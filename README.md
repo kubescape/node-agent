@@ -23,5 +23,5 @@ minikube start
 4. Run Sneeffer:
 
 ```
-sudo SNEEFFER_CONF_FILE_PATH=./configuration/SneefferConfigurationFile.txt HOME=<your home directory> ./kubescape_sneeffer
+sudo SNEEFFER_CONF_FILE_PATH=./configuration/SneefferConfigurationFile.txt HOME=<your home directory> ./sniffer
 ```
