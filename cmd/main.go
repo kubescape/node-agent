@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"sniffer/internal/config"
 	"sniffer/internal/validator"
 	"sniffer/internal/version"
@@ -16,8 +15,7 @@ import (
 func waitOnCacheAccumulatorErrorCode(cacheAccumulatorErrorChan chan error) {
 	err := <-cacheAccumulatorErrorChan
 	if err != nil {
-		logger.L().Error("", helpers.String("Global Sniffer failed on error ", fmt.Sprintf("%v", err)))
-		os.Exit(1)
+		logger.L().Fatal("", helpers.String("ebpf engine failed on error ", fmt.Sprintf("%v", err)))
 	}
 }
 

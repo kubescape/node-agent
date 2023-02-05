@@ -1,6 +1,5 @@
 package version
 
-type versionClient interface {
-	SetVersion()
+type VersionClient interface {
 	GetVersion()
 }

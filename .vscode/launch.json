@@ -11,8 +11,7 @@
             "mode": "auto",
             "program": "${workspaceFolder}", 
             "env": {
-                "SNEEFFER_CONF_FILE_PATH": "${workspaceFolder}/configuration/SneefferConfigurationFile.txt",
-                "HOME": "/home/raziel"
+                "SNEEFFER_CONFIG": "${workspaceFolder}/configuration/SnifferConfigurationFile.json"
             },
             "console": "integratedTerminal",
             "asRoot": true

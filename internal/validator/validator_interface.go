@@ -1,5 +1,5 @@
 package validator
 
-type validatorClient interface {
+type ValidatorClient interface {
 	CheckPrerequsits() error
 }

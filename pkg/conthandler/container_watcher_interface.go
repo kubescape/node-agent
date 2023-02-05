@@ -1,5 +1,5 @@
 package conthandler
 
-type containerWatcherClient interface {
+type ContainerWatcherClient interface {
 	StartWatchedOnNewContainers()
 }
