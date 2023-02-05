@@ -1,5 +1,0 @@
-kernelObjPath=./resources/ebpf/kernel_obj.o
-snifferEngineLoaderPath=./resources/ebpf/falco_ebpf_engine
-myNode=minikube
-enableRelaventCVEsService=true
-ebpfEngine=cilium
