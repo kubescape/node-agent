@@ -2,8 +2,6 @@ module sniffer
 
 go 1.19
 
-replace github.com/slashben/kubescape-ebpf => /home/raziel/armo/go/src/kubescape-ebpf
-
 require (
 	github.com/kubescape/go-logger v0.0.8
 	github.com/slashben/kubescape-ebpf v0.1.1
