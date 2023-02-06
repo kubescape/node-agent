@@ -1,4 +1,4 @@
-package ebpfev_v1
+package ebpfev
 
 import "time"
 

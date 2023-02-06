@@ -1,9 +1,9 @@
 package ebpfeng
 
-import "sniffer/pkg/ebpfev_v1"
+import "sniffer/pkg/ebpfev"
 
 type EbpfEngineClient interface {
 	StartEbpfEngine() error
-	GetData(chan *ebpfev_v1.EventData)
+	GetData(chan *ebpfev.EventData)
 	GetEbpfEngineError(chan error)
 }

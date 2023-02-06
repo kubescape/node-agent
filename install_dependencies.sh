@@ -4,7 +4,7 @@ sudo apt install git curl clang-12 -y
 
 mkdir dependencies
 
-git clone git@github.com:rcohencyberarmor/kubescape-ebpf-engine.git dependencies/kubescape_ebpf_engine_sc
+git clone git@github.com:kubescape/kubescape-ebpf-engine.git dependencies/kubescape_ebpf_engine_sc
 cd dependencies/kubescape_ebpf_engine_sc
 ./install_dependencies.sh
 mkdir build && cd ./build

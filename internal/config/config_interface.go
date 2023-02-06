@@ -2,6 +2,6 @@ package config
 
 type configClient interface {
 	// global configuration
-	GetConfigurutionData() ([]byte, error)
-	ParseConfiguration() error
+	GetConfigurationData() ([]byte, error)
+	ParseConfiguration(data []byte) error
 }
