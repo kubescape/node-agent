@@ -1,17 +1,8 @@
 package ebpfev
 
-import "time"
-
-type EventData struct {
-	timestamp   time.Time
-	containerID string
-	ppid        string
-	pid         string
-	syscallOp   string
-	syscallArgs string
-	exe         string
-	cmd         string
-}
+import (
+	"time"
+)
 
 type EventClient interface {
 	GetEventTimestamp(ev EventData) time.Time

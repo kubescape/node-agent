@@ -1,7 +1,7 @@
 package sbom
 
 type SbomClient interface {
-	GetSBOM(imageID)
+	GetSBOM(imageID string)
 	FilterSBOM()
-	PostFilterSBOM(key inteface{}, data []byte)
+	PostFilterSBOM(key interface{}, data []byte)
 }

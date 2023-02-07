@@ -1,7 +1,7 @@
 package conthandler
 
 type ContainerAggregatorClient interface {
-	StartAggregate() error
-	StopAggregate() error
-	ListContainerRealTimeFiles() []string
+	StartAggregate(containerID string) error
+	StopAggregate(containerID string) error
+	ListContainerRealTimeFiles(containerID string) []string
 }
