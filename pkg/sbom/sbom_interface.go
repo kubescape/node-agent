@@ -1,7 +1,7 @@
 package sbom
 
-type SbomClient interface {
-	GetSBOM(imageID string)
-	FilterSBOM(sbomFileRelevantMap map[string]bool)
-	StoreFilterSBOM()
+type SBOMClient interface {
+	GetSBOM(imageID string) error
+	FilterSBOM(sbomFileRelevantMap map[string]bool) error
+	StoreFilterSBOM() error
 }

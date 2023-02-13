@@ -1,7 +1,9 @@
 package config
 
+import "io"
+
 type ConfigClient interface {
 	// global configuration
-	GetConfigurationData() ([]byte, error)
-	ParseConfiguration(data []byte) error
+	GetConfigurationData() (io.Reader, error)
+	ParseConfiguration(data io.Reader) error
 }

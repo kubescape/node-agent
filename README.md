@@ -6,7 +6,7 @@
 minikube start
 ```
 
-2. Run Sneeffer:
+2. Run Sniffer:
 
 ```
 sudo SNIFFER_CONFIG=./configuration/SnifferConfigurationFile.json ./sniffer
@@ -33,7 +33,7 @@ sudo SNIFFER_CONFIG=./configuration/SnifferConfigurationFile.json ./sniffer
             "mode": "auto",
             "program": "${workspaceFolder}", 
             "env": {
-                "SNEEFFER_CONFIG": "${workspaceFolder}/configuration/SnifferConfigurationFile.json"
+                "SNIFFER_CONFIG": "${workspaceFolder}/configuration/SnifferConfigurationFile.json"
             },
             "console": "integratedTerminal",
             "asRoot": true
