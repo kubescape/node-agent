@@ -13,4 +13,4 @@ cmake ..
 make all
 cd ../../../
 cp deps/dependencies/kubescape_ebpf_engine_sc/deps/dependencies/falco-libs/build/driver/bpf/probe.o ../resources/ebpf/kernel_obj.o
-cp deps/dependencies/kubescape_ebpf_engine_sc/build/main ../resources/ebpf/sniffer
+cp deps/dependencies/kubescape_ebpf_engine_sc/build/main ../resources/ebpf/userspace_app
