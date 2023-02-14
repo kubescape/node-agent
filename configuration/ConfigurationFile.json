@@ -1,0 +1,38 @@
+{
+    "services": [
+        {
+            "type": "sniffer",
+            "data": {
+                "ebpfEngine": {
+                    "type": "falco",
+                    "data": {
+                        "kernelObjPath": "./resources/ebpf/kernel_obj.o",
+                        "ebpfEngineLoaderPath": "./resources/ebpf/userspace_app"
+                    }
+                },
+                "node": {
+                    "name": "minikube"
+                },
+                "features": [
+                    {
+                        "Name": "relevantCVEs"
+                    }
+                ],
+                "containerSniffing": {
+                    "sniffingTime": {
+                        "sniffingMaxTime": "3600"
+                    }
+                }, 
+                "outputDataStorage": {
+                    "type": "server",
+                    "data": {
+                        "dataStorage": {
+                            "URL": "blabla.com/v1/store"
+                        }
+                    },
+                    "updateDataPeriod": "120"
+                }
+            }
+        }
+    ]
+}
