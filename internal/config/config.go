@@ -64,3 +64,11 @@ func IsFalcoEbpfEngine() bool {
 func GetSyscallFilter() []string {
 	return c.data.GetFalcoSyscallFilter()
 }
+
+func GetFalcoKernelObjPath() string {
+	return c.data.GetFalcoKernelObjPath()
+}
+
+func GetEbpfEngineLoaderPath() string {
+	return c.data.GetFalcoKernelObjPath()
+}

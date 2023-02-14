@@ -24,4 +24,19 @@ func TestConfig(t *testing.T) {
 	if cfg.data.IsFalcoEbpfEngine() == false {
 		t.Fatalf("IsFalcoEbpfEngine need to be falco")
 	}
+
+	syscallFilters := cfg.data.GetFalcoSyscallFilter()
+	if !(syscallFilters[0] == "open" && syscallFilters[1] == "openat" && syscallFilters[2] == "execve" && syscallFilters[3] == "execveat") {
+		t.Fatalf("GetFalcoSyscallFilter need to be matched to relevantCVEs feature")
+	}
+
+	falcoKernelObj := cfg.data.GetFalcoKernelObjPath()
+	if falcoKernelObj != "./resources/ebpf/kernel_obj.o" {
+		t.Fatalf("GetFalcoKernelObjPath failed")
+	}
+
+	falcoEbpfEngineLoaderPath := cfg.data.GetEbpfEngineLoaderPath()
+	if falcoEbpfEngineLoaderPath != "./resources/ebpf/userspace_app" {
+		t.Fatalf("GetEbpfEngineLoaderPath failed")
+	}
 }
