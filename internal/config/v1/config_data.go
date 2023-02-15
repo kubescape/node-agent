@@ -70,7 +70,12 @@ func (c *ConfigData) IsFalcoEbpfEngine() bool {
 	for i := range c.ServicesList {
 		switch v := c.ServicesList[i].Data.(type) {
 		case map[string]interface{}:
-			return v["ebpfEngine"].(map[string]interface{})["type"] == FALCO_EBPF_ENGINE_TYPE
+			switch ebpfEngineData := v["ebpfEngine"].(type) {
+			case map[string]interface{}:
+				return ebpfEngineData["type"] == FALCO_EBPF_ENGINE_TYPE
+			default:
+				return false
+			}
 		default:
 			return false
 		}
@@ -81,10 +86,17 @@ func (c *ConfigData) IsFalcoEbpfEngine() bool {
 func (c *ConfigData) setFalcoSyscallFilter() {
 	if c.IsFalcoEbpfEngine() {
 		for i := range c.ServicesList {
-			features := c.ServicesList[i].Data.(map[string]interface{})["features"]
-			feature := features.([]interface{})
-			if feature[0].(map[string]interface{})["Name"] == SNIFFER_SERVICE_RELEVANT_CVES {
-				falcoSyscallFilter = append(falcoSyscallFilter, []string{"open", "openat", "execve", "execveat"}...)
+			switch v := c.ServicesList[i].Data.(type) {
+			case map[string]interface{}:
+				switch features := v["features"].(type) {
+				case []interface{}:
+					switch feature := features[0].(type) {
+					case map[string]interface{}:
+						if feature["Name"] == SNIFFER_SERVICE_RELEVANT_CVES {
+							falcoSyscallFilter = append(falcoSyscallFilter, []string{"open", "openat", "execve", "execveat"}...)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -100,7 +112,22 @@ func (c *ConfigData) GetFalcoSyscallFilter() []string {
 func (c *ConfigData) GetFalcoKernelObjPath() string {
 	for i := range c.ServicesList {
 		if c.ServicesList[i].ServiceType == "sniffer" {
-			return c.ServicesList[i].Data.(map[string]interface{})["ebpfEngine"].(map[string]interface{})["data"].(map[string]interface{})["kernelObjPath"].(string)
+			switch v := c.ServicesList[i].Data.(type) {
+			case map[string]interface{}:
+				switch ebpfEngineData := v["ebpfEngine"].(type) {
+				case map[string]interface{}:
+					switch falcoEbpfEngineData := ebpfEngineData["data"].(type) {
+					case map[string]interface{}:
+						return falcoEbpfEngineData["kernelObjPath"].(string)
+					default:
+						return ""
+					}
+				default:
+					return ""
+				}
+			default:
+				return ""
+			}
 		}
 	}
 	return ""
@@ -109,7 +136,22 @@ func (c *ConfigData) GetFalcoKernelObjPath() string {
 func (c *ConfigData) GetEbpfEngineLoaderPath() string {
 	for i := range c.ServicesList {
 		if c.ServicesList[i].ServiceType == "sniffer" {
-			return c.ServicesList[i].Data.(map[string]interface{})["ebpfEngine"].(map[string]interface{})["data"].(map[string]interface{})["ebpfEngineLoaderPath"].(string)
+			switch v := c.ServicesList[i].Data.(type) {
+			case map[string]interface{}:
+				switch ebpfEngineData := v["ebpfEngine"].(type) {
+				case map[string]interface{}:
+					switch falcoEbpfEngineData := ebpfEngineData["data"].(type) {
+					case map[string]interface{}:
+						return falcoEbpfEngineData["ebpfEngineLoaderPath"].(string)
+					default:
+						return ""
+					}
+				default:
+					return ""
+				}
+			default:
+				return ""
+			}
 		}
 	}
 	return ""
