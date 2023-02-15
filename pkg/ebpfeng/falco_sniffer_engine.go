@@ -99,8 +99,8 @@ func (FalcoEbpfEngine *FalcoEbpfEngine) StartEbpfEngine() error {
 	return nil
 }
 
-func convertStringTimeToTimeOBJ(Timestamp string) (*time.Time, error) {
-	dateAndTime := strings.Split(Timestamp, "T")
+func convertStringTimeToTimeOBJ(timestamp string) (*time.Time, error) {
+	dateAndTime := strings.Split(timestamp, "T")
 	date := strings.Split(dateAndTime[0], "-")
 	tm := strings.Split(dateAndTime[1], ":")
 
