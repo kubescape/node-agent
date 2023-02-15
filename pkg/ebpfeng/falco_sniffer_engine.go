@@ -106,28 +106,28 @@ func convertStringTimeToTimeOBJ(timestamp string) (*time.Time, error) {
 
 	year, err := strconv.Atoi(date[0])
 	if err != nil {
-		logger.L().Error("", helpers.String("fail strconv %v", fmt.Sprintf("%v", err)))
+		logger.L().Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 	month, err := strconv.Atoi(date[1])
 	if err != nil {
-		logger.L().Error("", helpers.String("fail strconv %v", fmt.Sprintf("%v", err)))
+		logger.L().Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 	day, err := strconv.Atoi(date[2])
 	if err != nil {
-		logger.L().Error("", helpers.String("fail strconv %v", fmt.Sprintf("%v", err)))
+		logger.L().Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 
 	hour, err := strconv.Atoi(tm[0])
 	if err != nil {
-		logger.L().Error("", helpers.String("fail strconv %v", fmt.Sprintf("%v", err)))
+		logger.L().Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 	minute, err := strconv.Atoi(tm[1])
 	if err != nil {
-		logger.L().Error("", helpers.String("fail strconv %v", fmt.Sprintf("%v", err)))
+		logger.L().Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 	seconds := strings.Split(tm[2], "+")
@@ -135,13 +135,13 @@ func convertStringTimeToTimeOBJ(timestamp string) (*time.Time, error) {
 
 	sec, err := strconv.Atoi(secs[0])
 	if err != nil {
-		logger.L().Error("", helpers.String("fail strconv %v", fmt.Sprintf("%v", err)))
+		logger.L().Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 
 	nsec, err := strconv.Atoi(secs[1])
 	if err != nil {
-		logger.L().Error("", helpers.String("fail strconv %v", fmt.Sprintf("%v", err)))
+		logger.L().Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 
@@ -151,7 +151,7 @@ func convertStringTimeToTimeOBJ(timestamp string) (*time.Time, error) {
 
 func parseLine(line string) (*ebpfev.EventData, error) {
 	if strings.Contains(line, "drop event occured") {
-		return ebpfev.CreateKernelEvent(nil, "", "", "", "", "", "", "drop event occured\n"), nil
+		return ebpfev.CreateKernelEvent(nil, "", "", "", "", "", "", "drop event occurred\n"), nil
 	}
 	lineParts := strings.Split(line, "]::[")
 	if len(lineParts) != 8 {
