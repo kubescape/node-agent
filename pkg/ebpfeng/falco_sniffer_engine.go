@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"sniffer/internal/config"
+	"sniffer/pkg/config"
 	ebpfev "sniffer/pkg/ebpfev/v1"
 
 	logger "github.com/kubescape/go-logger"
@@ -40,7 +40,7 @@ func createSyscallFilterString(syscallFilter []string) string {
 }
 
 func CreateFalcoEbpfEngine(syscallFilter []string, includeHost bool, sniffMainThreadOnly bool, containerID string) *FalcoEbpfEngine {
-	kernelObjPath := config.GetFalcoKernelObjPath()
+	kernelObjPath := config.GetConfigurationConfigContext().GetFalcoKernelObjPath()
 	syscallFilterString := createSyscallFilterString(syscallFilter)
 
 	return &FalcoEbpfEngine{
@@ -76,7 +76,7 @@ func (FalcoEbpfEngine *FalcoEbpfEngine) ebpfEngineCMDWithParams() []string {
 }
 
 func (FalcoEbpfEngine *FalcoEbpfEngine) StartEbpfEngine() error {
-	ebpfEngineLoaderPath := config.GetEbpfEngineLoaderPath()
+	ebpfEngineLoaderPath := config.GetConfigurationConfigContext().GetEbpfEngineLoaderPath()
 	if ebpfEngineLoaderPath == "" {
 		return fmt.Errorf("StartEbpfEngine: the ebpfEngineLoaderPath is not configured")
 	}

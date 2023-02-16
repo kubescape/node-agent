@@ -2,21 +2,21 @@ package main
 
 import (
 	"fmt"
-	"sniffer/internal/config"
-	v1 "sniffer/internal/config/v1"
 	"sniffer/internal/validator"
+	"sniffer/pkg/config"
+	v1 "sniffer/pkg/config/v1"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
 
 func main() {
-	cfg := config.Config{}
-	configData, err := cfg.GetConfigurationData()
+	cfg := config.GetConfigurationConfigContext()
+	configData, err := cfg.GetConfigurationReader()
 	if err != nil {
 		logger.L().Fatal("", helpers.String("error during getting configuration data: ", fmt.Sprintf("%v", err)))
 	}
-	err = cfg.ParseConfiguration(&v1.ConfigData{}, configData)
+	err = cfg.ParseConfiguration(v1.CreateConfigData(), configData)
 	if err != nil {
 		logger.L().Fatal("", helpers.String("error during parsing configuration: ", fmt.Sprintf("%v", err)))
 	}

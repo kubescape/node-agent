@@ -2,7 +2,7 @@ package validator
 
 import (
 	"fmt"
-	"sniffer/internal/config"
+	"sniffer/pkg/config"
 	"syscall"
 
 	logger "github.com/kubescape/go-logger"
@@ -43,7 +43,7 @@ func checkKernelVersion() error {
 }
 
 func checkNodePrerequisites() error {
-	if config.IsFalcoEbpfEngine() {
+	if config.GetConfigurationConfigContext().IsFalcoEbpfEngine() {
 		minKernelVersion = FALCO_EBPF_ENGINE_MIN_KERNEL_VERSION_SUPPORT
 	} else {
 		minKernelVersion = KUBESCAPE_EBPF_ENGINE_MIN_KERNEL_VERSION_SUPPORT
