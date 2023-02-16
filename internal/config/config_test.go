@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"sniffer/internal/config/v1"
 	"testing"
 )
 
@@ -16,7 +17,7 @@ func TestConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetConfigurationData failed with err %v", err)
 	}
-	err = cfg.ParseConfiguration(configData)
+	err = cfg.ParseConfiguration(&config.ConfigData{}, configData)
 	if err != nil {
 		t.Fatalf("ParseConfiguration failed with err %v", err)
 	}
@@ -31,12 +32,12 @@ func TestConfig(t *testing.T) {
 	}
 
 	falcoKernelObj := cfg.data.GetFalcoKernelObjPath()
-	if falcoKernelObj != "./resources/ebpf/kernel_obj.o" {
+	if falcoKernelObj != "./resources/ebpf/falco/kernel_obj.o" {
 		t.Fatalf("GetFalcoKernelObjPath failed")
 	}
 
 	falcoEbpfEngineLoaderPath := cfg.data.GetEbpfEngineLoaderPath()
-	if falcoEbpfEngineLoaderPath != "./resources/ebpf/userspace_app" {
+	if falcoEbpfEngineLoaderPath != "./resources/ebpf/falco/userspace_app" {
 		t.Fatalf("GetEbpfEngineLoaderPath failed")
 	}
 }

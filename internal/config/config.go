@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	v1 "sniffer/internal/config/v1"
 )
 
 const (
@@ -15,9 +14,14 @@ const (
 )
 
 var c *Config
+var myContainerID string
+
+func init() {
+	myContainerID = "1111111"
+}
 
 type Config struct {
-	data v1.ConfigData
+	data ConfigDataInterface
 }
 
 func (cfg *Config) getConfigFilePath() (string, bool) {
@@ -25,8 +29,7 @@ func (cfg *Config) getConfigFilePath() (string, bool) {
 }
 
 func (cfg *Config) GetConfigurationData() (io.Reader, error) {
-	config := Config{}
-	c = &config
+	c = cfg
 	cfgPath, exist := cfg.getConfigFilePath()
 	if !exist {
 		return nil, fmt.Errorf("failed to find configuration file path")
@@ -39,8 +42,7 @@ func (cfg *Config) GetConfigurationData() (io.Reader, error) {
 	return bytes.NewReader(data), nil
 }
 
-func (cfg *Config) ParseConfiguration(data io.Reader) error {
-	configData := v1.ConfigData{}
+func (cfg *Config) ParseConfiguration(configData ConfigDataInterface, data io.Reader) error {
 
 	buf := new(bytes.Buffer)
 	_, err := buf.ReadFrom(data)
@@ -70,5 +72,13 @@ func GetFalcoKernelObjPath() string {
 }
 
 func GetEbpfEngineLoaderPath() string {
-	return c.data.GetFalcoKernelObjPath()
+	return c.data.GetEbpfEngineLoaderPath()
+}
+
+func SetMyContainerID(mycid string) {
+	myContainerID = mycid
+}
+
+func GetMyContainerID() string {
+	return myContainerID
 }

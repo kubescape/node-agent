@@ -1,38 +1,24 @@
 {
-    "services": [
-        {
-            "type": "sniffer",
-            "data": {
-                "ebpfEngine": {
-                    "type": "falco",
-                    "data": {
-                        "kernelObjPath": "./resources/ebpf/kernel_obj.o",
-                        "ebpfEngineLoaderPath": "./resources/ebpf/userspace_app"
-                    }
-                },
-                "node": {
-                    "name": "minikube"
-                },
-                "features": [
-                    {
-                        "Name": "relevantCVEs"
-                    }
-                ],
-                "containerSniffing": {
-                    "sniffingTime": {
-                        "sniffingMaxTime": "3600"
-                    }
-                }, 
-                "outputDataStorage": {
-                    "type": "server",
-                    "data": {
-                        "dataStorage": {
-                            "URL": "blabla.com/v1/store"
-                        }
-                    },
-                    "updateDataPeriod": "120"
-                }
+    "sniffer": {
+        "services": [
+            {
+                "Name": "relevantCVEs"
             }
-        }
-    ]
+        ],
+        "maxSniffingTimePerContainer": "360"
+    },
+    "falcoEbpfEngine": {
+        "kernelObjPath": "./resources/ebpf/falco/kernel_obj.o",
+        "ebpfEngineLoaderPath": "./resources/ebpf/falco/userspace_app"
+    },
+    "node": {
+        "name": "minikube"
+    },
+    "db": {
+        "server": {
+            "URL": "blabla.com/v1/store"
+        },
+        "fileSystem": true,
+        "updateDataPeriod": "120"
+    }
 }
