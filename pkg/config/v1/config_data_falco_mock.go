@@ -3,6 +3,10 @@ package config
 type ConfigDataFalcoMock struct {
 }
 
+func CreateFalcoMockConfigData() *ConfigDataFalcoMock {
+	return &ConfigDataFalcoMock{}
+}
+
 func (c *ConfigDataFalcoMock) IsFalcoEbpfEngine() bool {
 	return true
 }
