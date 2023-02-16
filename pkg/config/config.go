@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	v1 "sniffer/internal/config/v1"
 )
 
 const (
@@ -14,19 +13,15 @@ const (
 	CILIUM_EBPF_ENGINE = "cilium"
 )
 
-var c *Config
-
 type Config struct {
-	data v1.ConfigData
+	data ConfigDataInterface
 }
 
 func (cfg *Config) getConfigFilePath() (string, bool) {
 	return os.LookupEnv("SNIFFER_CONFIG")
 }
 
-func (cfg *Config) GetConfigurationData() (io.Reader, error) {
-	config := Config{}
-	c = &config
+func (cfg *Config) GetConfigurationReader() (io.Reader, error) {
 	cfgPath, exist := cfg.getConfigFilePath()
 	if !exist {
 		return nil, fmt.Errorf("failed to find configuration file path")
@@ -39,8 +34,7 @@ func (cfg *Config) GetConfigurationData() (io.Reader, error) {
 	return bytes.NewReader(data), nil
 }
 
-func (cfg *Config) ParseConfiguration(data io.Reader) error {
-	configData := v1.ConfigData{}
+func (cfg *Config) ParseConfiguration(configData ConfigDataInterface, data io.Reader) error {
 
 	buf := new(bytes.Buffer)
 	_, err := buf.ReadFrom(data)
@@ -57,10 +51,18 @@ func (cfg *Config) ParseConfiguration(data io.Reader) error {
 	return nil
 }
 
-func IsFalcoEbpfEngine() bool {
-	return c.data.IsFalcoEbpfEngine()
+func (cfg *Config) IsFalcoEbpfEngine() bool {
+	return cfg.data.IsFalcoEbpfEngine()
 }
 
-func GetSyscallFilter() []string {
-	return c.data.GetFalcoSyscallFilter()
+func (cfg *Config) GetSyscallFilter() []string {
+	return cfg.data.GetFalcoSyscallFilter()
+}
+
+func (cfg *Config) GetFalcoKernelObjPath() string {
+	return cfg.data.GetFalcoKernelObjPath()
+}
+
+func (cfg *Config) GetEbpfEngineLoaderPath() string {
+	return cfg.data.GetEbpfEngineLoaderPath()
 }
