@@ -13,12 +13,16 @@ const (
 	CILIUM_EBPF_ENGINE = "cilium"
 )
 
+const (
+	SNIFFER_CONFIG = "SNIFFER_CONFIG"
+)
+
 type Config struct {
 	data ConfigDataInterface
 }
 
 func (cfg *Config) getConfigFilePath() (string, bool) {
-	return os.LookupEnv("SNIFFER_CONFIG")
+	return os.LookupEnv(SNIFFER_CONFIG)
 }
 
 func (cfg *Config) GetConfigurationReader() (io.Reader, error) {

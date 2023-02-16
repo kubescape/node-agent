@@ -15,7 +15,11 @@ import (
 )
 
 const (
-	CACHE_ACCUMULATOR_SIZE = 10
+	ACCUMULATOR_SIZE = 10
+)
+
+const (
+	DROP_EVENT_OCCURRED = "drop event occurred\n"
 )
 
 type containersAccumulator struct {
@@ -23,7 +27,7 @@ type containersAccumulator struct {
 	registerMutex               sync.Mutex
 }
 
-type CacheAccumulator struct {
+type Accumulator struct {
 	accumulatorData                 []map[string][]evData.EventData
 	syncReaderWriterAccumulatorData sync.Mutex
 	firstMapKeysOfAccumulatorData   []string
@@ -39,20 +43,39 @@ type ContainerAccumulator struct {
 }
 
 var myContainerID string
-var cacheAccumulator *CacheAccumulator
+var accumulatorSingelton *Accumulator
+var lock = &sync.Mutex{}
 
-func CreateAccumulator() *CacheAccumulator {
-	cacheAccumulator = &CacheAccumulator{
-		cacheAccumulatorSize:          CACHE_ACCUMULATOR_SIZE,
-		accumulatorData:               make([]map[string][]evData.EventData, CACHE_ACCUMULATOR_SIZE),
-		firstMapKeysOfAccumulatorData: make([]string, CACHE_ACCUMULATOR_SIZE),
+func createAccumulator() *Accumulator {
+	myContainerID = "111111"
+	accumulatorSingelton = &Accumulator{
+		cacheAccumulatorSize:          ACCUMULATOR_SIZE,
+		accumulatorData:               make([]map[string][]evData.EventData, ACCUMULATOR_SIZE),
+		firstMapKeysOfAccumulatorData: make([]string, ACCUMULATOR_SIZE),
 		mainDataChannel:               make(chan *evData.EventData),
 		containersData: containersAccumulator{
 			accumulatorDataPerContainer: make(map[string]chan evData.EventData),
 		},
 	}
 
-	return cacheAccumulator
+	return accumulatorSingelton
+}
+
+func GetAccumulator() *Accumulator {
+	if accumulatorSingelton == nil {
+		lock.Lock()
+		defer lock.Unlock()
+		if accumulatorSingelton == nil {
+			logger.L().Debug("Creating accumulatorSingelton now.")
+			accumulatorSingelton = createAccumulator()
+		} else {
+			logger.L().Debug("accumulatorSingelton already created.")
+		}
+	} else {
+		logger.L().Debug("accumulatorSingelton already created.")
+	}
+
+	return accumulatorSingelton
 }
 
 func CreateContainerAccumulator(containerID string, dataChannel chan evData.EventData) *ContainerAccumulator {
@@ -62,7 +85,7 @@ func CreateContainerAccumulator(containerID string, dataChannel chan evData.Even
 	}
 }
 
-func (acc *CacheAccumulator) createNewMap(event *evData.EventData, index int) {
+func (acc *Accumulator) createNewMap(event *evData.EventData, index int) {
 	slice := make([]evData.EventData, 0)
 	m := make(map[string][]evData.EventData)
 	m[event.GetEventContainerID()] = slice
@@ -70,9 +93,26 @@ func (acc *CacheAccumulator) createNewMap(event *evData.EventData, index int) {
 	acc.firstMapKeysOfAccumulatorData[index] = event.GetEventContainerID()
 }
 
-func (acc *CacheAccumulator) findIndexByTimestampWhenAccumulatorDataIsFull(event *evData.EventData) int {
+func (acc *Accumulator) getFirstTimestamp() (time.Time, error) {
+	if len(acc.accumulatorData) < 1 {
+		return time.Time{}, fmt.Errorf("getFirstTimestamp failed the slice accumulatorData has no members")
+	}
+	if len(acc.firstMapKeysOfAccumulatorData) < 1 {
+		return time.Time{}, fmt.Errorf("getFirstTimestamp failed the slice firstMapKeysOfAccumulatorData has no members")
+	}
+	if len(acc.accumulatorData[0][acc.firstMapKeysOfAccumulatorData[0]]) < 1 {
+		return time.Time{}, fmt.Errorf("getFirstTimestamp failed the slice acc.accumulatorData[0][acc.firstMapKeysOfAccumulatorData[0] has no members")
+	}
+	return acc.accumulatorData[0][acc.firstMapKeysOfAccumulatorData[0]][0].GetEventTimestamp(), nil
+}
+
+func (acc *Accumulator) findIndexByTimestampWhenAccumulatorDataIsFull(event *evData.EventData) int {
 	index := 0
-	minTimestamp := acc.accumulatorData[0][acc.firstMapKeysOfAccumulatorData[0]][0].GetEventTimestamp()
+	minTimestamp, err := acc.getFirstTimestamp()
+	if err != nil {
+		logger.L().Warning("findIndexByTimestampWhenAccumulatorDataIsFull fail to find the place to insert the event, fail with error", helpers.Error(err))
+		return -1
+	}
 	for i := range acc.accumulatorData {
 		if i == 0 {
 			continue
@@ -86,7 +126,7 @@ func (acc *CacheAccumulator) findIndexByTimestampWhenAccumulatorDataIsFull(event
 	return index
 }
 
-func (acc *CacheAccumulator) findIndexByTimestamp(event *evData.EventData) int {
+func (acc *Accumulator) findIndexByTimestamp(event *evData.EventData) int {
 	for i := range acc.accumulatorData {
 		if len(acc.accumulatorData[i]) == 0 {
 			acc.createNewMap(event, i)
@@ -97,15 +137,10 @@ func (acc *CacheAccumulator) findIndexByTimestamp(event *evData.EventData) int {
 			return i
 		}
 	}
-	index := acc.findIndexByTimestampWhenAccumulatorDataIsFull(event)
-	if index != -1 {
-		return index
-	}
-	// logger.L().Debug("findIndexByTimestamp: failed to find index, sniffer data will not saved")
-	return -1
+	return acc.findIndexByTimestampWhenAccumulatorDataIsFull(event)
 }
 
-func (acc *CacheAccumulator) removeAllStreamedContainers(event *evData.EventData) {
+func (acc *Accumulator) removeAllStreamedContainers(event *evData.EventData) {
 	acc.containersData.registerMutex.Lock()
 	if len(acc.containersData.accumulatorDataPerContainer) > 0 {
 		for contID := range acc.containersData.accumulatorDataPerContainer {
@@ -115,7 +150,7 @@ func (acc *CacheAccumulator) removeAllStreamedContainers(event *evData.EventData
 	acc.containersData.registerMutex.Unlock()
 }
 
-func (acc *CacheAccumulator) addEventToCacheAccumulator(event *evData.EventData, index int) {
+func (acc *Accumulator) addEventToCacheAccumulator(event *evData.EventData, index int) {
 	acc.syncReaderWriterAccumulatorData.Lock()
 	a := acc.accumulatorData[index]
 	a[event.GetEventContainerID()] = append(a[event.GetEventContainerID()], *event)
@@ -123,7 +158,7 @@ func (acc *CacheAccumulator) addEventToCacheAccumulator(event *evData.EventData,
 	acc.syncReaderWriterAccumulatorData.Unlock()
 }
 
-func (acc *CacheAccumulator) streamEventToRegisterContainer(event *evData.EventData, index int) {
+func (acc *Accumulator) streamEventToRegisterContainer(event *evData.EventData, index int) {
 	acc.containersData.registerMutex.Lock()
 	if containerAccumulatorChan, exist := acc.containersData.accumulatorDataPerContainer[event.GetEventContainerID()]; exist {
 		containerAccumulatorChan <- *event
@@ -131,7 +166,7 @@ func (acc *CacheAccumulator) streamEventToRegisterContainer(event *evData.EventD
 	acc.containersData.registerMutex.Unlock()
 }
 
-func (acc *CacheAccumulator) accumulateEbpfEngineData() {
+func (acc *Accumulator) accumulateEbpfEngineData() {
 	for {
 		event := <-acc.mainDataChannel
 		logger.L().Debug("metadataAcc ", helpers.String("", fmt.Sprintf("%v", event)))
@@ -139,12 +174,11 @@ func (acc *CacheAccumulator) accumulateEbpfEngineData() {
 			continue
 		}
 		if event != nil {
-			if event.GetEventCMD() == "drop event occurred\n" {
+			if event.GetEventCMD() == DROP_EVENT_OCCURRED {
 				acc.removeAllStreamedContainers(event)
 			} else {
 				index := acc.findIndexByTimestamp(event)
 				if index == -1 {
-					// logger.L().Debug("metadataAcc %v\n", metadataAcc)
 					continue
 				}
 				acc.addEventToCacheAccumulator(event, index)
@@ -154,21 +188,21 @@ func (acc *CacheAccumulator) accumulateEbpfEngineData() {
 	}
 }
 
-func (acc *CacheAccumulator) getEbpfEngineData() {
+func (acc *Accumulator) getEbpfEngineData() {
 	acc.ebpfEngine.GetData(acc.mainDataChannel)
 }
 
-func (acc *CacheAccumulator) getEbpfEngineError(errChan chan error) {
+func (acc *Accumulator) getEbpfEngineError(errChan chan error) {
 	errChan <- acc.ebpfEngine.GetEbpfEngineError()
 }
 
-func (acc *CacheAccumulator) StartAccumulator(errChan chan error) error {
+func (acc *Accumulator) StartAccumulator(errChan chan error) error {
 	falcoEbpfEngine := ebpfeng.CreateFalcoEbpfEngine(config.GetConfigurationConfigContext().GetSyscallFilter(), false, false, "")
 	acc.ebpfEngine = falcoEbpfEngine
 
 	err := acc.ebpfEngine.StartEbpfEngine()
 	if err != nil {
-		logger.L().Error("fail to create ebpf engine")
+		logger.L().Error("fail to create ebpf engine %v", helpers.Error(err))
 		return err
 	}
 
@@ -179,15 +213,15 @@ func (acc *CacheAccumulator) StartAccumulator(errChan chan error) error {
 }
 
 func (acc *ContainerAccumulator) registerContainerAccumulator() {
-	cacheAccumulator.containersData.registerMutex.Lock()
-	cacheAccumulator.containersData.accumulatorDataPerContainer[acc.containerID] = acc.dataChannel
-	cacheAccumulator.containersData.registerMutex.Unlock()
+	accumulatorSingelton.containersData.registerMutex.Lock()
+	accumulatorSingelton.containersData.accumulatorDataPerContainer[acc.containerID] = acc.dataChannel
+	accumulatorSingelton.containersData.registerMutex.Unlock()
 }
 
 func (acc *ContainerAccumulator) unregisterContainerAccumulator() {
-	cacheAccumulator.containersData.registerMutex.Lock()
-	delete(cacheAccumulator.containersData.accumulatorDataPerContainer, acc.containerID)
-	cacheAccumulator.containersData.registerMutex.Unlock()
+	accumulatorSingelton.containersData.registerMutex.Lock()
+	delete(accumulatorSingelton.containersData.accumulatorDataPerContainer, acc.containerID)
+	accumulatorSingelton.containersData.registerMutex.Unlock()
 }
 
 func (acc *ContainerAccumulator) StartContainerAccumulator() {
@@ -198,13 +232,13 @@ func (acc *ContainerAccumulator) StopContainerAccumulator() {
 	acc.unregisterContainerAccumulator()
 }
 
-func GetCacheAccumulator() *CacheAccumulator {
-	return cacheAccumulator
+func GetCacheAccumulator() *Accumulator {
+	return accumulatorSingelton
 }
 
-func (acc *CacheAccumulator) AccumulatorByContainerID(aggregationData *[]evData.EventData, containerID string, containerStartTime interface{}) {
+func (acc *Accumulator) AccumulatorByContainerID(aggregationData *[]evData.EventData, containerID string) {
 	for i := range acc.accumulatorData {
-		logger.L().Debug("", helpers.String("index ", fmt.Sprintf("%d:%v", i, acc.accumulatorData[i])))
+		logger.L().Debug("", helpers.String("accumulatorData in index ", fmt.Sprintf("%d:%v", i, acc.accumulatorData[i])))
 	}
 	for i := range acc.accumulatorData {
 		for j := range acc.accumulatorData[i][containerID] {
@@ -213,7 +247,8 @@ func (acc *CacheAccumulator) AccumulatorByContainerID(aggregationData *[]evData.
 			acc.syncReaderWriterAccumulatorData.Unlock()
 		}
 	}
-	logger.L().Debug("data ", helpers.String("", fmt.Sprintf("%v", aggregationData)))
+	logger.L().Debug("full aggregation data ", helpers.String("of conatinerID ", fmt.Sprintf("%s is:", containerID)))
+	logger.L().Debug("", helpers.String("", fmt.Sprintf("%v", aggregationData)))
 }
 
 func SetMyContainerID(mycid string) {
