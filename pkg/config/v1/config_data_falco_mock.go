@@ -16,9 +16,9 @@ func (c *ConfigDataFalcoMock) GetFalcoSyscallFilter() []string {
 }
 
 func (c *ConfigDataFalcoMock) GetFalcoKernelObjPath() string {
-	return "./../../resources/ebpf/testdata/mock_falco_ebpf_engine/kernel_obj_mock.o"
+	return "./../config/testdata/mock_falco_ebpf_engine/kernel_obj_mock.o"
 }
 
 func (c *ConfigDataFalcoMock) GetEbpfEngineLoaderPath() string {
-	return "./../../resources/ebpf/testdata/mock_falco_ebpf_engine/userspace_app_mock"
+	return "./../config/testdata/mock_falco_ebpf_engine/userspace_app_mock"
 }

@@ -7,9 +7,9 @@ import (
 )
 
 func TestConfig(t *testing.T) {
-	err := os.Setenv(SNIFFER_CONFIG, "../../configuration/ConfigurationFile.json")
+	err := os.Setenv(SNIFFER_CONFIG_ENV_VAR, "../../configuration/ConfigurationFile.json")
 	if err != nil {
-		t.Fatalf("failed to set env SNIFFER_CONFIG with err %v", err)
+		t.Fatalf("failed to set env SNIFFER_CONFIG_ENV_VAR with err %v", err)
 	}
 
 	cfg := GetConfigurationConfigContext()
