@@ -1,4 +1,6 @@
 ## sniffer
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fsniffer.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fsniffer?ref=badge_shield)
+
 
 1. Run minikube:
 
@@ -42,3 +44,6 @@ sudo SNIFFER_CONFIG=./configuration/SnifferConfigurationFile.json ./sniffer
 }
 
 ```
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fsniffer.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fsniffer?ref=badge_large)
