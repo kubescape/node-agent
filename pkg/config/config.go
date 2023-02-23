@@ -9,12 +9,10 @@ import (
 )
 
 const (
-	FALCO_EBPF_ENGINE      = "falco"
-	CILIUM_EBPF_ENGINE     = "cilium"
+	EBPFEngineFalco        = "falco"
+	EBPFEngineCilium       = "cilium"
 	SNIFFER_CONFIG_ENV_VAR = "SNIFFER_CONFIG_ENV_VAR"
 )
-
-const ()
 
 type Config struct {
 	data ConfigDataInterface

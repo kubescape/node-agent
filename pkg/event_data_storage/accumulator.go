@@ -26,7 +26,8 @@ type containersEventStreamer struct {
 
 type Accumulator struct {
 	data                            []map[string][]evData.EventData
-	syncReaderWriterData            sync.RWMutex
+	startStatus                     bool
+	syncReaderWriterData            *sync.RWMutex
 	listOfFirstKeysInsertInEachSlot []string
 	cacheSize                       int
 	eventChannel                    chan *evData.EventData
@@ -46,6 +47,8 @@ var accumulatorInstanceLock = &sync.Mutex{}
 func newAccumulator() *Accumulator {
 	accumulatorInstance = &Accumulator{
 		cacheSize:                       AccumulatorSize,
+		startStatus:                     false,
+		syncReaderWriterData:            &sync.RWMutex{},
 		data:                            make([]map[string][]evData.EventData, AccumulatorSize),
 		listOfFirstKeysInsertInEachSlot: make([]string, AccumulatorSize),
 		eventChannel:                    make(chan *evData.EventData),
@@ -78,6 +81,8 @@ func CreateContainerAccumulator(containerID string, dataChannel chan evData.Even
 }
 
 func (acc *Accumulator) createNewSlotInIndex(event *evData.EventData, index int) {
+	acc.syncReaderWriterData.Lock()
+	defer acc.syncReaderWriterData.Unlock()
 	slice := make([]evData.EventData, 0)
 	m := make(map[string][]evData.EventData)
 	m[event.GetEventContainerID()] = slice
@@ -195,18 +200,25 @@ func (acc *Accumulator) getEbpfEngineError(errChan chan error) {
 }
 
 func (acc *Accumulator) StartAccumulator(errChan chan error) error {
-	falcoEbpfEngine := ebpfeng.CreateFalcoEbpfEngine(config.GetConfigurationConfigContext().GetSyscallFilter(), false, false, "")
-	acc.ebpfEngine = falcoEbpfEngine
+	if !accumulatorInstance.startStatus {
+		accumulatorInstanceLock.Lock()
+		defer accumulatorInstanceLock.Unlock()
+		if !accumulatorInstance.startStatus {
+			accumulatorInstance.startStatus = true
+			falcoEbpfEngine := ebpfeng.CreateFalcoEbpfEngine(config.GetConfigurationConfigContext().GetSyscallFilter(), false, false, "")
+			acc.ebpfEngine = falcoEbpfEngine
 
-	err := acc.ebpfEngine.StartEbpfEngine()
-	if err != nil {
-		logger.L().Error("fail to create ebpf engine %v", helpers.Error(err))
-		return err
+			err := acc.ebpfEngine.StartEbpfEngine()
+			if err != nil {
+				logger.L().Error("fail to create ebpf engine %v", helpers.Error(err))
+				return err
+			}
+
+			go acc.accumulateEbpfEngineData()
+			go acc.getEbpfEngineData()
+			go acc.getEbpfEngineError(errChan)
+		}
 	}
-
-	go acc.accumulateEbpfEngineData()
-	go acc.getEbpfEngineData()
-	go acc.getEbpfEngineError(errChan)
 	return nil
 }
 
@@ -234,15 +246,15 @@ func GetCacheAccumulator() *Accumulator {
 	return accumulatorInstance
 }
 
-func (acc *Accumulator) AccumulatorByContainerID(aggregationData *[]evData.EventData, containerID string) {
-	acc.syncReaderWriterData.Lock()
-	defer acc.syncReaderWriterData.Unlock()
-	for i := range acc.data {
-		logger.L().Debug("", helpers.String("data in index ", fmt.Sprintf("%d:%v", i, acc.data[i])))
+func AccumulatorByContainerID(aggregationData *[]evData.EventData, containerID string) {
+	accumulatorInstance.syncReaderWriterData.Lock()
+	defer accumulatorInstance.syncReaderWriterData.Unlock()
+	for i := range accumulatorInstance.data {
+		logger.L().Debug("", helpers.String("data in index ", fmt.Sprintf("%d:%v", i, accumulatorInstance.data[i])))
 	}
-	for i := range acc.data {
-		for j := range acc.data[i][containerID] {
-			*aggregationData = append(*aggregationData, acc.data[i][containerID][j])
+	for i := range accumulatorInstance.data {
+		for j := range accumulatorInstance.data[i][containerID] {
+			*aggregationData = append(*aggregationData, accumulatorInstance.data[i][containerID][j])
 		}
 	}
 	logger.L().Debug("full aggregation data ", helpers.String("of containerID ", fmt.Sprintf("%s is: : aggregationData %v ", containerID, aggregationData)))

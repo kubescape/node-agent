@@ -39,7 +39,7 @@ func TestFullAccumulatorFlow(t *testing.T) {
 	time.Sleep(5 * time.Second)
 
 	var data []evData.EventData
-	acc.AccumulatorByContainerID(&data, REDIS_CONTAINERID)
+	AccumulatorByContainerID(&data, REDIS_CONTAINERID)
 	if len(data) < NUMBER_OF_REDIS_EVENT_IN_THE_MOCK {
 		t.Fatalf("failed to get redis server events %d < 703", len(data))
 	}

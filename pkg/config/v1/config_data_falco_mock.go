@@ -1,5 +1,11 @@
 package config
 
+import (
+	"path"
+	"path/filepath"
+	"runtime"
+)
+
 type ConfigDataFalcoMock struct {
 }
 
@@ -16,9 +22,15 @@ func (c *ConfigDataFalcoMock) GetFalcoSyscallFilter() []string {
 }
 
 func (c *ConfigDataFalcoMock) GetFalcoKernelObjPath() string {
-	return "./../config/testdata/mock_falco_ebpf_engine/kernel_obj_mock.o"
+	return path.Join(currentDir(), "..", "config", "testdata", "mock_falco_ebpf_engine", "kernel_obj_mock.o")
 }
 
 func (c *ConfigDataFalcoMock) GetEbpfEngineLoaderPath() string {
-	return "./../config/testdata/mock_falco_ebpf_engine/userspace_app_mock"
+	return path.Join(currentDir(), "..", "config", "testdata", "mock_falco_ebpf_engine", "userspace_app_mock")
+}
+
+func currentDir() string {
+	_, filename, _, _ := runtime.Caller(1)
+
+	return filepath.Dir(filename)
 }
