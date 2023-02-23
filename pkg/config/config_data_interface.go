@@ -5,4 +5,9 @@ type ConfigDataInterface interface {
 	GetFalcoSyscallFilter() []string
 	GetFalcoKernelObjPath() string
 	GetEbpfEngineLoaderPath() string
+	GetUpdateDataPeriod() int
+	GetSniffingMaxTimes() int
+	IsRelevantCVEServiceEnabled() bool
+	GetNodeName() string
+	GetClusterName() string
 }

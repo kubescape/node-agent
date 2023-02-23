@@ -32,19 +32,13 @@ type Server struct {
 
 type DB struct {
 	Server           `json:"server"`
-	FileSystem       bool   `json:"fileSystem"`
-	UpdateDataPeriod string `json:"updateDataPeriod"`
-}
-
-type OutputDataStorage struct {
-	OutputDataStorageType string      `json:"type"`
-	Data                  interface{} `json:"data"`
-	UpdateDataPeriod      string      `json:"updateDataPeriod"`
+	FileSystem       bool `json:"fileSystem"`
+	UpdateDataPeriod int  `json:"updateDataPeriod"`
 }
 
 type SnifferData struct {
 	FeatureList     []SnifferServices `json:"services"`
-	SniffingMaxTime string            `json:"sniffingMaxTime"`
+	SniffingMaxTime int               `json:"sniffingMaxTime"`
 }
 
 type ConfigData struct {
@@ -52,6 +46,7 @@ type ConfigData struct {
 	FalcoEbpfEngineData `json:"falcoEbpfEngine"`
 	NodeData            `json:"node"`
 	DB                  `json:"db"`
+	ClusterName         string `json:"clusterName"`
 }
 
 func CreateConfigData() *ConfigData {
@@ -85,4 +80,29 @@ func (c *ConfigData) GetFalcoKernelObjPath() string {
 
 func (c *ConfigData) GetEbpfEngineLoaderPath() string {
 	return c.FalcoEbpfEngineData.EbpfEngineLoaderPath
+}
+
+func (c *ConfigData) GetUpdateDataPeriod() int {
+	return c.DB.UpdateDataPeriod
+}
+
+func (c *ConfigData) GetSniffingMaxTimes() int {
+	return c.SnifferData.SniffingMaxTime
+}
+
+func (c *ConfigData) IsRelevantCVEServiceEnabled() bool {
+	for i := range c.FeatureList {
+		if c.FeatureList[i].Name == SNIFFER_SERVICE_RELEVANT_CVES {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *ConfigData) GetNodeName() string {
+	return c.NodeData.Name
+}
+
+func (c *ConfigData) GetClusterName() string {
+	return c.ClusterName
 }

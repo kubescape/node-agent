@@ -29,6 +29,26 @@ func (c *ConfigDataFalcoMock) GetEbpfEngineLoaderPath() string {
 	return path.Join(currentDir(), "..", "testdata", "mock_falco_ebpf_engine", "userspace_app_mock")
 }
 
+func (c *ConfigDataFalcoMock) GetUpdateDataPeriod() int {
+	return 120
+}
+
+func (c *ConfigDataFalcoMock) GetSniffingMaxTimes() int {
+	return 60 * 60
+}
+
+func (c *ConfigDataFalcoMock) IsRelevantCVEServiceEnabled() bool {
+	return true
+}
+
+func (c *ConfigDataFalcoMock) GetNodeName() string {
+	return "minikube"
+}
+
+func (c *ConfigDataFalcoMock) GetClusterName() string {
+	return "test"
+}
+
 func currentDir() string {
 	_, filename, _, _ := runtime.Caller(1)
 

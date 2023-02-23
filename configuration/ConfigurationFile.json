@@ -5,7 +5,7 @@
                 "Name": "relevantCVEs"
             }
         ],
-        "maxSniffingTimePerContainer": "360"
+        "maxSniffingTimePerContainer": 360
     },
     "falcoEbpfEngine": {
         "kernelObjPath": "./resources/ebpf/falco/kernel_obj.o",
@@ -19,6 +19,7 @@
             "URL": "blabla.com/v1/store"
         },
         "fileSystem": true,
-        "updateDataPeriod": "120"
-    }
+        "updateDataPeriod": 120
+    },
+    "clusterName": "myCluster"
 }

@@ -67,3 +67,23 @@ func (cfg *Config) GetFalcoKernelObjPath() string {
 func (cfg *Config) GetEbpfEngineLoaderPath() string {
 	return cfg.data.GetEbpfEngineLoaderPath()
 }
+
+func (cfg *Config) GetUpdateDataPeriod() int {
+	return cfg.data.GetUpdateDataPeriod()
+}
+
+func (cfg *Config) GetSniffingMaxTimes() int {
+	return cfg.data.GetSniffingMaxTimes()
+}
+
+func (cfg *Config) IsRelevantCVEServiceEnabled() bool {
+	return cfg.data.IsRelevantCVEServiceEnabled()
+}
+
+func (cfg *Config) GetNodeName() string {
+	return cfg.data.GetNodeName()
+}
+
+func (cfg *Config) GetClusterName() string {
+	return cfg.data.GetClusterName()
+}
