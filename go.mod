@@ -5,7 +5,7 @@ go 1.19
 require (
 	github.com/armosec/utils-go v0.0.12 // indirect
 	github.com/kubescape/go-logger v0.0.8
-	github.com/kubescape/k8s-interface v0.0.101
+	github.com/kubescape/k8s-interface v0.0.102
 	github.com/spdx/tools-golang v0.4.0
 	// github.com/kubescape/storage
 	k8s.io/api v0.26.1
@@ -14,7 +14,7 @@ require (
 )
 
 require (
-	github.com/armosec/armoapi-go v0.0.98 // indirect
+	github.com/armosec/armoapi-go v0.0.169 // indirect
 	github.com/armosec/utils-k8s-go v0.0.12 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/coreos/go-oidc v2.2.1+incompatible // indirect
@@ -52,6 +52,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pquerna/cachecontrol v0.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/stripe/stripe-go/v74 v74.8.0 // indirect
 	github.com/uptrace/opentelemetry-go-extra/otelutil v0.1.18 // indirect
 	github.com/uptrace/opentelemetry-go-extra/otelzap v0.1.18 // indirect
 	github.com/uptrace/uptrace-go v1.11.8 // indirect
