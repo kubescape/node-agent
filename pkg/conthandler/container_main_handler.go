@@ -5,7 +5,10 @@ import (
 	"sniffer/pkg/config"
 	v1 "sniffer/pkg/conthandler/v1"
 	accumulator "sniffer/pkg/event_data_storage"
+	"sniffer/pkg/sbom"
+	"sniffer/pkg/storageclient"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -28,17 +31,21 @@ type afterTimerActionsData struct {
 type watchedContainerData struct {
 	containerAggregator *Aggregator
 	snifferTimer        *time.Timer
+	event               v1.ContainerEventData
 	syncChannel         map[string]chan error
+	sbomClient          sbom.SBOMClient
 }
 
 type ContainerHandler struct {
 	containerWatcher         *ContainerWatcher
 	containersEventChan      chan v1.ContainerEventData
 	watchedContainers        map[string]watchedContainerData
+	syncWatchedContainersMap *sync.RWMutex
 	afterTimerActionsChannel chan afterTimerActionsData
+	storageClient            storageclient.StorageClient
 }
 
-func CreateContainerHandler(contClient ContainerClient) (*ContainerHandler, error) {
+func CreateContainerHandler(contClient ContainerClient, storageClient storageclient.StorageClient) (*ContainerHandler, error) {
 
 	contWatcher, err := CreateContainerWatcher(contClient)
 	if err != nil {
@@ -49,7 +56,9 @@ func CreateContainerHandler(contClient ContainerClient) (*ContainerHandler, erro
 		containersEventChan:      make(chan v1.ContainerEventData, 50),
 		containerWatcher:         contWatcher,
 		watchedContainers:        make(map[string]watchedContainerData),
+		syncWatchedContainersMap: &sync.RWMutex{},
 		afterTimerActionsChannel: make(chan afterTimerActionsData),
+		storageClient:            storageClient,
 	}, nil
 }
 
@@ -58,24 +67,25 @@ func (ch *ContainerHandler) afterTimerActions() error {
 
 	for {
 		afterTimerActionsData := <-ch.afterTimerActionsChannel
+		ch.syncWatchedContainersMap.Lock()
 		containerData := ch.watchedContainers[afterTimerActionsData.containerID]
+		ch.syncWatchedContainersMap.Unlock()
 
 		if config.GetConfigurationConfigContext().IsRelevantCVEServiceEnabled() && afterTimerActionsData.service == RELEVANT_CVES_SERVICE {
-			_ = containerData.containerAggregator.GetContainerRealtimeFileList()
+			fileList := containerData.containerAggregator.GetContainerRealtimeFileList()
+
 			if err = <-containerData.syncChannel[STEP_GET_SBOM]; err != nil {
-				// logger.Print(logger.ERROR, false, "afterTimerActions: failed to get runtime file list with err %v\n", err)
+				logger.L().Warning("failed to get SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s with err ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				continue
 			}
-			// err = containerData.relaventCVEsData.sbomObject.FilterSbom(fileList)
-			// if err != nil {
-			// 	logger.Print(logger.ERROR, false, "afterTimerActions: failed to filter sbom with err %v\n", err)
-			// 	continue
-			// }
-			// err = DB.SetDataInDB(containerData.relaventCVEsData.vulnObject.GetProcessedData(), nil, nil, "resourceName", afterTimerActionsData.service)
-			// if err != nil {
-			// 	logger.Print(logger.ERROR, false, "afterTimerActions: failed to set data in the DB with err %v\n", err)
-			// 	continue
-			// }
+			if err = containerData.sbomClient.FilterSBOM(afterTimerActionsData.containerID, fileList); err != nil {
+				logger.L().Warning("failed to filter SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s with err ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+				continue
+			}
+			if err = containerData.sbomClient.StoreFilterSBOM(afterTimerActionsData.containerID); err != nil {
+				logger.L().Warning("failed to store filter SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s with err ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+				continue
+			}
 		}
 	}
 }
@@ -106,14 +116,18 @@ func createTimer() *time.Timer {
 }
 
 func (ch *ContainerHandler) startRelevancyProcess(contID string, contData watchedContainerData) {
+	ch.syncWatchedContainersMap.Lock()
 	err := contData.containerAggregator.StartAggregate(ch.watchedContainers[contID].syncChannel[STEP_EVENT_AGGREGATOR])
 	if err != nil {
 		contData.syncChannel[STEP_EVENT_AGGREGATOR] <- err
+		ch.syncWatchedContainersMap.Unlock()
 		return
 	}
+	ch.syncWatchedContainersMap.Unlock()
 
 	stopSniffingTime := time.Now().Add(time.Duration(config.GetConfigurationConfigContext().GetSniffingMaxTimes()) * time.Minute)
 	for start := time.Now(); start.Before(stopSniffingTime); {
+		ch.syncWatchedContainersMap.Lock()
 		err = ch.startTimer(contID)
 		if err != nil {
 			logger.L().Warning("", helpers.Error(err))
@@ -121,7 +135,10 @@ func (ch *ContainerHandler) startRelevancyProcess(contID string, contData watche
 			if err != nil {
 				logger.L().Warning("we have failed to stop to aggregate data for container ID: ", helpers.String("%s", contID))
 			}
+			delete(ch.watchedContainers, contID)
+			break
 		}
+		ch.syncWatchedContainersMap.Unlock()
 	}
 }
 
@@ -134,13 +151,18 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 	newWatchedContainer := watchedContainerData{
 		containerAggregator: CreateAggregator(getShortContainerID(contEvent.GetContainerID())),
 		snifferTimer:        createTimer(),
+		event:               contEvent,
+		sbomClient:          sbom.CreateSBOMStorageClient(ch.storageClient),
 		syncChannel: map[string]chan error{
 			STEP_GET_SBOM:         make(chan error, 10),
 			STEP_EVENT_AGGREGATOR: make(chan error, 10),
 		},
 	}
+	ch.syncWatchedContainersMap.Lock()
 	ch.watchedContainers[contEvent.GetContainerID()] = newWatchedContainer
+	ch.syncWatchedContainersMap.Unlock()
 	go ch.startRelevancyProcess(contEvent.GetContainerID(), newWatchedContainer)
+	go newWatchedContainer.sbomClient.GetSBOM(contEvent.GetContainerID())
 	return nil
 }
 

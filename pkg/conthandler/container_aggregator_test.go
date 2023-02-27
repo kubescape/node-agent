@@ -18,7 +18,7 @@ const (
 	REDIS_CONTAINER_ID                                        = "16248df36c67"
 	REDIS_WLID                                                = "wlid://cluster-test/namespace-any/deployment/redis"
 	REDIS_INSTANCE_ID                                         = "any"
-	NUMBER_OF_REDIS_EVENT_IN_THE_MOCK_AFTER_FILTER_DUPLICATED = 393
+	NUMBER_OF_REDIS_EVENT_IN_THE_MOCK_AFTER_FILTER_DUPLICATED = 73
 )
 
 func TestContAggregator(t *testing.T) {

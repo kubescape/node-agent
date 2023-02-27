@@ -9,6 +9,7 @@ import (
 	configV1 "sniffer/pkg/config/v1"
 	conthadlerV1 "sniffer/pkg/conthandler/v1"
 	accumulator "sniffer/pkg/event_data_storage"
+	"sniffer/pkg/storageclient"
 	"testing"
 	"time"
 
@@ -55,7 +56,7 @@ func TestContMainHandler(t *testing.T) {
 		t.Fatalf("StartAccumulator failed with err %v", err)
 	}
 
-	contHandler, err := CreateContainerHandler(nil)
+	contHandler, err := CreateContainerHandler(nil, storageclient.CreateSBOMStorageHttpClientMock())
 	if err != nil {
 		t.Fatalf("CreateContainerHandler failed with err %v", err)
 	}

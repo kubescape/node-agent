@@ -99,6 +99,10 @@ func (c *ConfigData) IsRelevantCVEServiceEnabled() bool {
 	return false
 }
 
+func (c *ConfigData) GetStorageURL() string {
+	return c.DB.Server.URL
+}
+
 func (c *ConfigData) GetNodeName() string {
 	return c.NodeData.Name
 }

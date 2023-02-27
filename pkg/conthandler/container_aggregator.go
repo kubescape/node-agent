@@ -51,8 +51,8 @@ func (aggregator *Aggregator) StopAggregate() error {
 	return nil
 }
 
-func (aggregator *Aggregator) GetContainerRealtimeFileList() []string {
-	var snifferRealtimeFileList []string
+func (aggregator *Aggregator) GetContainerRealtimeFileList() map[string]bool {
+	snifferRealtimeFileList := make(map[string]bool)
 
 	// logger.Print(logger.DEBUG, false, "GetContainerRealtimeSyscalls: aggregator.aggregationData list size %d\n", len(aggregator.aggregationData))
 	// logger.Print(logger.DEBUG, false, "GetContainerRealtimeSyscalls: aggregator.aggregationData list %v\n", aggregator.aggregationData)
@@ -62,7 +62,7 @@ func (aggregator *Aggregator) GetContainerRealtimeFileList() []string {
 	for i := range aggregator.aggregationData {
 		fileName := aggregator.aggregationData[i].GetOpenFileName()
 		if fileName != "" {
-			snifferRealtimeFileList = append(snifferRealtimeFileList, fileName)
+			snifferRealtimeFileList[fileName] = true
 		}
 	}
 

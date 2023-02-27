@@ -2,6 +2,3 @@ sniffer
 temp
 .vscode
 resources/ebpf/falco/*
-pkg/sbom/*
-pkg/storageclient/*
-pkg/strageclient/*

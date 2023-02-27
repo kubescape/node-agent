@@ -1,0 +1,166 @@
+{
+    "spdxVersion": "SPDX-2.3",
+    "dataLicense": "CC0-1.0",
+    "SPDXID": "SPDXRef-DOCUMENT",
+    "name": "nginx",
+    "documentNamespace": "https://anchore.com/syft/image/nginx-b0a8069e-2bcf-445e-b535-de6d078a6d36",
+    "creationInfo": {
+     "licenseListVersion": "3.19",
+     "creators": [
+      "Organization: Anchore, Inc",
+      "Tool: syft-0.70.0"
+     ],
+     "created": "2023-02-26T13:34:46Z"
+    },
+    "packages": [
+     {
+      "name": "adduser",
+      "SPDXID": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
+      "versionInfo": "3.118",
+      "originator": "Person: Debian Adduser Developers \u003cadduser@packages.debian.org\u003e",
+      "downloadLocation": "NOASSERTION",
+      "sourceInfo": "acquired package info from DPKG DB: /usr/share/doc/adduser/copyright, /var/lib/dpkg/info/adduser.conffiles, /var/lib/dpkg/info/adduser.md5sums, /var/lib/dpkg/status",
+      "licenseConcluded": "GPL-2.0-only",
+      "licenseDeclared": "GPL-2.0-only",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+       {
+        "referenceCategory": "SECURITY",
+        "referenceType": "cpe23Type",
+        "referenceLocator": "cpe:2.3:a:adduser:adduser:3.118:*:*:*:*:*:*:*"
+       },
+       {
+        "referenceCategory": "PACKAGE-MANAGER",
+        "referenceType": "purl",
+        "referenceLocator": "pkg:deb/debian/adduser@3.118?arch=all&distro=debian-11"
+       }
+      ]
+     }
+    ],
+    "files": [
+        {
+            "fileName": "/usr/share/adduser/adduser.conf",
+            "SPDXID": "SPDXRef-18099a63ef768f72",
+            "checksums": [
+             {
+              "algorithm": "SHA1",
+              "checksumValue": "0000000000000000000000000000000000000000"
+             }
+            ],
+            "licenseConcluded": "NOASSERTION",
+            "copyrightText": "",
+            "comment": "layerID: sha256:67a4178b7d47beb6a1f697a593bd0c6841c67eb0da00f2badefb05fd30671490"
+        },
+        {
+            "fileName": "/usr/sbin/deluser",
+            "SPDXID": "SPDXRef-1a35bf77abe6053c",
+            "checksums": [
+             {
+              "algorithm": "SHA1",
+              "checksumValue": "0000000000000000000000000000000000000000"
+             }
+            ],
+            "licenseConcluded": "NOASSERTION",
+            "copyrightText": "",
+            "comment": "layerID: sha256:67a4178b7d47beb6a1f697a593bd0c6841c67eb0da00f2badefb05fd30671490"
+        },
+        {
+            "fileName": "/etc/deluser.conf",
+            "SPDXID": "SPDXRef-3ec7e593276354ae",
+            "checksums": [
+             {
+              "algorithm": "SHA1",
+              "checksumValue": "0000000000000000000000000000000000000000"
+             }
+            ],
+            "licenseConcluded": "NOASSERTION",
+            "copyrightText": "",
+            "comment": "layerID: sha256:67a4178b7d47beb6a1f697a593bd0c6841c67eb0da00f2badefb05fd30671490"
+        },
+        {
+            "fileName": "/usr/share/doc/adduser/copyright",
+            "SPDXID": "SPDXRef-b2a13b08d0a14a92",
+            "checksums": [
+             {
+              "algorithm": "SHA1",
+              "checksumValue": "0000000000000000000000000000000000000000"
+             }
+            ],
+            "licenseConcluded": "NOASSERTION",
+            "copyrightText": "",
+            "comment": "layerID: sha256:67a4178b7d47beb6a1f697a593bd0c6841c67eb0da00f2badefb05fd30671490"
+        },
+        {
+            "fileName": "/usr/share/doc/adduser/copyright",
+            "SPDXID": "SPDXRef-b2a13b08d0a14a92",
+            "checksums": [
+             {
+              "algorithm": "SHA1",
+              "checksumValue": "0000000000000000000000000000000000000000"
+             }
+            ],
+            "licenseConcluded": "NOASSERTION",
+            "copyrightText": "",
+            "comment": "layerID: sha256:67a4178b7d47beb6a1f697a593bd0c6841c67eb0da00f2badefb05fd30671490"
+        },
+        {
+            "fileName": "/usr/sbin/adduser",
+            "SPDXID": "SPDXRef-e97fef92a7d904e0",
+            "checksums": [
+             {
+              "algorithm": "SHA1",
+              "checksumValue": "0000000000000000000000000000000000000000"
+             }
+            ],
+            "licenseConcluded": "NOASSERTION",
+            "copyrightText": "",
+            "comment": "layerID: sha256:67a4178b7d47beb6a1f697a593bd0c6841c67eb0da00f2badefb05fd30671490"
+        }, 
+        {
+        "fileName": "/usr/sbin/adduser",
+        "SPDXID": "SPDXRef-e97fef92a7d904e0",
+        "checksums": [
+            {
+            "algorithm": "SHA1",
+            "checksumValue": "0000000000000000000000000000000000000000"
+            }
+        ],
+        "licenseConcluded": "NOASSERTION",
+        "copyrightText": "",
+        "comment": "layerID: sha256:67a4178b7d47beb6a1f697a593bd0c6841c67eb0da00f2badefb05fd30671490"
+        }
+    ],
+    "relationships": [
+     {
+      "spdxElementId": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
+      "relatedSpdxElement": "SPDXRef-18099a63ef768f72",
+      "relationshipType": "CONTAINS"
+     },
+     {
+      "spdxElementId": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
+      "relatedSpdxElement": "SPDXRef-1a35bf77abe6053c",
+      "relationshipType": "CONTAINS"
+     },
+     {
+      "spdxElementId": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
+      "relatedSpdxElement": "SPDXRef-3ec7e593276354ae",
+      "relationshipType": "CONTAINS"
+     },
+     {
+      "spdxElementId": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
+      "relatedSpdxElement": "SPDXRef-b2a13b08d0a14a92",
+      "relationshipType": "CONTAINS"
+     },
+     {
+      "spdxElementId": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
+      "relatedSpdxElement": "SPDXRef-e045176dbb87bb5a",
+      "relationshipType": "CONTAINS"
+     },
+     {
+      "spdxElementId": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
+      "relatedSpdxElement": "SPDXRef-e97fef92a7d904e0",
+      "relationshipType": "CONTAINS"
+     }
+    ]
+   }
+   

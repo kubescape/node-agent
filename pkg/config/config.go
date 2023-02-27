@@ -87,3 +87,7 @@ func (cfg *Config) GetNodeName() string {
 func (cfg *Config) GetClusterName() string {
 	return cfg.data.GetClusterName()
 }
+
+func (cfg *Config) GetStorageURL() string {
+	return cfg.data.GetStorageURL()
+}

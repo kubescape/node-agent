@@ -49,6 +49,10 @@ func (c *ConfigDataFalcoMock) GetClusterName() string {
 	return "test"
 }
 
+func (c *ConfigDataFalcoMock) GetStorageURL() string {
+	return "blabla"
+}
+
 func currentDir() string {
 	_, filename, _, _ := runtime.Caller(1)
 

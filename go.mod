@@ -3,10 +3,11 @@ module sniffer
 go 1.19
 
 require (
-	github.com/armosec/utils-go v0.0.12
+	github.com/armosec/utils-go v0.0.12 // indirect
 	github.com/kubescape/go-logger v0.0.8
 	github.com/kubescape/k8s-interface v0.0.101
-	github.com/spdx/tools-golang v0.5.0-rc1 
+	github.com/spdx/tools-golang v0.4.0
+	// github.com/kubescape/storage
 	k8s.io/api v0.26.1
 	k8s.io/apimachinery v0.26.1
 	k8s.io/client-go v0.26.1
