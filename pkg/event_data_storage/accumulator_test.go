@@ -15,9 +15,9 @@ const (
 )
 
 func TestFullAccumulatorFlow(t *testing.T) {
-	err := os.Setenv(config.SNIFFER_CONFIG_ENV_VAR, "../../configuration/ConfigurationFile.json")
+	err := os.Setenv(config.CONFIG_ENV_VAR, "../../configuration/ConfigurationFile.json")
 	if err != nil {
-		t.Fatalf("failed to set env SNIFFER_CONFIG_ENV_VAR with err %v", err)
+		t.Fatalf("failed to set env %s with err %v", config.CONFIG_ENV_VAR, err)
 	}
 
 	cfg := config.GetConfigurationConfigContext()
@@ -46,9 +46,9 @@ func TestFullAccumulatorFlow(t *testing.T) {
 }
 
 func TestFullAccumulatorFlowAndAllOtherSmallFunctions(t *testing.T) {
-	err := os.Setenv(config.SNIFFER_CONFIG_ENV_VAR, "../../configuration/ConfigurationFile.json")
+	err := os.Setenv(config.CONFIG_ENV_VAR, "../../configuration/ConfigurationFile.json")
 	if err != nil {
-		t.Fatalf("failed to set env SNIFFER_CONFIG_ENV_VAR with err %v", err)
+		t.Fatalf("failed to set env %s with err %v", config.CONFIG_ENV_VAR, err)
 	}
 
 	cfg := config.GetConfigurationConfigContext()

@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	EBPFEngineFalco        = "falco"
-	EBPFEngineCilium       = "cilium"
-	SNIFFER_CONFIG_ENV_VAR = "SNIFFER_CONFIG_ENV_VAR"
+	EBPFEngineFalco  = "falco"
+	EBPFEngineCilium = "cilium"
+	CONFIG_ENV_VAR   = "CONFIG_ENV_VAR"
 )
 
 type Config struct {
@@ -19,7 +19,7 @@ type Config struct {
 }
 
 func (cfg *Config) getConfigFilePath() (string, bool) {
-	return os.LookupEnv(SNIFFER_CONFIG_ENV_VAR)
+	return os.LookupEnv(CONFIG_ENV_VAR)
 }
 
 func (cfg *Config) GetConfigurationReader() (io.Reader, error) {
