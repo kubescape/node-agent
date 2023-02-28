@@ -80,6 +80,7 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 			case watch.Modified:
 				for i := range pod.Status.ContainerStatuses {
 					if pod.Status.ContainerStatuses[i].Started != nil && *pod.Status.ContainerStatuses[i].Started {
+						pod.TypeMeta.Kind = "Pod"
 						podBytes, err := json.Marshal(pod)
 						if err != nil {
 							logger.L().Error("fail to unmarshal pod ", []helpers.IDetails{helpers.String("%s", pod.GetName()), helpers.String(" in namespace %s with error: ", pod.GetNamespace()), helpers.Error(err)}...)
@@ -91,7 +92,11 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 							continue
 						}
 						wlid := workload.GenerateWlid(config.GetConfigurationConfigContext().GetClusterName())
-						instanceID := conthandlerV1.CreateInstanceID(workload, wlid, pod.Status.ContainerStatuses[i].Name)
+						instanceID, err := conthandlerV1.CreateInstanceID(workload, wlid, pod.Status.ContainerStatuses[i].Name)
+						if err != nil {
+							logger.L().Error("fail to create InstanceID to pod ", []helpers.IDetails{helpers.String("%s", pod.GetName()), helpers.String(" in namespace %s with err ", pod.GetNamespace()), helpers.Error(err)}...)
+							continue
+						}
 						containerEventData := conthandlerV1.CreateNewContainerEvent(pod.Status.ContainerStatuses[i].ImageID, pod.Status.ContainerStatuses[i].ContainerID, pod.GetName(), wlid, instanceID, conthandlerV1.CONTAINER_RUNNING)
 						containerEventChannel <- *containerEventData
 					}

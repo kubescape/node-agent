@@ -21,12 +21,14 @@ type SBOMData struct {
 	spdxData                              spdx.Document
 	filteredSpdxData                      spdx.Document
 	relevantRealtimeFilesBySPDXIdentifier map[common.ElementID]bool
+	newRelevantData                       bool
 }
 
 func CreateSBOMDataSPDXVersionV050rc1() *SBOMData {
 	return &SBOMData{
 		filteredSpdxData:                      spdx.Document{},
 		relevantRealtimeFilesBySPDXIdentifier: make(map[common.ElementID]bool),
+		newRelevantData:                       false,
 	}
 }
 
@@ -59,12 +61,14 @@ func (sbom *SBOMData) StoreSBOM(sbomData []byte) error {
 }
 
 func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
+	sbom.newRelevantData = false
 	//filter relevant file list
 	for i := range sbom.spdxData.Files {
 		if exist := sbomFileRelevantMap[sbom.spdxData.Files[i].FileName]; exist {
 			if alreadyExist := sbom.relevantRealtimeFilesBySPDXIdentifier[sbom.spdxData.Files[i].FileSPDXIdentifier]; !alreadyExist {
 				sbom.filteredSpdxData.Files = append(sbom.filteredSpdxData.Files, sbom.spdxData.Files[i])
 				sbom.relevantRealtimeFilesBySPDXIdentifier[sbom.spdxData.Files[i].FileSPDXIdentifier] = true
+				sbom.newRelevantData = true
 			}
 		}
 	}
@@ -101,4 +105,8 @@ func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 
 func (sbom *SBOMData) GetFilterSBOMInBytes() ([]byte, error) {
 	return json.Marshal(sbom.filteredSpdxData)
+}
+
+func (sbom *SBOMData) IsNewRelevantSBOMDataExist() bool {
+	return sbom.newRelevantData
 }

@@ -19,7 +19,7 @@
             "URL": "blabla.com/v1/store"
         },
         "fileSystem": true,
-        "updateDataPeriod": 120
+        "updateDataPeriod": 30
     },
     "clusterName": "myCluster"
 }

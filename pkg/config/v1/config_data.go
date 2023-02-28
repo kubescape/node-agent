@@ -38,7 +38,7 @@ type DB struct {
 
 type SnifferData struct {
 	FeatureList     []SnifferServices `json:"services"`
-	SniffingMaxTime int               `json:"sniffingMaxTime"`
+	SniffingMaxTime int               `json:"maxSniffingTimePerContainer"`
 }
 
 type ConfigData struct {

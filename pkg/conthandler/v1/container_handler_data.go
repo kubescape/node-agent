@@ -1,6 +1,7 @@
 package conthandler
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -71,10 +72,36 @@ func (event *ContainerEventData) GetK8SWorkloadID() string {
 	return event.wlid
 }
 
-func CreateInstanceID(workload *workloadinterface.Workload, wlid string, containerName string) string {
+func isWLIDInExpectedFormat(wlid string) bool {
+	if !strings.HasPrefix(wlid, "wlid://cluster-") {
+		return false
+	}
+	trimmedStr := strings.TrimPrefix(wlid, "wlid://cluster-")
+	namespaceIndex := strings.Index(trimmedStr, "/namespace-")
+	if namespaceIndex == -1 {
+		return false
+	}
+	trimmedStr2 := trimmedStr[namespaceIndex+len("/namespace-"):]
+	spiltStrings := strings.Split(trimmedStr2, "/")
+	if len(spiltStrings) != 2 {
+		return false
+	}
+	kindAndName := strings.Split(spiltStrings[1], "-")
+	if len(kindAndName) < 2 {
+		return false
+	}
+
+	return true
+}
+
+func CreateInstanceID(workload *workloadinterface.Workload, wlid string, containerName string) (string, error) {
+	if !isWLIDInExpectedFormat(wlid) {
+		return "", fmt.Errorf("WLID is not in the expected format: format: wlid://cluster-<name>/namespace-<name>/<kind>-<name>, wlid: %s", wlid)
+	}
+
 	temp := wlid[strings.Index(wlid, "namespace-")+len("namespace-"):]
 	kind := temp[strings.Index(temp, "/")+1 : strings.Index(temp, "-")]
 	name := temp[strings.Index(temp, "-")+1:]
 
-	return "apiVersion-" + workload.GetApiVersion() + "/namespace-" + workload.GetNamespace() + "/kind-" + kind + "/name-" + name + "/resourceVersion-" + workload.GetResourceVersion() + "/containerName-" + containerName
+	return "apiVersion-" + workload.GetApiVersion() + "/namespace-" + workload.GetNamespace() + "/kind-" + kind + "/name-" + name + "/resourceVersion-" + workload.GetResourceVersion() + "/containerName-" + containerName, nil
 }

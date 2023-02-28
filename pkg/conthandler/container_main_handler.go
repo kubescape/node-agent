@@ -57,7 +57,7 @@ func CreateContainerHandler(contClient ContainerClient, storageClient storagecli
 		containerWatcher:         contWatcher,
 		watchedContainers:        make(map[string]watchedContainerData),
 		syncWatchedContainersMap: &sync.RWMutex{},
-		afterTimerActionsChannel: make(chan afterTimerActionsData),
+		afterTimerActionsChannel: make(chan afterTimerActionsData, 50),
 		storageClient:            storageClient,
 	}, nil
 }
@@ -83,27 +83,31 @@ func (ch *ContainerHandler) afterTimerActions() error {
 				continue
 			}
 			if err = containerData.sbomClient.StoreFilterSBOM(afterTimerActionsData.containerID); err != nil {
-				logger.L().Warning("failed to store filter SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s with err ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+				if err.Error() == sbom.DataAlreadyExist {
+					logger.L().Warning("SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s already reported ", containerData.event.GetK8SWorkloadID())}...)
+				} else {
+					logger.L().Warning("failed to store filter SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s with err ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+				}
 				continue
 			}
+			logger.L().Info("filtered SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s has stored successfully in the storage", containerData.event.GetK8SWorkloadID())}...)
 		}
 	}
 }
 
-func (ch *ContainerHandler) startTimer(containerID string) error {
+func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, containerID string) error {
 	var err error
-	containerData := ch.watchedContainers[containerID]
 	select {
-	case <-containerData.snifferTimer.C:
+	case <-watchedContainer.snifferTimer.C:
 		if config.GetConfigurationConfigContext().IsRelevantCVEServiceEnabled() {
 			ch.afterTimerActionsChannel <- afterTimerActionsData{
 				containerID: containerID,
 				service:     RELEVANT_CVES_SERVICE,
 			}
 		}
-	case err = <-containerData.syncChannel[STEP_EVENT_AGGREGATOR]:
+	case err = <-watchedContainer.syncChannel[STEP_EVENT_AGGREGATOR]:
 		if err.Error() == accumulator.DROP_EVENT_OCCURRED {
-			containerData.snifferTimer.Stop()
+			watchedContainer.snifferTimer.Stop()
 			err = fmt.Errorf("we have missed some kernel events, we are going to stop all current containers monitoring")
 		}
 	}
@@ -112,39 +116,51 @@ func (ch *ContainerHandler) startTimer(containerID string) error {
 }
 
 func createTimer() *time.Timer {
-	return time.NewTimer(time.Duration(config.GetConfigurationConfigContext().GetUpdateDataPeriod()) * time.Minute)
+	return time.NewTimer(time.Duration(config.GetConfigurationConfigContext().GetUpdateDataPeriod()) * time.Second)
 }
 
-func (ch *ContainerHandler) startRelevancyProcess(contID string, contData watchedContainerData) {
+func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventData) {
 	ch.syncWatchedContainersMap.Lock()
-	err := contData.containerAggregator.StartAggregate(ch.watchedContainers[contID].syncChannel[STEP_EVENT_AGGREGATOR])
-	if err != nil {
-		contData.syncChannel[STEP_EVENT_AGGREGATOR] <- err
-		ch.syncWatchedContainersMap.Unlock()
-		return
-	}
+	watchedContainer := ch.watchedContainers[contEvent.GetContainerID()]
 	ch.syncWatchedContainersMap.Unlock()
 
-	stopSniffingTime := time.Now().Add(time.Duration(config.GetConfigurationConfigContext().GetSniffingMaxTimes()) * time.Minute)
+	err := watchedContainer.containerAggregator.StartAggregate(watchedContainer.syncChannel[STEP_EVENT_AGGREGATOR])
+	if err != nil {
+		return
+	}
+
+	now := time.Now()
+	configStopTime := time.Duration(config.GetConfigurationConfigContext().GetSniffingMaxTimes())
+	stopSniffingTime := now.Add(configStopTime * time.Minute)
 	for start := time.Now(); start.Before(stopSniffingTime); {
-		ch.syncWatchedContainersMap.Lock()
-		err = ch.startTimer(contID)
+		err = ch.startTimer(watchedContainer, contEvent.GetContainerID())
 		if err != nil {
 			logger.L().Warning("", helpers.Error(err))
-			err = ch.watchedContainers[contID].containerAggregator.StopAggregate()
+			err = watchedContainer.containerAggregator.StopAggregate()
 			if err != nil {
-				logger.L().Warning("we have failed to stop to aggregate data for container ID: ", helpers.String("%s", contID))
+				logger.L().Warning("we have failed to stop to aggregate data for container ID: ", helpers.String("%s", contEvent.GetContainerID()))
 			}
-			delete(ch.watchedContainers, contID)
+			ch.syncWatchedContainersMap.Lock()
+			delete(ch.watchedContainers, contEvent.GetContainerID())
+			ch.syncWatchedContainersMap.Unlock()
+
 			break
 		}
-		ch.syncWatchedContainersMap.Unlock()
+		watchedContainer.snifferTimer.Reset(time.Duration(config.GetConfigurationConfigContext().GetUpdateDataPeriod()) * time.Second)
 	}
 }
 
 func getShortContainerID(containerID string) string {
 	cont := strings.Split(containerID, "://")
 	return cont[1][:12]
+}
+
+func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
+	ch.syncWatchedContainersMap.Lock()
+	watchedContainer := ch.watchedContainers[contEvent.GetContainerID()]
+	ch.syncWatchedContainersMap.Unlock()
+	err := watchedContainer.sbomClient.GetSBOM(contEvent.GetContainerID())
+	watchedContainer.syncChannel[STEP_GET_SBOM] <- err
 }
 
 func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEventData) error {
@@ -161,8 +177,8 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 	ch.syncWatchedContainersMap.Lock()
 	ch.watchedContainers[contEvent.GetContainerID()] = newWatchedContainer
 	ch.syncWatchedContainersMap.Unlock()
-	go ch.startRelevancyProcess(contEvent.GetContainerID(), newWatchedContainer)
-	go newWatchedContainer.sbomClient.GetSBOM(contEvent.GetContainerID())
+	go ch.startRelevancyProcess(contEvent)
+	go ch.getSBOM(contEvent)
 	return nil
 }
 
