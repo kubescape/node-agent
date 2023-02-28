@@ -26,12 +26,16 @@ func CreateSBOMStorageClient(sc storageclient.StorageClient) *SBOMStructure {
 		storageClient: SBOMStorageClient{
 			client: sc,
 		},
-		SBOMData:    v1.CreateSBOMDataSPDXVersionV050rc1(),
+		SBOMData:    v1.CreateSBOMDataSPDXVersionV040(),
 		firstReport: true,
 	}
 }
 
 func (sc *SBOMStructure) GetSBOM(imageID string) error {
+	if sc.SBOMData.IsNewRelevantSBOMDataExist() {
+		return nil
+	}
+
 	SBOM, err := sc.storageClient.client.GetData(imageID)
 	if err != nil {
 		return err

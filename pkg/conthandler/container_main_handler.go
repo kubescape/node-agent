@@ -30,17 +30,18 @@ type afterTimerActionsData struct {
 
 type watchedContainerData struct {
 	containerAggregator *Aggregator
-	snifferTimer        *time.Timer
+	snifferTicker       *time.Ticker
 	event               v1.ContainerEventData
 	syncChannel         map[string]chan error
 	sbomClient          sbom.SBOMClient
 }
 
 type ContainerHandler struct {
-	containerWatcher         *ContainerWatcher
-	containersEventChan      chan v1.ContainerEventData
-	watchedContainers        map[string]watchedContainerData
-	syncWatchedContainersMap *sync.RWMutex
+	containerWatcher    *ContainerWatcher
+	containersEventChan chan v1.ContainerEventData
+	// watchedContainers        map[string]watchedContainerData
+	// syncWatchedContainersMap *sync.RWMutex
+	watchedContainers        sync.Map
 	afterTimerActionsChannel chan afterTimerActionsData
 	storageClient            storageclient.StorageClient
 }
@@ -53,10 +54,10 @@ func CreateContainerHandler(contClient ContainerClient, storageClient storagecli
 	}
 
 	return &ContainerHandler{
-		containersEventChan:      make(chan v1.ContainerEventData, 50),
-		containerWatcher:         contWatcher,
-		watchedContainers:        make(map[string]watchedContainerData),
-		syncWatchedContainersMap: &sync.RWMutex{},
+		containersEventChan: make(chan v1.ContainerEventData, 50),
+		containerWatcher:    contWatcher,
+		watchedContainers:   sync.Map{},
+		// syncWatchedContainersMap: &sync.RWMutex{},
 		afterTimerActionsChannel: make(chan afterTimerActionsData, 50),
 		storageClient:            storageClient,
 	}, nil
@@ -67,9 +68,12 @@ func (ch *ContainerHandler) afterTimerActions() error {
 
 	for {
 		afterTimerActionsData := <-ch.afterTimerActionsChannel
-		ch.syncWatchedContainersMap.Lock()
-		containerData := ch.watchedContainers[afterTimerActionsData.containerID]
-		ch.syncWatchedContainersMap.Unlock()
+		containerDataInterface, exist := ch.watchedContainers.Load(afterTimerActionsData.containerID)
+		if !exist {
+			logger.L().Warning("afterTimerActions: failed to get container data of containerID ", []helpers.IDetails{helpers.String("%s", afterTimerActionsData.containerID)}...)
+			continue
+		}
+		containerData := containerDataInterface.(watchedContainerData)
 
 		if config.GetConfigurationConfigContext().IsRelevantCVEServiceEnabled() && afterTimerActionsData.service == RELEVANT_CVES_SERVICE {
 			fileList := containerData.containerAggregator.GetContainerRealtimeFileList()
@@ -98,7 +102,7 @@ func (ch *ContainerHandler) afterTimerActions() error {
 func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, containerID string) error {
 	var err error
 	select {
-	case <-watchedContainer.snifferTimer.C:
+	case <-watchedContainer.snifferTicker.C:
 		if config.GetConfigurationConfigContext().IsRelevantCVEServiceEnabled() {
 			ch.afterTimerActionsChannel <- afterTimerActionsData{
 				containerID: containerID,
@@ -107,7 +111,7 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 		}
 	case err = <-watchedContainer.syncChannel[STEP_EVENT_AGGREGATOR]:
 		if err.Error() == accumulator.DROP_EVENT_OCCURRED {
-			watchedContainer.snifferTimer.Stop()
+			watchedContainer.snifferTicker.Stop()
 			err = fmt.Errorf("we have missed some kernel events, we are going to stop all current containers monitoring")
 		}
 	}
@@ -115,14 +119,17 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 	return err
 }
 
-func createTimer() *time.Timer {
-	return time.NewTimer(time.Duration(config.GetConfigurationConfigContext().GetUpdateDataPeriod()) * time.Second)
+func createTicker() *time.Ticker {
+	return time.NewTicker(time.Duration(config.GetConfigurationConfigContext().GetUpdateDataPeriod()) * time.Second)
 }
 
 func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventData) {
-	ch.syncWatchedContainersMap.Lock()
-	watchedContainer := ch.watchedContainers[contEvent.GetContainerID()]
-	ch.syncWatchedContainersMap.Unlock()
+	containerDataInterface, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
+	if !exist {
+		logger.L().Error("startRelevancyProcess: failed to get container data of ", helpers.String("containerID: ", contEvent.GetContainerID()))
+		return
+	}
+	watchedContainer := containerDataInterface.(watchedContainerData)
 
 	err := watchedContainer.containerAggregator.StartAggregate(watchedContainer.syncChannel[STEP_EVENT_AGGREGATOR])
 	if err != nil {
@@ -133,6 +140,7 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 	configStopTime := time.Duration(config.GetConfigurationConfigContext().GetSniffingMaxTimes())
 	stopSniffingTime := now.Add(configStopTime * time.Minute)
 	for start := time.Now(); start.Before(stopSniffingTime); {
+		go ch.getSBOM(contEvent)
 		err = ch.startTimer(watchedContainer, contEvent.GetContainerID())
 		if err != nil {
 			logger.L().Warning("", helpers.Error(err))
@@ -140,13 +148,9 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 			if err != nil {
 				logger.L().Warning("we have failed to stop to aggregate data for container ID: ", helpers.String("%s", contEvent.GetContainerID()))
 			}
-			ch.syncWatchedContainersMap.Lock()
-			delete(ch.watchedContainers, contEvent.GetContainerID())
-			ch.syncWatchedContainersMap.Unlock()
-
+			ch.watchedContainers.Delete(contEvent.GetContainerID())
 			break
 		}
-		watchedContainer.snifferTimer.Reset(time.Duration(config.GetConfigurationConfigContext().GetUpdateDataPeriod()) * time.Second)
 	}
 }
 
@@ -156,9 +160,12 @@ func getShortContainerID(containerID string) string {
 }
 
 func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
-	ch.syncWatchedContainersMap.Lock()
-	watchedContainer := ch.watchedContainers[contEvent.GetContainerID()]
-	ch.syncWatchedContainersMap.Unlock()
+	containerDataInterface, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
+	if !exist {
+		logger.L().Error("getSBOM: failed to get container data of ", helpers.String("containerID: ", contEvent.GetContainerID()))
+		return
+	}
+	watchedContainer := containerDataInterface.(watchedContainerData)
 	err := watchedContainer.sbomClient.GetSBOM(contEvent.GetContainerID())
 	watchedContainer.syncChannel[STEP_GET_SBOM] <- err
 }
@@ -166,7 +173,7 @@ func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
 func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEventData) error {
 	newWatchedContainer := watchedContainerData{
 		containerAggregator: CreateAggregator(getShortContainerID(contEvent.GetContainerID())),
-		snifferTimer:        createTimer(),
+		snifferTicker:       createTicker(),
 		event:               contEvent,
 		sbomClient:          sbom.CreateSBOMStorageClient(ch.storageClient),
 		syncChannel: map[string]chan error{
@@ -174,11 +181,8 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 			STEP_EVENT_AGGREGATOR: make(chan error, 10),
 		},
 	}
-	ch.syncWatchedContainersMap.Lock()
-	ch.watchedContainers[contEvent.GetContainerID()] = newWatchedContainer
-	ch.syncWatchedContainersMap.Unlock()
+	ch.watchedContainers.Store(contEvent.GetContainerID(), newWatchedContainer)
 	go ch.startRelevancyProcess(contEvent)
-	go ch.getSBOM(contEvent)
 	return nil
 }
 

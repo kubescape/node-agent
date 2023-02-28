@@ -22,13 +22,15 @@ type SBOMData struct {
 	filteredSpdxData                      spdx.Document
 	relevantRealtimeFilesBySPDXIdentifier map[common.ElementID]bool
 	newRelevantData                       bool
+	alreadyExistSBOM                      bool
 }
 
-func CreateSBOMDataSPDXVersionV050rc1() *SBOMData {
+func CreateSBOMDataSPDXVersionV040() *SBOMData {
 	return &SBOMData{
 		filteredSpdxData:                      spdx.Document{},
 		relevantRealtimeFilesBySPDXIdentifier: make(map[common.ElementID]bool),
 		newRelevantData:                       false,
+		alreadyExistSBOM:                      false,
 	}
 }
 
@@ -56,6 +58,7 @@ func (sbom *SBOMData) StoreSBOM(sbomData []byte) error {
 	sbom.filteredSpdxData.Files = make([]*spdx.File, 0)
 	sbom.filteredSpdxData.Packages = make([]*spdx.Package, 0)
 	sbom.filteredSpdxData.Relationships = make([]*spdx.Relationship, 0)
+	sbom.alreadyExistSBOM = true
 
 	return nil
 }
@@ -109,4 +112,8 @@ func (sbom *SBOMData) GetFilterSBOMInBytes() ([]byte, error) {
 
 func (sbom *SBOMData) IsNewRelevantSBOMDataExist() bool {
 	return sbom.newRelevantData
+}
+
+func (sbom *SBOMData) IsSBOMAlreadyExist() bool {
+	return sbom.alreadyExistSBOM
 }

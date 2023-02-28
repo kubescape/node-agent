@@ -5,4 +5,5 @@ type SBOMFormat interface {
 	StoreSBOM([]byte) error
 	FilterSBOM(sbomFileRelevantMap map[string]bool) error
 	IsNewRelevantSBOMDataExist() bool
+	IsSBOMAlreadyExist() bool
 }
