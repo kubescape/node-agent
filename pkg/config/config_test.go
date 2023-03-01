@@ -2,14 +2,17 @@ package config
 
 import (
 	"os"
+	"path"
 	v1 "sniffer/pkg/config/v1"
+	"sniffer/pkg/utils"
 	"testing"
 )
 
 func TestConfig(t *testing.T) {
-	err := os.Setenv("SNIFFER_CONFIG", "../../configuration/ConfigurationFile.json")
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(CONFIG_ENV_VAR, configPath)
 	if err != nil {
-		t.Fatalf("failed to set env SNIFFER_CONFIG with err %v", err)
+		t.Fatalf("failed to set env %s with err %v", CONFIG_ENV_VAR, err)
 	}
 
 	cfg := GetConfigurationConfigContext()

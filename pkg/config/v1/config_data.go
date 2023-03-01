@@ -3,12 +3,7 @@ package config
 var falcoSyscallFilter []string
 
 const (
-	FALCO_EBPF_ENGINE_TYPE     = "falco"
-	KUBESCAPE_EBPF_ENGINE_TYPE = "kubescape"
-)
-
-const (
-	SNIFFER_SERVICE_RELEVANT_CVES = "relevantCVEs"
+	SnifferServiceRelevantCVEs = "relevantCVEs"
 )
 
 // all the struct and arguments names must be visible outside from the package since the json parser package need to parse them
@@ -65,7 +60,7 @@ func (c *ConfigData) IsFalcoEbpfEngine() bool {
 func (c *ConfigData) setFalcoSyscallFilter() {
 	if c.IsFalcoEbpfEngine() {
 		for i := range c.FeatureList {
-			if c.FeatureList[i].Name == SNIFFER_SERVICE_RELEVANT_CVES {
+			if c.FeatureList[i].Name == SnifferServiceRelevantCVEs {
 				falcoSyscallFilter = append(falcoSyscallFilter, []string{"open", "openat", "execve", "execveat"}...)
 			}
 		}

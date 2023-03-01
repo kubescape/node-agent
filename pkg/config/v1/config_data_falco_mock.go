@@ -1,6 +1,15 @@
 package config
 
+import (
+	"path"
+	"sniffer/pkg/utils"
+)
+
 type ConfigDataFalcoMock struct {
+}
+
+func CreateFalcoMockConfigData() *ConfigDataFalcoMock {
+	return &ConfigDataFalcoMock{}
 }
 
 func (c *ConfigDataFalcoMock) IsFalcoEbpfEngine() bool {
@@ -12,9 +21,9 @@ func (c *ConfigDataFalcoMock) GetFalcoSyscallFilter() []string {
 }
 
 func (c *ConfigDataFalcoMock) GetFalcoKernelObjPath() string {
-	return "./../../resources/ebpf/mock_falco_ebpf_engine/kernel_obj_mock.o"
+	return path.Join(utils.CurrentDir(), "..", "testdata", "mock_falco_ebpf_engine", "kernel_obj_mock.o")
 }
 
 func (c *ConfigDataFalcoMock) GetEbpfEngineLoaderPath() string {
-	return "./../../resources/ebpf/mock_falco_ebpf_engine/userspace_app_mock"
+	return path.Join(utils.CurrentDir(), "..", "testdata", "mock_falco_ebpf_engine", "userspace_app_mock")
 }

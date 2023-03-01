@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	FALCO_EBPF_ENGINE_MIN_KERNEL_VERSION_SUPPORT     = "4.14"
-	KUBESCAPE_EBPF_ENGINE_MIN_KERNEL_VERSION_SUPPORT = "5.1"
+	FalcoEBPFEngineMinKernelVersionSupport     = "4.14"
+	KubescapeEBPFEngineMinKernelVersionSupport = "5.1"
 )
 
 var minKernelVersion string
@@ -44,9 +44,9 @@ func checkKernelVersion() error {
 
 func checkNodePrerequisites() error {
 	if config.GetConfigurationConfigContext().IsFalcoEbpfEngine() {
-		minKernelVersion = FALCO_EBPF_ENGINE_MIN_KERNEL_VERSION_SUPPORT
+		minKernelVersion = FalcoEBPFEngineMinKernelVersionSupport
 	} else {
-		minKernelVersion = KUBESCAPE_EBPF_ENGINE_MIN_KERNEL_VERSION_SUPPORT
+		minKernelVersion = KubescapeEBPFEngineMinKernelVersionSupport
 	}
 	err := checkKernelVersion()
 	if err != nil {
