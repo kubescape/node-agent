@@ -27,7 +27,7 @@ type containersEventStreamer struct {
 type Accumulator struct {
 	data                            []map[string][]evData.EventData
 	startStatus                     bool
-	syncReaderWriterData            *sync.RWMutex
+	syncReaderWriterData            sync.RWMutex
 	listOfFirstKeysInsertInEachSlot []string
 	cacheSize                       int
 	eventChannel                    chan *evData.EventData
@@ -42,13 +42,13 @@ type ContainerAccumulator struct {
 
 var nodeAgentContainerID string
 var accumulatorInstance *Accumulator
-var accumulatorInstanceLock = &sync.Mutex{}
+var accumulatorInstanceLock = sync.Mutex{}
 
 func newAccumulator() *Accumulator {
 	accumulatorInstance = &Accumulator{
 		cacheSize:                       AccumulatorSize,
 		startStatus:                     false,
-		syncReaderWriterData:            &sync.RWMutex{},
+		syncReaderWriterData:            sync.RWMutex{},
 		data:                            make([]map[string][]evData.EventData, AccumulatorSize),
 		listOfFirstKeysInsertInEachSlot: make([]string, AccumulatorSize),
 		eventChannel:                    make(chan *evData.EventData),
