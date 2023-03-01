@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	AccumulatorSize     = 10
-	DROP_EVENT_OCCURRED = "drop event occurred\n"
+	AccumulatorSize   = 10
+	DropEventOccurred = "drop event occurred\n"
 )
 
 type containersEventStreamer struct {
@@ -27,7 +27,7 @@ type containersEventStreamer struct {
 type Accumulator struct {
 	data                            []map[string][]evData.EventData
 	startStatus                     bool
-	syncReaderWriterData            *sync.RWMutex
+	syncReaderWriterData            sync.RWMutex
 	listOfFirstKeysInsertInEachSlot []string
 	cacheSize                       int
 	eventChannel                    chan *evData.EventData
@@ -42,13 +42,13 @@ type ContainerAccumulator struct {
 
 var nodeAgentContainerID string
 var accumulatorInstance *Accumulator
-var accumulatorInstanceLock = &sync.Mutex{}
+var accumulatorInstanceLock = sync.Mutex{}
 
 func newAccumulator() *Accumulator {
 	accumulatorInstance = &Accumulator{
 		cacheSize:                       AccumulatorSize,
 		startStatus:                     false,
-		syncReaderWriterData:            &sync.RWMutex{},
+		syncReaderWriterData:            sync.RWMutex{},
 		data:                            make([]map[string][]evData.EventData, AccumulatorSize),
 		listOfFirstKeysInsertInEachSlot: make([]string, AccumulatorSize),
 		eventChannel:                    make(chan *evData.EventData),
@@ -172,7 +172,7 @@ func (acc *Accumulator) accumulateEbpfEngineData() {
 			continue
 		}
 		if event != nil {
-			if event.GetEventCMD() == DROP_EVENT_OCCURRED {
+			if event.GetEventCMD() == DropEventOccurred {
 				acc.removeAllStreamedContainers(event)
 			} else {
 				index, newSlotIsNeeded, err := acc.findIndexByTimestamp(event)

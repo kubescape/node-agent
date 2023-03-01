@@ -1,6 +1,10 @@
 package utils
 
-import "strings"
+import (
+	"path/filepath"
+	"runtime"
+	"strings"
+)
 
 func Between(value string, a string, b string) string {
 	// Get substring between two strings.
@@ -18,4 +22,10 @@ func Between(value string, a string, b string) string {
 		return ""
 	}
 	return value[posFirstAdjusted:posLast]
+}
+
+func CurrentDir() string {
+	_, filename, _, _ := runtime.Caller(1)
+
+	return filepath.Dir(filename)
 }

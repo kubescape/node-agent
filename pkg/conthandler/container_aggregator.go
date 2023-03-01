@@ -25,7 +25,7 @@ func CreateAggregator(containerID string) *Aggregator {
 func (aggregator *Aggregator) collectDataFromContainerAccumulator(errChan chan error) {
 	for {
 		newEvent := <-aggregator.aggregationDataChan
-		if newEvent.GetEventCMD() == accumulator.DROP_EVENT_OCCURRED {
+		if newEvent.GetEventCMD() == accumulator.DropEventOccurred {
 			aggregator.StopAggregate()
 			errChan <- fmt.Errorf(newEvent.GetEventCMD())
 			break

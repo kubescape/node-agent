@@ -3,17 +3,16 @@ package config
 import (
 	"os"
 	"path"
-	"path/filepath"
-	"runtime"
 	v1 "sniffer/pkg/config/v1"
+	"sniffer/pkg/utils"
 	"testing"
 )
 
 func TestConfig(t *testing.T) {
-	configPath := path.Join(currentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(SNIFFER_CONFIG_ENV_VAR, configPath)
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(CONFIG_ENV_VAR, configPath)
 	if err != nil {
-		t.Fatalf("failed to set env SNIFFER_CONFIG_ENV_VAR with err %v", err)
+		t.Fatalf("failed to set env %s with err %v", CONFIG_ENV_VAR, err)
 	}
 
 	cfg := GetConfigurationConfigContext()
@@ -44,10 +43,4 @@ func TestConfig(t *testing.T) {
 	if falcoEbpfEngineLoaderPath != "./resources/ebpf/falco/userspace_app" {
 		t.Fatalf("GetEbpfEngineLoaderPath failed")
 	}
-}
-
-func currentDir() string {
-	_, filename, _, _ := runtime.Caller(1)
-
-	return filepath.Dir(filename)
 }

@@ -10,14 +10,14 @@ import (
 )
 
 const (
-	REDIS_CONTAINERID                 = "16248df36c67"
-	NUMBER_OF_REDIS_EVENT_IN_THE_MOCK = 402
+	RedisContainerID            = "16248df36c67"
+	NumberOfRedisEventInTheMock = 402
 )
 
 func TestFullAccumulatorFlow(t *testing.T) {
-	err := os.Setenv(config.SNIFFER_CONFIG_ENV_VAR, "../../configuration/ConfigurationFile.json")
+	err := os.Setenv(config.CONFIG_ENV_VAR, "../../configuration/ConfigurationFile.json")
 	if err != nil {
-		t.Fatalf("failed to set env SNIFFER_CONFIG_ENV_VAR with err %v", err)
+		t.Fatalf("failed to set env %s with err %v", config.CONFIG_ENV_VAR, err)
 	}
 
 	cfg := config.GetConfigurationConfigContext()
@@ -39,16 +39,16 @@ func TestFullAccumulatorFlow(t *testing.T) {
 	time.Sleep(5 * time.Second)
 
 	var data []evData.EventData
-	AccumulatorByContainerID(&data, REDIS_CONTAINERID)
-	if len(data) < NUMBER_OF_REDIS_EVENT_IN_THE_MOCK {
+	AccumulatorByContainerID(&data, RedisContainerID)
+	if len(data) < NumberOfRedisEventInTheMock {
 		t.Fatalf("failed to get redis server events %d < 703", len(data))
 	}
 }
 
 func TestFullAccumulatorFlowAndAllOtherSmallFunctions(t *testing.T) {
-	err := os.Setenv(config.SNIFFER_CONFIG_ENV_VAR, "../../configuration/ConfigurationFile.json")
+	err := os.Setenv(config.CONFIG_ENV_VAR, "../../configuration/ConfigurationFile.json")
 	if err != nil {
-		t.Fatalf("failed to set env SNIFFER_CONFIG_ENV_VAR with err %v", err)
+		t.Fatalf("failed to set env %s with err %v", config.CONFIG_ENV_VAR, err)
 	}
 
 	cfg := config.GetConfigurationConfigContext()

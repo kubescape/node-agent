@@ -34,9 +34,9 @@ func (client *k8sFakeClientMainHandler) GetWatcher() (watch.Interface, error) {
 
 func TestContMainHandler(t *testing.T) {
 	configPath := path.Join(currentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(config.SNIFFER_CONFIG_ENV_VAR, configPath)
+	err := os.Setenv(config.CONFIG_ENV_VAR, configPath)
 	if err != nil {
-		t.Fatalf("failed to set env SNIFFER_CONFIG_ENV_VAR with err %v", err)
+		t.Fatalf("failed to set env %s with err %v", config.CONFIG_ENV_VAR, err)
 	}
 
 	cfg := config.GetConfigurationConfigContext()

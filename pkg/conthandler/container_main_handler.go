@@ -110,7 +110,7 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 			}
 		}
 	case err = <-watchedContainer.syncChannel[STEP_EVENT_AGGREGATOR]:
-		if err.Error() == accumulator.DROP_EVENT_OCCURRED {
+		if err.Error() == accumulator.DropEventOccurred {
 			watchedContainer.snifferTicker.Stop()
 			err = fmt.Errorf("we have missed some kernel events, we are going to stop all current containers monitoring")
 		}
