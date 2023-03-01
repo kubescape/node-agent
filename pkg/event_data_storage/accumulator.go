@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	AccumulatorSize     = 10
-	DROP_EVENT_OCCURRED = "drop event occurred\n"
+	AccumulatorSize   = 10
+	DropEventOccurred = "drop event occurred\n"
 )
 
 type containersEventStreamer struct {
@@ -172,7 +172,7 @@ func (acc *Accumulator) accumulateEbpfEngineData() {
 			continue
 		}
 		if event != nil {
-			if event.GetEventCMD() == DROP_EVENT_OCCURRED {
+			if event.GetEventCMD() == DropEventOccurred {
 				acc.removeAllStreamedContainers(event)
 			} else {
 				index, newSlotIsNeeded, err := acc.findIndexByTimestamp(event)
