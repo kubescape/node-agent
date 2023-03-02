@@ -11,7 +11,7 @@ import (
 const (
 	EBPFEngineFalco  = "falco"
 	EBPFEngineCilium = "cilium"
-	CONFIG_ENV_VAR   = "CONFIG_ENV_VAR"
+	ConfigEnvVar     = "CONFIG_ENV_VAR"
 )
 
 type Config struct {
@@ -19,7 +19,7 @@ type Config struct {
 }
 
 func (cfg *Config) getConfigFilePath() (string, bool) {
-	return os.LookupEnv(CONFIG_ENV_VAR)
+	return os.LookupEnv(ConfigEnvVar)
 }
 
 func (cfg *Config) GetConfigurationReader() (io.Reader, error) {
@@ -66,4 +66,28 @@ func (cfg *Config) GetFalcoKernelObjPath() string {
 
 func (cfg *Config) GetEbpfEngineLoaderPath() string {
 	return cfg.data.GetEbpfEngineLoaderPath()
+}
+
+func (cfg *Config) GetUpdateDataPeriod() int {
+	return cfg.data.GetUpdateDataPeriod()
+}
+
+func (cfg *Config) GetSniffingMaxTimes() int {
+	return cfg.data.GetSniffingMaxTimes()
+}
+
+func (cfg *Config) IsRelevantCVEServiceEnabled() bool {
+	return cfg.data.IsRelevantCVEServiceEnabled()
+}
+
+func (cfg *Config) GetNodeName() string {
+	return cfg.data.GetNodeName()
+}
+
+func (cfg *Config) GetClusterName() string {
+	return cfg.data.GetClusterName()
+}
+
+func (cfg *Config) GetStorageURL() string {
+	return cfg.data.GetStorageURL()
 }

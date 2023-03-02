@@ -180,6 +180,7 @@ func (FalcoEbpfEngine *FalcoEbpfEngine) GetData(ebpfEngineDataChannel chan *ebpf
 			}
 		}
 		logger.L().Info("", helpers.String("CacheAccumulator accumulateEbpfEngineData scanner.Err(): ", fmt.Sprintf("%v", scanner.Err())))
+		break
 	}
 }
 
