@@ -62,12 +62,12 @@ func TestContMainHandler(t *testing.T) {
 	}
 	go contHandler.afterTimerActions()
 	go func() {
-		contHandler.containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerIDContHandler, RedisPodName, RedisWLID, RedisInstanceID, conthadlerV1.CONTAINER_RUNNING)
+		contHandler.containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerIDContHandler, RedisPodName, RedisWLID, RedisInstanceID, conthadlerV1.ContainerRunning)
 	}()
 
 	event := <-contHandler.containersEventChan
-	if event.GetContainerEventType() != conthadlerV1.CONTAINER_RUNNING {
-		t.Fatalf("event container type is wrong, get: %s expected: %s", event.GetContainerEventType(), conthadlerV1.CONTAINER_RUNNING)
+	if event.GetContainerEventType() != conthadlerV1.ContainerRunning {
+		t.Fatalf("event container type is wrong, get: %s expected: %s", event.GetContainerEventType(), conthadlerV1.ContainerRunning)
 	}
 	if event.GetContainerID() != RedisContainerIDContHandler {
 		t.Fatalf("container ID is wrong,  get: %s expected: %s", event.GetContainerID(), RedisContainerIDContHandler)

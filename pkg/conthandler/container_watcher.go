@@ -97,7 +97,7 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 							logger.L().Error("fail to create InstanceID to pod ", []helpers.IDetails{helpers.String("%s", pod.GetName()), helpers.String(" in namespace %s with err ", pod.GetNamespace()), helpers.Error(err)}...)
 							continue
 						}
-						containerEventData := conthandlerV1.CreateNewContainerEvent(pod.Status.ContainerStatuses[i].ImageID, pod.Status.ContainerStatuses[i].ContainerID, pod.GetName(), wlid, instanceID, conthandlerV1.CONTAINER_RUNNING)
+						containerEventData := conthandlerV1.CreateNewContainerEvent(pod.Status.ContainerStatuses[i].ImageID, pod.Status.ContainerStatuses[i].ContainerID, pod.GetName(), wlid, instanceID, conthandlerV1.ContainerRunning)
 						containerEventChannel <- *containerEventData
 					}
 				}

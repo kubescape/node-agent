@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	CONTAINER_RUNNING = "Running"
-	CONTAINER_DELETED = "Deleted"
+	ContainerRunning = "Running"
+	ContainerDeleted = "Deleted"
 )
 
 type ContainerEventType string

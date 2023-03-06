@@ -91,8 +91,8 @@ func TestContWatcher(t *testing.T) {
 	}()
 
 	event := <-containersEventChan
-	if event.GetContainerEventType() != conthadlerV1.CONTAINER_RUNNING {
-		t.Fatalf("event container type is wrong, get: %s expected: %s", event.GetContainerEventType(), conthadlerV1.CONTAINER_RUNNING)
+	if event.GetContainerEventType() != conthadlerV1.ContainerRunning {
+		t.Fatalf("event container type is wrong, get: %s expected: %s", event.GetContainerEventType(), conthadlerV1.ContainerRunning)
 	}
 	if event.GetContainerID() != "nginxContainerID" {
 		t.Fatalf("container ID is wrong,  get: %s expected: %s", event.GetContainerID(), "nginxContainerID")

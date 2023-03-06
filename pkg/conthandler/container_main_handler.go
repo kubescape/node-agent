@@ -137,7 +137,7 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 	}
 
 	now := time.Now()
-	configStopTime := time.Duration(config.GetConfigurationConfigContext().GetSniffingMaxTimes())
+	configStopTime := config.GetConfigurationConfigContext().GetSniffingMaxTimes()
 	stopSniffingTime := now.Add(configStopTime * time.Minute)
 	for start := time.Now(); start.Before(stopSniffingTime); {
 		go ch.getSBOM(contEvent)
@@ -193,7 +193,7 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 
 func (ch *ContainerHandler) handleNewContainerEvent(contEvent v1.ContainerEventData) error {
 	switch contEvent.GetContainerEventType() {
-	case v1.CONTAINER_RUNNING:
+	case v1.ContainerRunning:
 		return ch.handleContainerRunningEvent(contEvent)
 	}
 	return nil

@@ -47,12 +47,12 @@ func TestContAggregator(t *testing.T) {
 
 	containersEventChan := make(chan conthadlerV1.ContainerEventData, 50)
 	go func() {
-		containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerID, RedisPodName, RedisWLID, RedisInstanceID, conthadlerV1.CONTAINER_RUNNING)
+		containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerID, RedisPodName, RedisWLID, RedisInstanceID, conthadlerV1.ContainerRunning)
 	}()
 
 	event := <-containersEventChan
-	if event.GetContainerEventType() != conthadlerV1.CONTAINER_RUNNING {
-		t.Fatalf("event container type is wrong, get: %s expected: %s", event.GetContainerEventType(), conthadlerV1.CONTAINER_RUNNING)
+	if event.GetContainerEventType() != conthadlerV1.ContainerRunning {
+		t.Fatalf("event container type is wrong, get: %s expected: %s", event.GetContainerEventType(), conthadlerV1.ContainerRunning)
 	}
 	if event.GetContainerID() != RedisContainerID {
 		t.Fatalf("container ID is wrong,  get: %s expected: %s", event.GetContainerID(), RedisContainerID)
