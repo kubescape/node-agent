@@ -3,6 +3,7 @@ package config
 import (
 	"path"
 	"sniffer/pkg/utils"
+	"time"
 )
 
 type ConfigDataFalcoMock struct {
@@ -28,12 +29,12 @@ func (c *ConfigDataFalcoMock) GetEbpfEngineLoaderPath() string {
 	return path.Join(utils.CurrentDir(), "..", "testdata", "mock_falco_ebpf_engine", "userspace_app_mock")
 }
 
-func (c *ConfigDataFalcoMock) GetUpdateDataPeriod() int {
-	return 120
+func (c *ConfigDataFalcoMock) GetUpdateDataPeriod() time.Duration {
+	return time.Duration(120) * time.Second
 }
 
-func (c *ConfigDataFalcoMock) GetSniffingMaxTimes() int {
-	return 60 * 60
+func (c *ConfigDataFalcoMock) GetSniffingMaxTimes() time.Duration {
+	return time.Duration(60*60) * time.Second
 }
 
 func (c *ConfigDataFalcoMock) IsRelevantCVEServiceEnabled() bool {
