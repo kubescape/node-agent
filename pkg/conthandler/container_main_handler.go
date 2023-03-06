@@ -120,7 +120,7 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 }
 
 func createTicker() *time.Ticker {
-	return time.NewTicker(time.Duration(config.GetConfigurationConfigContext().GetUpdateDataPeriod()))
+	return time.NewTicker(config.GetConfigurationConfigContext().GetUpdateDataPeriod())
 }
 
 func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventData) {
