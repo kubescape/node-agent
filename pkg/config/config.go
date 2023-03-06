@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 )
 
 const (
@@ -68,11 +69,11 @@ func (cfg *Config) GetEbpfEngineLoaderPath() string {
 	return cfg.data.GetEbpfEngineLoaderPath()
 }
 
-func (cfg *Config) GetUpdateDataPeriod() int {
+func (cfg *Config) GetUpdateDataPeriod() time.Duration {
 	return cfg.data.GetUpdateDataPeriod()
 }
 
-func (cfg *Config) GetSniffingMaxTimes() int {
+func (cfg *Config) GetSniffingMaxTimes() time.Duration {
 	return cfg.data.GetSniffingMaxTimes()
 }
 

@@ -1,12 +1,14 @@
 package config
 
+import "time"
+
 type ConfigDataInterface interface {
 	IsFalcoEbpfEngine() bool
 	GetFalcoSyscallFilter() []string
 	GetFalcoKernelObjPath() string
 	GetEbpfEngineLoaderPath() string
-	GetUpdateDataPeriod() int
-	GetSniffingMaxTimes() int
+	GetUpdateDataPeriod() time.Duration
+	GetSniffingMaxTimes() time.Duration
 	IsRelevantCVEServiceEnabled() bool
 	GetNodeName() string
 	GetClusterName() string

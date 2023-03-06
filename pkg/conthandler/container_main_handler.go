@@ -120,7 +120,7 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 }
 
 func createTicker() *time.Ticker {
-	return time.NewTicker(time.Duration(config.GetConfigurationConfigContext().GetUpdateDataPeriod()) * time.Second)
+	return time.NewTicker(time.Duration(config.GetConfigurationConfigContext().GetUpdateDataPeriod()))
 }
 
 func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventData) {
@@ -159,6 +159,11 @@ func getShortContainerID(containerID string) string {
 	return cont[1][:12]
 }
 
+func getImageHash(containerID string) string {
+	cont := strings.Split(containerID, "://")
+	return cont[1]
+}
+
 func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
 	containerDataInterface, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
 	if !exist {
@@ -166,7 +171,7 @@ func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
 		return
 	}
 	watchedContainer := containerDataInterface.(watchedContainerData)
-	err := watchedContainer.sbomClient.GetSBOM(contEvent.GetContainerID())
+	err := watchedContainer.sbomClient.GetSBOM(getImageHash(contEvent.GetImageID()))
 	watchedContainer.syncChannel[StepGetSBOM] <- err
 }
 

@@ -1,5 +1,7 @@
 package config
 
+import "time"
+
 var falcoSyscallFilter []string
 
 const (
@@ -77,12 +79,12 @@ func (c *ConfigData) GetEbpfEngineLoaderPath() string {
 	return c.FalcoEbpfEngineData.EbpfEngineLoaderPath
 }
 
-func (c *ConfigData) GetUpdateDataPeriod() int {
-	return c.DB.UpdateDataPeriod
+func (c *ConfigData) GetUpdateDataPeriod() time.Duration {
+	return time.Duration(c.DB.UpdateDataPeriod) * time.Second
 }
 
-func (c *ConfigData) GetSniffingMaxTimes() int {
-	return c.SnifferData.SniffingMaxTime
+func (c *ConfigData) GetSniffingMaxTimes() time.Duration {
+	return time.Duration(c.SnifferData.SniffingMaxTime) * time.Second
 }
 
 func (c *ConfigData) IsRelevantCVEServiceEnabled() bool {

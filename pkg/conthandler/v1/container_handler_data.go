@@ -72,6 +72,10 @@ func (event *ContainerEventData) GetK8SWorkloadID() string {
 	return event.wlid
 }
 
+func (event *ContainerEventData) GetImageID() string {
+	return event.imageID
+}
+
 func isWLIDInExpectedFormat(wlid string) bool {
 	if !strings.HasPrefix(wlid, "wlid://cluster-") {
 		return false
