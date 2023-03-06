@@ -1,6 +1,11 @@
 package ebpfev
 
-import "time"
+import (
+	"sniffer/pkg/config"
+	"sniffer/pkg/utils"
+	"strings"
+	"time"
+)
 
 type EventData struct {
 	timestamp   time.Time
@@ -13,7 +18,7 @@ type EventData struct {
 	cmd         string
 }
 
-func CreateKernelEvent(timestamp *time.Time, containerID string, ppid string, pid string, syscallOp string, syscallArgs string, exe string, cmd string) *EventData {
+func CreateKernelEvent(timestamp *time.Time, containerID string, syscallOp string, ppid string, pid string, syscallArgs string, exe string, cmd string) *EventData {
 	return &EventData{
 		timestamp:   *timestamp,
 		containerID: containerID,
@@ -49,4 +54,27 @@ func (ev *EventData) GetEventEXE() string {
 }
 func (ev *EventData) GetEventCMD() string {
 	return ev.cmd
+}
+
+func (ev *EventData) GetOpenFileName() string {
+	fileName := ""
+	if config.GetConfigurationConfigContext().IsFalcoEbpfEngine() {
+		switch ev.syscallOp {
+		case "CAT=PROCESS":
+			if strings.HasPrefix(ev.syscallArgs, "TYPE=execve(") {
+				fileName = utils.Between(ev.syscallArgs, "filename: ", ")")
+			} else if strings.HasPrefix(ev.syscallArgs, "TYPE=execveat(") {
+				fileName = utils.Between(ev.syscallArgs, "dirfd: <f>", ", pathname:")
+			}
+		case "CAT=FILE":
+			if strings.HasPrefix(ev.syscallArgs, "TYPE=openat(") {
+				fileName = utils.Between(ev.syscallArgs, "name: ", ", flags")
+			} else if strings.HasPrefix(ev.syscallArgs, "TYPE=open(") {
+				fileName = utils.Between(ev.syscallArgs, "name: ", ", flags")
+			}
+		}
+	} else {
+		fileName = ev.syscallArgs
+	}
+	return fileName
 }

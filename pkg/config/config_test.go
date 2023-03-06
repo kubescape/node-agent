@@ -10,9 +10,9 @@ import (
 
 func TestConfig(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(CONFIG_ENV_VAR, configPath)
+	err := os.Setenv(ConfigEnvVar, configPath)
 	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", CONFIG_ENV_VAR, err)
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
 	}
 
 	cfg := GetConfigurationConfigContext()
