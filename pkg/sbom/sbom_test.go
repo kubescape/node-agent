@@ -7,7 +7,7 @@ import (
 
 func TestGetSBOM(t *testing.T) {
 	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock())
-	err := SBOMClient.GetSBOM("nginx")
+	err := SBOMClient.GetSBOM(storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")
 	}
@@ -16,11 +16,11 @@ func TestGetSBOM(t *testing.T) {
 
 func TestFilterSBOM(t *testing.T) {
 	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock())
-	err := SBOMClient.GetSBOM("nginx")
+	err := SBOMClient.GetSBOM(storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")
 	}
-	err = SBOMClient.FilterSBOM("nginx", map[string]bool{
+	err = SBOMClient.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
 	})
 	if err != nil {
@@ -31,11 +31,11 @@ func TestFilterSBOM(t *testing.T) {
 
 func TestStoreFilterSBOM(t *testing.T) {
 	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock())
-	err := SBOMClient.GetSBOM("nginx")
+	err := SBOMClient.GetSBOM(storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")
 	}
-	err = SBOMClient.FilterSBOM("nginx", map[string]bool{
+	err = SBOMClient.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
 	})
 	if err != nil {

@@ -3,12 +3,12 @@ package conthandler
 import (
 	"os"
 	"path"
-	"testing"
-	"time"
-
 	"sniffer/pkg/config"
 	configV1 "sniffer/pkg/config/v1"
 	conthadlerV1 "sniffer/pkg/conthandler/v1"
+	"sniffer/pkg/utils"
+	"testing"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,13 +22,29 @@ type k8sFakeClient struct {
 	Clientset *fake.Clientset
 }
 
+func (client *k8sFakeClient) GetApiVersion(workload any) string {
+	return "v1"
+}
+
+func (client *k8sFakeClient) CalculateWorkloadParentRecursive(workload any) (string, string, error) {
+	return "deployment", "nginx", nil
+}
+
+func (client *k8sFakeClient) GetWorkload(namespace, kind, name string) (any, error) {
+	return "", nil
+}
+
+func (client *k8sFakeClient) GenerateWLID(workload any, clusterName string) string {
+	return "wlid://cluster-" + clusterName + "/namespace-any" + "/deployment-nginx"
+}
+
 func (client *k8sFakeClient) GetWatcher() (watch.Interface, error) {
 	watcher = watch.NewFake()
 	return watcher, nil
 }
 
 func TestContWatcher(t *testing.T) {
-	configPath := path.Join(currentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
 	err := os.Setenv(config.ConfigEnvVar, configPath)
 	if err != nil {
 		t.Fatalf("failed to set env ConfigEnvVar with err %v", err)

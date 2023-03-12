@@ -6,6 +6,7 @@ import (
 	"sniffer/pkg/config"
 	configV1 "sniffer/pkg/config/v1"
 	conthadlerV1 "sniffer/pkg/conthandler/v1"
+	"sniffer/pkg/utils"
 	"testing"
 	"time"
 
@@ -22,7 +23,7 @@ const (
 )
 
 func TestContAggregator(t *testing.T) {
-	configPath := path.Join(currentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
 	err := os.Setenv(config.ConfigEnvVar, configPath)
 	if err != nil {
 		t.Fatalf("failed to set env ConfigEnvVar with err %v", err)

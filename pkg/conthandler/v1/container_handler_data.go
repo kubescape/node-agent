@@ -1,6 +1,8 @@
 package conthandler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -72,8 +74,26 @@ func (event *ContainerEventData) GetK8SWorkloadID() string {
 	return event.wlid
 }
 
+func (event *ContainerEventData) GetImageHash() (string, error) {
+	imageIDSplit := strings.Split(event.imageID, "@sha256:")
+	if len(imageIDSplit) == 2 {
+		return imageIDSplit[1], nil
+	}
+	return "", fmt.Errorf("GetImageHash: fail to parse image hash of image ID %s", event.imageID)
+}
+
 func (event *ContainerEventData) GetImageID() string {
 	return event.imageID
+}
+
+func (event *ContainerEventData) GetInstanceID() string {
+	return event.instanceID
+}
+
+func (event *ContainerEventData) GetInstanceIDHash() string {
+	hash := sha256.Sum256([]byte(event.instanceID))
+	str := hex.EncodeToString(hash[:])
+	return str
 }
 
 func isWLIDInExpectedFormat(wlid string) bool {

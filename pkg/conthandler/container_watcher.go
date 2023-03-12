@@ -52,6 +52,25 @@ func (client *ContainerClientK8SAPIServer) GetWatcher() (watch.Interface, error)
 	return client.k8sClient.KubernetesClient.CoreV1().Pods("").Watch(globalHTTPContext, v1.ListOptions{})
 }
 
+func (client *ContainerClientK8SAPIServer) GetApiVersion(workload any) string {
+	w := workload.(*workloadinterface.Workload)
+	return w.GetApiVersion()
+}
+
+func (client *ContainerClientK8SAPIServer) CalculateWorkloadParentRecursive(workload any) (string, string, error) {
+	w := workload.(*workloadinterface.Workload)
+	return client.k8sClient.CalculateWorkloadParentRecursive(w)
+}
+
+func (client *ContainerClientK8SAPIServer) GetWorkload(namespace, kind, name string) (any, error) {
+	return client.k8sClient.GetWorkload(namespace, kind, name)
+}
+
+func (client *ContainerClientK8SAPIServer) GenerateWLID(workload any, clusterName string) string {
+	w := workload.(*workloadinterface.Workload)
+	return w.GenerateWlid(clusterName)
+}
+
 func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEventChannel chan conthandlerV1.ContainerEventData) error {
 	logger.L().Info("", helpers.String("sniffer is ready to watch over node %s", containerWatcher.nodeName))
 
@@ -91,7 +110,17 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 							logger.L().Error("fail to create workload ID to pod ", []helpers.IDetails{helpers.String("%s", pod.GetName()), helpers.String(" in namespace %s", pod.GetNamespace())}...)
 							continue
 						}
-						wlid := workload.GenerateWlid(config.GetConfigurationConfigContext().GetClusterName())
+						kind, name, err := containerWatcher.ContainerClient.CalculateWorkloadParentRecursive(workload)
+						if err != nil {
+							logger.L().Error("fail to get workload owner parent", []helpers.IDetails{helpers.String("%s", pod.GetName()), helpers.String(" in namespace %s", pod.GetNamespace())}...)
+							continue
+						}
+						parentWorkload, err := containerWatcher.ContainerClient.GetWorkload(pod.GetNamespace(), kind, name)
+						if err != nil {
+							logger.L().Error("fail to get parent workload", []helpers.IDetails{helpers.String("%s", pod.GetName()), helpers.String(" in namespace %s", pod.GetNamespace())}...)
+							continue
+						}
+						wlid := containerWatcher.ContainerClient.GenerateWLID(parentWorkload, config.GetConfigurationConfigContext().GetClusterName())
 						instanceID, err := conthandlerV1.CreateInstanceID(workload, wlid, pod.Status.ContainerStatuses[i].Name)
 						if err != nil {
 							logger.L().Error("fail to create InstanceID to pod ", []helpers.IDetails{helpers.String("%s", pod.GetName()), helpers.String(" in namespace %s with err ", pod.GetNamespace()), helpers.Error(err)}...)

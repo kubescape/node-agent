@@ -84,7 +84,7 @@ func (c *ConfigData) GetUpdateDataPeriod() time.Duration {
 }
 
 func (c *ConfigData) GetSniffingMaxTimes() time.Duration {
-	return time.Duration(c.SnifferData.SniffingMaxTime) * time.Second
+	return time.Duration(c.SnifferData.SniffingMaxTime) * time.Minute
 }
 
 func (c *ConfigData) IsRelevantCVEServiceEnabled() bool {

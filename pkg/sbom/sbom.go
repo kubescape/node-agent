@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	KeyAlreadyExist  = "KeyAlreadyExist"
-	DataAlreadyExist = "DataAlreadyExist"
+	KeyAlreadyExist  = "already exist"
+	DataAlreadyExist = "already exist"
 )
 
 type SBOMStructure struct {
@@ -47,17 +47,15 @@ func (sc *SBOMStructure) GetSBOM(imageID string) error {
 	return nil
 }
 
-func (sc *SBOMStructure) FilterSBOM(instanceID string, sbomFileRelevantMap map[string]bool) error {
+func (sc *SBOMStructure) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 	return sc.SBOMData.FilterSBOM(sbomFileRelevantMap)
 }
 
 func (sc *SBOMStructure) StoreFilterSBOM(instanceID string) error {
 	if sc.firstReport || sc.SBOMData.IsNewRelevantSBOMDataExist() {
-		data, err := sc.SBOMData.GetFilterSBOMInBytes()
-		if err != nil {
-			return err
-		}
-		err = sc.storageClient.client.PostData(instanceID, data)
+		sc.SBOMData.StoreFilteredSBOMName(instanceID)
+		data := sc.SBOMData.GetFilterSBOMData()
+		err := sc.storageClient.client.PostData(instanceID, data)
 		if err != nil {
 			if err.Error() == KeyAlreadyExist {
 				err = sc.storageClient.client.PutData(instanceID, data)
