@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 )
@@ -16,31 +15,6 @@ const (
 )
 
 type ContainerEventType string
-
-type k8sTripletIdentity struct {
-	namespace       string
-	k8sAncestorType string
-	name            string
-}
-
-type handledContainer struct {
-	// containerAggregator       *aggregator.Aggregator
-	containerAggregatorStatus    bool
-	containerAggregatorStartTime *time.Time
-	snifferTimer                 *time.Timer
-	syncChannel                  map[string]chan error
-	containerEvent               ContainerEventData
-}
-
-type afterTimerActionsData struct {
-	containerID string
-	service     string
-}
-
-type ContainerHandler struct {
-	watchedContainers        map[string]*handledContainer
-	afterTimerActionsChannel chan afterTimerActionsData
-}
 
 type ContainerEventData struct {
 	imageID     string
@@ -101,11 +75,17 @@ func isWLIDInExpectedFormat(wlid string) bool {
 		return false
 	}
 	trimmedStr := strings.TrimPrefix(wlid, "wlid://cluster-")
+	if strings.HasPrefix(trimmedStr, "/") {
+		return false
+	}
 	namespaceIndex := strings.Index(trimmedStr, "/namespace-")
 	if namespaceIndex == -1 {
 		return false
 	}
 	trimmedStr2 := trimmedStr[namespaceIndex+len("/namespace-"):]
+	if strings.HasPrefix(trimmedStr2, "/") {
+		return false
+	}
 	spiltStrings := strings.Split(trimmedStr2, "/")
 	if len(spiltStrings) != 2 {
 		return false
