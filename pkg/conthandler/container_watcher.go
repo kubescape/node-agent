@@ -7,6 +7,7 @@ import (
 	"sniffer/pkg/config"
 	conthandlerV1 "sniffer/pkg/conthandler/v1"
 
+	wlid "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	k8sinterface "github.com/kubescape/k8s-interface/k8sinterface"
@@ -120,13 +121,18 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 							logger.L().Error("fail to get parent workload", []helpers.IDetails{helpers.String("%s", pod.GetName()), helpers.String(" in namespace %s", pod.GetNamespace())}...)
 							continue
 						}
-						wlid := containerWatcher.ContainerClient.GenerateWLID(parentWorkload, config.GetConfigurationConfigContext().GetClusterName())
-						instanceID, err := conthandlerV1.CreateInstanceID(workload, wlid, pod.Status.ContainerStatuses[i].Name)
+						parentWlid := containerWatcher.ContainerClient.GenerateWLID(parentWorkload, config.GetConfigurationConfigContext().GetClusterName())
+						err = wlid.IsWlidValid(parentWlid)
+						if err != nil {
+							logger.L().Error("WLID of parent workload is not in the right form", []helpers.IDetails{helpers.String("", pod.GetName()), helpers.String(" in namespace ", pod.GetNamespace()), helpers.Error(err)}...)
+							continue
+						}
+						instanceID, err := conthandlerV1.CreateInstanceID(workload.GetApiVersion(), workload.GetResourceVersion(), parentWlid, pod.Status.ContainerStatuses[i].Name)
 						if err != nil {
 							logger.L().Error("fail to create InstanceID to pod ", []helpers.IDetails{helpers.String("%s", pod.GetName()), helpers.String(" in namespace %s with err ", pod.GetNamespace()), helpers.Error(err)}...)
 							continue
 						}
-						containerEventData := conthandlerV1.CreateNewContainerEvent(pod.Status.ContainerStatuses[i].ImageID, pod.Status.ContainerStatuses[i].ContainerID, pod.GetName(), wlid, instanceID, conthandlerV1.ContainerRunning)
+						containerEventData := conthandlerV1.CreateNewContainerEvent(pod.Status.ContainerStatuses[i].ImageID, pod.Status.ContainerStatuses[i].ContainerID, pod.GetName(), parentWlid, instanceID, conthandlerV1.ContainerRunning)
 						containerEventChannel <- *containerEventData
 					}
 				}

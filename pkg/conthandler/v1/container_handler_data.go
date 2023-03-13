@@ -5,8 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
-
-	"github.com/kubescape/k8s-interface/workloadinterface"
 )
 
 const (
@@ -70,42 +68,11 @@ func (event *ContainerEventData) GetInstanceIDHash() string {
 	return str
 }
 
-func isWLIDInExpectedFormat(wlid string) bool {
-	if !strings.HasPrefix(wlid, "wlid://cluster-") {
-		return false
-	}
-	trimmedStr := strings.TrimPrefix(wlid, "wlid://cluster-")
-	if strings.HasPrefix(trimmedStr, "/") {
-		return false
-	}
-	namespaceIndex := strings.Index(trimmedStr, "/namespace-")
-	if namespaceIndex == -1 {
-		return false
-	}
-	trimmedStr2 := trimmedStr[namespaceIndex+len("/namespace-"):]
-	if strings.HasPrefix(trimmedStr2, "/") {
-		return false
-	}
-	spiltStrings := strings.Split(trimmedStr2, "/")
-	if len(spiltStrings) != 2 {
-		return false
-	}
-	kindAndName := strings.Split(spiltStrings[1], "-")
-	if len(kindAndName) < 2 {
-		return false
-	}
-
-	return true
-}
-
-func CreateInstanceID(workload *workloadinterface.Workload, wlid string, containerName string) (string, error) {
-	if !isWLIDInExpectedFormat(wlid) {
-		return "", fmt.Errorf("WLID is not in the expected format: format: wlid://cluster-<name>/namespace-<name>/<kind>-<name>, wlid: %s", wlid)
-	}
-
+func CreateInstanceID(apiVersion, resourceVersion, wlid, containerName string) (string, error) {
 	temp := wlid[strings.Index(wlid, "namespace-")+len("namespace-"):]
+	namespace := temp[:strings.Index(temp, "/")]
 	kind := temp[strings.Index(temp, "/")+1 : strings.Index(temp, "-")]
 	name := temp[strings.Index(temp, "-")+1:]
 
-	return "apiVersion-" + workload.GetApiVersion() + "/namespace-" + workload.GetNamespace() + "/kind-" + kind + "/name-" + name + "/resourceVersion-" + workload.GetResourceVersion() + "/containerName-" + containerName, nil
+	return "apiVersion-" + apiVersion + "/namespace-" + namespace + "/kind-" + kind + "/name-" + name + "/resourceVersion-" + resourceVersion + "/containerName-" + containerName, nil
 }
