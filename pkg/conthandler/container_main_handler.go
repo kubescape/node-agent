@@ -1,6 +1,7 @@
 package conthandler
 
 import (
+	"errors"
 	"fmt"
 	"sniffer/pkg/config"
 	v1 "sniffer/pkg/conthandler/v1"
@@ -87,7 +88,7 @@ func (ch *ContainerHandler) afterTimerActions() error {
 				continue
 			}
 			if err = containerData.sbomClient.StoreFilterSBOM(containerData.event.GetInstanceIDHash()); err != nil {
-				if strings.Contains(err.Error(), sbom.DataAlreadyExist) {
+				if errors.Is(err, sbom.IsAlreadyExist()) {
 					logger.L().Info("SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s already reported ", containerData.event.GetK8SWorkloadID())}...)
 				} else {
 					logger.L().Warning("failed to store filter SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s with err ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)

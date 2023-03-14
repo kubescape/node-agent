@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	apimachineryerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -20,6 +21,12 @@ const (
 
 type StorageK8SAggregatedAPIClient struct {
 	clientset *spdxclient.Clientset
+}
+
+var storageclientErrors map[string]error
+
+func init() {
+	storageclientErrors = map[string]error{}
 }
 
 func CreateSBOMStorageK8SAggregatedAPIClient() (*StorageK8SAggregatedAPIClient, error) {
@@ -71,4 +78,7 @@ func (sc *StorageK8SAggregatedAPIClient) PostData(key string, data any) error {
 		return err
 	}
 	return nil
+}
+func IsAlreadyExist(err error) bool {
+	return apimachineryerrors.IsAlreadyExists(err)
 }

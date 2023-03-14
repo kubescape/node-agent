@@ -1,13 +1,12 @@
 package sbom
 
 import (
-	"fmt"
+	"errors"
 	v1 "sniffer/pkg/sbom/v1"
 	"sniffer/pkg/storageclient"
 )
 
 const (
-	KeyAlreadyExist  = "already exist"
 	DataAlreadyExist = "already exist"
 )
 
@@ -19,6 +18,13 @@ type SBOMStructure struct {
 
 type SBOMStorageClient struct {
 	client storageclient.StorageClient
+}
+
+var errorsOfSBOM map[string]error
+
+func init() {
+	errorsOfSBOM = make(map[string]error)
+	errorsOfSBOM[DataAlreadyExist] = errors.New(DataAlreadyExist)
 }
 
 func CreateSBOMStorageClient(sc storageclient.StorageClient) *SBOMStructure {
@@ -57,7 +63,7 @@ func (sc *SBOMStructure) StoreFilterSBOM(instanceID string) error {
 		data := sc.SBOMData.GetFilterSBOMData()
 		err := sc.storageClient.client.PostData(instanceID, data)
 		if err != nil {
-			if err.Error() == KeyAlreadyExist {
+			if storageclient.IsAlreadyExist(err) {
 				err = sc.storageClient.client.PutData(instanceID, data)
 				if err != nil {
 					return err
@@ -69,5 +75,9 @@ func (sc *SBOMStructure) StoreFilterSBOM(instanceID string) error {
 		}
 		return err
 	}
-	return fmt.Errorf(DataAlreadyExist)
+	return errorsOfSBOM[DataAlreadyExist]
+}
+
+func IsAlreadyExist() error {
+	return errorsOfSBOM[DataAlreadyExist]
 }
