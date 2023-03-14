@@ -1,6 +1,7 @@
 package conthandler
 
 import (
+	"errors"
 	"fmt"
 	"sniffer/pkg/config"
 	v1 "sniffer/pkg/conthandler/v1"
@@ -82,13 +83,13 @@ func (ch *ContainerHandler) afterTimerActions() error {
 				logger.L().Warning("failed to get SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s with err ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				continue
 			}
-			if err = containerData.sbomClient.FilterSBOM(afterTimerActionsData.containerID, fileList); err != nil {
+			if err = containerData.sbomClient.FilterSBOM(fileList); err != nil {
 				logger.L().Warning("failed to filter SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s with err ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				continue
 			}
-			if err = containerData.sbomClient.StoreFilterSBOM(afterTimerActionsData.containerID); err != nil {
-				if err.Error() == sbom.DataAlreadyExist {
-					logger.L().Warning("SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s already reported ", containerData.event.GetK8SWorkloadID())}...)
+			if err = containerData.sbomClient.StoreFilterSBOM(containerData.event.GetInstanceIDHash()); err != nil {
+				if errors.Is(err, sbom.IsAlreadyExist()) {
+					logger.L().Info("SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s already reported ", containerData.event.GetK8SWorkloadID())}...)
 				} else {
 					logger.L().Warning("failed to store filter SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s with err ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				}
@@ -138,7 +139,7 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 
 	now := time.Now()
 	configStopTime := config.GetConfigurationConfigContext().GetSniffingMaxTimes()
-	stopSniffingTime := now.Add(configStopTime * time.Minute)
+	stopSniffingTime := now.Add(configStopTime)
 	for start := time.Now(); start.Before(stopSniffingTime); {
 		go ch.getSBOM(contEvent)
 		err = ch.startTimer(watchedContainer, contEvent.GetContainerID())
@@ -159,11 +160,6 @@ func getShortContainerID(containerID string) string {
 	return cont[1][:12]
 }
 
-func getImageHash(containerID string) string {
-	cont := strings.Split(containerID, "://")
-	return cont[1]
-}
-
 func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
 	containerDataInterface, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
 	if !exist {
@@ -171,7 +167,10 @@ func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
 		return
 	}
 	watchedContainer := containerDataInterface.(watchedContainerData)
-	err := watchedContainer.sbomClient.GetSBOM(getImageHash(contEvent.GetImageID()))
+	imageHash, err := contEvent.GetImageHash()
+	if err == nil {
+		err = watchedContainer.sbomClient.GetSBOM(imageHash)
+	}
 	watchedContainer.syncChannel[StepGetSBOM] <- err
 }
 

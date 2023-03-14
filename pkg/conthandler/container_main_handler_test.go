@@ -3,13 +3,12 @@ package conthandler
 import (
 	"os"
 	"path"
-	"path/filepath"
-	"runtime"
 	"sniffer/pkg/config"
 	configV1 "sniffer/pkg/config/v1"
 	conthadlerV1 "sniffer/pkg/conthandler/v1"
 	accumulator "sniffer/pkg/event_data_storage"
 	"sniffer/pkg/storageclient"
+	"sniffer/pkg/utils"
 	"testing"
 	"time"
 
@@ -33,7 +32,7 @@ func (client *k8sFakeClientMainHandler) GetWatcher() (watch.Interface, error) {
 }
 
 func TestContMainHandler(t *testing.T) {
-	configPath := path.Join(currentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
 	err := os.Setenv(config.ConfigEnvVar, configPath)
 	if err != nil {
 		t.Fatalf("failed to set env ConfigEnvVar with err %v", err)
@@ -77,11 +76,4 @@ func TestContMainHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleNewContainerEvent failed with error %v", err)
 	}
-
-}
-
-func currentDir() string {
-	_, filename, _, _ := runtime.Caller(1)
-
-	return filepath.Dir(filename)
 }

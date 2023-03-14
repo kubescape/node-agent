@@ -1,7 +1,7 @@
 package storageclient
 
 type StorageClient interface {
-	GetData(key string) ([]byte, error)
-	PutData(key string, data []byte) error
-	PostData(key string, data []byte) error
+	GetData(key string) (any, error)
+	PutData(key string, data any) error
+	PostData(key string, data any) error
 }
