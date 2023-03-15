@@ -25,4 +25,5 @@ jobs:
       COSIGN: true       
       REQUIRED_TESTS: '[
                       ]'  
+      TRIGGER_HELM_CICD: false
     secrets: inherit
