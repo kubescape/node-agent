@@ -13,6 +13,10 @@ on:
       - '**.md' ### Ignore running when README.MD changed.
       - '.github/workflows/*' ### Ignore running when files under path: .github/workflows/* changed.
 
+concurrency:
+  group: "temp"
+  cancel-in-progress: true
+
 jobs:
   pr-merged:
 #     if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged to master
