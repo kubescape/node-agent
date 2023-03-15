@@ -1,0 +1,26 @@
+name: pr-merged
+on:
+  pull_request:
+    types: [closed]
+    branches: 
+    - 'master'
+    - 'main'
+    paths-ignore:
+      - '**.md' ### Ignore running when README.MD changed.
+      - '.github/workflows/*' ### Ignore running when files under path: .github/workflows/* changed.
+
+jobs:
+  pr-merged:
+    if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged to master
+    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
+    with:
+      IMAGE_NAME: quay.io/${{ github.repository_owner }}/sniffer
+      IMAGE_TAG: v0.1.${{ github.run_number }}
+      COMPONENT_NAME: sniffer
+      CGO_ENABLED: 0
+      GO111MODULE: ""
+      BUILD_PLATFORM: linux/amd64,linux/arm64
+      GO_VERSION: "1.18"  
+      HELM_E2E_TEST: true  
+      COSIGN: true       
+    secrets: inherit
