@@ -38,7 +38,7 @@ func CreateSBOMStorageClient(sc storageclient.StorageClient) *SBOMStructure {
 }
 
 func (sc *SBOMStructure) GetSBOM(imageID string) error {
-	if sc.SBOMData.IsNewRelevantSBOMDataExist() {
+	if sc.SBOMData.IsSBOMAlreadyExist() {
 		return nil
 	}
 
