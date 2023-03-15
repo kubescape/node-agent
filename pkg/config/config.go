@@ -49,6 +49,7 @@ func (cfg *Config) ParseConfiguration(configData ConfigDataInterface, data io.Re
 		return err
 	}
 	cfg.data = configData
+	cfg.data.SetNodeName()
 
 	return nil
 }

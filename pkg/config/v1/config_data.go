@@ -1,11 +1,15 @@
 package config
 
-import "time"
+import (
+	"os"
+	"time"
+)
 
 var falcoSyscallFilter []string
 
 const (
 	SnifferServiceRelevantCVEs = "relevantCVEs"
+	nodeNameEnvVar             = "NodeName"
 )
 
 // all the struct and arguments names must be visible outside from the package since the json parser package need to parse them
@@ -96,4 +100,11 @@ func (c *ConfigData) GetNodeName() string {
 
 func (c *ConfigData) GetClusterName() string {
 	return c.ClusterName
+}
+
+func (c *ConfigData) SetNodeName() {
+	NodeName, exist := os.LookupEnv(nodeNameEnvVar)
+	if exist {
+		c.NodeData.Name = NodeName
+	}
 }
