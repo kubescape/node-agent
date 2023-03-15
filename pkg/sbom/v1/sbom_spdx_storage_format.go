@@ -72,7 +72,7 @@ func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 	//filter relevant file list
 	for i := range sbom.spdxData.Spec.SPDX.Files {
 		if exist := sbomFileRelevantMap[sbom.spdxData.Spec.SPDX.Files[i].FileName]; exist {
-			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier)); !data.(bool) {
+			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier)); data != nil && !data.(bool) {
 				sbom.filteredSpdxData.Spec.SPDX.Files = append(sbom.filteredSpdxData.Spec.SPDX.Files, sbom.spdxData.Spec.SPDX.Files[i])
 				sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier), true)
 				sbom.newRelevantData = true
@@ -84,7 +84,7 @@ func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 	for i := range sbom.spdxData.Spec.SPDX.Relationships {
 		switch sbom.spdxData.Spec.SPDX.Relationships[i].Relationship {
 		case RelationshipContainType:
-			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Relationships[i].RefB.ElementRefID)); data.(bool) {
+			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Relationships[i].RefB.ElementRefID)); data != nil && data.(bool) {
 				sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, sbom.spdxData.Spec.SPDX.Relationships[i])
 			}
 		default:
