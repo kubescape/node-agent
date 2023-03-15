@@ -15,10 +15,6 @@
         "name": "minikube"
     },
     "db": {
-        "server": {
-            "URL": "blabla.com/v1/store"
-        },
-        "fileSystem": true,
         "updateDataPeriod": 30
     },
     "clusterName": "myCluster"

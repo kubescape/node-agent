@@ -23,14 +23,8 @@ type SnifferServices struct {
 	Name string `json:"name"`
 }
 
-type Server struct {
-	URL string `json:"URL"`
-}
-
 type DB struct {
-	Server           `json:"server"`
-	FileSystem       bool `json:"fileSystem"`
-	UpdateDataPeriod int  `json:"updateDataPeriod"`
+	UpdateDataPeriod int `json:"updateDataPeriod"`
 }
 
 type SnifferData struct {
@@ -94,10 +88,6 @@ func (c *ConfigData) IsRelevantCVEServiceEnabled() bool {
 		}
 	}
 	return false
-}
-
-func (c *ConfigData) GetStorageURL() string {
-	return c.DB.Server.URL
 }
 
 func (c *ConfigData) GetNodeName() string {
