@@ -2,6 +2,7 @@ package sbom
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -72,7 +73,7 @@ func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 	//filter relevant file list
 	for i := range sbom.spdxData.Spec.SPDX.Files {
 		if exist := sbomFileRelevantMap[sbom.spdxData.Spec.SPDX.Files[i].FileName]; exist {
-			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier)); data != nil && !data.(bool) {
+			if _, alreadyExist := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier)); !alreadyExist {
 				sbom.filteredSpdxData.Spec.SPDX.Files = append(sbom.filteredSpdxData.Spec.SPDX.Files, sbom.spdxData.Spec.SPDX.Files[i])
 				sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier), true)
 				sbom.newRelevantData = true
@@ -80,30 +81,31 @@ func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 		}
 	}
 
+	//filter relevant package list
+	for i := range sbom.spdxData.Spec.SPDX.Packages {
+		relevantFilesInPackage := make([]string, 0)
+		for j := range sbom.spdxData.Spec.SPDX.Packages[i].HasFiles {
+			fileSPDXFormat := strings.TrimPrefix(sbom.spdxData.Spec.SPDX.Packages[i].HasFiles[j], SPDXRefpre)
+			if _, exist := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(fileSPDXFormat)); exist {
+				relevantFilesInPackage = append(relevantFilesInPackage, sbom.spdxData.Spec.SPDX.Packages[i].HasFiles[j])
+			}
+		}
+		if len(relevantFilesInPackage) > 0 {
+			relevantPackage := sbom.spdxData.Spec.SPDX.Packages[i]
+			relevantPackage.HasFiles = relevantFilesInPackage
+			sbom.filteredSpdxData.Spec.SPDX.Packages = append(sbom.filteredSpdxData.Spec.SPDX.Packages, relevantPackage)
+		}
+	}
+
 	//filter relationship list
 	for i := range sbom.spdxData.Spec.SPDX.Relationships {
 		switch sbom.spdxData.Spec.SPDX.Relationships[i].Relationship {
 		case RelationshipContainType:
-			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Relationships[i].RefB.ElementRefID)); data != nil && data.(bool) {
+			if _, exist := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Relationships[i].RefB.ElementRefID)); exist {
 				sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, sbom.spdxData.Spec.SPDX.Relationships[i])
 			}
 		default:
 			sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, sbom.spdxData.Spec.SPDX.Relationships[i])
-		}
-	}
-
-	//filter relevant package list
-	for i := range sbom.spdxData.Spec.SPDX.Packages {
-		relevantPackageMap := make(map[spdxv1beta1.DocElementID]bool)
-		for j := range sbom.filteredSpdxData.Spec.SPDX.Relationships {
-			switch sbom.filteredSpdxData.Spec.SPDX.Relationships[j].Relationship {
-			case RelationshipContainType:
-				if alreadyExist := relevantPackageMap[sbom.filteredSpdxData.Spec.SPDX.Relationships[j].RefA]; !alreadyExist {
-					if spdxv1beta1.ElementID(sbom.filteredSpdxData.Spec.SPDX.Relationships[j].RefA.ElementRefID) == sbom.spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier {
-						sbom.filteredSpdxData.Spec.SPDX.Packages = append(sbom.filteredSpdxData.Spec.SPDX.Packages, sbom.spdxData.Spec.SPDX.Packages[i])
-					}
-				}
-			}
 		}
 	}
 
