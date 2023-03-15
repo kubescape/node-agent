@@ -5,8 +5,12 @@ import (
 	"testing"
 )
 
+const (
+	NGINX_WLID string = "wlid://cluster-myCluster/namespace-any/deployment-nginx"
+)
+
 func TestGetSBOM(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock())
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), NGINX_WLID)
 	err := SBOMClient.GetSBOM(storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")
@@ -15,7 +19,7 @@ func TestGetSBOM(t *testing.T) {
 }
 
 func TestFilterSBOM(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock())
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), NGINX_WLID)
 	err := SBOMClient.GetSBOM(storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")
@@ -30,7 +34,7 @@ func TestFilterSBOM(t *testing.T) {
 }
 
 func TestStoreFilterSBOM(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock())
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), NGINX_WLID)
 	err := SBOMClient.GetSBOM(storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")

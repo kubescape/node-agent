@@ -7,4 +7,5 @@ type SBOMFormat interface {
 	IsNewRelevantSBOMDataExist() bool
 	IsSBOMAlreadyExist() bool
 	StoreFilteredSBOMName(string)
+	StoreMetadata(string)
 }
