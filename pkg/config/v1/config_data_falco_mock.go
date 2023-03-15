@@ -48,7 +48,3 @@ func (c *ConfigDataFalcoMock) GetNodeName() string {
 func (c *ConfigDataFalcoMock) GetClusterName() string {
 	return "test"
 }
-
-func (c *ConfigDataFalcoMock) GetStorageURL() string {
-	return "blabla"
-}
