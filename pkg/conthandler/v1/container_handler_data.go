@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+
+	wlid "github.com/armosec/utils-k8s-go/wlid"
 )
 
 const (
@@ -68,11 +70,10 @@ func (event *ContainerEventData) GetInstanceIDHash() string {
 	return str
 }
 
-func CreateInstanceID(apiVersion, resourceVersion, wlid, containerName string) (string, error) {
-	temp := wlid[strings.Index(wlid, "namespace-")+len("namespace-"):]
-	namespace := temp[:strings.Index(temp, "/")]
-	kind := temp[strings.Index(temp, "/")+1 : strings.Index(temp, "-")]
-	name := temp[strings.Index(temp, "-")+1:]
+func CreateInstanceID(apiVersion, resourceVersion, wlidData, containerName string) (string, error) {
+	namespace := wlid.GetNamespaceFromWlid(wlidData)
+	kind := wlid.GetKindFromWlid(wlidData)
+	name := wlid.GetNameFromWlid(wlidData)
 
 	return "apiVersion-" + apiVersion + "/namespace-" + namespace + "/kind-" + kind + "/name-" + name + "/resourceVersion-" + resourceVersion + "/containerName-" + containerName, nil
 }
