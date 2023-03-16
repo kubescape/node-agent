@@ -151,7 +151,8 @@ func convertStringTimeToTimeOBJ(timestamp string) (*time.Time, error) {
 
 func parseLine(line string) (*ebpfev.EventData, error) {
 	if strings.Contains(line, "drop event occured") {
-		return ebpfev.CreateKernelEvent(nil, "", "", "", "", "", "", "drop event occurred\n"), nil
+		now := time.Now()
+		return ebpfev.CreateKernelEvent(&now, "", "", "", "", "", "", "drop event occurred\n"), nil
 	}
 	lineParts := strings.Split(line, "]::[")
 	if len(lineParts) != 8 {
