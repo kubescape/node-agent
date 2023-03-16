@@ -58,6 +58,11 @@ func (client *ContainerClientK8SAPIServer) GetApiVersion(workload any) string {
 	return w.GetApiVersion()
 }
 
+func (client *ContainerClientK8SAPIServer) GetResourceVersion(workload any) string {
+	w := workload.(*workloadinterface.Workload)
+	return w.GetResourceVersion()
+}
+
 func (client *ContainerClientK8SAPIServer) CalculateWorkloadParentRecursive(workload any) (string, string, error) {
 	w := workload.(*workloadinterface.Workload)
 	return client.k8sClient.CalculateWorkloadParentRecursive(w)
@@ -127,7 +132,8 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 							logger.L().Error("WLID of parent workload is not in the right form", []helpers.IDetails{helpers.String("", pod.GetName()), helpers.String(" in namespace ", pod.GetNamespace()), helpers.Error(err)}...)
 							continue
 						}
-						instanceID, err := conthandlerV1.CreateInstanceID(workload.GetApiVersion(), workload.GetResourceVersion(), parentWlid, pod.Status.ContainerStatuses[i].Name)
+
+						instanceID, err := conthandlerV1.CreateInstanceID(containerWatcher.ContainerClient.GetApiVersion(parentWorkload), containerWatcher.ContainerClient.GetResourceVersion(parentWorkload), parentWlid, pod.Status.ContainerStatuses[i].Name)
 						if err != nil {
 							logger.L().Error("fail to create InstanceID to pod ", []helpers.IDetails{helpers.String("%s", pod.GetName()), helpers.String(" in namespace %s with err ", pod.GetNamespace()), helpers.Error(err)}...)
 							continue
