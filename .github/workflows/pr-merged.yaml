@@ -1,21 +1,17 @@
 name: pr-merged
 on:
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [closed]
     branches: 
     - 'master'
     - 'main'
-#     types: [closed]
-#     branches: 
-#     - 'master'
-#     - 'main'
     paths-ignore:
       - '**.md' ### Ignore running when README.MD changed.
       - '.github/workflows/*' ### Ignore running when files under path: .github/workflows/* changed.
 
 jobs:
   pr-merged:
-#     if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged to master
+    if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged to master
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/sniffer

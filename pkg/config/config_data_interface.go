@@ -12,4 +12,5 @@ type ConfigDataInterface interface {
 	IsRelevantCVEServiceEnabled() bool
 	GetNodeName() string
 	GetClusterName() string
+	SetNodeName()
 }

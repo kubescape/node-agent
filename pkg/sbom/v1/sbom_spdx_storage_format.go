@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	wlid "github.com/armosec/utils-k8s-go/wlid"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -17,6 +18,9 @@ const (
 	KubescapeNodeAgentName    = "KubescapeNodeAgent"
 	RelationshipContainType   = "CONTAINS"
 	SPDXRefpre                = "SPDXRef-"
+	namespaceLabelKey         = "kubescape.io/workload-namespace"
+	kindLabelKey              = "kubescape.io/workload-kind"
+	nameLabelKey              = "kubescape.io/workload-name"
 )
 
 type SBOMData struct {
@@ -124,4 +128,13 @@ func (sbom *SBOMData) IsSBOMAlreadyExist() bool {
 
 func (sbom *SBOMData) StoreFilteredSBOMName(name string) {
 	sbom.filteredSpdxData.ObjectMeta.SetName(name)
+}
+
+func (sbom *SBOMData) StoreMetadata(wlidData string) {
+	wlidLabel := map[string]string{
+		namespaceLabelKey: wlid.GetNamespaceFromWlid(wlidData),
+		kindLabelKey:      wlid.GetKindFromWlid(wlidData),
+		nameLabelKey:      wlid.GetNameFromWlid(wlidData),
+	}
+	sbom.filteredSpdxData.ObjectMeta.SetLabels(wlidLabel)
 }
