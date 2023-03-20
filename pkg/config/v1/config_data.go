@@ -37,11 +37,11 @@ type SnifferData struct {
 }
 
 type ConfigData struct {
-	SnifferData         `json:"sniffer"`
 	FalcoEbpfEngineData `json:"falcoEbpfEngine"`
 	NodeData            `json:"node"`
-	DB                  `json:"db"`
 	ClusterName         string `json:"clusterName"`
+	SnifferData         `json:"sniffer"`
+	DB                  `json:"db"`
 }
 
 func CreateConfigData() *ConfigData {
