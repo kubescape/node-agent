@@ -42,6 +42,8 @@ type ConfigData struct {
 	FalcoEbpfEngineData `json:"falcoEbpfEngine"`
 	NodeData            `json:"node"`
 	ClusterName         string `json:"clusterName"`
+	SnifferData         `json:"sniffer"`
+	DB                  `json:"db"`
 	MyNamespace         string `json:"namespace"`
 	MyContainerName     string `json:"containerName"`
 }
@@ -114,21 +116,21 @@ func (c *ConfigData) SetNodeName() {
 func (c *ConfigData) SetMyNamespace() {
 	myNamespace, exist := os.LookupEnv(myNamespaceEnvVar)
 	if exist {
-		c.myNamespace = myNamespace
+		c.MyNamespace = myNamespace
 	}
 }
 
 func (c *ConfigData) SetMyContainerName() {
 	myContainerName, exist := os.LookupEnv(myContainerNameEnvVar)
 	if exist {
-		c.myContainerName = myContainerName
+		c.MyContainerName = myContainerName
 	}
 }
 
 func (c *ConfigData) GetMyNamespace() string {
-	return c.myNamespace
+	return c.MyNamespace
 }
 
 func (c *ConfigData) GetMyContainerName() string {
-	return c.myContainerName
+	return c.MyContainerName
 }
