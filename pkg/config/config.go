@@ -50,6 +50,8 @@ func (cfg *Config) ParseConfiguration(configData ConfigDataInterface, data io.Re
 	}
 	cfg.data = configData
 	cfg.data.SetNodeName()
+	cfg.data.SetMyNamespace()
+	cfg.data.SetMyContainerName()
 
 	return nil
 }
@@ -88,4 +90,12 @@ func (cfg *Config) GetNodeName() string {
 
 func (cfg *Config) GetClusterName() string {
 	return cfg.data.GetClusterName()
+}
+
+func (cfg *Config) GetMyNamespace() string {
+	return cfg.data.GetMyNamespace()
+}
+
+func (cfg *Config) GetMyContainerName() string {
+	return cfg.data.GetMyContainerName()
 }

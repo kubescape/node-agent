@@ -51,3 +51,17 @@ func (c *ConfigDataFalcoMock) GetClusterName() string {
 
 func (c *ConfigDataFalcoMock) SetNodeName() {
 }
+
+func (c *ConfigDataFalcoMock) SetMyNamespace() {
+}
+
+func (c *ConfigDataFalcoMock) SetMyContainerName() {
+}
+
+func (c *ConfigDataFalcoMock) GetMyNamespace() string {
+	return "myNamespace"
+}
+
+func (c *ConfigDataFalcoMock) GetMyContainerName() string {
+	return "myContName"
+}

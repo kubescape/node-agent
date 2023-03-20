@@ -10,6 +10,8 @@ var falcoSyscallFilter []string
 const (
 	SnifferServiceRelevantCVEs = "relevantCVEs"
 	nodeNameEnvVar             = "NODE_NAME"
+	myNamespaceEnvVar          = "MY_NAMESPCAE"
+	myContainerNameEnvVar      = "MY_CONTAINER_NAME"
 )
 
 // all the struct and arguments names must be visible outside from the package since the json parser package need to parse them
@@ -42,6 +44,8 @@ type ConfigData struct {
 	NodeData            `json:"node"`
 	DB                  `json:"db"`
 	ClusterName         string `json:"clusterName"`
+	myNamespace         string `json:"namespace"`
+	myContainerName     string `json:"clusterName"`
 }
 
 func CreateConfigData() *ConfigData {
@@ -107,4 +111,26 @@ func (c *ConfigData) SetNodeName() {
 	if exist {
 		c.NodeData.Name = nodeName
 	}
+}
+
+func (c *ConfigData) SetMyNamespace() {
+	myNamespace, exist := os.LookupEnv(myNamespaceEnvVar)
+	if exist {
+		c.myNamespace = myNamespace
+	}
+}
+
+func (c *ConfigData) SetMyContainerName() {
+	myContainerName, exist := os.LookupEnv(myContainerNameEnvVar)
+	if exist {
+		c.myContainerName = myContainerName
+	}
+}
+
+func (c *ConfigData) GetMyNamespace() string {
+	return c.myNamespace
+}
+
+func (c *ConfigData) GetMyContainerName() string {
+	return c.myContainerName
 }

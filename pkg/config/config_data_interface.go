@@ -13,4 +13,8 @@ type ConfigDataInterface interface {
 	GetNodeName() string
 	GetClusterName() string
 	SetNodeName()
+	SetMyNamespace()
+	GetMyNamespace() string
+	SetMyContainerName()
+	GetMyContainerName() string
 }
