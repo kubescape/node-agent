@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	v1 "sniffer/pkg/config/v1"
 	"time"
 )
 
@@ -14,6 +15,22 @@ const (
 	EBPFEngineCilium = "cilium"
 	ConfigEnvVar     = "CONFIG_ENV_VAR"
 )
+
+const (
+	// error message if configuration file is not exist
+	ErrConfigurationFileNotExist = "configuration file does not exist"
+
+	// error message if configuration file is not valid
+	ErrConfigurationFileNotValid = "configuration file is not valid"
+
+	// error message if failed to read configuration file
+	ErrFailedToReadConfigurationFile = "failed to read the configuration file"
+
+	// error message if failed to parse configuration file
+	ErrFailedToUnmarshalConfigurationData = "failed to unmarshal the configuration json data"
+)
+
+var _ ConfigDataInterface = &v1.ConfigData{}
 
 type Config struct {
 	data ConfigDataInterface
@@ -26,11 +43,11 @@ func (cfg *Config) getConfigFilePath() (string, bool) {
 func (cfg *Config) GetConfigurationReader() (io.Reader, error) {
 	cfgPath, exist := cfg.getConfigFilePath()
 	if !exist {
-		return nil, fmt.Errorf("failed to find configuration file path")
+		return nil, fmt.Errorf(ErrConfigurationFileNotExist)
 	}
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read configuration file with error %v", err.Error())
+		return nil, fmt.Errorf("%s, error: %w", ErrConfigurationFileNotValid, err)
 	}
 
 	return bytes.NewReader(data), nil
@@ -39,14 +56,14 @@ func (cfg *Config) GetConfigurationReader() (io.Reader, error) {
 func (cfg *Config) ParseConfiguration(configData ConfigDataInterface, data io.Reader) error {
 
 	buf := new(bytes.Buffer)
-	_, err := buf.ReadFrom(data)
-	if err != nil {
-		return err
+
+	if _, err := buf.ReadFrom(data); err != nil {
+		return fmt.Errorf("%s, error: %w", ErrFailedToUnmarshalConfigurationData, err)
 	}
+
 	b := buf.Bytes()
-	err = json.Unmarshal(b, &configData)
-	if err != nil {
-		return err
+	if err := json.Unmarshal(b, &configData); err != nil {
+		return fmt.Errorf("%s, error: %w", ErrFailedToUnmarshalConfigurationData, err)
 	}
 	cfg.data = configData
 	cfg.data.SetNodeName()
