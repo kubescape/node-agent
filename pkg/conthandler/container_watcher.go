@@ -110,7 +110,7 @@ func (containerWatcher *ContainerWatcher) parsePodData(pod *core.Pod, containerI
 }
 
 func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEventChannel chan conthandlerV1.ContainerEventData) error {
-	logger.L().Info("", helpers.String("sniffer is ready to watch over node %s", containerWatcher.nodeName))
+	logger.L().Info("", helpers.String("sniffer is ready to watch over node ", containerWatcher.nodeName))
 
 	for {
 		watcher, err := containerWatcher.ContainerClient.GetWatcher()
@@ -143,7 +143,7 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 						}
 						containerEventData, err := containerWatcher.parsePodData(pod, i)
 						if err != nil {
-							logger.L().Error("parsePodData failed with error: ", helpers.Error(err))
+							logger.L().Ctx(config.GetConfigurationConfigContext().GetBackgroundContext()).Error("parsePodData failed with error: ", helpers.Error(err))
 							continue
 						}
 						containerEventChannel <- *containerEventData

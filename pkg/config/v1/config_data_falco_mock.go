@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"path"
 	"sniffer/pkg/utils"
 	"time"
@@ -64,4 +65,11 @@ func (c *ConfigDataFalcoMock) GetMyNamespace() string {
 
 func (c *ConfigDataFalcoMock) GetMyContainerName() string {
 	return "myContName"
+}
+
+func (c *ConfigDataFalcoMock) SetBackgroundContext() {
+}
+
+func (c *ConfigDataFalcoMock) GetBackgroundContext() context.Context {
+	return context.Background()
 }

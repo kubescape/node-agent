@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type ConfigDataInterface interface {
 	IsFalcoEbpfEngine() bool
@@ -17,4 +20,6 @@ type ConfigDataInterface interface {
 	GetMyNamespace() string
 	SetMyContainerName()
 	GetMyContainerName() string
+	SetBackgroundContext()
+	GetBackgroundContext() context.Context
 }

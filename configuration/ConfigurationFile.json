@@ -17,5 +17,6 @@
     "db": {
         "updateDataPeriod": 30
     },
-    "clusterName": "myCluster"
+    "clusterName": "myCluster",
+    "accountID": "myAccountID"
 }

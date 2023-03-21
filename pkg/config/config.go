@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -69,6 +70,7 @@ func (cfg *Config) ParseConfiguration(configData ConfigDataInterface, data io.Re
 	cfg.data.SetNodeName()
 	cfg.data.SetMyNamespace()
 	cfg.data.SetMyContainerName()
+	cfg.data.SetBackgroundContext()
 
 	return nil
 }
@@ -115,4 +117,8 @@ func (cfg *Config) GetMyNamespace() string {
 
 func (cfg *Config) GetMyContainerName() string {
 	return cfg.data.GetMyContainerName()
+}
+
+func (cfg *Config) GetBackgroundContext() context.Context {
+	return cfg.data.GetBackgroundContext()
 }

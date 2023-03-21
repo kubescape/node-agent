@@ -1,17 +1,22 @@
 package config
 
 import (
+	"context"
+	"net/url"
 	"os"
 	"time"
+
+	"github.com/kubescape/go-logger"
 )
 
 var falcoSyscallFilter []string
 
 const (
-	SnifferServiceRelevantCVEs = "relevantCVEs"
-	nodeNameEnvVar             = "NODE_NAME"
-	myNamespaceEnvVar          = "MY_NAMESPCAE"
-	myContainerNameEnvVar      = "MY_CONTAINER_NAME"
+	SnifferServiceRelevantCVEs         = "relevantCVEs"
+	nodeNameEnvVar                     = "NODE_NAME"
+	myNamespaceEnvVar                  = "MY_NAMESPCAE"
+	myContainerNameEnvVar              = "MY_CONTAINER_NAME"
+	releaseBuildTagEnvironmentVariable = "RELEASE"
 )
 
 // all the struct and arguments names must be visible outside from the package since the json parser package need to parse them
@@ -42,10 +47,12 @@ type ConfigData struct {
 	FalcoEbpfEngineData `json:"falcoEbpfEngine"`
 	NodeData            `json:"node"`
 	ClusterName         string `json:"clusterName"`
+	AccountID           string `json:"accountID"`
 	SnifferData         `json:"sniffer"`
 	DB                  `json:"db"`
 	MyNamespace         string `json:"namespace"`
 	MyContainerName     string `json:"containerName"`
+	BackgroundContext   context.Context
 }
 
 func CreateConfigData() *ConfigData {
@@ -133,4 +140,21 @@ func (c *ConfigData) GetMyNamespace() string {
 
 func (c *ConfigData) GetMyContainerName() string {
 	return c.MyContainerName
+}
+
+func (c *ConfigData) SetBackgroundContext() {
+	ctx := context.Background()
+	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
+		ctx = logger.InitOtel("node agent",
+			os.Getenv(releaseBuildTagEnvironmentVariable),
+			c.AccountID,
+			c.ClusterName,
+			url.URL{Host: otelHost})
+		defer logger.ShutdownOtel(ctx)
+	}
+	c.BackgroundContext = ctx
+}
+
+func (c *ConfigData) GetBackgroundContext() context.Context {
+	return c.BackgroundContext
 }
