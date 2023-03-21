@@ -17,6 +17,7 @@ RUN apt-get install ca-certificates -y
 
 ENV GO111MODULE=on CGO_ENABLED=0
 WORKDIR /etc/node-agent
+ADD . .
 RUN go build -o node-agent .
 
 CMD ["./node-agent"]
