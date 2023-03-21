@@ -11,6 +11,7 @@ type ContainerClient interface {
 	CalculateWorkloadParentRecursive(workload any) (string, string, error)
 	GetWorkload(namespace, kind, name string) (any, error)
 	GetApiVersion(workload any) string
+	GetResourceVersion(workload any) string
 	GenerateWLID(workload any, clusterName string) string
 }
 

@@ -1,6 +1,8 @@
 package config
 
-import "time"
+import (
+	"time"
+)
 
 type ConfigDataInterface interface {
 	IsFalcoEbpfEngine() bool
@@ -13,4 +15,11 @@ type ConfigDataInterface interface {
 	GetNodeName() string
 	GetClusterName() string
 	SetNodeName()
+	SetNamespace()
+	GetNamespace() string
+	SetContainerName()
+	GetContainerName() string
+	SetBackgroundContextURL()
+	GetBackgroundContextURL() string
+	GetAccountID() string
 }

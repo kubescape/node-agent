@@ -26,6 +26,10 @@ func (client *k8sFakeClient) GetApiVersion(workload any) string {
 	return "v1"
 }
 
+func (client *k8sFakeClient) GetResourceVersion(workload any) string {
+	return "1234"
+}
+
 func (client *k8sFakeClient) CalculateWorkloadParentRecursive(workload any) (string, string, error) {
 	return "deployment", "nginx", nil
 }

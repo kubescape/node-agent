@@ -51,3 +51,28 @@ func (c *ConfigDataFalcoMock) GetClusterName() string {
 
 func (c *ConfigDataFalcoMock) SetNodeName() {
 }
+
+func (c *ConfigDataFalcoMock) SetNamespace() {
+}
+
+func (c *ConfigDataFalcoMock) SetContainerName() {
+}
+
+func (c *ConfigDataFalcoMock) GetNamespace() string {
+	return "Namespace"
+}
+
+func (c *ConfigDataFalcoMock) GetContainerName() string {
+	return "ContName"
+}
+
+func (c *ConfigDataFalcoMock) SetBackgroundContextURL() {
+}
+
+func (c *ConfigDataFalcoMock) GetBackgroundContextURL() string {
+	return "URLcontext"
+}
+
+func (c *ConfigDataFalcoMock) GetAccountID() string {
+	return "AccountID"
+}

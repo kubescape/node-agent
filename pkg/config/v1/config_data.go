@@ -10,6 +10,8 @@ var falcoSyscallFilter []string
 const (
 	SnifferServiceRelevantCVEs = "relevantCVEs"
 	nodeNameEnvVar             = "NODE_NAME"
+	NamespaceEnvVar            = "NAMESPCAE"
+	ContainerNameEnvVar        = "CONTAINER_NAME"
 )
 
 // all the struct and arguments names must be visible outside from the package since the json parser package need to parse them
@@ -36,12 +38,20 @@ type SnifferData struct {
 	SniffingMaxTime int               `json:"maxSniffingTimePerContainer"`
 }
 
+type BackgroundContextData struct {
+	telemetryURL string
+}
+
 type ConfigData struct {
 	FalcoEbpfEngineData `json:"falcoEbpfEngine"`
 	NodeData            `json:"node"`
 	ClusterName         string `json:"clusterName"`
+	AccountID           string `json:"accountID"`
 	SnifferData         `json:"sniffer"`
 	DB                  `json:"db"`
+	Namespace           string `json:"namespace"`
+	ContainerName       string `json:"containerName"`
+	BackgroundContextData
 }
 
 func CreateConfigData() *ConfigData {
@@ -107,4 +117,39 @@ func (c *ConfigData) SetNodeName() {
 	if exist {
 		c.NodeData.Name = nodeName
 	}
+}
+
+func (c *ConfigData) SetNamespace() {
+	Namespace, exist := os.LookupEnv(NamespaceEnvVar)
+	if exist {
+		c.Namespace = Namespace
+	}
+}
+
+func (c *ConfigData) SetContainerName() {
+	ContainerName, exist := os.LookupEnv(ContainerNameEnvVar)
+	if exist {
+		c.ContainerName = ContainerName
+	}
+}
+
+func (c *ConfigData) GetNamespace() string {
+	return c.Namespace
+}
+
+func (c *ConfigData) GetContainerName() string {
+	return c.ContainerName
+}
+
+func (c *ConfigData) SetBackgroundContextURL() {
+	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
+		c.telemetryURL = otelHost
+	}
+}
+
+func (c *ConfigData) GetBackgroundContextURL() string {
+	return c.telemetryURL
+}
+func (c *ConfigData) GetAccountID() string {
+	return c.AccountID
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"sniffer/pkg/config"
+	"sniffer/pkg/context"
 	"sniffer/pkg/ebpfeng"
 	evData "sniffer/pkg/ebpfev/v1"
 
@@ -177,8 +178,8 @@ func (acc *Accumulator) accumulateEbpfEngineData() {
 			} else {
 				index, newSlotIsNeeded, err := acc.findIndexByTimestamp(event)
 				if err != nil {
-					logger.L().Warning("findIndexByTimestamp fail to find the index to insert the event, fail with error", helpers.Error(err))
-					logger.L().Warning("event that didn't store ", helpers.String("", fmt.Sprintf("%v", event)))
+					logger.L().Ctx(context.GetBackgroundContext()).Warning("findIndexByTimestamp fail to find the index to insert the event, fail with error", helpers.Error(err))
+					logger.L().Ctx(context.GetBackgroundContext()).Warning("event that didn't store ", helpers.String("", fmt.Sprintf("%v", event)))
 					continue
 				}
 				if newSlotIsNeeded {
@@ -210,7 +211,7 @@ func (acc *Accumulator) StartAccumulator(errChan chan error) error {
 
 			err := acc.ebpfEngine.StartEbpfEngine()
 			if err != nil {
-				logger.L().Error("fail to create ebpf engine %v", helpers.Error(err))
+				logger.L().Ctx(context.GetBackgroundContext()).Error("fail to create ebpf engine ", helpers.Error(err))
 				return err
 			}
 

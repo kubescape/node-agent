@@ -67,6 +67,9 @@ func (cfg *Config) ParseConfiguration(configData ConfigDataInterface, data io.Re
 	}
 	cfg.data = configData
 	cfg.data.SetNodeName()
+	cfg.data.SetNamespace()
+	cfg.data.SetContainerName()
+	cfg.data.SetBackgroundContextURL()
 
 	return nil
 }
@@ -105,4 +108,20 @@ func (cfg *Config) GetNodeName() string {
 
 func (cfg *Config) GetClusterName() string {
 	return cfg.data.GetClusterName()
+}
+
+func (cfg *Config) GetNamespace() string {
+	return cfg.data.GetNamespace()
+}
+
+func (cfg *Config) GetContainerName() string {
+	return cfg.data.GetContainerName()
+}
+
+func (cfg *Config) GetBackgroundContextURL() string {
+	return cfg.data.GetBackgroundContextURL()
+}
+
+func (cfg *Config) GetAccountID() string {
+	return cfg.data.GetAccountID()
 }

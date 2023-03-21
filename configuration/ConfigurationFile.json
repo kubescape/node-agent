@@ -17,5 +17,8 @@
     "db": {
         "updateDataPeriod": 30
     },
-    "clusterName": "myCluster"
+    "clusterName": "myCluster",
+    "containerName": "contName",
+    "namespace": "kubescape",
+    "accountID": "myAccountID"
 }

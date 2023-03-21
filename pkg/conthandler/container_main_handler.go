@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sniffer/pkg/config"
+	"sniffer/pkg/context"
 	v1 "sniffer/pkg/conthandler/v1"
 	accumulator "sniffer/pkg/event_data_storage"
 	"sniffer/pkg/sbom"
@@ -71,7 +72,7 @@ func (ch *ContainerHandler) afterTimerActions() error {
 		afterTimerActionsData := <-ch.afterTimerActionsChannel
 		containerDataInterface, exist := ch.watchedContainers.Load(afterTimerActionsData.containerID)
 		if !exist {
-			logger.L().Warning("afterTimerActions: failed to get container data of containerID ", []helpers.IDetails{helpers.String("%s", afterTimerActionsData.containerID)}...)
+			logger.L().Ctx(context.GetBackgroundContext()).Warning("afterTimerActions: failed to get container data of containerID ", []helpers.IDetails{helpers.String("", afterTimerActionsData.containerID)}...)
 			continue
 		}
 		containerData := containerDataInterface.(watchedContainerData)
@@ -80,22 +81,22 @@ func (ch *ContainerHandler) afterTimerActions() error {
 			fileList := containerData.containerAggregator.GetContainerRealtimeFileList()
 
 			if err = <-containerData.syncChannel[StepGetSBOM]; err != nil {
-				logger.L().Warning("failed to get SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s with err ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+				logger.L().Ctx(context.GetBackgroundContext()).Warning("failed to get SBOM of containerID ", []helpers.IDetails{helpers.String(" ", afterTimerActionsData.containerID), helpers.String("of k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				continue
 			}
 			if err = containerData.sbomClient.FilterSBOM(fileList); err != nil {
-				logger.L().Warning("failed to filter SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s with err ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+				logger.L().Ctx(context.GetBackgroundContext()).Warning("failed to filter SBOM of containerID ", []helpers.IDetails{helpers.String(" ", afterTimerActionsData.containerID), helpers.String("of k8s resource  ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				continue
 			}
 			if err = containerData.sbomClient.StoreFilterSBOM(containerData.event.GetInstanceIDHash()); err != nil {
 				if errors.Is(err, sbom.IsAlreadyExist()) {
-					logger.L().Info("SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s already reported ", containerData.event.GetK8SWorkloadID())}...)
+					logger.L().Info("SBOM of containerID ", []helpers.IDetails{helpers.String(" ", afterTimerActionsData.containerID), helpers.String("of k8s resource already reported ", containerData.event.GetK8SWorkloadID())}...)
 				} else {
-					logger.L().Warning("failed to store filter SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s with err ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+					logger.L().Ctx(context.GetBackgroundContext()).Warning("failed to store filter SBOM of containerID ", []helpers.IDetails{helpers.String(" ", afterTimerActionsData.containerID), helpers.String("of k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				}
 				continue
 			}
-			logger.L().Info("filtered SBOM of containerID ", []helpers.IDetails{helpers.String("%s ", afterTimerActionsData.containerID), helpers.String("of k8s resource %s has stored successfully in the storage", containerData.event.GetK8SWorkloadID())}...)
+			logger.L().Info("filtered SBOM of containerID ", []helpers.IDetails{helpers.String(" ", afterTimerActionsData.containerID), helpers.String("of k8s resource has stored successfully in the storage", containerData.event.GetK8SWorkloadID())}...)
 		}
 	}
 }
@@ -127,7 +128,7 @@ func createTicker() *time.Ticker {
 func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventData) {
 	containerDataInterface, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
 	if !exist {
-		logger.L().Error("startRelevancyProcess: failed to get container data of ", helpers.String("containerID: ", contEvent.GetContainerID()))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("startRelevancyProcess: failed to get container data of ", helpers.String("containerID: ", contEvent.GetContainerID()))
 		return
 	}
 	watchedContainer := containerDataInterface.(watchedContainerData)
@@ -144,10 +145,10 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 		go ch.getSBOM(contEvent)
 		err = ch.startTimer(watchedContainer, contEvent.GetContainerID())
 		if err != nil {
-			logger.L().Warning("", helpers.Error(err))
+			logger.L().Ctx(context.GetBackgroundContext()).Warning("", helpers.Error(err))
 			err = watchedContainer.containerAggregator.StopAggregate()
 			if err != nil {
-				logger.L().Warning("we have failed to stop to aggregate data for container ID: ", helpers.String("%s", contEvent.GetContainerID()))
+				logger.L().Ctx(context.GetBackgroundContext()).Warning("we have failed to stop to aggregate data for container ID: ", helpers.String("", contEvent.GetContainerID()))
 			}
 			ch.watchedContainers.Delete(contEvent.GetContainerID())
 			break
@@ -163,7 +164,7 @@ func getShortContainerID(containerID string) string {
 func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
 	containerDataInterface, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
 	if !exist {
-		logger.L().Error("getSBOM: failed to get container data of ", helpers.String("containerID: ", contEvent.GetContainerID()))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("getSBOM: failed to get container data of ", helpers.String("containerID: ", contEvent.GetContainerID()))
 		return
 	}
 	watchedContainer := containerDataInterface.(watchedContainerData)
@@ -204,10 +205,10 @@ func (ch *ContainerHandler) StartMainHandler() error {
 
 	for {
 		contEvent := <-ch.containersEventChan
-		logger.L().Info("", []helpers.IDetails{helpers.String("new container %s ", contEvent.GetContainerID()), helpers.String("has loaded in microservice %s", contEvent.GetK8SWorkloadID())}...)
+		logger.L().Info("", []helpers.IDetails{helpers.String("new container  ", contEvent.GetContainerID()), helpers.String("has loaded in microservice ", contEvent.GetK8SWorkloadID())}...)
 		err := ch.handleNewContainerEvent(contEvent)
 		if err != nil {
-			logger.L().Warning("fail to handle new container %s was loaded, start monitor on it's container %s")
+			logger.L().Ctx(context.GetBackgroundContext()).Warning("fail to handle new container" + contEvent.GetK8SWorkloadID() + "was loaded, start monitor on it's container " + contEvent.GetContainerID())
 		}
 	}
 }

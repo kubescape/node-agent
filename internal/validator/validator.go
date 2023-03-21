@@ -33,7 +33,7 @@ func checkKernelVersion() error {
 		return fmt.Errorf("checkKernelVersion: fail to detect the kernel version")
 	}
 	kernelVersion := int8ToStr(uname.Sysname[:]) + "," + int8ToStr(uname.Release[:]) + "," + int8ToStr(uname.Version[:])
-	logger.L().Debug("", helpers.String("kernelVersion: %s", kernelVersion))
+	logger.L().Debug("", helpers.String("kernelVersion: ", kernelVersion))
 
 	if int8ToStr(uname.Release[:]) < minKernelVersion {
 		return fmt.Errorf("checkKernelVersion: the current kernel version %s is less than the min kernel version support %s", int8ToStr(uname.Release[:]), minKernelVersion)
