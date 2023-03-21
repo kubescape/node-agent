@@ -1,7 +1,6 @@
 package config
 
 import (
-	"context"
 	"path"
 	"sniffer/pkg/utils"
 	"time"
@@ -53,23 +52,27 @@ func (c *ConfigDataFalcoMock) GetClusterName() string {
 func (c *ConfigDataFalcoMock) SetNodeName() {
 }
 
-func (c *ConfigDataFalcoMock) SetMyNamespace() {
+func (c *ConfigDataFalcoMock) SetNamespace() {
 }
 
-func (c *ConfigDataFalcoMock) SetMyContainerName() {
+func (c *ConfigDataFalcoMock) SetContainerName() {
 }
 
-func (c *ConfigDataFalcoMock) GetMyNamespace() string {
-	return "myNamespace"
+func (c *ConfigDataFalcoMock) GetNamespace() string {
+	return "Namespace"
 }
 
-func (c *ConfigDataFalcoMock) GetMyContainerName() string {
-	return "myContName"
+func (c *ConfigDataFalcoMock) GetContainerName() string {
+	return "ContName"
 }
 
-func (c *ConfigDataFalcoMock) SetBackgroundContext() {
+func (c *ConfigDataFalcoMock) SetBackgroundContextURL() {
 }
 
-func (c *ConfigDataFalcoMock) GetBackgroundContext() context.Context {
-	return context.Background()
+func (c *ConfigDataFalcoMock) GetBackgroundContextURL() string {
+	return "URLcontext"
+}
+
+func (c *ConfigDataFalcoMock) GetAccountID() string {
+	return "AccountID"
 }

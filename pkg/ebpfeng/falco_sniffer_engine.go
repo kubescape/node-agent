@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"sniffer/pkg/config"
+	"sniffer/pkg/context"
 	ebpfev "sniffer/pkg/ebpfev/v1"
 
 	logger "github.com/kubescape/go-logger"
@@ -106,28 +107,28 @@ func convertStringTimeToTimeOBJ(timestamp string) (*time.Time, error) {
 
 	year, err := strconv.Atoi(date[0])
 	if err != nil {
-		logger.L().Ctx(config.GetConfigurationConfigContext().GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 	month, err := strconv.Atoi(date[1])
 	if err != nil {
-		logger.L().Ctx(config.GetConfigurationConfigContext().GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 	day, err := strconv.Atoi(date[2])
 	if err != nil {
-		logger.L().Ctx(config.GetConfigurationConfigContext().GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 
 	hour, err := strconv.Atoi(tm[0])
 	if err != nil {
-		logger.L().Ctx(config.GetConfigurationConfigContext().GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 	minute, err := strconv.Atoi(tm[1])
 	if err != nil {
-		logger.L().Ctx(config.GetConfigurationConfigContext().GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 	seconds := strings.Split(tm[2], "+")
@@ -135,13 +136,13 @@ func convertStringTimeToTimeOBJ(timestamp string) (*time.Time, error) {
 
 	sec, err := strconv.Atoi(secs[0])
 	if err != nil {
-		logger.L().Ctx(config.GetConfigurationConfigContext().GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 
 	nsec, err := strconv.Atoi(secs[1])
 	if err != nil {
-		logger.L().Ctx(config.GetConfigurationConfigContext().GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 
@@ -156,12 +157,12 @@ func parseLine(line string) (*ebpfev.EventData, error) {
 	}
 	lineParts := strings.Split(line, "]::[")
 	if len(lineParts) != 8 {
-		logger.L().Ctx(config.GetConfigurationConfigContext().GetBackgroundContext()).Error("", helpers.String("we have got unknown line format, line is ", fmt.Sprintf("%s", line)))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("", helpers.String("we have got unknown line format, line is ", fmt.Sprintf("%s", line)))
 		return nil, fmt.Errorf("we have got unknown line format, line is %s", line)
 	}
 	Timestamp, err := convertStringTimeToTimeOBJ(lineParts[0])
 	if err != nil {
-		logger.L().Ctx(config.GetConfigurationConfigContext().GetBackgroundContext()).Error("", helpers.String("parseLine Timestamp fail line is ", fmt.Sprintf("%s, err %v", line, err)))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("", helpers.String("parseLine Timestamp fail line is ", fmt.Sprintf("%s, err %v", line, err)))
 		return nil, fmt.Errorf("parseLine Timestamp fail line is %s, err %v", line, err)
 	}
 	return ebpfev.CreateKernelEvent(Timestamp, lineParts[1], lineParts[2], lineParts[3], lineParts[4], lineParts[5], lineParts[6], lineParts[7]), nil

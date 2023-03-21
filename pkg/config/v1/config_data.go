@@ -1,22 +1,17 @@
 package config
 
 import (
-	"context"
-	"net/url"
 	"os"
 	"time"
-
-	"github.com/kubescape/go-logger"
 )
 
 var falcoSyscallFilter []string
 
 const (
-	SnifferServiceRelevantCVEs         = "relevantCVEs"
-	nodeNameEnvVar                     = "NODE_NAME"
-	myNamespaceEnvVar                  = "MY_NAMESPCAE"
-	myContainerNameEnvVar              = "MY_CONTAINER_NAME"
-	releaseBuildTagEnvironmentVariable = "RELEASE"
+	SnifferServiceRelevantCVEs = "relevantCVEs"
+	nodeNameEnvVar             = "NODE_NAME"
+	NamespaceEnvVar            = "NAMESPCAE"
+	ContainerNameEnvVar        = "CONTAINER_NAME"
 )
 
 // all the struct and arguments names must be visible outside from the package since the json parser package need to parse them
@@ -43,6 +38,10 @@ type SnifferData struct {
 	SniffingMaxTime int               `json:"maxSniffingTimePerContainer"`
 }
 
+type BackgroundContextData struct {
+	telemetryURL string
+}
+
 type ConfigData struct {
 	FalcoEbpfEngineData `json:"falcoEbpfEngine"`
 	NodeData            `json:"node"`
@@ -50,9 +49,9 @@ type ConfigData struct {
 	AccountID           string `json:"accountID"`
 	SnifferData         `json:"sniffer"`
 	DB                  `json:"db"`
-	MyNamespace         string `json:"namespace"`
-	MyContainerName     string `json:"containerName"`
-	BackgroundContext   context.Context
+	Namespace           string `json:"namespace"`
+	ContainerName       string `json:"containerName"`
+	BackgroundContextData
 }
 
 func CreateConfigData() *ConfigData {
@@ -120,41 +119,37 @@ func (c *ConfigData) SetNodeName() {
 	}
 }
 
-func (c *ConfigData) SetMyNamespace() {
-	myNamespace, exist := os.LookupEnv(myNamespaceEnvVar)
+func (c *ConfigData) SetNamespace() {
+	Namespace, exist := os.LookupEnv(NamespaceEnvVar)
 	if exist {
-		c.MyNamespace = myNamespace
+		c.Namespace = Namespace
 	}
 }
 
-func (c *ConfigData) SetMyContainerName() {
-	myContainerName, exist := os.LookupEnv(myContainerNameEnvVar)
+func (c *ConfigData) SetContainerName() {
+	ContainerName, exist := os.LookupEnv(ContainerNameEnvVar)
 	if exist {
-		c.MyContainerName = myContainerName
+		c.ContainerName = ContainerName
 	}
 }
 
-func (c *ConfigData) GetMyNamespace() string {
-	return c.MyNamespace
+func (c *ConfigData) GetNamespace() string {
+	return c.Namespace
 }
 
-func (c *ConfigData) GetMyContainerName() string {
-	return c.MyContainerName
+func (c *ConfigData) GetContainerName() string {
+	return c.ContainerName
 }
 
-func (c *ConfigData) SetBackgroundContext() {
-	ctx := context.Background()
+func (c *ConfigData) SetBackgroundContextURL() {
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
-		ctx = logger.InitOtel("node agent",
-			os.Getenv(releaseBuildTagEnvironmentVariable),
-			c.AccountID,
-			c.ClusterName,
-			url.URL{Host: otelHost})
-		defer logger.ShutdownOtel(ctx)
+		c.telemetryURL = otelHost
 	}
-	c.BackgroundContext = ctx
 }
 
-func (c *ConfigData) GetBackgroundContext() context.Context {
-	return c.BackgroundContext
+func (c *ConfigData) GetBackgroundContextURL() string {
+	return c.telemetryURL
+}
+func (c *ConfigData) GetAccountID() string {
+	return c.AccountID
 }

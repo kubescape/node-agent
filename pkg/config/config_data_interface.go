@@ -1,7 +1,6 @@
 package config
 
 import (
-	"context"
 	"time"
 )
 
@@ -16,10 +15,11 @@ type ConfigDataInterface interface {
 	GetNodeName() string
 	GetClusterName() string
 	SetNodeName()
-	SetMyNamespace()
-	GetMyNamespace() string
-	SetMyContainerName()
-	GetMyContainerName() string
-	SetBackgroundContext()
-	GetBackgroundContext() context.Context
+	SetNamespace()
+	GetNamespace() string
+	SetContainerName()
+	GetContainerName() string
+	SetBackgroundContextURL()
+	GetBackgroundContextURL() string
+	GetAccountID() string
 }

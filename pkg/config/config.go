@@ -2,7 +2,6 @@ package config
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -68,9 +67,9 @@ func (cfg *Config) ParseConfiguration(configData ConfigDataInterface, data io.Re
 	}
 	cfg.data = configData
 	cfg.data.SetNodeName()
-	cfg.data.SetMyNamespace()
-	cfg.data.SetMyContainerName()
-	cfg.data.SetBackgroundContext()
+	cfg.data.SetNamespace()
+	cfg.data.SetContainerName()
+	cfg.data.SetBackgroundContextURL()
 
 	return nil
 }
@@ -111,14 +110,18 @@ func (cfg *Config) GetClusterName() string {
 	return cfg.data.GetClusterName()
 }
 
-func (cfg *Config) GetMyNamespace() string {
-	return cfg.data.GetMyNamespace()
+func (cfg *Config) GetNamespace() string {
+	return cfg.data.GetNamespace()
 }
 
-func (cfg *Config) GetMyContainerName() string {
-	return cfg.data.GetMyContainerName()
+func (cfg *Config) GetContainerName() string {
+	return cfg.data.GetContainerName()
 }
 
-func (cfg *Config) GetBackgroundContext() context.Context {
-	return cfg.data.GetBackgroundContext()
+func (cfg *Config) GetBackgroundContextURL() string {
+	return cfg.data.GetBackgroundContextURL()
+}
+
+func (cfg *Config) GetAccountID() string {
+	return cfg.data.GetAccountID()
 }

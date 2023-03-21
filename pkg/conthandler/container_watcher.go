@@ -1,12 +1,14 @@
 package conthandler
 
 import (
-	"context"
+	gcontext "context"
 	"encoding/json"
 	"fmt"
 
 	"sniffer/pkg/config"
 	conthandlerV1 "sniffer/pkg/conthandler/v1"
+
+	"sniffer/pkg/context"
 
 	wlid "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
@@ -50,7 +52,7 @@ func getNodeName() (string, error) {
 }
 
 func (client *ContainerClientK8SAPIServer) GetWatcher() (watch.Interface, error) {
-	globalHTTPContext := context.Background()
+	globalHTTPContext := gcontext.Background()
 	return client.k8sClient.KubernetesClient.CoreV1().Pods("").Watch(globalHTTPContext, v1.ListOptions{})
 }
 
@@ -88,7 +90,7 @@ func (containerWatcher *ContainerWatcher) parsePodData(pod *core.Pod, containerI
 	if err != nil {
 		return nil, fmt.Errorf("fail to create workload ID to pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
-	kind, name, err := containerWatcher.ContainerClient.CalculateWorkloadParentRecursive(workload)
+	kind, name, err := containerWatcher.ContainerClient.CalculateWorkloadParentRecursive(*workload)
 	if err != nil {
 		return nil, fmt.Errorf("fail to get workload owner parent %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
@@ -138,12 +140,12 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 				for i := range pod.Status.ContainerStatuses {
 					if pod.Status.ContainerStatuses[i].Started != nil && *pod.Status.ContainerStatuses[i].Started {
 						logger.L().Info("container started: ", helpers.String("container name: ", pod.Status.ContainerStatuses[i].ContainerID))
-						if pod.GetNamespace() == config.GetConfigurationConfigContext().GetMyNamespace() && pod.GetName() == config.GetConfigurationConfigContext().GetMyContainerName() {
+						if pod.GetNamespace() == config.GetConfigurationConfigContext().GetNamespace() && pod.GetName() == config.GetConfigurationConfigContext().GetContainerName() {
 							continue
 						}
 						containerEventData, err := containerWatcher.parsePodData(pod, i)
 						if err != nil {
-							logger.L().Ctx(config.GetConfigurationConfigContext().GetBackgroundContext()).Error("parsePodData failed with error: ", helpers.Error(err))
+							logger.L().Ctx(context.GetBackgroundContext()).Error("parsePodData failed with error: ", helpers.Error(err))
 							continue
 						}
 						containerEventChannel <- *containerEventData

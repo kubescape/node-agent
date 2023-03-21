@@ -117,3 +117,83 @@ func TestSetNodeName(t *testing.T) {
 		t.Errorf("SetNodeName() returned %v, expected %v", actual, expected)
 	}
 }
+
+func TestSetNamespace(t *testing.T) {
+	config := CreateFalcoMockConfigData()
+	config.SetNamespace()
+
+	expected := "Namespace"
+	actual := config.GetNamespace()
+
+	if actual != expected {
+		t.Errorf("GetNodeName() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetNamespace(t *testing.T) {
+	config := CreateFalcoMockConfigData()
+
+	expected := "Namespace"
+	actual := config.GetNamespace()
+
+	if actual != expected {
+		t.Errorf("GetNamespace() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestSetContainerName(t *testing.T) {
+	config := CreateFalcoMockConfigData()
+	config.SetContainerName()
+
+	expected := "ContName"
+	actual := config.GetContainerName()
+
+	if actual != expected {
+		t.Errorf("GetContainerName() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetContainerName(t *testing.T) {
+	config := CreateFalcoMockConfigData()
+
+	expected := "ContName"
+	actual := config.GetContainerName()
+
+	if actual != expected {
+		t.Errorf("GetContainerName() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestSetBackgroundContextURL(t *testing.T) {
+	config := CreateFalcoMockConfigData()
+	config.SetBackgroundContextURL()
+
+	expected := "URLcontext"
+	actual := config.GetBackgroundContextURL()
+
+	if actual != expected {
+		t.Errorf("GetBackgroundContextURL() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetBackgroundContextURL(t *testing.T) {
+	config := CreateFalcoMockConfigData()
+
+	expected := "URLcontext"
+	actual := config.GetBackgroundContextURL()
+
+	if actual != expected {
+		t.Errorf("GetBackgroundContextURL() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetAccountID(t *testing.T) {
+	config := CreateFalcoMockConfigData()
+
+	expected := "AccountID"
+	actual := config.GetAccountID()
+
+	if actual != expected {
+		t.Errorf("GetAccountID() returned %v, expected %v", actual, expected)
+	}
+}

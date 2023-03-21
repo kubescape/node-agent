@@ -165,3 +165,330 @@ func TestParseConfiguration(t *testing.T) {
 		t.Errorf("expected empty cluster name but got %v", cfg.GetClusterName())
 	}
 }
+
+func TestIsFalcoEbpfEngineMock(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+	}
+
+	config := GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+
+	expected := true
+	actual := config.IsFalcoEbpfEngine()
+
+	if actual != expected {
+		t.Errorf("IsFalcoEbpfEngine() returned %v, expected %v", actual, expected)
+	}
+}
+
+// func TestGetFalcoSyscallFilterMockv(t *testing.T) {
+// 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+// 	err := os.Setenv(ConfigEnvVar, configPath)
+// 	if err != nil {
+// 		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+// 	}
+
+// 	config := GetConfigurationConfigContext()
+// 	configData, err := config.GetConfigurationReader()
+// 	if err != nil {
+// 		t.Errorf("GetConfigurationReader failed with err %v", err)
+// 	}
+// 	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+// 	if err != nil {
+// 		t.Fatalf("ParseConfiguration failed with err %v", err)
+// 	}
+
+// 	expected := []string{"open", "openat", "execve", "execveat"}
+// 	actual := config.GetFalcoSyscallFilter()
+
+// 	if !equalStringSlices(actual, expected) {
+// 		t.Errorf("GetFalcoSyscallFilter() returned %v, expected %v", actual, expected)
+// 	}
+// }
+
+func TestGetFalcoKernelObjPath(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+	}
+
+	config := GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+
+	expected := "./resources/ebpf/falco/kernel_obj.o"
+	actual := config.GetFalcoKernelObjPath()
+
+	if actual != expected {
+		t.Errorf("GetFalcoKernelObjPath() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetEbpfEngineLoaderPath(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+	}
+
+	config := GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+
+	expected := "./resources/ebpf/falco/userspace_app"
+	actual := config.GetEbpfEngineLoaderPath()
+
+	if actual != expected {
+		t.Errorf("GetEbpfEngineLoaderPath() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetUpdateDataPeriodMock(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+	}
+
+	config := GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+
+	expected := time.Duration(30) * time.Second
+	actual := config.GetUpdateDataPeriod()
+
+	if actual != expected {
+		t.Errorf("GetUpdateDataPeriod() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetSniffingMaxTimesMock(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+	}
+
+	config := GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+
+	expected := time.Duration(6*60*60) * time.Second
+	actual := config.GetSniffingMaxTimes()
+
+	if actual != expected {
+		t.Errorf("GetSniffingMaxTimes() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestIsRelevantCVEServiceEnabledMock(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+	}
+
+	config := GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+
+	expected := true
+	actual := config.IsRelevantCVEServiceEnabled()
+
+	if actual != expected {
+		t.Errorf("IsRelevantCVEServiceEnabled() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetNodeName(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+	}
+
+	config := GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+
+	expected := "minikube"
+	actual := config.GetNodeName()
+
+	if actual != expected {
+		t.Errorf("GetNodeName() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetClusterName(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+	}
+
+	config := GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+
+	expected := "myCluster"
+	actual := config.GetClusterName()
+
+	if actual != expected {
+		t.Errorf("GetClusterName() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetNamespace(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+	}
+
+	config := GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+
+	expected := "kubescape"
+	actual := config.GetNamespace()
+
+	if actual != expected {
+		t.Errorf("GetNamespace() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetContainerName(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+	}
+
+	config := GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+
+	expected := "contName"
+	actual := config.GetContainerName()
+
+	if actual != expected {
+		t.Errorf("GetContainerName() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetBackgroundContextURL(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+	}
+
+	config := GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+	os.Setenv("OTEL_COLLECTOR_SVC", "URLcontext")
+
+	expected := "URLcontext"
+	config.data.SetBackgroundContextURL()
+	actual := config.GetBackgroundContextURL()
+
+	if actual != expected {
+		t.Errorf("GetBackgroundContextURL() returned %v, expected %v", actual, expected)
+	}
+}
+
+func TestGetAccountID(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
+	}
+
+	config := GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+
+	expected := "myAccountID"
+	actual := config.GetAccountID()
+
+	if actual != expected {
+		t.Errorf("GetAccountID() returned %v, expected %v", actual, expected)
+	}
+}
