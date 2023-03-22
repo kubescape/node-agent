@@ -27,7 +27,7 @@ func (client *k8sFakeClient) GetApiVersion(workload any) string {
 }
 
 func (client *k8sFakeClient) GetResourceVersion(workload any) string {
-	return "1234"
+	return "1234wat"
 }
 
 func (client *k8sFakeClient) CalculateWorkloadParentRecursive(workload any) (string, string, error) {
