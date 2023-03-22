@@ -2,6 +2,7 @@ package storageclient
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path"
 	"sniffer/pkg/utils"
@@ -10,6 +11,10 @@ import (
 )
 
 type StorageHttpClientMock struct {
+	nginxSBOMSpdxBytes *spdxv1beta1.SBOMSPDXv2p3
+}
+
+type StorageHttpClientFailureMock struct {
 	nginxSBOMSpdxBytes *spdxv1beta1.SBOMSPDXv2p3
 }
 
@@ -45,4 +50,40 @@ func (sc *StorageHttpClientMock) PutData(key string, data any) error {
 }
 func (sc *StorageHttpClientMock) PostData(key string, data any) error {
 	return nil
+}
+
+func CreateStorageHttpClientFailureMock() *StorageHttpClientFailureMock {
+	var data spdxv1beta1.SBOMSPDXv2p3
+	nginxSBOMPath := path.Join(utils.CurrentDir(), "testdata", "nginx-spdx-format-mock.json")
+	bytes, err := os.ReadFile(nginxSBOMPath)
+	if err != nil {
+		return nil
+	}
+	err = json.Unmarshal(bytes, &data)
+	if err != nil {
+		return nil
+	}
+
+	return &StorageHttpClientFailureMock{
+		nginxSBOMSpdxBytes: &data,
+	}
+}
+
+func (sc *StorageHttpClientFailureMock) GetData(key string) (any, error) {
+	if key == NGINX {
+		return sc.nginxSBOMSpdxBytes, nil
+	}
+	return nil, nil
+}
+
+func (sc *StorageHttpClientFailureMock) PutData(key string, data any) error {
+	return fmt.Errorf("any")
+}
+
+func (sc *StorageHttpClientFailureMock) PostData(key string, data any) error {
+	return fmt.Errorf("error already exist")
+}
+
+func (sc *StorageHttpClientFailureMock) IsAlreadyExist(err error) bool {
+	return true
 }

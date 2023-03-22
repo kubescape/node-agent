@@ -51,3 +51,22 @@ func TestStoreFilterSBOM(t *testing.T) {
 	}
 
 }
+
+func TestStoreFilterSBOMFailure(t *testing.T) {
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateStorageHttpClientFailureMock(), NGINX_WLID)
+	err := SBOMClient.GetSBOM(storageclient.NGINX)
+	if err != nil {
+		t.Fatalf("fail to get sbom")
+	}
+	err = SBOMClient.FilterSBOM(map[string]bool{
+		"/usr/share/adduser/adduser.conf": true,
+	})
+	if err != nil {
+		t.Fatalf("fail to filter sbom")
+	}
+	err = SBOMClient.StoreFilterSBOM("anyInstanceID")
+	if err == nil {
+		t.Fatalf("StoreFilterSBOM should fail")
+	}
+
+}

@@ -140,6 +140,68 @@ func TestConfigData_SetNodeName(t *testing.T) {
 	}
 }
 
+func TestConfigData_SetNamespace(t *testing.T) {
+	expectedName := "namespace-1"
+	os.Setenv(NamespaceEnvVar, expectedName)
+	c := &ConfigData{}
+	c.SetNamespace()
+	if c.Namespace != expectedName {
+		t.Errorf("SetNamespace() failed to set the namespace to %s, got %s instead", expectedName, c.Namespace)
+	}
+}
+
+func TestConfigData_SetContainerName(t *testing.T) {
+	expectedName := "cont-1"
+	os.Setenv(ContainerNameEnvVar, expectedName)
+	c := &ConfigData{}
+	c.SetContainerName()
+	if c.ContainerName != expectedName {
+		t.Errorf("SetContainerName() failed to set the container name to %s, got %s instead", expectedName, c.ContainerName)
+	}
+}
+
+func TestConfigData_SetBackgroundContextURL(t *testing.T) {
+	expectedName := "URL-1"
+	os.Setenv("OTEL_COLLECTOR_SVC", expectedName)
+	c := &ConfigData{}
+	c.SetBackgroundContextURL()
+	if c.telemetryURL != expectedName {
+		t.Errorf("SetBackgroundContextURL() failed to set the background context name to %s, got %s instead", expectedName, c.telemetryURL)
+	}
+}
+
+func TestConfigData_GetNamespace(t *testing.T) {
+	expectedName := ""
+	c := &ConfigData{}
+	if c.GetNamespace() != expectedName {
+		t.Errorf("GetNamespace() failed to get the namespace to %s, got %s instead", expectedName, c.Namespace)
+	}
+}
+
+func TestConfigData_GetContainerName(t *testing.T) {
+	expectedName := ""
+	c := &ConfigData{}
+	if c.GetContainerName() != expectedName {
+		t.Errorf("GetContainerName() failed to set the container name to %s, got %s instead", expectedName, c.NodeData.Name)
+	}
+}
+
+func TestConfigData_GetBackgroundContextURL(t *testing.T) {
+	expectedName := ""
+	c := &ConfigData{}
+	if c.GetBackgroundContextURL() != expectedName {
+		t.Errorf("GetBackgroundContextURL() failed to get the background context name to %s, got %s instead", expectedName, c.NodeData.Name)
+	}
+}
+
+func TestConfigData_GetAccountID(t *testing.T) {
+	expectedName := ""
+	c := &ConfigData{}
+	if c.GetAccountID() != expectedName {
+		t.Errorf("GetAccountID() failed to get the account ID name to %s, got %s instead", expectedName, c.NodeData.Name)
+	}
+}
+
 // check is slices are equal
 func equalStringSlices(a, b []string) bool {
 	if len(a) != len(b) {

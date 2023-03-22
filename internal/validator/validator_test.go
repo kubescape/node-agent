@@ -1,6 +1,11 @@
 package validator
 
 import (
+	"os"
+	"path"
+	"sniffer/pkg/config"
+	v1 "sniffer/pkg/config/v1"
+	"sniffer/pkg/utils"
 	"testing"
 )
 
@@ -44,4 +49,29 @@ func TestInt8ToStr(t *testing.T) {
 	if output4 != expected4 {
 		t.Errorf("int8ToStr(%v) = %v; want %v", input4, output4, expected4)
 	}
+}
+
+func TestCheckPrerequisites(t *testing.T) {
+	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
+	err := os.Setenv(config.ConfigEnvVar, configPath)
+	if err != nil {
+		t.Fatalf("failed to set env %s with err %v", config.ConfigEnvVar, err)
+	}
+
+	config := config.GetConfigurationConfigContext()
+	configData, err := config.GetConfigurationReader()
+	if err != nil {
+		t.Errorf("GetConfigurationReader failed with err %v", err)
+	}
+	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	if err != nil {
+		t.Fatalf("ParseConfiguration failed with err %v", err)
+	}
+
+	minKernelVersion = "0.1"
+	err = CheckPrerequisites()
+	if err != nil {
+		t.Fatalf("checkNodePrerequisites failed with err %v", err)
+	}
+
 }
