@@ -90,7 +90,7 @@ func (containerWatcher *ContainerWatcher) parsePodData(pod *core.Pod, containerI
 	if err != nil {
 		return nil, fmt.Errorf("fail to create workload ID to pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
-	kind, name, err := containerWatcher.ContainerClient.CalculateWorkloadParentRecursive(*workload)
+	kind, name, err := containerWatcher.ContainerClient.CalculateWorkloadParentRecursive(workload)
 	if err != nil {
 		return nil, fmt.Errorf("fail to get workload owner parent %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
@@ -116,6 +116,7 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 	for {
 		watcher, err := containerWatcher.ContainerClient.GetWatcher()
 		if err != nil {
+			logger.L().Ctx(context.GetBackgroundContext()).Error("GetWatcher err: ", helpers.Error(err))
 			continue
 		}
 		for {
