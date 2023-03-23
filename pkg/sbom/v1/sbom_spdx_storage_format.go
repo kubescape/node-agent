@@ -25,7 +25,7 @@ const (
 
 type SBOMData struct {
 	spdxData                              spdxv1beta1.SBOMSPDXv2p3
-	filteredSpdxData                      spdxv1beta1.SBOMSPDXv2p3
+	filteredSpdxData                      spdxv1beta1.SBOMSPDXv2p3Filtered
 	relevantRealtimeFilesBySPDXIdentifier sync.Map
 	newRelevantData                       bool
 	alreadyExistSBOM                      bool
@@ -33,7 +33,7 @@ type SBOMData struct {
 
 func CreateSBOMDataSPDXVersionV040() *SBOMData {
 	return &SBOMData{
-		filteredSpdxData:                      spdxv1beta1.SBOMSPDXv2p3{},
+		filteredSpdxData:                      spdxv1beta1.SBOMSPDXv2p3Filtered{},
 		relevantRealtimeFilesBySPDXIdentifier: sync.Map{},
 		newRelevantData:                       false,
 		alreadyExistSBOM:                      false,
@@ -50,7 +50,9 @@ func (sbom *SBOMData) StoreSBOM(sbomData any) error {
 	for i := range sbom.spdxData.Spec.SPDX.Files {
 		sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier), false)
 	}
-	sbom.filteredSpdxData = sbom.spdxData
+
+	sbom.filteredSpdxData.Spec = sbom.spdxData.Spec
+	sbom.filteredSpdxData.Status = sbom.spdxData.Status
 	sbom.spdxData.Spec.SPDX.CreationInfo.Creators = append(sbom.spdxData.Spec.SPDX.CreationInfo.Creators, []spdxv1beta1.Creator{
 		{
 			CreatorType: Organization,

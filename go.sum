@@ -227,8 +227,8 @@ github.com/kubescape/go-logger v0.0.11 h1:oucpq2S7+DT7O+UclG5IrmHado/tj6+IkYf9cz
 github.com/kubescape/go-logger v0.0.11/go.mod h1:yGiKBJ2lhq/kxzY/MVYDREL9fLV3RGD6gv+UFjslaew=
 github.com/kubescape/k8s-interface v0.0.102 h1:FAsGstCcQv5kLT19PUbtdZayeT1huFgXJ+KrZUaTsb4=
 github.com/kubescape/k8s-interface v0.0.102/go.mod h1:McIx729bV395FOL3FWiv8vyT5V0F1TbcbTOCc+LS50A=
-github.com/kubescape/storage v0.1.0 h1:SnFx+s4yc7sLXadstMufPRxVJaqtjoHsPLnRFOo2IG4=
-github.com/kubescape/storage v0.1.0/go.mod h1:YAfHevtMx8MCxxlMVEBzY4tO521G6E23Jzm7MVJYG3Q=
+github.com/kubescape/storage v0.2.0 h1:WZXy4Dyjf5ltEMtk0SOD9RFL1haS9ffFPGfs1gUV1aM=
+github.com/kubescape/storage v0.2.0/go.mod h1:sPE749pFNoxoskBn6JTpNQyguF2rv/u2kYqzRd3MvXw=
 github.com/lunixbochs/vtclean v1.0.0/go.mod h1:pHhQNgMf3btfWnGBVipUOjRYhoOsdGqdm/+2c2E2WMI=
 github.com/mailru/easyjson v0.0.0-20190312143242-1de009706dbe/go.mod h1:C1wdFJiN94OJF2b5HbByQZoLdCWB1Yqtg26g4irojpc=
 github.com/mailru/easyjson v0.7.7 h1:UGYAvKxe3sBsEDzO8ZeWOSlIQfWFlxbzLZe7hwFURr0=
