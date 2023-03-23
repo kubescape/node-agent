@@ -84,14 +84,14 @@ func (FalcoEbpfEngine *FalcoEbpfEngine) StartEbpfEngine() error {
 
 	fullEbpfEngineCMD := FalcoEbpfEngine.ebpfEngineCMDWithParams()
 	cmd := exec.Command(ebpfEngineLoaderPath, fullEbpfEngineCMD...)
-	logger.L().Debug("", helpers.String("cmd.Args ", fmt.Sprintf("%v", cmd.Args)))
+	logger.L().Debug("start ebpf engine process", helpers.String("cmd.Args", fmt.Sprintf("%v", cmd.Args)))
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
 	}
 	err = cmd.Start()
 	if err != nil {
-		logger.L().Debug("", helpers.String("StartEbpfEngine: fail with err ", fmt.Sprintf("%v", err)))
+		logger.L().Error("failed to start ebpf engine process", helpers.Error(err))
 		return err
 	}
 	FalcoEbpfEngine.cmd = cmd
@@ -107,28 +107,23 @@ func convertStringTimeToTimeOBJ(timestamp string) (*time.Time, error) {
 
 	year, err := strconv.Atoi(date[0])
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 	month, err := strconv.Atoi(date[1])
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 	day, err := strconv.Atoi(date[2])
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 
 	hour, err := strconv.Atoi(tm[0])
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 	minute, err := strconv.Atoi(tm[1])
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 	seconds := strings.Split(tm[2], "+")
@@ -136,13 +131,11 @@ func convertStringTimeToTimeOBJ(timestamp string) (*time.Time, error) {
 
 	sec, err := strconv.Atoi(secs[0])
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 
 	nsec, err := strconv.Atoi(secs[1])
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Error("fail strconv", helpers.Error(err))
 		return nil, err
 	}
 
@@ -157,15 +150,15 @@ func parseLine(line string) (*ebpfev.EventData, error) {
 	}
 	lineParts := strings.Split(line, "]::[")
 	if len(lineParts) != 8 {
-		logger.L().Ctx(context.GetBackgroundContext()).Error("", helpers.String("we have got unknown line format, line is ", fmt.Sprintf("%s", line)))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("failed to parse data from ebpf engine", helpers.String("we have got unknown line format, line is", line))
 		return nil, fmt.Errorf("we have got unknown line format, line is %s", line)
 	}
-	Timestamp, err := convertStringTimeToTimeOBJ(lineParts[0])
+	timestamp, err := convertStringTimeToTimeOBJ(lineParts[0])
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Error("", helpers.String("parseLine Timestamp fail line is ", fmt.Sprintf("%s, err %v", line, err)))
+		logger.L().Ctx(context.GetBackgroundContext()).Warning("fail to parse timestamp from ebpf engine", []helpers.IDetails{helpers.String("timestamp", lineParts[0]), helpers.Error(err)}...)
 		return nil, fmt.Errorf("parseLine Timestamp fail line is %s, err %v", line, err)
 	}
-	return ebpfev.CreateKernelEvent(Timestamp, lineParts[1], lineParts[2], lineParts[3], lineParts[4], lineParts[5], lineParts[6], lineParts[7]), nil
+	return ebpfev.CreateKernelEvent(timestamp, lineParts[1], lineParts[2], lineParts[3], lineParts[4], lineParts[5], lineParts[6], lineParts[7]), nil
 }
 
 func (FalcoEbpfEngine *FalcoEbpfEngine) GetData(ebpfEngineDataChannel chan *ebpfev.EventData) {
@@ -181,7 +174,7 @@ func (FalcoEbpfEngine *FalcoEbpfEngine) GetData(ebpfEngineDataChannel chan *ebpf
 				ebpfEngineDataChannel <- data
 			}
 		}
-		logger.L().Info("", helpers.String("CacheAccumulator accumulateEbpfEngineData scanner.Err(): ", fmt.Sprintf("%v", scanner.Err())))
+		logger.L().Error("failed to get data from ebpf engine process", helpers.Error(scanner.Err()))
 		break
 	}
 }

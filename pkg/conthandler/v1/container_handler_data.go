@@ -17,22 +17,22 @@ const (
 type ContainerEventType string
 
 type ContainerEventData struct {
-	imageID     string
-	containerID string
-	podName     string
-	wlid        string
-	instanceID  string
-	eventType   ContainerEventType
+	imageID       string
+	containerID   string
+	containerName string
+	wlid          string
+	instanceID    string
+	eventType     ContainerEventType
 }
 
-func CreateNewContainerEvent(imageID, containerID, podName, wlid, instanceID string, eventType ContainerEventType) *ContainerEventData {
+func CreateNewContainerEvent(imageID, containerID, containerName, wlid, instanceID string, eventType ContainerEventType) *ContainerEventData {
 	return &ContainerEventData{
-		imageID:     imageID,
-		containerID: containerID,
-		podName:     podName,
-		wlid:        wlid,
-		instanceID:  instanceID,
-		eventType:   eventType,
+		imageID:       imageID,
+		containerID:   containerID,
+		containerName: containerName,
+		wlid:          wlid,
+		instanceID:    instanceID,
+		eventType:     eventType,
 	}
 }
 
@@ -46,6 +46,10 @@ func (event *ContainerEventData) GetContainerID() string {
 
 func (event *ContainerEventData) GetK8SWorkloadID() string {
 	return event.wlid
+}
+
+func (event *ContainerEventData) GetContainerName() string {
+	return event.containerName
 }
 
 func (event *ContainerEventData) GetImageHash() (string, error) {

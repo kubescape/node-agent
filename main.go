@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"sniffer/internal/validator"
 	"sniffer/pkg/config"
 	v1 "sniffer/pkg/config/v1"
@@ -18,15 +17,15 @@ func main() {
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("", helpers.String("error during getting configuration data: ", fmt.Sprintf("%v", err)))
+		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during getting configuration data", helpers.Error(err))
 	}
 	err = cfg.ParseConfiguration(v1.CreateConfigData(), configData)
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("", helpers.String("error during parsing configuration: ", fmt.Sprintf("%v", err)))
+		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during parsing configuration", helpers.Error(err))
 	}
 	err = validator.CheckPrerequisites()
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("", helpers.String("error during validation: ", fmt.Sprintf("%v", err)))
+		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during validation", helpers.Error(err))
 	}
 
 	context.SetBackgroundContext()
@@ -35,16 +34,16 @@ func main() {
 	acc := accumulator.GetAccumulator()
 	err = acc.StartAccumulator(accumulatorChannelError)
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("", helpers.String("error during start accumulator: ", fmt.Sprintf("%v", err)))
+		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during start accumulator", helpers.Error(err))
 	}
 
 	k8sAPIServerClient, err := conthandler.CreateContainerClientK8SAPIServer()
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("", helpers.String("error during create the container client: ", fmt.Sprintf("%v", err)))
+		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the container client", helpers.Error(err))
 	}
 	storageClient, err := storageclient.CreateSBOMStorageK8SAggregatedAPIClient()
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("", helpers.Error(err))
+		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the storage client", helpers.Error(err))
 	}
 	mainHandler, err := conthandler.CreateContainerHandler(k8sAPIServerClient, storageClient)
 	mainHandler.StartMainHandler()
