@@ -138,22 +138,22 @@ func (sc *StorageK8SAggregatedAPIClient) GetData(key string) (any, error) {
 	return SBOM, nil
 }
 func (sc *StorageK8SAggregatedAPIClient) PutData(key string, data any) error {
-	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3)
+	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3Filtered)
 	if !ok {
 		return fmt.Errorf("failed to update SBOM: SBOM is not in the right form")
 	}
-	_, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3s(KubescapeNamespace).Update(gcontext.TODO(), SBOM, metav1.UpdateOptions{})
+	_, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Update(gcontext.TODO(), SBOM, metav1.UpdateOptions{})
 	if err != nil {
 		return err
 	}
 	return nil
 }
 func (sc *StorageK8SAggregatedAPIClient) PostData(key string, data any) error {
-	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3)
+	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3Filtered)
 	if !ok {
 		return fmt.Errorf("failed to update SBOM: SBOM is not in the right form")
 	}
-	retSBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3s(KubescapeNamespace).Create(gcontext.TODO(), SBOM, metav1.CreateOptions{})
+	retSBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Create(gcontext.TODO(), SBOM, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
