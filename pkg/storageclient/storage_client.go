@@ -4,6 +4,7 @@ import (
 	gcontext "context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	apimachineryerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -37,7 +38,7 @@ type SBOMMetadata struct {
 
 type StorageK8SAggregatedAPIClient struct {
 	clientset *spdxclient.Clientset
-	existSBOM map[string]SBOMMetadata
+	existSBOM sync.Map
 }
 
 var storageclientErrors map[string]error
@@ -64,7 +65,7 @@ func CreateSBOMStorageK8SAggregatedAPIClient() (*StorageK8SAggregatedAPIClient, 
 	}
 	storageClient := &StorageK8SAggregatedAPIClient{
 		clientset: clientset,
-		existSBOM: make(map[string]SBOMMetadata),
+		existSBOM: sync.Map{},
 	}
 
 	go storageClient.watchForSBOMs()
@@ -99,15 +100,17 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs() {
 
 			switch event.Type {
 			case watch.Added:
-				sc.existSBOM[SBOM.Name] = SBOMMetadata{
+				SBOMmetadataAdded := SBOMMetadata{
 					SBOMID:          SBOM.Name,
 					SBOMServerState: SBOMServerStateExist,
 				}
+				sc.existSBOM.Store(SBOM.Name, SBOMmetadataAdded)
 			case watch.Deleted:
-				sc.existSBOM[SBOM.Name] = SBOMMetadata{
+				SBOMmetadataDeleted := SBOMMetadata{
 					SBOMID:          SBOM.Name,
 					SBOMServerState: SBOMServerStateDeleted,
 				}
+				sc.existSBOM.Store(SBOM.Name, SBOMmetadataDeleted)
 			}
 		}
 
@@ -115,9 +118,13 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs() {
 }
 
 func (sc *StorageK8SAggregatedAPIClient) GetData(key string) (any, error) {
-	metadata, exist := sc.existSBOM[key]
+	value, exist := sc.existSBOM.Load(key)
 	if !exist {
 		return nil, fmt.Errorf("SBOM not exist in server")
+	}
+	metadata, ok := value.(SBOMMetadata)
+	if !ok {
+		return nil, fmt.Errorf("failed to convert to SBOM metadata")
 	}
 	if metadata.SBOMServerState == SBOMServerStateDeleted {
 		return nil, fmt.Errorf("SBOM not exist in server, SBOM deleted")
