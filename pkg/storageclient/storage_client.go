@@ -37,8 +37,8 @@ type SBOMMetadata struct {
 }
 
 type StorageK8SAggregatedAPIClient struct {
-	clientset *spdxclient.Clientset
-	existSBOM sync.Map
+	clientset  *spdxclient.Clientset
+	readySBOMs sync.Map
 }
 
 var storageclientErrors map[string]error
@@ -64,8 +64,8 @@ func CreateSBOMStorageK8SAggregatedAPIClient() (*StorageK8SAggregatedAPIClient, 
 		return nil, fmt.Errorf("failed to create K8S Aggregated API Client with err: %v", err)
 	}
 	storageClient := &StorageK8SAggregatedAPIClient{
-		clientset: clientset,
-		existSBOM: sync.Map{},
+		clientset:  clientset,
+		readySBOMs: sync.Map{},
 	}
 
 	go storageClient.watchForSBOMs()
@@ -104,14 +104,14 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs() {
 					SBOMID:          SBOM.Name,
 					SBOMServerState: SBOMServerStateExist,
 				}
-				sc.existSBOM.Store(SBOM.Name, SBOMmetadataAdded)
+				sc.readySBOMs.Store(SBOM.Name, SBOMmetadataAdded)
 				logger.L().Debug(fmt.Sprintf("new SBOM %s was detected in storage with labels: %v", SBOM.Name, SBOM.Labels))
 			case watch.Deleted:
 				SBOMmetadataDeleted := SBOMMetadata{
 					SBOMID:          SBOM.Name,
 					SBOMServerState: SBOMServerStateDeleted,
 				}
-				sc.existSBOM.Store(SBOM.Name, SBOMmetadataDeleted)
+				sc.readySBOMs.Store(SBOM.Name, SBOMmetadataDeleted)
 				logger.L().Debug(fmt.Sprintf("new SBOM %s was deleted from storage with labels: %v", SBOM.Name, SBOM.Labels))
 			}
 		}
@@ -120,7 +120,7 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs() {
 }
 
 func (sc *StorageK8SAggregatedAPIClient) GetData(key string) (any, error) {
-	value, exist := sc.existSBOM.Load(key)
+	value, exist := sc.readySBOMs.Load(key)
 	if !exist {
 		return nil, fmt.Errorf("SBOM not exist in server")
 	}
