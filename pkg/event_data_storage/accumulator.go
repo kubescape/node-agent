@@ -66,7 +66,7 @@ func GetAccumulator() *Accumulator {
 		accumulatorInstanceLock.Lock()
 		defer accumulatorInstanceLock.Unlock()
 		if accumulatorInstance == nil {
-			logger.L().Debug("Creating accumulatorInstance now.")
+			logger.L().Debug("Creating accumulatorInstance now")
 			accumulatorInstance = newAccumulator()
 		}
 	}
@@ -178,8 +178,8 @@ func (acc *Accumulator) accumulateEbpfEngineData() {
 			} else {
 				index, newSlotIsNeeded, err := acc.findIndexByTimestamp(event)
 				if err != nil {
-					logger.L().Ctx(context.GetBackgroundContext()).Warning("findIndexByTimestamp fail to find the index to insert the event, fail with error", helpers.Error(err))
-					logger.L().Ctx(context.GetBackgroundContext()).Warning("event that didn't store ", helpers.String("", fmt.Sprintf("%v", event)))
+					logger.L().Ctx(context.GetBackgroundContext()).Warning("findIndexByTimestamp fail to find the index to insert the event", helpers.Error(err))
+					logger.L().Ctx(context.GetBackgroundContext()).Warning("event that didn't store", helpers.String("event", fmt.Sprintf("%v", event)))
 					continue
 				}
 				if newSlotIsNeeded {
@@ -211,7 +211,7 @@ func (acc *Accumulator) StartAccumulator(errChan chan error) error {
 
 			err := acc.ebpfEngine.StartEbpfEngine()
 			if err != nil {
-				logger.L().Ctx(context.GetBackgroundContext()).Error("fail to create ebpf engine ", helpers.Error(err))
+				logger.L().Ctx(context.GetBackgroundContext()).Error("fail to create ebpf engine", helpers.Error(err))
 				return err
 			}
 
@@ -251,14 +251,10 @@ func AccumulatorByContainerID(aggregationData *[]evData.EventData, containerID s
 	accumulatorInstance.syncReaderWriterData.Lock()
 	defer accumulatorInstance.syncReaderWriterData.Unlock()
 	for i := range accumulatorInstance.data {
-		logger.L().Debug("", helpers.String("data in index ", fmt.Sprintf("%d:%v", i, accumulatorInstance.data[i])))
-	}
-	for i := range accumulatorInstance.data {
 		for j := range accumulatorInstance.data[i][containerID] {
 			*aggregationData = append(*aggregationData, accumulatorInstance.data[i][containerID][j])
 		}
 	}
-	logger.L().Debug("full aggregation data ", helpers.String("of containerID ", fmt.Sprintf("%s is: : aggregationData %v ", containerID, aggregationData)))
 }
 
 func SetMyContainerID(mycid string) {

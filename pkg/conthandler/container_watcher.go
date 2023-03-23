@@ -112,11 +112,11 @@ func (containerWatcher *ContainerWatcher) parsePodData(pod *core.Pod, containerI
 }
 
 func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEventChannel chan conthandlerV1.ContainerEventData) error {
-	logger.L().Info("", helpers.String("Ready to watch over node", containerWatcher.nodeName))
+	logger.L().Info("Ready to watch over node", helpers.String("node name", containerWatcher.nodeName))
 	for {
 		watcher, err := containerWatcher.ContainerClient.GetWatcher()
 		if err != nil {
-			logger.L().Ctx(context.GetBackgroundContext()).Error("GetWatcher err: ", helpers.Error(err))
+			logger.L().Ctx(context.GetBackgroundContext()).Error("GetWatcher err", helpers.Error(err))
 			continue
 		}
 		for {
@@ -139,13 +139,13 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 			case watch.Modified:
 				for i := range pod.Status.ContainerStatuses {
 					if pod.Status.ContainerStatuses[i].Started != nil && *pod.Status.ContainerStatuses[i].Started {
-						logger.L().Info("container started: ", helpers.String("container name: ", pod.Status.ContainerStatuses[i].ContainerID))
+						logger.L().Info("container has started", helpers.String("namespace", pod.GetNamespace()), helpers.String("Pod name", pod.GetName()), helpers.String("ContainerID", pod.Status.ContainerStatuses[i].ContainerID), helpers.String("Container name", pod.Status.ContainerStatuses[i].Name))
 						if pod.GetNamespace() == config.GetConfigurationConfigContext().GetNamespace() && pod.GetName() == config.GetConfigurationConfigContext().GetContainerName() {
 							continue
 						}
 						containerEventData, err := containerWatcher.parsePodData(pod, i)
 						if err != nil {
-							logger.L().Ctx(context.GetBackgroundContext()).Error("parsePodData failed with error: ", helpers.Error(err))
+							logger.L().Ctx(context.GetBackgroundContext()).Error("failed to parse container data", helpers.String("namespace", pod.GetNamespace()), helpers.String("Pod name", pod.GetName()), helpers.String("ContainerID", pod.Status.ContainerStatuses[i].ContainerID), helpers.String("Container name", pod.Status.ContainerStatuses[i].Name), helpers.Error(err))
 							continue
 						}
 						containerEventChannel <- *containerEventData

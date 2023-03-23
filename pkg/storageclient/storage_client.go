@@ -77,8 +77,8 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs() {
 	for {
 		watcher, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3s(KubescapeNamespace).Watch(gcontext.TODO(), metav1.ListOptions{})
 		if err != nil {
-			logger.L().Ctx(context.GetBackgroundContext()).Error("Watch for SBOMs failed ", helpers.Error(err))
-			logger.L().Ctx(context.GetBackgroundContext()).Error("Retry in ", helpers.String(fmt.Sprintf("%d", retryWatcherSleep), " seconds"))
+			logger.L().Ctx(context.GetBackgroundContext()).Error("Watch for SBOMs failed", helpers.Error(err))
+			logger.L().Ctx(context.GetBackgroundContext()).Error("Retry", helpers.String(fmt.Sprintf("with %d", retryWatcherSleep), " seconds"))
 			time.Sleep(retryWatcherSleep * time.Second)
 			continue
 		}
