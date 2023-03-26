@@ -1,12 +1,10 @@
 package conthandler
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
-	wlid "github.com/armosec/utils-k8s-go/wlid"
+	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 )
 
 const (
@@ -21,11 +19,11 @@ type ContainerEventData struct {
 	containerID   string
 	containerName string
 	wlid          string
-	instanceID    string
+	instanceID    instanceidhandler.InstanceID
 	eventType     ContainerEventType
 }
 
-func CreateNewContainerEvent(imageID, containerID, containerName, wlid, instanceID string, eventType ContainerEventType) *ContainerEventData {
+func CreateNewContainerEvent(imageID, containerID, containerName, wlid string, instanceID instanceidhandler.InstanceID, eventType ContainerEventType) *ContainerEventData {
 	return &ContainerEventData{
 		imageID:       imageID,
 		containerID:   containerID,
@@ -64,20 +62,10 @@ func (event *ContainerEventData) GetImageID() string {
 	return event.imageID
 }
 
-func (event *ContainerEventData) GetInstanceID() string {
+func (event *ContainerEventData) GetInstanceID() instanceidhandler.InstanceID {
 	return event.instanceID
 }
 
 func (event *ContainerEventData) GetInstanceIDHash() string {
-	hash := sha256.Sum256([]byte(event.instanceID))
-	str := hex.EncodeToString(hash[:])
-	return str
-}
-
-func CreateInstanceID(apiVersion, resourceVersion, wlidData, containerName string) (string, error) {
-	namespace := wlid.GetNamespaceFromWlid(wlidData)
-	kind := wlid.GetKindFromWlid(wlidData)
-	name := wlid.GetNameFromWlid(wlidData)
-
-	return "apiVersion-" + apiVersion + "/namespace-" + namespace + "/kind-" + kind + "/name-" + name + "/resourceVersion-" + resourceVersion + "/containerName-" + containerName, nil
+	return event.instanceID.GetIDHashed()
 }

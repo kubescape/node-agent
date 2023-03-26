@@ -23,6 +23,11 @@ const (
 	StepEventAggregator = "StepEventAggregator"
 )
 
+var (
+	containerAlreadyExistError  = errors.New("container already exist")
+	containerHasTerminatedError = errors.New("container has terminated")
+)
+
 type supportedServices string
 
 type afterTimerActionsData struct {
@@ -90,7 +95,7 @@ func (ch *ContainerHandler) afterTimerActions() error {
 			}
 			if err = containerData.sbomClient.StoreFilterSBOM(containerData.event.GetInstanceIDHash()); err != nil {
 				if errors.Is(err, sbom.IsAlreadyExist()) {
-					logger.L().Info("SBOM already reported", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID())}...)
+					logger.L().Debug("SBOM already reported", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID())}...)
 				} else {
 					logger.L().Ctx(context.GetBackgroundContext()).Warning("failed to store filter SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				}
@@ -115,6 +120,9 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 		if err.Error() == accumulator.DropEventOccurred {
 			watchedContainer.snifferTicker.Stop()
 			err = fmt.Errorf("we have missed some kernel events, we are going to stop all current containers monitoring")
+		} else if errors.Is(err, containerHasTerminatedError) {
+			watchedContainer.snifferTicker.Stop()
+			logger.L().Debug("container has terminated", helpers.String("container ID", watchedContainer.event.GetContainerID()), helpers.String("container name", watchedContainer.event.GetContainerName()), helpers.String("k8s resources", watchedContainer.event.GetK8SWorkloadID()))
 		}
 	}
 
@@ -145,7 +153,7 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 		go ch.getSBOM(contEvent)
 		err = ch.startTimer(watchedContainer, contEvent.GetContainerID())
 		if err != nil {
-			logger.L().Ctx(context.GetBackgroundContext()).Warning("timer of containerID stop before expected", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
+			logger.L().Ctx(context.GetBackgroundContext()).Debug("container monitoring stop before expected", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
 			err = watchedContainer.containerAggregator.StopAggregate()
 			if err != nil {
 				logger.L().Ctx(context.GetBackgroundContext()).Warning("we have failed to stop to aggregate data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()))
@@ -176,11 +184,16 @@ func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
 }
 
 func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEventData) error {
+	_, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
+	if exist {
+		return containerAlreadyExistError
+	}
+	logger.L().Info("new container has loaded - start monitor it", []helpers.IDetails{helpers.String("ContainerID", contEvent.GetContainerID()), helpers.String("Container name", contEvent.GetContainerID()), helpers.String("k8s workload", contEvent.GetK8SWorkloadID())}...)
 	newWatchedContainer := watchedContainerData{
 		containerAggregator: CreateAggregator(getShortContainerID(contEvent.GetContainerID())),
 		snifferTicker:       createTicker(),
 		event:               contEvent,
-		sbomClient:          sbom.CreateSBOMStorageClient(ch.storageClient, contEvent.GetK8SWorkloadID(), contEvent.GetInstanceID()),
+		sbomClient:          sbom.CreateSBOMStorageClient(ch.storageClient, contEvent.GetInstanceID()),
 		syncChannel: map[string]chan error{
 			StepGetSBOM:         make(chan error, 10),
 			StepEventAggregator: make(chan error, 10),
@@ -191,10 +204,26 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 	return nil
 }
 
+func (ch *ContainerHandler) handleContainerTerminatedEvent(contEvent v1.ContainerEventData) error {
+	watchedContainer, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
+	if exist {
+		data, ok := watchedContainer.(watchedContainerData)
+		if !ok {
+			return fmt.Errorf("failed to stop container ID %s", contEvent.GetContainerID())
+		}
+		logger.L().Info("container has terminated - stop monitor it", []helpers.IDetails{helpers.String("ContainerID", contEvent.GetContainerID()), helpers.String("Container name", data.event.GetContainerName()), helpers.String("k8s workload", data.event.GetK8SWorkloadID())}...)
+		data.syncChannel[StepEventAggregator] <- containerHasTerminatedError
+	}
+	return nil
+}
+
 func (ch *ContainerHandler) handleNewContainerEvent(contEvent v1.ContainerEventData) error {
 	switch contEvent.GetContainerEventType() {
 	case v1.ContainerRunning:
 		return ch.handleContainerRunningEvent(contEvent)
+
+	case v1.ContainerDeleted:
+		return ch.handleContainerTerminatedEvent(contEvent)
 	}
 	return nil
 }
@@ -205,10 +234,11 @@ func (ch *ContainerHandler) StartMainHandler() error {
 
 	for {
 		contEvent := <-ch.containersEventChan
-		logger.L().Info("", []helpers.IDetails{helpers.String("new container has loaded", contEvent.GetContainerID()), helpers.String("ContainerID", contEvent.GetContainerID()), helpers.String("Container name", contEvent.GetContainerID()), helpers.String("k8s workload", contEvent.GetK8SWorkloadID())}...)
 		err := ch.handleNewContainerEvent(contEvent)
 		if err != nil {
-			logger.L().Ctx(context.GetBackgroundContext()).Warning("fail to handle new container", helpers.String("ContainerID", contEvent.GetContainerID()), helpers.String("Container name", contEvent.GetContainerID()), helpers.String("k8s workload", contEvent.GetK8SWorkloadID()), helpers.Error(err))
+			if !errors.Is(err, containerAlreadyExistError) {
+				logger.L().Ctx(context.GetBackgroundContext()).Warning("fail to handle new container", helpers.String("ContainerID", contEvent.GetContainerID()), helpers.String("Container name", contEvent.GetContainerID()), helpers.String("k8s workload", contEvent.GetK8SWorkloadID()), helpers.Error(err))
+			}
 		}
 	}
 }

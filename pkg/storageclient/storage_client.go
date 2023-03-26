@@ -100,22 +100,21 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs() {
 
 			switch event.Type {
 			case watch.Added:
-				SBOMmetadataAdded := SBOMMetadata{
+				SBOMetadataAdded := SBOMMetadata{
 					SBOMID:          SBOM.Name,
 					SBOMServerState: SBOMServerStateExist,
 				}
-				sc.readySBOMs.Store(SBOM.Name, SBOMmetadataAdded)
+				sc.readySBOMs.Store(SBOM.Name, SBOMetadataAdded)
 				logger.L().Debug(fmt.Sprintf("new SBOM %s was detected in storage with labels: %v", SBOM.Name, SBOM.Labels))
 			case watch.Deleted:
-				SBOMmetadataDeleted := SBOMMetadata{
+				SBOMetadataDeleted := SBOMMetadata{
 					SBOMID:          SBOM.Name,
 					SBOMServerState: SBOMServerStateDeleted,
 				}
-				sc.readySBOMs.Store(SBOM.Name, SBOMmetadataDeleted)
+				sc.readySBOMs.Store(SBOM.Name, SBOMetadataDeleted)
 				logger.L().Debug(fmt.Sprintf("new SBOM %s was deleted from storage with labels: %v", SBOM.Name, SBOM.Labels))
 			}
 		}
-
 	}
 }
 

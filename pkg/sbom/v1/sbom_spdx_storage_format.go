@@ -2,11 +2,9 @@ package sbom
 
 import (
 	"fmt"
-	"sniffer/pkg/utils"
 	"sync"
 
-	wlid "github.com/armosec/utils-k8s-go/wlid"
-	"github.com/kubescape/k8s-interface/k8sinterface"
+	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -19,14 +17,6 @@ const (
 	KubescapeOrganizationName = "Kubescape"
 	KubescapeNodeAgentName    = "KubescapeNodeAgent"
 	RelationshipContainType   = "CONTAINS"
-	SPDXRefpre                = "SPDXRef-"
-	namespaceLabelKey         = "kubescape.io/workload-namespace"
-	kindLabelKey              = "kubescape.io/workload-kind"
-	nameLabelKey              = "kubescape.io/workload-name"
-	apiGroupLabelKey          = "kubescape.io/workload-api-group"
-	apiVersionLabelKey        = "kubescape.io/workload-api-version"
-	resourceVersionLabelKey   = "kubescape.io/workload-resource-version"
-	containerNameLabelKey     = "kubescape.io/workload-container-name"
 )
 
 type SBOMData struct {
@@ -138,19 +128,6 @@ func (sbom *SBOMData) StoreFilteredSBOMName(name string) {
 	sbom.filteredSpdxData.ObjectMeta.SetName(name)
 }
 
-func (sbom *SBOMData) StoreMetadata(wlidData, instanceID string) {
-	apiVersion := utils.Between(instanceID, "apiVersion-", "/namespace-")
-	group, version := k8sinterface.SplitApiVersion(apiVersion)
-
-	metadataLabel := map[string]string{
-		namespaceLabelKey:       wlid.GetNamespaceFromWlid(wlidData),
-		kindLabelKey:            wlid.GetKindFromWlid(wlidData),
-		nameLabelKey:            wlid.GetNameFromWlid(wlidData),
-		apiGroupLabelKey:        group,
-		apiVersionLabelKey:      version,
-		resourceVersionLabelKey: utils.Between(instanceID, "/resourceVersion-", "/containerName-"),
-		containerNameLabelKey:   utils.After(instanceID, "/containerName-"),
-	}
-
-	sbom.filteredSpdxData.ObjectMeta.SetLabels(metadataLabel)
+func (sbom *SBOMData) StoreMetadata(instanceID instanceidhandler.InstanceID) {
+	sbom.filteredSpdxData.ObjectMeta.SetLabels(instanceID.GetLabels())
 }
