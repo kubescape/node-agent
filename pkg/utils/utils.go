@@ -24,6 +24,19 @@ func Between(value string, a string, b string) string {
 	return value[posFirstAdjusted:posLast]
 }
 
+func After(value string, a string) string {
+	// Get substring after a string.
+	pos := strings.LastIndex(value, a)
+	if pos == -1 {
+		return ""
+	}
+	adjustedPos := pos + len(a)
+	if adjustedPos >= len(value) {
+		return ""
+	}
+	return value[adjustedPos:len(value)]
+}
+
 func CurrentDir() string {
 	_, filename, _, _ := runtime.Caller(1)
 
