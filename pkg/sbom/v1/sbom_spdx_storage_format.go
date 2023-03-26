@@ -2,6 +2,7 @@ package sbom
 
 import (
 	"fmt"
+	"sniffer/pkg/utils"
 	"sync"
 
 	wlid "github.com/armosec/utils-k8s-go/wlid"
@@ -21,6 +22,9 @@ const (
 	namespaceLabelKey         = "kubescape.io/workload-namespace"
 	kindLabelKey              = "kubescape.io/workload-kind"
 	nameLabelKey              = "kubescape.io/workload-name"
+	apiVersionLabelKey        = "kubescape.io/workload-api-version"
+	resourceVersionLabelKey   = "kubescape.io/workload-resource-version"
+	containerNameLabelKey     = "kubescape.io/workload-container-name"
 )
 
 type SBOMData struct {
@@ -132,11 +136,15 @@ func (sbom *SBOMData) StoreFilteredSBOMName(name string) {
 	sbom.filteredSpdxData.ObjectMeta.SetName(name)
 }
 
-func (sbom *SBOMData) StoreMetadata(wlidData string) {
-	wlidLabel := map[string]string{
-		namespaceLabelKey: wlid.GetNamespaceFromWlid(wlidData),
-		kindLabelKey:      wlid.GetKindFromWlid(wlidData),
-		nameLabelKey:      wlid.GetNameFromWlid(wlidData),
+func (sbom *SBOMData) StoreMetadata(wlidData, instanceID string) {
+	metadataLabel := map[string]string{
+		namespaceLabelKey:       wlid.GetNamespaceFromWlid(wlidData),
+		kindLabelKey:            wlid.GetKindFromWlid(wlidData),
+		nameLabelKey:            wlid.GetNameFromWlid(wlidData),
+		apiVersionLabelKey:      utils.Between(instanceID, "apiVersion-", "/namespace-"),
+		resourceVersionLabelKey: utils.Between(instanceID, "/resourceVersion-", "/containerName-"),
+		containerNameLabelKey:   utils.After(instanceID, "/containerName-"),
 	}
-	sbom.filteredSpdxData.ObjectMeta.SetLabels(wlidLabel)
+
+	sbom.filteredSpdxData.ObjectMeta.SetLabels(metadataLabel)
 }

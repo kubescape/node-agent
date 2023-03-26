@@ -28,6 +28,14 @@ func TestUtilsBetween(t *testing.T) {
 	}
 }
 
+func TestAfter(t *testing.T) {
+	str := "123456789"
+	substrAfter := After(str, "567")
+	if substrAfter != "89" {
+		t.Fatalf("TestAfter failed, expected 89 Get: %s", substrAfter)
+	}
+}
+
 func TestCurrentDir(t *testing.T) {
 	dir := CurrentDir()
 	if !strings.Contains(dir, "pkg/utils") {
