@@ -159,6 +159,14 @@ func (sc *StorageK8SAggregatedAPIClient) PostData(key string, data any) error {
 	SBOM.ObjectMeta = retSBOM.ObjectMeta
 	return nil
 }
+func (sc *StorageK8SAggregatedAPIClient) GetResourceVersion(key string) string {
+	SBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Get(gcontext.TODO(), key, metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	return SBOM.GetResourceVersion()
+}
+
 func IsAlreadyExist(err error) bool {
 	return apimachineryerrors.IsAlreadyExists(err)
 }

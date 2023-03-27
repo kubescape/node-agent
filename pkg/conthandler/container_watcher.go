@@ -93,6 +93,7 @@ func getInstanceID(instanceIDs []instanceidhandler.IInstanceID, name string) ins
 }
 
 func (containerWatcher *ContainerWatcher) parsePodData(pod *core.Pod, containerIndex int) (*conthandlerV1.ContainerEventData, error) {
+	pod.TypeMeta.APIVersion = "v1"
 	pod.TypeMeta.Kind = "Pod"
 	podBytes, err := json.Marshal(pod)
 	if err != nil {

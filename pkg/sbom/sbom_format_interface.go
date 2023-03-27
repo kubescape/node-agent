@@ -8,6 +8,7 @@ type SBOMFormat interface {
 	FilterSBOM(sbomFileRelevantMap map[string]bool) error
 	IsNewRelevantSBOMDataExist() bool
 	IsSBOMAlreadyExist() bool
+	AddResourceVersionIfNeeded(string)
 	StoreFilteredSBOMName(string)
 	StoreMetadata(instanceID instanceidhandler.IInstanceID)
 }
