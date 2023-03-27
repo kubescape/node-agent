@@ -205,13 +205,12 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 }
 
 func (ch *ContainerHandler) handleContainerTerminatedEvent(contEvent v1.ContainerEventData) error {
-	watchedContainer, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
-	if exist {
+	watchedContainer, _ := ch.watchedContainers.Load(contEvent.GetContainerID())
+	if watchedContainer != nil {
 		data, ok := watchedContainer.(watchedContainerData)
 		if !ok {
 			return fmt.Errorf("failed to stop container ID %s", contEvent.GetContainerID())
 		}
-		logger.L().Info("container has terminated - stop monitor it", []helpers.IDetails{helpers.String("ContainerID", contEvent.GetContainerID()), helpers.String("Container name", data.event.GetContainerName()), helpers.String("k8s workload", data.event.GetK8SWorkloadID())}...)
 		data.syncChannel[StepEventAggregator] <- containerHasTerminatedError
 	}
 	return nil

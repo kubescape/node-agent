@@ -129,7 +129,13 @@ func (sbom *SBOMData) StoreFilteredSBOMName(name string) {
 }
 
 func (sbom *SBOMData) StoreMetadata(instanceID instanceidhandler.IInstanceID) {
-	sbom.filteredSpdxData.ObjectMeta.SetLabels(instanceID.GetLabels())
+	labels := instanceID.GetLabels()
+	for i := range labels {
+		if labels[i] == "" {
+			delete(labels, i)
+		}
+	}
+	sbom.filteredSpdxData.ObjectMeta.SetLabels(labels)
 }
 
 func (sc *SBOMData) AddResourceVersionIfNeeded(resourceVersion string) {

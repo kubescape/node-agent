@@ -2,6 +2,7 @@ package storageclient
 
 import (
 	gcontext "context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -9,6 +10,7 @@ import (
 
 	apimachineryerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -136,17 +138,23 @@ func (sc *StorageK8SAggregatedAPIClient) GetData(key string) (any, error) {
 	}
 	return SBOM, nil
 }
+
 func (sc *StorageK8SAggregatedAPIClient) PutData(key string, data any) error {
 	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3Filtered)
 	if !ok {
 		return fmt.Errorf("failed to update SBOM: SBOM is not in the right form")
 	}
-	_, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Update(gcontext.TODO(), SBOM, metav1.UpdateOptions{})
+	bytes, err := json.Marshal(SBOM)
+	if err != nil {
+		return err
+	}
+	_, err = sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Patch(gcontext.TODO(), key, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		return err
 	}
 	return nil
 }
+
 func (sc *StorageK8SAggregatedAPIClient) PostData(key string, data any) error {
 	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3Filtered)
 	if !ok {
@@ -159,6 +167,7 @@ func (sc *StorageK8SAggregatedAPIClient) PostData(key string, data any) error {
 	SBOM.ObjectMeta = retSBOM.ObjectMeta
 	return nil
 }
+
 func (sc *StorageK8SAggregatedAPIClient) GetResourceVersion(key string) string {
 	SBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Get(gcontext.TODO(), key, metav1.GetOptions{})
 	if err != nil {
