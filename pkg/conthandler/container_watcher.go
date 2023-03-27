@@ -13,6 +13,8 @@ import (
 	wlid "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
+	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	k8sinterface "github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	core "k8s.io/api/core/v1"
@@ -80,6 +82,16 @@ func (client *ContainerClientK8SAPIServer) GenerateWLID(workload any, clusterNam
 	return w.GenerateWlid(clusterName)
 }
 
+func getInstanceID(instanceIDs []instanceidhandler.IInstanceID, name string) instanceidhandler.IInstanceID {
+	foundIndex := 0
+	for i := range instanceIDs {
+		if instanceIDs[i].GetContainerName() == name {
+			foundIndex = i
+		}
+	}
+	return instanceIDs[foundIndex]
+}
+
 func (containerWatcher *ContainerWatcher) parsePodData(pod *core.Pod, containerIndex int) (*conthandlerV1.ContainerEventData, error) {
 	pod.TypeMeta.Kind = "Pod"
 	podBytes, err := json.Marshal(pod)
@@ -104,10 +116,11 @@ func (containerWatcher *ContainerWatcher) parsePodData(pod *core.Pod, containerI
 		return nil, fmt.Errorf("WLID of parent workload is not in the right %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 
-	instanceID, err := conthandlerV1.CreateInstanceID(containerWatcher.ContainerClient.GetApiVersion(parentWorkload), containerWatcher.ContainerClient.GetResourceVersion(parentWorkload), parentWlid, pod.Status.ContainerStatuses[containerIndex].Name)
+	instanceIDs, err := instanceidhandlerV1.GenerateInstanceID(workload)
 	if err != nil {
 		return nil, fmt.Errorf("fail to create InstanceID to pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
+	instanceID := getInstanceID(instanceIDs, pod.Status.ContainerStatuses[containerIndex].Name)
 	return conthandlerV1.CreateNewContainerEvent(pod.Status.ContainerStatuses[containerIndex].ImageID, pod.Status.ContainerStatuses[containerIndex].ContainerID, pod.GetName(), parentWlid, instanceID, conthandlerV1.ContainerRunning), nil
 }
 
@@ -139,7 +152,7 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 			case watch.Modified:
 				for i := range pod.Status.ContainerStatuses {
 					if pod.Status.ContainerStatuses[i].Started != nil && *pod.Status.ContainerStatuses[i].Started {
-						logger.L().Info("container has started", helpers.String("namespace", pod.GetNamespace()), helpers.String("Pod name", pod.GetName()), helpers.String("ContainerID", pod.Status.ContainerStatuses[i].ContainerID), helpers.String("Container name", pod.Status.ContainerStatuses[i].Name))
+						logger.L().Debug("container has started", helpers.String("namespace", pod.GetNamespace()), helpers.String("Pod name", pod.GetName()), helpers.String("ContainerID", pod.Status.ContainerStatuses[i].ContainerID), helpers.String("Container name", pod.Status.ContainerStatuses[i].Name))
 						if pod.GetNamespace() == config.GetConfigurationConfigContext().GetNamespace() && pod.GetName() == config.GetConfigurationConfigContext().GetContainerName() {
 							continue
 						}
@@ -148,6 +161,10 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 							logger.L().Ctx(context.GetBackgroundContext()).Error("failed to parse container data", helpers.String("namespace", pod.GetNamespace()), helpers.String("Pod name", pod.GetName()), helpers.String("ContainerID", pod.Status.ContainerStatuses[i].ContainerID), helpers.String("Container name", pod.Status.ContainerStatuses[i].Name), helpers.Error(err))
 							continue
 						}
+						containerEventChannel <- *containerEventData
+					} else if pod.Status.ContainerStatuses[i].State.Terminated != nil {
+						logger.L().Debug("container has Terminated", helpers.String("namespace", pod.GetNamespace()), helpers.String("Pod name", pod.GetName()), helpers.String("ContainerID", pod.Status.ContainerStatuses[i].ContainerID), helpers.String("Container name", pod.Status.ContainerStatuses[i].Name))
+						containerEventData := conthandlerV1.CreateNewContainerEvent("", pod.Status.ContainerStatuses[i].ContainerID, "", "", &instanceidhandlerV1.InstanceID{}, conthandlerV1.ContainerDeleted)
 						containerEventChannel <- *containerEventData
 					}
 				}

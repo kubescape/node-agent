@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -61,7 +62,13 @@ func TestContMainHandler(t *testing.T) {
 	}
 	go contHandler.afterTimerActions()
 	go func() {
-		contHandler.containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerIDContHandler, RedisPodName, RedisWLID, RedisInstanceID, conthadlerV1.ContainerRunning)
+		RedisInstanceID := instanceidhandler.InstanceID{}
+		RedisInstanceID.SetAPIVersion("v1")
+		RedisInstanceID.SetNamespace("any")
+		RedisInstanceID.SetKind("deployment")
+		RedisInstanceID.SetName("redis")
+		RedisInstanceID.SetContainerName("redis")
+		contHandler.containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerIDContHandler, RedisPodName, RedisWLID, &RedisInstanceID, conthadlerV1.ContainerRunning)
 	}()
 
 	event := <-contHandler.containersEventChan

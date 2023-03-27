@@ -4,6 +4,8 @@ import (
 	"errors"
 	v1 "sniffer/pkg/sbom/v1"
 	"sniffer/pkg/storageclient"
+
+	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
 )
 
 const (
@@ -14,8 +16,7 @@ type SBOMStructure struct {
 	storageClient SBOMStorageClient
 	SBOMData      SBOMFormat
 	firstReport   bool
-	wlid          string
-	instanceID    string
+	instanceID    instanceidhandler.IInstanceID
 }
 
 type SBOMStorageClient struct {
@@ -29,14 +30,13 @@ func init() {
 	errorsOfSBOM[DataAlreadyExist] = errors.New(DataAlreadyExist)
 }
 
-func CreateSBOMStorageClient(sc storageclient.StorageClient, wlid, instanceID string) *SBOMStructure {
+func CreateSBOMStorageClient(sc storageclient.StorageClient, instanceID instanceidhandler.IInstanceID) *SBOMStructure {
 	return &SBOMStructure{
 		storageClient: SBOMStorageClient{
 			client: sc,
 		},
 		SBOMData:    v1.CreateSBOMDataSPDXVersionV040(),
 		firstReport: true,
-		wlid:        wlid,
 		instanceID:  instanceID,
 	}
 }
@@ -64,7 +64,7 @@ func (sc *SBOMStructure) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 func (sc *SBOMStructure) StoreFilterSBOM(instanceID string) error {
 	if sc.firstReport || sc.SBOMData.IsNewRelevantSBOMDataExist() {
 		sc.SBOMData.StoreFilteredSBOMName(instanceID)
-		sc.SBOMData.StoreMetadata(sc.wlid, sc.instanceID)
+		sc.SBOMData.StoreMetadata(sc.instanceID)
 		data := sc.SBOMData.GetFilterSBOMData()
 		err := sc.storageClient.client.PostData(instanceID, data)
 		if err != nil {
