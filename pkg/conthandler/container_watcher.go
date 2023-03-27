@@ -13,7 +13,8 @@ import (
 	wlid "github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
+	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	k8sinterface "github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	core "k8s.io/api/core/v1"
@@ -81,7 +82,7 @@ func (client *ContainerClientK8SAPIServer) GenerateWLID(workload any, clusterNam
 	return w.GenerateWlid(clusterName)
 }
 
-func getInstanceID(instanceIDs []instanceidhandler.InstanceID, name string) instanceidhandler.InstanceID {
+func getInstanceID(instanceIDs []instanceidhandler.IInstanceID, name string) instanceidhandler.IInstanceID {
 	foundIndex := 0
 	for i := range instanceIDs {
 		if instanceIDs[i].GetContainerName() == name {
@@ -115,7 +116,7 @@ func (containerWatcher *ContainerWatcher) parsePodData(pod *core.Pod, containerI
 		return nil, fmt.Errorf("WLID of parent workload is not in the right %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 
-	instanceIDs, err := instanceidhandler.GenerateInstanceID(workload)
+	instanceIDs, err := instanceidhandlerV1.GenerateInstanceID(workload)
 	if err != nil {
 		return nil, fmt.Errorf("fail to create InstanceID to pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
@@ -163,7 +164,7 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 						containerEventChannel <- *containerEventData
 					} else if pod.Status.ContainerStatuses[i].State.Terminated != nil {
 						logger.L().Debug("container has Terminated", helpers.String("namespace", pod.GetNamespace()), helpers.String("Pod name", pod.GetName()), helpers.String("ContainerID", pod.Status.ContainerStatuses[i].ContainerID), helpers.String("Container name", pod.Status.ContainerStatuses[i].Name))
-						containerEventData := conthandlerV1.CreateNewContainerEvent("", pod.Status.ContainerStatuses[i].ContainerID, "", "", instanceidhandler.InstanceID{}, conthandlerV1.ContainerDeleted)
+						containerEventData := conthandlerV1.CreateNewContainerEvent("", pod.Status.ContainerStatuses[i].ContainerID, "", "", &instanceidhandlerV1.InstanceID{}, conthandlerV1.ContainerDeleted)
 						containerEventChannel <- *containerEventData
 					}
 				}

@@ -68,7 +68,7 @@ func TestContMainHandler(t *testing.T) {
 		RedisInstanceID.SetKind("deployment")
 		RedisInstanceID.SetName("redis")
 		RedisInstanceID.SetContainerName("redis")
-		contHandler.containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerIDContHandler, RedisPodName, RedisWLID, RedisInstanceID, conthadlerV1.ContainerRunning)
+		contHandler.containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerIDContHandler, RedisPodName, RedisWLID, &RedisInstanceID, conthadlerV1.ContainerRunning)
 	}()
 
 	event := <-contHandler.containersEventChan

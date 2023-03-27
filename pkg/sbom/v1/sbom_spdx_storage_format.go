@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -128,6 +128,6 @@ func (sbom *SBOMData) StoreFilteredSBOMName(name string) {
 	sbom.filteredSpdxData.ObjectMeta.SetName(name)
 }
 
-func (sbom *SBOMData) StoreMetadata(instanceID instanceidhandler.InstanceID) {
+func (sbom *SBOMData) StoreMetadata(instanceID instanceidhandler.IInstanceID) {
 	sbom.filteredSpdxData.ObjectMeta.SetLabels(instanceID.GetLabels())
 }

@@ -56,7 +56,7 @@ func TestContAggregator(t *testing.T) {
 	RedisInstanceID.SetContainerName("redis")
 	containersEventChan := make(chan conthadlerV1.ContainerEventData, 50)
 	go func() {
-		containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerID, RedisPodName, RedisWLID, RedisInstanceID, conthadlerV1.ContainerRunning)
+		containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerID, RedisPodName, RedisWLID, &RedisInstanceID, conthadlerV1.ContainerRunning)
 	}()
 
 	event := <-containersEventChan

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
 )
 
 const (
@@ -19,11 +19,11 @@ type ContainerEventData struct {
 	containerID   string
 	containerName string
 	wlid          string
-	instanceID    instanceidhandler.InstanceID
+	instanceID    instanceidhandler.IInstanceID
 	eventType     ContainerEventType
 }
 
-func CreateNewContainerEvent(imageID, containerID, containerName, wlid string, instanceID instanceidhandler.InstanceID, eventType ContainerEventType) *ContainerEventData {
+func CreateNewContainerEvent(imageID, containerID, containerName, wlid string, instanceID instanceidhandler.IInstanceID, eventType ContainerEventType) *ContainerEventData {
 	return &ContainerEventData{
 		imageID:       imageID,
 		containerID:   containerID,
@@ -62,10 +62,10 @@ func (event *ContainerEventData) GetImageID() string {
 	return event.imageID
 }
 
-func (event *ContainerEventData) GetInstanceID() instanceidhandler.InstanceID {
+func (event *ContainerEventData) GetInstanceID() instanceidhandler.IInstanceID {
 	return event.instanceID
 }
 
 func (event *ContainerEventData) GetInstanceIDHash() string {
-	return event.instanceID.GetIDHashed()
+	return event.instanceID.GetHashed()
 }

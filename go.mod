@@ -2,10 +2,12 @@ module sniffer
 
 go 1.19
 
+// replace github.com/kubescape/k8s-interface => /home/raziel/armo/go/src/k8s-interface
+
 require (
 	github.com/armosec/utils-k8s-go v0.0.13
 	github.com/kubescape/go-logger v0.0.11
-	github.com/kubescape/k8s-interface v0.0.113
+	github.com/kubescape/k8s-interface v0.0.114
 	github.com/kubescape/storage v0.2.0
 	k8s.io/api v0.26.2
 	k8s.io/apimachinery v0.26.2

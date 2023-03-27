@@ -22,7 +22,7 @@ func TestContainerEvent(t *testing.T) {
 	instanceid.SetKind("deployment")
 	instanceid.SetName("aaa")
 	instanceid.SetContainerName("contName")
-	contEv := CreateNewContainerEvent(TestImageID, TestContainerID, TestContainerName, TestWLID, instanceid, ContainerRunning)
+	contEv := CreateNewContainerEvent(TestImageID, TestContainerID, TestContainerName, TestWLID, &instanceid, ContainerRunning)
 	if contEv.GetContainerEventType() != ContainerRunning {
 		t.Fatalf("fail to get container event type")
 	}
@@ -47,11 +47,11 @@ func TestContainerEvent(t *testing.T) {
 	if contEv.GetContainerName() != TestContainerName {
 		t.Fatalf("fail to get container event WLID, get %s, expected %s ", contEv.GetContainerName(), TestContainerName)
 	}
-	if contEv.GetInstanceID() != instanceid {
+	if contEv.GetInstanceID() != &instanceid {
 		t.Fatalf("fail to get container event WLID, get %s, expected %s ", contEv.GetInstanceID(), instanceid)
 	}
 
-	contEvBadImageHash := CreateNewContainerEvent("123", TestContainerID, TestContainerName, TestWLID, instanceid, ContainerRunning)
+	contEvBadImageHash := CreateNewContainerEvent("123", TestContainerID, TestContainerName, TestWLID, &instanceid, ContainerRunning)
 	_, err := contEvBadImageHash.GetImageHash()
 	if err == nil {
 		t.Fatalf("image hash parser should fail")

@@ -12,7 +12,7 @@ const (
 )
 
 func TestGetSBOM(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), instanceidhandler.InstanceID{})
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), &instanceidhandler.InstanceID{})
 	err := SBOMClient.GetSBOM(storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")
@@ -21,7 +21,7 @@ func TestGetSBOM(t *testing.T) {
 }
 
 func TestFilterSBOM(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), instanceidhandler.InstanceID{})
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), &instanceidhandler.InstanceID{})
 	err := SBOMClient.GetSBOM(storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")
@@ -36,7 +36,7 @@ func TestFilterSBOM(t *testing.T) {
 }
 
 func TestStoreFilterSBOM(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), instanceidhandler.InstanceID{})
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), &instanceidhandler.InstanceID{})
 	err := SBOMClient.GetSBOM(storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")
@@ -55,7 +55,7 @@ func TestStoreFilterSBOM(t *testing.T) {
 }
 
 func TestStoreFilterSBOMFailure(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateStorageHttpClientFailureMock(), instanceidhandler.InstanceID{})
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateStorageHttpClientFailureMock(), &instanceidhandler.InstanceID{})
 	err := SBOMClient.GetSBOM(storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")
