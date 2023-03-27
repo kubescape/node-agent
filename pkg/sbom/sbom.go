@@ -69,6 +69,8 @@ func (sc *SBOMStructure) StoreFilterSBOM(instanceID string) error {
 		err := sc.storageClient.client.PostData(instanceID, data)
 		if err != nil {
 			if storageclient.IsAlreadyExist(err) {
+				sc.SBOMData.AddResourceVersionIfNeeded(sc.storageClient.client.GetResourceVersion(instanceID))
+				data = sc.SBOMData.GetFilterSBOMData()
 				err = sc.storageClient.client.PutData(instanceID, data)
 				if err != nil {
 					return err

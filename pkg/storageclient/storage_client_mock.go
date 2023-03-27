@@ -51,6 +51,9 @@ func (sc *StorageHttpClientMock) PutData(key string, data any) error {
 func (sc *StorageHttpClientMock) PostData(key string, data any) error {
 	return nil
 }
+func (sc *StorageHttpClientMock) GetResourceVersion(key string) string {
+	return "123"
+}
 
 func CreateStorageHttpClientFailureMock() *StorageHttpClientFailureMock {
 	var data spdxv1beta1.SBOMSPDXv2p3
@@ -83,7 +86,9 @@ func (sc *StorageHttpClientFailureMock) PutData(key string, data any) error {
 func (sc *StorageHttpClientFailureMock) PostData(key string, data any) error {
 	return fmt.Errorf("error already exist")
 }
-
+func (sc *StorageHttpClientFailureMock) GetResourceVersion(key string) string {
+	return "123"
+}
 func (sc *StorageHttpClientFailureMock) IsAlreadyExist(err error) bool {
 	return true
 }
