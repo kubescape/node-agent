@@ -17,7 +17,7 @@ const (
 
 func TestContainerEvent(t *testing.T) {
 	instanceid := instanceidhandler.InstanceID{}
-	instanceid.SetAPIVersion("v1")
+	instanceid.SetAPIVersion("apps/v1")
 	instanceid.SetNamespace("any")
 	instanceid.SetKind("deployment")
 	instanceid.SetName("aaa")

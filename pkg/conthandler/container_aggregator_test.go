@@ -49,7 +49,7 @@ func TestContAggregator(t *testing.T) {
 	}
 
 	RedisInstanceID := instanceidhandler.InstanceID{}
-	RedisInstanceID.SetAPIVersion("v1")
+	RedisInstanceID.SetAPIVersion("apps/v1")
 	RedisInstanceID.SetNamespace("any")
 	RedisInstanceID.SetKind("deployment")
 	RedisInstanceID.SetName("redis")
