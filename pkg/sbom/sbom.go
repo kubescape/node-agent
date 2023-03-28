@@ -16,6 +16,8 @@ type SBOMStructure struct {
 	storageClient SBOMStorageClient
 	SBOMData      SBOMFormat
 	firstReport   bool
+	imageID       string
+	wlid          string
 	instanceID    instanceidhandler.IInstanceID
 }
 
@@ -30,7 +32,7 @@ func init() {
 	errorsOfSBOM[DataAlreadyExist] = errors.New(DataAlreadyExist)
 }
 
-func CreateSBOMStorageClient(sc storageclient.StorageClient, instanceID instanceidhandler.IInstanceID) *SBOMStructure {
+func CreateSBOMStorageClient(sc storageclient.StorageClient, wlid, imageID string, instanceID instanceidhandler.IInstanceID) *SBOMStructure {
 	return &SBOMStructure{
 		storageClient: SBOMStorageClient{
 			client: sc,
@@ -38,6 +40,8 @@ func CreateSBOMStorageClient(sc storageclient.StorageClient, instanceID instance
 		SBOMData:    v1.CreateSBOMDataSPDXVersionV040(),
 		firstReport: true,
 		instanceID:  instanceID,
+		wlid:        wlid,
+		imageID:     imageID,
 	}
 }
 
@@ -64,7 +68,7 @@ func (sc *SBOMStructure) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 func (sc *SBOMStructure) StoreFilterSBOM(instanceID string) error {
 	if sc.firstReport || sc.SBOMData.IsNewRelevantSBOMDataExist() {
 		sc.SBOMData.StoreFilteredSBOMName(instanceID)
-		sc.SBOMData.StoreMetadata(sc.instanceID)
+		sc.SBOMData.StoreMetadata(sc.wlid, sc.imageID, sc.instanceID)
 		data := sc.SBOMData.GetFilterSBOMData()
 		err := sc.storageClient.client.PostData(instanceID, data)
 		if err != nil {

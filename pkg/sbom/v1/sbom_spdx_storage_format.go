@@ -4,19 +4,30 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
 	// CreatorType should be one of "Person", "Organization", or "Tool"
-	Organization              = "Organization"
-	Tool                      = "Tool"
-	Person                    = "Person"
-	KubescapeOrganizationName = "Kubescape"
-	KubescapeNodeAgentName    = "KubescapeNodeAgent"
-	RelationshipContainType   = "CONTAINS"
+	labelPrefix                 = "kubescape.io"
+	Organization                = "Organization"
+	Tool                        = "Tool"
+	Person                      = "Person"
+	KubescapeOrganizationName   = "Kubescape"
+	KubescapeNodeAgentName      = "KubescapeNodeAgent"
+	RelationshipContainType     = "CONTAINS"
+	namespaceLabelKey           = "/workload-namespace"
+	kindLabelKey                = "/workload-kind"
+	nameLabelKey                = "/workload-name"
+	containerNameLabelKey       = "/workload-conatienr-name"
+	imageIDKeyForAnnotations    = "imageID"
+	instanceIDKeyForAnnotations = "instanceID"
 )
 
 type SBOMData struct {
@@ -128,14 +139,38 @@ func (sbom *SBOMData) StoreFilteredSBOMName(name string) {
 	sbom.filteredSpdxData.ObjectMeta.SetName(name)
 }
 
-func (sbom *SBOMData) StoreMetadata(instanceID instanceidhandler.IInstanceID) {
-	labels := instanceID.GetLabels()
+func (sbom *SBOMData) StoreMetadata(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
+	labels := map[string]string{
+		namespaceLabelKey:     wlid.GetNamespaceFromWlid(wlidData),
+		kindLabelKey:          wlid.GetKindFromWlid(wlidData),
+		nameLabelKey:          wlid.GetNameFromWlid(wlidData),
+		containerNameLabelKey: instanceID.GetContainerName(),
+	}
 	for i := range labels {
 		if labels[i] == "" {
 			delete(labels, i)
+		} else {
+			errs := validation.IsValidLabelValue(labels[i])
+			if len(errs) != 0 {
+				logger.L().Debug("label is not valid", helpers.String("label", labels[i]))
+				for j := range errs {
+					logger.L().Debug("label err description", helpers.String("Err: ", errs[j]))
+				}
+				delete(labels, i)
+			}
 		}
 	}
 	sbom.filteredSpdxData.ObjectMeta.SetLabels(labels)
+
+	annotations := make(map[string]string)
+	if imageID != "" {
+		annotations[imageIDKeyForAnnotations] = imageID
+	}
+	instanceIDString := instanceID.GetStringFormatted()
+	if instanceIDString != "" {
+		annotations[instanceIDKeyForAnnotations] = instanceIDString
+	}
+	sbom.filteredSpdxData.ObjectMeta.SetAnnotations(annotations)
 }
 
 func (sc *SBOMData) AddResourceVersionIfNeeded(resourceVersion string) {
