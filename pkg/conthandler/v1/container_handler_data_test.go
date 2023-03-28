@@ -11,13 +11,13 @@ const (
 	TestContainerID    = "e1da74f71370d61564cbc746996e3f534d4c61ce3e7e7627b1f2543999e3cf7a"
 	TestContainerName  = "blabla"
 	TestWLID           = "wlid://cluster-name/namespace-any/deployment-aaa"
-	TestInstanceID     = "apiVersion-v1/namespace-any/kind-deployment/name-aaa/containerName-contName"
-	TestInstanceIDHash = "caab386cd1230809464f0b67ddd09cb5132053bec358a4e99b35b5d695ac0026"
+	TestInstanceID     = "apiVersion-apps/v1/namespace-any/kind-deployment/name-aaa/containerName-contName"
+	TestInstanceIDHash = "fb7c6f65d5ede71f7dd6dc43b63261295ce26a2898d8517c23c6f171cc3865ce"
 )
 
 func TestContainerEvent(t *testing.T) {
 	instanceid := instanceidhandler.InstanceID{}
-	instanceid.SetAPIVersion("v1")
+	instanceid.SetAPIVersion("apps/v1")
 	instanceid.SetNamespace("any")
 	instanceid.SetKind("deployment")
 	instanceid.SetName("aaa")
@@ -36,7 +36,7 @@ func TestContainerEvent(t *testing.T) {
 		t.Fatalf("fail to get container event image ID")
 	}
 	if instanceid.GetStringFormatted() != TestInstanceID {
-		t.Fatalf("fail to get container event instance ID")
+		t.Fatalf("fail to get container event instance ID, get %s expected %s", instanceid.GetStringFormatted(), TestInstanceID)
 	}
 	if contEv.GetInstanceIDHash() != TestInstanceIDHash {
 		t.Fatalf("fail to get container event instance ID hash, get %s, expected %s ", contEv.GetInstanceIDHash(), TestInstanceIDHash)

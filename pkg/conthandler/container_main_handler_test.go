@@ -63,7 +63,7 @@ func TestContMainHandler(t *testing.T) {
 	go contHandler.afterTimerActions()
 	go func() {
 		RedisInstanceID := instanceidhandler.InstanceID{}
-		RedisInstanceID.SetAPIVersion("v1")
+		RedisInstanceID.SetAPIVersion("apps/v1")
 		RedisInstanceID.SetNamespace("any")
 		RedisInstanceID.SetKind("deployment")
 		RedisInstanceID.SetName("redis")
