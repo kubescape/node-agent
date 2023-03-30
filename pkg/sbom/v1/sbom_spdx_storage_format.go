@@ -139,9 +139,9 @@ func (sbom *SBOMData) storeLabels(wlidData string, imageID string, instanceID in
 		if labels[i] == "" {
 			delete(labels, i)
 		} else {
-			if i == instanceidhandlerV1.LabelFormatKeyKind {
+			if i == instanceidhandlerV1.KindMetadataKey {
 				labels[i] = wlid.GetKindFromWlid(wlidData)
-			} else if i == instanceidhandlerV1.LabelFormatKeyName {
+			} else if i == instanceidhandlerV1.NameMetadataKey {
 				labels[i] = wlid.GetNameFromWlid(wlidData)
 			}
 			errs := validation.IsValidLabelValue(labels[i])
@@ -159,9 +159,9 @@ func (sbom *SBOMData) storeLabels(wlidData string, imageID string, instanceID in
 
 func (sbom *SBOMData) storeAnnotations(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
 	annotations := make(map[string]string)
-	annotations[instanceidhandlerV1.WlidAnnotationKey] = wlidData
-	annotations[instanceidhandlerV1.InstanceIDAnnotationKey] = instanceID.GetStringFormatted()
-	annotations[instanceidhandlerV1.LabelFormatKeyContainerName] = instanceID.GetContainerName()
+	annotations[instanceidhandlerV1.WlidMetadataKey] = wlidData
+	annotations[instanceidhandlerV1.InstanceIDMetadataKey] = instanceID.GetStringFormatted()
+	annotations[instanceidhandlerV1.ContainerNameMetadataKey] = instanceID.GetContainerName()
 
 	sbom.filteredSpdxData.ObjectMeta.SetAnnotations(annotations)
 }
