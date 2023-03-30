@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
+	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -139,17 +140,17 @@ func (sbom *SBOMData) StoreFilteredSBOMName(name string) {
 	sbom.filteredSpdxData.ObjectMeta.SetName(name)
 }
 
-func (sbom *SBOMData) StoreMetadata(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
-	labels := map[string]string{
-		namespaceLabelKey:     wlid.GetNamespaceFromWlid(wlidData),
-		kindLabelKey:          wlid.GetKindFromWlid(wlidData),
-		nameLabelKey:          wlid.GetNameFromWlid(wlidData),
-		containerNameLabelKey: instanceID.GetContainerName(),
-	}
+func (sbom *SBOMData) storeLabels(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
+	labels := instanceID.GetLabels()
 	for i := range labels {
 		if labels[i] == "" {
 			delete(labels, i)
 		} else {
+			if i == instanceidhandlerV1.LabelFormatKeyKind {
+				labels[i] = wlid.GetKindFromWlid(wlidData)
+			} else if i == instanceidhandlerV1.LabelFormatKeyName {
+				labels[i] = wlid.GetNameFromWlid(wlidData)
+			}
 			errs := validation.IsValidLabelValue(labels[i])
 			if len(errs) != 0 {
 				logger.L().Debug("label is not valid", helpers.String("label", labels[i]))
@@ -161,16 +162,20 @@ func (sbom *SBOMData) StoreMetadata(wlidData string, imageID string, instanceID 
 		}
 	}
 	sbom.filteredSpdxData.ObjectMeta.SetLabels(labels)
+}
 
+func (sbom *SBOMData) storeAnnotations(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
 	annotations := make(map[string]string)
-	if imageID != "" {
-		annotations[imageIDKeyForAnnotations] = imageID
-	}
-	instanceIDString := instanceID.GetStringFormatted()
-	if instanceIDString != "" {
-		annotations[instanceIDKeyForAnnotations] = instanceIDString
-	}
+	annotations[instanceidhandlerV1.WlidAnnotationKey] = wlidData
+	annotations[instanceidhandlerV1.InstanceIDAnnotationKey] = instanceID.GetStringFormatted()
+	annotations[instanceidhandlerV1.LabelFormatKeyContainerName] = instanceID.GetContainerName()
+
 	sbom.filteredSpdxData.ObjectMeta.SetAnnotations(annotations)
+}
+
+func (sbom *SBOMData) StoreMetadata(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
+	sbom.storeLabels(wlidData, imageID, instanceID)
+	sbom.storeAnnotations(wlidData, imageID, instanceID)
 }
 
 func (sc *SBOMData) AddResourceVersionIfNeeded(resourceVersion string) {
