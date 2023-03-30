@@ -16,19 +16,12 @@ import (
 
 const (
 	// CreatorType should be one of "Person", "Organization", or "Tool"
-	labelPrefix                 = "kubescape.io"
-	Organization                = "Organization"
-	Tool                        = "Tool"
-	Person                      = "Person"
-	KubescapeOrganizationName   = "Kubescape"
-	KubescapeNodeAgentName      = "KubescapeNodeAgent"
-	RelationshipContainType     = "CONTAINS"
-	namespaceLabelKey           = "/workload-namespace"
-	kindLabelKey                = "/workload-kind"
-	nameLabelKey                = "/workload-name"
-	containerNameLabelKey       = "/workload-conatienr-name"
-	imageIDKeyForAnnotations    = "imageID"
-	instanceIDKeyForAnnotations = "instanceID"
+	Organization              = "Organization"
+	Tool                      = "Tool"
+	Person                    = "Person"
+	KubescapeOrganizationName = "Kubescape"
+	KubescapeNodeAgentName    = "KubescapeNodeAgent"
+	RelationshipContainType   = "CONTAINS"
 )
 
 type SBOMData struct {
