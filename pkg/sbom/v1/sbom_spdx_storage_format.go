@@ -1,7 +1,11 @@
 package sbom
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"sniffer/pkg/context"
 	"sync"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -22,23 +26,60 @@ const (
 	KubescapeOrganizationName = "Kubescape"
 	KubescapeNodeAgentName    = "KubescapeNodeAgent"
 	RelationshipContainType   = "CONTAINS"
+	directorySBOM             = "SBOM"
 )
 
+var spdxDataDirPath string
+
 type SBOMData struct {
-	spdxData                              spdxv1beta1.SBOMSPDXv2p3
+	spdxDataPath                          string
 	filteredSpdxData                      spdxv1beta1.SBOMSPDXv2p3Filtered
 	relevantRealtimeFilesBySPDXIdentifier sync.Map
 	newRelevantData                       bool
 	alreadyExistSBOM                      bool
+	instanceID                            instanceidhandler.IInstanceID
 }
 
-func CreateSBOMDataSPDXVersionV040() *SBOMData {
+func init() {
+	wd, err := os.Getwd()
+	if err != nil {
+		logger.L().Ctx(context.GetBackgroundContext()).Error("failed to get working directory", helpers.Error(err))
+	}
+	spdxDataDirPath = fmt.Sprintf("%s/%s", wd, directorySBOM)
+	err = os.MkdirAll(spdxDataDirPath, os.ModeDir|os.ModePerm)
+	if err != nil {
+		logger.L().Ctx(context.GetBackgroundContext()).Error("failed to create directory for SBOM resources", helpers.String("directory path", spdxDataDirPath), helpers.Error(err))
+	}
+}
+
+func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID) SBOMFormat {
+
 	return &SBOMData{
+		spdxDataPath:                          fmt.Sprintf("%s/%s", spdxDataDirPath, instanceID.GetHashed()),
 		filteredSpdxData:                      spdxv1beta1.SBOMSPDXv2p3Filtered{},
 		relevantRealtimeFilesBySPDXIdentifier: sync.Map{},
 		newRelevantData:                       false,
 		alreadyExistSBOM:                      false,
+		instanceID:                            instanceID,
 	}
+}
+
+func (sbom *SBOMData) saveSBOM(spdxData *spdxv1beta1.SBOMSPDXv2p3) error {
+	f, err := os.Create(sbom.spdxDataPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	data, err := json.Marshal(spdxData)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (sbom *SBOMData) StoreSBOM(sbomData any) error {
@@ -47,14 +88,18 @@ func (sbom *SBOMData) StoreSBOM(sbomData any) error {
 		return fmt.Errorf("storage format: StoreSBOM: SBOM data format is not supported")
 	}
 
-	sbom.spdxData = *spdxData
-	for i := range sbom.spdxData.Spec.SPDX.Files {
-		sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier), false)
+	err := sbom.saveSBOM(spdxData)
+	if err != nil {
+		return err
 	}
 
-	sbom.filteredSpdxData.Spec = sbom.spdxData.Spec
-	sbom.filteredSpdxData.Status = sbom.spdxData.Status
-	sbom.spdxData.Spec.SPDX.CreationInfo.Creators = append(sbom.spdxData.Spec.SPDX.CreationInfo.Creators, []spdxv1beta1.Creator{
+	for i := range spdxData.Spec.SPDX.Files {
+		sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxv1beta1.ElementID(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier), false)
+	}
+
+	sbom.filteredSpdxData.Spec = spdxData.Spec
+	sbom.filteredSpdxData.Status = spdxData.Status
+	sbom.filteredSpdxData.Spec.SPDX.CreationInfo.Creators = append(sbom.filteredSpdxData.Spec.SPDX.CreationInfo.Creators, []spdxv1beta1.Creator{
 		{
 			CreatorType: Organization,
 			Creator:     KubescapeOrganizationName,
@@ -74,40 +119,67 @@ func (sbom *SBOMData) StoreSBOM(sbomData any) error {
 	return nil
 }
 
+func (sbom *SBOMData) getSBOMData() (*spdxv1beta1.SBOMSPDXv2p3, error) {
+	file, err := os.Open(sbom.spdxDataPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	bytes, err := ioutil.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+
+	spdxData := spdxv1beta1.SBOMSPDXv2p3{}
+	err = json.Unmarshal(bytes, &spdxData)
+	if err != nil {
+		return nil, err
+	}
+
+	return &spdxData, nil
+}
+
 func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 	sbom.newRelevantData = false
+
+	spdxData, err := sbom.getSBOMData()
+	if err != nil {
+		return err
+	}
+
 	//filter relevant file list
-	for i := range sbom.spdxData.Spec.SPDX.Files {
-		if exist := sbomFileRelevantMap[sbom.spdxData.Spec.SPDX.Files[i].FileName]; exist {
-			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier)); data != nil && !data.(bool) {
-				sbom.filteredSpdxData.Spec.SPDX.Files = append(sbom.filteredSpdxData.Spec.SPDX.Files, sbom.spdxData.Spec.SPDX.Files[i])
-				sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier), true)
+	for i := range spdxData.Spec.SPDX.Files {
+		if exist := sbomFileRelevantMap[spdxData.Spec.SPDX.Files[i].FileName]; exist {
+			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier)); data != nil && !data.(bool) {
+				sbom.filteredSpdxData.Spec.SPDX.Files = append(sbom.filteredSpdxData.Spec.SPDX.Files, spdxData.Spec.SPDX.Files[i])
+				sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxv1beta1.ElementID(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier), true)
 				sbom.newRelevantData = true
 			}
 		}
 	}
 
 	//filter relationship list
-	for i := range sbom.spdxData.Spec.SPDX.Relationships {
-		switch sbom.spdxData.Spec.SPDX.Relationships[i].Relationship {
+	for i := range spdxData.Spec.SPDX.Relationships {
+		switch spdxData.Spec.SPDX.Relationships[i].Relationship {
 		case RelationshipContainType:
-			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(sbom.spdxData.Spec.SPDX.Relationships[i].RefB.ElementRefID)); data != nil && data.(bool) {
-				sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, sbom.spdxData.Spec.SPDX.Relationships[i])
+			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(spdxData.Spec.SPDX.Relationships[i].RefB.ElementRefID)); data != nil && data.(bool) {
+				sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, spdxData.Spec.SPDX.Relationships[i])
 			}
 		default:
-			sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, sbom.spdxData.Spec.SPDX.Relationships[i])
+			sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, spdxData.Spec.SPDX.Relationships[i])
 		}
 	}
 
 	//filter relevant package list
-	for i := range sbom.spdxData.Spec.SPDX.Packages {
+	for i := range spdxData.Spec.SPDX.Packages {
 		relevantPackageMap := make(map[spdxv1beta1.DocElementID]bool)
 		for j := range sbom.filteredSpdxData.Spec.SPDX.Relationships {
 			switch sbom.filteredSpdxData.Spec.SPDX.Relationships[j].Relationship {
 			case RelationshipContainType:
 				if alreadyExist := relevantPackageMap[sbom.filteredSpdxData.Spec.SPDX.Relationships[j].RefA]; !alreadyExist {
-					if spdxv1beta1.ElementID(sbom.filteredSpdxData.Spec.SPDX.Relationships[j].RefA.ElementRefID) == sbom.spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier {
-						sbom.filteredSpdxData.Spec.SPDX.Packages = append(sbom.filteredSpdxData.Spec.SPDX.Packages, sbom.spdxData.Spec.SPDX.Packages[i])
+					if spdxv1beta1.ElementID(sbom.filteredSpdxData.Spec.SPDX.Relationships[j].RefA.ElementRefID) == spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier {
+						sbom.filteredSpdxData.Spec.SPDX.Packages = append(sbom.filteredSpdxData.Spec.SPDX.Packages, spdxData.Spec.SPDX.Packages[i])
 					}
 				}
 			}
@@ -174,5 +246,12 @@ func (sbom *SBOMData) StoreMetadata(wlidData string, imageID string, instanceID 
 func (sc *SBOMData) AddResourceVersionIfNeeded(resourceVersion string) {
 	if sc.filteredSpdxData.GetResourceVersion() == "" {
 		sc.filteredSpdxData.SetResourceVersion(resourceVersion)
+	}
+}
+
+func (sc *SBOMData) CleanResources() {
+	err := os.Remove(sc.spdxDataPath)
+	if err != nil {
+		logger.L().Warning("fail to remove file", helpers.String("file name", sc.spdxDataPath), helpers.Error(err))
 	}
 }
