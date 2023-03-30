@@ -4,9 +4,14 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
+	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
@@ -128,14 +133,42 @@ func (sbom *SBOMData) StoreFilteredSBOMName(name string) {
 	sbom.filteredSpdxData.ObjectMeta.SetName(name)
 }
 
-func (sbom *SBOMData) StoreMetadata(instanceID instanceidhandler.IInstanceID) {
+func (sbom *SBOMData) storeLabels(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
 	labels := instanceID.GetLabels()
 	for i := range labels {
 		if labels[i] == "" {
 			delete(labels, i)
+		} else {
+			if i == instanceidhandlerV1.KindMetadataKey {
+				labels[i] = wlid.GetKindFromWlid(wlidData)
+			} else if i == instanceidhandlerV1.NameMetadataKey {
+				labels[i] = wlid.GetNameFromWlid(wlidData)
+			}
+			errs := validation.IsValidLabelValue(labels[i])
+			if len(errs) != 0 {
+				logger.L().Debug("label is not valid", helpers.String("label", labels[i]))
+				for j := range errs {
+					logger.L().Debug("label err description", helpers.String("Err: ", errs[j]))
+				}
+				delete(labels, i)
+			}
 		}
 	}
 	sbom.filteredSpdxData.ObjectMeta.SetLabels(labels)
+}
+
+func (sbom *SBOMData) storeAnnotations(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
+	annotations := make(map[string]string)
+	annotations[instanceidhandlerV1.WlidMetadataKey] = wlidData
+	annotations[instanceidhandlerV1.InstanceIDMetadataKey] = instanceID.GetStringFormatted()
+	annotations[instanceidhandlerV1.ContainerNameMetadataKey] = instanceID.GetContainerName()
+
+	sbom.filteredSpdxData.ObjectMeta.SetAnnotations(annotations)
+}
+
+func (sbom *SBOMData) StoreMetadata(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
+	sbom.storeLabels(wlidData, imageID, instanceID)
+	sbom.storeAnnotations(wlidData, imageID, instanceID)
 }
 
 func (sc *SBOMData) AddResourceVersionIfNeeded(resourceVersion string) {

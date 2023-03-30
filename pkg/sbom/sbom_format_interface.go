@@ -10,5 +10,5 @@ type SBOMFormat interface {
 	IsSBOMAlreadyExist() bool
 	AddResourceVersionIfNeeded(string)
 	StoreFilteredSBOMName(string)
-	StoreMetadata(instanceID instanceidhandler.IInstanceID)
+	StoreMetadata(wlidData, imageID string, instanceID instanceidhandler.IInstanceID)
 }

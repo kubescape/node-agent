@@ -193,7 +193,7 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 		containerAggregator: CreateAggregator(getShortContainerID(contEvent.GetContainerID())),
 		snifferTicker:       createTicker(),
 		event:               contEvent,
-		sbomClient:          sbom.CreateSBOMStorageClient(ch.storageClient, contEvent.GetInstanceID()),
+		sbomClient:          sbom.CreateSBOMStorageClient(ch.storageClient, contEvent.GetK8SWorkloadID(), contEvent.GetImageID(), contEvent.GetInstanceID()),
 		syncChannel: map[string]chan error{
 			StepGetSBOM:         make(chan error, 10),
 			StepEventAggregator: make(chan error, 10),
