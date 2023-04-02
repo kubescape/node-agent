@@ -86,7 +86,7 @@ func (ch *ContainerHandler) afterTimerActions() error {
 			fileList := containerData.containerAggregator.GetContainerRealtimeFileList()
 
 			if err = <-containerData.syncChannel[StepGetSBOM]; err != nil {
-				logger.L().Ctx(context.GetBackgroundContext()).Warning("failed to get SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+				logger.L().Ctx(context.GetBackgroundContext()).Debug("failed to get SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				continue
 			}
 			if err = containerData.sbomClient.FilterSBOM(fileList); err != nil {
