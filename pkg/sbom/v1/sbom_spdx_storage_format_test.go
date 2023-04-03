@@ -16,7 +16,7 @@ const (
 )
 
 type notSPDXFormatSBOMData struct {
-	data int `json:"aaa"`
+	Data int `json:"aaa"`
 }
 
 func TestStoreLabels(t *testing.T) {
