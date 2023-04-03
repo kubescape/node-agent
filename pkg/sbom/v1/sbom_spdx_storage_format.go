@@ -40,16 +40,20 @@ type SBOMData struct {
 	instanceID                            instanceidhandler.IInstanceID
 }
 
-func init() {
+func createSBOMDir() {
 	wd, err := os.Getwd()
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Error("failed to get working directory", helpers.Error(err))
+		logger.L().Ctx(context.GetBackgroundContext()).Fatal("failed to get working directory", helpers.Error(err))
 	}
 	spdxDataDirPath = fmt.Sprintf("%s/%s", wd, directorySBOM)
 	err = os.MkdirAll(spdxDataDirPath, os.ModeDir|os.ModePerm)
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Error("failed to create directory for SBOM resources", helpers.String("directory path", spdxDataDirPath), helpers.Error(err))
+		logger.L().Ctx(context.GetBackgroundContext()).Fatal("failed to create directory for SBOM resources", helpers.String("directory path", spdxDataDirPath), helpers.Error(err))
 	}
+}
+
+func init() {
+	createSBOMDir()
 }
 
 func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID) SBOMFormat {
@@ -119,7 +123,7 @@ func (sbom *SBOMData) StoreSBOM(sbomData any) error {
 	return nil
 }
 
-func (sbom *SBOMData) getSBOMData() (*spdxv1beta1.SBOMSPDXv2p3, error) {
+func (sbom *SBOMData) getSBOMDataSPDXFormat() (*spdxv1beta1.SBOMSPDXv2p3, error) {
 	file, err := os.Open(sbom.spdxDataPath)
 	if err != nil {
 		return nil, err
@@ -143,7 +147,7 @@ func (sbom *SBOMData) getSBOMData() (*spdxv1beta1.SBOMSPDXv2p3, error) {
 func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 	sbom.newRelevantData = false
 
-	spdxData, err := sbom.getSBOMData()
+	spdxData, err := sbom.getSBOMDataSPDXFormat()
 	if err != nil {
 		return err
 	}
@@ -252,6 +256,6 @@ func (sc *SBOMData) AddResourceVersionIfNeeded(resourceVersion string) {
 func (sc *SBOMData) CleanResources() {
 	err := os.Remove(sc.spdxDataPath)
 	if err != nil {
-		logger.L().Warning("fail to remove file", helpers.String("file name", sc.spdxDataPath), helpers.Error(err))
+		logger.L().Debug("fail to remove file", helpers.String("file name", sc.spdxDataPath), helpers.Error(err))
 	}
 }
