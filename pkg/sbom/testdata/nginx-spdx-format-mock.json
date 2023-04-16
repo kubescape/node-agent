@@ -160,6 +160,11 @@
       "spdxElementId": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
       "relatedSpdxElement": "SPDXRef-e97fef92a7d904e0",
       "relationshipType": "CONTAINS"
+     },
+     {
+     "relatedSpdxElement": "SPDXRef-DOCUMENT",
+     "relationshipType": "DESCRIBES",
+     "spdxElementId": "SPDXRef-DOCUMENT"
      }
     ]
    }

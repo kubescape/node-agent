@@ -86,7 +86,7 @@ func (ch *ContainerHandler) afterTimerActions() error {
 			fileList := containerData.containerAggregator.GetContainerRealtimeFileList()
 
 			if err = <-containerData.syncChannel[StepGetSBOM]; err != nil {
-				logger.L().Ctx(context.GetBackgroundContext()).Warning("failed to get SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+				logger.L().Ctx(context.GetBackgroundContext()).Debug("failed to get SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				continue
 			}
 			if err = containerData.sbomClient.FilterSBOM(fileList); err != nil {
@@ -133,6 +133,11 @@ func createTicker() *time.Ticker {
 	return time.NewTicker(config.GetConfigurationConfigContext().GetUpdateDataPeriod())
 }
 
+func (ch *ContainerHandler) deleteResources(watchedContainer watchedContainerData, contEvent v1.ContainerEventData) {
+	watchedContainer.sbomClient.CleanResources()
+	ch.watchedContainers.Delete(contEvent.GetContainerID())
+}
+
 func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventData) {
 	containerDataInterface, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
 	if !exist {
@@ -158,10 +163,10 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 			if err != nil {
 				logger.L().Ctx(context.GetBackgroundContext()).Warning("we have failed to stop to aggregate data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()))
 			}
-			ch.watchedContainers.Delete(contEvent.GetContainerID())
 			break
 		}
 	}
+	ch.deleteResources(watchedContainer, contEvent)
 }
 
 func getShortContainerID(containerID string) string {

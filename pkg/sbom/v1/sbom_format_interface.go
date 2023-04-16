@@ -11,4 +11,5 @@ type SBOMFormat interface {
 	AddResourceVersionIfNeeded(string)
 	StoreFilteredSBOMName(string)
 	StoreMetadata(wlidData, imageID string, instanceID instanceidhandler.IInstanceID)
+	CleanResources()
 }
