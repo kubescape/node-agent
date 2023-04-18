@@ -97,11 +97,11 @@ func (ch *ContainerHandler) afterTimerActions() error {
 				if errors.Is(err, sbom.IsAlreadyExist()) {
 					logger.L().Debug("SBOM already reported", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID())}...)
 				} else {
-					logger.L().Ctx(context.GetBackgroundContext()).Error("failed to store filter SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+					logger.L().Ctx(context.GetBackgroundContext()).Error("failed to store filtered SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				}
 				continue
 			}
-			logger.L().Info("filtered SBOM has stored successfully in the storage", []helpers.IDetails{helpers.String("containerID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID())}...)
+			logger.L().Info("filtered SBOM has been stored successfully", []helpers.IDetails{helpers.String("containerID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID())}...)
 		}
 	}
 }
@@ -119,7 +119,7 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 	case err = <-watchedContainer.syncChannel[StepEventAggregator]:
 		if err.Error() == accumulator.DropEventOccurred {
 			watchedContainer.snifferTicker.Stop()
-			err = fmt.Errorf("we have missed some kernel events, we are going to stop all current containers monitoring")
+			err = fmt.Errorf("droppedEvents. Monitoring for all of the containers will be stopped")
 		} else if errors.Is(err, containerHasTerminatedError) {
 			watchedContainer.snifferTicker.Stop()
 			logger.L().Debug("container has terminated", helpers.String("container ID", watchedContainer.event.GetContainerID()), helpers.String("container name", watchedContainer.event.GetContainerName()), helpers.String("k8s resources", watchedContainer.event.GetK8SWorkloadID()))
