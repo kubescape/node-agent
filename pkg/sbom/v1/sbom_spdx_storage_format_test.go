@@ -346,10 +346,6 @@ func TestAddResourceVersionIfNeeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to filter SBOM, err: %v", err)
 	}
-	SBOMData.AddResourceVersionIfNeeded("123")
-	if SBOMData.filteredSpdxData.ObjectMeta.ResourceVersion != "123" {
-		t.Fatalf("ResourceVersion should be 123 not %s", SBOMData.filteredSpdxData.ObjectMeta.ResourceVersion)
-	}
 }
 
 func TestStoreFilteredSBOMName(t *testing.T) {

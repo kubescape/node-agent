@@ -247,12 +247,6 @@ func (sbom *SBOMData) StoreMetadata(wlidData string, imageID string, instanceID 
 	sbom.storeAnnotations(wlidData, imageID, instanceID)
 }
 
-func (sc *SBOMData) AddResourceVersionIfNeeded(resourceVersion string) {
-	if sc.filteredSpdxData.GetResourceVersion() == "" {
-		sc.filteredSpdxData.SetResourceVersion(resourceVersion)
-	}
-}
-
 func (sc *SBOMData) CleanResources() {
 	err := os.Remove(sc.spdxDataPath)
 	if err != nil {
