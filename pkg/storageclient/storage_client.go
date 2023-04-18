@@ -121,17 +121,17 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs() {
 }
 
 func (sc *StorageK8SAggregatedAPIClient) GetData(key string) (any, error) {
-	value, exist := sc.readySBOMs.Load(key)
-	if !exist {
-		return nil, fmt.Errorf("SBOM not exist in server")
-	}
-	metadata, ok := value.(SBOMMetadata)
-	if !ok {
-		return nil, fmt.Errorf("failed to convert to SBOM metadata")
-	}
-	if metadata.SBOMServerState == SBOMServerStateDeleted {
-		return nil, fmt.Errorf("SBOM not exist in server, SBOM deleted")
-	}
+	// value, exist := sc.readySBOMs.Load(key)
+	// if !exist {
+	// 	return nil, fmt.Errorf("SBOM not exist in server")
+	// }
+	// metadata, ok := value.(SBOMMetadata)
+	// if !ok {
+	// 	return nil, fmt.Errorf("failed to convert to SBOM metadata")
+	// }
+	// if metadata.SBOMServerState == SBOMServerStateDeleted {
+	// 	return nil, fmt.Errorf("SBOM not exist in server, SBOM deleted")
+	// }
 	SBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3s(KubescapeNamespace).Get(gcontext.TODO(), key, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
