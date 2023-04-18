@@ -136,6 +136,13 @@ func (sc *StorageK8SAggregatedAPIClient) GetData(key string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// remove fields that are not needed
+	SBOM.ResourceVersion = ""
+	SBOM.CreationTimestamp = metav1.Time{}
+	SBOM.Generation = 0
+	SBOM.UID = ""
+
 	return SBOM, nil
 }
 
