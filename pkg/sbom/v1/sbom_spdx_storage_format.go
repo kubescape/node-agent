@@ -197,6 +197,7 @@ func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 			for i := range packageData.packageSPDXIdentifier {
 				relevantPackageFromSourceInfoMap[packageData.packageSPDXIdentifier[i]] = true
 			}
+			sbom.newRelevantData = true
 		}
 	}
 
