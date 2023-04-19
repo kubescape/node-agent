@@ -94,9 +94,7 @@ func (ch *ContainerHandler) afterTimerActions() error {
 				continue
 			}
 			if err = containerData.sbomClient.StoreFilterSBOM(containerData.event.GetInstanceIDHash()); err != nil {
-				if errors.Is(err, sbom.IsAlreadyExist()) {
-					logger.L().Debug("SBOM already reported", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID())}...)
-				} else {
+				if !errors.Is(err, sbom.IsAlreadyExist()) {
 					logger.L().Ctx(context.GetBackgroundContext()).Error("failed to store filtered SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				}
 				continue
