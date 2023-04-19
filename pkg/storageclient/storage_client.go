@@ -167,11 +167,10 @@ func (sc *StorageK8SAggregatedAPIClient) PostData(key string, data any) error {
 	if !ok {
 		return fmt.Errorf("failed to update SBOM: SBOM is not in the right form")
 	}
-	retSBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Create(gcontext.TODO(), SBOM, metav1.CreateOptions{})
+	_, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Create(gcontext.TODO(), SBOM, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
-	SBOM.ObjectMeta = retSBOM.ObjectMeta
 	return nil
 }
 
