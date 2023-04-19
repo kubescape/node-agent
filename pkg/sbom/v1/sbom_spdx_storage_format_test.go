@@ -406,7 +406,8 @@ func TestStoreMetadata(t *testing.T) {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
 	err = SBOMData.FilterSBOM((map[string]bool{
-		"/usr/share/adduser/adduser.conf": true,
+		"/usr/share/adduser/adduser.conf":  true,
+		"/usr/share/doc/adduser/copyright": true,
 	}))
 	if err != nil {
 		t.Fatalf("fail to filter SBOM, err: %v", err)
@@ -462,4 +463,21 @@ func TestCleanResources(t *testing.T) {
 		t.Fatalf("SBOM file of %s should be deleted", instanceID.GetHashed())
 	}
 	SBOMData.CleanResources()
+}
+
+/*
+example:    "sourceInfo": "acquired package info from installed python package manifest file: /usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/METADATA, /usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/RECORD, /usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/top_level.txt"
+*/
+func TestParsedFilesBySourceInfo(t *testing.T) {
+	sourceInfo := "acquired package info from installed python package manifest file: /usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/METADATA, /usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/RECORD, /usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/top_level.txt"
+	list := parsedFilesBySourceInfo(sourceInfo)
+	if list[0] != "/usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/METADATA" {
+		t.Fatalf("list[0] should be %s, not %s", "/usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/METADATA", list[0])
+	}
+	if list[1] != "/usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/RECORD" {
+		t.Fatalf("list[1] should be %s, not %s", "/usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/RECORD", list[1])
+	}
+	if list[2] != "/usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/top_level.txt" {
+		t.Fatalf("list[2] should be %s, not %s", "/usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/top_level.txt", list[2])
+	}
 }

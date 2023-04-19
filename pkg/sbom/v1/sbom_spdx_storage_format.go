@@ -6,6 +6,8 @@ import (
 	"io/ioutil"
 	"os"
 	"sniffer/pkg/context"
+	"sniffer/pkg/utils"
+	"strings"
 	"sync"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -32,12 +34,18 @@ const (
 var spdxDataDirPath string
 
 type SBOMData struct {
-	spdxDataPath                          string
-	filteredSpdxData                      spdxv1beta1.SBOMSPDXv2p3Filtered
-	relevantRealtimeFilesBySPDXIdentifier sync.Map
-	newRelevantData                       bool
-	alreadyExistSBOM                      bool
-	instanceID                            instanceidhandler.IInstanceID
+	spdxDataPath                             string
+	filteredSpdxData                         spdxv1beta1.SBOMSPDXv2p3Filtered
+	relevantRealtimeFilesBySPDXIdentifier    sync.Map
+	relevantRealtimeFilesByPackageSourceInfo sync.Map
+	newRelevantData                          bool
+	alreadyExistSBOM                         bool
+	instanceID                               instanceidhandler.IInstanceID
+}
+
+type packageSourceInfoData struct {
+	exist                 bool
+	packageSPDXIdentifier []spdxv1beta1.ElementID
 }
 
 func createSBOMDir() {
@@ -59,12 +67,13 @@ func init() {
 func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID) SBOMFormat {
 
 	return &SBOMData{
-		spdxDataPath:                          fmt.Sprintf("%s/%s", spdxDataDirPath, instanceID.GetHashed()),
-		filteredSpdxData:                      spdxv1beta1.SBOMSPDXv2p3Filtered{},
-		relevantRealtimeFilesBySPDXIdentifier: sync.Map{},
-		newRelevantData:                       false,
-		alreadyExistSBOM:                      false,
-		instanceID:                            instanceID,
+		spdxDataPath:                             fmt.Sprintf("%s/%s", spdxDataDirPath, instanceID.GetHashed()),
+		filteredSpdxData:                         spdxv1beta1.SBOMSPDXv2p3Filtered{},
+		relevantRealtimeFilesBySPDXIdentifier:    sync.Map{},
+		relevantRealtimeFilesByPackageSourceInfo: sync.Map{},
+		newRelevantData:                          false,
+		alreadyExistSBOM:                         false,
+		instanceID:                               instanceID,
 	}
 }
 
@@ -86,6 +95,11 @@ func (sbom *SBOMData) saveSBOM(spdxData *spdxv1beta1.SBOMSPDXv2p3) error {
 	return nil
 }
 
+func parsedFilesBySourceInfo(packageSourceInfo string) []string {
+	fileListInString := utils.After(packageSourceInfo, ": ")
+	return strings.Split(fileListInString, ", ")
+}
+
 func (sbom *SBOMData) StoreSBOM(sbomData any) error {
 	spdxData, ok := sbomData.(*spdxv1beta1.SBOMSPDXv2p3)
 	if !ok {
@@ -99,6 +113,17 @@ func (sbom *SBOMData) StoreSBOM(sbomData any) error {
 
 	for i := range spdxData.Spec.SPDX.Files {
 		sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxv1beta1.ElementID(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier), false)
+	}
+	for i := range spdxData.Spec.SPDX.Packages {
+		filesBySourceInfo := parsedFilesBySourceInfo(spdxData.Spec.SPDX.Packages[i].PackageSourceInfo)
+		for j := range filesBySourceInfo {
+			if data, _ := sbom.relevantRealtimeFilesByPackageSourceInfo.Load(filesBySourceInfo[j]); data != nil {
+				packageData := data.(*packageSourceInfoData)
+				packageData.packageSPDXIdentifier = append(packageData.packageSPDXIdentifier, spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier)
+			} else {
+				sbom.relevantRealtimeFilesByPackageSourceInfo.Store(filesBySourceInfo[j], &packageSourceInfoData{exist: false, packageSPDXIdentifier: []spdxv1beta1.ElementID{(spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier)}})
+			}
+		}
 	}
 
 	sbom.filteredSpdxData.Spec = spdxData.Spec
@@ -163,11 +188,26 @@ func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 		}
 	}
 
+	//filter relevant file list from package source Info
+	relevantPackageFromSourceInfoMap := make(map[spdxv1beta1.ElementID]bool)
+	for realtimeFileName := range sbomFileRelevantMap {
+		if data, _ := sbom.relevantRealtimeFilesByPackageSourceInfo.Load(realtimeFileName); data != nil && !data.(*packageSourceInfoData).exist {
+			packageData := data.(*packageSourceInfoData)
+			packageData.exist = true
+			for i := range packageData.packageSPDXIdentifier {
+				relevantPackageFromSourceInfoMap[packageData.packageSPDXIdentifier[i]] = true
+			}
+		}
+	}
+
 	//filter relationship list
 	for i := range spdxData.Spec.SPDX.Relationships {
 		switch spdxData.Spec.SPDX.Relationships[i].Relationship {
 		case RelationshipContainType:
 			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(spdxData.Spec.SPDX.Relationships[i].RefB.ElementRefID)); data != nil && data.(bool) {
+				sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, spdxData.Spec.SPDX.Relationships[i])
+			}
+			if exist := relevantPackageFromSourceInfoMap[spdxData.Spec.SPDX.Relationships[i].RefA.ElementRefID]; exist {
 				sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, spdxData.Spec.SPDX.Relationships[i])
 			}
 		default:
@@ -187,6 +227,9 @@ func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 					}
 				}
 			}
+		}
+		if exist := relevantPackageFromSourceInfoMap[spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier]; exist {
+			sbom.filteredSpdxData.Spec.SPDX.Packages = append(sbom.filteredSpdxData.Spec.SPDX.Packages, spdxData.Spec.SPDX.Packages[i])
 		}
 	}
 

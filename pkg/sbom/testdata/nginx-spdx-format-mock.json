@@ -35,7 +35,30 @@
         "referenceLocator": "pkg:deb/debian/adduser@3.118?arch=all&distro=debian-11"
        }
       ]
-     }
+     }, 
+     {
+        "name": "adduser",
+        "SPDXID": "SPDXRef-Package-deb-adduser-1234",
+        "versionInfo": "3.118",
+        "originator": "Person: Debian Adduser Developers \u003cadduser@packages.debian.org\u003e",
+        "downloadLocation": "NOASSERTION",
+        "sourceInfo": "acquired package info from DPKG DB: /usr/share/doc/adduser/copyright, /var/lib/dpkg/info/adduser.conffiles, /var/lib/dpkg/info/adduser.md5sums, /var/lib/dpkg/status",
+        "licenseConcluded": "GPL-2.0-only",
+        "licenseDeclared": "GPL-2.0-only",
+        "copyrightText": "NOASSERTION",
+        "externalRefs": [
+         {
+          "referenceCategory": "SECURITY",
+          "referenceType": "cpe23Type",
+          "referenceLocator": "cpe:2.3:a:adduser:adduser:3.118:*:*:*:*:*:*:*"
+         },
+         {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:deb/debian/adduser@3.118?arch=all&distro=debian-11"
+         }
+        ]
+       }
     ],
     "files": [
         {
