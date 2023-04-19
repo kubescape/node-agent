@@ -117,7 +117,7 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 	case err = <-watchedContainer.syncChannel[StepEventAggregator]:
 		if err.Error() == accumulator.DropEventOccurred {
 			watchedContainer.snifferTicker.Stop()
-			err = fmt.Errorf("droppedEvents. Monitoring for all of the containers will be stopped")
+			err = fmt.Errorf("droppedEvents.")
 		} else if errors.Is(err, containerHasTerminatedError) {
 			watchedContainer.snifferTicker.Stop()
 			logger.L().Debug("container has terminated", helpers.String("container ID", watchedContainer.event.GetContainerID()), helpers.String("container name", watchedContainer.event.GetContainerName()), helpers.String("k8s resources", watchedContainer.event.GetK8SWorkloadID()))
@@ -132,6 +132,8 @@ func createTicker() *time.Ticker {
 }
 
 func (ch *ContainerHandler) deleteResources(watchedContainer watchedContainerData, contEvent v1.ContainerEventData) {
+	watchedContainer.snifferTicker.Stop()
+	watchedContainer.containerAggregator.StopAggregate()
 	watchedContainer.sbomClient.CleanResources()
 	ch.watchedContainers.Delete(contEvent.GetContainerID())
 }
@@ -156,12 +158,7 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 		go ch.getSBOM(contEvent)
 		err = ch.startTimer(watchedContainer, contEvent.GetContainerID())
 		if err != nil {
-			logger.L().Ctx(context.GetBackgroundContext()).Debug("container monitoring stop before expected", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
-			err = watchedContainer.containerAggregator.StopAggregate()
-			if err != nil {
-				logger.L().Ctx(context.GetBackgroundContext()).Warning("we have failed to stop to aggregate data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()))
-			}
-			break
+			logger.L().Ctx(context.GetBackgroundContext()).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
 		}
 	}
 	ch.deleteResources(watchedContainer, contEvent)
