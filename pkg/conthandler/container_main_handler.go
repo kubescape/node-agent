@@ -1,6 +1,7 @@
 package conthandler
 
 import (
+	gcontext "context"
 	"errors"
 	"fmt"
 	"sniffer/pkg/config"
@@ -15,6 +16,9 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -41,6 +45,8 @@ type watchedContainerData struct {
 	event               v1.ContainerEventData
 	syncChannel         map[string]chan error
 	sbomClient          sbom.SBOMClient
+	ctx                 gcontext.Context
+	span                trace.Span
 }
 
 type ContainerHandler struct {
@@ -61,10 +67,9 @@ func CreateContainerHandler(contClient ContainerClient, storageClient storagecli
 	}
 
 	return &ContainerHandler{
-		containersEventChan: make(chan v1.ContainerEventData, 50),
-		containerWatcher:    contWatcher,
-		watchedContainers:   sync.Map{},
-		// syncWatchedContainersMap: &sync.RWMutex{},
+		containersEventChan:      make(chan v1.ContainerEventData, 50),
+		containerWatcher:         contWatcher,
+		watchedContainers:        sync.Map{},
 		afterTimerActionsChannel: make(chan afterTimerActionsData, 50),
 		storageClient:            storageClient,
 	}, nil
@@ -90,16 +95,22 @@ func (ch *ContainerHandler) afterTimerActions() error {
 				continue
 			}
 			if err = containerData.sbomClient.FilterSBOM(fileList); err != nil {
-				logger.L().Ctx(context.GetBackgroundContext()).Warning("failed to filter SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+				ctx, span := otel.Tracer("").Start(containerData.ctx, "failed to filter SBOM", trace.WithAttributes(attribute.String("containerID", afterTimerActionsData.containerID), attribute.String("container workload", containerData.event.GetK8SWorkloadID())))
+				logger.L().Ctx(ctx).Warning("failed to filter SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+				span.End()
 				continue
 			}
 			if err = containerData.sbomClient.StoreFilterSBOM(containerData.event.GetInstanceIDHash()); err != nil {
 				if !errors.Is(err, sbom.IsAlreadyExist()) {
-					logger.L().Ctx(context.GetBackgroundContext()).Error("failed to store filtered SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+					ctx, span := otel.Tracer("").Start(containerData.ctx, "failed to store filter SBOM", trace.WithAttributes(attribute.String("containerID", afterTimerActionsData.containerID), attribute.String("container workload", containerData.event.GetK8SWorkloadID())))
+					logger.L().Ctx(ctx).Error("failed to store filtered SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+					span.End()
 				}
 				continue
 			}
-			logger.L().Info("filtered SBOM has been stored successfully", []helpers.IDetails{helpers.String("containerID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID())}...)
+			ctx, span := otel.Tracer("").Start(containerData.ctx, "SBOM store successfully", trace.WithAttributes(attribute.String("containerID", afterTimerActionsData.containerID), attribute.String("container workload", containerData.event.GetK8SWorkloadID())))
+			logger.L().Ctx(ctx).Info("filtered SBOM has been stored successfully", []helpers.IDetails{helpers.String("containerID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID())}...)
+			span.End()
 		}
 	}
 }
@@ -146,6 +157,11 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 	}
 	watchedContainer := containerDataInterface.(watchedContainerData)
 
+	ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "container monitoring", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
+	defer span.End()
+	watchedContainer.ctx = ctx
+	watchedContainer.span = span
+
 	err := watchedContainer.containerAggregator.StartAggregate(watchedContainer.syncChannel[StepEventAggregator])
 	if err != nil {
 		return
@@ -158,9 +174,12 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 		go ch.getSBOM(contEvent)
 		err = ch.startTimer(watchedContainer, contEvent.GetContainerID())
 		if err != nil {
-			logger.L().Ctx(context.GetBackgroundContext()).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
+			ctx, span := otel.Tracer("").Start(ctx, "dropped events.", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
+			logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
+			span.End()
 		}
 	}
+	logger.L().Ctx(ctx).Info("stop monitor on container - after monitoring time", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
 	ch.deleteResources(watchedContainer, contEvent)
 }
 
@@ -188,6 +207,7 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 	if exist {
 		return containerAlreadyExistError
 	}
+
 	logger.L().Info("new container has loaded - start monitor it", []helpers.IDetails{helpers.String("ContainerID", contEvent.GetContainerID()), helpers.String("Container name", contEvent.GetContainerID()), helpers.String("k8s workload", contEvent.GetK8SWorkloadID())}...)
 	newWatchedContainer := watchedContainerData{
 		containerAggregator: CreateAggregator(getShortContainerID(contEvent.GetContainerID())),
