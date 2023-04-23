@@ -283,7 +283,7 @@ func TestGetUpdateDataPeriodMock(t *testing.T) {
 		t.Fatalf("ParseConfiguration failed with err %v", err)
 	}
 
-	expected := time.Duration(60) * time.Second
+	expected := time.Duration(1) * time.Minute
 	actual := config.GetUpdateDataPeriod()
 
 	if actual != expected {

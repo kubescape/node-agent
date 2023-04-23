@@ -80,7 +80,7 @@ func TestGetEbpfEngineLoaderPath(t *testing.T) {
 func TestGetUpdateDataPeriod(t *testing.T) {
 	c := CreateConfigData()
 	c.DB.UpdateDataPeriod = 1
-	if dur := c.GetUpdateDataPeriod(); dur != 60*time.Second {
+	if dur := c.GetUpdateDataPeriod(); dur != 1*time.Minute {
 		t.Errorf("Expected 60s, got %v", dur)
 	}
 }
