@@ -26,6 +26,7 @@ const (
 var (
 	containerAlreadyExistError  = errors.New("container already exist")
 	containerHasTerminatedError = errors.New("container has terminated")
+	droppedEventsError          = errors.New("droppedEvents")
 )
 
 type supportedServices string
@@ -117,7 +118,7 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 	case err = <-watchedContainer.syncChannel[StepEventAggregator]:
 		if err.Error() == accumulator.DropEventOccurred {
 			watchedContainer.snifferTicker.Stop()
-			err = fmt.Errorf("droppedEvents.")
+			err = droppedEventsError
 		} else if errors.Is(err, containerHasTerminatedError) {
 			watchedContainer.snifferTicker.Stop()
 			logger.L().Debug("container has terminated", helpers.String("container ID", watchedContainer.event.GetContainerID()), helpers.String("container name", watchedContainer.event.GetContainerName()), helpers.String("k8s resources", watchedContainer.event.GetK8SWorkloadID()))
@@ -158,7 +159,9 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 		go ch.getSBOM(contEvent)
 		err = ch.startTimer(watchedContainer, contEvent.GetContainerID())
 		if err != nil {
-			logger.L().Ctx(context.GetBackgroundContext()).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
+			if errors.Is(err, droppedEventsError) {
+				logger.L().Ctx(context.GetBackgroundContext()).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
+			}
 		}
 	}
 	ch.deleteResources(watchedContainer, contEvent)
