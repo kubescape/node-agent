@@ -149,7 +149,7 @@ func TestParseConfiguration(t *testing.T) {
 	if cfg.GetEbpfEngineLoaderPath() == "" {
 		t.Errorf("expected empty ebpf engine loader path but got %v", cfg.GetEbpfEngineLoaderPath())
 	}
-	if cfg.GetUpdateDataPeriod() != 30*time.Second {
+	if cfg.GetUpdateDataPeriod() != 60*time.Second {
 		t.Errorf("expected update data period to be 0 but got %v", cfg.GetUpdateDataPeriod())
 	}
 	if cfg.GetSniffingMaxTimes() != 6*time.Hour {
@@ -283,7 +283,7 @@ func TestGetUpdateDataPeriodMock(t *testing.T) {
 		t.Fatalf("ParseConfiguration failed with err %v", err)
 	}
 
-	expected := time.Duration(30) * time.Second
+	expected := time.Duration(60) * time.Second
 	actual := config.GetUpdateDataPeriod()
 
 	if actual != expected {

@@ -15,7 +15,7 @@
         "name": "minikube"
     },
     "db": {
-        "updateDataPeriod": 30
+        "updateDataPeriod": 1
     },
     "clusterName": "myCluster",
     "containerName": "contName",

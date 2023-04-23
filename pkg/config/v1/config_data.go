@@ -88,7 +88,7 @@ func (c *ConfigData) GetEbpfEngineLoaderPath() string {
 }
 
 func (c *ConfigData) GetUpdateDataPeriod() time.Duration {
-	return time.Duration(c.DB.UpdateDataPeriod) * time.Second
+	return time.Duration(c.DB.UpdateDataPeriod) * time.Minute
 }
 
 func (c *ConfigData) GetSniffingMaxTimes() time.Duration {
