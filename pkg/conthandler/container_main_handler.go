@@ -30,6 +30,7 @@ const (
 var (
 	containerAlreadyExistError  = errors.New("container already exist")
 	containerHasTerminatedError = errors.New("container has terminated")
+	droppedEventsError          = errors.New("droppedEvents")
 )
 
 type supportedServices string
@@ -128,7 +129,7 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 	case err = <-watchedContainer.syncChannel[StepEventAggregator]:
 		if err.Error() == accumulator.DropEventOccurred {
 			watchedContainer.snifferTicker.Stop()
-			err = fmt.Errorf("droppedEvents.")
+			err = droppedEventsError
 		} else if errors.Is(err, containerHasTerminatedError) {
 			watchedContainer.snifferTicker.Stop()
 			logger.L().Debug("container has terminated", helpers.String("container ID", watchedContainer.event.GetContainerID()), helpers.String("container name", watchedContainer.event.GetContainerName()), helpers.String("k8s resources", watchedContainer.event.GetK8SWorkloadID()))
@@ -174,9 +175,11 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 		go ch.getSBOM(contEvent)
 		err = ch.startTimer(watchedContainer, contEvent.GetContainerID())
 		if err != nil {
-			ctx, span := otel.Tracer("").Start(ctx, "dropped events.", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
-			logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
-			span.End()
+			if errors.Is(err, droppedEventsError) {
+				ctx, span := otel.Tracer("").Start(ctx, "dropped events.", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
+				logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
+				span.End()
+			}
 		}
 	}
 	logger.L().Ctx(ctx).Info("stop monitor on container - after monitoring time", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
