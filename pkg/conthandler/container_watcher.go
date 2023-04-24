@@ -149,6 +149,10 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 				continue
 			}
 
+			if pod.Spec.NodeName != containerWatcher.nodeName {
+				continue
+			}
+
 			switch event.Type {
 			case watch.Modified:
 				for i := range pod.Status.ContainerStatuses {
