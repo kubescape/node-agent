@@ -46,5 +46,8 @@ func main() {
 		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the storage client", helpers.Error(err))
 	}
 	mainHandler, err := conthandler.CreateContainerHandler(k8sAPIServerClient, storageClient)
+	if err != nil {
+		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the main container handler", helpers.Error(err))
+	}
 	mainHandler.StartMainHandler()
 }

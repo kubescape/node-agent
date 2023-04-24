@@ -1,6 +1,7 @@
 package conthandler
 
 import (
+	"context"
 	"os"
 	"path"
 	"sniffer/pkg/config"
@@ -79,7 +80,7 @@ func TestContMainHandler(t *testing.T) {
 		t.Fatalf("container ID is wrong,  get: %s expected: %s", event.GetContainerID(), RedisContainerIDContHandler)
 	}
 	time.Sleep(12 * time.Second)
-	err = contHandler.handleNewContainerEvent(event)
+	err = contHandler.handleNewContainerEvent(event, context.Background())
 	if err != nil {
 		t.Fatalf("handleNewContainerEvent failed with error %v", err)
 	}
