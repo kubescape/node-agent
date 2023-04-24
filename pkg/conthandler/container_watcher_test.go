@@ -93,6 +93,7 @@ func TestContWatcher(t *testing.T) {
 							ImagePullPolicy: "Always",
 						},
 					},
+					NodeName: "minikube",
 				},
 			}
 			watcher.Add(pod)
