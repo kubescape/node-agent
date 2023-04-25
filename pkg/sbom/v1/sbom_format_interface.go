@@ -1,6 +1,6 @@
 package sbom
 
-import instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
+import "github.com/kubescape/k8s-interface/instanceidhandler"
 
 type SBOMFormat interface {
 	GetFilterSBOMData() any

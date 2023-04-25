@@ -7,10 +7,6 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 )
 
-const (
-	NGINX_WLID string = "wlid://cluster-myCluster/namespace-any/deployment-nginx"
-)
-
 func TestGetSBOM(t *testing.T) {
 	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", "", &instanceidhandler.InstanceID{})
 	err := SBOMClient.GetSBOM(storageclient.NGINX)

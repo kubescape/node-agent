@@ -10,12 +10,12 @@ import (
 
 	"sniffer/pkg/context"
 
-	wlid "github.com/armosec/utils-k8s-go/wlid"
+	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
+	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	k8sinterface "github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	core "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"

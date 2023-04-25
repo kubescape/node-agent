@@ -17,18 +17,19 @@ func main() {
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during getting configuration data", helpers.Error(err))
+		logger.L().Fatal("error during getting configuration data", helpers.Error(err))
 	}
 	err = cfg.ParseConfiguration(v1.CreateConfigData(), configData)
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during parsing configuration", helpers.Error(err))
+		logger.L().Fatal("error during parsing configuration", helpers.Error(err))
 	}
 	err = validator.CheckPrerequisites()
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during validation", helpers.Error(err))
+		logger.L().Fatal("error during validation", helpers.Error(err))
 	}
 
 	context.SetBackgroundContext()
+	// after this line we can use logger.L().Ctx() to attach events to spans
 
 	accumulatorChannelError := make(chan error, 10)
 	acc := accumulator.GetAccumulator()
@@ -49,5 +50,9 @@ func main() {
 	if err != nil {
 		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the main container handler", helpers.Error(err))
 	}
-	mainHandler.StartMainHandler()
+
+	err = mainHandler.StartMainHandler()
+	if err != nil {
+		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during start the main container handler", helpers.Error(err))
+	}
 }

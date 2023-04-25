@@ -5,7 +5,7 @@ import (
 	"sniffer/pkg/config"
 	"syscall"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
 

@@ -13,25 +13,12 @@ import (
 	"testing"
 	"time"
 
-	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/kubernetes/fake"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 )
 
 const (
 	RedisContainerIDContHandler = "docker://16248df36c67807ca5c429e6f021fe092e14a27aab89cbde00ba801de0f05266"
 )
-
-var watcherMainHandler *watch.FakeWatcher
-
-type k8sFakeClientMainHandler struct {
-	Clientset *fake.Clientset
-}
-
-func (client *k8sFakeClientMainHandler) GetWatcher() (watch.Interface, error) {
-	watcherMainHandler = watch.NewFake()
-	return watcherMainHandler, nil
-}
 
 func TestContMainHandler(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
@@ -61,7 +48,9 @@ func TestContMainHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateContainerHandler failed with err %v", err)
 	}
-	go contHandler.afterTimerActions()
+	go func() {
+		_ = contHandler.afterTimerActions()
+	}()
 	go func() {
 		RedisInstanceID := instanceidhandler.InstanceID{}
 		RedisInstanceID.SetAPIVersion("apps/v1")
