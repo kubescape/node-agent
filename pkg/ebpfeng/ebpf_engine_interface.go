@@ -1,6 +1,6 @@
 package ebpfeng
 
-import ebpfev "sniffer/pkg/ebpfev/v1"
+import "sniffer/pkg/ebpfev/v1"
 
 type EbpfEngineClient interface {
 	StartEbpfEngine() error

@@ -11,7 +11,7 @@ import (
 	"sniffer/pkg/ebpfeng"
 	evData "sniffer/pkg/ebpfev/v1"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"go.opentelemetry.io/otel"
 )
@@ -105,7 +105,7 @@ func (acc *Accumulator) getFirstTimestamp() (time.Time, error) {
 	return acc.data[0][acc.listOfFirstKeysInsertInEachSlot[0]][0].GetEventTimestamp(), nil
 }
 
-func (acc *Accumulator) findIndexByTimestampWhenAccumulatorDataIsFull(event *evData.EventData) (int, bool, error) {
+func (acc *Accumulator) findIndexByTimestampWhenAccumulatorDataIsFull() (int, bool, error) {
 	index := 0
 	minTimestamp, err := acc.getFirstTimestamp()
 	if err != nil {
@@ -134,7 +134,7 @@ func (acc *Accumulator) findIndexByTimestamp(event *evData.EventData) (int, bool
 			return -1, false, fmt.Errorf("findIndexByTimestamp: trying to access slice of first accumulator keys to index out of range")
 		}
 	}
-	return acc.findIndexByTimestampWhenAccumulatorDataIsFull(event)
+	return acc.findIndexByTimestampWhenAccumulatorDataIsFull()
 }
 
 func (acc *Accumulator) removeAllStreamedContainers(event *evData.EventData) {
@@ -260,9 +260,7 @@ func AccumulatorByContainerID(aggregationData *[]evData.EventData, containerID s
 	accumulatorInstance.syncReaderWriterData.Lock()
 	defer accumulatorInstance.syncReaderWriterData.Unlock()
 	for i := range accumulatorInstance.data {
-		for j := range accumulatorInstance.data[i][containerID] {
-			*aggregationData = append(*aggregationData, accumulatorInstance.data[i][containerID][j])
-		}
+		*aggregationData = append(*aggregationData, accumulatorInstance.data[i][containerID]...)
 	}
 }
 

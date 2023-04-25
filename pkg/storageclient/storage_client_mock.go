@@ -45,13 +45,13 @@ func (sc *StorageHttpClientMock) GetData(key string) (any, error) {
 	}
 	return nil, nil
 }
-func (sc *StorageHttpClientMock) PutData(key string, data any) error {
+func (sc *StorageHttpClientMock) PutData(_ string, _ any) error {
 	return nil
 }
-func (sc *StorageHttpClientMock) PostData(key string, data any) error {
+func (sc *StorageHttpClientMock) PostData(_ string, _ any) error {
 	return nil
 }
-func (sc *StorageHttpClientMock) GetResourceVersion(key string) string {
+func (sc *StorageHttpClientMock) GetResourceVersion(_ string) string {
 	return "123"
 }
 
@@ -79,16 +79,16 @@ func (sc *StorageHttpClientFailureMock) GetData(key string) (any, error) {
 	return nil, nil
 }
 
-func (sc *StorageHttpClientFailureMock) PutData(key string, data any) error {
+func (sc *StorageHttpClientFailureMock) PutData(_ string, _ any) error {
 	return fmt.Errorf("any")
 }
 
-func (sc *StorageHttpClientFailureMock) PostData(key string, data any) error {
+func (sc *StorageHttpClientFailureMock) PostData(_ string, _ any) error {
 	return fmt.Errorf("error already exist")
 }
-func (sc *StorageHttpClientFailureMock) GetResourceVersion(key string) string {
+func (sc *StorageHttpClientFailureMock) GetResourceVersion(_ string) string {
 	return "123"
 }
-func (sc *StorageHttpClientFailureMock) IsAlreadyExist(err error) bool {
+func (sc *StorageHttpClientFailureMock) IsAlreadyExist(_ error) bool {
 	return true
 }

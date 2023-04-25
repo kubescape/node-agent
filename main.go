@@ -14,6 +14,9 @@ import (
 )
 
 func main() {
+	context.SetBackgroundContext()
+	defer context.GetMainSpan().End()
+
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
 	if err != nil {
@@ -27,8 +30,6 @@ func main() {
 	if err != nil {
 		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during validation", helpers.Error(err))
 	}
-
-	context.SetBackgroundContext()
 
 	accumulatorChannelError := make(chan error, 10)
 	acc := accumulator.GetAccumulator()
@@ -49,5 +50,9 @@ func main() {
 	if err != nil {
 		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the main container handler", helpers.Error(err))
 	}
-	mainHandler.StartMainHandler()
+
+	err = mainHandler.StartMainHandler()
+	if err != nil {
+		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during start the main container handler", helpers.Error(err))
+	}
 }

@@ -22,23 +22,23 @@ type k8sFakeClient struct {
 	Clientset *fake.Clientset
 }
 
-func (client *k8sFakeClient) GetApiVersion(workload any) string {
+func (client *k8sFakeClient) GetApiVersion(_ any) string {
 	return "v1"
 }
 
-func (client *k8sFakeClient) GetResourceVersion(workload any) string {
+func (client *k8sFakeClient) GetResourceVersion(_ any) string {
 	return "1234wat"
 }
 
-func (client *k8sFakeClient) CalculateWorkloadParentRecursive(workload any) (string, string, error) {
+func (client *k8sFakeClient) CalculateWorkloadParentRecursive(_ any) (string, string, error) {
 	return "deployment", "nginx", nil
 }
 
-func (client *k8sFakeClient) GetWorkload(namespace, kind, name string) (any, error) {
+func (client *k8sFakeClient) GetWorkload(_, _, _ string) (any, error) {
 	return "", nil
 }
 
-func (client *k8sFakeClient) GenerateWLID(workload any, clusterName string) string {
+func (client *k8sFakeClient) GenerateWLID(_ any, clusterName string) string {
 	return "wlid://cluster-" + clusterName + "/namespace-any" + "/deployment-nginx"
 }
 
@@ -73,7 +73,9 @@ func TestContWatcher(t *testing.T) {
 
 	containersEventChan := make(chan conthadlerV1.ContainerEventData, 50)
 	go func() {
-		go contWatcher.StartWatchedOnContainers(containersEventChan)
+		go func() {
+			_ = contWatcher.StartWatchedOnContainers(containersEventChan)
+		}()
 		time.Sleep(1 * time.Second)
 		go func() {
 			pod := &v1.Pod{

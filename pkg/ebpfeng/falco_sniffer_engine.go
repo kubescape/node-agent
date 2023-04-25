@@ -11,9 +11,9 @@ import (
 
 	"sniffer/pkg/config"
 	"sniffer/pkg/context"
-	ebpfev "sniffer/pkg/ebpfev/v1"
+	"sniffer/pkg/ebpfev/v1"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
 
