@@ -14,22 +14,20 @@ import (
 )
 
 func main() {
-	context.SetBackgroundContext()
-	defer context.GetMainSpan().End()
-
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during getting configuration data", helpers.Error(err))
+		logger.L().Fatal("error during getting configuration data", helpers.Error(err))
 	}
 	err = cfg.ParseConfiguration(v1.CreateConfigData(), configData)
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during parsing configuration", helpers.Error(err))
+		logger.L().Fatal("error during parsing configuration", helpers.Error(err))
 	}
 	err = validator.CheckPrerequisites()
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during validation", helpers.Error(err))
+		logger.L().Fatal("error during validation", helpers.Error(err))
 	}
+	context.SetBackgroundContext()
 
 	accumulatorChannelError := make(chan error, 10)
 	acc := accumulator.GetAccumulator()
