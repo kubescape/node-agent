@@ -27,9 +27,7 @@ func main() {
 	if err != nil {
 		logger.L().Fatal("error during validation", helpers.Error(err))
 	}
-
 	context.SetBackgroundContext()
-	// after this line we can use logger.L().Ctx() to attach events to spans
 
 	accumulatorChannelError := make(chan error, 10)
 	acc := accumulator.GetAccumulator()

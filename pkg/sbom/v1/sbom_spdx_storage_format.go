@@ -29,9 +29,22 @@ const (
 	KubescapeNodeAgentName    = "KubescapeNodeAgent"
 	RelationshipContainType   = "CONTAINS"
 	directorySBOM             = "SBOM"
+	sourceInfoDotnet = "acquired package info from dotnet project assets file"
+	sourceInfoNodeModule = "acquired package info from installed node module manifest file"
+	sourceInfoPythonPackage = "acquired package info from installed python package manifest file"
+	sourceInfoJava = "acquired package info from installed java archive"
+	sourceInfoGemFile = "acquired package info from installed gem metadata file"
+	sourceInfoGoModule = "acquired package info from go module information"
+	sourceInfoRustCargo = "acquired package info from rust cargo manifest"
+	sourceInfoPHPComposer = "acquired package info from PHP composer manifest"
+	sourceInfoCabal = "acquired package info from cabal or stack manifest files"
+	sourceInfoRebar = "acquired package info from rebar3 or mix manifest file"
+	sourceInfoLinuxKernel = "acquired package info from linux kernel archive"
+	sourceInfoLinuxKernelModule = "acquired package info from linux kernel module files"
 )
 
 var spdxDataDirPath string
+var sourceInfoRequiredPrefix []string
 
 type SBOMData struct {
 	spdxDataPath                             string
@@ -62,6 +75,8 @@ func createSBOMDir() {
 
 func init() {
 	createSBOMDir()
+	sourceInfoPrefixData := []string{sourceInfoDotnet, sourceInfoNodeModule, sourceInfoPythonPackage, sourceInfoJava, sourceInfoGemFile, sourceInfoGoModule, sourceInfoRustCargo, sourceInfoPHPComposer, sourceInfoCabal, sourceInfoRebar, sourceInfoLinuxKernel, sourceInfoLinuxKernelModule}
+	sourceInfoRequiredPrefix = append(sourceInfoRequiredPrefix,sourceInfoPrefixData...) 
 }
 
 func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID) SBOMFormat {
@@ -98,8 +113,18 @@ func (sbom *SBOMData) saveSBOM(spdxData *spdxv1beta1.SBOMSPDXv2p3) error {
 }
 
 func parsedFilesBySourceInfo(packageSourceInfo string) []string {
-	fileListInString := utils.After(packageSourceInfo, ": ")
-	return strings.Split(fileListInString, ", ")
+	needToMonitor := false
+	for i := range sourceInfoRequiredPrefix {
+		if strings.Contains(packageSourceInfo, sourceInfoRequiredPrefix[i]) {
+			needToMonitor = true
+			break
+		}
+	}
+	if needToMonitor {
+		fileListInString := utils.After(packageSourceInfo, ": ")
+		return strings.Split(fileListInString, ", ")
+	}
+	return []string{}
 }
 
 func (sbom *SBOMData) StoreSBOM(sbomData any) error {

@@ -481,3 +481,28 @@ func TestParsedFilesBySourceInfo(t *testing.T) {
 		t.Fatalf("list[2] should be %s, not %s", "/usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/top_level.txt", list[2])
 	}
 }
+
+func TestParsedFilesBySourceInfoFiltered(t *testing.T) {
+	shouldBeSourcesInfo := []string{"acquired package info from dotnet project assets file: 123, 456", "acquired package info from installed node module manifest file: 123, 456", "acquired package info from installed python package manifest file: 123, 456", "acquired package info from installed java archive: 123, 456", "acquired package info from installed gem metadata file: 123, 456", "acquired package info from go module information: 123, 456", "acquired package info from rust cargo manifest: 123, 456", "acquired package info from PHP composer manifest: 123, 456", "acquired package info from cabal or stack manifest files: 123, 456", "acquired package info from rebar3 or mix manifest files: 123, 456", "acquired package info from linux kernel archive: 123, 456", "acquired package info from linux kernel module files: 123, 456"}
+	for i := range shouldBeSourcesInfo {
+		list := parsedFilesBySourceInfo(shouldBeSourcesInfo[i])
+		if len(list) != 2 {
+			t.Fatalf("source Info %s: parsed source Info list must be equal to 2", shouldBeSourcesInfo[i])
+		}
+		if list[0] != "123" {
+			t.Fatalf("list[0] should be %s, not %s", "/usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/METADATA", list[0])
+		}
+		if list[1] != "456" {
+			t.Fatalf("list[1] should be %s, not %s", "/usr/local/lib/python3.10/site-packages/Deprecated-1.2.13.dist-info/RECORD", list[1])
+		}
+	}
+
+
+	shouldNotBeSourcesInfo := []string{"acquired package info from ALPM DB: 1234, 456", "acquired package info from RPM DB: 1234, 456", "acquired package info from APK DB: 1234, 456", "acquired package info from DPKG DB: 1234, 456", "acquired package info from installed cocoapods manifest file: 1234, 456", "acquired package info from conan manifest: 1234, 456", "acquired package info from portage DB: 1234, 456", "acquired package info from nix store path: 123, 456"}
+	for i := range shouldNotBeSourcesInfo {
+		list := parsedFilesBySourceInfo(shouldNotBeSourcesInfo[i])
+		if len(list) != 0 {
+			t.Fatalf("source Info %s: parsed source Info list must be equal to 0", shouldNotBeSourcesInfo[i])
+		}
+	}
+}
