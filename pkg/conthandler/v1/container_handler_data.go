@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
+	"github.com/kubescape/k8s-interface/instanceidhandler"
 )
 
 const (

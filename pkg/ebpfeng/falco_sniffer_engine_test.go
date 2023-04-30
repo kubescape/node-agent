@@ -136,12 +136,12 @@ func TestCreateFalcoEbpfEngine(t *testing.T) {
 		t.Fatalf("failed to set env %s with err %v", config.ConfigEnvVar, err)
 	}
 
-	config := config.GetConfigurationConfigContext()
-	configData, err := config.GetConfigurationReader()
+	cfg := config.GetConfigurationConfigContext()
+	configData, err := cfg.GetConfigurationReader()
 	if err != nil {
 		t.Errorf("GetConfigurationReader failed with err %v", err)
 	}
-	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	err = cfg.ParseConfiguration(v1.CreateConfigData(), configData)
 	if err != nil {
 		t.Fatalf("ParseConfiguration failed with err %v", err)
 	}
@@ -159,12 +159,12 @@ func TestEbpfEngineCMDWithParams(t *testing.T) {
 		t.Fatalf("failed to set env %s with err %v", config.ConfigEnvVar, err)
 	}
 
-	config := config.GetConfigurationConfigContext()
-	configData, err := config.GetConfigurationReader()
+	cfg := config.GetConfigurationConfigContext()
+	configData, err := cfg.GetConfigurationReader()
 	if err != nil {
 		t.Errorf("GetConfigurationReader failed with err %v", err)
 	}
-	err = config.ParseConfiguration(v1.CreateConfigData(), configData)
+	err = cfg.ParseConfiguration(v1.CreateConfigData(), configData)
 	if err != nil {
 		t.Fatalf("ParseConfiguration failed with err %v", err)
 	}

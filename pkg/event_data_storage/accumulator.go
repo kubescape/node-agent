@@ -11,8 +11,9 @@ import (
 	"sniffer/pkg/ebpfeng"
 	evData "sniffer/pkg/ebpfev/v1"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"go.opentelemetry.io/otel"
 )
 
 const (
@@ -104,7 +105,7 @@ func (acc *Accumulator) getFirstTimestamp() (time.Time, error) {
 	return acc.data[0][acc.listOfFirstKeysInsertInEachSlot[0]][0].GetEventTimestamp(), nil
 }
 
-func (acc *Accumulator) findIndexByTimestampWhenAccumulatorDataIsFull(event *evData.EventData) (int, bool, error) {
+func (acc *Accumulator) findIndexByTimestampWhenAccumulatorDataIsFull() (int, bool, error) {
 	index := 0
 	minTimestamp, err := acc.getFirstTimestamp()
 	if err != nil {
@@ -133,7 +134,7 @@ func (acc *Accumulator) findIndexByTimestamp(event *evData.EventData) (int, bool
 			return -1, false, fmt.Errorf("findIndexByTimestamp: trying to access slice of first accumulator keys to index out of range")
 		}
 	}
-	return acc.findIndexByTimestampWhenAccumulatorDataIsFull(event)
+	return acc.findIndexByTimestampWhenAccumulatorDataIsFull()
 }
 
 func (acc *Accumulator) removeAllStreamedContainers(event *evData.EventData) {
@@ -168,6 +169,7 @@ func (acc *Accumulator) streamEventToRegisterContainer(event *evData.EventData) 
 
 func (acc *Accumulator) accumulateEbpfEngineData() {
 	for {
+		ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "accumulator.accumulateEbpfEngineData")
 		event := <-acc.eventChannel
 		if nodeAgentContainerID != "" && strings.Contains(event.GetEventContainerID(), nodeAgentContainerID) {
 			continue
@@ -178,8 +180,8 @@ func (acc *Accumulator) accumulateEbpfEngineData() {
 			} else {
 				index, newSlotIsNeeded, err := acc.findIndexByTimestamp(event)
 				if err != nil {
-					logger.L().Ctx(context.GetBackgroundContext()).Warning("findIndexByTimestamp fail to find the index to insert the event", helpers.Error(err))
-					logger.L().Ctx(context.GetBackgroundContext()).Warning("event that didn't store", helpers.String("event", fmt.Sprintf("%v", event)))
+					logger.L().Ctx(ctx).Warning("findIndexByTimestamp fail to find the index to insert the event", helpers.Error(err))
+					logger.L().Ctx(ctx).Warning("event that didn't store", helpers.String("event", fmt.Sprintf("%v", event)))
 					continue
 				}
 				if newSlotIsNeeded {
@@ -189,6 +191,7 @@ func (acc *Accumulator) accumulateEbpfEngineData() {
 				acc.streamEventToRegisterContainer(event)
 			}
 		}
+		span.End()
 	}
 }
 
@@ -197,7 +200,11 @@ func (acc *Accumulator) getEbpfEngineData() {
 }
 
 func (acc *Accumulator) getEbpfEngineError(errChan chan error) {
-	errChan <- acc.ebpfEngine.GetEbpfEngineError()
+	ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "accumulator.getEbpfEngineError")
+	defer span.End()
+	err := acc.ebpfEngine.GetEbpfEngineError()
+	errChan <- err
+	logger.L().Ctx(ctx).Error("ebpfEngine error", helpers.Error(err))
 }
 
 func (acc *Accumulator) StartAccumulator(errChan chan error) error {
@@ -205,13 +212,15 @@ func (acc *Accumulator) StartAccumulator(errChan chan error) error {
 		accumulatorInstanceLock.Lock()
 		defer accumulatorInstanceLock.Unlock()
 		if !accumulatorInstance.startStatus {
+			ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "start accumulator")
+			defer span.End()
 			accumulatorInstance.startStatus = true
 			falcoEbpfEngine := ebpfeng.CreateFalcoEbpfEngine(config.GetConfigurationConfigContext().GetSyscallFilter(), false, false, "")
 			acc.ebpfEngine = falcoEbpfEngine
 
 			err := acc.ebpfEngine.StartEbpfEngine()
 			if err != nil {
-				logger.L().Ctx(context.GetBackgroundContext()).Error("fail to create ebpf engine", helpers.Error(err))
+				logger.L().Ctx(ctx).Error("fail to create ebpf engine", helpers.Error(err))
 				return err
 			}
 
@@ -251,9 +260,7 @@ func AccumulatorByContainerID(aggregationData *[]evData.EventData, containerID s
 	accumulatorInstance.syncReaderWriterData.Lock()
 	defer accumulatorInstance.syncReaderWriterData.Unlock()
 	for i := range accumulatorInstance.data {
-		for j := range accumulatorInstance.data[i][containerID] {
-			*aggregationData = append(*aggregationData, accumulatorInstance.data[i][containerID][j])
-		}
+		*aggregationData = append(*aggregationData, accumulatorInstance.data[i][containerID]...)
 	}
 }
 

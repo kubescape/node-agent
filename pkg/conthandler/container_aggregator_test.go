@@ -12,15 +12,15 @@ import (
 
 	accumulator "sniffer/pkg/event_data_storage"
 
-	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 )
 
 const (
-	RedisPodName                                     = "redis-64bd97b5fc-kvh7r"
-	RedisImageID                                     = "docker-pullable://redis@sha256:6a59f1cbb8d28ac484176d52c473494859a512ddba3ea62a547258cf16c9b3ae"
-	RedisContainerID                                 = "16248df36c67"
-	RedisWLID                                        = "wlid://cluster-test/namespace-any/deployment/redis"
-	RedisInstanceID                                  = "apiVersion-v1/namespace-any/kind-deployment/name-redis/containerName-redis"
+	RedisPodName     = "redis-64bd97b5fc-kvh7r"
+	RedisImageID     = "docker-pullable://redis@sha256:6a59f1cbb8d28ac484176d52c473494859a512ddba3ea62a547258cf16c9b3ae"
+	RedisContainerID = "16248df36c67"
+	RedisWLID        = "wlid://cluster-test/namespace-any/deployment/redis"
+
 	NumberOfRedisEventInTheMockAfterFilterDuplicated = 73
 )
 

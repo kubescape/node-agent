@@ -41,9 +41,9 @@ func TestStoreLabels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM((map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
-	}))
+	})
 	if err != nil {
 		t.Fatalf("fail to filter SBOM, err: %v", err)
 	}
@@ -243,9 +243,9 @@ func TestFilterSBOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM((map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
-	}))
+	})
 	if err != nil {
 		t.Fatalf("fail to filter SBOM, err: %v", err)
 	}
@@ -274,9 +274,9 @@ func TestIsNewRelevantSBOMDataExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM((map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
-	}))
+	})
 	if err != nil {
 		t.Fatalf("fail to filter SBOM, err: %v", err)
 	}
@@ -307,9 +307,9 @@ func TestIsSBOMAlreadyExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM((map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
-	}))
+	})
 	if err != nil {
 		t.Fatalf("fail to filter SBOM, err: %v", err)
 	}
@@ -340,9 +340,9 @@ func TestAddResourceVersionIfNeeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM((map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
-	}))
+	})
 	if err != nil {
 		t.Fatalf("fail to filter SBOM, err: %v", err)
 	}
@@ -370,9 +370,9 @@ func TestStoreFilteredSBOMName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM((map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
-	}))
+	})
 	if err != nil {
 		t.Fatalf("fail to filter SBOM, err: %v", err)
 	}
@@ -405,10 +405,10 @@ func TestStoreMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM((map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf":  true,
 		"/usr/share/doc/adduser/copyright": true,
-	}))
+	})
 	if err != nil {
 		t.Fatalf("fail to filter SBOM, err: %v", err)
 	}

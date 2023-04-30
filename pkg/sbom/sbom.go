@@ -5,7 +5,7 @@ import (
 	v1 "sniffer/pkg/sbom/v1"
 	"sniffer/pkg/storageclient"
 
-	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
+	"github.com/kubescape/k8s-interface/instanceidhandler"
 )
 
 const (

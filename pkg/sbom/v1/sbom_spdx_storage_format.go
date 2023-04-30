@@ -3,7 +3,7 @@ package sbom
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"sniffer/pkg/context"
 	"sniffer/pkg/utils"
@@ -13,7 +13,7 @@ import (
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	instanceidhandler "github.com/kubescape/k8s-interface/instanceidhandler"
+	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -82,7 +82,9 @@ func (sbom *SBOMData) saveSBOM(spdxData *spdxv1beta1.SBOMSPDXv2p3) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func(f *os.File) {
+		_ = f.Close()
+	}(f)
 
 	data, err := json.Marshal(spdxData)
 	if err != nil {
@@ -112,7 +114,7 @@ func (sbom *SBOMData) StoreSBOM(sbomData any) error {
 	}
 
 	for i := range spdxData.Spec.SPDX.Files {
-		sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxv1beta1.ElementID(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier), false)
+		sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier, false)
 	}
 	for i := range spdxData.Spec.SPDX.Packages {
 		filesBySourceInfo := parsedFilesBySourceInfo(spdxData.Spec.SPDX.Packages[i].PackageSourceInfo)
@@ -121,7 +123,7 @@ func (sbom *SBOMData) StoreSBOM(sbomData any) error {
 				packageData := data.(*packageSourceInfoData)
 				packageData.packageSPDXIdentifier = append(packageData.packageSPDXIdentifier, spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier)
 			} else {
-				sbom.relevantRealtimeFilesByPackageSourceInfo.Store(filesBySourceInfo[j], &packageSourceInfoData{exist: false, packageSPDXIdentifier: []spdxv1beta1.ElementID{(spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier)}})
+				sbom.relevantRealtimeFilesByPackageSourceInfo.Store(filesBySourceInfo[j], &packageSourceInfoData{exist: false, packageSPDXIdentifier: []spdxv1beta1.ElementID{spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier}})
 			}
 		}
 	}
@@ -153,9 +155,11 @@ func (sbom *SBOMData) getSBOMDataSPDXFormat() (*spdxv1beta1.SBOMSPDXv2p3, error)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		_ = file.Close()
+	}(file)
 
-	bytes, err := ioutil.ReadAll(file)
+	bytes, err := io.ReadAll(file)
 	if err != nil {
 		return nil, err
 	}
@@ -180,9 +184,9 @@ func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 	//filter relevant file list
 	for i := range spdxData.Spec.SPDX.Files {
 		if exist := sbomFileRelevantMap[spdxData.Spec.SPDX.Files[i].FileName]; exist {
-			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier)); data != nil && !data.(bool) {
+			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier); data != nil && !data.(bool) {
 				sbom.filteredSpdxData.Spec.SPDX.Files = append(sbom.filteredSpdxData.Spec.SPDX.Files, spdxData.Spec.SPDX.Files[i])
-				sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxv1beta1.ElementID(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier), true)
+				sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier, true)
 				sbom.newRelevantData = true
 			}
 		}
@@ -205,7 +209,7 @@ func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 	for i := range spdxData.Spec.SPDX.Relationships {
 		switch spdxData.Spec.SPDX.Relationships[i].Relationship {
 		case RelationshipContainType:
-			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxv1beta1.ElementID(spdxData.Spec.SPDX.Relationships[i].RefB.ElementRefID)); data != nil && data.(bool) {
+			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxData.Spec.SPDX.Relationships[i].RefB.ElementRefID); data != nil && data.(bool) {
 				sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, spdxData.Spec.SPDX.Relationships[i])
 			}
 			if exist := relevantPackageFromSourceInfoMap[spdxData.Spec.SPDX.Relationships[i].RefA.ElementRefID]; exist {
@@ -223,7 +227,7 @@ func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 			switch sbom.filteredSpdxData.Spec.SPDX.Relationships[j].Relationship {
 			case RelationshipContainType:
 				if alreadyExist := relevantPackageMap[sbom.filteredSpdxData.Spec.SPDX.Relationships[j].RefA]; !alreadyExist {
-					if spdxv1beta1.ElementID(sbom.filteredSpdxData.Spec.SPDX.Relationships[j].RefA.ElementRefID) == spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier {
+					if sbom.filteredSpdxData.Spec.SPDX.Relationships[j].RefA.ElementRefID == spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier {
 						sbom.filteredSpdxData.Spec.SPDX.Packages = append(sbom.filteredSpdxData.Spec.SPDX.Packages, spdxData.Spec.SPDX.Packages[i])
 					}
 				}
@@ -253,7 +257,7 @@ func (sbom *SBOMData) StoreFilteredSBOMName(name string) {
 	sbom.filteredSpdxData.ObjectMeta.SetName(name)
 }
 
-func (sbom *SBOMData) storeLabels(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
+func (sbom *SBOMData) storeLabels(wlidData string, instanceID instanceidhandler.IInstanceID) {
 	labels := instanceID.GetLabels()
 	for i := range labels {
 		if labels[i] == "" {
@@ -277,7 +281,7 @@ func (sbom *SBOMData) storeLabels(wlidData string, imageID string, instanceID in
 	sbom.filteredSpdxData.ObjectMeta.SetLabels(labels)
 }
 
-func (sbom *SBOMData) storeAnnotations(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
+func (sbom *SBOMData) storeAnnotations(wlidData string, instanceID instanceidhandler.IInstanceID) {
 	annotations := make(map[string]string)
 	annotations[instanceidhandlerV1.WlidMetadataKey] = wlidData
 	annotations[instanceidhandlerV1.InstanceIDMetadataKey] = instanceID.GetStringFormatted()
@@ -286,9 +290,9 @@ func (sbom *SBOMData) storeAnnotations(wlidData string, imageID string, instance
 	sbom.filteredSpdxData.ObjectMeta.SetAnnotations(annotations)
 }
 
-func (sbom *SBOMData) StoreMetadata(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
-	sbom.storeLabels(wlidData, imageID, instanceID)
-	sbom.storeAnnotations(wlidData, imageID, instanceID)
+func (sbom *SBOMData) StoreMetadata(wlidData string, _ string, instanceID instanceidhandler.IInstanceID) {
+	sbom.storeLabels(wlidData, instanceID)
+	sbom.storeAnnotations(wlidData, instanceID)
 }
 
 func (sc *SBOMData) CleanResources() {

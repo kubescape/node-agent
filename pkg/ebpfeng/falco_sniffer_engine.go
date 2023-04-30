@@ -11,9 +11,9 @@ import (
 
 	"sniffer/pkg/config"
 	"sniffer/pkg/context"
-	ebpfev "sniffer/pkg/ebpfev/v1"
+	"sniffer/pkg/ebpfev/v1"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
 
@@ -174,7 +174,7 @@ func (FalcoEbpfEngine *FalcoEbpfEngine) GetData(ebpfEngineDataChannel chan *ebpf
 				ebpfEngineDataChannel <- data
 			}
 		}
-		logger.L().Error("failed to get data from ebpf engine process", helpers.Error(scanner.Err()))
+		logger.L().Ctx(context.GetBackgroundContext()).Error("failed to get data from ebpf engine process", helpers.Error(scanner.Err()))
 		break
 	}
 }

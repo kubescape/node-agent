@@ -43,12 +43,6 @@ type StorageK8SAggregatedAPIClient struct {
 	readySBOMs sync.Map
 }
 
-var storageclientErrors map[string]error
-
-func init() {
-	storageclientErrors = map[string]error{}
-}
-
 func CreateSBOMStorageK8SAggregatedAPIClient() (*StorageK8SAggregatedAPIClient, error) {
 	var config *rest.Config
 	kubeconfig := os.Getenv(KubeConfig)
@@ -162,7 +156,7 @@ func (sc *StorageK8SAggregatedAPIClient) PutData(key string, data any) error {
 	return nil
 }
 
-func (sc *StorageK8SAggregatedAPIClient) PostData(key string, data any) error {
+func (sc *StorageK8SAggregatedAPIClient) PostData(_ string, data any) error {
 	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3Filtered)
 	if !ok {
 		return fmt.Errorf("failed to update SBOM: SBOM is not in the right form")
