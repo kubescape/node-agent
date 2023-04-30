@@ -1,7 +1,6 @@
 package conthandler
 
 import (
-	gcontext "context"
 	"errors"
 	"fmt"
 	"sniffer/pkg/config"
@@ -78,11 +77,11 @@ func (ch *ContainerHandler) afterTimerActions() error {
 	var err error
 
 	for {
-		ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "afterTimerActions")
 		afterTimerActionsData := <-ch.afterTimerActionsChannel
 		containerDataInterface, exist := ch.watchedContainers.Load(afterTimerActionsData.containerID)
 		if !exist {
-			logger.L().Ctx(context.GetBackgroundContext()).Warning("afterTimerActions: failed to get container data of container ID", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID)}...)
+			ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "afterTimerActions")
+			logger.L().Ctx(ctx).Warning("afterTimerActions: failed to get container data of container ID", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID)}...)
 			span.End()
 			continue
 		}
@@ -93,23 +92,23 @@ func (ch *ContainerHandler) afterTimerActions() error {
 
 			if err = <-containerData.syncChannel[StepGetSBOM]; err != nil {
 				logger.L().Debug("failed to get SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
-				span.End()
 				continue
 			}
 			if err = containerData.sbomClient.FilterSBOM(fileList); err != nil {
+				ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "afterTimerActions")
 				logger.L().Ctx(ctx).Warning("failed to filter SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				span.End()
 				continue
 			}
 			if err = containerData.sbomClient.StoreFilterSBOM(containerData.event.GetInstanceIDHash()); err != nil {
 				if !errors.Is(err, sbom.IsAlreadyExist()) {
+					ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "afterTimerActions")
 					logger.L().Ctx(ctx).Error("failed to store filtered SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+					span.End()
 				}
-				span.End()
 				continue
 			}
 			logger.L().Info("filtered SBOM has been stored successfully", []helpers.IDetails{helpers.String("containerID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID())}...)
-			span.End() // defer in infinite loop never runs
 		}
 	}
 }
@@ -129,6 +128,7 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 			err = droppedEventsError
 		} else if errors.Is(err, containerHasTerminatedError) {
 			watchedContainer.snifferTicker.Stop()
+			err = containerHasTerminatedError
 		}
 	}
 
@@ -146,16 +146,15 @@ func (ch *ContainerHandler) deleteResources(watchedContainer watchedContainerDat
 	ch.watchedContainers.Delete(contEvent.GetContainerID())
 }
 
-func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventData, ctx gcontext.Context) {
+func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventData) {
 	containerDataInterface, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
 	if !exist {
+		ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "container monitoring", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
+		defer span.End()
 		logger.L().Ctx(ctx).Error("startRelevancyProcess: failed to get container data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()))
 		return
 	}
 	watchedContainer := containerDataInterface.(watchedContainerData)
-
-	ctx, span := otel.Tracer("").Start(ctx, "container monitoring", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
-	defer span.End()
 
 	err := watchedContainer.containerAggregator.StartAggregate(watchedContainer.syncChannel[StepEventAggregator])
 	if err != nil {
@@ -167,14 +166,16 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 	stopSniffingTime := now.Add(configStopTime)
 	for start := time.Now(); start.Before(stopSniffingTime); {
 		go ch.getSBOM(contEvent)
+		ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "container monitoring", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
 		err = ch.startTimer(watchedContainer, contEvent.GetContainerID())
 		if err != nil {
 			if errors.Is(err, droppedEventsError) {
 				logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
+			} else if errors.Is(err, containerHasTerminatedError) {
+				break
 			}
-		} else if errors.Is(err, containerHasTerminatedError) {
-			break
 		}
+		span.End()
 	}
 	logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
 	ch.deleteResources(watchedContainer, contEvent)
@@ -199,7 +200,7 @@ func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
 	watchedContainer.syncChannel[StepGetSBOM] <- err
 }
 
-func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEventData, ctx gcontext.Context) error {
+func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEventData) error {
 	_, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
 	if exist {
 		return containerAlreadyExistError
@@ -216,7 +217,7 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 		},
 	}
 	ch.watchedContainers.Store(contEvent.GetContainerID(), newWatchedContainer)
-	go ch.startRelevancyProcess(contEvent, ctx)
+	go ch.startRelevancyProcess(contEvent)
 	return nil
 }
 
@@ -232,10 +233,10 @@ func (ch *ContainerHandler) handleContainerTerminatedEvent(contEvent v1.Containe
 	return nil
 }
 
-func (ch *ContainerHandler) handleNewContainerEvent(contEvent v1.ContainerEventData, ctx gcontext.Context) error {
+func (ch *ContainerHandler) handleNewContainerEvent(contEvent v1.ContainerEventData) error {
 	switch contEvent.GetContainerEventType() {
 	case v1.ContainerRunning:
-		return ch.handleContainerRunningEvent(contEvent, ctx)
+		return ch.handleContainerRunningEvent(contEvent)
 
 	case v1.ContainerDeleted:
 		return ch.handleContainerTerminatedEvent(contEvent)
@@ -252,14 +253,14 @@ func (ch *ContainerHandler) StartMainHandler() error {
 	}()
 
 	for {
-		ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "mainContainerHandler")
 		contEvent := <-ch.containersEventChan
-		err := ch.handleNewContainerEvent(contEvent, ctx)
+		err := ch.handleNewContainerEvent(contEvent)
 		if err != nil {
+			ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "mainContainerHandler")
 			if !errors.Is(err, containerAlreadyExistError) {
 				logger.L().Ctx(ctx).Warning("fail to handle new container", helpers.String("ContainerID", contEvent.GetContainerID()), helpers.String("Container name", contEvent.GetContainerID()), helpers.String("k8s workload", contEvent.GetK8SWorkloadID()), helpers.Error(err))
 			}
+			defer span.End()
 		}
-		span.End()
 	}
 }
