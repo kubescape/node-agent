@@ -1,7 +1,6 @@
 package ebpfeng
 
 import (
-	"os"
 	"path"
 	"sniffer/pkg/config"
 	v1 "sniffer/pkg/config/v1"
@@ -131,10 +130,7 @@ func TestCreateSyscallFilterString(t *testing.T) {
 
 func TestCreateFalcoEbpfEngine(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(config.ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", config.ConfigEnvVar, err)
-	}
+	t.Setenv(config.ConfigEnvVar, configPath)
 
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
@@ -154,10 +150,7 @@ func TestCreateFalcoEbpfEngine(t *testing.T) {
 
 func TestEbpfEngineCMDWithParams(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(config.ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", config.ConfigEnvVar, err)
-	}
+	t.Setenv(config.ConfigEnvVar, configPath)
 
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
@@ -193,10 +186,7 @@ func TestEbpfEngineCMDWithParams(t *testing.T) {
 
 func TestStartEbpfEngine(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(config.ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env ConfigEnvVar with err %v", err)
-	}
+	t.Setenv(config.ConfigEnvVar, configPath)
 
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()

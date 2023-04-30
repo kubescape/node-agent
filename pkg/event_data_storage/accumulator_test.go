@@ -1,7 +1,6 @@
 package accumulator
 
 import (
-	"os"
 	"sniffer/pkg/config"
 	v1 "sniffer/pkg/config/v1"
 	evData "sniffer/pkg/ebpfev/v1"
@@ -15,10 +14,7 @@ const (
 )
 
 func TestFullAccumulatorFlow(t *testing.T) {
-	err := os.Setenv(config.ConfigEnvVar, "../../configuration/ConfigurationFile.json")
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", config.ConfigEnvVar, err)
-	}
+	t.Setenv(config.ConfigEnvVar, "../../configuration/ConfigurationFile.json")
 
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
@@ -46,10 +42,7 @@ func TestFullAccumulatorFlow(t *testing.T) {
 }
 
 func TestFullAccumulatorFlowAndAllOtherSmallFunctions(t *testing.T) {
-	err := os.Setenv(config.ConfigEnvVar, "../../configuration/ConfigurationFile.json")
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", config.ConfigEnvVar, err)
-	}
+	t.Setenv(config.ConfigEnvVar, "../../configuration/ConfigurationFile.json")
 
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()

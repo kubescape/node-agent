@@ -1,7 +1,6 @@
 package validator
 
 import (
-	"os"
 	"path"
 	"sniffer/pkg/config"
 	v1 "sniffer/pkg/config/v1"
@@ -53,10 +52,7 @@ func TestInt8ToStr(t *testing.T) {
 
 func TestCheckPrerequisites(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(config.ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", config.ConfigEnvVar, err)
-	}
+	t.Setenv(config.ConfigEnvVar, configPath)
 
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
