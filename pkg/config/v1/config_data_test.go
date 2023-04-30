@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"testing"
 	"time"
 )
@@ -132,7 +131,7 @@ func TestConfigData_GetClusterName(t *testing.T) {
 
 func TestConfigData_SetNodeName(t *testing.T) {
 	expectedName := "node-1"
-	_ = os.Setenv(nodeNameEnvVar, expectedName)
+	t.Setenv(nodeNameEnvVar, expectedName)
 	c := &ConfigData{}
 	c.SetNodeName()
 	if c.NodeData.Name != expectedName {
@@ -142,7 +141,7 @@ func TestConfigData_SetNodeName(t *testing.T) {
 
 func TestConfigData_SetNamespace(t *testing.T) {
 	expectedName := "namespace-1"
-	_ = os.Setenv(NamespaceEnvVar, expectedName)
+	t.Setenv(NamespaceEnvVar, expectedName)
 	c := &ConfigData{}
 	c.SetNamespace()
 	if c.Namespace != expectedName {
@@ -152,7 +151,7 @@ func TestConfigData_SetNamespace(t *testing.T) {
 
 func TestConfigData_SetContainerName(t *testing.T) {
 	expectedName := "cont-1"
-	_ = os.Setenv(ContainerNameEnvVar, expectedName)
+	t.Setenv(ContainerNameEnvVar, expectedName)
 	c := &ConfigData{}
 	c.SetContainerName()
 	if c.ContainerName != expectedName {
@@ -162,7 +161,7 @@ func TestConfigData_SetContainerName(t *testing.T) {
 
 func TestConfigData_SetBackgroundContextURL(t *testing.T) {
 	expectedName := "URL-1"
-	_ = os.Setenv("OTEL_COLLECTOR_SVC", expectedName)
+	t.Setenv("OTEL_COLLECTOR_SVC", expectedName)
 	c := &ConfigData{}
 	c.SetBackgroundContextURL()
 	if c.telemetryURL != expectedName {

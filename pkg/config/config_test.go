@@ -22,10 +22,7 @@ func TestConfig(t *testing.T) {
 	}
 	{
 		configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-		err := os.Setenv(ConfigEnvVar, configPath)
-		if err != nil {
-			t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-		}
+		t.Setenv(ConfigEnvVar, configPath)
 
 		cfg := GetConfigurationConfigContext()
 		configData, err := cfg.GetConfigurationReader()
@@ -57,7 +54,7 @@ func TestConfig(t *testing.T) {
 		}
 	}
 	{
-		os.Setenv(ConfigEnvVar, "kuku")
+		t.Setenv(ConfigEnvVar, "kuku")
 		cfg := GetConfigurationConfigContext()
 		_, err := cfg.GetConfigurationReader()
 		if err == nil || !strings.Contains(err.Error(), ErrConfigurationFileNotValid) {
@@ -105,7 +102,7 @@ func TestGetConfigurationReader(t *testing.T) {
 	}
 	defer os.Remove(cfgFilePath)
 
-	os.Setenv(ConfigEnvVar, cfgFilePath)
+	t.Setenv(ConfigEnvVar, cfgFilePath)
 	reader, err = cfg.GetConfigurationReader()
 	if err != nil {
 		t.Errorf("unexpected error while getting reader: %v", err)
@@ -118,10 +115,7 @@ func TestGetConfigurationReader(t *testing.T) {
 func TestParseConfiguration(t *testing.T) {
 
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	cfg := GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
@@ -168,10 +162,7 @@ func TestParseConfiguration(t *testing.T) {
 
 func TestIsFalcoEbpfEngineMock(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	config := GetConfigurationConfigContext()
 	configData, err := config.GetConfigurationReader()
@@ -218,10 +209,7 @@ func TestIsFalcoEbpfEngineMock(t *testing.T) {
 
 func TestGetFalcoKernelObjPath(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	config := GetConfigurationConfigContext()
 	configData, err := config.GetConfigurationReader()
@@ -243,10 +231,7 @@ func TestGetFalcoKernelObjPath(t *testing.T) {
 
 func TestGetEbpfEngineLoaderPath(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	config := GetConfigurationConfigContext()
 	configData, err := config.GetConfigurationReader()
@@ -268,10 +253,7 @@ func TestGetEbpfEngineLoaderPath(t *testing.T) {
 
 func TestGetUpdateDataPeriodMock(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	config := GetConfigurationConfigContext()
 	configData, err := config.GetConfigurationReader()
@@ -293,10 +275,7 @@ func TestGetUpdateDataPeriodMock(t *testing.T) {
 
 func TestGetSniffingMaxTimesMock(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	config := GetConfigurationConfigContext()
 	configData, err := config.GetConfigurationReader()
@@ -318,10 +297,7 @@ func TestGetSniffingMaxTimesMock(t *testing.T) {
 
 func TestIsRelevantCVEServiceEnabledMock(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	config := GetConfigurationConfigContext()
 	configData, err := config.GetConfigurationReader()
@@ -343,10 +319,7 @@ func TestIsRelevantCVEServiceEnabledMock(t *testing.T) {
 
 func TestGetNodeName(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	config := GetConfigurationConfigContext()
 	configData, err := config.GetConfigurationReader()
@@ -368,10 +341,7 @@ func TestGetNodeName(t *testing.T) {
 
 func TestGetClusterName(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	config := GetConfigurationConfigContext()
 	configData, err := config.GetConfigurationReader()
@@ -393,10 +363,7 @@ func TestGetClusterName(t *testing.T) {
 
 func TestGetNamespace(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	config := GetConfigurationConfigContext()
 	configData, err := config.GetConfigurationReader()
@@ -418,10 +385,7 @@ func TestGetNamespace(t *testing.T) {
 
 func TestGetContainerName(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	config := GetConfigurationConfigContext()
 	configData, err := config.GetConfigurationReader()
@@ -443,10 +407,7 @@ func TestGetContainerName(t *testing.T) {
 
 func TestGetBackgroundContextURL(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	config := GetConfigurationConfigContext()
 	configData, err := config.GetConfigurationReader()
@@ -457,7 +418,7 @@ func TestGetBackgroundContextURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseConfiguration failed with err %v", err)
 	}
-	os.Setenv("OTEL_COLLECTOR_SVC", "URLcontext")
+	t.Setenv("OTEL_COLLECTOR_SVC", "URLcontext")
 
 	expected := "URLcontext"
 	config.data.SetBackgroundContextURL()
@@ -470,10 +431,7 @@ func TestGetBackgroundContextURL(t *testing.T) {
 
 func TestGetAccountID(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env %s with err %v", ConfigEnvVar, err)
-	}
+	t.Setenv(ConfigEnvVar, configPath)
 
 	config := GetConfigurationConfigContext()
 	configData, err := config.GetConfigurationReader()

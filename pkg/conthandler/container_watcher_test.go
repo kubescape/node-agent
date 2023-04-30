@@ -1,7 +1,6 @@
 package conthandler
 
 import (
-	"os"
 	"path"
 	"sniffer/pkg/config"
 	configV1 "sniffer/pkg/config/v1"
@@ -49,10 +48,7 @@ func (client *k8sFakeClient) GetWatcher() (watch.Interface, error) {
 
 func TestContWatcher(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	err := os.Setenv(config.ConfigEnvVar, configPath)
-	if err != nil {
-		t.Fatalf("failed to set env ConfigEnvVar with err %v", err)
-	}
+	t.Setenv(config.ConfigEnvVar, configPath)
 
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
