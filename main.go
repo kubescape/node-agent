@@ -11,7 +11,17 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"go.opentelemetry.io/otel"
 )
+
+func waitOnEBPFEngineProcessErrorCode(cacheAccumulatorErrorChan chan error) {
+	ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "EBPF engine process error")
+	defer span.End()
+	err := <-cacheAccumulatorErrorChan
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("error", helpers.Error(err))
+	}
+}
 
 func main() {
 	cfg := config.GetConfigurationConfigContext()
@@ -35,6 +45,9 @@ func main() {
 	if err != nil {
 		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during start accumulator", helpers.Error(err))
 	}
+	go func() {
+		waitOnEBPFEngineProcessErrorCode(accumulatorChannelError)
+	}()
 
 	k8sAPIServerClient, err := conthandler.CreateContainerClientK8SAPIServer()
 	if err != nil {

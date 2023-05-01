@@ -169,7 +169,6 @@ func (acc *Accumulator) streamEventToRegisterContainer(event *evData.EventData) 
 
 func (acc *Accumulator) accumulateEbpfEngineData() {
 	for {
-		ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "accumulator.accumulateEbpfEngineData")
 		event := <-acc.eventChannel
 		if nodeAgentContainerID != "" && strings.Contains(event.GetEventContainerID(), nodeAgentContainerID) {
 			continue
@@ -180,8 +179,8 @@ func (acc *Accumulator) accumulateEbpfEngineData() {
 			} else {
 				index, newSlotIsNeeded, err := acc.findIndexByTimestamp(event)
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("findIndexByTimestamp fail to find the index to insert the event", helpers.Error(err))
-					logger.L().Ctx(ctx).Warning("event that didn't store", helpers.String("event", fmt.Sprintf("%v", event)))
+					logger.L().Ctx(context.GetBackgroundContext()).Warning("findIndexByTimestamp fail to find the index to insert the event", helpers.Error(err))
+					logger.L().Ctx(context.GetBackgroundContext()).Warning("event that didn't store", helpers.String("event", fmt.Sprintf("%v", event)))
 					continue
 				}
 				if newSlotIsNeeded {
@@ -191,7 +190,6 @@ func (acc *Accumulator) accumulateEbpfEngineData() {
 				acc.streamEventToRegisterContainer(event)
 			}
 		}
-		span.End()
 	}
 }
 
