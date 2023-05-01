@@ -164,7 +164,7 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 	now := time.Now()
 	configStopTime := config.GetConfigurationConfigContext().GetSniffingMaxTimes()
 	stopSniffingTime := now.Add(configStopTime)
-	for start := time.Now(); start.Before(stopSniffingTime); {
+	for ;time.Now().Before(stopSniffingTime); {
 		go ch.getSBOM(contEvent)
 		ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "container monitoring", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
 		err = ch.startTimer(watchedContainer, contEvent.GetContainerID())
