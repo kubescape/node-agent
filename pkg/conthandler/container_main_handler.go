@@ -260,7 +260,7 @@ func (ch *ContainerHandler) StartMainHandler() error {
 			if !errors.Is(err, containerAlreadyExistError) {
 				logger.L().Ctx(ctx).Warning("fail to handle new container", helpers.String("ContainerID", contEvent.GetContainerID()), helpers.String("Container name", contEvent.GetContainerID()), helpers.String("k8s workload", contEvent.GetK8SWorkloadID()), helpers.Error(err))
 			}
-			defer span.End()
+			span.End()
 		}
 	}
 }
