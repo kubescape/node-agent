@@ -4,7 +4,6 @@ import (
 	"path"
 	"sniffer/pkg/config"
 	configV1 "sniffer/pkg/config/v1"
-	conthadlerV1 "sniffer/pkg/conthandler/v1"
 	conthandlerV1 "sniffer/pkg/conthandler/v1"
 	accumulator "sniffer/pkg/event_data_storage"
 	"sniffer/pkg/sbom"
@@ -55,12 +54,12 @@ func TestContMainHandler(t *testing.T) {
 		RedisInstanceID.SetKind("deployment")
 		RedisInstanceID.SetName("redis")
 		RedisInstanceID.SetContainerName("redis")
-		contHandler.containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerIDContHandler, RedisPodName, RedisWLID, &RedisInstanceID, conthadlerV1.ContainerRunning)
+		contHandler.containersEventChan <- *conthandlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerIDContHandler, RedisPodName, RedisWLID, &RedisInstanceID, conthandlerV1.ContainerRunning)
 	}()
 
 	event := <-contHandler.containersEventChan
-	if event.GetContainerEventType() != conthadlerV1.ContainerRunning {
-		t.Fatalf("event container type is wrong, get: %s expected: %s", event.GetContainerEventType(), conthadlerV1.ContainerRunning)
+	if event.GetContainerEventType() != conthandlerV1.ContainerRunning {
+		t.Fatalf("event container type is wrong, get: %s expected: %s", event.GetContainerEventType(), conthandlerV1.ContainerRunning)
 	}
 	if event.GetContainerID() != RedisContainerIDContHandler {
 		t.Fatalf("container ID is wrong,  get: %s expected: %s", event.GetContainerID(), RedisContainerIDContHandler)
@@ -105,7 +104,7 @@ func TestContMainHandlerStopMonitorAfterXMinutes(t *testing.T) {
 	RedisInstanceID.SetKind("deployment")
 	RedisInstanceID.SetName("redis")
 	RedisInstanceID.SetContainerName("redis")
-	contEvent := conthandlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerIDContHandler, RedisWLID, RedisPodName, &RedisInstanceID, conthadlerV1.ContainerRunning)
+	contEvent := conthandlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerIDContHandler, RedisWLID, RedisPodName, &RedisInstanceID, conthandlerV1.ContainerRunning)
 
 	newWatchedContainer := watchedContainerData{
 		containerAggregator: CreateAggregator(getShortContainerID(contEvent.GetContainerID())),
