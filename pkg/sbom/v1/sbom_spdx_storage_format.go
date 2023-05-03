@@ -41,6 +41,7 @@ const (
 	sourceInfoRebar = "acquired package info from rebar3 or mix manifest file"
 	sourceInfoLinuxKernel = "acquired package info from linux kernel archive"
 	sourceInfoLinuxKernelModule = "acquired package info from linux kernel module files"
+	sourceInfoDefault = "acquired package info from the following paths"
 )
 
 var spdxDataDirPath string
@@ -75,7 +76,7 @@ func createSBOMDir() {
 
 func init() {
 	createSBOMDir()
-	sourceInfoPrefixData := []string{sourceInfoDotnet, sourceInfoNodeModule, sourceInfoPythonPackage, sourceInfoJava, sourceInfoGemFile, sourceInfoGoModule, sourceInfoRustCargo, sourceInfoPHPComposer, sourceInfoCabal, sourceInfoRebar, sourceInfoLinuxKernel, sourceInfoLinuxKernelModule}
+	sourceInfoPrefixData := []string{sourceInfoDotnet, sourceInfoNodeModule, sourceInfoPythonPackage, sourceInfoJava, sourceInfoGemFile, sourceInfoGoModule, sourceInfoRustCargo, sourceInfoPHPComposer, sourceInfoCabal, sourceInfoRebar, sourceInfoLinuxKernel, sourceInfoLinuxKernelModule, sourceInfoDefault}
 	sourceInfoRequiredPrefix = append(sourceInfoRequiredPrefix,sourceInfoPrefixData...) 
 }
 
