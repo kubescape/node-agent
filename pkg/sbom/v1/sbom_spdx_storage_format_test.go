@@ -431,6 +431,10 @@ func TestStoreMetadata(t *testing.T) {
 			if SBOMData.filteredSpdxData.Labels[i] != "redis" {
 				t.Fatalf("label key %s should be v1 not %s", i, SBOMData.filteredSpdxData.Labels[i])
 			}
+		case instanceidhandlerV1.ImageTagMetadataKey:
+			if SBOMData.filteredSpdxData.Labels[i] != "e41ced4a64bd065a1a8b79dbc5832b744a3ad82e7fcbe9fb2ebdd1267f972775" {
+				t.Fatalf("label key %s should be v1 not %s", i, SBOMData.filteredSpdxData.Labels[i])
+			}
 		}
 	}
 }

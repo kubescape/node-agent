@@ -307,18 +307,19 @@ func (sbom *SBOMData) storeLabels(wlidData string, instanceID instanceidhandler.
 	sbom.filteredSpdxData.ObjectMeta.SetLabels(labels)
 }
 
-func (sbom *SBOMData) storeAnnotations(wlidData string, instanceID instanceidhandler.IInstanceID) {
+func (sbom *SBOMData) storeAnnotations(wlidData, imageID string, instanceID instanceidhandler.IInstanceID) {
 	annotations := make(map[string]string)
 	annotations[instanceidhandlerV1.WlidMetadataKey] = wlidData
 	annotations[instanceidhandlerV1.InstanceIDMetadataKey] = instanceID.GetStringFormatted()
 	annotations[instanceidhandlerV1.ContainerNameMetadataKey] = instanceID.GetContainerName()
+	annotations[instanceidhandlerV1.ImageIDMetadataKey] = imageID
 
 	sbom.filteredSpdxData.ObjectMeta.SetAnnotations(annotations)
 }
 
-func (sbom *SBOMData) StoreMetadata(wlidData string, _ string, instanceID instanceidhandler.IInstanceID) {
+func (sbom *SBOMData) StoreMetadata(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
 	sbom.storeLabels(wlidData, instanceID)
-	sbom.storeAnnotations(wlidData, instanceID)
+	sbom.storeAnnotations(imageID, wlidData, instanceID)
 }
 
 func (sc *SBOMData) CleanResources() {
