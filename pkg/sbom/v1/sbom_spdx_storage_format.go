@@ -319,7 +319,7 @@ func (sbom *SBOMData) storeAnnotations(wlidData, imageID string, instanceID inst
 
 func (sbom *SBOMData) StoreMetadata(wlidData string, imageID string, instanceID instanceidhandler.IInstanceID) {
 	sbom.storeLabels(wlidData, instanceID)
-	sbom.storeAnnotations(imageID, wlidData, instanceID)
+	sbom.storeAnnotations(wlidData, imageID, instanceID)
 }
 
 func (sc *SBOMData) CleanResources() {
