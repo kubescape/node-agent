@@ -26,9 +26,8 @@ func (aggregator *Aggregator) collectDataFromContainerAccumulator(errChan chan e
 	for {
 		newEvent := <-aggregator.aggregationDataChan
 		if newEvent.GetEventCMD() == accumulator.DropEventOccurred {
-			_ = aggregator.StopAggregate()
 			errChan <- fmt.Errorf(newEvent.GetEventCMD())
-			break
+			continue
 		}
 		aggregator.aggregationData = append(aggregator.aggregationData, newEvent)
 	}
