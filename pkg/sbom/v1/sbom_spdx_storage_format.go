@@ -2,6 +2,7 @@ package sbom
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -42,6 +43,10 @@ const (
 	sourceInfoLinuxKernel = "acquired package info from linux kernel archive"
 	sourceInfoLinuxKernelModule = "acquired package info from linux kernel module files"
 	sourceInfoDefault = "acquired package info from the following paths"
+)
+
+var (
+	SBOMIncomplete = errors.New("SBOM Incomplete")
 )
 
 var spdxDataDirPath string
@@ -327,4 +332,19 @@ func (sc *SBOMData) CleanResources() {
 	if err != nil {
 		logger.L().Debug("fail to remove file", helpers.String("file name", sc.spdxDataPath), helpers.Error(err))
 	}
+}
+
+func (sc *SBOMData) ValidateSBOM() error {
+	sbom, err :=  sc.getSBOMDataSPDXFormat()
+	if err != nil {
+		logger.L().Debug("fail to validate SBOM", helpers.String("file name", sc.spdxDataPath), helpers.Error(err))
+		return nil
+	}
+	annotationes := sbom.GetAnnotations()
+	if val, ok := annotationes[instanceidhandlerV1.StatusMetadataKey]; ok {
+		if val == instanceidhandlerV1.Incomplete {
+			return SBOMIncomplete
+		} 
+	} 
+	return nil
 }

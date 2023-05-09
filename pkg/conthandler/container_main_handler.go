@@ -8,6 +8,7 @@ import (
 	v1 "sniffer/pkg/conthandler/v1"
 	accumulator "sniffer/pkg/event_data_storage"
 	"sniffer/pkg/sbom"
+	sbomV1 "sniffer/pkg/sbom/v1"
 	"sniffer/pkg/storageclient"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 const (
 	RelevantCVEsService = "RelevantCVEsService"
 	StepGetSBOM         = "StepGetSBOM"
+	StepValidateSBOM         = "StepValidateSBOM"
 	StepEventAggregator = "StepEventAggregator"
 )
 
@@ -94,6 +96,13 @@ func (ch *ContainerHandler) afterTimerActions() error {
 				logger.L().Debug("failed to get SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				continue
 			}
+			if err = containerData.sbomClient.ValidateSBOM(); err != nil {
+				ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "afterTimerActions")
+				logger.L().Ctx(ctx).Warning("SBOM is incomplete", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+				containerData.syncChannel[StepValidateSBOM] <- err
+				span.End()
+				continue
+			}
 			if err = containerData.sbomClient.FilterSBOM(fileList); err != nil {
 				ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "afterTimerActions")
 				logger.L().Ctx(ctx).Warning("failed to filter SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
@@ -130,8 +139,11 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 			watchedContainer.snifferTicker.Stop()
 			err = containerHasTerminatedError
 		}
+	case err = <-watchedContainer.syncChannel[StepValidateSBOM]:
+		if errors.Is(err, sbomV1.SBOMIncomplete) {
+			return err
+		}
 	}
-
 	return err
 }
 
@@ -172,6 +184,9 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 			if errors.Is(err, droppedEventsError) {
 				logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
 			} else if errors.Is(err, containerHasTerminatedError) {
+				break
+			} else if errors.Is(err, sbomV1.SBOMIncomplete) {
+				logger.L().Ctx(ctx).Warning("container monitoring stopped - incomplete SBOM", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()), helpers.Error(err))
 				break
 			}
 		}
@@ -214,6 +229,7 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 		syncChannel: map[string]chan error{
 			StepGetSBOM:         make(chan error, 10),
 			StepEventAggregator: make(chan error, 10),
+			StepValidateSBOM: make(chan error, 10),
 		},
 	}
 	ch.watchedContainers.Store(contEvent.GetContainerID(), newWatchedContainer)
