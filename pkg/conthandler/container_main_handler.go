@@ -24,7 +24,7 @@ import (
 const (
 	RelevantCVEsService = "RelevantCVEsService"
 	StepGetSBOM         = "StepGetSBOM"
-	StepValidateSBOM         = "StepValidateSBOM"
+	StepValidateSBOM    = "StepValidateSBOM"
 	StepEventAggregator = "StepEventAggregator"
 )
 
@@ -176,7 +176,7 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 	now := time.Now()
 	configStopTime := config.GetConfigurationConfigContext().GetSniffingMaxTimes()
 	stopSniffingTime := now.Add(configStopTime)
-	for ;time.Now().Before(stopSniffingTime); {
+	for time.Now().Before(stopSniffingTime) {
 		go ch.getSBOM(contEvent)
 		ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "container monitoring", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
 		err = ch.startTimer(watchedContainer, contEvent.GetContainerID())
@@ -229,7 +229,7 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 		syncChannel: map[string]chan error{
 			StepGetSBOM:         make(chan error, 10),
 			StepEventAggregator: make(chan error, 10),
-			StepValidateSBOM: make(chan error, 10),
+			StepValidateSBOM:    make(chan error, 10),
 		},
 	}
 	ch.watchedContainers.Store(contEvent.GetContainerID(), newWatchedContainer)
