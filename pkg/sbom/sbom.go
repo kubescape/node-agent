@@ -95,3 +95,7 @@ func (sc *SBOMStructure) CleanResources() {
 func IsAlreadyExist() error {
 	return errorsOfSBOM[DataAlreadyExist]
 }
+
+func (sc *SBOMStructure) ValidateSBOM() error {
+	return sc.SBOMData.ValidateSBOM()
+}

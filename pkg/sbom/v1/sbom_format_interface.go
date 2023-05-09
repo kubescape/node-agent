@@ -5,6 +5,7 @@ import "github.com/kubescape/k8s-interface/instanceidhandler"
 type SBOMFormat interface {
 	GetFilterSBOMData() any
 	StoreSBOM(any) error
+	ValidateSBOM() error
 	FilterSBOM(sbomFileRelevantMap map[string]bool) error
 	IsNewRelevantSBOMDataExist() bool
 	IsSBOMAlreadyExist() bool

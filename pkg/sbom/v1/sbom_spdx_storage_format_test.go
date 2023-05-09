@@ -510,3 +510,31 @@ func TestParsedFilesBySourceInfoFiltered(t *testing.T) {
 		}
 	}
 }
+
+func TestSBOMIncomplete(t *testing.T) {
+	instanceID, err := instanceidhandlerV1.GenerateInstanceIDFromString(instnaceIDMock)
+	if err != nil {
+		t.Fatalf("fail to create instance ID, err: %v", err)
+	}
+	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	SBOMData := data.(*SBOMData)
+
+	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
+	nginxSBOMPath := path.Join(utils.CurrentDir(), "..", "testdata", "sbom-incomplete-mock.json")
+	bytes, err := os.ReadFile(nginxSBOMPath)
+	if err != nil {
+		t.Fatalf("fail to read SBOM file, err: %v", err)
+	}
+	err = json.Unmarshal(bytes, &SBOMDataMock)
+	if err != nil {
+		t.Fatalf("fail to unmarshal SBOM file, err: %v", err)
+	}
+	err = SBOMData.StoreSBOM(&SBOMDataMock)
+	if err != nil {
+		t.Fatalf("fail to store SBOM file, err: %v", err)
+	}
+	if err = SBOMData.ValidateSBOM(); err == nil {
+		t.Fatalf("SBOM should mark as incomplete")
+	}
+	
+}
