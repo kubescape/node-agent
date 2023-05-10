@@ -1,4 +1,4 @@
-FROM quay.io/kubescape/sniffer:base as builder
+FROM quay.io/kubescape/ebpf-engine:v0.0.0 as builder
 
 
 FROM ubuntu:latest
@@ -17,6 +17,8 @@ RUN apt-get install ca-certificates -y
 
 ENV GO111MODULE=on CGO_ENABLED=0
 WORKDIR /etc/node-agent
+ADD go.mod go.sum /etc/node-agent/
+RUN go mod download
 ADD . .
 RUN go build -o node-agent .
 
