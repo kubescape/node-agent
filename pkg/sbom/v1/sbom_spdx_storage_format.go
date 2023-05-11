@@ -23,26 +23,26 @@ import (
 
 const (
 	// CreatorType should be one of "Person", "Organization", or "Tool"
-	Organization              = "Organization"
-	Tool                      = "Tool"
-	Person                    = "Person"
-	KubescapeOrganizationName = "Kubescape"
-	KubescapeNodeAgentName    = "KubescapeNodeAgent"
-	RelationshipContainType   = "CONTAINS"
-	directorySBOM             = "SBOM"
-	sourceInfoDotnet = "acquired package info from dotnet project assets file"
-	sourceInfoNodeModule = "acquired package info from installed node module manifest file"
-	sourceInfoPythonPackage = "acquired package info from installed python package manifest file"
-	sourceInfoJava = "acquired package info from installed java archive"
-	sourceInfoGemFile = "acquired package info from installed gem metadata file"
-	sourceInfoGoModule = "acquired package info from go module information"
-	sourceInfoRustCargo = "acquired package info from rust cargo manifest"
-	sourceInfoPHPComposer = "acquired package info from PHP composer manifest"
-	sourceInfoCabal = "acquired package info from cabal or stack manifest files"
-	sourceInfoRebar = "acquired package info from rebar3 or mix manifest file"
-	sourceInfoLinuxKernel = "acquired package info from linux kernel archive"
+	Organization                = "Organization"
+	Tool                        = "Tool"
+	Person                      = "Person"
+	KubescapeOrganizationName   = "Kubescape"
+	KubescapeNodeAgentName      = "KubescapeNodeAgent"
+	RelationshipContainType     = "CONTAINS"
+	directorySBOM               = "SBOM"
+	sourceInfoDotnet            = "acquired package info from dotnet project assets file"
+	sourceInfoNodeModule        = "acquired package info from installed node module manifest file"
+	sourceInfoPythonPackage     = "acquired package info from installed python package manifest file"
+	sourceInfoJava              = "acquired package info from installed java archive"
+	sourceInfoGemFile           = "acquired package info from installed gem metadata file"
+	sourceInfoGoModule          = "acquired package info from go module information"
+	sourceInfoRustCargo         = "acquired package info from rust cargo manifest"
+	sourceInfoPHPComposer       = "acquired package info from PHP composer manifest"
+	sourceInfoCabal             = "acquired package info from cabal or stack manifest files"
+	sourceInfoRebar             = "acquired package info from rebar3 or mix manifest file"
+	sourceInfoLinuxKernel       = "acquired package info from linux kernel archive"
 	sourceInfoLinuxKernelModule = "acquired package info from linux kernel module files"
-	sourceInfoDefault = "acquired package info from the following paths"
+	sourceInfoDefault           = "acquired package info from the following paths"
 )
 
 var (
@@ -59,6 +59,7 @@ type SBOMData struct {
 	relevantRealtimeFilesByPackageSourceInfo sync.Map
 	newRelevantData                          bool
 	alreadyExistSBOM                         bool
+	status                                   string
 	instanceID                               instanceidhandler.IInstanceID
 }
 
@@ -82,7 +83,7 @@ func createSBOMDir() {
 func init() {
 	createSBOMDir()
 	sourceInfoPrefixData := []string{sourceInfoDotnet, sourceInfoNodeModule, sourceInfoPythonPackage, sourceInfoJava, sourceInfoGemFile, sourceInfoGoModule, sourceInfoRustCargo, sourceInfoPHPComposer, sourceInfoCabal, sourceInfoRebar, sourceInfoLinuxKernel, sourceInfoLinuxKernelModule, sourceInfoDefault}
-	sourceInfoRequiredPrefix = append(sourceInfoRequiredPrefix,sourceInfoPrefixData...) 
+	sourceInfoRequiredPrefix = append(sourceInfoRequiredPrefix, sourceInfoPrefixData...)
 }
 
 func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID) SBOMFormat {
@@ -95,6 +96,7 @@ func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID) SBO
 		newRelevantData:                          false,
 		alreadyExistSBOM:                         false,
 		instanceID:                               instanceID,
+		status:                                   "",
 	}
 }
 
@@ -205,6 +207,9 @@ func (sbom *SBOMData) getSBOMDataSPDXFormat() (*spdxv1beta1.SBOMSPDXv2p3, error)
 }
 
 func (sbom *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
+	if sbom.status == instanceidhandlerV1.Incomplete {
+		return nil
+	}
 	sbom.newRelevantData = false
 
 	spdxData, err := sbom.getSBOMDataSPDXFormat()
@@ -318,6 +323,7 @@ func (sbom *SBOMData) storeAnnotations(wlidData, imageID string, instanceID inst
 	annotations[instanceidhandlerV1.InstanceIDMetadataKey] = instanceID.GetStringFormatted()
 	annotations[instanceidhandlerV1.ContainerNameMetadataKey] = instanceID.GetContainerName()
 	annotations[instanceidhandlerV1.ImageIDMetadataKey] = imageID
+	annotations[instanceidhandlerV1.StatusMetadataKey] = sbom.status
 
 	sbom.filteredSpdxData.ObjectMeta.SetAnnotations(annotations)
 }
@@ -335,7 +341,7 @@ func (sc *SBOMData) CleanResources() {
 }
 
 func (sc *SBOMData) ValidateSBOM() error {
-	sbom, err :=  sc.getSBOMDataSPDXFormat()
+	sbom, err := sc.getSBOMDataSPDXFormat()
 	if err != nil {
 		logger.L().Debug("fail to validate SBOM", helpers.String("file name", sc.spdxDataPath), helpers.Error(err))
 		return nil
@@ -343,8 +349,9 @@ func (sc *SBOMData) ValidateSBOM() error {
 	annotationes := sbom.GetAnnotations()
 	if val, ok := annotationes[instanceidhandlerV1.StatusMetadataKey]; ok {
 		if val == instanceidhandlerV1.Incomplete {
+			sc.status = instanceidhandlerV1.Incomplete
 			return SBOMIncomplete
-		} 
-	} 
+		}
+	}
 	return nil
 }
