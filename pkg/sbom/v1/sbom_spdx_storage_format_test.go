@@ -501,7 +501,6 @@ func TestParsedFilesBySourceInfoFiltered(t *testing.T) {
 		}
 	}
 
-
 	shouldNotBeSourcesInfo := []string{"acquired package info from ALPM DB: 1234, 456", "acquired package info from RPM DB: 1234, 456", "acquired package info from APK DB: 1234, 456", "acquired package info from DPKG DB: 1234, 456", "acquired package info from installed cocoapods manifest file: 1234, 456", "acquired package info from conan manifest: 1234, 456", "acquired package info from portage DB: 1234, 456", "acquired package info from nix store path: 123, 456"}
 	for i := range shouldNotBeSourcesInfo {
 		list := parsedFilesBySourceInfo(shouldNotBeSourcesInfo[i])
@@ -536,5 +535,7 @@ func TestSBOMIncomplete(t *testing.T) {
 	if err = SBOMData.ValidateSBOM(); err == nil {
 		t.Fatalf("SBOM should mark as incomplete")
 	}
-	
+	if SBOMData.status != instanceidhandlerV1.Incomplete {
+		t.Fatalf("SBOM status should be in complete")
+	}
 }

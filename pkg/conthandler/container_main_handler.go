@@ -101,7 +101,6 @@ func (ch *ContainerHandler) afterTimerActions() error {
 				logger.L().Ctx(ctx).Warning("SBOM is incomplete", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				containerData.syncChannel[StepValidateSBOM] <- err
 				span.End()
-				continue
 			}
 			if err = containerData.sbomClient.FilterSBOM(fileList); err != nil {
 				ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "afterTimerActions")
