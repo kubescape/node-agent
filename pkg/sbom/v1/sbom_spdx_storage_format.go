@@ -163,16 +163,18 @@ func (sbom *SBOMData) StoreSBOM(sbomData any) error {
 
 	sbom.filteredSpdxData.Spec = spdxData.Spec
 	sbom.filteredSpdxData.Status = spdxData.Status
-	sbom.filteredSpdxData.Spec.SPDX.CreationInfo.Creators = append(sbom.filteredSpdxData.Spec.SPDX.CreationInfo.Creators, []spdxv1beta1.Creator{
-		{
-			CreatorType: Organization,
-			Creator:     KubescapeOrganizationName,
-		},
-		{
-			CreatorType: Tool,
-			Creator:     KubescapeNodeAgentName,
-		},
-	}...)
+	if sbom.filteredSpdxData.Spec.SPDX.CreationInfo != nil {
+		sbom.filteredSpdxData.Spec.SPDX.CreationInfo.Creators = append(sbom.filteredSpdxData.Spec.SPDX.CreationInfo.Creators, []spdxv1beta1.Creator{
+			{
+				CreatorType: Organization,
+				Creator:     KubescapeOrganizationName,
+			},
+			{
+				CreatorType: Tool,
+				Creator:     KubescapeNodeAgentName,
+			},
+		}...)
+	}
 
 	sbom.filteredSpdxData.ObjectMeta = metav1.ObjectMeta{}
 	sbom.filteredSpdxData.Spec.SPDX.Files = make([]*spdxv1beta1.File, 0)
