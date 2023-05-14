@@ -1,12 +1,13 @@
 name: pr-merged
 on:
-  pull_request_target:
+  workflow_call:
     inputs:
       REQUIRED_TESTS:
         required: true
         type: string
         description: 'tests to run'  
 
+  pull_request_target:
     types: [closed]
     branches: 
     - 'main'
@@ -71,11 +72,11 @@ jobs:
           push: true
 
       - id: export_tests_to_env
-          name: set test name
-          run: |
-            echo "TEST_NAMES=$input" >> $GITHUB_OUTPUT
-          env:
-            input: ${{ inputs.REQUIRED_TESTS }}
+        name: set test name
+        run: |
+          echo "TEST_NAMES=$input" >> $GITHUB_OUTPUT
+        env:
+          input: ${{ inputs.REQUIRED_TESTS }}
 
   run-tests:
     strategy:
