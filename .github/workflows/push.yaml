@@ -1,0 +1,14 @@
+name: push
+on:
+  push:
+    branches:
+      - e2e-tests
+jobs:
+  basic-tests:
+    uses: ./.github/workflows/e2e-tests.yaml
+    with:
+      REQUIRED_TESTS: '[
+                        "vulnerability_scanning", 
+                        "vulnerability_scanning_trigger_scan_on_new_image"
+                        ]'
+    secrets: inherit
