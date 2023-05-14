@@ -1,5 +1,12 @@
 name: pr-merged
 on:
+  workflow_call:
+    inputs:
+      REQUIRED_TESTS:
+        required: true
+        type: string
+        description: 'tests to run'  
+
   pull_request_target:
     types: [closed]
     branches: 
@@ -18,6 +25,9 @@ jobs:
   docker-build:
     if: ${{ (github.event.pull_request.merged == true) && (github.repository_owner == 'kubescape') }} ## Skip if not merged and the repository owner is not kubescape
     runs-on: ubuntu-latest
+    outputs:
+      TEST_NAMES: ${{ steps.export_tests_to_env.outputs.TEST_NAMES }}
+
     permissions:
       id-token: write
       packages: write
@@ -60,12 +70,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           push: true
+
+      - id: export_tests_to_env
+        name: set test name
+        run: |
+          echo "TEST_NAMES=$input" >> $GITHUB_OUTPUT
+        env:
+          input: ${{ inputs.REQUIRED_TESTS }}
+
   run-tests:
     strategy:
       fail-fast: false    
       matrix:
         TEST: ${{ fromJson(needs.docker-build.outputs.TEST_NAMES) }}
-    if: ${{ contains( github.event.pull_request.labels.*.name, 'trigger-integration-test') }}
     needs: docker-build
     runs-on: ubuntu-latest
     steps:
