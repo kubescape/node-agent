@@ -9,7 +9,7 @@ on:
       - '**.md' ### Ignore running when .md files change
       - '**.yaml' ### Ignore running when .yaml files change
       - '**.json' ### Ignore running when .json files change
-      - '.github/*' ### Ignore running when files under path: .github/* changed.
+      # - '.github/*' ### Ignore running when files under path: .github/* changed.
 
 concurrency:
   group: ${{ github.head_ref }}
@@ -21,4 +21,13 @@ jobs:
     with:
       GO_VERSION: "1.19"
       CGO_ENABLED: 0
+    secrets: inherit
+  
+  e2e-tests:
+    uses: ./.github/workflows/e2e-tests.yaml
+    with:
+      REQUIRED_TESTS: '[
+                        "vulnerability_scanning", 
+                        "vulnerability_scanning_trigger_scan_on_new_image"
+                        ]'
     secrets: inherit
