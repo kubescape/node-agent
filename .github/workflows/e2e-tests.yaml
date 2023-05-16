@@ -47,7 +47,10 @@ jobs:
 
       - name: Checkout linux distro
         run: cat /etc/os-release
-      
+
+      - name: Checkout linux distro - from another file
+        run: cat /etc/debian_version
+     
       - name: run falco init container
         run: docker run -i -v /etc:/host/etc -v /boot:/host/boot -v /lib/modules:/host/lib/modules -v /usr:/host/usr  -e FALCO_BPF_PROBE=1  docker.io/falcosecurity/falco-driver-loader:0.32.2 > container-logs.txt
 
