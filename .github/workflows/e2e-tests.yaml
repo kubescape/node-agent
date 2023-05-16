@@ -44,6 +44,13 @@ jobs:
     steps:
       - name: Checkout kernel version and release
         run: uname -a
+      
+      - name: run falco init container
+        run: docker run -it  docker.io/falcosecurity/falco-driver-loader:0.32.2 > container-logs.txt
+
+      - name: print logs
+        run: cat container-logs.txt
+
       # - name: Checkout systests repo
       #   uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
       #   with:

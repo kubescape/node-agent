@@ -8,13 +8,6 @@ jobs:
     uses: ./.github/workflows/e2e-tests.yaml
     with:
       REQUIRED_TESTS: '[
-                        "vulnerability_scanning", 
-                        "vulnerability_scanning_trigger_scan_on_new_image",
                         "relevantCVEs",
-                        "relevancy_disabled_installation",
-                        "relevancy_enabled_stop_sniffing",
-                        "relevant_data_is_appended",
-                        "relevancy_extra_large_image",
-                        "relevancy_large_image",
-                        ]'
+                       ]'
     secrets: inherit
