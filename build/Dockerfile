@@ -1,4 +1,4 @@
-FROM quay.io/kubescape/ebpf-engine:v0.0.0 as builder
+FROM quay.io/kubescape/ebpf-engine:v1.0.0 as builder
 
 
 FROM ubuntu:latest
@@ -11,7 +11,6 @@ RUN mkdir /etc/node-agent/resources/ebpf
 RUN mkdir /etc/node-agent/resources/ebpf/falco
 RUN mkdir /etc/node-agent/configuration
 
-COPY --from=builder /etc/kubescape_ebpf_engine_sc/build/main /etc/node-agent/resources/ebpf/falco/userspace_app
 
 RUN apt-get install ca-certificates -y
 
@@ -21,5 +20,7 @@ ADD go.mod go.sum /etc/node-agent/
 RUN go mod download
 ADD . .
 RUN go build -o node-agent .
+
+COPY --from=builder /etc/kubescape_ebpf_engine_sc/build/main /etc/node-agent/resources/ebpf/falco/userspace_app
 
 CMD ["./node-agent"]
