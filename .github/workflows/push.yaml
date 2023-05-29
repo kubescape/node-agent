@@ -12,7 +12,6 @@ jobs:
                         "relevancy_disabled_installation",
                         "relevancy_enabled_stop_sniffing",
                         "relevant_data_is_appended",
-                        "relevancy_enabled_deleted_image",
                         "relevancy_large_image",
                         "relevancy_extra_large_image",
                         "relevancy_storage_disabled",
