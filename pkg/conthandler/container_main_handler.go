@@ -82,7 +82,7 @@ func (ch *ContainerHandler) afterTimerActions() error {
 		afterTimerActionsData := <-ch.afterTimerActionsChannel
 		containerDataInterface, exist := ch.watchedContainers.Load(afterTimerActionsData.containerID)
 		if !exist {
-			ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "afterTimerActions")
+			ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "LoadContainerIDFromMap")
 			logger.L().Ctx(ctx).Warning("afterTimerActions: failed to get container data of container ID", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID)}...)
 			span.End()
 			continue
@@ -92,31 +92,33 @@ func (ch *ContainerHandler) afterTimerActions() error {
 		if config.GetConfigurationConfigContext().IsRelevantCVEServiceEnabled() && afterTimerActionsData.service == RelevantCVEsService {
 			fileList := containerData.containerAggregator.GetContainerRealtimeFileList()
 
+			ctxPostSBOM, spanPostSBOM := otel.Tracer("").Start(context.GetBackgroundContext(), "PostFilterSBOM")
 			if err = <-containerData.syncChannel[StepGetSBOM]; err != nil {
 				logger.L().Debug("failed to get SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				continue
 			}
 			if err = containerData.sbomClient.ValidateSBOM(); err != nil {
-				ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "afterTimerActions")
+				ctx, span := otel.Tracer("").Start(ctxPostSBOM, "ValidateSBOM")
 				logger.L().Ctx(ctx).Warning("SBOM is incomplete", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				containerData.syncChannel[StepValidateSBOM] <- err
 				span.End()
 			}
 			if err = containerData.sbomClient.FilterSBOM(fileList); err != nil {
-				ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "afterTimerActions")
+				ctx, span := otel.Tracer("").Start(ctxPostSBOM, "FilterSBOM")
 				logger.L().Ctx(ctx).Warning("failed to filter SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				span.End()
 				continue
 			}
 			if err = containerData.sbomClient.StoreFilterSBOM(containerData.event.GetInstanceIDHash()); err != nil {
 				if !errors.Is(err, sbom.IsAlreadyExist()) {
-					ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "afterTimerActions")
+					ctx, span := otel.Tracer("").Start(ctxPostSBOM, "StoreFilterSBOM")
 					logger.L().Ctx(ctx).Error("failed to store filtered SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 					span.End()
 				}
 				continue
 			}
 			logger.L().Info("filtered SBOM has been stored successfully", []helpers.IDetails{helpers.String("containerID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID())}...)
+			spanPostSBOM.End()
 		}
 	}
 }
