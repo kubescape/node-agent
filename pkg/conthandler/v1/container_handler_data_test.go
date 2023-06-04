@@ -7,6 +7,7 @@ import (
 )
 
 const (
+	TestImageTAG       = "docker-pullable://k8s.gcr.io/etcd"
 	TestImageID        = "docker-pullable://k8s.gcr.io/etcd@sha256:13f53ed1d91e2e11aac476ee9a0269fdda6cc4874eba903efd40daf50c55eee5"
 	TestContainerID    = "e1da74f71370d61564cbc746996e3f534d4c61ce3e7e7627b1f2543999e3cf7a"
 	TestContainerName  = "blabla"
@@ -22,7 +23,7 @@ func TestContainerEvent(t *testing.T) {
 	instanceid.SetKind("deployment")
 	instanceid.SetName("aaa")
 	instanceid.SetContainerName("contName")
-	contEv := CreateNewContainerEvent(TestImageID, TestContainerID, TestContainerName, TestWLID, &instanceid, ContainerRunning)
+	contEv := CreateNewContainerEvent(TestImageTAG, TestImageID, TestContainerID, TestContainerName, TestWLID, &instanceid, ContainerRunning)
 	if contEv.GetContainerEventType() != ContainerRunning {
 		t.Fatalf("fail to get container event type")
 	}
@@ -51,7 +52,7 @@ func TestContainerEvent(t *testing.T) {
 		t.Fatalf("fail to get container event WLID, get %s, expected %s ", contEv.GetInstanceID(), instanceid)
 	}
 
-	contEvBadImageHash := CreateNewContainerEvent("123", TestContainerID, TestContainerName, TestWLID, &instanceid, ContainerRunning)
+	contEvBadImageHash := CreateNewContainerEvent("456", "123", TestContainerID, TestContainerName, TestWLID, &instanceid, ContainerRunning)
 	_, err := contEvBadImageHash.GetImageHash()
 	if err == nil {
 		t.Fatalf("image hash parser should fail")

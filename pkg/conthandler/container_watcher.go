@@ -122,7 +122,7 @@ func (containerWatcher *ContainerWatcher) parsePodData(pod *core.Pod, containerI
 		return nil, fmt.Errorf("fail to create InstanceID to pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 	instanceID := getInstanceID(instanceIDs, pod.Status.ContainerStatuses[containerIndex].Name)
-	return conthandlerV1.CreateNewContainerEvent(pod.Status.ContainerStatuses[containerIndex].ImageID, pod.Status.ContainerStatuses[containerIndex].ContainerID, pod.GetName(), parentWlid, instanceID, conthandlerV1.ContainerRunning), nil
+	return conthandlerV1.CreateNewContainerEvent(pod.Status.ContainerStatuses[containerIndex].Image, pod.Status.ContainerStatuses[containerIndex].ImageID, pod.Status.ContainerStatuses[containerIndex].ContainerID, pod.GetName(), parentWlid, instanceID, conthandlerV1.ContainerRunning), nil
 }
 
 func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEventChannel chan conthandlerV1.ContainerEventData) error {
@@ -169,7 +169,7 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 						containerEventChannel <- *containerEventData
 					} else if pod.Status.ContainerStatuses[i].State.Terminated != nil {
 						logger.L().Debug("container has Terminated", helpers.String("namespace", pod.GetNamespace()), helpers.String("Pod name", pod.GetName()), helpers.String("ContainerID", pod.Status.ContainerStatuses[i].ContainerID), helpers.String("Container name", pod.Status.ContainerStatuses[i].Name))
-						containerEventData := conthandlerV1.CreateNewContainerEvent("", pod.Status.ContainerStatuses[i].ContainerID, "", "", &instanceidhandlerV1.InstanceID{}, conthandlerV1.ContainerDeleted)
+						containerEventData := conthandlerV1.CreateNewContainerEvent("", "", pod.Status.ContainerStatuses[i].ContainerID, "", "", &instanceidhandlerV1.InstanceID{}, conthandlerV1.ContainerDeleted)
 						containerEventChannel <- *containerEventData
 					}
 				}
