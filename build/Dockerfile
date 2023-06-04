@@ -23,4 +23,7 @@ RUN go build -o node-agent .
 
 COPY --from=builder /etc/kubescape_ebpf_engine_sc/build/main /etc/node-agent/resources/ebpf/falco/userspace_app
 
+ARG image_version
+ENV RELEASE=$image_version
+
 CMD ["./node-agent"]
