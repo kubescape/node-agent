@@ -64,9 +64,9 @@ jobs:
         with:
           context: .
           file: build/Dockerfile
-          tags: quay.io/${{ github.repository_owner }}/sniffer:v0.1.${{ github.run_number }}-relevancy
+          tags: quay.io/${{ github.repository_owner }}/node-agent:v0.1.${{ github.run_number }}-relevancy
           build-args: image_version=v0.1.${{ github.run_number }}-relevancy
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
           push: true
