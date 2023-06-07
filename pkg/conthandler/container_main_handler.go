@@ -109,7 +109,14 @@ func (ch *ContainerHandler) afterTimerActions() error {
 				span.End()
 				continue
 			}
-			if err = containerData.sbomClient.StoreFilterSBOM(containerData.event.GetInstanceIDHash()); err != nil {
+			filterSBOMKey, err := containerData.event.GetInstanceID().GetSlug()
+			if err != nil {
+				ctx, span := otel.Tracer("").Start(ctxPostSBOM, "filterSBOMKey")
+				logger.L().Ctx(ctx).Warning("failed to get filterSBOMKey for store filter SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
+				span.End()
+				continue
+			}
+			if err = containerData.sbomClient.StoreFilterSBOM(filterSBOMKey); err != nil {
 				if !errors.Is(err, sbom.IsAlreadyExist()) {
 					ctx, span := otel.Tracer("").Start(ctxPostSBOM, "StoreFilterSBOM")
 					logger.L().Ctx(ctx).Error("failed to store filtered SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s resource", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
@@ -209,10 +216,7 @@ func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
 		return
 	}
 	watchedContainer := containerDataInterface.(watchedContainerData)
-	imageHash, err := contEvent.GetImageHash()
-	if err == nil {
-		err = watchedContainer.sbomClient.GetSBOM(imageHash)
-	}
+	err := watchedContainer.sbomClient.GetSBOM(contEvent.GetImageTAG(), contEvent.GetImageID())
 	watchedContainer.syncChannel[StepGetSBOM] <- err
 }
 

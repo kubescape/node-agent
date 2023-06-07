@@ -6,6 +6,7 @@ import (
 	"sniffer/pkg/storageclient"
 
 	"github.com/kubescape/k8s-interface/instanceidhandler"
+	"github.com/kubescape/k8s-interface/names"
 )
 
 const (
@@ -45,12 +46,17 @@ func CreateSBOMStorageClient(sc storageclient.StorageClient, wlid, imageID strin
 	}
 }
 
-func (sc *SBOMStructure) GetSBOM(imageID string) error {
+func (sc *SBOMStructure) GetSBOM(imageTAG, imageID string) error {
 	if sc.SBOMData.IsSBOMAlreadyExist() {
 		return nil
 	}
 
-	SBOM, err := sc.storageClient.client.GetData(imageID)
+	SBOMKey, err := names.ImageInfoToSlug(imageTAG, imageID)
+	if err != nil {
+		return err
+	}
+
+	SBOM, err := sc.storageClient.client.GetData(SBOMKey)
 	if err != nil {
 		return err
 	}
