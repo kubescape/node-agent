@@ -216,10 +216,7 @@ func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
 		return
 	}
 	watchedContainer := containerDataInterface.(watchedContainerData)
-	imageHash, err := contEvent.GetImageHash()
-	if err == nil {
-		err = watchedContainer.sbomClient.GetSBOM(contEvent.GetImageTAG(), imageHash)
-	}
+	err := watchedContainer.sbomClient.GetSBOM(contEvent.GetImageTAG(), contEvent.GetImageID())
 	watchedContainer.syncChannel[StepGetSBOM] <- err
 }
 

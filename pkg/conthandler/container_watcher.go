@@ -17,6 +17,7 @@ import (
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"go.opentelemetry.io/otel"
 	core "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -122,15 +123,30 @@ func (containerWatcher *ContainerWatcher) parsePodData(pod *core.Pod, containerI
 		return nil, fmt.Errorf("fail to create InstanceID to pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 	instanceID := getInstanceID(instanceIDs, pod.Status.ContainerStatuses[containerIndex].Name)
-	return conthandlerV1.CreateNewContainerEvent(pod.Status.ContainerStatuses[containerIndex].Image, pod.Status.ContainerStatuses[containerIndex].ImageID, pod.Status.ContainerStatuses[containerIndex].ContainerID, pod.GetName(), parentWlid, instanceID, conthandlerV1.ContainerRunning), nil
+
+	imageTag := ""
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == pod.Status.ContainerStatuses[containerIndex].Name {
+			imageTag = pod.Spec.Containers[i].Image
+		}
+	}
+	if imageTag == "" {
+		return nil, fmt.Errorf("fail to get image of container %s to pod %s in namespace %s", pod.Status.ContainerStatuses[containerIndex].ContainerID, pod.GetName(), pod.GetNamespace())
+	}
+	return conthandlerV1.CreateNewContainerEvent(imageTag, pod.Status.ContainerStatuses[containerIndex].ImageID, pod.Status.ContainerStatuses[containerIndex].ContainerID, pod.GetName(), parentWlid, instanceID, conthandlerV1.ContainerRunning), nil
 }
 
 func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEventChannel chan conthandlerV1.ContainerEventData) error {
 	logger.L().Info("Ready to watch over node", helpers.String("node name", containerWatcher.nodeName))
+	alreadyReported := false
 	for {
+		ctxContainerWatcher, spanContainerWatcher := otel.Tracer("").Start(context.GetBackgroundContext(), "containers watcher")
 		watcher, err := containerWatcher.ContainerClient.GetWatcher()
 		if err != nil {
-			logger.L().Ctx(context.GetBackgroundContext()).Error("GetWatcher err", helpers.Error(err))
+			if alreadyReported {
+				logger.L().Ctx(context.GetBackgroundContext()).Error("GetWatcher err", helpers.Error(err))
+			}
+			spanContainerWatcher.End()
 			continue
 		}
 		for {
@@ -163,7 +179,9 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 						}
 						containerEventData, err := containerWatcher.parsePodData(pod, i)
 						if err != nil {
-							logger.L().Ctx(context.GetBackgroundContext()).Error("failed to parse container data", helpers.String("namespace", pod.GetNamespace()), helpers.String("Pod name", pod.GetName()), helpers.String("ContainerID", pod.Status.ContainerStatuses[i].ContainerID), helpers.String("Container name", pod.Status.ContainerStatuses[i].Name), helpers.Error(err))
+							ctx, span := otel.Tracer("").Start(ctxContainerWatcher, "parsePodData")
+							logger.L().Ctx(ctx).Error("failed to parse container data", helpers.String("namespace", pod.GetNamespace()), helpers.String("Pod name", pod.GetName()), helpers.String("ContainerID", pod.Status.ContainerStatuses[i].ContainerID), helpers.String("Container name", pod.Status.ContainerStatuses[i].Name), helpers.Error(err))
+							span.End()
 							continue
 						}
 						containerEventChannel <- *containerEventData
@@ -175,6 +193,6 @@ func (containerWatcher *ContainerWatcher) StartWatchedOnContainers(containerEven
 				}
 			}
 		}
+		spanContainerWatcher.End()
 	}
-
 }
