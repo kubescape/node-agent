@@ -99,6 +99,7 @@ func TestContWatcher(t *testing.T) {
 			cs = make([]v1.ContainerStatus, 0)
 			Started := true
 			cs = append(cs, v1.ContainerStatus{
+				Name:        "nginx",
 				Image:       "nginx",
 				ContainerID: "nginxContainerID",
 				Ready:       true,
