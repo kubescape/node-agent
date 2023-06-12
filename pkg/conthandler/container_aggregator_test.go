@@ -16,6 +16,7 @@ import (
 
 const (
 	RedisPodName     = "redis-64bd97b5fc-kvh7r"
+	RedisImageTAG    = "docker-pullable://redis"
 	RedisImageID     = "docker-pullable://redis@sha256:6a59f1cbb8d28ac484176d52c473494859a512ddba3ea62a547258cf16c9b3ae"
 	RedisContainerID = "16248df36c67"
 	RedisWLID        = "wlid://cluster-test/namespace-any/deployment/redis"
@@ -52,7 +53,7 @@ func TestContAggregator(t *testing.T) {
 	RedisInstanceID.SetContainerName("redis")
 	containersEventChan := make(chan conthadlerV1.ContainerEventData, 50)
 	go func() {
-		containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerID, RedisPodName, RedisWLID, &RedisInstanceID, conthadlerV1.ContainerRunning)
+		containersEventChan <- *conthadlerV1.CreateNewContainerEvent(RedisImageTAG, RedisImageID, RedisContainerID, RedisPodName, RedisWLID, &RedisInstanceID, conthadlerV1.ContainerRunning)
 	}()
 
 	event := <-containersEventChan

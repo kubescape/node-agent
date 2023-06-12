@@ -15,6 +15,7 @@ const (
 type ContainerEventType string
 
 type ContainerEventData struct {
+	imageTAG      string
 	imageID       string
 	containerID   string
 	containerName string
@@ -23,8 +24,9 @@ type ContainerEventData struct {
 	eventType     ContainerEventType
 }
 
-func CreateNewContainerEvent(imageID, containerID, containerName, wlid string, instanceID instanceidhandler.IInstanceID, eventType ContainerEventType) *ContainerEventData {
+func CreateNewContainerEvent(imageTAG, imageID, containerID, containerName, wlid string, instanceID instanceidhandler.IInstanceID, eventType ContainerEventType) *ContainerEventData {
 	return &ContainerEventData{
+		imageTAG:      imageTAG,
 		imageID:       imageID,
 		containerID:   containerID,
 		containerName: containerName,
@@ -68,4 +70,8 @@ func (event *ContainerEventData) GetInstanceID() instanceidhandler.IInstanceID {
 
 func (event *ContainerEventData) GetInstanceIDHash() string {
 	return event.instanceID.GetHashed()
+}
+
+func (event *ContainerEventData) GetImageTAG() string {
+	return event.imageTAG
 }

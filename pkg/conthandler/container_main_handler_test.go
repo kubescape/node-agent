@@ -54,7 +54,7 @@ func TestContMainHandler(t *testing.T) {
 		RedisInstanceID.SetKind("deployment")
 		RedisInstanceID.SetName("redis")
 		RedisInstanceID.SetContainerName("redis")
-		contHandler.containersEventChan <- *conthandlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerIDContHandler, RedisPodName, RedisWLID, &RedisInstanceID, conthandlerV1.ContainerRunning)
+		contHandler.containersEventChan <- *conthandlerV1.CreateNewContainerEvent(RedisImageTAG, RedisImageID, RedisContainerIDContHandler, RedisPodName, RedisWLID, &RedisInstanceID, conthandlerV1.ContainerRunning)
 	}()
 
 	event := <-contHandler.containersEventChan
@@ -70,8 +70,6 @@ func TestContMainHandler(t *testing.T) {
 		t.Fatalf("handleNewContainerEvent failed with error %v", err)
 	}
 }
-
-
 
 func TestContMainHandlerStopMonitorAfterXMinutes(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
@@ -104,7 +102,7 @@ func TestContMainHandlerStopMonitorAfterXMinutes(t *testing.T) {
 	RedisInstanceID.SetKind("deployment")
 	RedisInstanceID.SetName("redis")
 	RedisInstanceID.SetContainerName("redis")
-	contEvent := conthandlerV1.CreateNewContainerEvent(RedisImageID, RedisContainerIDContHandler, RedisWLID, RedisPodName, &RedisInstanceID, conthandlerV1.ContainerRunning)
+	contEvent := conthandlerV1.CreateNewContainerEvent(RedisImageTAG, RedisImageID, RedisContainerIDContHandler, RedisWLID, RedisPodName, &RedisInstanceID, conthandlerV1.ContainerRunning)
 
 	newWatchedContainer := watchedContainerData{
 		containerAggregator: CreateAggregator(getShortContainerID(contEvent.GetContainerID())),
@@ -120,7 +118,7 @@ func TestContMainHandlerStopMonitorAfterXMinutes(t *testing.T) {
 	now := time.Now()
 	contHandler.startRelevancyProcess(*contEvent)
 	stopTime := time.Now()
-	elapsedTime := stopTime.Sub(now) 
+	elapsedTime := stopTime.Sub(now)
 	if elapsedTime.Minutes() < config.GetConfigurationConfigContext().GetSniffingMaxTimes().Minutes() {
 		t.Fatalf("elapsedTime is too little, should be %f < %f", elapsedTime.Minutes(), config.GetConfigurationConfigContext().GetSniffingMaxTimes().Minutes())
 	}
