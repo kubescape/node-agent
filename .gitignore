@@ -2,3 +2,4 @@ sniffer
 temp
 .vscode
 resources/ebpf/falco/*
+node-agent
