@@ -1,4 +1,4 @@
-## sniffer
+## NodeAgent
 
 1. Run minikube:
 
@@ -6,7 +6,7 @@
 minikube start
 ```
 
-2. Run Sniffer:
+2. Run NodeAgent:
 
 ```
 sudo SNIFFER_CONFIG=./configuration/SnifferConfigurationFile.json ./sniffer
