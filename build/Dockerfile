@@ -19,8 +19,10 @@ RUN mkdir /etc/node-agent/resources/ebpf
 RUN mkdir /etc/node-agent/resources/ebpf/falco
 RUN mkdir /etc/node-agent/configuration
 
+WORKDIR /etc/node-agent
+
 COPY --from=base /etc/kubescape_ebpf_engine_sc/build/main /etc/node-agent/resources/ebpf/falco/userspace_app
-COPY --from=builder /work/build/gateway /usr/bin/gateway
+COPY --from=builder /etc/node-agent/node-agent ./node-agent
 
 
 ARG image_version
