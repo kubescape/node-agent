@@ -19,7 +19,7 @@ jobs:
       CGO_ENABLED: 0
       GO111MODULE: ""
       BUILD_PLATFORM: linux/amd64,linux/arm64
-      GO_VERSION: "1.18"
+      GO_VERSION: "1.20"
       HELM_BRANCH: "dev"
       REQUIRED_TESTS: '[
                         "relevantCVEs",

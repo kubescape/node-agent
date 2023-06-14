@@ -1,6 +1,6 @@
 module sniffer
 
-go 1.19
+go 1.20
 
 require (
 	github.com/armosec/utils-k8s-go v0.0.13
