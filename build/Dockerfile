@@ -1,9 +1,17 @@
-FROM quay.io/kubescape/ebpf-engine:v1.0.0 as builder
+FROM quay.io/kubescape/ebpf-engine:v1.0.0 as base
 
+FROM golang:1.20-alpine as builder
 
-FROM ubuntu:latest
+ENV GO111MODULE=on 
+ENV CGO_ENABLED=0
 
-RUN apt update && apt-get install git libelf-dev golang-go -y
+RUN mkdir /etc/node-agent
+WORKDIR /etc/node-agent
+ADD . .
+
+RUN go build -o node-agent .
+
+FROM alpine
 
 RUN mkdir /etc/node-agent
 RUN mkdir /etc/node-agent/resources
@@ -11,17 +19,11 @@ RUN mkdir /etc/node-agent/resources/ebpf
 RUN mkdir /etc/node-agent/resources/ebpf/falco
 RUN mkdir /etc/node-agent/configuration
 
-
-RUN apt-get install ca-certificates -y
-
-ENV GO111MODULE=on CGO_ENABLED=0
 WORKDIR /etc/node-agent
-ADD go.mod go.sum /etc/node-agent/
-RUN go mod download
-ADD . .
-RUN go build -o node-agent .
 
-COPY --from=builder /etc/kubescape_ebpf_engine_sc/build/main /etc/node-agent/resources/ebpf/falco/userspace_app
+COPY --from=base /etc/kubescape_ebpf_engine_sc/build/main /etc/node-agent/resources/ebpf/falco/userspace_app
+COPY --from=builder /etc/node-agent/node-agent ./node-agent
+
 
 ARG image_version
 ENV RELEASE=$image_version

@@ -1,79 +1,40 @@
-name: pr-merged
+name: build
 on:
-  workflow_call:
-    inputs:
-      REQUIRED_TESTS:
-        required: true
-        type: string
-        description: 'tests to run'  
-
   pull_request_target:
     types: [closed]
     branches: 
     - 'main'
-    - 'master'
     paths-ignore:
-      - '*.md' 
-      - '*.yaml'
-      - '.github/workflows/*'
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
+      - '**.md' ### Ignore running when README.MD changed.
+      - '.github/workflows/*' ### Ignore running when files under path: .github/workflows/* changed.
+      
 jobs:
-  docker-build:
-    if: ${{ (github.event.pull_request.merged == true) && (github.repository_owner == 'kubescape') }} ## Skip if not merged and the repository owner is not kubescape
-    runs-on: ubuntu-latest
-    outputs:
-      TEST_NAMES: ${{ steps.export_tests_to_env.outputs.TEST_NAMES }}
-
-    permissions:
-      id-token: write
-      packages: write
-      contents: read    
-      pull-requests: read  
-
-    steps:
-      - uses: actions/checkout@v3
-        name: Checkout
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v3
-        name: Installing go
-        with:
-          go-version: "1.19"
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
- 
-      - name: Login to Quay
-        uses: docker/login-action@v2
-        with:
-          registry: quay.io
-          username: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
-          password: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: build/Dockerfile
-          tags: quay.io/${{ github.repository_owner }}/sniffer:v0.1.${{ github.run_number }}-relevancy
-          build-args: image_version=v0.1.${{ github.run_number }}-relevancy
-          platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          push: true
-
-      - id: export_tests_to_env
-        name: set test name
-        run: |
-          echo "TEST_NAMES=$input" >> $GITHUB_OUTPUT
-        env:
-          input: ${{ inputs.REQUIRED_TESTS }}
- 
+  pr-merged:
+    if: ${{ github.event.pull_request.merged == true }} ## Skip if not merged 
+    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
+    with:
+      IMAGE_NAME: quay.io/${{ github.repository_owner }}/node-agent
+      IMAGE_TAG: v0.1.${{ github.run_number }}
+      COMPONENT_NAME: node-agent
+      SYSTEM_TESTS_BRANCH: relevancy
+      CGO_ENABLED: 0
+      GO111MODULE: "on"
+      BUILD_PLATFORM: linux/amd64,linux/arm64
+      GO_VERSION: "1.20"
+      HELM_BRANCH: "dev"
+      REQUIRED_TESTS: '[
+                        "relevantCVEs",
+                        "relevancy_enabled_stop_sniffing",
+                        "relevant_data_is_appended",
+                        "relevancy_large_image",
+                        "relevancy_extra_large_image",
+                        "relevancy_fix_vuln",
+                        "relevancy_python",
+                        "relevancy_golang",
+                        "relevancy_java",
+                        "relevancy_java_and_python",
+                        "relevancy_golang_dynamic"
+                      ]'
+      COSIGN: true
+      HELM_E2E_TEST: true
+    secrets: inherit
