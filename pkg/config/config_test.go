@@ -3,10 +3,10 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	v1 "node-agent/pkg/config/v1"
+	"node-agent/pkg/utils"
 	"os"
 	"path"
-	v1 "sniffer/pkg/config/v1"
-	"sniffer/pkg/utils"
 	"strings"
 	"testing"
 	"time"
@@ -100,7 +100,9 @@ func TestGetConfigurationReader(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error while creating test file: %v", err)
 	}
-	defer os.Remove(cfgFilePath)
+	defer func(name string) {
+		_ = os.Remove(name)
+	}(cfgFilePath)
 
 	t.Setenv(ConfigEnvVar, cfgFilePath)
 	reader, err = cfg.GetConfigurationReader()

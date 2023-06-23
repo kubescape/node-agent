@@ -1,18 +1,20 @@
 package conthandler
 
 import (
+	"node-agent/pkg/config"
+	configV1 "node-agent/pkg/config/v1"
+	conthandlerV1 "node-agent/pkg/conthandler/v1"
+	"node-agent/pkg/utils"
 	"path"
-	"sniffer/pkg/config"
-	configV1 "sniffer/pkg/config/v1"
-	conthadlerV1 "sniffer/pkg/conthandler/v1"
-	"sniffer/pkg/utils"
 	"testing"
-	"time"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 )
 
 var watcher *watch.FakeWatcher
@@ -21,12 +23,8 @@ type k8sFakeClient struct {
 	Clientset *fake.Clientset
 }
 
-func (client *k8sFakeClient) GetApiVersion(_ any) string {
-	return "v1"
-}
-
-func (client *k8sFakeClient) GetResourceVersion(_ any) string {
-	return "1234wat"
+func (client *k8sFakeClient) GetK8sConfig() *rest.Config {
+	return nil
 }
 
 func (client *k8sFakeClient) CalculateWorkloadParentRecursive(_ any) (string, string, error) {
@@ -34,22 +32,72 @@ func (client *k8sFakeClient) CalculateWorkloadParentRecursive(_ any) (string, st
 }
 
 func (client *k8sFakeClient) GetWorkload(_, _, _ string) (any, error) {
-	return "", nil
+	return &workloadinterface.Workload{}, nil
 }
 
 func (client *k8sFakeClient) GenerateWLID(_ any, clusterName string) string {
 	return "wlid://cluster-" + clusterName + "/namespace-any" + "/deployment-nginx"
 }
 
-func (client *k8sFakeClient) GetWatcher() (watch.Interface, error) {
-	watcher = watch.NewFake()
-	return watcher, nil
+func TestCreateContainerClientK8SAPIServer(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		{
+			name: "TestCreateContainerClientK8SAPIServer",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := CreateContainerClientK8SAPIServer()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CreateContainerClientK8SAPIServer() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			assert.NotNil(t, got.GetK8sConfig())
+		})
+	}
 }
 
-func TestContWatcher(t *testing.T) {
+func TestContainerWatcher_ParsePodData(t *testing.T) {
+	type fields struct {
+		ContainerClient ContainerClient
+		nodeName        string
+	}
+	type args struct {
+		pod       *workloadinterface.Workload
+		container *containercollection.Container
+	}
+	pod, err := workloadinterface.NewWorkload([]byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"nginx","namespace":"default"},"spec":{"containers":[{"name":"nginx","image":"nginx:1.14.2"}]}}`))
+	instanceID := &instanceidhandler.InstanceID{}
+	instanceID.SetAPIVersion("v1")
+	instanceID.SetNamespace("default")
+	instanceID.SetKind("Pod")
+	instanceID.SetName("nginx")
+	instanceID.SetContainerName("nginx")
+	assert.NoError(t, err)
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		want    *conthandlerV1.ContainerEventData
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "TestContainerWatcher_ParsePodData",
+			args: args{
+				pod:       pod,
+				container: &containercollection.Container{Name: "nginx"},
+			},
+			fields: fields{
+				ContainerClient: &k8sFakeClient{},
+			},
+			want: conthandlerV1.CreateNewContainerEvent("nginx:1.14.2", &containercollection.Container{Name: "nginx"}, "default/nginx/nginx", "wlid://cluster-test/namespace-any/deployment-nginx", instanceID),
+		},
+	}
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
 	t.Setenv(config.ConfigEnvVar, configPath)
-
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
 	if err != nil {
@@ -59,62 +107,15 @@ func TestContWatcher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseConfiguration failed with err %v", err)
 	}
-
-	client := &k8sFakeClient{}
-	client.Clientset = fake.NewSimpleClientset()
-	contWatcher, err := CreateContainerWatcher(client)
-	if err != nil {
-		t.Fatalf("CreateContainerWatcher failed with error %v", err)
-	}
-
-	containersEventChan := make(chan conthadlerV1.ContainerEventData, 50)
-	go func() {
-		go func() {
-			_ = contWatcher.StartWatchedOnContainers(containersEventChan)
-		}()
-		time.Sleep(1 * time.Second)
-		go func() {
-			pod := &v1.Pod{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "Pod",
-					APIVersion: "v1",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod",
-					Namespace: "default",
-				},
-				Spec: v1.PodSpec{
-					Containers: []v1.Container{
-						{
-							Name:            "nginx",
-							Image:           "nginx",
-							ImagePullPolicy: "Always",
-						},
-					},
-					NodeName: "minikube",
-				},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			containerWatcher := &ContainerWatcher{
+				ContainerClient: tt.fields.ContainerClient,
+				nodeName:        tt.fields.nodeName,
 			}
-			watcher.Add(pod)
-			var cs []v1.ContainerStatus
-			cs = make([]v1.ContainerStatus, 0)
-			Started := true
-			cs = append(cs, v1.ContainerStatus{
-				Name:        "nginx",
-				Image:       "nginx",
-				ContainerID: "nginxContainerID",
-				Ready:       true,
-				Started:     &Started,
-			})
-			pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, cs...)
-			watcher.Modify(pod)
-		}()
-	}()
-
-	event := <-containersEventChan
-	if event.GetContainerEventType() != conthadlerV1.ContainerRunning {
-		t.Fatalf("event container type is wrong, get: %s expected: %s", event.GetContainerEventType(), conthadlerV1.ContainerRunning)
-	}
-	if event.GetContainerID() != "nginxContainerID" {
-		t.Fatalf("container ID is wrong,  get: %s expected: %s", event.GetContainerID(), "nginxContainerID")
+			got, err := containerWatcher.ParsePodData(tt.args.pod, tt.args.container)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }

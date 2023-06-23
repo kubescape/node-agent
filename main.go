@@ -1,29 +1,23 @@
 package main
 
 import (
-	"sniffer/internal/validator"
-	"sniffer/pkg/config"
-	v1 "sniffer/pkg/config/v1"
-	"sniffer/pkg/context"
-	"sniffer/pkg/conthandler"
-	accumulator "sniffer/pkg/event_data_storage"
-	"sniffer/pkg/storageclient"
+	"log"
+	"node-agent/internal/validator"
+	"node-agent/pkg/config"
+	v1 "node-agent/pkg/config/v1"
+	"node-agent/pkg/context"
+	"node-agent/pkg/conthandler"
+	"node-agent/pkg/storageclient"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"go.opentelemetry.io/otel"
 )
 
-func waitOnEBPFEngineProcessErrorCode(cacheAccumulatorErrorChan chan error) {
-	ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "EBPF engine process error")
-	defer span.End()
-	err := <-cacheAccumulatorErrorChan
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error", helpers.Error(err))
-	}
-}
-
 func main() {
+	// Init
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
 	if err != nil {
@@ -39,16 +33,7 @@ func main() {
 	}
 	context.SetBackgroundContext()
 
-	accumulatorChannelError := make(chan error, 10)
-	acc := accumulator.GetAccumulator()
-	err = acc.StartAccumulator(accumulatorChannelError)
-	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during start accumulator", helpers.Error(err))
-	}
-	go func() {
-		waitOnEBPFEngineProcessErrorCode(accumulatorChannelError)
-	}()
-
+	// Create the container handler
 	k8sAPIServerClient, err := conthandler.CreateContainerClientK8SAPIServer()
 	if err != nil {
 		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the container client", helpers.Error(err))
@@ -62,8 +47,19 @@ func main() {
 		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the main container handler", helpers.Error(err))
 	}
 
+	// Start the container handler
 	err = mainHandler.StartMainHandler()
 	if err != nil {
 		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during start the main container handler", helpers.Error(err))
 	}
+	defer mainHandler.StopMainHandler()
+
+	// Wait for shutdown signal
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+	<-shutdown
+	log.Println("Shutting down...")
+
+	// Exit with success
+	os.Exit(0)
 }

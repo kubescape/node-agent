@@ -1,8 +1,8 @@
 package config
 
 import (
+	"node-agent/pkg/utils"
 	"path"
-	"sniffer/pkg/utils"
 	"time"
 )
 

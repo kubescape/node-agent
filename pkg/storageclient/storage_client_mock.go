@@ -3,9 +3,9 @@ package storageclient
 import (
 	"encoding/json"
 	"fmt"
+	"node-agent/pkg/utils"
 	"os"
 	"path"
-	"sniffer/pkg/utils"
 
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )

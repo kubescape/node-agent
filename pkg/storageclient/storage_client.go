@@ -15,7 +15,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"sniffer/pkg/context"
+	"node-agent/pkg/context"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"

@@ -1,14 +1,14 @@
 package sbom
 
 import (
-	"sniffer/pkg/storageclient"
+	"node-agent/pkg/storageclient"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 )
 
 func TestGetSBOM(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", "", &instanceidhandler.InstanceID{})
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", &instanceidhandler.InstanceID{})
 	err := SBOMClient.GetSBOM(storageclient.NGINX_IMAGE_TAG, storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom, %v", err)
@@ -17,7 +17,7 @@ func TestGetSBOM(t *testing.T) {
 }
 
 func TestFilterSBOM(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", "", &instanceidhandler.InstanceID{})
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", &instanceidhandler.InstanceID{})
 	err := SBOMClient.GetSBOM(storageclient.NGINX_IMAGE_TAG, storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom, %v", err)
@@ -32,7 +32,7 @@ func TestFilterSBOM(t *testing.T) {
 }
 
 func TestStoreFilterSBOM(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", "", &instanceidhandler.InstanceID{})
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", &instanceidhandler.InstanceID{})
 	err := SBOMClient.GetSBOM(storageclient.NGINX_IMAGE_TAG, storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")
@@ -43,7 +43,7 @@ func TestStoreFilterSBOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to filter sbom")
 	}
-	err = SBOMClient.StoreFilterSBOM("anyInstanceID")
+	err = SBOMClient.StoreFilterSBOM("", "anyInstanceID")
 	if err != nil {
 		t.Fatalf("fail to store filter sbom")
 	}
@@ -51,7 +51,7 @@ func TestStoreFilterSBOM(t *testing.T) {
 }
 
 func TestStoreFilterSBOMFailure(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateStorageHttpClientFailureMock(), "", "", &instanceidhandler.InstanceID{})
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateStorageHttpClientFailureMock(), "", &instanceidhandler.InstanceID{})
 	err := SBOMClient.GetSBOM(storageclient.NGINX_IMAGE_TAG, storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")
@@ -62,7 +62,7 @@ func TestStoreFilterSBOMFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to filter sbom")
 	}
-	err = SBOMClient.StoreFilterSBOM("anyInstanceID")
+	err = SBOMClient.StoreFilterSBOM("", "anyInstanceID")
 	if err == nil {
 		t.Fatalf("StoreFilterSBOM should fail")
 	}

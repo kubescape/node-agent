@@ -1,20 +1,22 @@
 package conthandler
 
 import (
-	v1 "sniffer/pkg/conthandler/v1"
+	conthandlerV1 "node-agent/pkg/conthandler/v1"
 
-	"k8s.io/apimachinery/pkg/watch"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"k8s.io/client-go/rest"
 )
 
 type ContainerClient interface {
-	GetWatcher() (watch.Interface, error)
+	GetK8sConfig() *rest.Config
 	CalculateWorkloadParentRecursive(workload any) (string, string, error)
 	GetWorkload(namespace, kind, name string) (any, error)
-	GetApiVersion(workload any) string
-	GetResourceVersion(workload any) string
 	GenerateWLID(workload any, clusterName string) string
 }
 
 type ContainerWatcherClient interface {
-	StartWatchedOnContainers(containerEventChannel chan v1.ContainerEventData) error
+	GetContainerClient() ContainerClient
+	GetNodeName() string
+	ParsePodData(*workloadinterface.Workload, *containercollection.Container) (*conthandlerV1.ContainerEventData, error)
 }

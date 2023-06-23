@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"node-agent/pkg/context"
+	"node-agent/pkg/utils"
 	"os"
-	"sniffer/pkg/context"
-	"sniffer/pkg/utils"
 	"strings"
 	"sync"
 
@@ -23,9 +23,9 @@ import (
 
 const (
 	// CreatorType should be one of "Person", "Organization", or "Tool"
-	Organization                = "Organization"
-	Tool                        = "Tool"
-	Person                      = "Person"
+	Organization = "Organization"
+	Tool         = "Tool"
+
 	KubescapeOrganizationName   = "Kubescape"
 	KubescapeNodeAgentName      = "KubescapeNodeAgent"
 	RelationshipContainType     = "CONTAINS"
@@ -103,6 +103,7 @@ func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID) SBO
 }
 
 func (sbom *SBOMData) saveSBOM(spdxData *spdxv1beta1.SBOMSPDXv2p3) error {
+	logger.L().Debug("saving SBOM", helpers.String("path", sbom.spdxDataPath))
 	f, err := os.Create(sbom.spdxDataPath)
 	if err != nil {
 		return err

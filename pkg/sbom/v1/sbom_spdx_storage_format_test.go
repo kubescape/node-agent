@@ -2,9 +2,9 @@ package sbom
 
 import (
 	"encoding/json"
+	"node-agent/pkg/utils"
 	"os"
 	"path"
-	"sniffer/pkg/utils"
 	"testing"
 
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"

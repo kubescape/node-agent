@@ -1,22 +1,23 @@
 package conthandler
 
 import (
+	"node-agent/pkg/config"
+	configV1 "node-agent/pkg/config/v1"
+	conthandlerV1 "node-agent/pkg/conthandler/v1"
+	"node-agent/pkg/sbom"
+	"node-agent/pkg/storageclient"
+	"node-agent/pkg/utils"
 	"path"
-	"sniffer/pkg/config"
-	configV1 "sniffer/pkg/config/v1"
-	conthandlerV1 "sniffer/pkg/conthandler/v1"
-	accumulator "sniffer/pkg/event_data_storage"
-	"sniffer/pkg/sbom"
-	"sniffer/pkg/storageclient"
-	"sniffer/pkg/utils"
 	"testing"
 	"time"
 
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 const (
-	RedisContainerIDContHandler = "docker://16248df36c67807ca5c429e6f021fe092e14a27aab89cbde00ba801de0f05266"
+	RedisContainerIDContHandler = "16248df36c67807ca5c429e6f021fe092e14a27aab89cbde00ba801de0f05266"
 )
 
 func TestContMainHandler(t *testing.T) {
@@ -33,39 +34,30 @@ func TestContMainHandler(t *testing.T) {
 		t.Fatalf("ParseConfiguration failed with err %v", err)
 	}
 
-	cacheAccumulatorErrorChan := make(chan error)
-	acc := accumulator.GetAccumulator()
-	err = acc.StartAccumulator(cacheAccumulatorErrorChan)
-	if err != nil {
-		t.Fatalf("StartAccumulator failed with err %v", err)
-	}
-
-	contHandler, err := CreateContainerHandler(nil, storageclient.CreateSBOMStorageHttpClientMock())
+	client := &k8sFakeClient{}
+	client.Clientset = fake.NewSimpleClientset()
+	contHandler, err := CreateContainerHandler(client, storageclient.CreateSBOMStorageHttpClientMock())
 	if err != nil {
 		t.Fatalf("CreateContainerHandler failed with err %v", err)
 	}
 	go func() {
 		_ = contHandler.afterTimerActions()
 	}()
-	go func() {
-		RedisInstanceID := instanceidhandler.InstanceID{}
-		RedisInstanceID.SetAPIVersion("apps/v1")
-		RedisInstanceID.SetNamespace("any")
-		RedisInstanceID.SetKind("deployment")
-		RedisInstanceID.SetName("redis")
-		RedisInstanceID.SetContainerName("redis")
-		contHandler.containersEventChan <- *conthandlerV1.CreateNewContainerEvent(RedisImageTAG, RedisImageID, RedisContainerIDContHandler, RedisPodName, RedisWLID, &RedisInstanceID, conthandlerV1.ContainerRunning)
-	}()
 
-	event := <-contHandler.containersEventChan
-	if event.GetContainerEventType() != conthandlerV1.ContainerRunning {
-		t.Fatalf("event container type is wrong, get: %s expected: %s", event.GetContainerEventType(), conthandlerV1.ContainerRunning)
+	RedisInstanceID := instanceidhandler.InstanceID{}
+	RedisInstanceID.SetAPIVersion("apps/v1")
+	RedisInstanceID.SetNamespace("any")
+	RedisInstanceID.SetKind("deployment")
+	RedisInstanceID.SetName("redis")
+	RedisInstanceID.SetContainerName("redis")
+	cont := &containercollection.Container{
+		ID:        RedisContainerIDContHandler,
+		Name:      "redis",
+		Namespace: "any",
+		Podname:   "redis",
 	}
-	if event.GetContainerID() != RedisContainerIDContHandler {
-		t.Fatalf("container ID is wrong,  get: %s expected: %s", event.GetContainerID(), RedisContainerIDContHandler)
-	}
-	time.Sleep(12 * time.Second)
-	err = contHandler.handleNewContainerEvent(event)
+	event := conthandlerV1.CreateNewContainerEvent("docker.io/library/redis/latest", cont, "any/redis/redis", "wlid://cluster-foo/namespace-any/deployment-redis", &RedisInstanceID)
+	err = contHandler.handleContainerRunningEvent(*event)
 	if err != nil {
 		t.Fatalf("handleNewContainerEvent failed with error %v", err)
 	}
@@ -85,14 +77,9 @@ func TestContMainHandlerStopMonitorAfterXMinutes(t *testing.T) {
 		t.Fatalf("ParseConfiguration failed with err %v", err)
 	}
 
-	cacheAccumulatorErrorChan := make(chan error)
-	acc := accumulator.GetAccumulator()
-	err = acc.StartAccumulator(cacheAccumulatorErrorChan)
-	if err != nil {
-		t.Fatalf("StartAccumulator failed with err %v", err)
-	}
-
-	contHandler, err := CreateContainerHandler(nil, storageclient.CreateSBOMStorageHttpClientMock())
+	client := &k8sFakeClient{}
+	client.Clientset = fake.NewSimpleClientset()
+	contHandler, err := CreateContainerHandler(client, storageclient.CreateSBOMStorageHttpClientMock())
 	if err != nil {
 		t.Fatalf("CreateContainerHandler failed with err %v", err)
 	}
@@ -102,17 +89,17 @@ func TestContMainHandlerStopMonitorAfterXMinutes(t *testing.T) {
 	RedisInstanceID.SetKind("deployment")
 	RedisInstanceID.SetName("redis")
 	RedisInstanceID.SetContainerName("redis")
-	contEvent := conthandlerV1.CreateNewContainerEvent(RedisImageTAG, RedisImageID, RedisContainerIDContHandler, RedisWLID, RedisPodName, &RedisInstanceID, conthandlerV1.ContainerRunning)
+	cont := &containercollection.Container{
+		ID:        RedisContainerIDContHandler,
+		Name:      "redis",
+		Namespace: "any",
+		Podname:   "redis",
+	}
+	contEvent := conthandlerV1.CreateNewContainerEvent("docker.io/library/redis/latest", cont, "any/redis/redis", "wlid://cluster-foo/namespace-any/deployment-redis", &RedisInstanceID)
 
 	newWatchedContainer := watchedContainerData{
-		containerAggregator: CreateAggregator(getShortContainerID(contEvent.GetContainerID())),
-		snifferTicker:       createTicker(),
-		event:               *contEvent,
-		sbomClient:          sbom.CreateSBOMStorageClient(contHandler.storageClient, contEvent.GetK8SWorkloadID(), contEvent.GetImageID(), contEvent.GetInstanceID()),
-		syncChannel: map[string]chan error{
-			StepGetSBOM:         make(chan error, 10),
-			StepEventAggregator: make(chan error, 10),
-		},
+		snifferTicker: createTicker(),
+		sbomClient:    sbom.CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", &instanceidhandler.InstanceID{}),
 	}
 	contHandler.watchedContainers.Store(contEvent.GetContainerID(), newWatchedContainer)
 	now := time.Now()

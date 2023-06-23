@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	v1 "node-agent/pkg/config/v1"
 	"os"
-	v1 "sniffer/pkg/config/v1"
 	"time"
 )
 
 const (
-	EBPFEngineFalco  = "falco"
-	EBPFEngineCilium = "cilium"
-	ConfigEnvVar     = "CONFIG_ENV_VAR"
+	ConfigEnvVar   = "CONFIG_ENV_VAR"
+	NodeNameEnvVar = "NODE_NAME"
 )
 
 const (
@@ -22,9 +21,6 @@ const (
 
 	// error message if configuration file is not valid
 	ErrConfigurationFileNotValid = "configuration file is not valid"
-
-	// error message if failed to read configuration file
-	ErrFailedToReadConfigurationFile = "failed to read the configuration file"
 
 	// error message if failed to parse configuration file
 	ErrFailedToUnmarshalConfigurationData = "failed to unmarshal the configuration json data"

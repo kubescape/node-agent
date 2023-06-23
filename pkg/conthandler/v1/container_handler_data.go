@@ -1,47 +1,36 @@
 package conthandler
 
 import (
-	"fmt"
-	"strings"
-
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
-)
-
-const (
-	ContainerRunning = "Running"
-	ContainerDeleted = "Deleted"
 )
 
 type ContainerEventType string
 
 type ContainerEventData struct {
-	imageTAG      string
-	imageID       string
-	containerID   string
-	containerName string
-	wlid          string
-	instanceID    instanceidhandler.IInstanceID
-	eventType     ContainerEventType
+	imageTAG       string
+	container      *containercollection.Container
+	wlid           string
+	instanceID     instanceidhandler.IInstanceID
+	k8sContainerID string
 }
 
-func CreateNewContainerEvent(imageTAG, imageID, containerID, containerName, wlid string, instanceID instanceidhandler.IInstanceID, eventType ContainerEventType) *ContainerEventData {
+func CreateNewContainerEvent(imageTAG string, container *containercollection.Container, k8sContainerID, wlid string, instanceID instanceidhandler.IInstanceID) *ContainerEventData {
 	return &ContainerEventData{
-		imageTAG:      imageTAG,
-		imageID:       imageID,
-		containerID:   containerID,
-		containerName: containerName,
-		wlid:          wlid,
-		instanceID:    instanceID,
-		eventType:     eventType,
+		imageTAG:       imageTAG,
+		container:      container,
+		wlid:           wlid,
+		instanceID:     instanceID,
+		k8sContainerID: k8sContainerID,
 	}
 }
 
-func (event *ContainerEventData) GetContainerEventType() ContainerEventType {
-	return event.eventType
+func (event *ContainerEventData) GetK8SContainerID() string {
+	return event.k8sContainerID
 }
 
 func (event *ContainerEventData) GetContainerID() string {
-	return event.containerID
+	return event.container.ID
 }
 
 func (event *ContainerEventData) GetK8SWorkloadID() string {
@@ -49,19 +38,7 @@ func (event *ContainerEventData) GetK8SWorkloadID() string {
 }
 
 func (event *ContainerEventData) GetContainerName() string {
-	return event.containerName
-}
-
-func (event *ContainerEventData) GetImageHash() (string, error) {
-	imageIDSplit := strings.Split(event.imageID, "@sha256:")
-	if len(imageIDSplit) == 2 {
-		return imageIDSplit[1], nil
-	}
-	return "", fmt.Errorf("GetImageHash: fail to parse image hash of image ID %s", event.imageID)
-}
-
-func (event *ContainerEventData) GetImageID() string {
-	return event.imageID
+	return event.container.Name
 }
 
 func (event *ContainerEventData) GetInstanceID() instanceidhandler.IInstanceID {
@@ -74,4 +51,16 @@ func (event *ContainerEventData) GetInstanceIDHash() string {
 
 func (event *ContainerEventData) GetImageTAG() string {
 	return event.imageTAG
+}
+
+func (event *ContainerEventData) GetNamespace() string {
+	return event.container.Namespace
+}
+
+func (event *ContainerEventData) GetPodName() string {
+	return event.container.Podname
+}
+
+func (event *ContainerEventData) GetContainer() *containercollection.Container {
+	return event.container
 }

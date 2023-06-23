@@ -1,16 +1,15 @@
 package validator
 
 import (
+	"node-agent/pkg/config"
+	v1 "node-agent/pkg/config/v1"
+	"node-agent/pkg/utils"
 	"path"
-	"sniffer/pkg/config"
-	v1 "sniffer/pkg/config/v1"
-	"sniffer/pkg/utils"
 	"testing"
 )
 
 func TestValidator(t *testing.T) {
-	minKernelVersion = "0.1"
-	err := checkKernelVersion()
+	err := checkKernelVersion("0.1")
 	if err != nil {
 		t.Fatalf("checkKernelVersion failed withh error %v", err)
 	}
@@ -53,6 +52,7 @@ func TestInt8ToStr(t *testing.T) {
 func TestCheckPrerequisites(t *testing.T) {
 	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
 	t.Setenv(config.ConfigEnvVar, configPath)
+	t.Setenv(config.NodeNameEnvVar, "testNode")
 
 	cfg := config.GetConfigurationConfigContext()
 	configData, err := cfg.GetConfigurationReader()
@@ -64,7 +64,6 @@ func TestCheckPrerequisites(t *testing.T) {
 		t.Fatalf("ParseConfiguration failed with err %v", err)
 	}
 
-	minKernelVersion = "0.1"
 	err = CheckPrerequisites()
 	if err != nil {
 		t.Fatalf("checkNodePrerequisites failed with err %v", err)

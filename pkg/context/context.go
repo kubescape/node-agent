@@ -3,8 +3,8 @@ package context
 import (
 	"context"
 	"net/url"
+	"node-agent/pkg/config"
 	"os"
-	"sniffer/pkg/config"
 
 	"github.com/kubescape/go-logger"
 )
@@ -14,7 +14,7 @@ const (
 )
 
 type BackgroundContext struct {
-	ctx  context.Context
+	ctx context.Context
 }
 
 var backgroundContext BackgroundContext
