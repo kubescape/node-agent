@@ -16,5 +16,5 @@ type ContainerClient interface {
 }
 
 type ContainerWatcherClient interface {
-	StartWatchedOnContainers(contClient ContainerClient, containerEventChannel chan v1.ContainerEventData) error
+	StartWatchedOnContainers(containerEventChannel chan v1.ContainerEventData) error
 }

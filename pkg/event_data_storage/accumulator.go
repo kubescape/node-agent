@@ -9,7 +9,7 @@ import (
 	"sniffer/pkg/config"
 	"sniffer/pkg/context"
 	"sniffer/pkg/ebpfeng"
-	evData "sniffer/pkg/ebpfev/v1"
+	evData "sniffer/pkg/ebpfev"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -22,25 +22,27 @@ const (
 )
 
 type containersEventStreamer struct {
-	streamDataChannelForContainerID map[string]chan evData.EventData
+	streamDataChannelForContainerID map[string]chan evData.EventClient
 	registerMutex                   sync.Mutex
 }
 
 type Accumulator struct {
-	data                            []map[string][]evData.EventData
+	data                            []map[string][]evData.EventClient
 	startStatus                     bool
 	syncReaderWriterData            sync.RWMutex
 	listOfFirstKeysInsertInEachSlot []string
 	cacheSize                       int
-	eventChannel                    chan *evData.EventData
+	eventChannel                    chan evData.EventClient
 	containersData                  containersEventStreamer
 	ebpfEngine                      ebpfeng.EbpfEngineClient
 }
 
 type ContainerAccumulator struct {
-	dataChannel chan evData.EventData
+	dataChannel chan evData.EventClient
 	containerID string
 }
+
+var _ AccumulatorClient = (*ContainerAccumulator)(nil)
 
 var nodeAgentContainerID string
 var accumulatorInstance *Accumulator
@@ -51,11 +53,11 @@ func newAccumulator() *Accumulator {
 		cacheSize:                       AccumulatorSize,
 		startStatus:                     false,
 		syncReaderWriterData:            sync.RWMutex{},
-		data:                            make([]map[string][]evData.EventData, AccumulatorSize),
+		data:                            make([]map[string][]evData.EventClient, AccumulatorSize),
 		listOfFirstKeysInsertInEachSlot: make([]string, AccumulatorSize),
-		eventChannel:                    make(chan *evData.EventData),
+		eventChannel:                    make(chan evData.EventClient),
 		containersData: containersEventStreamer{
-			streamDataChannelForContainerID: make(map[string]chan evData.EventData),
+			streamDataChannelForContainerID: make(map[string]chan evData.EventClient),
 		},
 	}
 
@@ -75,18 +77,18 @@ func GetAccumulator() *Accumulator {
 	return accumulatorInstance
 }
 
-func CreateContainerAccumulator(containerID string, dataChannel chan evData.EventData) *ContainerAccumulator {
+func CreateContainerAccumulator(containerID string, dataChannel chan evData.EventClient) *ContainerAccumulator {
 	return &ContainerAccumulator{
 		dataChannel: dataChannel,
 		containerID: containerID,
 	}
 }
 
-func (acc *Accumulator) createNewSlotInIndex(event *evData.EventData, index int) {
+func (acc *Accumulator) createNewSlotInIndex(event evData.EventClient, index int) {
 	acc.syncReaderWriterData.Lock()
 	defer acc.syncReaderWriterData.Unlock()
-	slice := make([]evData.EventData, 0)
-	m := make(map[string][]evData.EventData)
+	slice := make([]evData.EventClient, 0)
+	m := make(map[string][]evData.EventClient)
 	m[event.GetEventContainerID()] = slice
 	acc.data[index] = m
 	acc.listOfFirstKeysInsertInEachSlot[index] = event.GetEventContainerID()
@@ -120,7 +122,7 @@ func (acc *Accumulator) findIndexByTimestampWhenAccumulatorDataIsFull() (int, bo
 	return index, true, nil
 }
 
-func (acc *Accumulator) findIndexByTimestamp(event *evData.EventData) (int, bool, error) {
+func (acc *Accumulator) findIndexByTimestamp(event evData.EventClient) (int, bool, error) {
 	for i := range acc.data {
 		if len(acc.data[i]) == 0 {
 			return i, true, nil
@@ -137,27 +139,27 @@ func (acc *Accumulator) findIndexByTimestamp(event *evData.EventData) (int, bool
 	return acc.findIndexByTimestampWhenAccumulatorDataIsFull()
 }
 
-func (acc *Accumulator) removeAllStreamedContainers(event *evData.EventData) {
+func (acc *Accumulator) removeAllStreamedContainers(event evData.EventClient) {
 	acc.containersData.registerMutex.Lock()
 	defer acc.containersData.registerMutex.Unlock()
 	if len(acc.containersData.streamDataChannelForContainerID) > 0 {
 		for contID := range acc.containersData.streamDataChannelForContainerID {
-			acc.containersData.streamDataChannelForContainerID[contID] <- *event
+			acc.containersData.streamDataChannelForContainerID[contID] <- event
 		}
 	}
 }
 
-func (acc *Accumulator) addEventToCache(event *evData.EventData, index int) {
+func (acc *Accumulator) addEventToCache(event evData.EventClient, index int) {
 	acc.syncReaderWriterData.Lock()
 	defer acc.syncReaderWriterData.Unlock()
-	acc.data[index][event.GetEventContainerID()] = append(acc.data[index][event.GetEventContainerID()], *event)
+	acc.data[index][event.GetEventContainerID()] = append(acc.data[index][event.GetEventContainerID()], event)
 }
 
-func (acc *Accumulator) streamEventToRegisterContainer(event *evData.EventData) {
+func (acc *Accumulator) streamEventToRegisterContainer(event evData.EventClient) {
 	acc.containersData.registerMutex.Lock()
 	defer acc.containersData.registerMutex.Unlock()
 	if containerAccumulatorChan, exist := acc.containersData.streamDataChannelForContainerID[event.GetEventContainerID()]; exist {
-		containerAccumulatorChan <- *event
+		containerAccumulatorChan <- event
 	}
 }
 
@@ -254,7 +256,7 @@ func GetCacheAccumulator() *Accumulator {
 	return accumulatorInstance
 }
 
-func AccumulatorByContainerID(aggregationData *[]evData.EventData, containerID string) {
+func AccumulatorByContainerID(aggregationData *[]evData.EventClient, containerID string) {
 	accumulatorInstance.syncReaderWriterData.Lock()
 	defer accumulatorInstance.syncReaderWriterData.Unlock()
 	for i := range accumulatorInstance.data {

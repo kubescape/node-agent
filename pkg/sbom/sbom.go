@@ -22,6 +22,8 @@ type SBOMStructure struct {
 	instanceID    instanceidhandler.IInstanceID
 }
 
+var _ SBOMClient = (*SBOMStructure)(nil)
+
 type SBOMStorageClient struct {
 	client storageclient.StorageClient
 }

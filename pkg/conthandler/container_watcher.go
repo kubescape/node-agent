@@ -27,10 +27,14 @@ type ContainerClientK8SAPIServer struct {
 	k8sClient *k8sinterface.KubernetesApi
 }
 
+var _ ContainerClient = (*ContainerClientK8SAPIServer)(nil)
+
 type ContainerWatcher struct {
 	ContainerClient ContainerClient
 	nodeName        string
 }
+
+var _ ContainerWatcherClient = (*ContainerWatcher)(nil)
 
 func CreateContainerClientK8SAPIServer() (ContainerClient, error) {
 	return &ContainerClientK8SAPIServer{

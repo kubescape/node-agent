@@ -11,7 +11,8 @@ import (
 
 	"sniffer/pkg/config"
 	"sniffer/pkg/context"
-	"sniffer/pkg/ebpfev/v1"
+	"sniffer/pkg/ebpfev"
+	ebpfev1 "sniffer/pkg/ebpfev/v1"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -27,6 +28,8 @@ type FalcoEbpfEngine struct {
 	pid                 int
 	cmd                 *exec.Cmd
 }
+
+var _ EbpfEngineClient = (*FalcoEbpfEngine)(nil)
 
 func createSyscallFilterString(syscallFilter []string) string {
 	filterString := ""
@@ -143,10 +146,10 @@ func convertStringTimeToTimeOBJ(timestamp string) (*time.Time, error) {
 	return &t, nil
 }
 
-func parseLine(line string) (*ebpfev.EventData, error) {
+func parseLine(line string) (ebpfev.EventClient, error) {
 	if strings.Contains(line, "drop event occured") {
 		now := time.Now()
-		return ebpfev.CreateKernelEvent(&now, "", "", "", "", "", "", "drop event occurred\n"), nil
+		return ebpfev1.CreateKernelEvent(&now, "", "", "", "", "", "", "drop event occurred\n"), nil
 	}
 	lineParts := strings.Split(line, "]::[")
 	if len(lineParts) != 8 {
@@ -158,10 +161,10 @@ func parseLine(line string) (*ebpfev.EventData, error) {
 		logger.L().Ctx(context.GetBackgroundContext()).Warning("fail to parse timestamp from ebpf engine", []helpers.IDetails{helpers.String("timestamp", lineParts[0]), helpers.Error(err)}...)
 		return nil, fmt.Errorf("parseLine Timestamp fail line is %s, err %v", line, err)
 	}
-	return ebpfev.CreateKernelEvent(timestamp, lineParts[1], lineParts[2], lineParts[3], lineParts[4], lineParts[5], lineParts[6], lineParts[7]), nil
+	return ebpfev1.CreateKernelEvent(timestamp, lineParts[1], lineParts[2], lineParts[3], lineParts[4], lineParts[5], lineParts[6], lineParts[7]), nil
 }
 
-func (FalcoEbpfEngine *FalcoEbpfEngine) GetData(ebpfEngineDataChannel chan *ebpfev.EventData) {
+func (FalcoEbpfEngine *FalcoEbpfEngine) GetData(ebpfEngineDataChannel chan ebpfev.EventClient) {
 	for {
 		scanner := bufio.NewScanner(FalcoEbpfEngine.reader)
 		for scanner.Scan() {

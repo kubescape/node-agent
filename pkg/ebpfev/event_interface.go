@@ -13,4 +13,5 @@ type EventClient interface {
 	GetEventSyscallArgs() string
 	GetEventEXE() string
 	GetEventCMD() string
+	GetOpenFileName() string
 }

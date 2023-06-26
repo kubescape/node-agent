@@ -3,7 +3,8 @@ package accumulator
 import (
 	"sniffer/pkg/config"
 	v1 "sniffer/pkg/config/v1"
-	evData "sniffer/pkg/ebpfev/v1"
+	"sniffer/pkg/ebpfev"
+	ebpfev1 "sniffer/pkg/ebpfev/v1"
 	"testing"
 	"time"
 )
@@ -34,7 +35,7 @@ func TestFullAccumulatorFlow(t *testing.T) {
 	}
 	time.Sleep(5 * time.Second)
 
-	var data []evData.EventData
+	var data []ebpfev.EventClient
 	AccumulatorByContainerID(&data, RedisContainerID)
 	if len(data) < NumberOfRedisEventInTheMock {
 		t.Fatalf("failed to get redis server events %d < 703", len(data))
@@ -57,7 +58,7 @@ func TestFullAccumulatorFlowAndAllOtherSmallFunctions(t *testing.T) {
 	acc := GetAccumulator()
 
 	now := time.Now()
-	event := evData.CreateKernelEvent(&now, "1234", "111", "1111", "open", "(dirfd: AT_FDCWD, name: /sys/fs/cgroup/perf_event/docker/0002f88945ecff75cf837f29f0378a686c830e8474028f6b913abdcc3be5ecd2/kubepods/besteffort/poda254d032-c044-4760-98d6-2d50aed26492/16248df36c67852de0e421767ef72e89fc0996d734210fbcdb824bcbcce1f57e, flags: O_RDONLY|O_CLOEXEC, mode: 0)", "blabla", "blublu")
+	event := ebpfev1.CreateKernelEvent(&now, "1234", "111", "1111", "open", "(dirfd: AT_FDCWD, name: /sys/fs/cgroup/perf_event/docker/0002f88945ecff75cf837f29f0378a686c830e8474028f6b913abdcc3be5ecd2/kubepods/besteffort/poda254d032-c044-4760-98d6-2d50aed26492/16248df36c67852de0e421767ef72e89fc0996d734210fbcdb824bcbcce1f57e, flags: O_RDONLY|O_CLOEXEC, mode: 0)", "blabla", "blublu")
 
 	index, newSlotIsNeeded, err := acc.findIndexByTimestamp(event)
 	if err != nil {
@@ -70,7 +71,7 @@ func TestFullAccumulatorFlowAndAllOtherSmallFunctions(t *testing.T) {
 	acc.createNewSlotInIndex(event, index)
 	acc.addEventToCache(event, index)
 
-	if acc.data[index]["1234"][0] != *event {
+	if acc.data[index]["1234"][0] != event {
 		t.Fatalf("event %v not exist", event)
 	}
 

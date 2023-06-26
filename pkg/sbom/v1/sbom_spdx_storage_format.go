@@ -63,6 +63,8 @@ type SBOMData struct {
 	instanceID                               instanceidhandler.IInstanceID
 }
 
+var _ SBOMFormat = (*SBOMData)(nil)
+
 type packageSourceInfoData struct {
 	exist                 bool
 	packageSPDXIdentifier []spdxv1beta1.ElementID

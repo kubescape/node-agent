@@ -2,22 +2,24 @@ package conthandler
 
 import (
 	"fmt"
-	"sniffer/pkg/ebpfev/v1"
+	"sniffer/pkg/ebpfev"
 	accumulator "sniffer/pkg/event_data_storage"
 )
 
 type Aggregator struct {
 	containerID          string
-	aggregationData      []ebpfev.EventData
-	aggregationDataChan  chan ebpfev.EventData
-	containerAccumulator *accumulator.ContainerAccumulator
+	aggregationData      []ebpfev.EventClient
+	aggregationDataChan  chan ebpfev.EventClient
+	containerAccumulator accumulator.AccumulatorClient
 }
+
+var _ ContainerAggregatorClient = (*Aggregator)(nil)
 
 func CreateAggregator(containerID string) *Aggregator {
 	return &Aggregator{
 		containerID:          containerID,
-		aggregationData:      make([]ebpfev.EventData, 0),
-		aggregationDataChan:  make(chan ebpfev.EventData),
+		aggregationData:      make([]ebpfev.EventClient, 0),
+		aggregationDataChan:  make(chan ebpfev.EventClient),
 		containerAccumulator: nil,
 	}
 }
