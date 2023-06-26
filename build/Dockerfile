@@ -1,3 +1,5 @@
+FROM quay.io/kubescape/ebpf-engine:v1.0.0 as builder
+
 FROM ubuntu:latest
 
 RUN apt update && apt-get install git libelf-dev golang-go -y
