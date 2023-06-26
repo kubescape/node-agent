@@ -3,16 +3,14 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
     branches: 
-    - 'master'
-    - 'main'
+      - 'main'
     paths-ignore:
-      - '**.md' ### Ignore running when .md files change
-      - '**.yaml' ### Ignore running when .yaml files change
-      - '**.json' ### Ignore running when .json files change
-      - '.github/*' ### Ignore running when files under path: .github/* changed.
+      - '*.md' 
+      - '*.yaml'
+      - '.github/workflows/*'
 
 concurrency:
-  group: ${{ github.head_ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
