@@ -36,6 +36,8 @@ type Config struct {
 	data ConfigDataInterface
 }
 
+var _ ConfigClient = (*Config)(nil)
+
 func (cfg *Config) getConfigFilePath() (string, bool) {
 	return os.LookupEnv(ConfigEnvVar)
 }

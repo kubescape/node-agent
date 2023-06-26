@@ -42,7 +42,7 @@ type afterTimerActionsData struct {
 }
 
 type watchedContainerData struct {
-	containerAggregator *Aggregator
+	containerAggregator ContainerAggregatorClient
 	snifferTicker       *time.Ticker
 	event               v1.ContainerEventData
 	syncChannel         map[string]chan error
@@ -50,7 +50,7 @@ type watchedContainerData struct {
 }
 
 type ContainerHandler struct {
-	containerWatcher    *ContainerWatcher
+	containerWatcher    ContainerWatcherClient
 	containersEventChan chan v1.ContainerEventData
 	// watchedContainers        map[string]watchedContainerData
 	// syncWatchedContainersMap *sync.RWMutex
@@ -58,6 +58,8 @@ type ContainerHandler struct {
 	afterTimerActionsChannel chan afterTimerActionsData
 	storageClient            storageclient.StorageClient
 }
+
+var _ ContainerMainHandlerClient = (*ContainerHandler)(nil)
 
 func CreateContainerHandler(contClient ContainerClient, storageClient storageclient.StorageClient) (*ContainerHandler, error) {
 

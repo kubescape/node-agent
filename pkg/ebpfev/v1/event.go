@@ -2,6 +2,7 @@ package ebpfev
 
 import (
 	"sniffer/pkg/config"
+	"sniffer/pkg/ebpfev"
 	"sniffer/pkg/utils"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ type EventData struct {
 	exe         string
 	cmd         string
 }
+
+var _ ebpfev.EventClient = (*EventData)(nil)
 
 func CreateKernelEvent(timestamp *time.Time, containerID string, syscallOp string, ppid string, pid string, syscallArgs string, exe string, cmd string) *EventData {
 	return &EventData{

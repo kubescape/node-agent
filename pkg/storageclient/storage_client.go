@@ -43,6 +43,8 @@ type StorageK8SAggregatedAPIClient struct {
 	readySBOMs sync.Map
 }
 
+var _ StorageClient = (*StorageK8SAggregatedAPIClient)(nil)
+
 func CreateSBOMStorageK8SAggregatedAPIClient() (*StorageK8SAggregatedAPIClient, error) {
 	var config *rest.Config
 	kubeconfig := os.Getenv(KubeConfig)
