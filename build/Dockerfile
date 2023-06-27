@@ -18,9 +18,9 @@ ENV GOROOT=/usr/local/go
 ENV PATH=$GOPATH/bin:$GOROOT/bin:$PATH  
 ENV GO111MODULE=on 
 ENV CGO_ENABLED=0
-RUN go mod download
+RUN /usr/local/go/bin/go mod download
 ADD . .
-RUN go build -o node-agent .
+RUN /usr/local/go/bin/go build -o node-agent .
 
 COPY --from=builder /etc/kubescape_ebpf_engine_sc/build/main /etc/node-agent/resources/ebpf/falco/userspace_app
 
