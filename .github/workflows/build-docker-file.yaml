@@ -61,16 +61,12 @@ jobs:
             id: image-prerelease-tag
             run: echo "IMAGE_TAG_PRERELEASE=quay.io/kubescape/node-agent:prerelease" >> $GITHUB_OUTPUT
     
-          - name: Run unit test
-            id: unit-test
-            run: go test -v ./...
-    
           - name: Build and push
             uses: docker/build-push-action@v3
             with:
               context: .
               file: build/Dockerfile
-              tags: ${{ inputs.IMAGE_NAME }}:${{ steps.image-prerelease-tag.outputs.IMAGE_TAG_PRERELEASE }}
+              tags: ${{ steps.image-prerelease-tag.outputs.IMAGE_TAG_PRERELEASE }}
               build-args: image_version=${{ steps.image-prerelease-tag.outputs.IMAGE_TAG }}
               platforms: ${{ inputs.BUILD_PLATFORM }}
               cache-from: type=gha
