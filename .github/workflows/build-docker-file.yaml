@@ -1,11 +1,8 @@
-name: e2e-tests
+name: push
 on:
-  workflow_call:
-    inputs:
-      REQUIRED_TESTS:
-        required: true
-        type: string
-
+  push:
+    branches:
+      - e2e-tests
 jobs:
     wf-preparation:
       name: secret-validator
@@ -98,4 +95,3 @@ jobs:
               echo "TEST_NAMES=$input" >> $GITHUB_OUTPUT
             env:
               input: ${{ inputs.REQUIRED_TESTS }}
-    
