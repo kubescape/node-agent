@@ -73,7 +73,7 @@ func CreateSBOMStorageK8SAggregatedAPIClient() (*StorageK8SAggregatedAPIClient, 
 
 func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs() {
 	for {
-		watcher, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3s(KubescapeNamespace).Watch(gcontext.TODO(), metav1.ListOptions{})
+		watcher, err := sc.clientset.SpdxV1beta1().SBOMSummaries(KubescapeNamespace).Watch(gcontext.TODO(), metav1.ListOptions{})
 		if err != nil {
 			logger.L().Ctx(context.GetBackgroundContext()).Error("Watch for SBOMs failed", helpers.Error(err))
 			logger.L().Ctx(context.GetBackgroundContext()).Error("Retry", helpers.String(fmt.Sprintf("with %d", retryWatcherSleep), " seconds"))
@@ -91,7 +91,7 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs() {
 				break
 			}
 
-			SBOM, ok := event.Object.(*spdxv1beta1.SBOMSPDXv2p3)
+			SBOM, ok := event.Object.(*spdxv1beta1.SBOMSummary)
 			if !ok {
 				continue
 			}
