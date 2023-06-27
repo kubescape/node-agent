@@ -2,7 +2,7 @@ name: push
 on:
   push:
     branches:
-      - e2e-tests
+      - Dockerfile-correction
 jobs:
     wf-preparation:
       name: secret-validator
