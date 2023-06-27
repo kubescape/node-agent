@@ -59,7 +59,7 @@ jobs:
     
           - name: Set prerelease image tag
             id: image-prerelease-tag
-            run: echo "IMAGE_TAG_PRERELEASE=${{ inputs.IMAGE_TAG }}-prerelease" >> $GITHUB_OUTPUT
+            run: echo "IMAGE_TAG_PRERELEASE=quay.io/kubescape/node-agent:prerelease" >> $GITHUB_OUTPUT
     
           - name: Run unit test
             id: unit-test
