@@ -2,6 +2,7 @@ FROM quay.io/kubescape/ebpf-engine:v1.0.0 as builder
 
 FROM ubuntu:latest
 
+ARG TARGETARCH
 RUN apt update && apt-get install wget git libelf-dev -y
 RUN mkdir /etc/node-agent
 RUN mkdir /etc/node-agent/resources
