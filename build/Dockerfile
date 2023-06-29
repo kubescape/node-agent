@@ -10,7 +10,7 @@ RUN mkdir /etc/node-agent/resources/ebpf/falco
 RUN mkdir /etc/node-agent/configuration
 RUN apt-get install ca-certificates -y
 WORKDIR /etc/node-agent
-RUN wget https://go.dev/dl/go1.20.2.linux-amd64.tar.gz 
+RUN wget https://go.dev/dl/go1.20.2.linux-${TARGETARCH}.tar.gz 
 RUN tar -xvf go1.20.2.linux-amd64.tar.gz  
 RUN mv go /usr/local
 ADD go.mod go.sum /etc/node-agent/
