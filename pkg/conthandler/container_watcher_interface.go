@@ -17,6 +17,5 @@ type ContainerClient interface {
 
 type ContainerWatcherClient interface {
 	GetContainerClient() ContainerClient
-	GetNodeName() string
 	ParsePodData(*workloadinterface.Workload, *containercollection.Container) (*conthandlerV1.ContainerEventData, error)
 }

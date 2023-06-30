@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"node-agent/pkg/context"
 	"node-agent/pkg/utils"
 	"os"
 	"strings"
@@ -73,12 +72,12 @@ type packageSourceInfoData struct {
 func createSBOMDir() {
 	wd, err := os.Getwd()
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("failed to get working directory", helpers.Error(err))
+		logger.L().Fatal("failed to get working directory", helpers.Error(err))
 	}
 	spdxDataDirPath = fmt.Sprintf("%s/%s", wd, directorySBOM)
 	err = os.MkdirAll(spdxDataDirPath, os.ModeDir|os.ModePerm)
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("failed to create directory for SBOM resources", helpers.String("directory path", spdxDataDirPath), helpers.Error(err))
+		logger.L().Fatal("failed to create directory for SBOM resources", helpers.String("directory path", spdxDataDirPath), helpers.Error(err))
 	}
 }
 

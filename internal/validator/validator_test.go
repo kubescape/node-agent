@@ -2,18 +2,8 @@ package validator
 
 import (
 	"node-agent/pkg/config"
-	v1 "node-agent/pkg/config/v1"
-	"node-agent/pkg/utils"
-	"path"
 	"testing"
 )
-
-func TestValidator(t *testing.T) {
-	err := checkKernelVersion("0.1")
-	if err != nil {
-		t.Fatalf("checkKernelVersion failed withh error %v", err)
-	}
-}
 
 func TestInt8ToStr(t *testing.T) {
 	// Test with valid input
@@ -49,24 +39,57 @@ func TestInt8ToStr(t *testing.T) {
 	}
 }
 
+func Test_checkKernelVersion(t *testing.T) {
+	type args struct {
+		minKernelVersion string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "valid kernel version",
+			args: args{minKernelVersion: "0.1"},
+		},
+		{
+			name:    "invalid kernel version",
+			args:    args{minKernelVersion: "999.999"},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := checkKernelVersion(tt.args.minKernelVersion); (err != nil) != tt.wantErr {
+				t.Errorf("checkKernelVersion() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestCheckPrerequisites(t *testing.T) {
-	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	t.Setenv(config.ConfigEnvVar, configPath)
-	t.Setenv(config.NodeNameEnvVar, "testNode")
-
-	cfg := config.GetConfigurationConfigContext()
-	configData, err := cfg.GetConfigurationReader()
-	if err != nil {
-		t.Errorf("GetConfigurationReader failed with err %v", err)
+	tests := []struct {
+		name    string
+		setEnv  bool
+		wantErr bool
+	}{
+		{
+			name:   "valid prerequisites",
+			setEnv: true,
+		},
+		{
+			name:    "invalid prerequisites",
+			wantErr: true,
+		},
 	}
-	err = cfg.ParseConfiguration(v1.CreateConfigData(), configData)
-	if err != nil {
-		t.Fatalf("ParseConfiguration failed with err %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setEnv {
+				t.Setenv(config.NodeNameEnvVar, "testNode")
+			}
+			if err := CheckPrerequisites(); (err != nil) != tt.wantErr {
+				t.Errorf("CheckPrerequisites() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
-
-	err = CheckPrerequisites()
-	if err != nil {
-		t.Fatalf("checkNodePrerequisites failed with err %v", err)
-	}
-
 }

@@ -1,7 +1,7 @@
 package storageclient
 
 import (
-	gcontext "context"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,8 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-
-	"node-agent/pkg/context"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -45,7 +43,7 @@ type StorageK8SAggregatedAPIClient struct {
 
 var _ StorageClient = (*StorageK8SAggregatedAPIClient)(nil)
 
-func CreateSBOMStorageK8SAggregatedAPIClient() (*StorageK8SAggregatedAPIClient, error) {
+func CreateSBOMStorageK8SAggregatedAPIClient(ctx context.Context) (*StorageK8SAggregatedAPIClient, error) {
 	var config *rest.Config
 	kubeconfig := os.Getenv(KubeConfig)
 	// use the current context in kubeconfig
@@ -66,17 +64,17 @@ func CreateSBOMStorageK8SAggregatedAPIClient() (*StorageK8SAggregatedAPIClient, 
 		readySBOMs: sync.Map{},
 	}
 
-	go storageClient.watchForSBOMs()
+	go storageClient.watchForSBOMs(ctx)
 
 	return storageClient, nil
 }
 
-func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs() {
+func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs(ctx context.Context) {
 	for {
-		watcher, err := sc.clientset.SpdxV1beta1().SBOMSummaries(KubescapeNamespace).Watch(gcontext.TODO(), metav1.ListOptions{})
+		watcher, err := sc.clientset.SpdxV1beta1().SBOMSummaries(KubescapeNamespace).Watch(context.TODO(), metav1.ListOptions{})
 		if err != nil {
-			logger.L().Ctx(context.GetBackgroundContext()).Error("Watch for SBOMs failed", helpers.Error(err))
-			logger.L().Ctx(context.GetBackgroundContext()).Error("Retry", helpers.String(fmt.Sprintf("with %d", retryWatcherSleep), " seconds"))
+			logger.L().Ctx(ctx).Error("Watch for SBOMs failed", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("Retry", helpers.String(fmt.Sprintf("with %d", retryWatcherSleep), " seconds"))
 			time.Sleep(retryWatcherSleep * time.Second)
 			continue
 		}
@@ -128,7 +126,7 @@ func (sc *StorageK8SAggregatedAPIClient) GetData(key string) (any, error) {
 	// if metadata.SBOMServerState == SBOMServerStateDeleted {
 	// 	return nil, fmt.Errorf("SBOM not exist in server, SBOM deleted")
 	// }
-	SBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3s(KubescapeNamespace).Get(gcontext.TODO(), key, metav1.GetOptions{})
+	SBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3s(KubescapeNamespace).Get(context.TODO(), key, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +149,7 @@ func (sc *StorageK8SAggregatedAPIClient) PutData(key string, data any) error {
 	if err != nil {
 		return err
 	}
-	_, err = sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Patch(gcontext.TODO(), key, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+	_, err = sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Patch(context.TODO(), key, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		return err
 	}
@@ -163,7 +161,7 @@ func (sc *StorageK8SAggregatedAPIClient) PostData(_ string, data any) error {
 	if !ok {
 		return fmt.Errorf("failed to update SBOM: SBOM is not in the right form")
 	}
-	_, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Create(gcontext.TODO(), SBOM, metav1.CreateOptions{})
+	_, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Create(context.TODO(), SBOM, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
@@ -171,7 +169,7 @@ func (sc *StorageK8SAggregatedAPIClient) PostData(_ string, data any) error {
 }
 
 func (sc *StorageK8SAggregatedAPIClient) GetResourceVersion(key string) string {
-	SBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Get(gcontext.TODO(), key, metav1.GetOptions{})
+	SBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Get(context.TODO(), key, metav1.GetOptions{})
 	if err != nil {
 		return ""
 	}

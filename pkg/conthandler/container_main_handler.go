@@ -1,14 +1,15 @@
 package conthandler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"node-agent/pkg/config"
-	"node-agent/pkg/context"
 	v1 "node-agent/pkg/conthandler/v1"
 	"node-agent/pkg/sbom"
 	sbomV1 "node-agent/pkg/sbom/v1"
 	"node-agent/pkg/storageclient"
+	"os"
 	"sync"
 	"time"
 
@@ -59,6 +60,7 @@ type watchedContainerData struct {
 }
 
 type ContainerHandler struct {
+	cfg                      config.Config
 	containerWatcher         ContainerWatcherClient
 	watchedContainers        sync.Map
 	afterTimerActionsChannel chan afterTimerActionsData
@@ -72,9 +74,9 @@ type ContainerHandler struct {
 
 var _ ContainerMainHandlerClient = (*ContainerHandler)(nil)
 
-func CreateContainerHandler(contClient ContainerClient, storageClient storageclient.StorageClient) (*ContainerHandler, error) {
+func CreateContainerHandler(cfg config.Config, clusterName string, contClient ContainerClient, storageClient storageclient.StorageClient) (*ContainerHandler, error) {
 
-	contWatcher, err := CreateContainerWatcher(contClient)
+	contWatcher, err := CreateContainerWatcher(contClient, clusterName)
 	if err != nil {
 		return nil, err
 	}
@@ -92,6 +94,7 @@ func CreateContainerHandler(contClient ContainerClient, storageClient storagecli
 	}
 
 	return &ContainerHandler{
+		cfg:                      cfg,
 		containerWatcher:         contWatcher,
 		watchedContainers:        sync.Map{},
 		afterTimerActionsChannel: make(chan afterTimerActionsData, 50),
@@ -102,21 +105,21 @@ func CreateContainerHandler(contClient ContainerClient, storageClient storagecli
 	}, nil
 }
 
-func (ch *ContainerHandler) afterTimerActions() error {
+func (ch *ContainerHandler) afterTimerActions(ctx context.Context) error {
 	var err error
 
 	for {
 		afterTimerActionsData := <-ch.afterTimerActionsChannel
 		containerDataInterface, exist := ch.watchedContainers.Load(afterTimerActionsData.containerID)
 		if !exist {
-			ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "LoadContainerIDFromMap")
+			ctx, span := otel.Tracer("").Start(ctx, "LoadContainerIDFromMap")
 			logger.L().Ctx(ctx).Warning("afterTimerActions: failed to get container data of container ID", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID)}...)
 			span.End()
 			continue
 		}
 		containerData := containerDataInterface.(watchedContainerData)
 
-		if config.GetConfigurationConfigContext().IsRelevantCVEServiceEnabled() && afterTimerActionsData.service == RelevantCVEsService {
+		if ch.cfg.EnableRelevancy && afterTimerActionsData.service == RelevantCVEsService {
 			fileList := make(map[string]bool)
 			err = ch.fileDB.View(func(tx *bolt.Tx) error {
 				b := tx.Bucket([]byte(containerData.k8sContainerID))
@@ -134,7 +137,7 @@ func (ch *ContainerHandler) afterTimerActions() error {
 				continue
 			}
 			logger.L().Debug("fileList generated", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.String("file list", fmt.Sprintf("%v", fileList))}...)
-			ctxPostSBOM, spanPostSBOM := otel.Tracer("").Start(context.GetBackgroundContext(), "PostFilterSBOM")
+			ctxPostSBOM, spanPostSBOM := otel.Tracer("").Start(ctx, "PostFilterSBOM")
 			if err = <-containerData.syncChannel[StepGetSBOM]; err != nil {
 				logger.L().Debug("failed to get SBOM", []helpers.IDetails{helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("container name", containerData.event.GetContainerName()), helpers.String("k8s resource ", containerData.event.GetK8SWorkloadID()), helpers.Error(err)}...)
 				continue
@@ -177,7 +180,7 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 	var err error
 	select {
 	case <-watchedContainer.snifferTicker.C:
-		if config.GetConfigurationConfigContext().IsRelevantCVEServiceEnabled() {
+		if ch.cfg.EnableRelevancy {
 			ch.afterTimerActionsChannel <- afterTimerActionsData{
 				containerID: containerID,
 				service:     RelevantCVEsService,
@@ -196,10 +199,6 @@ func (ch *ContainerHandler) startTimer(watchedContainer watchedContainerData, co
 	return err
 }
 
-func createTicker() *time.Ticker {
-	return time.NewTicker(config.GetConfigurationConfigContext().GetUpdateDataPeriod())
-}
-
 func (ch *ContainerHandler) deleteResources(watchedContainer watchedContainerData, contEvent v1.ContainerEventData) {
 	watchedContainer.snifferTicker.Stop()
 	watchedContainer.sbomClient.CleanResources()
@@ -212,10 +211,10 @@ func (ch *ContainerHandler) deleteResources(watchedContainer watchedContainerDat
 	ch.tracerCollection.TracerMapsUpdater()(event)
 }
 
-func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventData) {
+func (ch *ContainerHandler) startRelevancyProcess(ctx context.Context, contEvent v1.ContainerEventData) {
 	containerDataInterface, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
 	if !exist {
-		ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "container monitoring", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
+		ctx, span := otel.Tracer("").Start(ctx, "container monitoring", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
 		defer span.End()
 		logger.L().Ctx(ctx).Error("startRelevancyProcess: failed to get container data", helpers.String("container ID", contEvent.GetContainerID()), helpers.String("container name", contEvent.GetContainerName()), helpers.String("k8s resources", contEvent.GetK8SWorkloadID()))
 		return
@@ -223,11 +222,10 @@ func (ch *ContainerHandler) startRelevancyProcess(contEvent v1.ContainerEventDat
 	watchedContainer := containerDataInterface.(watchedContainerData)
 
 	now := time.Now()
-	configStopTime := config.GetConfigurationConfigContext().GetSniffingMaxTimes()
-	stopSniffingTime := now.Add(configStopTime)
+	stopSniffingTime := now.Add(ch.cfg.MaxSniffingTime)
 	for time.Now().Before(stopSniffingTime) {
-		go ch.getSBOM(contEvent)
-		ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "container monitoring", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
+		go ch.getSBOM(ctx, contEvent)
+		ctx, span := otel.Tracer("").Start(ctx, "container monitoring", trace.WithAttributes(attribute.String("containerID", contEvent.GetContainerID()), attribute.String("container workload", contEvent.GetK8SWorkloadID())))
 		err := ch.startTimer(watchedContainer, contEvent.GetContainerID())
 		if err != nil {
 			if errors.Is(err, containerHasTerminatedError) {
@@ -276,10 +274,10 @@ func (ch *ContainerHandler) getImageID(containerData *watchedContainerData) (str
 	return containerData.imageID, nil
 }
 
-func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
+func (ch *ContainerHandler) getSBOM(ctx context.Context, contEvent v1.ContainerEventData) {
 	containerDataInterface, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
 	if !exist {
-		logger.L().Ctx(context.GetBackgroundContext()).Error("getSBOM: failed to get container data of ContainerID, not exist in memory", helpers.String("containerID", contEvent.GetContainerID()))
+		logger.L().Ctx(ctx).Error("getSBOM: failed to get container data of ContainerID, not exist in memory", helpers.String("containerID", contEvent.GetContainerID()))
 		return
 	}
 	watchedContainer := containerDataInterface.(watchedContainerData)
@@ -292,7 +290,7 @@ func (ch *ContainerHandler) getSBOM(contEvent v1.ContainerEventData) {
 	watchedContainer.syncChannel[StepGetSBOM] <- err
 }
 
-func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEventData) error {
+func (ch *ContainerHandler) handleContainerRunningEvent(ctx context.Context, contEvent v1.ContainerEventData) error {
 	logger.L().Debug("handleContainerRunningEvent", helpers.Interface("contEvent", contEvent))
 	_, exist := ch.watchedContainers.Load(contEvent.GetContainerID())
 	if exist {
@@ -300,7 +298,7 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 	}
 	logger.L().Info("new container has loaded - start monitor it", []helpers.IDetails{helpers.String("ContainerID", contEvent.GetContainerID()), helpers.String("Container name", contEvent.GetContainerID()), helpers.String("k8s workload", contEvent.GetK8SWorkloadID())}...)
 	newWatchedContainer := watchedContainerData{
-		snifferTicker: createTicker(),
+		snifferTicker: time.NewTicker(ch.cfg.UpdateDataPeriod),
 		event:         contEvent,
 		sbomClient:    sbom.CreateSBOMStorageClient(ch.storageClient, contEvent.GetK8SWorkloadID(), contEvent.GetInstanceID()),
 		syncChannel: map[string]chan error{
@@ -311,7 +309,7 @@ func (ch *ContainerHandler) handleContainerRunningEvent(contEvent v1.ContainerEv
 		k8sContainerID: contEvent.GetK8SContainerID(),
 	}
 	ch.watchedContainers.Store(contEvent.GetContainerID(), newWatchedContainer)
-	go ch.startRelevancyProcess(contEvent)
+	go ch.startRelevancyProcess(ctx, contEvent)
 	return nil
 }
 
@@ -357,30 +355,30 @@ func (ch *ContainerHandler) reportFileAccessInPod(namespace, pod, container, fil
 	}
 }
 
-func (ch *ContainerHandler) StartMainHandler() error {
+func (ch *ContainerHandler) StartMainHandler(ctx context.Context) error {
 	go func() {
-		_ = ch.afterTimerActions()
+		_ = ch.afterTimerActions(ctx)
 	}()
 
 	callback := func(notif containercollection.PubSubEvent) {
 		logger.L().Debug("GetEventCallback", helpers.String("namespaceName", notif.Container.Namespace), helpers.String("podName", notif.Container.Podname), helpers.String("containerName", notif.Container.Name), helpers.String("containerID", notif.Container.ID), helpers.String("type", notif.Type.String()))
 		wl, err := ch.containerWatcher.GetContainerClient().GetWorkload(notif.Container.Namespace, "Pod", notif.Container.Podname)
 		if err != nil {
-			logger.L().Ctx(context.GetBackgroundContext()).Error("failed to get pod", helpers.Error(err), helpers.String("namespace", notif.Container.Namespace), helpers.String("Pod name", notif.Container.Podname))
+			logger.L().Ctx(ctx).Error("failed to get pod", helpers.Error(err), helpers.String("namespace", notif.Container.Namespace), helpers.String("Pod name", notif.Container.Podname))
 			return
 		}
 		workload := wl.(*workloadinterface.Workload)
 		containerEventData, err := ch.containerWatcher.ParsePodData(workload, notif.Container)
 		if err != nil {
-			logger.L().Ctx(context.GetBackgroundContext()).Error("failed to parse pod data", helpers.Error(err), helpers.Interface("workload", workload), helpers.Interface("container", notif.Container))
+			logger.L().Ctx(ctx).Error("failed to parse pod data", helpers.Error(err), helpers.Interface("workload", workload), helpers.Interface("container", notif.Container))
 			return
 		}
 		switch notif.Type {
 		case containercollection.EventTypeAddContainer:
 			logger.L().Debug("container has started", helpers.String("namespace", notif.Container.Namespace), helpers.String("Pod name", notif.Container.Podname), helpers.String("ContainerID", notif.Container.ID), helpers.String("Container name", notif.Container.Name))
-			err := ch.handleContainerRunningEvent(*containerEventData)
+			err := ch.handleContainerRunningEvent(ctx, *containerEventData)
 			if err != nil {
-				ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "mainContainerHandler")
+				ctx, span := otel.Tracer("").Start(ctx, "mainContainerHandler")
 				logger.L().Ctx(ctx).Warning("handle container running event failed", helpers.String("ContainerID", containerEventData.GetContainerID()), helpers.String("Container name", containerEventData.GetContainerID()), helpers.String("k8s workload", containerEventData.GetK8SWorkloadID()), helpers.Error(err))
 				span.End()
 			}
@@ -388,7 +386,7 @@ func (ch *ContainerHandler) StartMainHandler() error {
 			logger.L().Debug("container has Terminated", helpers.String("namespace", notif.Container.Namespace), helpers.String("Pod name", notif.Container.Podname), helpers.String("ContainerID", notif.Container.ID), helpers.String("Container name", notif.Container.Name))
 			err := ch.handleContainerTerminatedEvent(*containerEventData)
 			if err != nil {
-				ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "mainContainerHandler")
+				ctx, span := otel.Tracer("").Start(ctx, "mainContainerHandler")
 				logger.L().Ctx(ctx).Warning("handle container terminated event failed", helpers.String("ContainerID", containerEventData.GetContainerID()), helpers.String("Container name", containerEventData.GetContainerID()), helpers.String("k8s workload", containerEventData.GetK8SWorkloadID()), helpers.Error(err))
 				span.End()
 			}
@@ -410,7 +408,7 @@ func (ch *ContainerHandler) StartMainHandler() error {
 		containercollection.WithLinuxNamespaceEnrichment(),
 
 		// Enrich those containers with data from the Kubernetes API
-		containercollection.WithKubernetesEnrichment(ch.containerWatcher.GetNodeName(), ch.containerWatcher.GetContainerClient().GetK8sConfig()),
+		containercollection.WithKubernetesEnrichment(os.Getenv(config.NodeNameEnvVar), ch.containerWatcher.GetContainerClient().GetK8sConfig()),
 
 		// Get Notifications from the container collection
 		containercollection.WithPubSub(containerEventFuncs...),
@@ -428,7 +426,7 @@ func (ch *ContainerHandler) StartMainHandler() error {
 	execEventCallback := func(event *tracerexectype.Event) {
 		if event.Type != types.NORMAL {
 			// dropped event
-			logger.L().Ctx(context.GetBackgroundContext()).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("namespace", event.Namespace), helpers.String("pod", event.Pod), helpers.String("container", event.Container), helpers.String("error", event.Message))
+			logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("namespace", event.Namespace), helpers.String("pod", event.Pod), helpers.String("container", event.Container), helpers.String("error", event.Message))
 			return
 		}
 		if event.Retval > -1 {
@@ -447,7 +445,7 @@ func (ch *ContainerHandler) StartMainHandler() error {
 	openEventCallback := func(event *traceropentype.Event) {
 		if event.Type != types.NORMAL {
 			// dropped event
-			logger.L().Ctx(context.GetBackgroundContext()).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("namespace", event.Namespace), helpers.String("pod", event.Pod), helpers.String("container", event.Container), helpers.String("error", event.Message))
+			logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.String("namespace", event.Namespace), helpers.String("pod", event.Pod), helpers.String("container", event.Container), helpers.String("error", event.Message))
 			return
 		}
 		if event.Ret > -1 {

@@ -1,11 +1,11 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net/url"
 	"node-agent/internal/validator"
 	"node-agent/pkg/config"
-	v1 "node-agent/pkg/config/v1"
-	"node-agent/pkg/context"
 	"node-agent/pkg/conthandler"
 	"node-agent/pkg/storageclient"
 	"os"
@@ -17,40 +17,51 @@ import (
 )
 
 func main() {
-	// Init
-	cfg := config.GetConfigurationConfigContext()
-	configData, err := cfg.GetConfigurationReader()
+	ctx := context.Background()
+
+	cfg, err := config.LoadConfig("/etc/config")
 	if err != nil {
-		logger.L().Fatal("error during getting configuration data", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
-	err = cfg.ParseConfiguration(v1.CreateConfigData(), configData)
+
+	clusterData, err := config.LoadClusterData("/etc/config")
 	if err != nil {
-		logger.L().Fatal("error during parsing configuration", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
 	}
+
+	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
+	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
+		ctx = logger.InitOtel("kubevuln",
+			os.Getenv("RELEASE"),
+			clusterData.AccountID,
+			clusterData.ClusterName,
+			url.URL{Host: otelHost})
+		defer logger.ShutdownOtel(ctx)
+	}
+
 	err = validator.CheckPrerequisites()
 	if err != nil {
-		logger.L().Fatal("error during validation", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("error during validation", helpers.Error(err))
 	}
-	context.SetBackgroundContext()
 
 	// Create the container handler
 	k8sAPIServerClient, err := conthandler.CreateContainerClientK8SAPIServer()
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the container client", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("error during create the container client", helpers.Error(err))
 	}
-	storageClient, err := storageclient.CreateSBOMStorageK8SAggregatedAPIClient()
+	storageClient, err := storageclient.CreateSBOMStorageK8SAggregatedAPIClient(ctx)
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the storage client", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("error during create the storage client", helpers.Error(err))
 	}
-	mainHandler, err := conthandler.CreateContainerHandler(k8sAPIServerClient, storageClient)
+	mainHandler, err := conthandler.CreateContainerHandler(cfg, clusterData.ClusterName, k8sAPIServerClient, storageClient)
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the main container handler", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("error during create the main container handler", helpers.Error(err))
 	}
 
 	// Start the container handler
-	err = mainHandler.StartMainHandler()
+	err = mainHandler.StartMainHandler(ctx)
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during start the main container handler", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("error during start the main container handler", helpers.Error(err))
 	}
 	defer mainHandler.StopMainHandler()
 
