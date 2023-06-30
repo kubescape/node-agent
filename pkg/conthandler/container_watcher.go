@@ -2,8 +2,6 @@ package conthandler
 
 import (
 	"fmt"
-
-	"node-agent/pkg/config"
 	conthandlerV1 "node-agent/pkg/conthandler/v1"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -23,7 +21,7 @@ var _ ContainerClient = (*ContainerClientK8SAPIServer)(nil)
 
 type ContainerWatcher struct {
 	ContainerClient ContainerClient
-	nodeName        string
+	clusterName     string
 }
 
 var _ ContainerWatcherClient = (*ContainerWatcher)(nil)
@@ -34,20 +32,11 @@ func CreateContainerClientK8SAPIServer() (ContainerClient, error) {
 	}, nil
 }
 
-func CreateContainerWatcher(client ContainerClient) (*ContainerWatcher, error) {
-	nodeName, err := getNodeName()
-	if err != nil {
-		return nil, err
-	}
-
+func CreateContainerWatcher(client ContainerClient, clusterName string) (*ContainerWatcher, error) {
 	return &ContainerWatcher{
 		ContainerClient: client,
-		nodeName:        nodeName,
+		clusterName:     clusterName,
 	}, nil
-}
-
-func getNodeName() (string, error) {
-	return config.GetConfigurationConfigContext().GetNodeName(), nil
 }
 
 func (client *ContainerClientK8SAPIServer) GetK8sConfig() *rest.Config {
@@ -82,10 +71,6 @@ func (containerWatcher *ContainerWatcher) GetContainerClient() ContainerClient {
 	return containerWatcher.ContainerClient
 }
 
-func (containerWatcher *ContainerWatcher) GetNodeName() string {
-	return containerWatcher.nodeName
-}
-
 func (containerWatcher *ContainerWatcher) ParsePodData(pod *workloadinterface.Workload, container *containercollection.Container) (*conthandlerV1.ContainerEventData, error) {
 	kind, name, err := containerWatcher.GetContainerClient().CalculateWorkloadParentRecursive(pod)
 	if err != nil {
@@ -95,7 +80,7 @@ func (containerWatcher *ContainerWatcher) ParsePodData(pod *workloadinterface.Wo
 	if err != nil {
 		return nil, fmt.Errorf("fail to get parent workload %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
-	parentWlid := containerWatcher.GetContainerClient().GenerateWLID(parentWorkload, config.GetConfigurationConfigContext().GetClusterName())
+	parentWlid := containerWatcher.GetContainerClient().GenerateWLID(parentWorkload, containerWatcher.clusterName)
 	err = wlid.IsWlidValid(parentWlid)
 	if err != nil {
 		return nil, fmt.Errorf("WLID of parent workload is not in the right %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)

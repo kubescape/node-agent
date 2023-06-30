@@ -1,6 +1,8 @@
 package conthandler
 
+import "context"
+
 type ContainerMainHandlerClient interface {
-	StartMainHandler() error
+	StartMainHandler(ctx context.Context) error
 	StopMainHandler()
 }

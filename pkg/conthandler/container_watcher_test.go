@@ -1,23 +1,16 @@
 package conthandler
 
 import (
-	"node-agent/pkg/config"
-	configV1 "node-agent/pkg/config/v1"
 	conthandlerV1 "node-agent/pkg/conthandler/v1"
-	"node-agent/pkg/utils"
-	"path"
 	"testing"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/stretchr/testify/assert"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
-
-var watcher *watch.FakeWatcher
 
 type k8sFakeClient struct {
 	Clientset *fake.Clientset
@@ -63,7 +56,7 @@ func TestCreateContainerClientK8SAPIServer(t *testing.T) {
 func TestContainerWatcher_ParsePodData(t *testing.T) {
 	type fields struct {
 		ContainerClient ContainerClient
-		nodeName        string
+		clusterName     string
 	}
 	type args struct {
 		pod       *workloadinterface.Workload
@@ -92,26 +85,16 @@ func TestContainerWatcher_ParsePodData(t *testing.T) {
 			},
 			fields: fields{
 				ContainerClient: &k8sFakeClient{},
+				clusterName:     "test",
 			},
 			want: conthandlerV1.CreateNewContainerEvent("nginx:1.14.2", &containercollection.Container{Name: "nginx"}, "default/nginx/nginx", "wlid://cluster-test/namespace-any/deployment-nginx", instanceID),
 		},
-	}
-	configPath := path.Join(utils.CurrentDir(), "..", "..", "configuration", "ConfigurationFile.json")
-	t.Setenv(config.ConfigEnvVar, configPath)
-	cfg := config.GetConfigurationConfigContext()
-	configData, err := cfg.GetConfigurationReader()
-	if err != nil {
-		t.Fatalf("GetConfigurationReader failed with err %v", err)
-	}
-	err = cfg.ParseConfiguration(configV1.CreateFalcoMockConfigData(), configData)
-	if err != nil {
-		t.Fatalf("ParseConfiguration failed with err %v", err)
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			containerWatcher := &ContainerWatcher{
 				ContainerClient: tt.fields.ContainerClient,
-				nodeName:        tt.fields.nodeName,
+				clusterName:     tt.fields.clusterName,
 			}
 			got, err := containerWatcher.ParsePodData(tt.args.pod, tt.args.container)
 			assert.NoError(t, err)
