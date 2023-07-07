@@ -1,27 +1,31 @@
-package conthandler
+package containerwatcher
 
 import (
+	"node-agent/pkg/containerwatcher"
+
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 )
 
-type ContainerEventType string
-
 type ContainerEventData struct {
-	imageTAG       string
 	container      *containercollection.Container
+	imageID        string
+	imageTAG       string
+	k8sContainerID string
 	wlid           string
 	instanceID     instanceidhandler.IInstanceID
-	k8sContainerID string
 }
 
-func CreateNewContainerEvent(imageTAG string, container *containercollection.Container, k8sContainerID, wlid string, instanceID instanceidhandler.IInstanceID) *ContainerEventData {
+var _ containerwatcher.ContainerEvent = (*ContainerEventData)(nil)
+
+func CreateNewContainerEvent(container *containercollection.Container, imageID, imageTAG, k8sContainerID, wlid string, instanceID instanceidhandler.IInstanceID) *ContainerEventData {
 	return &ContainerEventData{
-		imageTAG:       imageTAG,
 		container:      container,
+		imageID:        imageID,
+		imageTAG:       imageTAG,
+		k8sContainerID: k8sContainerID,
 		wlid:           wlid,
 		instanceID:     instanceID,
-		k8sContainerID: k8sContainerID,
 	}
 }
 
@@ -63,4 +67,8 @@ func (event *ContainerEventData) GetPodName() string {
 
 func (event *ContainerEventData) GetContainer() *containercollection.Container {
 	return event.container
+}
+
+func (event *ContainerEventData) GetImageID() string {
+	return event.imageID
 }

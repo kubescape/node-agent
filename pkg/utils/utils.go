@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -41,4 +42,8 @@ func CurrentDir() string {
 	_, filename, _, _ := runtime.Caller(1)
 
 	return filepath.Dir(filename)
+}
+
+func CreateK8sContainerID(namespaceName string, podName string, containerName string) string {
+	return fmt.Sprintf("%s/%s/%s", namespaceName, podName, containerName)
 }

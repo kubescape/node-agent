@@ -1,15 +1,19 @@
 package sbom
 
-import "github.com/kubescape/k8s-interface/instanceidhandler"
+import (
+	"context"
+
+	"github.com/kubescape/k8s-interface/instanceidhandler"
+)
 
 type SBOMFormat interface {
 	GetFilterSBOMData() any
-	StoreSBOM(any) error
-	ValidateSBOM() error
-	FilterSBOM(sbomFileRelevantMap map[string]bool) error
+	StoreSBOM(ctx context.Context, sbomData any) error
+	ValidateSBOM(ctx context.Context) error
+	FilterSBOM(ctx context.Context, sbomFileRelevantMap map[string]bool) error
 	IsNewRelevantSBOMDataExist() bool
 	IsSBOMAlreadyExist() bool
-	StoreFilteredSBOMName(string)
-	StoreMetadata(wlidData, imageID string, instanceID instanceidhandler.IInstanceID)
+	SetFilteredSBOMName(string)
+	StoreMetadata(ctx context.Context, wlidData, imageID string, instanceID instanceidhandler.IInstanceID)
 	CleanResources()
 }

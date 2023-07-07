@@ -6,7 +6,9 @@ import (
 	"net/url"
 	"node-agent/internal/validator"
 	"node-agent/pkg/config"
-	"node-agent/pkg/conthandler"
+	"node-agent/pkg/containerwatcher/v1"
+	"node-agent/pkg/filehandler/v1"
+	"node-agent/pkg/relevancymanager/v1"
 	"node-agent/pkg/storageclient"
 	"os"
 	"os/signal"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 )
 
 func main() {
@@ -44,26 +47,33 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("error during validation", helpers.Error(err))
 	}
 
-	// Create the container handler
-	k8sAPIServerClient, err := conthandler.CreateContainerClientK8SAPIServer()
+	// Create the relevancy manager
+	fileHandler, err := filehandler.CreateBoltFileHandler()
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error during create the container client", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("failed to create fileDB", helpers.Error(err))
 	}
+	defer fileHandler.Close()
 	storageClient, err := storageclient.CreateSBOMStorageK8SAggregatedAPIClient(ctx)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error during create the storage client", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
-	mainHandler, err := conthandler.CreateContainerHandler(cfg, clusterData.ClusterName, k8sAPIServerClient, storageClient)
+	relevancyManager, err := relevancymanager.CreateRelevancyManager(cfg, fileHandler, storageClient)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error during create the main container handler", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
+	}
+
+	// Create the container handler
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(clusterData.ClusterName, k8sinterface.NewKubernetesApi(), relevancyManager)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
 
 	// Start the container handler
-	err = mainHandler.StartMainHandler(ctx)
+	err = mainHandler.Start(ctx)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error during start the main container handler", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("error starting the container watcher", helpers.Error(err))
 	}
-	defer mainHandler.StopMainHandler()
+	defer mainHandler.Stop()
 
 	// Wait for shutdown signal
 	shutdown := make(chan os.Signal, 1)
