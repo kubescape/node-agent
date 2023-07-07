@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	apimachineryerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -114,18 +115,10 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs(ctx context.Context) {
 	}
 }
 
-func (sc *StorageK8SAggregatedAPIClient) GetData(key string) (any, error) {
-	// value, exist := sc.readySBOMs.Load(key)
-	// if !exist {
-	// 	return nil, fmt.Errorf("SBOM not exist in server")
-	// }
-	// metadata, ok := value.(SBOMMetadata)
-	// if !ok {
-	// 	return nil, fmt.Errorf("failed to convert to SBOM metadata")
-	// }
-	// if metadata.SBOMServerState == SBOMServerStateDeleted {
-	// 	return nil, fmt.Errorf("SBOM not exist in server, SBOM deleted")
-	// }
+func (sc *StorageK8SAggregatedAPIClient) GetData(ctx context.Context, key string) (any, error) {
+	_, span := otel.Tracer("").Start(ctx, "StorageK8SAggregatedAPIClient.GetData")
+	defer span.End()
+
 	SBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3s(KubescapeNamespace).Get(context.TODO(), key, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
@@ -140,7 +133,9 @@ func (sc *StorageK8SAggregatedAPIClient) GetData(key string) (any, error) {
 	return SBOM, nil
 }
 
-func (sc *StorageK8SAggregatedAPIClient) PutData(key string, data any) error {
+func (sc *StorageK8SAggregatedAPIClient) PutData(ctx context.Context, key string, data any) error {
+	_, span := otel.Tracer("").Start(ctx, "StorageK8SAggregatedAPIClient.PutData")
+	defer span.End()
 	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3Filtered)
 	if !ok {
 		return fmt.Errorf("failed to update SBOM: SBOM is not in the right form")
@@ -156,7 +151,9 @@ func (sc *StorageK8SAggregatedAPIClient) PutData(key string, data any) error {
 	return nil
 }
 
-func (sc *StorageK8SAggregatedAPIClient) PostData(_ string, data any) error {
+func (sc *StorageK8SAggregatedAPIClient) PostData(ctx context.Context, data any) error {
+	_, span := otel.Tracer("").Start(ctx, "StorageK8SAggregatedAPIClient.PostData")
+	defer span.End()
 	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3Filtered)
 	if !ok {
 		return fmt.Errorf("failed to update SBOM: SBOM is not in the right form")
@@ -168,7 +165,9 @@ func (sc *StorageK8SAggregatedAPIClient) PostData(_ string, data any) error {
 	return nil
 }
 
-func (sc *StorageK8SAggregatedAPIClient) GetResourceVersion(key string) string {
+func (sc *StorageK8SAggregatedAPIClient) GetResourceVersion(ctx context.Context, key string) string {
+	_, span := otel.Tracer("").Start(ctx, "StorageK8SAggregatedAPIClient.GetResourceVersion")
+	defer span.End()
 	SBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Get(context.TODO(), key, metav1.GetOptions{})
 	if err != nil {
 		return ""

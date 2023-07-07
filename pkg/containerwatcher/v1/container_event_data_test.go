@@ -1,4 +1,4 @@
-package conthandler
+package containerwatcher
 
 import (
 	"testing"
@@ -30,7 +30,7 @@ func TestContainerEvent(t *testing.T) {
 		Namespace: "any",
 		Podname:   "aaa",
 	}
-	contEv := CreateNewContainerEvent(TestImageTAG, cont, TestK8sContainerID, TestWLID, &instanceid)
+	contEv := CreateNewContainerEvent(cont, "", TestImageTAG, TestK8sContainerID, TestWLID, &instanceid)
 	assert.Equal(t, contEv.GetK8SContainerID(), TestK8sContainerID)
 	assert.Equal(t, contEv.GetContainerID(), TestContainerID)
 	assert.Equal(t, contEv.GetK8SWorkloadID(), TestWLID)

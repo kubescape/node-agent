@@ -1,4 +1,5 @@
 temp
+.idea
 .vscode
 resources/ebpf/falco/*
 node-agent
