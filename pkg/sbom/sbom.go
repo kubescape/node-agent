@@ -51,7 +51,7 @@ func CreateSBOMStorageClient(sc storageclient.StorageClient, wlid string, instan
 	}
 }
 
-func (sc *SBOMStructure) GetSBOM(ctx context.Context, imageTAG, imageID string) error {
+func (sc *SBOMStructure) GetSBOM(ctx context.Context, imageTag, imageID string) error {
 	ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.GetSBOM")
 	defer span.End()
 
@@ -59,9 +59,9 @@ func (sc *SBOMStructure) GetSBOM(ctx context.Context, imageTAG, imageID string) 
 		return nil
 	}
 
-	SBOMKey, err := names.ImageInfoToSlug(imageTAG, imageID)
+	SBOMKey, err := names.ImageInfoToSlug(imageTag, imageID)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("Failed to create SBOM key", helpers.Error(err), helpers.String("imageTAG", imageTAG), helpers.String("imageID", imageID))
+		logger.L().Ctx(ctx).Error("Failed to create SBOM key", helpers.Error(err), helpers.String("imageTag", imageTag), helpers.String("imageID", imageID))
 		return err
 	}
 
@@ -74,6 +74,10 @@ func (sc *SBOMStructure) GetSBOM(ctx context.Context, imageTAG, imageID string) 
 		return err
 	}
 	return nil
+}
+
+func (sc *SBOMStructure) IsSBOMAlreadyExist() bool {
+	return sc.SBOMData.IsSBOMAlreadyExist()
 }
 
 func (sc *SBOMStructure) FilterSBOM(ctx context.Context, sbomFileRelevantMap map[string]bool) error {
