@@ -17,6 +17,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/spf13/afero"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -39,17 +40,19 @@ type RelevancyManager struct {
 	// FIXME we need this circular dependency to unregister the tracer at the end of startRelevancyProcess
 	containerHandler  containerwatcher.ContainerWatcher
 	fileHandler       filehandler.FileHandler
+	sbomFs            afero.Fs
 	storageClient     storageclient.StorageClient
 	watchedContainers sync.Map
 }
 
 var _ relevancymanager.RelevancyManagerClient = (*RelevancyManager)(nil)
 
-func CreateRelevancyManager(cfg config.Config, fileHandler filehandler.FileHandler, storageClient storageclient.StorageClient) (*RelevancyManager, error) {
+func CreateRelevancyManager(cfg config.Config, fileHandler filehandler.FileHandler, storageClient storageclient.StorageClient, sbomFs afero.Fs) (*RelevancyManager, error) {
 	return &RelevancyManager{
 		afterTimerActionsChannel: make(chan afterTimerActionsData, 50),
 		cfg:                      cfg,
 		fileHandler:              fileHandler,
+		sbomFs:                   sbomFs,
 		storageClient:            storageClient,
 		watchedContainers:        sync.Map{},
 	}, nil
@@ -205,7 +208,7 @@ func (rm *RelevancyManager) ReportContainerStarted(ctx context.Context, contEven
 	newWatchedContainer := watchedContainerData{
 		snifferTicker: time.NewTicker(rm.cfg.UpdateDataPeriod),
 		event:         contEvent,
-		sbomClient:    sbom.CreateSBOMStorageClient(rm.storageClient, contEvent.GetK8SWorkloadID(), contEvent.GetInstanceID()),
+		sbomClient:    sbom.CreateSBOMStorageClient(rm.storageClient, contEvent.GetK8SWorkloadID(), contEvent.GetInstanceID(), rm.sbomFs),
 		syncChannel: map[string]chan error{
 			StepGetSBOM:         make(chan error, 10),
 			StepEventAggregator: make(chan error, 10),

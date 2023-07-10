@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/spf13/afero"
 )
 
 func TestGetSBOM(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", &instanceidhandler.InstanceID{})
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", &instanceidhandler.InstanceID{}, afero.NewMemMapFs())
 	err := SBOMClient.GetSBOM(context.TODO(), storageclient.NGINX_IMAGE_TAG, storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom, %v", err)
@@ -18,7 +19,7 @@ func TestGetSBOM(t *testing.T) {
 }
 
 func TestFilterSBOM(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", &instanceidhandler.InstanceID{})
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", &instanceidhandler.InstanceID{}, afero.NewMemMapFs())
 	err := SBOMClient.GetSBOM(context.TODO(), storageclient.NGINX_IMAGE_TAG, storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom, %v", err)
@@ -33,7 +34,7 @@ func TestFilterSBOM(t *testing.T) {
 }
 
 func TestStoreFilterSBOM(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", &instanceidhandler.InstanceID{})
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", &instanceidhandler.InstanceID{}, afero.NewMemMapFs())
 	err := SBOMClient.GetSBOM(context.TODO(), storageclient.NGINX_IMAGE_TAG, storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")
@@ -52,7 +53,7 @@ func TestStoreFilterSBOM(t *testing.T) {
 }
 
 func TestStoreFilterSBOMFailure(t *testing.T) {
-	SBOMClient := CreateSBOMStorageClient(storageclient.CreateStorageHttpClientFailureMock(), "", &instanceidhandler.InstanceID{})
+	SBOMClient := CreateSBOMStorageClient(storageclient.CreateStorageHttpClientFailureMock(), "", &instanceidhandler.InstanceID{}, afero.NewMemMapFs())
 	err := SBOMClient.GetSBOM(context.TODO(), storageclient.NGINX_IMAGE_TAG, storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom")

@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"node-agent/pkg/utils"
-	"os"
 	"strings"
 	"sync"
 
@@ -17,6 +15,7 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/spf13/afero"
 	"go.opentelemetry.io/otel"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -54,6 +53,7 @@ var spdxDataDirPath string
 var sourceInfoRequiredPrefix []string
 
 type SBOMData struct {
+	sbomFs                                   afero.Fs
 	spdxDataPath                             string
 	filteredSpdxData                         spdxv1beta1.SBOMSPDXv2p3Filtered
 	relevantRealtimeFilesBySPDXIdentifier    sync.Map
@@ -71,27 +71,16 @@ type packageSourceInfoData struct {
 	packageSPDXIdentifier []spdxv1beta1.ElementID
 }
 
-func createSBOMDir() {
-	wd, err := os.Getwd()
-	if err != nil {
-		logger.L().Fatal("failed to get working directory", helpers.Error(err))
-	}
-	spdxDataDirPath = fmt.Sprintf("%s/%s", wd, directorySBOM)
-	err = os.MkdirAll(spdxDataDirPath, os.ModeDir|os.ModePerm)
-	if err != nil {
-		logger.L().Fatal("failed to create directory for SBOM resources", helpers.String("directory path", spdxDataDirPath), helpers.Error(err))
-	}
-}
-
 func init() {
-	createSBOMDir()
 	sourceInfoPrefixData := []string{sourceInfoDotnet, sourceInfoNodeModule, sourceInfoPythonPackage, sourceInfoJava, sourceInfoGemFile, sourceInfoGoModule, sourceInfoRustCargo, sourceInfoPHPComposer, sourceInfoCabal, sourceInfoRebar, sourceInfoLinuxKernel, sourceInfoLinuxKernelModule, sourceInfoDefault}
 	sourceInfoRequiredPrefix = append(sourceInfoRequiredPrefix, sourceInfoPrefixData...)
 }
 
-func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID) SBOMFormat {
-
+func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID, sbomFs afero.Fs) SBOMFormat {
+	spdxDataDirPath = "/data/" + directorySBOM
+	sbomFs.Mkdir(spdxDataDirPath, 0755)
 	return &SBOMData{
+		sbomFs:                                   sbomFs,
 		spdxDataPath:                             fmt.Sprintf("%s/%s", spdxDataDirPath, instanceID.GetHashed()),
 		filteredSpdxData:                         spdxv1beta1.SBOMSPDXv2p3Filtered{},
 		relevantRealtimeFilesBySPDXIdentifier:    sync.Map{},
@@ -103,23 +92,16 @@ func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID) SBO
 	}
 }
 
-func (sbom *SBOMData) saveSBOM(ctx context.Context, spdxData *spdxv1beta1.SBOMSPDXv2p3) error {
+func (sc *SBOMData) saveSBOM(ctx context.Context, spdxData *spdxv1beta1.SBOMSPDXv2p3) error {
 	_, span := otel.Tracer("").Start(ctx, "SBOMData.saveSBOM")
 	defer span.End()
-	logger.L().Debug("saving SBOM", helpers.String("path", sbom.spdxDataPath))
-	f, err := os.Create(sbom.spdxDataPath)
-	if err != nil {
-		return err
-	}
-	defer func(f *os.File) {
-		_ = f.Close()
-	}(f)
+	logger.L().Debug("saving SBOM", helpers.String("path", sc.spdxDataPath))
 
 	data, err := json.Marshal(spdxData)
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(data)
+	err = afero.WriteFile(sc.sbomFs, sc.spdxDataPath, data, 0644)
 	if err != nil {
 		return err
 	}
@@ -141,7 +123,7 @@ func parsedFilesBySourceInfo(packageSourceInfo string) []string {
 	return []string{}
 }
 
-func (sbom *SBOMData) StoreSBOM(ctx context.Context, sbomData any) error {
+func (sc *SBOMData) StoreSBOM(ctx context.Context, sbomData any) error {
 	ctx, span := otel.Tracer("").Start(ctx, "SBOMData.StoreSBOM")
 	defer span.End()
 	spdxData, ok := sbomData.(*spdxv1beta1.SBOMSPDXv2p3)
@@ -149,30 +131,30 @@ func (sbom *SBOMData) StoreSBOM(ctx context.Context, sbomData any) error {
 		return fmt.Errorf("storage format: StoreSBOM: SBOM data format is not supported")
 	}
 
-	err := sbom.saveSBOM(ctx, spdxData)
+	err := sc.saveSBOM(ctx, spdxData)
 	if err != nil {
 		return err
 	}
 
 	for i := range spdxData.Spec.SPDX.Files {
-		sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier, false)
+		sc.relevantRealtimeFilesBySPDXIdentifier.Store(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier, false)
 	}
 	for i := range spdxData.Spec.SPDX.Packages {
 		filesBySourceInfo := parsedFilesBySourceInfo(spdxData.Spec.SPDX.Packages[i].PackageSourceInfo)
 		for j := range filesBySourceInfo {
-			if data, _ := sbom.relevantRealtimeFilesByPackageSourceInfo.Load(filesBySourceInfo[j]); data != nil {
+			if data, _ := sc.relevantRealtimeFilesByPackageSourceInfo.Load(filesBySourceInfo[j]); data != nil {
 				packageData := data.(*packageSourceInfoData)
 				packageData.packageSPDXIdentifier = append(packageData.packageSPDXIdentifier, spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier)
 			} else {
-				sbom.relevantRealtimeFilesByPackageSourceInfo.Store(filesBySourceInfo[j], &packageSourceInfoData{exist: false, packageSPDXIdentifier: []spdxv1beta1.ElementID{spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier}})
+				sc.relevantRealtimeFilesByPackageSourceInfo.Store(filesBySourceInfo[j], &packageSourceInfoData{exist: false, packageSPDXIdentifier: []spdxv1beta1.ElementID{spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier}})
 			}
 		}
 	}
 
-	sbom.filteredSpdxData.Spec = spdxData.Spec
-	sbom.filteredSpdxData.Status = spdxData.Status
-	if sbom.filteredSpdxData.Spec.SPDX.CreationInfo != nil {
-		sbom.filteredSpdxData.Spec.SPDX.CreationInfo.Creators = append(sbom.filteredSpdxData.Spec.SPDX.CreationInfo.Creators, []spdxv1beta1.Creator{
+	sc.filteredSpdxData.Spec = spdxData.Spec
+	sc.filteredSpdxData.Status = spdxData.Status
+	if sc.filteredSpdxData.Spec.SPDX.CreationInfo != nil {
+		sc.filteredSpdxData.Spec.SPDX.CreationInfo.Creators = append(sc.filteredSpdxData.Spec.SPDX.CreationInfo.Creators, []spdxv1beta1.Creator{
 			{
 				CreatorType: Organization,
 				Creator:     KubescapeOrganizationName,
@@ -184,27 +166,20 @@ func (sbom *SBOMData) StoreSBOM(ctx context.Context, sbomData any) error {
 		}...)
 	}
 
-	sbom.filteredSpdxData.ObjectMeta = metav1.ObjectMeta{}
-	sbom.filteredSpdxData.Spec.SPDX.Files = make([]*spdxv1beta1.File, 0)
-	sbom.filteredSpdxData.Spec.SPDX.Packages = make([]*spdxv1beta1.Package, 0)
-	sbom.filteredSpdxData.Spec.SPDX.Relationships = make([]*spdxv1beta1.Relationship, 0)
-	sbom.alreadyExistSBOM = true
+	sc.filteredSpdxData.ObjectMeta = metav1.ObjectMeta{}
+	sc.filteredSpdxData.Spec.SPDX.Files = make([]*spdxv1beta1.File, 0)
+	sc.filteredSpdxData.Spec.SPDX.Packages = make([]*spdxv1beta1.Package, 0)
+	sc.filteredSpdxData.Spec.SPDX.Relationships = make([]*spdxv1beta1.Relationship, 0)
+	sc.alreadyExistSBOM = true
 
 	return nil
 }
 
-func (sbom *SBOMData) getSBOMDataSPDXFormat(ctx context.Context) (*spdxv1beta1.SBOMSPDXv2p3, error) {
+func (sc *SBOMData) getSBOMDataSPDXFormat(ctx context.Context) (*spdxv1beta1.SBOMSPDXv2p3, error) {
 	_, span := otel.Tracer("").Start(ctx, "SBOMData.getSBOMDataSPDXFormat")
 	defer span.End()
-	file, err := os.Open(sbom.spdxDataPath)
-	if err != nil {
-		return nil, err
-	}
-	defer func(file *os.File) {
-		_ = file.Close()
-	}(file)
 
-	bytes, err := io.ReadAll(file)
+	bytes, err := afero.ReadFile(sc.sbomFs, sc.spdxDataPath)
 	if err != nil {
 		return nil, err
 	}
@@ -218,16 +193,16 @@ func (sbom *SBOMData) getSBOMDataSPDXFormat(ctx context.Context) (*spdxv1beta1.S
 	return &spdxData, nil
 }
 
-func (sbom *SBOMData) FilterSBOM(ctx context.Context, sbomFileRelevantMap map[string]bool) error {
+func (sc *SBOMData) FilterSBOM(ctx context.Context, sbomFileRelevantMap map[string]bool) error {
 	ctx, span := otel.Tracer("").Start(ctx, "SBOMData.FilterSBOM")
 	defer span.End()
 
-	if sbom.status == instanceidhandlerV1.Incomplete {
+	if sc.status == instanceidhandlerV1.Incomplete {
 		return nil
 	}
-	sbom.newRelevantData = false
+	sc.newRelevantData = false
 
-	spdxData, err := sbom.getSBOMDataSPDXFormat(ctx)
+	spdxData, err := sc.getSBOMDataSPDXFormat(ctx)
 	if err != nil {
 		return err
 	}
@@ -235,10 +210,10 @@ func (sbom *SBOMData) FilterSBOM(ctx context.Context, sbomFileRelevantMap map[st
 	//filter relevant file list
 	for i := range spdxData.Spec.SPDX.Files {
 		if exist := sbomFileRelevantMap[spdxData.Spec.SPDX.Files[i].FileName]; exist {
-			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier); data != nil && !data.(bool) {
-				sbom.filteredSpdxData.Spec.SPDX.Files = append(sbom.filteredSpdxData.Spec.SPDX.Files, spdxData.Spec.SPDX.Files[i])
-				sbom.relevantRealtimeFilesBySPDXIdentifier.Store(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier, true)
-				sbom.newRelevantData = true
+			if data, _ := sc.relevantRealtimeFilesBySPDXIdentifier.Load(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier); data != nil && !data.(bool) {
+				sc.filteredSpdxData.Spec.SPDX.Files = append(sc.filteredSpdxData.Spec.SPDX.Files, spdxData.Spec.SPDX.Files[i])
+				sc.relevantRealtimeFilesBySPDXIdentifier.Store(spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier, true)
+				sc.newRelevantData = true
 			}
 		}
 	}
@@ -246,13 +221,13 @@ func (sbom *SBOMData) FilterSBOM(ctx context.Context, sbomFileRelevantMap map[st
 	//filter relevant file list from package source Info
 	relevantPackageFromSourceInfoMap := make(map[spdxv1beta1.ElementID]bool)
 	for realtimeFileName := range sbomFileRelevantMap {
-		if data, _ := sbom.relevantRealtimeFilesByPackageSourceInfo.Load(realtimeFileName); data != nil && !data.(*packageSourceInfoData).exist {
+		if data, _ := sc.relevantRealtimeFilesByPackageSourceInfo.Load(realtimeFileName); data != nil && !data.(*packageSourceInfoData).exist {
 			packageData := data.(*packageSourceInfoData)
 			packageData.exist = true
 			for i := range packageData.packageSPDXIdentifier {
 				relevantPackageFromSourceInfoMap[packageData.packageSPDXIdentifier[i]] = true
 			}
-			sbom.newRelevantData = true
+			sc.newRelevantData = true
 		}
 	}
 
@@ -260,55 +235,55 @@ func (sbom *SBOMData) FilterSBOM(ctx context.Context, sbomFileRelevantMap map[st
 	for i := range spdxData.Spec.SPDX.Relationships {
 		switch spdxData.Spec.SPDX.Relationships[i].Relationship {
 		case RelationshipContainType:
-			if data, _ := sbom.relevantRealtimeFilesBySPDXIdentifier.Load(spdxData.Spec.SPDX.Relationships[i].RefB.ElementRefID); data != nil && data.(bool) {
-				sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, spdxData.Spec.SPDX.Relationships[i])
+			if data, _ := sc.relevantRealtimeFilesBySPDXIdentifier.Load(spdxData.Spec.SPDX.Relationships[i].RefB.ElementRefID); data != nil && data.(bool) {
+				sc.filteredSpdxData.Spec.SPDX.Relationships = append(sc.filteredSpdxData.Spec.SPDX.Relationships, spdxData.Spec.SPDX.Relationships[i])
 			}
 			if exist := relevantPackageFromSourceInfoMap[spdxData.Spec.SPDX.Relationships[i].RefA.ElementRefID]; exist {
-				sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, spdxData.Spec.SPDX.Relationships[i])
+				sc.filteredSpdxData.Spec.SPDX.Relationships = append(sc.filteredSpdxData.Spec.SPDX.Relationships, spdxData.Spec.SPDX.Relationships[i])
 			}
 		default:
-			sbom.filteredSpdxData.Spec.SPDX.Relationships = append(sbom.filteredSpdxData.Spec.SPDX.Relationships, spdxData.Spec.SPDX.Relationships[i])
+			sc.filteredSpdxData.Spec.SPDX.Relationships = append(sc.filteredSpdxData.Spec.SPDX.Relationships, spdxData.Spec.SPDX.Relationships[i])
 		}
 	}
 
 	//filter relevant package list
 	for i := range spdxData.Spec.SPDX.Packages {
 		relevantPackageMap := make(map[spdxv1beta1.DocElementID]bool)
-		for j := range sbom.filteredSpdxData.Spec.SPDX.Relationships {
-			switch sbom.filteredSpdxData.Spec.SPDX.Relationships[j].Relationship {
+		for j := range sc.filteredSpdxData.Spec.SPDX.Relationships {
+			switch sc.filteredSpdxData.Spec.SPDX.Relationships[j].Relationship {
 			case RelationshipContainType:
-				if alreadyExist := relevantPackageMap[sbom.filteredSpdxData.Spec.SPDX.Relationships[j].RefA]; !alreadyExist {
-					if sbom.filteredSpdxData.Spec.SPDX.Relationships[j].RefA.ElementRefID == spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier {
-						sbom.filteredSpdxData.Spec.SPDX.Packages = append(sbom.filteredSpdxData.Spec.SPDX.Packages, spdxData.Spec.SPDX.Packages[i])
+				if alreadyExist := relevantPackageMap[sc.filteredSpdxData.Spec.SPDX.Relationships[j].RefA]; !alreadyExist {
+					if sc.filteredSpdxData.Spec.SPDX.Relationships[j].RefA.ElementRefID == spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier {
+						sc.filteredSpdxData.Spec.SPDX.Packages = append(sc.filteredSpdxData.Spec.SPDX.Packages, spdxData.Spec.SPDX.Packages[i])
 					}
 				}
 			}
 		}
 		if exist := relevantPackageFromSourceInfoMap[spdxData.Spec.SPDX.Packages[i].PackageSPDXIdentifier]; exist {
-			sbom.filteredSpdxData.Spec.SPDX.Packages = append(sbom.filteredSpdxData.Spec.SPDX.Packages, spdxData.Spec.SPDX.Packages[i])
+			sc.filteredSpdxData.Spec.SPDX.Packages = append(sc.filteredSpdxData.Spec.SPDX.Packages, spdxData.Spec.SPDX.Packages[i])
 		}
 	}
 
 	return nil
 }
 
-func (sbom *SBOMData) GetFilterSBOMData() any {
-	return &sbom.filteredSpdxData
+func (sc *SBOMData) GetFilterSBOMData() any {
+	return &sc.filteredSpdxData
 }
 
-func (sbom *SBOMData) IsNewRelevantSBOMDataExist() bool {
-	return sbom.newRelevantData
+func (sc *SBOMData) IsNewRelevantSBOMDataExist() bool {
+	return sc.newRelevantData
 }
 
-func (sbom *SBOMData) IsSBOMAlreadyExist() bool {
-	return sbom.alreadyExistSBOM
+func (sc *SBOMData) IsSBOMAlreadyExist() bool {
+	return sc.alreadyExistSBOM
 }
 
-func (sbom *SBOMData) SetFilteredSBOMName(name string) {
-	sbom.filteredSpdxData.ObjectMeta.SetName(name)
+func (sc *SBOMData) SetFilteredSBOMName(name string) {
+	sc.filteredSpdxData.ObjectMeta.SetName(name)
 }
 
-func (sbom *SBOMData) storeLabels(wlidData string, instanceID instanceidhandler.IInstanceID) {
+func (sc *SBOMData) storeLabels(wlidData string, instanceID instanceidhandler.IInstanceID) {
 	labels := instanceID.GetLabels()
 	for i := range labels {
 		if labels[i] == "" {
@@ -329,29 +304,29 @@ func (sbom *SBOMData) storeLabels(wlidData string, instanceID instanceidhandler.
 			}
 		}
 	}
-	sbom.filteredSpdxData.ObjectMeta.SetLabels(labels)
+	sc.filteredSpdxData.ObjectMeta.SetLabels(labels)
 }
 
-func (sbom *SBOMData) storeAnnotations(wlidData, imageID string, instanceID instanceidhandler.IInstanceID) {
+func (sc *SBOMData) storeAnnotations(wlidData, imageID string, instanceID instanceidhandler.IInstanceID) {
 	annotations := make(map[string]string)
 	annotations[instanceidhandlerV1.WlidMetadataKey] = wlidData
 	annotations[instanceidhandlerV1.InstanceIDMetadataKey] = instanceID.GetStringFormatted()
 	annotations[instanceidhandlerV1.ContainerNameMetadataKey] = instanceID.GetContainerName()
 	annotations[instanceidhandlerV1.ImageIDMetadataKey] = imageID
-	annotations[instanceidhandlerV1.StatusMetadataKey] = sbom.status
+	annotations[instanceidhandlerV1.StatusMetadataKey] = sc.status
 
-	sbom.filteredSpdxData.ObjectMeta.SetAnnotations(annotations)
+	sc.filteredSpdxData.ObjectMeta.SetAnnotations(annotations)
 }
 
-func (sbom *SBOMData) StoreMetadata(ctx context.Context, wlidData, imageID string, instanceID instanceidhandler.IInstanceID) {
+func (sc *SBOMData) StoreMetadata(ctx context.Context, wlidData, imageID string, instanceID instanceidhandler.IInstanceID) {
 	_, span := otel.Tracer("").Start(ctx, "SBOMData.StoreMetadata")
 	defer span.End()
-	sbom.storeLabels(wlidData, instanceID)
-	sbom.storeAnnotations(wlidData, imageID, instanceID)
+	sc.storeLabels(wlidData, instanceID)
+	sc.storeAnnotations(wlidData, imageID, instanceID)
 }
 
 func (sc *SBOMData) CleanResources() {
-	err := os.Remove(sc.spdxDataPath)
+	err := sc.sbomFs.Remove(sc.spdxDataPath)
 	if err != nil {
 		logger.L().Debug("fail to remove file", helpers.String("file name", sc.spdxDataPath), helpers.Error(err))
 	}
