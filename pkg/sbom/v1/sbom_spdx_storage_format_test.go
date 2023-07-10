@@ -10,6 +10,7 @@ import (
 
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/spf13/afero"
 )
 
 const (
@@ -25,7 +26,7 @@ func TestStoreLabels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -72,7 +73,7 @@ func TestGetSBOMData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -108,7 +109,7 @@ func TestSaveSBOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -125,12 +126,6 @@ func TestSaveSBOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to save SBOM file, err: %v", err)
 	}
-	SBOMData.spdxDataPath = "/proc/1/blabla"
-	err = SBOMData.StoreSBOM(context.TODO(), &SBOMDataMock)
-	if err == nil {
-		t.Fatalf("StoreSBOM should fail")
-	}
-
 }
 
 func TestCreateSBOMDataSPDXVersionV040(t *testing.T) {
@@ -138,22 +133,14 @@ func TestCreateSBOMDataSPDXVersionV040(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
-	expectedPath := utils.CurrentDir() + "/" + directorySBOM + "/" + instanceID.GetHashed()
+	expectedPath := spdxDataDirPath + "/" + instanceID.GetHashed()
 	if SBOMData.spdxDataPath != expectedPath {
 		t.Fatalf("fail to create SBOMData, expected path %s get path %s", expectedPath, SBOMData.spdxDataPath)
 	}
 
-}
-
-func TestCreateSBOMDir(t *testing.T) {
-	createSBOMDir()
-	_, err := os.Stat(utils.CurrentDir() + "/" + directorySBOM)
-	if os.IsNotExist(err) {
-		t.Fatalf("fail to create SBOM directory with err %v", err)
-	}
 }
 
 func TestGetFilterSBOMData(t *testing.T) {
@@ -161,7 +148,7 @@ func TestGetFilterSBOMData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -188,7 +175,7 @@ func TestStoreSBOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -227,7 +214,7 @@ func TestFilterSBOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -258,7 +245,7 @@ func TestIsNewRelevantSBOMDataExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -291,7 +278,7 @@ func TestIsSBOMAlreadyExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -324,7 +311,7 @@ func TestAddResourceVersionIfNeeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -354,7 +341,7 @@ func TestStoreFilteredSBOMName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -389,7 +376,7 @@ func TestStoreMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -445,7 +432,7 @@ func TestCleanResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -516,7 +503,7 @@ func TestSBOMIncomplete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID)
+	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3

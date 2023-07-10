@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	"github.com/kubescape/k8s-interface/names"
+	"github.com/spf13/afero"
 	"go.opentelemetry.io/otel"
 )
 
@@ -38,12 +39,12 @@ func init() {
 	errorsOfSBOM[DataAlreadyExist] = errors.New(DataAlreadyExist)
 }
 
-func CreateSBOMStorageClient(sc storageclient.StorageClient, wlid string, instanceID instanceidhandler.IInstanceID) *SBOMStructure {
+func CreateSBOMStorageClient(sc storageclient.StorageClient, wlid string, instanceID instanceidhandler.IInstanceID, sbomFs afero.Fs) *SBOMStructure {
 	return &SBOMStructure{
 		storageClient: SBOMStorageClient{
 			client: sc,
 		},
-		SBOMData:    v1.CreateSBOMDataSPDXVersionV040(instanceID),
+		SBOMData:    v1.CreateSBOMDataSPDXVersionV040(instanceID, sbomFs),
 		firstReport: true,
 		instanceID:  instanceID,
 		wlid:        wlid,

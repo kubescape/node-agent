@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/spf13/afero"
 )
 
 func main() {
@@ -57,7 +58,7 @@ func main() {
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
-	relevancyManager, err := relevancymanager.CreateRelevancyManager(cfg, fileHandler, storageClient)
+	relevancyManager, err := relevancymanager.CreateRelevancyManager(cfg, fileHandler, storageClient, afero.NewOsFs())
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
 	}
