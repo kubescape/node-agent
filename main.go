@@ -54,17 +54,18 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("failed to create fileDB", helpers.Error(err))
 	}
 	defer fileHandler.Close()
+	k8sClient := k8sinterface.NewKubernetesApi()
 	storageClient, err := storageclient.CreateSBOMStorageK8SAggregatedAPIClient(ctx)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
-	relevancyManager, err := relevancymanager.CreateRelevancyManager(cfg, fileHandler, storageClient, afero.NewOsFs())
+	relevancyManager, err := relevancymanager.CreateRelevancyManager(cfg, clusterData.ClusterName, fileHandler, k8sClient, afero.NewOsFs(), storageClient)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(clusterData.ClusterName, k8sinterface.NewKubernetesApi(), relevancyManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(k8sClient, relevancyManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

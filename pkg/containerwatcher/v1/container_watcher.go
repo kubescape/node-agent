@@ -6,11 +6,9 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher"
 	"node-agent/pkg/relevancymanager"
-	"node-agent/pkg/utils"
 	"os"
 	"time"
 
-	"github.com/armosec/utils-k8s-go/wlid"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -20,10 +18,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler"
-	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/k8s-interface/workloadinterface"
 	"go.opentelemetry.io/otel"
 )
 
@@ -33,7 +28,6 @@ const (
 )
 
 type IGContainerWatcher struct {
-	clusterName         string
 	containerCollection *containercollection.ContainerCollection
 	k8sClient           *k8sinterface.KubernetesApi
 	relevancyManager    relevancymanager.RelevancyManagerClient
@@ -44,7 +38,7 @@ type IGContainerWatcher struct {
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(clusterName string, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -54,7 +48,6 @@ func CreateIGContainerWatcher(clusterName string, k8sClient *k8sinterface.Kubern
 	}
 
 	return &IGContainerWatcher{
-		clusterName:         clusterName,
 		containerCollection: containerCollection,
 		k8sClient:           k8sClient,
 		tracerCollection:    tracerCollection,
@@ -71,26 +64,15 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 
 	callback := func(notif containercollection.PubSubEvent) {
 		logger.L().Debug("GetEventCallback", helpers.String("namespaceName", notif.Container.Namespace), helpers.String("podName", notif.Container.Podname), helpers.String("containerName", notif.Container.Name), helpers.String("containerID", notif.Container.ID), helpers.String("type", notif.Type.String()))
-		wl, err := ch.k8sClient.GetWorkload(notif.Container.Namespace, "Pod", notif.Container.Podname)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("failed to get pod", helpers.Error(err), helpers.String("namespace", notif.Container.Namespace), helpers.String("Pod name", notif.Container.Podname))
-			return
-		}
-		workload := wl.(*workloadinterface.Workload)
-		containerEvent, err := ch.parsePodData(ctx, workload, notif.Container)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("failed to parse pod data", helpers.Error(err), helpers.Interface("workload", workload), helpers.Interface("container", notif.Container))
-			return
-		}
 		switch notif.Type {
 		case containercollection.EventTypeAddContainer:
 			logger.L().Debug("container has started", helpers.String("namespace", notif.Container.Namespace), helpers.String("Pod name", notif.Container.Podname), helpers.String("ContainerID", notif.Container.ID), helpers.String("Container name", notif.Container.Name))
 			// notify the relevancy manager that a new container has started
-			ch.relevancyManager.ReportContainerStarted(ctx, containerEvent)
+			ch.relevancyManager.ReportContainerStarted(ctx, notif.Container)
 		case containercollection.EventTypeRemoveContainer:
 			logger.L().Debug("container has Terminated", helpers.String("namespace", notif.Container.Namespace), helpers.String("Pod name", notif.Container.Podname), helpers.String("ContainerID", notif.Container.ID), helpers.String("Container name", notif.Container.Name))
 			// notify the relevancy manager that a container has terminated
-			ch.relevancyManager.ReportContainerTerminated(ctx, containerEvent)
+			ch.relevancyManager.ReportContainerTerminated(ctx, notif.Container)
 		}
 	}
 	containerEventFuncs := []containercollection.FuncNotify{callback}
@@ -186,70 +168,6 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	return nil
 }
 
-func (ch *IGContainerWatcher) parsePodData(ctx context.Context, pod *workloadinterface.Workload, container *containercollection.Container) (containerwatcher.ContainerEvent, error) {
-	ctx, span := otel.Tracer("").Start(ctx, "IGContainerWatcher.parsePodData")
-	defer span.End()
-
-	kind, name, err := ch.k8sClient.CalculateWorkloadParentRecursive(pod)
-	if err != nil {
-		return nil, fmt.Errorf("fail to get workload owner parent %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
-	}
-	parentWorkload, err := ch.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
-	if err != nil {
-		return nil, fmt.Errorf("fail to get parent workload %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
-	}
-	w := parentWorkload.(*workloadinterface.Workload)
-	parentWlid := w.GenerateWlid(ch.clusterName)
-	err = wlid.IsWlidValid(parentWlid)
-	if err != nil {
-		return nil, fmt.Errorf("WLID of parent workload is not in the right %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
-	}
-
-	containers, err := pod.GetContainers()
-	if err != nil {
-		return nil, fmt.Errorf("fail to get containers for pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
-	}
-	imageTag := ""
-	for i := range containers {
-		if containers[i].Name == container.Name {
-			imageTag = containers[i].Image
-		}
-	}
-
-	status, err := pod.GetPodStatus()
-	if err != nil {
-		return nil, fmt.Errorf("fail to get status for pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
-	}
-	imageID := ""
-	for i := range status.ContainerStatuses {
-		if status.ContainerStatuses[i].Name == container.Name {
-			imageID = status.ContainerStatuses[i].ImageID
-		}
-	}
-
-	instanceIDs, err := instanceidhandlerV1.GenerateInstanceID(pod)
-	if err != nil {
-		return nil, fmt.Errorf("fail to create InstanceID to pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
-	}
-	instanceID := getInstanceID(ctx, instanceIDs, container.Name)
-
-	k8sContainerID := utils.CreateK8sContainerID(pod.GetNamespace(), pod.GetName(), container.Name)
-	return CreateNewContainerEvent(container, imageID, imageTag, k8sContainerID, parentWlid, instanceID), nil
-}
-
-func getInstanceID(ctx context.Context, instanceIDs []instanceidhandler.IInstanceID, name string) instanceidhandler.IInstanceID {
-	_, span := otel.Tracer("").Start(ctx, "IGContainerWatcher.getInstanceID")
-	defer span.End()
-
-	foundIndex := 0
-	for i := range instanceIDs {
-		if instanceIDs[i].GetContainerName() == name {
-			foundIndex = i
-		}
-	}
-	return instanceIDs[foundIndex]
-}
-
 func (ch *IGContainerWatcher) printNsMap(id string) {
 	nsMap, _ := ch.tracerCollection.TracerMountNsMap(id)
 	var (
@@ -271,14 +189,14 @@ func (ch *IGContainerWatcher) Stop() {
 	ch.tracerCollection.Close()
 }
 
-func (ch *IGContainerWatcher) UnregisterContainer(ctx context.Context, containerEvent containerwatcher.ContainerEvent) {
+func (ch *IGContainerWatcher) UnregisterContainer(ctx context.Context, container *containercollection.Container) {
 	_, span := otel.Tracer("").Start(ctx, "IGContainerWatcher.UnregisterContainer")
 	defer span.End()
 
 	event := containercollection.PubSubEvent{
 		Timestamp: time.Now().Format(time.RFC3339),
 		Type:      containercollection.EventTypeRemoveContainer,
-		Container: containerEvent.GetContainer(),
+		Container: container,
 	}
 	ch.tracerCollection.TracerMapsUpdater()(event)
 }
