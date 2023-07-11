@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/gammazero/workerpool"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -23,6 +24,7 @@ import (
 )
 
 const (
+	concurrency   = 4
 	execTraceName = "trace_exec"
 	openTraceName = "trace_open"
 )
@@ -34,6 +36,7 @@ type IGContainerWatcher struct {
 	tracerCollection    *tracercollection.TracerCollection
 	tracerExec          *tracerexec.Tracer
 	tracerOpen          *traceropen.Tracer
+	workerPool          *workerpool.WorkerPool
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
@@ -52,6 +55,7 @@ func CreateIGContainerWatcher(k8sClient *k8sinterface.KubernetesApi, relevancyMa
 		k8sClient:           k8sClient,
 		tracerCollection:    tracerCollection,
 		relevancyManager:    relevancyManager,
+		workerPool:          workerpool.New(concurrency),
 	}, nil
 }
 
@@ -117,7 +121,9 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			if len(event.Args) > 0 {
 				procImageName = event.Args[0]
 			}
-			go ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, procImageName)
+			ch.workerPool.Submit(func() {
+				ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, procImageName)
+			})
 		}
 	}
 	if err := ch.tracerCollection.AddTracer(execTraceName, containerSelector); err != nil {
@@ -132,7 +138,9 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			return
 		}
 		if event.Ret > -1 {
-			go ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, event.Path)
+			ch.workerPool.Submit(func() {
+				ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, event.Path)
+			})
 		}
 	}
 	if err := ch.tracerCollection.AddTracer(openTraceName, containerSelector); err != nil {
