@@ -18,7 +18,7 @@ type BoltFileHandler struct {
 var _ filehandler.FileHandler = (*BoltFileHandler)(nil)
 
 func CreateBoltFileHandler() (*BoltFileHandler, error) {
-	db, err := bolt.Open("file.db", 0666, nil)
+	db, err := bolt.Open("/data/file.db", 0644, nil)
 	if err != nil {
 		return nil, err
 	}
