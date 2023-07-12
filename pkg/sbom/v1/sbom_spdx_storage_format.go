@@ -78,7 +78,7 @@ func init() {
 
 func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID, sbomFs afero.Fs) SBOMFormat {
 	spdxDataDirPath = "/data/" + directorySBOM
-	sbomFs.Mkdir(spdxDataDirPath, 0755)
+	_ = sbomFs.Mkdir(spdxDataDirPath, 0755)
 	return &SBOMData{
 		sbomFs:                                   sbomFs,
 		spdxDataPath:                             fmt.Sprintf("%s/%s", spdxDataDirPath, instanceID.GetHashed()),

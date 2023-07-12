@@ -176,6 +176,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	return nil
 }
 
+//lint:ignore U1000 Ignore unused function temporarily for debugging
 func (ch *IGContainerWatcher) printNsMap(id string) {
 	nsMap, _ := ch.tracerCollection.TracerMountNsMap(id)
 	var (
