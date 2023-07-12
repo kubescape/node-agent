@@ -222,7 +222,7 @@ func (rm *RelevancyManager) parsePodData(ctx context.Context, pod *workloadinter
 	if err != nil {
 		return "", "", "", nil, fmt.Errorf("fail to create InstanceID to pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
-	var instanceID instanceidhandler.IInstanceID
+	instanceID := instanceIDs[0]
 	for i := range instanceIDs {
 		if instanceIDs[i].GetContainerName() == name {
 			instanceID = instanceIDs[i]
