@@ -149,6 +149,7 @@ func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercol
 	watchedContainer := containerDataInterface.(watchedContainerData)
 	// skip if the SBOM is already retrieved
 	if watchedContainer.sbomClient != nil && watchedContainer.sbomClient.IsSBOMAlreadyExist() {
+		watchedContainer.syncChannel[StepGetSBOM] <- nil
 		return
 	}
 	// get pod information, we cannot do this during ReportContainerStarted because the pod might not be updated yet with container information
@@ -156,12 +157,14 @@ func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercol
 	wl, err := rm.k8sClient.GetWorkload(container.Namespace, "Pod", container.Podname)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to get pod", helpers.Error(err), helpers.String("namespace", container.Namespace), helpers.String("Pod name", container.Podname))
+		watchedContainer.syncChannel[StepGetSBOM] <- err
 		return
 	}
 	workload := wl.(*workloadinterface.Workload)
 	imageID, imageTag, parentWlid, instanceID, err := rm.parsePodData(ctx, workload, container)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to parse pod data", helpers.Error(err), helpers.String("namespace", container.Namespace), helpers.String("Pod name", container.Podname))
+		watchedContainer.syncChannel[StepGetSBOM] <- err
 		return
 	}
 	// create sbomClient
