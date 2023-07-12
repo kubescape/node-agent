@@ -14,7 +14,7 @@ sudo SNIFFER_CONFIG=./configuration/SnifferConfigurationFile.json ./sniffer
 
 ## Limitations:
 1. This feature is using EBPF technology that is implemented only on linux.
-2. the linux kernel version that supported it 4.14
+2. the linux kernel version that supported it 5.4 and above.
 
 
 ## Debugging

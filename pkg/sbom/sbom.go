@@ -1,12 +1,17 @@
 package sbom
 
 import (
+	"context"
 	"errors"
-	v1 "sniffer/pkg/sbom/v1"
-	"sniffer/pkg/storageclient"
+	v1 "node-agent/pkg/sbom/v1"
+	"node-agent/pkg/storageclient"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	"github.com/kubescape/k8s-interface/names"
+	"github.com/spf13/afero"
+	"go.opentelemetry.io/otel"
 )
 
 const (
@@ -17,7 +22,6 @@ type SBOMStructure struct {
 	storageClient SBOMStorageClient
 	SBOMData      v1.SBOMFormat
 	firstReport   bool
-	imageID       string
 	wlid          string
 	instanceID    instanceidhandler.IInstanceID
 }
@@ -35,54 +39,65 @@ func init() {
 	errorsOfSBOM[DataAlreadyExist] = errors.New(DataAlreadyExist)
 }
 
-func CreateSBOMStorageClient(sc storageclient.StorageClient, wlid, imageID string, instanceID instanceidhandler.IInstanceID) *SBOMStructure {
+func CreateSBOMStorageClient(sc storageclient.StorageClient, wlid string, instanceID instanceidhandler.IInstanceID, sbomFs afero.Fs) *SBOMStructure {
 	return &SBOMStructure{
 		storageClient: SBOMStorageClient{
 			client: sc,
 		},
-		SBOMData:    v1.CreateSBOMDataSPDXVersionV040(instanceID),
+		SBOMData:    v1.CreateSBOMDataSPDXVersionV040(instanceID, sbomFs),
 		firstReport: true,
 		instanceID:  instanceID,
 		wlid:        wlid,
-		imageID:     imageID,
 	}
 }
 
-func (sc *SBOMStructure) GetSBOM(imageTAG, imageID string) error {
+func (sc *SBOMStructure) GetSBOM(ctx context.Context, imageTag, imageID string) error {
+	ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.GetSBOM")
+	defer span.End()
+
 	if sc.SBOMData.IsSBOMAlreadyExist() {
 		return nil
 	}
 
-	SBOMKey, err := names.ImageInfoToSlug(imageTAG, imageID)
+	SBOMKey, err := names.ImageInfoToSlug(imageTag, imageID)
 	if err != nil {
+		logger.L().Ctx(ctx).Error("Failed to create SBOM key", helpers.Error(err), helpers.String("imageTag", imageTag), helpers.String("imageID", imageID))
 		return err
 	}
 
-	SBOM, err := sc.storageClient.client.GetData(SBOMKey)
+	SBOM, err := sc.storageClient.client.GetData(ctx, SBOMKey)
 	if err != nil {
 		return err
 	}
-	err = sc.SBOMData.StoreSBOM(SBOM)
+	err = sc.SBOMData.StoreSBOM(ctx, SBOM)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (sc *SBOMStructure) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
-	return sc.SBOMData.FilterSBOM(sbomFileRelevantMap)
+func (sc *SBOMStructure) IsSBOMAlreadyExist() bool {
+	return sc.SBOMData.IsSBOMAlreadyExist()
 }
 
-func (sc *SBOMStructure) StoreFilterSBOM(instanceID string) error {
+func (sc *SBOMStructure) FilterSBOM(ctx context.Context, sbomFileRelevantMap map[string]bool) error {
+	ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.FilterSBOM")
+	defer span.End()
+	return sc.SBOMData.FilterSBOM(ctx, sbomFileRelevantMap)
+}
+
+func (sc *SBOMStructure) StoreFilterSBOM(ctx context.Context, imageID, instanceID string) error {
+	ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.StoreFilterSBOM")
+	defer span.End()
 	if sc.firstReport || sc.SBOMData.IsNewRelevantSBOMDataExist() {
-		sc.SBOMData.StoreFilteredSBOMName(instanceID)
-		sc.SBOMData.StoreMetadata(sc.wlid, sc.imageID, sc.instanceID)
+		sc.SBOMData.SetFilteredSBOMName(instanceID)
+		sc.SBOMData.StoreMetadata(ctx, sc.wlid, imageID, sc.instanceID)
 		data := sc.SBOMData.GetFilterSBOMData()
-		err := sc.storageClient.client.PostData(instanceID, data)
+		err := sc.storageClient.client.PostData(ctx, data)
 		if err != nil {
 			if storageclient.IsAlreadyExist(err) {
 				data = sc.SBOMData.GetFilterSBOMData()
-				err = sc.storageClient.client.PutData(instanceID, data)
+				err = sc.storageClient.client.PutData(ctx, instanceID, data)
 				if err != nil {
 					return err
 				}
@@ -104,6 +119,8 @@ func IsAlreadyExist() error {
 	return errorsOfSBOM[DataAlreadyExist]
 }
 
-func (sc *SBOMStructure) ValidateSBOM() error {
-	return sc.SBOMData.ValidateSBOM()
+func (sc *SBOMStructure) ValidateSBOM(ctx context.Context) error {
+	ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.ValidateSBOM")
+	defer span.End()
+	return sc.SBOMData.ValidateSBOM(ctx)
 }

@@ -4,5 +4,5 @@
 
 Run the following command to build your own Docker image:
 ```
-docker build -t node-agent -f build/Dockerfile .
+docker buildx build -t node-agent -f build/Dockerfile --load .
 ```

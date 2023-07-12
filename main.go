@@ -1,69 +1,88 @@
 package main
 
 import (
-	"sniffer/internal/validator"
-	"sniffer/pkg/config"
-	v1 "sniffer/pkg/config/v1"
-	"sniffer/pkg/context"
-	"sniffer/pkg/conthandler"
-	accumulator "sniffer/pkg/event_data_storage"
-	"sniffer/pkg/storageclient"
+	"context"
+	"log"
+	"net/url"
+	"node-agent/internal/validator"
+	"node-agent/pkg/config"
+	"node-agent/pkg/containerwatcher/v1"
+	"node-agent/pkg/filehandler/v1"
+	"node-agent/pkg/relevancymanager/v1"
+	"node-agent/pkg/storageclient"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"go.opentelemetry.io/otel"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/spf13/afero"
 )
 
-func waitOnEBPFEngineProcessErrorCode(cacheAccumulatorErrorChan chan error) {
-	ctx, span := otel.Tracer("").Start(context.GetBackgroundContext(), "EBPF engine process error")
-	defer span.End()
-	err := <-cacheAccumulatorErrorChan
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error", helpers.Error(err))
-	}
-}
-
 func main() {
-	cfg := config.GetConfigurationConfigContext()
-	configData, err := cfg.GetConfigurationReader()
+	ctx := context.Background()
+
+	cfg, err := config.LoadConfig("/etc/config")
 	if err != nil {
-		logger.L().Fatal("error during getting configuration data", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
-	err = cfg.ParseConfiguration(v1.CreateConfigData(), configData)
+
+	clusterData, err := config.LoadClusterData("/etc/config")
 	if err != nil {
-		logger.L().Fatal("error during parsing configuration", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
 	}
+
+	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
+	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
+		ctx = logger.InitOtel("kubevuln",
+			os.Getenv("RELEASE"),
+			clusterData.AccountID,
+			clusterData.ClusterName,
+			url.URL{Host: otelHost})
+		defer logger.ShutdownOtel(ctx)
+	}
+
 	err = validator.CheckPrerequisites()
 	if err != nil {
-		logger.L().Fatal("error during validation", helpers.Error(err))
-	}
-	context.SetBackgroundContext()
-
-	accumulatorChannelError := make(chan error, 10)
-	acc := accumulator.GetAccumulator()
-	err = acc.StartAccumulator(accumulatorChannelError)
-	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during start accumulator", helpers.Error(err))
-	}
-	go func() {
-		waitOnEBPFEngineProcessErrorCode(accumulatorChannelError)
-	}()
-
-	k8sAPIServerClient, err := conthandler.CreateContainerClientK8SAPIServer()
-	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the container client", helpers.Error(err))
-	}
-	storageClient, err := storageclient.CreateSBOMStorageK8SAggregatedAPIClient()
-	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the storage client", helpers.Error(err))
-	}
-	mainHandler, err := conthandler.CreateContainerHandler(k8sAPIServerClient, storageClient)
-	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during create the main container handler", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("error during validation", helpers.Error(err))
 	}
 
-	err = mainHandler.StartMainHandler()
+	// Create the relevancy manager
+	fileHandler, err := filehandler.CreateBoltFileHandler()
 	if err != nil {
-		logger.L().Ctx(context.GetBackgroundContext()).Fatal("error during start the main container handler", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("failed to create fileDB", helpers.Error(err))
 	}
+	defer fileHandler.Close()
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient, err := storageclient.CreateSBOMStorageK8SAggregatedAPIClient(ctx)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
+	}
+	relevancyManager, err := relevancymanager.CreateRelevancyManager(cfg, clusterData.ClusterName, fileHandler, k8sClient, afero.NewOsFs(), storageClient)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
+	}
+
+	// Create the container handler
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(k8sClient, relevancyManager)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
+	}
+
+	// Start the container handler
+	err = mainHandler.Start(ctx)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("error starting the container watcher", helpers.Error(err))
+	}
+	defer mainHandler.Stop()
+
+	// Wait for shutdown signal
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+	<-shutdown
+	log.Println("Shutting down...")
+
+	// Exit with success
+	os.Exit(0)
 }
