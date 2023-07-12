@@ -42,3 +42,33 @@ func TestCurrentDir(t *testing.T) {
 		t.Fatalf("CurrentDir failed")
 	}
 }
+
+func TestCreateK8sContainerID(t *testing.T) {
+	type args struct {
+		namespaceName string
+		podName       string
+		containerName string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "test1",
+			args: args{
+				namespaceName: "default",
+				podName:       "pod1",
+				containerName: "container1",
+			},
+			want: "default/pod1/container1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CreateK8sContainerID(tt.args.namespaceName, tt.args.podName, tt.args.containerName); got != tt.want {
+				t.Errorf("CreateK8sContainerID() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
