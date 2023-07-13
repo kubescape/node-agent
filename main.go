@@ -35,7 +35,7 @@ func main() {
 
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
-		ctx = logger.InitOtel("kubevuln",
+		ctx = logger.InitOtel("node-agent",
 			os.Getenv("RELEASE"),
 			clusterData.AccountID,
 			clusterData.ClusterName,
