@@ -144,4 +144,5 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
+// waiting for https://github.com/inspektor-gadget/inspektor-gadget/pull/1837 to be included in a release
 replace github.com/inspektor-gadget/inspektor-gadget v0.18.0 => github.com/slashben/inspektor-gadget v0.0.0-20230709135730-d50da6ca1e74
