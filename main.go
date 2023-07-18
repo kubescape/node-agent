@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"net/url"
-	"node-agent/internal/validator"
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher/v1"
 	"node-agent/pkg/filehandler/v1"
@@ -18,6 +18,8 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/spf13/afero"
+
+	_ "net/http/pprof"
 )
 
 func main() {
@@ -26,6 +28,9 @@ func main() {
 	cfg, err := config.LoadConfig("/etc/config")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
+	}
+	if _, present := os.LookupEnv("ENABLE_PROFILER"); present {
+		go http.ListenAndServe("localhost:6060", nil)
 	}
 
 	clusterData, err := config.LoadClusterData("/etc/config")
@@ -43,10 +48,10 @@ func main() {
 		defer logger.ShutdownOtel(ctx)
 	}
 
-	err = validator.CheckPrerequisites()
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error during validation", helpers.Error(err))
-	}
+	// err = validator.CheckPrerequisites()
+	// if err != nil {
+	// 	logger.L().Ctx(ctx).Fatal("error during validation", helpers.Error(err))
+	// }
 
 	// Create the relevancy manager
 	fileHandler, err := filehandler.CreateBoltFileHandler()
