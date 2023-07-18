@@ -311,7 +311,7 @@ github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyua
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
 github.com/moby/locker v1.0.1 h1:fOXqR41zeveg4fFODix+1Ch4mj/gT0NE1XJbp/epuBg=
 github.com/moby/locker v1.0.1/go.mod h1:S7SDdo5zpBK84bzzVlKr2V0hz+7x9hWbYC/kq7oQppc=
-github.com/moby/moby v24.0.3+incompatible h1:Vcc6bY8TgCmMCPWT3K5zUKENXG4t38s09hSeKtYPLr0=
+github.com/moby/moby v24.0.4+incompatible h1:20Bf1sfJpspHMAUrxRFplG31Sriaw7Z9/jUEuJk6mqI=
 github.com/moby/sys/mountinfo v0.6.2 h1:BzJjoreD5BMFNmD9Rus6gdd1pLuecOFPt8wC+Vygl78=
 github.com/moby/sys/mountinfo v0.6.2/go.mod h1:IJb6JQeOklcdMU9F5xQ8ZALD+CUr5VlGpwtX+VE0rpI=
 github.com/moby/sys/sequential v0.5.0 h1:OPvI35Lzn9K04PBbCLW0g4LcFAJgHsvXsRyewg5lXtc=
@@ -394,8 +394,8 @@ github.com/shurcooL/webdavfs v0.0.0-20170829043945-18c3829fa133/go.mod h1:hKmq5k
 github.com/sirupsen/logrus v1.8.1/go.mod h1:yWOB1SBYBC5VeMP7gHvWumXLIWorT60ONWic61uBYv0=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
-github.com/slashben/inspektor-gadget v0.0.0-20230709135730-d50da6ca1e74 h1:jkRupL+u6XqdWNw9y3tcrqiQHQ+rB7r+5ers8ZBcbgs=
-github.com/slashben/inspektor-gadget v0.0.0-20230709135730-d50da6ca1e74/go.mod h1:3D6SFHGvpaZW599VOxszCa8HeXSkWrNPxY5bcD4Xh3A=
+github.com/slashben/inspektor-gadget v0.0.0-20230718115117-c3d4e596323f h1:Ybrfm0aCamZBJMH0lKuu759O5lJl+ONsE7mqQKglVMA=
+github.com/slashben/inspektor-gadget v0.0.0-20230718115117-c3d4e596323f/go.mod h1:RVR7z/TRwbjkMAuNxECUrWJaR0Wgq0wK7BVG7n2vvFs=
 github.com/sourcegraph/annotate v0.0.0-20160123013949-f4cad6c6324d/go.mod h1:UdhH50NIW0fCiwBSr0co2m7BnFLdv4fQTgdqdJTHFeE=
 github.com/sourcegraph/syntaxhighlight v0.0.0-20170531221838-bd320f5d308e/go.mod h1:HuIsMU8RRBOtsCgI77wP899iHVBQpCmg4ErYMZB+2IA=
 github.com/spaolacci/murmur3 v0.0.0-20180118202830-f09979ecbc72/go.mod h1:JwIasOWyU6f++ZhiEuf87xNszmSA2myDM2Kzu9HwQUA=
