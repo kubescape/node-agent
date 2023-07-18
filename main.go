@@ -86,7 +86,7 @@ func main() {
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 	<-shutdown
-	log.Println("Shutting down...")
+	
 
 	// Exit with success
 	os.Exit(0)
