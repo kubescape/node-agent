@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"node-agent/pkg/config"
@@ -28,13 +30,10 @@ func main() {
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
-	if _, present := os.LookupEnv("ENABLE_PROFILER"); present {
-		go http.ListenAndServe("localhost:6060", nil)
-	}
 
-	if _, present := os.LookupEnv("EANBLE_PROFILING"); present {
-		go http.ListenAndServe("localhost:6060", nil)
-	}
+	port := rand.Intn(9090-6060+1) + 6060
+	logger.L().Info("Port for profiler", helpers.Int("port", port))
+	go http.ListenAndServe(fmt.Sprintf("localhost:%s", port), nil)
 
 	clusterData, err := config.LoadClusterData("/etc/config")
 	if err != nil {
