@@ -145,4 +145,4 @@ require (
 )
 
 // waiting for https://github.com/inspektor-gadget/inspektor-gadget/pull/1837 to be included in a release
-replace github.com/inspektor-gadget/inspektor-gadget v0.18.0 => github.com/slashben/inspektor-gadget v0.0.0-20230709135730-d50da6ca1e74
+replace github.com/inspektor-gadget/inspektor-gadget v0.18.0 => github.com/slashben/inspektor-gadget v0.0.0-20230718115117-c3d4e596323f
