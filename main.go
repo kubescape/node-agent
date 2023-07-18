@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"net/url"
 	"node-agent/internal/validator"
 	"node-agent/pkg/config"
@@ -18,6 +19,8 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/spf13/afero"
+
+	_ "net/http/pprof"
 )
 
 func main() {
@@ -26,6 +29,10 @@ func main() {
 	cfg, err := config.LoadConfig("/etc/config")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
+	}
+
+	if _, present := os.LookupEnv("EANBLE_PROFILING"); present {
+		go http.ListenAndServe("localhost:6060", nil)
 	}
 
 	clusterData, err := config.LoadClusterData("/etc/config")
