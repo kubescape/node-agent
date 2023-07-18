@@ -89,9 +89,6 @@ func (sc *StorageHttpClientFailureMock) PutData(_ context.Context, _ string, _ a
 func (sc *StorageHttpClientFailureMock) PostData(_ context.Context, _ any) error {
 	return fmt.Errorf("error already exist")
 }
-func (sc *StorageHttpClientFailureMock) GetResourceVersion(_ context.Context, _ string) string {
-	return "123"
-}
 func (sc *StorageHttpClientFailureMock) IsAlreadyExist(_ error) bool {
 	return true
 }
