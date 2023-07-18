@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"net/url"
 	"node-agent/pkg/config"
@@ -86,7 +85,6 @@ func main() {
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 	<-shutdown
-	
 
 	// Exit with success
 	os.Exit(0)
