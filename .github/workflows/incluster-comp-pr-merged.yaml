@@ -1,4 +1,4 @@
-name: pr-merged
+name: docker-build
 on:
   push:
     paths-ignore:
@@ -6,19 +6,13 @@ on:
       
 jobs:
   docker-build:
-    if: ${{ (contains(github.event.pull_request.labels.*.name, 'release') || contains( github.event.pull_request.labels.*.name, 'trigger-integration-test')) && github.repository_owner == 'kubescape' }}  
     runs-on: ubuntu-latest
-    outputs:
-      IMAGE_TAG_PRERELEASE: ${{ steps.image-prerelease-tag.outputs.IMAGE_TAG_PRERELEASE }}
-      TEST_NAMES: ${{ steps.export_tests_to_env.outputs.TEST_NAMES }}
     permissions:
       id-token: write
       packages: write
       contents: read    
       pull-requests: read  
-
     steps:
-
       - uses: actions/checkout@v3
         name: Checkout
         with:
@@ -61,7 +55,7 @@ jobs:
  
   create-release-and-retag:
     name: Docker retag and create release
-    needs: [run-tests, docker-build]
+    needs: [docker-build]
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     runs-on: ubuntu-latest  
