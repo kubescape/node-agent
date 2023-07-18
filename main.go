@@ -32,6 +32,10 @@ func main() {
 		go http.ListenAndServe("localhost:6060", nil)
 	}
 
+	if _, present := os.LookupEnv("EANBLE_PROFILING"); present {
+		go http.ListenAndServe("localhost:6060", nil)
+	}
+
 	clusterData, err := config.LoadClusterData("/etc/config")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
