@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"net/url"
-	"node-agent/internal/validator"
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher/v1"
 	"node-agent/pkg/filehandler/v1"
@@ -30,6 +28,9 @@ func main() {
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
+	if _, present := os.LookupEnv("ENABLE_PROFILER"); present {
+		go http.ListenAndServe("localhost:6060", nil)
+	}
 
 	if _, present := os.LookupEnv("EANBLE_PROFILING"); present {
 		go http.ListenAndServe("localhost:6060", nil)
@@ -50,10 +51,10 @@ func main() {
 		defer logger.ShutdownOtel(ctx)
 	}
 
-	err = validator.CheckPrerequisites()
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error during validation", helpers.Error(err))
-	}
+	// err = validator.CheckPrerequisites()
+	// if err != nil {
+	// 	logger.L().Ctx(ctx).Fatal("error during validation", helpers.Error(err))
+	// }
 
 	// Create the relevancy manager
 	fileHandler, err := filehandler.CreateBoltFileHandler()
@@ -88,7 +89,6 @@ func main() {
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 	<-shutdown
-	log.Println("Shutting down...")
 
 	// Exit with success
 	os.Exit(0)

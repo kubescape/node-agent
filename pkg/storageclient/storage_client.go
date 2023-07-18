@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	apimachineryerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -27,7 +26,7 @@ const (
 	KubescapeNamespace                     = "kubescape"
 	SBOMServerStateExist   SBOMServerState = "Exist"
 	SBOMServerStateDeleted SBOMServerState = "Deleted"
-	retryWatcherSleep                      = 30
+	retryWatcherSleep                      = 5
 )
 
 type SBOMServerState string
@@ -75,8 +74,6 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs(ctx context.Context) {
 		watcher, err := sc.clientset.SpdxV1beta1().SBOMSummaries(KubescapeNamespace).Watch(context.TODO(), metav1.ListOptions{})
 		if err != nil {
 			logger.L().Ctx(ctx).Error("Watch for SBOMs failed", helpers.Error(err))
-			logger.L().Ctx(ctx).Error("Retry", helpers.String(fmt.Sprintf("with %d", retryWatcherSleep), " seconds"))
-			time.Sleep(retryWatcherSleep * time.Second)
 			continue
 		}
 		for {
@@ -163,16 +160,6 @@ func (sc *StorageK8SAggregatedAPIClient) PostData(ctx context.Context, data any)
 		return err
 	}
 	return nil
-}
-
-func (sc *StorageK8SAggregatedAPIClient) GetResourceVersion(ctx context.Context, key string) string {
-	_, span := otel.Tracer("").Start(ctx, "StorageK8SAggregatedAPIClient.GetResourceVersion")
-	defer span.End()
-	SBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3Filtereds(KubescapeNamespace).Get(context.TODO(), key, metav1.GetOptions{})
-	if err != nil {
-		return ""
-	}
-	return SBOM.GetResourceVersion()
 }
 
 func IsAlreadyExist(err error) bool {
