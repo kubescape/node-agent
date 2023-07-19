@@ -2,9 +2,11 @@ package utils
 
 import (
 	"fmt"
+	"math/rand"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 func Between(value string, a string, b string) string {
@@ -46,4 +48,11 @@ func CurrentDir() string {
 
 func CreateK8sContainerID(namespaceName string, podName string, containerName string) string {
 	return fmt.Sprintf("%s/%s/%s", namespaceName, podName, containerName)
+}
+
+// RandomSleep sleeps between min and max seconds
+func RandomSleep(min, max int) {
+	// we don't initialize the seed, so we will get the same sequence of random numbers every time
+	randomDuration := time.Duration(rand.Intn(max+1-min)+min) * time.Second
+	time.Sleep(randomDuration)
 }
