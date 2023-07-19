@@ -152,8 +152,22 @@ func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercol
 		watchedContainer.syncChannel[StepGetSBOM] <- nil
 		return
 	}
+	// FIXME: this is a workaround to let the pod be updated with container information, avoiding another try
+	utils.RandomSleep(2, 10)
+	// get watchedContainer from map
+	containerDataInterface, exist = rm.watchedContainers.Load(container.ID)
+	if !exist {
+		logger.L().Ctx(ctx).Error("getSBOM: failed to get container data of ContainerID, not exist in memory", helpers.String("container ID", container.ID))
+		return
+	}
+	watchedContainer = containerDataInterface.(watchedContainerData)
+	// skip if the SBOM is already retrieved
+	if watchedContainer.sbomClient != nil && watchedContainer.sbomClient.IsSBOMAlreadyExist() {
+		watchedContainer.syncChannel[StepGetSBOM] <- nil
+		return
+	}
+	// end of FIXME
 	// get pod information, we cannot do this during ReportContainerStarted because the pod might not be updated yet with container information
-	time.Sleep(10 * time.Second) // FIXME: this is a workaround to let the pod be updated with container information, avoiding another try
 	wl, err := rm.k8sClient.GetWorkload(container.Namespace, "Pod", container.Podname)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to get pod", helpers.Error(err), helpers.String("namespace", container.Namespace), helpers.String("Pod name", container.Podname))
@@ -255,9 +269,8 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 	now := time.Now()
 	stopSniffingTime := now.Add(rm.cfg.MaxSniffingTime)
 	for time.Now().Before(stopSniffingTime) {
-		go rm.getSBOM(ctx, container)
-		ctx, span := otel.Tracer("").Start(ctx, "container monitoring")
-		err := rm.startTimer(watchedContainer, container.ID)
+		rm.getSBOM(ctx, container)
+		err := rm.waitForTicks(watchedContainer, container.ID)
 		if err != nil {
 			if errors.Is(err, containerHasTerminatedError) {
 				break
@@ -266,14 +279,13 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 				break
 			}
 		}
-		span.End()
 	}
 	logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
 	rm.containerHandler.UnregisterContainer(ctx, container)
 	rm.deleteResources(watchedContainer, container.ID)
 }
 
-func (rm *RelevancyManager) startTimer(watchedContainer watchedContainerData, containerID string) error {
+func (rm *RelevancyManager) waitForTicks(watchedContainer watchedContainerData, containerID string) error {
 	var err error
 	select {
 	case <-watchedContainer.snifferTicker.C:
