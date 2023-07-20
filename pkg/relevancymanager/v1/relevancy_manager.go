@@ -344,8 +344,6 @@ func (rm *RelevancyManager) ReportContainerTerminated(ctx context.Context, conta
 }
 
 func (rm *RelevancyManager) ReportFileAccess(ctx context.Context, namespace, pod, container, file string) {
-	ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.ReportFileAccess")
-	defer span.End()
 	// log accessed files for all containers to avoid race condition
 	// this won't record unnecessary containers as the containerCollection takes care of filtering them
 	if file == "" {
