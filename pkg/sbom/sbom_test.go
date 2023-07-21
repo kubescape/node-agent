@@ -2,6 +2,7 @@ package sbom
 
 import (
 	"context"
+	"math/rand"
 	"node-agent/pkg/storageclient"
 	"testing"
 
@@ -18,15 +19,28 @@ func TestGetSBOM(t *testing.T) {
 
 }
 
+const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+// generate a random string of given length
+func randStringBytes(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letterBytes[rand.Intn(len(letterBytes))] //pick a random letter from the letterBytes
+	}
+	return string(b)
+}
+
 func TestFilterSBOM(t *testing.T) {
 	SBOMClient := CreateSBOMStorageClient(storageclient.CreateSBOMStorageHttpClientMock(), "", &instanceidhandler.InstanceID{}, afero.NewMemMapFs())
 	err := SBOMClient.GetSBOM(context.TODO(), storageclient.NGINX_IMAGE_TAG, storageclient.NGINX)
 	if err != nil {
 		t.Fatalf("fail to get sbom, %v", err)
 	}
-	err = SBOMClient.FilterSBOM(context.TODO(), map[string]bool{
-		"/usr/share/adduser/adduser.conf": true,
-	})
+	m := make(map[string]bool)
+	for i := 0; i < 10000; i++ {
+		m["/tmp/"+randStringBytes(10)] = true
+	}
+	err = SBOMClient.FilterSBOM(context.TODO(), m)
 	if err != nil {
 		t.Fatalf("fail to filter sbom, %v", err)
 	}

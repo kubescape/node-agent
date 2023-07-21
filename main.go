@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"net/url"
 	"node-agent/internal/validator"
 	"node-agent/pkg/config"
@@ -14,6 +15,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	_ "net/http/pprof"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -22,6 +25,10 @@ import (
 
 func main() {
 	ctx := context.Background()
+
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 
 	cfg, err := config.LoadConfig("/etc/config")
 	if err != nil {
