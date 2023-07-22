@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/gammazero/workerpool"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -30,6 +31,7 @@ import (
 )
 
 const (
+	concurrency         = 4
 	RelevantCVEsService = "RelevantCVEsService"
 	StepGetSBOM         = "StepGetSBOM"
 	StepValidateSBOM    = "StepValidateSBOM"
@@ -51,6 +53,7 @@ type RelevancyManager struct {
 	sbomFs            afero.Fs
 	storageClient     storageclient.StorageClient
 	watchedContainers sync.Map
+	workerPool        *workerpool.WorkerPool
 }
 
 var _ relevancymanager.RelevancyManagerClient = (*RelevancyManager)(nil)
@@ -65,6 +68,7 @@ func CreateRelevancyManager(cfg config.Config, clusterName string, fileHandler f
 		sbomFs:                   sbomFs,
 		storageClient:            storageClient,
 		watchedContainers:        sync.Map{},
+		workerPool:               workerpool.New(concurrency),
 	}, nil
 }
 
@@ -349,11 +353,13 @@ func (rm *RelevancyManager) ReportFileAccess(ctx context.Context, namespace, pod
 	if file == "" {
 		return
 	}
-	k8sContainerID := utils.CreateK8sContainerID(namespace, pod, container)
-	err := rm.fileHandler.AddFile(ctx, k8sContainerID, file)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to add file to container file list", helpers.Error(err), helpers.Interface("k8sContainerID", k8sContainerID), helpers.String("file", file))
-	}
+	rm.workerPool.Submit(func() {
+		k8sContainerID := utils.CreateK8sContainerID(namespace, pod, container)
+		err := rm.fileHandler.AddFile(ctx, k8sContainerID, file)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("failed to add file to container file list", helpers.Error(err), helpers.Interface("k8sContainerID", k8sContainerID), helpers.String("file", file))
+		}
+	})
 }
 
 func (rm *RelevancyManager) SetContainerHandler(containerHandler containerwatcher.ContainerWatcher) {
