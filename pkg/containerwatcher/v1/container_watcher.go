@@ -109,7 +109,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	execEventCallback := func(event *tracerexectype.Event) {
 		if event.Type != types.NORMAL {
 			// dropped event
-			logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
+			logger.L().Warning("container monitoring got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 			return
 		}
 		if event.Retval > -1 {
@@ -117,7 +117,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			if len(event.Args) > 0 {
 				procImageName = event.Args[0]
 			}
-			ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, procImageName)
+			ch.relevancyManager.ReportFileAccess(event.Namespace, event.Pod, event.Container, procImageName)
 		}
 	}
 	if err := ch.tracerCollection.AddTracer(execTraceName, containerSelector); err != nil {
@@ -128,11 +128,11 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	openEventCallback := func(event *traceropentype.Event) {
 		if event.Type != types.NORMAL {
 			// dropped event
-			logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
+			logger.L().Warning("container monitoring got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 			return
 		}
 		if event.Ret > -1 {
-			ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, event.Path)
+			ch.relevancyManager.ReportFileAccess(event.Namespace, event.Pod, event.Container, event.Path)
 		}
 	}
 	if err := ch.tracerCollection.AddTracer(openTraceName, containerSelector); err != nil {

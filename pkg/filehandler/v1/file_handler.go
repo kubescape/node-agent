@@ -25,7 +25,7 @@ func CreateBoltFileHandler() (*BoltFileHandler, error) {
 	return &BoltFileHandler{fileDB: db}, nil
 }
 
-func (b BoltFileHandler) AddFile(_ context.Context, bucket, file string) error {
+func (b BoltFileHandler) AddFile(bucket, file string) error {
 	return b.fileDB.Batch(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
 		if err != nil {

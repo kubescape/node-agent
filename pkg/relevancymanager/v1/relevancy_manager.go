@@ -347,7 +347,7 @@ func (rm *RelevancyManager) ReportContainerTerminated(ctx context.Context, conta
 	}
 }
 
-func (rm *RelevancyManager) ReportFileAccess(ctx context.Context, namespace, pod, container, file string) {
+func (rm *RelevancyManager) ReportFileAccess(namespace, pod, container, file string) {
 	// log accessed files for all containers to avoid race condition
 	// this won't record unnecessary containers as the containerCollection takes care of filtering them
 	if file == "" {
@@ -355,9 +355,9 @@ func (rm *RelevancyManager) ReportFileAccess(ctx context.Context, namespace, pod
 	}
 	rm.workerPool.Submit(func() {
 		k8sContainerID := utils.CreateK8sContainerID(namespace, pod, container)
-		err := rm.fileHandler.AddFile(ctx, k8sContainerID, file)
+		err := rm.fileHandler.AddFile(k8sContainerID, file)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("failed to add file to container file list", helpers.Error(err), helpers.Interface("k8sContainerID", k8sContainerID), helpers.String("file", file))
+			logger.L().Error("failed to add file to container file list", helpers.Error(err), helpers.Interface("k8sContainerID", k8sContainerID), helpers.String("file", file))
 		}
 	})
 }
