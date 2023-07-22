@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	concurrency         = 4
+	concurrency         = 8
 	RelevantCVEsService = "RelevantCVEsService"
 	StepGetSBOM         = "StepGetSBOM"
 	StepValidateSBOM    = "StepValidateSBOM"
@@ -353,8 +353,8 @@ func (rm *RelevancyManager) ReportFileAccess(namespace, pod, container, file str
 	if file == "" {
 		return
 	}
+	k8sContainerID := utils.CreateK8sContainerID(namespace, pod, container)
 	rm.workerPool.Submit(func() {
-		k8sContainerID := utils.CreateK8sContainerID(namespace, pod, container)
 		err := rm.fileHandler.AddFile(k8sContainerID, file)
 		if err != nil {
 			logger.L().Error("failed to add file to container file list", helpers.Error(err), helpers.Interface("k8sContainerID", k8sContainerID), helpers.String("file", file))
