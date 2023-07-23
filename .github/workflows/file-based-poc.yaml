@@ -30,4 +30,5 @@ jobs:
                       ]'
       COSIGN: true
       HELM_E2E_TEST: true
+      SYSTEM_TESTS_BRANCH: "file-based-poc"
     secrets: inherit
