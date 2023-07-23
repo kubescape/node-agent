@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	bolt "go.etcd.io/bbolt"
@@ -90,8 +91,6 @@ func (b BoltFileHandler) RemoveBucket(ctx context.Context, bucket string) error 
 type File struct {
 	// File object
 	FileObject *os.File
-	// Bufio writer
-	Writer *bufio.Writer
 	// Mutex for locking the file
 	Lock *sync.Mutex
 }
@@ -120,14 +119,12 @@ func (f *FsFileHandler) AddFile(ctx context.Context, bucket, file string) error 
 	fileObject, ok := f.fileMap[bucket]
 	if !ok {
 		// If not, create a new file object and add it to the map
-		storageFileName := fmt.Sprintf("%s/%s.txt", f.dirPath, bucket)
-		fileOsObject, err := os.OpenFile(storageFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		fileOsObject, err := os.OpenFile(f.GetBucketFileName(bucket), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			f.Lock.Unlock()
 			return err
 		}
-		bufferedWriter := bufio.NewWriter(fileOsObject)
-		fileObject = &File{FileObject: fileOsObject, Lock: &sync.Mutex{}, Writer: bufferedWriter}
+		fileObject = &File{FileObject: fileOsObject, Lock: &sync.Mutex{}}
 		f.fileMap[bucket] = fileObject
 	}
 	f.Lock.Unlock()
@@ -158,11 +155,10 @@ func (f *FsFileHandler) GetFiles(ctx context.Context, container string) (map[str
 	// Check if bucket exists in the map
 	f.Lock.Lock()
 	fileObject, ok := f.fileMap[container]
+	f.Lock.Unlock()
 	if !ok {
-		f.Lock.Unlock()
 		return fileList, fmt.Errorf("bucket does not exist for container %s", container)
 	}
-	f.Lock.Unlock()
 
 	// Lock the file
 	fileObject.Lock.Lock()
@@ -172,23 +168,22 @@ func (f *FsFileHandler) GetFiles(ctx context.Context, container string) (map[str
 	// Do not use defer here! It makes life much harder
 
 	// Copy the file to a new file
-	storageFileName := fmt.Sprintf("%s/%s.txt", f.dirPath, container)
-	storageFileCopyName := fmt.Sprintf("%s/%s_copy.txt", f.dirPath, container)
+	storageFileName := f.GetBucketFileName(container)
+	storageFileCopyName := f.GetTempBucketFileName(container)
 	// Copy the file
 	err := copyFile(storageFileName, storageFileCopyName)
 	if err != nil {
-		fileObject.FileObject, _ = os.OpenFile(storageFileName, os.O_CREATE|os.O_WRONLY, 0644)
+		fileObject.FileObject, _ = os.OpenFile(storageFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		fileObject.Lock.Unlock()
 		return fileList, err
 	}
 
-	// Open the file
+	// Open the file (purge the contents)
 	fileObject.FileObject, err = os.OpenFile(storageFileName, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fileObject.Lock.Unlock()
 		return fileList, err
 	}
-	fileObject.Writer = bufio.NewWriter(fileObject.FileObject)
 
 	// Unlock the file and let other goroutines use it
 	fileObject.Lock.Unlock()
@@ -227,17 +222,26 @@ func (f *FsFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
 	// Close the file
 	fileObject.FileObject.Close()
 	// Remove the file
-	storageFileName := fmt.Sprintf("%s/%s.txt", f.dirPath, bucket)
+	storageFileName := f.GetBucketFileName(bucket)
 	err := os.Remove(storageFileName)
+	// Unlock the file so other goroutines can use it
+	fileObject.Lock.Unlock()
 	if err != nil {
-		fileObject.Lock.Unlock()
 		return err
 	}
-	// Unlock the file and let other goroutines use it
-	fileObject.Lock.Unlock()
 	// Remove the bucket from the map
 	delete(f.fileMap, bucket)
 	return nil
+}
+
+func (f *FsFileHandler) GetBucketFileName(bucket string) string {
+	return fmt.Sprintf("%s/%s.txt", f.dirPath, bucket)
+}
+
+func (f *FsFileHandler) GetTempBucketFileName(bucket string) string {
+	// Get 8 random characters
+	rand := uuid.New().String()[0:8]
+	return fmt.Sprintf("%s/%s-%s.txt", f.dirPath, bucket, rand)
 }
 
 func copyFile(srcFile, dstFile string) error {
