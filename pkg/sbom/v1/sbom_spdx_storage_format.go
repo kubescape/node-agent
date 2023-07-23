@@ -16,7 +16,6 @@ import (
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/spf13/afero"
-	"go.opentelemetry.io/otel"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
@@ -93,8 +92,8 @@ func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID, sbo
 }
 
 func (sc *SBOMData) saveSBOM(ctx context.Context, spdxData *spdxv1beta1.SBOMSPDXv2p3) error {
-	_, span := otel.Tracer("").Start(ctx, "SBOMData.saveSBOM")
-	defer span.End()
+	// _, span := otel.Tracer("").Start(ctx, "SBOMData.saveSBOM")
+	// defer span.End()
 	logger.L().Debug("saving SBOM", helpers.String("path", sc.spdxDataPath))
 
 	data, err := json.Marshal(spdxData)
@@ -124,8 +123,8 @@ func parsedFilesBySourceInfo(packageSourceInfo string) []string {
 }
 
 func (sc *SBOMData) StoreSBOM(ctx context.Context, sbomData any) error {
-	ctx, span := otel.Tracer("").Start(ctx, "SBOMData.StoreSBOM")
-	defer span.End()
+	// ctx, span := otel.Tracer("").Start(ctx, "SBOMData.StoreSBOM")
+	// defer span.End()
 	spdxData, ok := sbomData.(*spdxv1beta1.SBOMSPDXv2p3)
 	if !ok {
 		return fmt.Errorf("storage format: StoreSBOM: SBOM data format is not supported")
@@ -176,8 +175,8 @@ func (sc *SBOMData) StoreSBOM(ctx context.Context, sbomData any) error {
 }
 
 func (sc *SBOMData) getSBOMDataSPDXFormat(ctx context.Context) (*spdxv1beta1.SBOMSPDXv2p3, error) {
-	_, span := otel.Tracer("").Start(ctx, "SBOMData.getSBOMDataSPDXFormat")
-	defer span.End()
+	// _, span := otel.Tracer("").Start(ctx, "SBOMData.getSBOMDataSPDXFormat")
+	// defer span.End()
 
 	bytes, err := afero.ReadFile(sc.sbomFs, sc.spdxDataPath)
 	if err != nil {
@@ -194,8 +193,8 @@ func (sc *SBOMData) getSBOMDataSPDXFormat(ctx context.Context) (*spdxv1beta1.SBO
 }
 
 func (sc *SBOMData) FilterSBOM(ctx context.Context, sbomFileRelevantMap map[string]bool) error {
-	ctx, span := otel.Tracer("").Start(ctx, "SBOMData.FilterSBOM")
-	defer span.End()
+	// ctx, span := otel.Tracer("").Start(ctx, "SBOMData.FilterSBOM")
+	// defer span.End()
 
 	if sc.status == instanceidhandlerV1.Incomplete {
 		return nil
@@ -319,8 +318,8 @@ func (sc *SBOMData) storeAnnotations(wlidData, imageID string, instanceID instan
 }
 
 func (sc *SBOMData) StoreMetadata(ctx context.Context, wlidData, imageID string, instanceID instanceidhandler.IInstanceID) {
-	_, span := otel.Tracer("").Start(ctx, "SBOMData.StoreMetadata")
-	defer span.End()
+	// _, span := otel.Tracer("").Start(ctx, "SBOMData.StoreMetadata")
+	// defer span.End()
 	sc.storeLabels(wlidData, instanceID)
 	sc.storeAnnotations(wlidData, imageID, instanceID)
 }
@@ -333,8 +332,8 @@ func (sc *SBOMData) CleanResources() {
 }
 
 func (sc *SBOMData) ValidateSBOM(ctx context.Context) error {
-	ctx, span := otel.Tracer("").Start(ctx, "SBOMData.ValidateSBOM")
-	defer span.End()
+	// ctx, span := otel.Tracer("").Start(ctx, "SBOMData.ValidateSBOM")
+	// defer span.End()
 	sbom, err := sc.getSBOMDataSPDXFormat(ctx)
 	if err != nil {
 		logger.L().Debug("fail to validate SBOM", helpers.String("file name", sc.spdxDataPath), helpers.Error(err))
