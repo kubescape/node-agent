@@ -79,10 +79,13 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 		containerData := containerDataInterface.(watchedContainerData)
 
 		if rm.cfg.EnableRelevancy && afterTimerActionsData.service == RelevantCVEsService {
-			fileList, err := rm.fileHandler.GetFiles(ctx, containerData.k8sContainerID)
+			fileList, rwMutex, err := rm.fileHandler.GetFiles(ctx, containerData.k8sContainerID)
 			if err != nil {
 				logger.L().Debug("failed to get file list", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 				continue
+			}
+			if rwMutex != nil {
+				rwMutex.Lock()
 			}
 			logger.L().Debug("fileList generated", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.String("file list", fmt.Sprintf("%v", fileList)))
 			ctxPostSBOM, spanPostSBOM := otel.Tracer("").Start(ctx, "PostFilterSBOM")
@@ -123,7 +126,10 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 				}
 				continue
 			}
-			// rm.fileHandler.RemoveBucket(ctx, containerData.k8sContainerID)
+			if rwMutex != nil {
+				rm.fileHandler.InitBucket(ctx, containerData.k8sContainerID)
+				rwMutex.Unlock()
+			}
 
 			logger.L().Info("filtered SBOM has been stored successfully", helpers.String("containerID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID))
 			spanPostSBOM.End()

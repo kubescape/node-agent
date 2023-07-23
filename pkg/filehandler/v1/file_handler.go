@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"node-agent/pkg/filehandler"
+	"sync"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -41,7 +42,7 @@ func (b BoltFileHandler) Close() {
 	_ = b.fileDB.Close()
 }
 
-func (b BoltFileHandler) GetFiles(ctx context.Context, container string) (map[string]bool, error) {
+func (b BoltFileHandler) GetFiles(ctx context.Context, container string) (map[string]bool, *sync.RWMutex, error) {
 	_, span := otel.Tracer("").Start(ctx, "BoltFileHandler.GetFiles")
 	defer span.End()
 	fileList := make(map[string]bool)
@@ -56,7 +57,7 @@ func (b BoltFileHandler) GetFiles(ctx context.Context, container string) (map[st
 		}
 		return nil
 	})
-	return fileList, err
+	return fileList, nil, err
 }
 
 func (b BoltFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
@@ -70,4 +71,8 @@ func (b BoltFileHandler) RemoveBucket(ctx context.Context, bucket string) error 
 		logger.L().Debug("deleted file bucket", helpers.String("bucket", bucket))
 		return nil
 	})
+}
+
+func (b BoltFileHandler) InitBucket(ctx context.Context, bucket string) {
+	// Do nothing
 }

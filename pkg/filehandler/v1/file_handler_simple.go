@@ -72,20 +72,21 @@ func shallowCopyMapStringBool(m map[string]bool) map[string]bool {
 	return mCopy
 }
 
-func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[string]bool, error) {
+func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[string]bool, *sync.RWMutex, error) {
 	s.mutex.RLock()
 	bucketLock, ok := s.m[bucket]
 	bucketFiles, okFiles := s.files[bucket]
 	s.mutex.RUnlock()
 
 	if !ok || !okFiles {
-		return map[string]bool{}, fmt.Errorf("bucket does not exist for container %s", bucket)
+		return map[string]bool{}, nil, fmt.Errorf("bucket does not exist for container %s", bucket)
 	}
 
 	bucketLock.RLock()
 	defer bucketLock.RUnlock()
 
-	return shallowCopyMapStringBool(bucketFiles), nil
+	// return shallowCopyMapStringBool(bucketFiles), bucketLock, nil
+	return bucketFiles, bucketLock, nil
 }
 func (s *SimpleFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
 	s.mutex.Lock()
@@ -100,4 +101,11 @@ func (s *SimpleFileHandler) RemoveBucket(ctx context.Context, bucket string) err
 	s.mutex.Unlock()
 
 	return nil
+}
+
+func (s *SimpleFileHandler) InitBucket(ctx context.Context, bucket string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.files[bucket] = make(map[string]bool)
 }
