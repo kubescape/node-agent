@@ -16,7 +16,7 @@ const initFileListLength = 5000
 type SimpleFileHandler struct {
 	mutex sync.RWMutex
 	m     map[string]*sync.RWMutex
-	files map[string]*map[string]bool
+	files map[string]map[string]bool
 }
 
 var _ filehandler.FileHandler = (*SimpleFileHandler)(nil)
@@ -24,7 +24,7 @@ var _ filehandler.FileHandler = (*SimpleFileHandler)(nil)
 func CreateSimpleFileHandler() (*SimpleFileHandler, error) {
 	return &SimpleFileHandler{
 		m:     make(map[string]*sync.RWMutex),
-		files: make(map[string]*map[string]bool),
+		files: make(map[string]map[string]bool),
 	}, nil
 }
 
@@ -50,7 +50,7 @@ func (s *SimpleFileHandler) AddFile(ctx context.Context, bucket, file string) er
 
 		bucketFiles, okF = s.files[bucket]
 		if !okF {
-			*bucketFiles = make(map[string]bool, initFileListLength)
+			bucketFiles = make(map[string]bool, initFileListLength)
 			s.files[bucket] = bucketFiles
 		}
 		s.mutex.Unlock()
@@ -60,7 +60,7 @@ func (s *SimpleFileHandler) AddFile(ctx context.Context, bucket, file string) er
 	bucketLock.Lock()
 	defer bucketLock.Unlock()
 
-	(*bucketFiles)[file] = true
+	bucketFiles[file] = true
 	// logger.L().Debug("Done AddFile", helpers.String("bucket", bucket))
 
 	return nil
@@ -97,7 +97,7 @@ func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[st
 	logger.L().Debug("Done GetFiles", helpers.String("bucket", bucket))
 
 	// return shallowCopyMapStringBool(bucketFiles), bucketLock, nil
-	return *bucketFiles, bucketLock, nil
+	return bucketFiles, bucketLock, nil
 }
 func (s *SimpleFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
 	logger.L().Debug("In RemoveBucket", helpers.String("bucket", bucket))
@@ -123,6 +123,6 @@ func (s *SimpleFileHandler) InitBucket(ctx context.Context, bucket string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	*s.files[bucket] = make(map[string]bool, defaultFileListLength)
+	s.files[bucket] = make(map[string]bool, defaultFileListLength)
 	logger.L().Debug("Done InitBucket", helpers.String("bucket", bucket))
 }
