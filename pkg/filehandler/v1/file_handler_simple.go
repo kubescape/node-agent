@@ -92,12 +92,12 @@ func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[st
 		return map[string]bool{}, nil, fmt.Errorf("bucket does not exist for container %s", bucket)
 	}
 
-	// bucketLock.RLock()
-	// defer bucketLock.RUnlock()
+	bucketLock.RLock()
+	defer bucketLock.RUnlock()
 	logger.L().Debug("Done GetFiles", helpers.String("bucket", bucket))
 
-	// return shallowCopyMapStringBool(bucketFiles), bucketLock, nil
-	return bucketFiles, bucketLock, nil
+	c := shallowCopyMapStringBool(bucketFiles)
+	return c, nil, nil
 }
 func (s *SimpleFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
 	logger.L().Debug("In RemoveBucket", helpers.String("bucket", bucket))
