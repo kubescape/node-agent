@@ -11,7 +11,6 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/spf13/afero"
-	"go.opentelemetry.io/otel"
 )
 
 const (
@@ -52,8 +51,8 @@ func CreateSBOMStorageClient(sc storageclient.StorageClient, wlid string, instan
 }
 
 func (sc *SBOMStructure) GetSBOM(ctx context.Context, imageTag, imageID string) error {
-	ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.GetSBOM")
-	defer span.End()
+	// ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.GetSBOM")
+	// defer span.End()
 
 	if sc.SBOMData.IsSBOMAlreadyExist() {
 		return nil
@@ -61,7 +60,7 @@ func (sc *SBOMStructure) GetSBOM(ctx context.Context, imageTag, imageID string) 
 
 	SBOMKey, err := names.ImageInfoToSlug(imageTag, imageID)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("Failed to create SBOM key", helpers.Error(err), helpers.String("imageTag", imageTag), helpers.String("imageID", imageID))
+		logger.L().Error("Failed to create SBOM key", helpers.Error(err), helpers.String("imageTag", imageTag), helpers.String("imageID", imageID))
 		return err
 	}
 
@@ -81,14 +80,14 @@ func (sc *SBOMStructure) IsSBOMAlreadyExist() bool {
 }
 
 func (sc *SBOMStructure) FilterSBOM(ctx context.Context, sbomFileRelevantMap map[string]bool) error {
-	ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.FilterSBOM")
-	defer span.End()
+	// ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.FilterSBOM")
+	// defer span.End()
 	return sc.SBOMData.FilterSBOM(ctx, sbomFileRelevantMap)
 }
 
 func (sc *SBOMStructure) StoreFilterSBOM(ctx context.Context, imageID, instanceID string) error {
-	ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.StoreFilterSBOM")
-	defer span.End()
+	// ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.StoreFilterSBOM")
+	// defer span.End()
 	if sc.firstReport || sc.SBOMData.IsNewRelevantSBOMDataExist() {
 		sc.SBOMData.SetFilteredSBOMName(instanceID)
 		sc.SBOMData.StoreMetadata(ctx, sc.wlid, imageID, sc.instanceID)
@@ -120,7 +119,7 @@ func IsAlreadyExist() error {
 }
 
 func (sc *SBOMStructure) ValidateSBOM(ctx context.Context) error {
-	ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.ValidateSBOM")
-	defer span.End()
+	// ctx, span := otel.Tracer("").Start(ctx, "SBOMStructure.ValidateSBOM")
+	// defer span.End()
 	return sc.SBOMData.ValidateSBOM(ctx)
 }

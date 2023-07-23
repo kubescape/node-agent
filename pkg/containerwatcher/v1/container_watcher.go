@@ -20,7 +20,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"go.opentelemetry.io/otel"
 )
 
 const (
@@ -60,8 +59,8 @@ func CreateIGContainerWatcher(k8sClient *k8sinterface.KubernetesApi, relevancyMa
 }
 
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {
-	ctx, span := otel.Tracer("").Start(ctx, "IGContainerWatcher.Start")
-	defer span.End()
+	// ctx, span := otel.Tracer("").Start(ctx, "IGContainerWatcher.Start")
+	// defer span.End()
 
 	ch.relevancyManager.SetContainerHandler(ch)
 	ch.relevancyManager.StartRelevancyManager(ctx)
@@ -113,7 +112,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	execEventCallback := func(event *tracerexectype.Event) {
 		if event.Type != types.NORMAL {
 			// dropped event
-			logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
+			logger.L().Warning("container monitoring got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 			return
 		}
 		if event.Retval > -1 {
@@ -134,7 +133,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	openEventCallback := func(event *traceropentype.Event) {
 		if event.Type != types.NORMAL {
 			// dropped event
-			logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
+			logger.L().Warning("container monitoring got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 			return
 		}
 		if event.Ret > -1 {
@@ -199,8 +198,8 @@ func (ch *IGContainerWatcher) Stop() {
 }
 
 func (ch *IGContainerWatcher) UnregisterContainer(ctx context.Context, container *containercollection.Container) {
-	_, span := otel.Tracer("").Start(ctx, "IGContainerWatcher.UnregisterContainer")
-	defer span.End()
+	// _, span := otel.Tracer("").Start(ctx, "IGContainerWatcher.UnregisterContainer")
+	// defer span.End()
 
 	event := containercollection.PubSubEvent{
 		Timestamp: time.Now().Format(time.RFC3339),

@@ -26,7 +26,7 @@ func main() {
 
 	cfg, err := config.LoadConfig("/etc/config")
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
+		logger.L().Fatal("load config error", helpers.Error(err))
 	}
 
 	// port := rand.Intn(9090-6060+1) + 6060
@@ -35,7 +35,7 @@ func main() {
 
 	clusterData, err := config.LoadClusterData("/etc/config")
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
+		logger.L().Fatal("load clusterData error", helpers.Error(err))
 	}
 
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
@@ -56,29 +56,29 @@ func main() {
 	// Create the relevancy manager
 	fileHandler, err := filehandler.CreateSimpleFileHandler()
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to create fileDB", helpers.Error(err))
+		logger.L().Fatal("failed to create fileDB", helpers.Error(err))
 	}
 	defer fileHandler.Close()
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageClient, err := storageclient.CreateSBOMStorageK8SAggregatedAPIClient(ctx)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
+		logger.L().Fatal("error creating the storage client", helpers.Error(err))
 	}
 	relevancyManager, err := relevancymanager.CreateRelevancyManager(cfg, clusterData.ClusterName, fileHandler, k8sClient, afero.NewOsFs(), storageClient)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
+		logger.L().Fatal("error creating the relevancy manager", helpers.Error(err))
 	}
 
 	// Create the container handler
 	mainHandler, err := containerwatcher.CreateIGContainerWatcher(k8sClient, relevancyManager)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
+		logger.L().Fatal("error creating the container watcher", helpers.Error(err))
 	}
 
 	// Start the container handler
 	err = mainHandler.Start(ctx)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error starting the container watcher", helpers.Error(err))
+		logger.L().Fatal("error starting the container watcher", helpers.Error(err))
 	}
 	defer mainHandler.Stop()
 
