@@ -50,7 +50,7 @@ func (s *SimpleFileHandler) AddFile(ctx context.Context, bucket, file string) er
 			bucketFiles = make(map[string]bool)
 			s.files[bucket] = bucketFiles
 		}
-
+		s.mutex.Unlock()
 	}
 
 	// Acquire a write lock if the bucket already exists
