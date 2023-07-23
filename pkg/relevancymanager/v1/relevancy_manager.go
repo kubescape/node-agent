@@ -135,6 +135,9 @@ func (rm *RelevancyManager) deleteResources(watchedContainer watchedContainerDat
 		watchedContainer.sbomClient.CleanResources()
 	}
 	rm.watchedContainers.Delete(containerID)
+
+	// Remove container from the file DB
+	rm.fileHandler.RemoveBucket(context.Background(), containerID)
 }
 
 func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercollection.Container) {
