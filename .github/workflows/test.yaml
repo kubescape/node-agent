@@ -1,0 +1,33 @@
+name: build
+on:
+  push:
+    branches: 
+    - 'inspektor-test'
+      
+jobs:
+  pr-merged:
+    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
+    with:
+      IMAGE_NAME: quay.io/${{ github.repository_owner }}/node-agent
+      IMAGE_TAG: v0.1.${{ github.run_number }}-test
+      COMPONENT_NAME: node-agent
+      CGO_ENABLED: 0
+      GO111MODULE: "on"
+      BUILD_PLATFORM: linux/amd64
+      GO_VERSION: "1.20"
+      REQUIRED_TESTS: '[
+                        "relevantCVEs",
+                        "relevancy_enabled_stop_sniffing",
+                        "relevant_data_is_appended",
+                        "relevancy_large_image",
+                        "relevancy_extra_large_image",
+                        "relevancy_fix_vuln",
+                        "relevancy_python",
+                        "relevancy_golang",
+                        "relevancy_java",
+                        "relevancy_java_and_python",
+                        "relevancy_golang_dynamic"
+                      ]'
+      COSIGN: true
+      HELM_E2E_TEST: true
+    secrets: inherit
