@@ -87,9 +87,14 @@ func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[st
 
 	return shallowCopyMapStringBool(bucketFiles), nil
 }
-
 func (s *SimpleFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
 	s.mutex.Lock()
+	bucketLock, ok := s.m[bucket]
+	if ok {
+		bucketLock.Lock()
+		defer bucketLock.Unlock()
+	}
+
 	delete(s.m, bucket)
 	delete(s.files, bucket)
 	s.mutex.Unlock()

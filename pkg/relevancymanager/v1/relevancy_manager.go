@@ -123,6 +123,8 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 				}
 				continue
 			}
+			// rm.fileHandler.RemoveBucket(ctx, containerData.k8sContainerID)
+
 			logger.L().Info("filtered SBOM has been stored successfully", helpers.String("containerID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID))
 			spanPostSBOM.End()
 		}
