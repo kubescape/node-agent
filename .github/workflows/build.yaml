@@ -6,6 +6,7 @@ on:
       
 jobs:
   docker-build:
+    if: "${{ github.repository_owner }} == dwertent"
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -51,24 +52,3 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           push: true
-  
- 
-  create-release-and-retag:
-    name: Docker retag and create release
-    needs: [docker-build]
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    runs-on: ubuntu-latest  
-    steps:
-      - name: Create Release
-        id: create_release
-        uses: ncipollo/release-action@v1.11.1
-        with:
-          token:  ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ inputs.IMAGE_TAG }}
-          name: Release ${{ inputs.IMAGE_TAG }}
-          draft: false
-          prerelease: false
-          body: ${{ github.event.pull_request.body }}
-
- 
