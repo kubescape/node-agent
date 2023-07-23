@@ -49,7 +49,7 @@ func main() {
 	}
 
 	// Create the relevancy manager
-	fileHandler, err := filehandler.CreateBoltFileHandler()
+	fileHandler, err := filehandler.CreateFsFileHandler("/data")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("failed to create fileDB", helpers.Error(err))
 	}
