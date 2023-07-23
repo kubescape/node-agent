@@ -173,8 +173,7 @@ jobs:
             -b production                                     \
             -c CyberArmorTests                                \
             --logger DEBUG                                    \
-            --kwargs helm_branch=${{ inputs.HELM_BRANCH }}    \
-            node-agent-tag=${{ needs.docker-build.outputs.IMAGE_TAG_PRERELEASE }}
+            --kwargs node-agent-tag:${{ needs.docker-build.outputs.IMAGE_TAG_PRERELEASE }}
 
           deactivate
 
