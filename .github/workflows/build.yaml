@@ -1,6 +1,8 @@
 name: docker-build
 on:
   push:
+    branches: 
+    - 'main'
     paths-ignore:
       - '**.md' ### Ignore running when README.MD changed.
       
