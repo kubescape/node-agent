@@ -78,6 +78,8 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 		}
 		containerData := containerDataInterface.(watchedContainerData)
 
+		logger.L().Debug("getting files", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID))
+
 		if rm.cfg.EnableRelevancy && afterTimerActionsData.service == RelevantCVEsService {
 			fileList, rwMutex, err := rm.fileHandler.GetFiles(ctx, containerData.k8sContainerID)
 			if err != nil {

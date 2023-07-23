@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"node-agent/pkg/filehandler"
 	"sync"
+
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 type SimpleFileHandler struct {
@@ -23,6 +26,8 @@ func CreateSimpleFileHandler() (*SimpleFileHandler, error) {
 }
 
 func (s *SimpleFileHandler) AddFile(ctx context.Context, bucket, file string) error {
+	// logger.L().Debug("In AddFile", helpers.String("bucket", bucket))
+
 	// Acquire a read lock first
 	s.mutex.RLock()
 	bucketLock, ok := s.m[bucket]
@@ -32,7 +37,7 @@ func (s *SimpleFileHandler) AddFile(ctx context.Context, bucket, file string) er
 	// If the bucket doesn't exist, acquire a write lock to create the new bucket
 	if !ok || !okF {
 		s.mutex.Lock()
-
+		logger.L().Debug("Adding a bucket", helpers.String("bucket", bucket))
 		// Double-check the bucket's existence to ensure another goroutine didn't already create it
 		bucketLock, ok = s.m[bucket]
 		if !ok {
@@ -53,6 +58,7 @@ func (s *SimpleFileHandler) AddFile(ctx context.Context, bucket, file string) er
 	defer bucketLock.Unlock()
 
 	bucketFiles[file] = true
+	// logger.L().Debug("Done AddFile", helpers.String("bucket", bucket))
 
 	return nil
 }
@@ -73,6 +79,7 @@ func shallowCopyMapStringBool(m map[string]bool) map[string]bool {
 }
 
 func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[string]bool, *sync.RWMutex, error) {
+	logger.L().Debug("In GetFiles", helpers.String("bucket", bucket))
 	s.mutex.RLock()
 	bucketLock, ok := s.m[bucket]
 	bucketFiles, okFiles := s.files[bucket]
@@ -82,13 +89,16 @@ func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[st
 		return map[string]bool{}, nil, fmt.Errorf("bucket does not exist for container %s", bucket)
 	}
 
-	bucketLock.RLock()
-	defer bucketLock.RUnlock()
+	// bucketLock.RLock()
+	// defer bucketLock.RUnlock()
+	logger.L().Debug("Done GetFiles", helpers.String("bucket", bucket))
 
 	// return shallowCopyMapStringBool(bucketFiles), bucketLock, nil
 	return bucketFiles, bucketLock, nil
 }
 func (s *SimpleFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
+	logger.L().Debug("In RemoveBucket", helpers.String("bucket", bucket))
+
 	s.mutex.Lock()
 	bucketLock, ok := s.m[bucket]
 	if ok {
@@ -99,13 +109,17 @@ func (s *SimpleFileHandler) RemoveBucket(ctx context.Context, bucket string) err
 	delete(s.m, bucket)
 	delete(s.files, bucket)
 	s.mutex.Unlock()
+	logger.L().Debug("Done RemoveBucket", helpers.String("bucket", bucket))
 
 	return nil
 }
 
 func (s *SimpleFileHandler) InitBucket(ctx context.Context, bucket string) {
+	logger.L().Debug("In InitBucket", helpers.String("bucket", bucket))
+
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	s.files[bucket] = make(map[string]bool)
+	logger.L().Debug("Done InitBucket", helpers.String("bucket", bucket))
 }
