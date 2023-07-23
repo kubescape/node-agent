@@ -91,11 +91,17 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 			ctxPostSBOM, spanPostSBOM := otel.Tracer("").Start(ctx, "PostFilterSBOM")
 			if err = <-containerData.syncChannel[StepGetSBOM]; err != nil {
 				logger.L().Debug("failed to get SBOM", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
+				if rwMutex != nil {
+					rwMutex.Unlock()
+				}
 				continue
 			}
 			if containerData.sbomClient == nil {
 				// it is possible that the sbom client was not created yet
 				logger.L().Debug("sbom client not yet created", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
+				if rwMutex != nil {
+					rwMutex.Unlock()
+				}
 				continue
 			}
 			if err = containerData.sbomClient.ValidateSBOM(ctx); err != nil {
@@ -108,6 +114,10 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 				ctx, span := otel.Tracer("").Start(ctxPostSBOM, "FilterSBOM")
 				logger.L().Ctx(ctx).Warning("failed to filter SBOM", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 				span.End()
+				if rwMutex != nil {
+					rwMutex.Unlock()
+				}
+
 				continue
 			}
 			filterSBOMKey, err := containerData.instanceID.GetSlug()
@@ -115,6 +125,9 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 				ctx, span := otel.Tracer("").Start(ctxPostSBOM, "filterSBOMKey")
 				logger.L().Ctx(ctx).Warning("failed to get filterSBOMKey for store filter SBOM", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 				span.End()
+				if rwMutex != nil {
+					rwMutex.Unlock()
+				}
 				continue
 			}
 			// it is safe to use containerData.imageID directly since we needed it to retrieve the SBOM
@@ -123,6 +136,9 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 					ctx, span := otel.Tracer("").Start(ctxPostSBOM, "StoreFilterSBOM")
 					logger.L().Ctx(ctx).Error("failed to store filtered SBOM", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 					span.End()
+				}
+				if rwMutex != nil {
+					rwMutex.Unlock()
 				}
 				continue
 			}
