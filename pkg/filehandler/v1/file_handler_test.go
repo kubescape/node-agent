@@ -3,7 +3,6 @@ package filehandler
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"runtime/pprof"
 	"testing"
@@ -43,8 +42,7 @@ func TestFsFileHandler_AddFile(t *testing.T) {
 }
 
 func TestFsFileHandler_MultipleThreadAdd(t *testing.T) {
-	// Delete all the files that start with bucket in /tmp
-	os.RemoveAll("/tmp/bucket*")
+	loopCount := 100
 
 	fh, err := CreateFsFileHandler("/tmp")
 	if err != nil {
@@ -53,7 +51,6 @@ func TestFsFileHandler_MultipleThreadAdd(t *testing.T) {
 	defer fh.Close()
 
 	insertFunc := func(i int) {
-		log.Printf("Inserting file %d", i)
 		// Generate a random file name
 		err = fh.AddFile(context.TODO(), "bucket", fmt.Sprintf("file%d", i))
 		if err != nil {
@@ -61,7 +58,7 @@ func TestFsFileHandler_MultipleThreadAdd(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < loopCount; i++ {
 		go insertFunc(i)
 	}
 
@@ -72,7 +69,7 @@ func TestFsFileHandler_MultipleThreadAdd(t *testing.T) {
 	if err != nil {
 		t.Errorf("GetFiles() failed: %s", err)
 	}
-	if len(fl) != 100 {
+	if len(fl) != loopCount {
 		t.Errorf("GetFiles() failed: expected 100 files, got %d", len(fl))
 	}
 }

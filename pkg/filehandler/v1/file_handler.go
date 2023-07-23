@@ -142,8 +142,11 @@ func (f *FsFileHandler) Close() {
 	f.Lock.Lock()
 	for _, file := range f.fileMap {
 		file.Lock.Lock()
+		name := file.FileObject.Name()
 		_ = file.FileObject.Close()
+		os.Remove(name)
 	}
+
 }
 
 func (f *FsFileHandler) GetFiles(ctx context.Context, container string) (map[string]bool, error) {
