@@ -1,8 +1,9 @@
 name: test
 on:
-  branches: 
-  - 'file-based-poc'
-  - 'dict-based-poc'
+  push:
+    branches: 
+    - 'file-based-poc'
+    - 'dict-based-poc'
 
 jobs:
   trigger-tests:
