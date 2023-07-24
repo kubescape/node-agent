@@ -1,12 +1,9 @@
 package filehandler
 
-import (
-	"context"
-)
-
 type FileHandler interface {
-	AddFile(ctx context.Context, bucket, file string) error
+	AddFile(bucket, file string) error
+	AddFiles(bucket string, files map[string]bool) error
 	Close()
-	GetFiles(ctx context.Context, container string) (map[string]bool, error)
-	RemoveBucket(ctx context.Context, bucket string) error
+	GetFiles(container string) (map[string]bool, error)
+	RemoveBucket(bucket string) error
 }
