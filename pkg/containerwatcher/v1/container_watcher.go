@@ -166,7 +166,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	}
 
 	// Create the exec tracer
-	ch.tracerOpen, err = traceropen.NewTracer(&traceropen.Config{MountnsMap: openMountnsmap}, ch.containerCollection, openEventCallback)
+	ch.tracerOpen, err = traceropen.NewTracer(&traceropen.Config{MountnsMap: openMountnsmap, FullPath: true}, ch.containerCollection, openEventCallback)
 	if err != nil {
 		return fmt.Errorf("error creating tracerOpen: %s\n", err)
 	}
