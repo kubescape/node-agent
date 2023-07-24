@@ -20,7 +20,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"go.opentelemetry.io/otel"
 )
 
 const (
@@ -60,8 +59,6 @@ func CreateIGContainerWatcher(k8sClient *k8sinterface.KubernetesApi, relevancyMa
 }
 
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {
-	ctx, span := otel.Tracer("").Start(ctx, "IGContainerWatcher.Start")
-	defer span.End()
 
 	ch.relevancyManager.SetContainerHandler(ch)
 	ch.relevancyManager.StartRelevancyManager(ctx)
@@ -139,7 +136,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 		}
 		if event.Ret > -1 {
 			ch.workerPool.Submit(func() {
-				ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, event.Path)
+				ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, event.FullPath)
 			})
 		}
 	}
@@ -166,7 +163,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	}
 
 	// Create the exec tracer
-	ch.tracerOpen, err = traceropen.NewTracer(&traceropen.Config{MountnsMap: openMountnsmap}, ch.containerCollection, openEventCallback)
+	ch.tracerOpen, err = traceropen.NewTracer(&traceropen.Config{MountnsMap: openMountnsmap, FullPath: true}, ch.containerCollection, openEventCallback)
 	if err != nil {
 		return fmt.Errorf("error creating tracerOpen: %s\n", err)
 	}
@@ -199,8 +196,6 @@ func (ch *IGContainerWatcher) Stop() {
 }
 
 func (ch *IGContainerWatcher) UnregisterContainer(ctx context.Context, container *containercollection.Container) {
-	_, span := otel.Tracer("").Start(ctx, "IGContainerWatcher.UnregisterContainer")
-	defer span.End()
 
 	event := containercollection.PubSubEvent{
 		Timestamp: time.Now().Format(time.RFC3339),

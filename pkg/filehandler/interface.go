@@ -1,6 +1,8 @@
 package filehandler
 
-import "context"
+import (
+	"context"
+)
 
 type FileHandler interface {
 	AddFile(ctx context.Context, bucket, file string) error

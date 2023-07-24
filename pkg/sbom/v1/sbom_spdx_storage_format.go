@@ -93,8 +93,6 @@ func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID, sbo
 }
 
 func (sc *SBOMData) saveSBOM(ctx context.Context, spdxData *spdxv1beta1.SBOMSPDXv2p3) error {
-	_, span := otel.Tracer("").Start(ctx, "SBOMData.saveSBOM")
-	defer span.End()
 	logger.L().Debug("saving SBOM", helpers.String("path", sc.spdxDataPath))
 
 	data, err := json.Marshal(spdxData)
@@ -176,8 +174,6 @@ func (sc *SBOMData) StoreSBOM(ctx context.Context, sbomData any) error {
 }
 
 func (sc *SBOMData) getSBOMDataSPDXFormat(ctx context.Context) (*spdxv1beta1.SBOMSPDXv2p3, error) {
-	_, span := otel.Tracer("").Start(ctx, "SBOMData.getSBOMDataSPDXFormat")
-	defer span.End()
 
 	bytes, err := afero.ReadFile(sc.sbomFs, sc.spdxDataPath)
 	if err != nil {
@@ -194,8 +190,6 @@ func (sc *SBOMData) getSBOMDataSPDXFormat(ctx context.Context) (*spdxv1beta1.SBO
 }
 
 func (sc *SBOMData) FilterSBOM(ctx context.Context, sbomFileRelevantMap map[string]bool) error {
-	ctx, span := otel.Tracer("").Start(ctx, "SBOMData.FilterSBOM")
-	defer span.End()
 
 	if sc.status == instanceidhandlerV1.Incomplete {
 		return nil
@@ -319,8 +313,6 @@ func (sc *SBOMData) storeAnnotations(wlidData, imageID string, instanceID instan
 }
 
 func (sc *SBOMData) StoreMetadata(ctx context.Context, wlidData, imageID string, instanceID instanceidhandler.IInstanceID) {
-	_, span := otel.Tracer("").Start(ctx, "SBOMData.StoreMetadata")
-	defer span.End()
 	sc.storeLabels(wlidData, instanceID)
 	sc.storeAnnotations(wlidData, imageID, instanceID)
 }

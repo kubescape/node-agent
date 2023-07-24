@@ -8,7 +8,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	bolt "go.etcd.io/bbolt"
-	"go.opentelemetry.io/otel"
 )
 
 type BoltFileHandler struct {
@@ -26,8 +25,6 @@ func CreateBoltFileHandler() (*BoltFileHandler, error) {
 }
 
 func (b BoltFileHandler) AddFile(ctx context.Context, bucket, file string) error {
-	_, span := otel.Tracer("").Start(ctx, "BoltFileHandler.AddFile")
-	defer span.End()
 	return b.fileDB.Batch(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
 		if err != nil {
@@ -42,8 +39,6 @@ func (b BoltFileHandler) Close() {
 }
 
 func (b BoltFileHandler) GetFiles(ctx context.Context, container string) (map[string]bool, error) {
-	_, span := otel.Tracer("").Start(ctx, "BoltFileHandler.GetFiles")
-	defer span.End()
 	fileList := make(map[string]bool)
 	err := b.fileDB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(container))
@@ -60,8 +55,6 @@ func (b BoltFileHandler) GetFiles(ctx context.Context, container string) (map[st
 }
 
 func (b BoltFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
-	_, span := otel.Tracer("").Start(ctx, "BoltFileHandler.RemoveBucket")
-	defer span.End()
 	return b.fileDB.Update(func(tx *bolt.Tx) error {
 		err := tx.DeleteBucket([]byte(bucket))
 		if err != nil {

@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"net/http"
 	"net/url"
 	"node-agent/internal/validator"
 	"node-agent/pkg/config"
@@ -18,6 +18,8 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/spf13/afero"
+
+	_ "net/http/pprof"
 )
 
 func main() {
@@ -48,8 +50,13 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("error during validation", helpers.Error(err))
 	}
 
+	if _, present := os.LookupEnv("ENABLE_PROFILER"); present {
+		logger.L().Info("Starting profiler on port 6060")
+		go http.ListenAndServe("localhost:6060", nil)
+	}
+
 	// Create the relevancy manager
-	fileHandler, err := filehandler.CreateBoltFileHandler()
+	fileHandler, err := filehandler.CreateInMemoryFileHandler()
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("failed to create fileDB", helpers.Error(err))
 	}
@@ -81,7 +88,6 @@ func main() {
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 	<-shutdown
-	log.Println("Shutting down...")
 
 	// Exit with success
 	os.Exit(0)
