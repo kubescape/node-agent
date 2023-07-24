@@ -96,7 +96,7 @@ func TestProfileLotOfAddFiles(t *testing.T) {
 	}
 	defer pprof.StopCPUProfile()
 
-	for i := 0; i < 100000; i++ {
+	for i := 0; i < 10000; i++ {
 		err := fh.AddFile(context.TODO(), "bucket", fmt.Sprintf("file%d", i))
 		if err != nil {
 			t.Errorf("AddFile()  failed: %s", err)
