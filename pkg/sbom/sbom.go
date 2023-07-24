@@ -58,7 +58,7 @@ func (sc *SBOMStructure) GetSBOM(ctx context.Context, imageTag, imageID string) 
 
 	SBOMKey, err := names.ImageInfoToSlug(imageTag, imageID)
 	if err != nil {
-		logger.L().Error("Failed to create SBOM key", helpers.Error(err), helpers.String("imageTag", imageTag), helpers.String("imageID", imageID))
+		logger.L().Ctx(ctx).Error("Failed to create SBOM key", helpers.Error(err), helpers.String("imageTag", imageTag), helpers.String("imageID", imageID))
 		return err
 	}
 

@@ -79,7 +79,7 @@ func shallowCopyMapStringBool(m map[string]bool) map[string]bool {
 	return mCopy
 }
 
-func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[string]bool, *sync.RWMutex, error) {
+func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[string]bool, error) {
 	logger.L().Debug("In GetFiles", helpers.String("bucket", bucket))
 	s.mutex.RLock()
 	bucketLock, ok := s.m[bucket]
@@ -87,7 +87,7 @@ func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[st
 	s.mutex.RUnlock()
 
 	if !ok || !okFiles {
-		return map[string]bool{}, nil, fmt.Errorf("bucket does not exist for container %s", bucket)
+		return map[string]bool{}, fmt.Errorf("bucket does not exist for container %s", bucket)
 	}
 
 	bucketLock.RLock()
@@ -95,7 +95,7 @@ func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[st
 	logger.L().Debug("Done GetFiles", helpers.String("bucket", bucket))
 
 	c := shallowCopyMapStringBool(bucketFiles)
-	return c, nil, nil
+	return c, nil
 }
 func (s *SimpleFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
 	logger.L().Debug("In RemoveBucket", helpers.String("bucket", bucket))
@@ -113,14 +113,4 @@ func (s *SimpleFileHandler) RemoveBucket(ctx context.Context, bucket string) err
 	logger.L().Debug("Done RemoveBucket", helpers.String("bucket", bucket))
 
 	return nil
-}
-
-func (s *SimpleFileHandler) InitBucket(ctx context.Context, bucket string) {
-	logger.L().Debug("In InitBucket", helpers.String("bucket", bucket))
-
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	s.files[bucket] = make(map[string]bool, defaultFileListLength)
-	logger.L().Debug("Done InitBucket", helpers.String("bucket", bucket))
 }
