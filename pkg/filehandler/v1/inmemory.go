@@ -8,6 +8,7 @@ import (
 )
 
 const initFileListLength = 5000
+const updateFileListLength = 200
 
 type filesBucket struct {
 	lock  *sync.RWMutex
@@ -82,6 +83,7 @@ func (s *InMemoryFileHandler) GetFiles(ctx context.Context, bucket string) (map[
 
 	bucketFiles.lock.RLock()
 	copy := shallowCopyMapStringBool(bucketFiles.files)
+	bucketFiles.files = make(map[string]bool, updateFileListLength)
 	bucketFiles.lock.RUnlock()
 
 	return copy, nil
