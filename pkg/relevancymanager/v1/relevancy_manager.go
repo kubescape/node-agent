@@ -270,7 +270,7 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 	rm.watchedContainers.Store(container.ID, watchedContainer)
 
 	if err := rm.monitorContainer(ctx, container, watchedContainer); err != nil {
-		logger.L().Info("stop monitor on container", helpers.Error(err), helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
+		logger.L().Info("stop monitor on container", helpers.String("reason", err.Error()), helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
 	} else {
 		logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
 	}

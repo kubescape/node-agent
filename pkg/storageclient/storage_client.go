@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	apimachineryerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,7 +16,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxclient "github.com/kubescape/storage/pkg/generated/clientset/versioned"
 )
@@ -72,9 +72,10 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs(ctx context.Context) {
 	for {
 		watcher, err := sc.clientset.SpdxV1beta1().SBOMSummaries(KubescapeNamespace).Watch(context.TODO(), metav1.ListOptions{})
 		if err != nil {
-			logger.L().Error("Watch for SBOMs failed", helpers.Error(err))
+			time.Sleep(retryWatcherSleep * time.Second)
 			continue
 		}
+		logger.L().Info("Watching for SBOM summaries")
 		for {
 			event, chanActive := <-watcher.ResultChan()
 			if !chanActive {
