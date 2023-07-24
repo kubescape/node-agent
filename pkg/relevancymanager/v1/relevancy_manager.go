@@ -292,6 +292,17 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 	}
 	rm.watchedContainers.Store(container.ID, watchedContainer)
 
+	if err := rm.monitorContiner(ctx, container, watchedContainer); err != nil {
+		logger.L().Info("stop monitor on container", helpers.Error(err), helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
+	} else {
+		logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
+	}
+
+	rm.containerHandler.UnregisterContainer(ctx, container)
+	rm.deleteResources(watchedContainer, container.ID)
+}
+func (rm *RelevancyManager) monitorContiner(ctx context.Context, container *containercollection.Container, watchedContainer watchedContainerData) error {
+
 	now := time.Now()
 	stopSniffingTime := now.Add(rm.cfg.MaxSniffingTime)
 	for time.Now().Before(stopSniffingTime) {
@@ -299,16 +310,13 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 		err := rm.waitForTicks(watchedContainer, container.ID)
 		if err != nil {
 			if errors.Is(err, containerHasTerminatedError) {
-				break
+				return fmt.Errorf("continaer terminated")
 			} else if errors.Is(err, sbomV1.SBOMIncomplete) {
-				logger.L().Warning("container monitoring stopped - incomplete SBOM", helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID), helpers.Error(err))
-				break
+				return fmt.Errorf("incomplete SBOM")
 			}
 		}
 	}
-	logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
-	rm.containerHandler.UnregisterContainer(ctx, container)
-	rm.deleteResources(watchedContainer, container.ID)
+	return nil
 }
 
 func (rm *RelevancyManager) waitForTicks(watchedContainer watchedContainerData, containerID string) error {
