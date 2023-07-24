@@ -138,7 +138,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 		}
 		if event.Ret > -1 {
 			ch.workerPool.Submit(func() {
-				ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, event.Path)
+				ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, event.FullPath)
 			})
 		}
 	}
