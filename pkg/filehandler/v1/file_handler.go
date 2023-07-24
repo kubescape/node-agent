@@ -43,6 +43,10 @@ func (b BoltFileHandler) AddFile(ctx context.Context, bucket, file string) error
 	})
 }
 
+func (b BoltFileHandler) AddFiles(ctx context.Context, bucket string, files map[string]bool) error {
+	panic("not implemented")
+}
+
 func (b BoltFileHandler) Close() {
 	_ = b.fileDB.Close()
 }
@@ -131,6 +135,33 @@ func (f *FsFileHandler) AddFile(ctx context.Context, bucket, file string) error 
 	// Lock the file
 	fileObject.Lock.Lock()
 	fileObject.FileObject.WriteString(file + "\n")
+	defer fileObject.Lock.Unlock()
+	return nil
+}
+
+func (f *FsFileHandler) AddFiles(ctx context.Context, bucket string, files map[string]bool) error {
+	// Normalize the bucket name
+	bucket = NormalizeBucketName(bucket)
+
+	// Check if bucket exists in the map
+	f.Lock.Lock()
+	fileObject, ok := f.fileMap[bucket]
+	if !ok {
+		// If not, create a new file object and add it to the map
+		fileOsObject, err := os.OpenFile(f.GetBucketFileName(bucket), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			f.Lock.Unlock()
+			return err
+		}
+		fileObject = &File{FileObject: fileOsObject, Lock: &sync.Mutex{}}
+		f.fileMap[bucket] = fileObject
+	}
+	f.Lock.Unlock()
+	// Lock the file
+	fileObject.Lock.Lock()
+	for file := range files {
+		fileObject.FileObject.WriteString(file + "\n")
+	}
 	defer fileObject.Lock.Unlock()
 	return nil
 }
