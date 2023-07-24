@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"node-agent/pkg/filehandler"
 	"sync"
-
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 )
 
 const initFileListLength = 5000
@@ -38,7 +35,6 @@ func (s *InMemoryFileHandler) AddFile(ctx context.Context, bucket, file string) 
 	// If the bucket doesn't exist, acquire a write lock to create the new bucket
 	if !ok || !okF {
 		s.mutex.Lock()
-		logger.L().Debug("Adding a bucket", helpers.String("bucket", bucket))
 		// Double-check the bucket's existence to ensure another goroutine didn't already create it
 		bucketLock, ok = s.m[bucket]
 		if !ok {
@@ -79,7 +75,6 @@ func shallowCopyMapStringBool(m map[string]bool) map[string]bool {
 }
 
 func (s *InMemoryFileHandler) GetFiles(ctx context.Context, bucket string) (map[string]bool, error) {
-	logger.L().Debug("In GetFiles", helpers.String("bucket", bucket))
 	s.mutex.RLock()
 	bucketLock, ok := s.m[bucket]
 	bucketFiles, okFiles := s.files[bucket]
@@ -91,13 +86,10 @@ func (s *InMemoryFileHandler) GetFiles(ctx context.Context, bucket string) (map[
 
 	bucketLock.RLock()
 	defer bucketLock.RUnlock()
-	logger.L().Debug("Done GetFiles", helpers.String("bucket", bucket))
 
-	c := shallowCopyMapStringBool(bucketFiles)
-	return c, nil
+	return shallowCopyMapStringBool(bucketFiles), nil
 }
 func (s *InMemoryFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
-	logger.L().Debug("In RemoveBucket", helpers.String("bucket", bucket))
 
 	s.mutex.Lock()
 	bucketLock, ok := s.m[bucket]
@@ -109,7 +101,6 @@ func (s *InMemoryFileHandler) RemoveBucket(ctx context.Context, bucket string) e
 	delete(s.m, bucket)
 	delete(s.files, bucket)
 	s.mutex.Unlock()
-	logger.L().Debug("Done RemoveBucket", helpers.String("bucket", bucket))
 
 	return nil
 }

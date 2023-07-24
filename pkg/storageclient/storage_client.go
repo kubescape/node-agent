@@ -112,8 +112,6 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs(ctx context.Context) {
 }
 
 func (sc *StorageK8SAggregatedAPIClient) GetData(ctx context.Context, key string) (any, error) {
-	// _, span := otel.Tracer("").Start(ctx, "StorageK8SAggregatedAPIClient.GetData")
-	// defer span.End()
 
 	SBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3s(KubescapeNamespace).Get(context.TODO(), key, metav1.GetOptions{})
 	if err != nil {
@@ -130,8 +128,6 @@ func (sc *StorageK8SAggregatedAPIClient) GetData(ctx context.Context, key string
 }
 
 func (sc *StorageK8SAggregatedAPIClient) PutData(ctx context.Context, key string, data any) error {
-	// _, span := otel.Tracer("").Start(ctx, "StorageK8SAggregatedAPIClient.PutData")
-	// defer span.End()
 	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3Filtered)
 	if !ok {
 		return fmt.Errorf("failed to update SBOM: SBOM is not in the right form")
@@ -148,8 +144,6 @@ func (sc *StorageK8SAggregatedAPIClient) PutData(ctx context.Context, key string
 }
 
 func (sc *StorageK8SAggregatedAPIClient) PostData(ctx context.Context, data any) error {
-	// _, span := otel.Tracer("").Start(ctx, "StorageK8SAggregatedAPIClient.PostData")
-	// defer span.End()
 	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3Filtered)
 	if !ok {
 		return fmt.Errorf("failed to update SBOM: SBOM is not in the right form")
