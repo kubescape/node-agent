@@ -10,25 +10,24 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 )
 
-const defaultFileListLength = 500
 const initFileListLength = 5000
 
-type SimpleFileHandler struct {
+type InMemoryFileHandler struct {
 	mutex sync.RWMutex
 	m     map[string]*sync.RWMutex
 	files map[string]map[string]bool
 }
 
-var _ filehandler.FileHandler = (*SimpleFileHandler)(nil)
+var _ filehandler.FileHandler = (*InMemoryFileHandler)(nil)
 
-func CreateSimpleFileHandler() (*SimpleFileHandler, error) {
-	return &SimpleFileHandler{
+func CreateInMemoryFileHandler() (*InMemoryFileHandler, error) {
+	return &InMemoryFileHandler{
 		m:     make(map[string]*sync.RWMutex),
-		files: make(map[string]map[string]bool),
+		files: make(map[string]map[string]bool, 20),
 	}, nil
 }
 
-func (s *SimpleFileHandler) AddFile(ctx context.Context, bucket, file string) error {
+func (s *InMemoryFileHandler) AddFile(ctx context.Context, bucket, file string) error {
 
 	// Acquire a read lock first
 	s.mutex.RLock()
@@ -64,7 +63,7 @@ func (s *SimpleFileHandler) AddFile(ctx context.Context, bucket, file string) er
 	return nil
 }
 
-func (s *SimpleFileHandler) Close() {
+func (s *InMemoryFileHandler) Close() {
 	// Nothing to do
 }
 
@@ -79,7 +78,7 @@ func shallowCopyMapStringBool(m map[string]bool) map[string]bool {
 	return mCopy
 }
 
-func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[string]bool, error) {
+func (s *InMemoryFileHandler) GetFiles(ctx context.Context, bucket string) (map[string]bool, error) {
 	logger.L().Debug("In GetFiles", helpers.String("bucket", bucket))
 	s.mutex.RLock()
 	bucketLock, ok := s.m[bucket]
@@ -97,7 +96,7 @@ func (s *SimpleFileHandler) GetFiles(ctx context.Context, bucket string) (map[st
 	c := shallowCopyMapStringBool(bucketFiles)
 	return c, nil
 }
-func (s *SimpleFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
+func (s *InMemoryFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
 	logger.L().Debug("In RemoveBucket", helpers.String("bucket", bucket))
 
 	s.mutex.Lock()
