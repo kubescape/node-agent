@@ -78,31 +78,33 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 		}
 		containerData := containerDataInterface.(watchedContainerData)
 
-		logger.L().Debug("getting files", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID))
-
 		if rm.cfg.EnableRelevancy && afterTimerActionsData.service == RelevantCVEsService {
-			fileList, err := rm.fileHandler.GetFiles(ctx, containerData.k8sContainerID)
-			if err != nil {
-				logger.L().Debug("failed to get file list", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
-				continue
-			}
-			logger.L().Debug("fileList generated", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.String("file list", fmt.Sprintf("%v", fileList)))
+
 			ctxPostSBOM, spanPostSBOM := otel.Tracer("").Start(ctx, "PostFilterSBOM")
-			if err = <-containerData.syncChannel[StepGetSBOM]; err != nil {
+			if err := <-containerData.syncChannel[StepGetSBOM]; err != nil {
 				logger.L().Debug("failed to get SBOM", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 				continue
 			}
 			if containerData.sbomClient == nil {
 				// it is possible that the sbom client was not created yet
-				logger.L().Debug("sbom client not yet created", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
+				logger.L().Debug("sbom client not yet created", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID))
 				continue
 			}
-			if err = containerData.sbomClient.ValidateSBOM(ctx); err != nil {
+			if err := containerData.sbomClient.ValidateSBOM(ctx); err != nil {
 				logger.L().Warning("SBOM is incomplete", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 				containerData.syncChannel[StepValidateSBOM] <- err
 				continue
 			}
+
+			fileList, err := rm.fileHandler.GetFiles(containerData.k8sContainerID)
+			if err != nil {
+				logger.L().Debug("failed to get file list", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
+				continue
+			}
+			logger.L().Debug("fileList generated", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.String("file list", fmt.Sprintf("%v", fileList)))
+
 			if err = containerData.sbomClient.FilterSBOM(ctx, fileList); err != nil {
+				rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
 				ctx, span := otel.Tracer("").Start(ctxPostSBOM, "FilterSBOM")
 				logger.L().Ctx(ctx).Warning("failed to filter SBOM", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 				span.End()
@@ -110,6 +112,7 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 			}
 			filterSBOMKey, err := containerData.instanceID.GetSlug()
 			if err != nil {
+				rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
 				ctx, span := otel.Tracer("").Start(ctxPostSBOM, "filterSBOMKey")
 				logger.L().Ctx(ctx).Warning("failed to get filterSBOMKey for store filter SBOM", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 				span.End()
@@ -118,6 +121,7 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 			// it is safe to use containerData.imageID directly since we needed it to retrieve the SBOM
 			if err = containerData.sbomClient.StoreFilterSBOM(ctx, containerData.imageID, filterSBOMKey); err != nil {
 				if !errors.Is(err, sbom.IsAlreadyExist()) {
+					rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
 					ctx, span := otel.Tracer("").Start(ctxPostSBOM, "StoreFilterSBOM")
 					logger.L().Ctx(ctx).Error("failed to store filtered SBOM", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 					span.End()
@@ -139,7 +143,7 @@ func (rm *RelevancyManager) deleteResources(watchedContainer watchedContainerDat
 	rm.watchedContainers.Delete(containerID)
 
 	// Remove container from the file DB
-	rm.fileHandler.RemoveBucket(context.Background(), containerID)
+	rm.fileHandler.RemoveBucket(containerID)
 }
 
 func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercollection.Container) {
@@ -345,7 +349,7 @@ func (rm *RelevancyManager) ReportContainerTerminated(ctx context.Context, conta
 			logger.L().Debug("container not found in memory", helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
 			return
 		}
-		err := rm.fileHandler.RemoveBucket(ctx, k8sContainerID)
+		err := rm.fileHandler.RemoveBucket(k8sContainerID)
 		if err != nil {
 			logger.L().Error("failed to remove container bucket", helpers.Error(err), helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
 			return
@@ -361,7 +365,7 @@ func (rm *RelevancyManager) ReportFileAccess(ctx context.Context, namespace, pod
 		return
 	}
 	k8sContainerID := utils.CreateK8sContainerID(namespace, pod, container)
-	err := rm.fileHandler.AddFile(ctx, k8sContainerID, file)
+	err := rm.fileHandler.AddFile(k8sContainerID, file)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to add file to container file list", helpers.Error(err), helpers.Interface("k8sContainerID", k8sContainerID), helpers.String("file", file))
 	}

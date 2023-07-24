@@ -1,7 +1,6 @@
 package filehandler
 
 import (
-	"context"
 	"fmt"
 	"node-agent/pkg/filehandler"
 	"sync"
@@ -28,7 +27,7 @@ func CreateInMemoryFileHandler() (*InMemoryFileHandler, error) {
 	}, nil
 }
 
-func (s *InMemoryFileHandler) AddFile(ctx context.Context, bucket, file string) error {
+func (s *InMemoryFileHandler) AddFile(bucket, file string) error {
 	// Acquire a read lock first
 	s.mutex.RLock()
 	bucketFiles, ok := s.buckets[bucket]
@@ -72,7 +71,7 @@ func shallowCopyMapStringBool(m map[string]bool) map[string]bool {
 	return mCopy
 }
 
-func (s *InMemoryFileHandler) GetFiles(ctx context.Context, bucket string) (map[string]bool, error) {
+func (s *InMemoryFileHandler) GetFiles(bucket string) (map[string]bool, error) {
 	s.mutex.RLock()
 	bucketFiles, ok := s.buckets[bucket]
 	s.mutex.RUnlock()
@@ -88,10 +87,41 @@ func (s *InMemoryFileHandler) GetFiles(ctx context.Context, bucket string) (map[
 
 	return copy, nil
 }
-func (s *InMemoryFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
+func (s *InMemoryFileHandler) RemoveBucket(bucket string) error {
 	s.mutex.Lock()
 	delete(s.buckets, bucket)
 	s.mutex.Unlock()
+
+	return nil
+}
+
+func (s *InMemoryFileHandler) AddFiles(bucket string, files map[string]bool) error {
+	// Acquire a read lock first
+	s.mutex.RLock()
+	bucketFiles, ok := s.buckets[bucket]
+	s.mutex.RUnlock()
+
+	// If the bucket doesn't exist, acquire a write lock to create the new bucket
+	if !ok {
+		s.mutex.Lock()
+		// Double-check the bucket's existence to ensure another goroutine didn't already create it
+		bucketFiles, ok = s.buckets[bucket]
+		if !ok {
+			bucketFiles = &filesBucket{
+				lock:  &sync.RWMutex{},
+				files: make(map[string]bool, initFileListLength),
+			}
+			s.buckets[bucket] = bucketFiles
+		}
+		s.mutex.Unlock()
+	}
+
+	// Acquire a write lock if the bucket already exists
+	bucketFiles.lock.Lock()
+	for file := range files {
+		bucketFiles.files[file] = true
+	}
+	bucketFiles.lock.Unlock()
 
 	return nil
 }

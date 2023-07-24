@@ -1,7 +1,6 @@
 package filehandler
 
 import (
-	"context"
 	"fmt"
 	"node-agent/pkg/filehandler"
 
@@ -24,7 +23,7 @@ func CreateBoltFileHandler() (*BoltFileHandler, error) {
 	return &BoltFileHandler{fileDB: db}, nil
 }
 
-func (b BoltFileHandler) AddFile(ctx context.Context, bucket, file string) error {
+func (b BoltFileHandler) AddFile(bucket, file string) error {
 	return b.fileDB.Batch(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
 		if err != nil {
@@ -38,7 +37,7 @@ func (b BoltFileHandler) Close() {
 	_ = b.fileDB.Close()
 }
 
-func (b BoltFileHandler) GetFiles(ctx context.Context, container string) (map[string]bool, error) {
+func (b BoltFileHandler) GetFiles(container string) (map[string]bool, error) {
 	fileList := make(map[string]bool)
 	err := b.fileDB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(container))
@@ -54,7 +53,7 @@ func (b BoltFileHandler) GetFiles(ctx context.Context, container string) (map[st
 	return fileList, err
 }
 
-func (b BoltFileHandler) RemoveBucket(ctx context.Context, bucket string) error {
+func (b BoltFileHandler) RemoveBucket(bucket string) error {
 	return b.fileDB.Update(func(tx *bolt.Tx) error {
 		err := tx.DeleteBucket([]byte(bucket))
 		if err != nil {
@@ -63,4 +62,8 @@ func (b BoltFileHandler) RemoveBucket(ctx context.Context, bucket string) error 
 		logger.L().Debug("deleted file bucket", helpers.String("bucket", bucket))
 		return nil
 	})
+}
+func (b BoltFileHandler) AddFiles(bucket string, files map[string]bool) error {
+	// do nothing
+	return nil
 }
