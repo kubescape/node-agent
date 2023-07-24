@@ -113,6 +113,7 @@ func storeFilteredSBOM(ctx context.Context, containerData watchedContainerData, 
 		logger.L().Ctx(ctx).Warning("SBOM is incomplete", helpers.String("container ID", containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 		containerData.syncChannel[StepValidateSBOM] <- err
 		span.End()
+		return err
 	}
 	if err = containerData.sbomClient.FilterSBOM(ctx, fileList); err != nil {
 		ctx, span := otel.Tracer("").Start(ctxPostSBOM, "FilterSBOM")
