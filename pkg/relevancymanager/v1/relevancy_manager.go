@@ -93,7 +93,6 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 			if err := containerData.sbomClient.ValidateSBOM(ctx); err != nil {
 				logger.L().Warning("SBOM is incomplete", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 				containerData.syncChannel[StepValidateSBOM] <- err
-				continue
 			}
 
 			fileList, err := rm.fileHandler.GetFiles(containerData.k8sContainerID)
