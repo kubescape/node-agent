@@ -29,7 +29,6 @@ func CreateSimpleFileHandler() (*SimpleFileHandler, error) {
 }
 
 func (s *SimpleFileHandler) AddFile(ctx context.Context, bucket, file string) error {
-	// logger.L().Debug("In AddFile", helpers.String("bucket", bucket))
 
 	// Acquire a read lock first
 	s.mutex.RLock()
@@ -61,7 +60,6 @@ func (s *SimpleFileHandler) AddFile(ctx context.Context, bucket, file string) er
 	defer bucketLock.Unlock()
 
 	bucketFiles[file] = true
-	// logger.L().Debug("Done AddFile", helpers.String("bucket", bucket))
 
 	return nil
 }

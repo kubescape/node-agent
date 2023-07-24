@@ -24,6 +24,9 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/spf13/afero"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -87,7 +90,7 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 				rwMutex.Lock()
 			}
 			logger.L().Debug("fileList generated", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.String("file list", fmt.Sprintf("%v", fileList)))
-			// ctxPostSBOM, spanPostSBOM := otel.Tracer("").Start(ctx, "PostFilterSBOM")
+			ctxPostSBOM, spanPostSBOM := otel.Tracer("").Start(ctx, "PostFilterSBOM")
 			if err = <-containerData.syncChannel[StepGetSBOM]; err != nil {
 				logger.L().Debug("failed to get SBOM", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 				if rwMutex != nil {
@@ -104,15 +107,13 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 				continue
 			}
 			if err = containerData.sbomClient.ValidateSBOM(ctx); err != nil {
-				// ctx, span := otel.Tracer("").Start(ctxPostSBOM, "ValidateSBOM")
 				logger.L().Warning("SBOM is incomplete", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 				containerData.syncChannel[StepValidateSBOM] <- err
-				// span.End()
 			}
 			if err = containerData.sbomClient.FilterSBOM(ctx, fileList); err != nil {
-				// ctx, span := otel.Tracer("").Start(ctxPostSBOM, "FilterSBOM")
+				_, span := otel.Tracer("").Start(ctxPostSBOM, "FilterSBOM")
 				logger.L().Warning("failed to filter SBOM", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
-				// span.End()
+				span.End()
 				if rwMutex != nil {
 					rwMutex.Unlock()
 				}
@@ -121,9 +122,9 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 			}
 			filterSBOMKey, err := containerData.instanceID.GetSlug()
 			if err != nil {
-				// ctx, span := otel.Tracer("").Start(ctxPostSBOM, "filterSBOMKey")
+				_, span := otel.Tracer("").Start(ctxPostSBOM, "filterSBOMKey")
 				logger.L().Warning("failed to get filterSBOMKey for store filter SBOM", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
-				// span.End()
+				span.End()
 				if rwMutex != nil {
 					rwMutex.Unlock()
 				}
@@ -132,9 +133,7 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 			// it is safe to use containerData.imageID directly since we needed it to retrieve the SBOM
 			if err = containerData.sbomClient.StoreFilterSBOM(ctx, containerData.imageID, filterSBOMKey); err != nil {
 				if !errors.Is(err, sbom.IsAlreadyExist()) {
-					// ctx, span := otel.Tracer("").Start(ctxPostSBOM, "StoreFilterSBOM")
 					logger.L().Error("failed to store filtered SBOM", helpers.String("container ID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
-					// span.End()
 				}
 				if rwMutex != nil {
 					rwMutex.Unlock()
@@ -147,7 +146,7 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 			}
 
 			logger.L().Info("filtered SBOM has been stored successfully", helpers.String("containerID", afterTimerActionsData.containerID), helpers.String("k8s workload", containerData.k8sContainerID))
-			// spanPostSBOM.End()
+			spanPostSBOM.End()
 		}
 	}
 }
@@ -164,8 +163,8 @@ func (rm *RelevancyManager) deleteResources(watchedContainer watchedContainerDat
 }
 
 func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercollection.Container) {
-	// ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.getSBOM")
-	// defer span.End()
+	ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.getSBOM")
+	defer span.End()
 	// get watchedContainer from map
 	containerDataInterface, exist := rm.watchedContainers.Load(container.ID)
 	if !exist {
@@ -277,8 +276,8 @@ func (rm *RelevancyManager) parsePodData(ctx context.Context, pod *workloadinter
 }
 
 func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
-	// ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.startRelevancyProcess")
-	// defer span.End()
+	ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.startRelevancyProcess")
+	defer span.End()
 
 	watchedContainer := watchedContainerData{
 		snifferTicker: time.NewTicker(rm.cfg.UpdateDataPeriod),
@@ -344,8 +343,8 @@ func (rm *RelevancyManager) waitForTicks(watchedContainer watchedContainerData, 
 
 func (rm *RelevancyManager) ReportContainerStarted(ctx context.Context, container *containercollection.Container) {
 	k8sContainerID := utils.CreateK8sContainerID(container.Namespace, container.Podname, container.Name)
-	// ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.ReportContainerStarted", trace.WithAttributes(attribute.String("containerID", container.ID), attribute.String("k8s workload", k8sContainerID)))
-	// defer span.End()
+	ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.ReportContainerStarted", trace.WithAttributes(attribute.String("containerID", container.ID), attribute.String("k8s workload", k8sContainerID)))
+	defer span.End()
 
 	logger.L().Debug("handleContainerRunningEvent", helpers.Interface("container", container))
 	_, exist := rm.watchedContainers.Load(container.ID)
@@ -359,8 +358,8 @@ func (rm *RelevancyManager) ReportContainerStarted(ctx context.Context, containe
 
 func (rm *RelevancyManager) ReportContainerTerminated(ctx context.Context, container *containercollection.Container) {
 	k8sContainerID := utils.CreateK8sContainerID(container.Namespace, container.Podname, container.Name)
-	// ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.ReportContainerTerminated", trace.WithAttributes(attribute.String("containerID", container.ID), attribute.String("k8s workload", k8sContainerID)))
-	// defer span.End()
+	ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.ReportContainerTerminated", trace.WithAttributes(attribute.String("containerID", container.ID), attribute.String("k8s workload", k8sContainerID)))
+	defer span.End()
 
 	if watchedContainer, ok := rm.watchedContainers.LoadAndDelete(container.ID); ok {
 		data, ok := watchedContainer.(watchedContainerData)
@@ -378,8 +377,6 @@ func (rm *RelevancyManager) ReportContainerTerminated(ctx context.Context, conta
 }
 
 func (rm *RelevancyManager) ReportFileAccess(ctx context.Context, namespace, pod, container, file string) {
-	// ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.ReportFileAccess")
-	// defer span.End()
 	// log accessed files for all containers to avoid race condition
 	// this won't record unnecessary containers as the containerCollection takes care of filtering them
 	if file == "" {
@@ -397,8 +394,8 @@ func (rm *RelevancyManager) SetContainerHandler(containerHandler containerwatche
 }
 
 func (rm *RelevancyManager) StartRelevancyManager(ctx context.Context) {
-	// ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.StartRelevancyManager")
-	// defer span.End()
+	ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.StartRelevancyManager")
+	defer span.End()
 	go func() {
 		_ = rm.afterTimerActions(ctx)
 	}()
