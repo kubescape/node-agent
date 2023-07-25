@@ -23,7 +23,7 @@ var _ filehandler.FileHandler = (*InMemoryFileHandler)(nil)
 
 func CreateInMemoryFileHandler() (*InMemoryFileHandler, error) {
 	return &InMemoryFileHandler{
-		buckets: make(map[string]*filesBucket, 20),
+		buckets: make(map[string]*filesBucket, 10),
 	}, nil
 }
 
