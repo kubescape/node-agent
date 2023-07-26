@@ -36,7 +36,6 @@ type IGContainerWatcher struct {
 	tracerExec          *tracerexec.Tracer
 	tracerOpen          *traceropen.Tracer
 	eventWorkerPool     *workerpool.WorkerPool
-	storageWorkerPool   *workerpool.WorkerPool
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
