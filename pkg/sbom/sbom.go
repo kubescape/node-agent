@@ -6,8 +6,6 @@ import (
 	v1 "node-agent/pkg/sbom/v1"
 	"node-agent/pkg/storageclient"
 
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/spf13/afero"
@@ -58,7 +56,6 @@ func (sc *SBOMStructure) GetSBOM(ctx context.Context, imageTag, imageID string) 
 
 	SBOMKey, err := names.ImageInfoToSlug(imageTag, imageID)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("Failed to create SBOM key", helpers.Error(err), helpers.String("imageTag", imageTag), helpers.String("imageID", imageID))
 		return err
 	}
 

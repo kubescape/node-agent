@@ -23,9 +23,9 @@ import (
 )
 
 const (
-	concurrency   = 4
-	execTraceName = "trace_exec"
-	openTraceName = "trace_open"
+	eventsWorkersConcurrency = 10
+	execTraceName            = "trace_exec"
+	openTraceName            = "trace_open"
 )
 
 type IGContainerWatcher struct {
@@ -35,7 +35,7 @@ type IGContainerWatcher struct {
 	tracerCollection    *tracercollection.TracerCollection
 	tracerExec          *tracerexec.Tracer
 	tracerOpen          *traceropen.Tracer
-	workerPool          *workerpool.WorkerPool
+	eventWorkerPool     *workerpool.WorkerPool
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
@@ -54,7 +54,7 @@ func CreateIGContainerWatcher(k8sClient *k8sinterface.KubernetesApi, relevancyMa
 		k8sClient:           k8sClient,
 		tracerCollection:    tracerCollection,
 		relevancyManager:    relevancyManager,
-		workerPool:          workerpool.New(concurrency),
+		eventWorkerPool:     workerpool.New(eventsWorkersConcurrency),
 	}, nil
 }
 
@@ -118,7 +118,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			if len(event.Args) > 0 {
 				procImageName = event.Args[0]
 			}
-			ch.workerPool.Submit(func() {
+			ch.eventWorkerPool.Submit(func() {
 				ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, procImageName)
 			})
 		}
@@ -135,7 +135,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			return
 		}
 		if event.Ret > -1 {
-			ch.workerPool.Submit(func() {
+			ch.eventWorkerPool.Submit(func() {
 				ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, event.FullPath)
 			})
 		}

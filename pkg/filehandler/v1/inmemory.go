@@ -80,10 +80,10 @@ func (s *InMemoryFileHandler) GetFiles(bucket string) (map[string]bool, error) {
 		return map[string]bool{}, fmt.Errorf("bucket does not exist for container %s", bucket)
 	}
 
-	bucketFiles.lock.RLock()
+	bucketFiles.lock.Lock()
 	copy := shallowCopyMapStringBool(bucketFiles.files)
 	bucketFiles.files = make(map[string]bool, updateFileListLength)
-	bucketFiles.lock.RUnlock()
+	bucketFiles.lock.Unlock()
 
 	return copy, nil
 }
