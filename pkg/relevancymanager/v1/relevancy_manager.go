@@ -23,7 +23,6 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/spf13/afero"
 	"go.opentelemetry.io/otel"
@@ -82,7 +81,7 @@ func (rm *RelevancyManager) handleRelevancy(ctx context.Context, containerData w
 	defer spanPostSBOM.End()
 
 	if err := containerData.sbomClient.ValidateSBOM(ctx); err != nil {
-		logger.L().Debug("SBOM is incomplete", helpers.String("container ID", containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
+		logger.L().Info("SBOM is incomplete", helpers.String("container ID", containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 		containerData.syncChannel[StepValidateSBOM] <- err
 	}
 
@@ -202,8 +201,8 @@ func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercol
 	}
 	workload := wl.(*workloadinterface.Workload)
 	imageID, imageTag, parentWlid, instanceID, err := rm.parsePodData(ctx, workload, container)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to parse pod data", helpers.Error(err), helpers.String("namespace", container.Namespace), helpers.String("Pod name", container.Podname))
+	// This behavior will happen when the running container is an initContainer
+	if err != nil || imageID == "" || imageTag == "" || parentWlid == "" || instanceID == nil {
 		watchedContainer.syncChannel[StepGetSBOM] <- err
 		return
 	}
@@ -211,19 +210,16 @@ func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercol
 	sbomClient := sbom.CreateSBOMStorageClient(rm.storageClient, parentWlid, instanceID, rm.sbomFs)
 
 	// get SBOM
-	if err := sbomClient.GetSBOM(ctx, imageTag, imageID); err != nil {
-		if errors.Is(err, names.ErrInvalidSlug) {
-			logger.L().Ctx(ctx).Error("failed to get SBOM", helpers.Error(err), helpers.String("wlid", parentWlid), helpers.String("pod name", container.Podname), helpers.String("imageTag", imageTag), helpers.String("imageID", imageID))
-		}
-		watchedContainer.syncChannel[StepGetSBOM] <- err
-	}
+	err = sbomClient.GetSBOM(ctx, imageTag, imageID)
 
 	// save watchedContainer with new fields
 	watchedContainer.imageID = imageID
 	watchedContainer.instanceID = instanceID
 	watchedContainer.sbomClient = sbomClient
 	rm.watchedContainers.Store(container.ID, watchedContainer)
-	// notify the channel
+
+	// notify the channel. This call must be at the end of the function as it will unblock the waitForTicks function
+	watchedContainer.syncChannel[StepGetSBOM] <- err
 }
 
 func (rm *RelevancyManager) parsePodData(ctx context.Context, pod *workloadinterface.Workload, container *containercollection.Container) (string, string, string, instanceidhandler.IInstanceID, error) {
