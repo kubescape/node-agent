@@ -168,7 +168,6 @@ func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercol
 	// get watchedContainer from map
 	containerDataInterface, exist := rm.watchedContainers.Load(container.ID)
 	if !exist {
-		logger.L().Error("getSBOM: failed to get container data of ContainerID, not exist in memory", helpers.String("container ID", container.ID))
 		return
 	}
 	watchedContainer := containerDataInterface.(watchedContainerData)
@@ -182,7 +181,6 @@ func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercol
 	// get watchedContainer from map
 	containerDataInterface, exist = rm.watchedContainers.Load(container.ID)
 	if !exist {
-		logger.L().Error("getSBOM: failed to get container data of ContainerID, not exist in memory", helpers.String("container ID", container.ID))
 		return
 	}
 	watchedContainer = containerDataInterface.(watchedContainerData)
