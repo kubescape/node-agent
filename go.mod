@@ -9,7 +9,7 @@ require (
 	github.com/gammazero/workerpool v1.1.3
 	github.com/inspektor-gadget/inspektor-gadget v0.18.0
 	github.com/kubescape/go-logger v0.0.13
-	github.com/kubescape/k8s-interface v0.0.130
+	github.com/kubescape/k8s-interface v0.0.134
 	github.com/kubescape/storage v0.0.8
 	github.com/spf13/afero v1.9.5
 	github.com/spf13/viper v1.16.0
