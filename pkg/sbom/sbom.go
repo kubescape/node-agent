@@ -59,7 +59,7 @@ func (sc *SBOMStructure) GetSBOM(ctx context.Context, imageTag, imageID string) 
 		return err
 	}
 
-	SBOM, err := sc.storageClient.client.GetData(ctx, SBOMKey)
+	SBOM, err := sc.storageClient.client.GetData(SBOMKey)
 	if err != nil {
 		return err
 	}
@@ -74,20 +74,20 @@ func (sc *SBOMStructure) IsSBOMAlreadyExist() bool {
 	return sc.SBOMData.IsSBOMAlreadyExist()
 }
 
-func (sc *SBOMStructure) FilterSBOM(ctx context.Context, sbomFileRelevantMap map[string]bool) error {
-	return sc.SBOMData.FilterSBOM(ctx, sbomFileRelevantMap)
+func (sc *SBOMStructure) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
+	return sc.SBOMData.FilterSBOM(sbomFileRelevantMap)
 }
 
-func (sc *SBOMStructure) StoreFilterSBOM(ctx context.Context, imageID, instanceID string) error {
+func (sc *SBOMStructure) StoreFilterSBOM(imageID, instanceID string) error {
 	if sc.firstReport || sc.SBOMData.IsNewRelevantSBOMDataExist() {
 		sc.SBOMData.SetFilteredSBOMName(instanceID)
-		sc.SBOMData.StoreMetadata(ctx, sc.wlid, imageID, sc.instanceID)
+		sc.SBOMData.StoreMetadata(sc.wlid, imageID, sc.instanceID)
 		data := sc.SBOMData.GetFilterSBOMData()
-		err := sc.storageClient.client.PostData(ctx, data)
+		err := sc.storageClient.client.PostData(data)
 		if err != nil {
 			if storageclient.IsAlreadyExist(err) {
 				data = sc.SBOMData.GetFilterSBOMData()
-				err = sc.storageClient.client.PutData(ctx, instanceID, data)
+				err = sc.storageClient.client.PutData(instanceID, data)
 				if err != nil {
 					return err
 				}

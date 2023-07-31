@@ -27,7 +27,7 @@ func CreateInMemoryFileHandler() (*InMemoryFileHandler, error) {
 	}, nil
 }
 
-func (s *InMemoryFileHandler) AddFile(bucket, file string) error {
+func (s *InMemoryFileHandler) AddFile(bucket, file string) {
 	// Acquire a read lock first
 	s.mutex.RLock()
 	bucketFiles, ok := s.buckets[bucket]
@@ -52,8 +52,6 @@ func (s *InMemoryFileHandler) AddFile(bucket, file string) error {
 	bucketFiles.lock.Lock()
 	bucketFiles.files[file] = true
 	bucketFiles.lock.Unlock()
-
-	return nil
 }
 
 func (s *InMemoryFileHandler) Close() {
@@ -81,11 +79,11 @@ func (s *InMemoryFileHandler) GetFiles(bucket string) (map[string]bool, error) {
 	}
 
 	bucketFiles.lock.Lock()
-	copy := shallowCopyMapStringBool(bucketFiles.files)
+	shallow := shallowCopyMapStringBool(bucketFiles.files)
 	bucketFiles.files = make(map[string]bool, updateFileListLength)
 	bucketFiles.lock.Unlock()
 
-	return copy, nil
+	return shallow, nil
 }
 func (s *InMemoryFileHandler) RemoveBucket(bucket string) error {
 	s.mutex.Lock()

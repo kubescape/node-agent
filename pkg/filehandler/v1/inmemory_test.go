@@ -14,9 +14,8 @@ func TestAddFile(t *testing.T) {
 		file   string
 	}
 	tests := []struct {
-		name    string
-		args    args
-		wantErr assert.ErrorAssertionFunc
+		name string
+		args args
 	}{
 		{
 			"Add a file to an empty bucket",
@@ -24,7 +23,6 @@ func TestAddFile(t *testing.T) {
 				bucket: "testBucket1",
 				file:   "testFile1",
 			},
-			assert.NoError,
 		},
 		{
 			"Add a file to a non-empty bucket",
@@ -32,7 +30,6 @@ func TestAddFile(t *testing.T) {
 				bucket: "testBucket1",
 				file:   "testFile2",
 			},
-			assert.NoError,
 		},
 	}
 
@@ -40,11 +37,7 @@ func TestAddFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := fileHandler.AddFile(tt.args.bucket, tt.args.file)
-
-			if !tt.wantErr(t, err) {
-				return
-			}
+			fileHandler.AddFile(tt.args.bucket, tt.args.file)
 
 			// Assert that the file exists in the bucket
 			files, _ := fileHandler.GetFiles(tt.args.bucket)
@@ -61,8 +54,7 @@ func TestAddFile(t *testing.T) {
 		for i := 0; i < routines; i++ {
 			go func(id int) {
 				defer wg.Done()
-				err := fileHandler.AddFile("concurrentBucket", fmt.Sprintf("testFile%d", id))
-				assert.NoError(t, err)
+				fileHandler.AddFile("concurrentBucket", fmt.Sprintf("testFile%d", id))
 			}(i)
 		}
 		wg.Wait()
@@ -328,15 +320,15 @@ func Test_shallowCopyMapStringBool(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			copy := shallowCopyMapStringBool(tt.input)
+			shallow := shallowCopyMapStringBool(tt.input)
 
 			// Assert maps are equal
-			assert.Equal(t, tt.want, copy)
+			assert.Equal(t, tt.want, shallow)
 
 			// If input map isn't nil, alter the copy and ensure original remains unchanged
 			if tt.input != nil {
-				copy["newKey"] = true
-				assert.NotEqual(t, tt.input, copy)
+				shallow["newKey"] = true
+				assert.NotEqual(t, tt.input, shallow)
 			}
 		})
 	}

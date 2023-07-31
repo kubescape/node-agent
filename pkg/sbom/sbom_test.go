@@ -24,7 +24,7 @@ func TestFilterSBOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to get sbom, %v", err)
 	}
-	err = SBOMClient.FilterSBOM(context.TODO(), map[string]bool{
+	err = SBOMClient.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
 	})
 	if err != nil {
@@ -39,13 +39,13 @@ func TestStoreFilterSBOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to get sbom")
 	}
-	err = SBOMClient.FilterSBOM(context.TODO(), map[string]bool{
+	err = SBOMClient.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
 	})
 	if err != nil {
 		t.Fatalf("fail to filter sbom")
 	}
-	err = SBOMClient.StoreFilterSBOM(context.TODO(), "", "anyInstanceID")
+	err = SBOMClient.StoreFilterSBOM("", "anyInstanceID")
 	if err != nil {
 		t.Fatalf("fail to store filter sbom")
 	}
@@ -58,13 +58,13 @@ func TestStoreFilterSBOMFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to get sbom")
 	}
-	err = SBOMClient.FilterSBOM(context.TODO(), map[string]bool{
+	err = SBOMClient.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
 	})
 	if err != nil {
 		t.Fatalf("fail to filter sbom")
 	}
-	err = SBOMClient.StoreFilterSBOM(context.TODO(), "", "anyInstanceID")
+	err = SBOMClient.StoreFilterSBOM("", "anyInstanceID")
 	if err == nil {
 		t.Fatalf("StoreFilterSBOM should fail")
 	}

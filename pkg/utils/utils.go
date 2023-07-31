@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"fmt"
 	"math/rand"
 	"path/filepath"
 	"runtime"
@@ -47,7 +46,7 @@ func CurrentDir() string {
 }
 
 func CreateK8sContainerID(namespaceName string, podName string, containerName string) string {
-	return fmt.Sprintf("%s/%s/%s", namespaceName, podName, containerName)
+	return strings.Join([]string{namespaceName, podName, containerName}, "/")
 }
 
 // RandomSleep sleeps between min and max seconds

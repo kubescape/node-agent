@@ -23,14 +23,17 @@ func CreateBoltFileHandler() (*BoltFileHandler, error) {
 	return &BoltFileHandler{fileDB: db}, nil
 }
 
-func (b BoltFileHandler) AddFile(bucket, file string) error {
-	return b.fileDB.Batch(func(tx *bolt.Tx) error {
+func (b BoltFileHandler) AddFile(bucket, file string) {
+	err := b.fileDB.Batch(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
 		if err != nil {
 			return err
 		}
 		return b.Put([]byte(file), nil)
 	})
+	if err != nil {
+		logger.L().Error("failed to add file to container file list", helpers.Error(err), helpers.Interface("bucket", bucket), helpers.String("file", file))
+	}
 }
 
 func (b BoltFileHandler) Close() {
@@ -63,7 +66,7 @@ func (b BoltFileHandler) RemoveBucket(bucket string) error {
 		return nil
 	})
 }
-func (b BoltFileHandler) AddFiles(bucket string, files map[string]bool) error {
+func (b BoltFileHandler) AddFiles(_ string, _ map[string]bool) error {
 	// do nothing
 	return nil
 }

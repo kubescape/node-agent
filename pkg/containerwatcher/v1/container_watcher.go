@@ -9,7 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/gammazero/workerpool"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -23,9 +22,8 @@ import (
 )
 
 const (
-	eventsWorkersConcurrency = 10
-	execTraceName            = "trace_exec"
-	openTraceName            = "trace_open"
+	execTraceName = "trace_exec"
+	openTraceName = "trace_open"
 )
 
 type IGContainerWatcher struct {
@@ -35,7 +33,6 @@ type IGContainerWatcher struct {
 	tracerCollection    *tracercollection.TracerCollection
 	tracerExec          *tracerexec.Tracer
 	tracerOpen          *traceropen.Tracer
-	eventWorkerPool     *workerpool.WorkerPool
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
@@ -54,7 +51,6 @@ func CreateIGContainerWatcher(k8sClient *k8sinterface.KubernetesApi, relevancyMa
 		k8sClient:           k8sClient,
 		tracerCollection:    tracerCollection,
 		relevancyManager:    relevancyManager,
-		eventWorkerPool:     workerpool.New(eventsWorkersConcurrency),
 	}, nil
 }
 
@@ -118,9 +114,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			if len(event.Args) > 0 {
 				procImageName = event.Args[0]
 			}
-			ch.eventWorkerPool.Submit(func() {
-				ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, procImageName)
-			})
+			ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, procImageName)
 		}
 	}
 	if err := ch.tracerCollection.AddTracer(execTraceName, containerSelector); err != nil {
@@ -135,9 +129,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			return
 		}
 		if event.Ret > -1 {
-			ch.eventWorkerPool.Submit(func() {
-				ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, event.FullPath)
-			})
+			ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, event.Path)
 		}
 	}
 	if err := ch.tracerCollection.AddTracer(openTraceName, containerSelector); err != nil {
@@ -195,7 +187,7 @@ func (ch *IGContainerWatcher) Stop() {
 	ch.tracerCollection.Close()
 }
 
-func (ch *IGContainerWatcher) UnregisterContainer(ctx context.Context, container *containercollection.Container) {
+func (ch *IGContainerWatcher) UnregisterContainer(container *containercollection.Container) {
 
 	event := containercollection.PubSubEvent{
 		Timestamp: time.Now().Format(time.RFC3339),

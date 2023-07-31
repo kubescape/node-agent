@@ -6,7 +6,6 @@ require (
 	github.com/armosec/utils-k8s-go v0.0.16
 	github.com/cilium/ebpf v0.10.0
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
-	github.com/gammazero/workerpool v1.1.3
 	github.com/inspektor-gadget/inspektor-gadget v0.18.0
 	github.com/kubescape/go-logger v0.0.13
 	github.com/kubescape/k8s-interface v0.0.134
@@ -48,7 +47,6 @@ require (
 	github.com/fatih/color v1.15.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
-	github.com/gammazero/deque v0.2.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect

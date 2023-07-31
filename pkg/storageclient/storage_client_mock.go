@@ -42,16 +42,16 @@ func CreateSBOMStorageHttpClientMock() *StorageHttpClientMock {
 	}
 }
 
-func (sc *StorageHttpClientMock) GetData(_ context.Context, key string) (any, error) {
+func (sc *StorageHttpClientMock) GetData(key string) (any, error) {
 	if key == NGINX_KEY {
 		return sc.nginxSBOMSpdxBytes, nil
 	}
 	return nil, nil
 }
-func (sc *StorageHttpClientMock) PutData(_ context.Context, _ string, _ any) error {
+func (sc *StorageHttpClientMock) PutData(_ string, _ any) error {
 	return nil
 }
-func (sc *StorageHttpClientMock) PostData(_ context.Context, _ any) error {
+func (sc *StorageHttpClientMock) PostData(_ any) error {
 	return nil
 }
 func (sc *StorageHttpClientMock) GetResourceVersion(_ context.Context, _ string) string {
@@ -75,18 +75,18 @@ func CreateStorageHttpClientFailureMock() *StorageHttpClientFailureMock {
 	}
 }
 
-func (sc *StorageHttpClientFailureMock) GetData(_ context.Context, key string) (any, error) {
+func (sc *StorageHttpClientFailureMock) GetData(key string) (any, error) {
 	if key == NGINX_KEY {
 		return sc.nginxSBOMSpdxBytes, nil
 	}
 	return nil, nil
 }
 
-func (sc *StorageHttpClientFailureMock) PutData(_ context.Context, _ string, _ any) error {
+func (sc *StorageHttpClientFailureMock) PutData(_ string, _ any) error {
 	return fmt.Errorf("any")
 }
 
-func (sc *StorageHttpClientFailureMock) PostData(_ context.Context, _ any) error {
+func (sc *StorageHttpClientFailureMock) PostData(_ any) error {
 	return fmt.Errorf("error already exist")
 }
 func (sc *StorageHttpClientFailureMock) IsAlreadyExist(_ error) bool {

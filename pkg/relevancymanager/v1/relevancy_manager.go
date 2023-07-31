@@ -86,8 +86,8 @@ func (rm *RelevancyManager) handleRelevancy(ctx context.Context, containerData w
 	}
 	logger.L().Debug("fileList generated", helpers.String("container ID", containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.String("file list", fmt.Sprintf("%v", fileList)))
 
-	if err = containerData.sbomClient.FilterSBOM(ctx, fileList); err != nil {
-		rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
+	if err = containerData.sbomClient.FilterSBOM(fileList); err != nil {
+		_ = rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
 		ctx, span := otel.Tracer("").Start(ctxPostSBOM, "FilterSBOM")
 		defer span.End()
 		logger.L().Ctx(ctx).Warning("failed to filter SBOM", helpers.String("container ID", containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
@@ -95,16 +95,16 @@ func (rm *RelevancyManager) handleRelevancy(ctx context.Context, containerData w
 	}
 	filterSBOMKey, err := containerData.instanceID.GetSlug()
 	if err != nil {
-		rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
+		_ = rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
 		ctx, span := otel.Tracer("").Start(ctxPostSBOM, "filterSBOMKey")
 		defer span.End()
 		logger.L().Ctx(ctx).Warning("failed to get filterSBOMKey for store filter SBOM", helpers.String("container ID", containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 		return
 	}
 	// it is safe to use containerData.imageID directly since we needed it to retrieve the SBOM
-	if err = containerData.sbomClient.StoreFilterSBOM(ctx, containerData.imageID, filterSBOMKey); err != nil {
+	if err = containerData.sbomClient.StoreFilterSBOM(containerData.imageID, filterSBOMKey); err != nil {
 		if !errors.Is(err, sbom.IsAlreadyExist()) {
-			rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
+			_ = rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
 			ctx, span := otel.Tracer("").Start(ctxPostSBOM, "StoreFilterSBOM")
 			defer span.End()
 			logger.L().Ctx(ctx).Error("failed to store filtered SBOM", helpers.String("container ID", containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
@@ -150,7 +150,7 @@ func (rm *RelevancyManager) deleteResources(watchedContainer watchedContainerDat
 	rm.watchedContainers.Delete(containerID)
 
 	// Remove container from the file DB
-	rm.fileHandler.RemoveBucket(containerID)
+	_ = rm.fileHandler.RemoveBucket(containerID)
 }
 
 func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercollection.Container) {
@@ -189,7 +189,7 @@ func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercol
 		return
 	}
 	workload := wl.(*workloadinterface.Workload)
-	imageID, imageTag, parentWlid, instanceID, err := rm.parsePodData(ctx, workload, container)
+	imageID, imageTag, parentWlid, instanceID, err := rm.parsePodData(workload, container)
 	// This behavior will happen when the running container is an initContainer
 	if err != nil || imageID == "" || imageTag == "" || parentWlid == "" || instanceID == nil {
 		watchedContainer.syncChannel[StepGetSBOM] <- err
@@ -211,7 +211,7 @@ func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercol
 	watchedContainer.syncChannel[StepGetSBOM] <- err
 }
 
-func (rm *RelevancyManager) parsePodData(ctx context.Context, pod *workloadinterface.Workload, container *containercollection.Container) (string, string, string, instanceidhandler.IInstanceID, error) {
+func (rm *RelevancyManager) parsePodData(pod *workloadinterface.Workload, container *containercollection.Container) (string, string, string, instanceidhandler.IInstanceID, error) {
 
 	kind, name, err := rm.k8sClient.CalculateWorkloadParentRecursive(pod)
 	if err != nil {
@@ -287,7 +287,7 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 		logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
 	}
 
-	rm.containerHandler.UnregisterContainer(ctx, container)
+	rm.containerHandler.UnregisterContainer(container)
 	rm.deleteResources(watchedContainer, container.ID)
 }
 func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer watchedContainerData) error {
@@ -348,7 +348,7 @@ func (rm *RelevancyManager) ReportContainerStarted(ctx context.Context, containe
 
 func (rm *RelevancyManager) ReportContainerTerminated(ctx context.Context, container *containercollection.Container) {
 	k8sContainerID := utils.CreateK8sContainerID(container.Namespace, container.Podname, container.Name)
-	ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.ReportContainerTerminated", trace.WithAttributes(attribute.String("containerID", container.ID), attribute.String("k8s workload", k8sContainerID)))
+	_, span := otel.Tracer("").Start(ctx, "RelevancyManager.ReportContainerTerminated", trace.WithAttributes(attribute.String("containerID", container.ID), attribute.String("k8s workload", k8sContainerID)))
 	defer span.End()
 
 	if watchedContainer, ok := rm.watchedContainers.LoadAndDelete(container.ID); ok {
@@ -366,17 +366,14 @@ func (rm *RelevancyManager) ReportContainerTerminated(ctx context.Context, conta
 	}
 }
 
-func (rm *RelevancyManager) ReportFileAccess(ctx context.Context, namespace, pod, container, file string) {
+func (rm *RelevancyManager) ReportFileAccess(_ context.Context, namespace, pod, container, file string) {
 	// log accessed files for all containers to avoid race condition
 	// this won't record unnecessary containers as the containerCollection takes care of filtering them
 	if file == "" {
 		return
 	}
 	k8sContainerID := utils.CreateK8sContainerID(namespace, pod, container)
-	err := rm.fileHandler.AddFile(k8sContainerID, file)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to add file to container file list", helpers.Error(err), helpers.Interface("k8sContainerID", k8sContainerID), helpers.String("file", file))
-	}
+	rm.fileHandler.AddFile(k8sContainerID, file)
 }
 
 func (rm *RelevancyManager) SetContainerHandler(containerHandler containerwatcher.ContainerWatcher) {

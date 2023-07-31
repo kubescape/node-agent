@@ -42,7 +42,7 @@ type StorageK8SAggregatedAPIClient struct {
 
 var _ StorageClient = (*StorageK8SAggregatedAPIClient)(nil)
 
-func CreateSBOMStorageK8SAggregatedAPIClient(ctx context.Context) (*StorageK8SAggregatedAPIClient, error) {
+func CreateSBOMStorageK8SAggregatedAPIClient() (*StorageK8SAggregatedAPIClient, error) {
 	var config *rest.Config
 	kubeconfig := os.Getenv(KubeConfig)
 	// use the current context in kubeconfig
@@ -63,12 +63,12 @@ func CreateSBOMStorageK8SAggregatedAPIClient(ctx context.Context) (*StorageK8SAg
 		readySBOMs: sync.Map{},
 	}
 
-	go storageClient.watchForSBOMs(ctx)
+	go storageClient.watchForSBOMs()
 
 	return storageClient, nil
 }
 
-func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs(ctx context.Context) {
+func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs() {
 	for {
 		watcher, err := sc.clientset.SpdxV1beta1().SBOMSummaries(KubescapeNamespace).Watch(context.TODO(), metav1.ListOptions{})
 		if err != nil {
@@ -112,7 +112,7 @@ func (sc *StorageK8SAggregatedAPIClient) watchForSBOMs(ctx context.Context) {
 	}
 }
 
-func (sc *StorageK8SAggregatedAPIClient) GetData(ctx context.Context, key string) (any, error) {
+func (sc *StorageK8SAggregatedAPIClient) GetData(key string) (any, error) {
 
 	SBOM, err := sc.clientset.SpdxV1beta1().SBOMSPDXv2p3s(KubescapeNamespace).Get(context.TODO(), key, metav1.GetOptions{})
 	if err != nil {
@@ -128,7 +128,7 @@ func (sc *StorageK8SAggregatedAPIClient) GetData(ctx context.Context, key string
 	return SBOM, nil
 }
 
-func (sc *StorageK8SAggregatedAPIClient) PutData(ctx context.Context, key string, data any) error {
+func (sc *StorageK8SAggregatedAPIClient) PutData(key string, data any) error {
 	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3Filtered)
 	if !ok {
 		return fmt.Errorf("failed to update SBOM: SBOM is not in the right form")
@@ -144,7 +144,7 @@ func (sc *StorageK8SAggregatedAPIClient) PutData(ctx context.Context, key string
 	return nil
 }
 
-func (sc *StorageK8SAggregatedAPIClient) PostData(ctx context.Context, data any) error {
+func (sc *StorageK8SAggregatedAPIClient) PostData(data any) error {
 	SBOM, ok := data.(*spdxv1beta1.SBOMSPDXv2p3Filtered)
 	if !ok {
 		return fmt.Errorf("failed to update SBOM: SBOM is not in the right form")

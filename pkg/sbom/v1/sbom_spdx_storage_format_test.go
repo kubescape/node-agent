@@ -43,13 +43,13 @@ func TestStoreLabels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM(context.TODO(), map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
 	})
 	if err != nil {
 		t.Fatalf("fail to filter SBOM, err: %v", err)
 	}
-	SBOMData.StoreMetadata(context.TODO(), "wlid://cluster-test/namespace-aaa/deplo#*?yment/redis", "e41ced4a64bd065a1a8b79dbc5832b744a3ad82e7fcbe9fb2ebdd1267f972775", instanceID)
+	SBOMData.StoreMetadata("wlid://cluster-test/namespace-aaa/deplo#*?yment/redis", "e41ced4a64bd065a1a8b79dbc5832b744a3ad82e7fcbe9fb2ebdd1267f972775", instanceID)
 	for i := range SBOMData.filteredSpdxData.Labels {
 		switch i {
 		case instanceidhandlerV1.NamespaceMetadataKey:
@@ -90,12 +90,12 @@ func TestGetSBOMData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	_, err = SBOMData.getSBOMDataSPDXFormat(context.TODO())
+	_, err = SBOMData.getSBOMDataSPDXFormat()
 	if err != nil {
 		t.Fatalf("fail to get SBOM, err: %v", err)
 	}
 	SBOMData.spdxDataPath = "123"
-	err = SBOMData.FilterSBOM(context.TODO(), map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
 	})
 	if err == nil {
@@ -122,7 +122,7 @@ func TestSaveSBOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to unmarshal SBOM file, err: %v", err)
 	}
-	err = SBOMData.saveSBOM(context.TODO(), &SBOMDataMock)
+	err = SBOMData.saveSBOM(&SBOMDataMock)
 	if err != nil {
 		t.Fatalf("fail to save SBOM file, err: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestFilterSBOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM(context.TODO(), map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
 	})
 	if err != nil {
@@ -262,7 +262,7 @@ func TestIsNewRelevantSBOMDataExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM(context.TODO(), map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
 	})
 	if err != nil {
@@ -295,7 +295,7 @@ func TestIsSBOMAlreadyExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM(context.TODO(), map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
 	})
 	if err != nil {
@@ -328,7 +328,7 @@ func TestAddResourceVersionIfNeeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM(context.TODO(), map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
 	})
 	if err != nil {
@@ -358,7 +358,7 @@ func TestStoreFilteredSBOMName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM(context.TODO(), map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf": true,
 	})
 	if err != nil {
@@ -393,14 +393,14 @@ func TestStoreMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
-	err = SBOMData.FilterSBOM(context.TODO(), map[string]bool{
+	err = SBOMData.FilterSBOM(map[string]bool{
 		"/usr/share/adduser/adduser.conf":  true,
 		"/usr/share/doc/adduser/copyright": true,
 	})
 	if err != nil {
 		t.Fatalf("fail to filter SBOM, err: %v", err)
 	}
-	SBOMData.StoreMetadata(context.TODO(), "wlid://cluster-test/namespace-aaa/deployment/redis", "e41ced4a64bd065a1a8b79dbc5832b744a3ad82e7fcbe9fb2ebdd1267f972775", instanceID)
+	SBOMData.StoreMetadata("wlid://cluster-test/namespace-aaa/deployment/redis", "e41ced4a64bd065a1a8b79dbc5832b744a3ad82e7fcbe9fb2ebdd1267f972775", instanceID)
 	for i := range SBOMData.filteredSpdxData.Labels {
 		switch i {
 		case instanceidhandlerV1.NamespaceMetadataKey:

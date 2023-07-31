@@ -92,7 +92,7 @@ func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID, sbo
 	}
 }
 
-func (sc *SBOMData) saveSBOM(ctx context.Context, spdxData *spdxv1beta1.SBOMSPDXv2p3) error {
+func (sc *SBOMData) saveSBOM(spdxData *spdxv1beta1.SBOMSPDXv2p3) error {
 	logger.L().Debug("saving SBOM", helpers.String("path", sc.spdxDataPath))
 
 	data, err := json.Marshal(spdxData)
@@ -122,14 +122,14 @@ func parsedFilesBySourceInfo(packageSourceInfo string) []string {
 }
 
 func (sc *SBOMData) StoreSBOM(ctx context.Context, sbomData any) error {
-	ctx, span := otel.Tracer("").Start(ctx, "SBOMData.StoreSBOM")
+	_, span := otel.Tracer("").Start(ctx, "SBOMData.StoreSBOM")
 	defer span.End()
 	spdxData, ok := sbomData.(*spdxv1beta1.SBOMSPDXv2p3)
 	if !ok {
 		return fmt.Errorf("storage format: StoreSBOM: SBOM data format is not supported")
 	}
 
-	err := sc.saveSBOM(ctx, spdxData)
+	err := sc.saveSBOM(spdxData)
 	if err != nil {
 		return err
 	}
@@ -173,7 +173,7 @@ func (sc *SBOMData) StoreSBOM(ctx context.Context, sbomData any) error {
 	return nil
 }
 
-func (sc *SBOMData) getSBOMDataSPDXFormat(ctx context.Context) (*spdxv1beta1.SBOMSPDXv2p3, error) {
+func (sc *SBOMData) getSBOMDataSPDXFormat() (*spdxv1beta1.SBOMSPDXv2p3, error) {
 
 	bytes, err := afero.ReadFile(sc.sbomFs, sc.spdxDataPath)
 	if err != nil {
@@ -189,14 +189,14 @@ func (sc *SBOMData) getSBOMDataSPDXFormat(ctx context.Context) (*spdxv1beta1.SBO
 	return &spdxData, nil
 }
 
-func (sc *SBOMData) FilterSBOM(ctx context.Context, sbomFileRelevantMap map[string]bool) error {
+func (sc *SBOMData) FilterSBOM(sbomFileRelevantMap map[string]bool) error {
 
 	if sc.status == instanceidhandlerV1.Incomplete {
 		return nil
 	}
 	sc.newRelevantData = false
 
-	spdxData, err := sc.getSBOMDataSPDXFormat(ctx)
+	spdxData, err := sc.getSBOMDataSPDXFormat()
 	if err != nil {
 		return err
 	}
@@ -312,7 +312,7 @@ func (sc *SBOMData) storeAnnotations(wlidData, imageID string, instanceID instan
 	sc.filteredSpdxData.ObjectMeta.SetAnnotations(annotations)
 }
 
-func (sc *SBOMData) StoreMetadata(ctx context.Context, wlidData, imageID string, instanceID instanceidhandler.IInstanceID) {
+func (sc *SBOMData) StoreMetadata(wlidData, imageID string, instanceID instanceidhandler.IInstanceID) {
 	sc.storeLabels(wlidData, instanceID)
 	sc.storeAnnotations(wlidData, imageID, instanceID)
 }
@@ -325,9 +325,9 @@ func (sc *SBOMData) CleanResources() {
 }
 
 func (sc *SBOMData) ValidateSBOM(ctx context.Context) error {
-	ctx, span := otel.Tracer("").Start(ctx, "SBOMData.ValidateSBOM")
+	_, span := otel.Tracer("").Start(ctx, "SBOMData.ValidateSBOM")
 	defer span.End()
-	sbom, err := sc.getSBOMDataSPDXFormat(ctx)
+	sbom, err := sc.getSBOMDataSPDXFormat()
 	if err != nil {
 		logger.L().Debug("fail to validate SBOM", helpers.String("file name", sc.spdxDataPath), helpers.Error(err))
 		return nil
