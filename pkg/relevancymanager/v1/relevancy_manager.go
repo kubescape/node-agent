@@ -23,6 +23,7 @@ import (
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/panjf2000/ants/v2"
 	"github.com/spf13/afero"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -30,10 +31,11 @@ import (
 )
 
 const (
-	RelevantCVEsService = "RelevantCVEsService"
-	StepGetSBOM         = "StepGetSBOM"
-	StepValidateSBOM    = "StepValidateSBOM"
-	StepEventAggregator = "StepEventAggregator"
+	eventsWorkersConcurrency = 10
+	RelevantCVEsService      = "RelevantCVEsService"
+	StepGetSBOM              = "StepGetSBOM"
+	StepValidateSBOM         = "StepValidateSBOM"
+	StepEventAggregator      = "StepEventAggregator"
 )
 
 var (
@@ -51,11 +53,19 @@ type RelevancyManager struct {
 	sbomFs            afero.Fs
 	storageClient     storageclient.StorageClient
 	watchedContainers sync.Map
+	eventWorkerPool   *ants.PoolWithFunc
 }
 
 var _ relevancymanager.RelevancyManagerClient = (*RelevancyManager)(nil)
 
 func CreateRelevancyManager(cfg config.Config, clusterName string, fileHandler filehandler.FileHandler, k8sClient *k8sinterface.KubernetesApi, sbomFs afero.Fs, storageClient storageclient.StorageClient) (*RelevancyManager, error) {
+	pool, err := ants.NewPoolWithFunc(eventsWorkersConcurrency, func(i interface{}) {
+		s := i.([2]string)
+		fileHandler.AddFile(s[0], s[1])
+	})
+	if err != nil {
+		return nil, err
+	}
 	return &RelevancyManager{
 		afterTimerActionsChannel: make(chan afterTimerActionsData, 50),
 		cfg:                      cfg,
@@ -65,6 +75,7 @@ func CreateRelevancyManager(cfg config.Config, clusterName string, fileHandler f
 		sbomFs:                   sbomFs,
 		storageClient:            storageClient,
 		watchedContainers:        sync.Map{},
+		eventWorkerPool:          pool,
 	}, nil
 }
 
@@ -373,7 +384,7 @@ func (rm *RelevancyManager) ReportFileAccess(_ context.Context, namespace, pod, 
 		return
 	}
 	k8sContainerID := utils.CreateK8sContainerID(namespace, pod, container)
-	rm.fileHandler.AddFile(k8sContainerID, file)
+	_ = rm.eventWorkerPool.Invoke([2]string{k8sContainerID, file})
 }
 
 func (rm *RelevancyManager) SetContainerHandler(containerHandler containerwatcher.ContainerWatcher) {

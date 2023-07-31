@@ -10,6 +10,7 @@ require (
 	github.com/kubescape/go-logger v0.0.13
 	github.com/kubescape/k8s-interface v0.0.134
 	github.com/kubescape/storage v0.0.8
+	github.com/panjf2000/ants/v2 v2.8.1
 	github.com/spf13/afero v1.9.5
 	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.8.4
