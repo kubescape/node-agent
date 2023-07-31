@@ -432,7 +432,8 @@ func TestCleanResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail to create instance ID, err: %v", err)
 	}
-	data := CreateSBOMDataSPDXVersionV040(instanceID, afero.NewMemMapFs())
+	fs := afero.NewMemMapFs()
+	data := CreateSBOMDataSPDXVersionV040(instanceID, fs)
 	SBOMData := data.(*SBOMData)
 
 	var SBOMDataMock spdxv1beta1.SBOMSPDXv2p3
@@ -450,7 +451,7 @@ func TestCleanResources(t *testing.T) {
 		t.Fatalf("fail to store SBOM file, err: %v", err)
 	}
 	SBOMData.CleanResources()
-	_, err = os.Stat(utils.CurrentDir() + "/" + directorySBOM + "/" + instanceID.GetHashed())
+	_, err = fs.Stat("/data/" + directorySBOM + "/" + instanceID.GetHashed())
 	if !os.IsNotExist(err) {
 		t.Fatalf("SBOM file of %s should be deleted", instanceID.GetHashed())
 	}
