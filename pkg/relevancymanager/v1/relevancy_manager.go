@@ -256,7 +256,7 @@ func (rm *RelevancyManager) parsePodData(ctx context.Context, pod *workloadinter
 	}
 	instanceID := instanceIDs[0]
 	for i := range instanceIDs {
-		if instanceIDs[i].GetContainerName() == name {
+		if instanceIDs[i].GetContainerName() == container.Name {
 			instanceID = instanceIDs[i]
 		}
 	}
