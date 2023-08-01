@@ -2,7 +2,7 @@ package sbom
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"node-agent/pkg/utils"
@@ -95,11 +95,12 @@ func CreateSBOMDataSPDXVersionV040(instanceID instanceidhandler.IInstanceID, sbo
 func (sc *SBOMData) saveSBOM(spdxData *spdxv1beta1.SBOMSPDXv2p3) error {
 	logger.L().Debug("saving SBOM", helpers.String("path", sc.spdxDataPath))
 
-	data, err := json.Marshal(spdxData)
+	dataFile, err := sc.sbomFs.Create(sc.spdxDataPath)
 	if err != nil {
 		return err
 	}
-	err = afero.WriteFile(sc.sbomFs, sc.spdxDataPath, data, 0644)
+	err = gob.NewEncoder(dataFile).Encode(spdxData)
+	_ = dataFile.Close()
 	if err != nil {
 		return err
 	}
@@ -175,13 +176,14 @@ func (sc *SBOMData) StoreSBOM(ctx context.Context, sbomData any) error {
 
 func (sc *SBOMData) getSBOMDataSPDXFormat() (*spdxv1beta1.SBOMSPDXv2p3, error) {
 
-	bytes, err := afero.ReadFile(sc.sbomFs, sc.spdxDataPath)
+	dataFile, err := sc.sbomFs.Open(sc.spdxDataPath)
 	if err != nil {
 		return nil, err
 	}
 
-	spdxData := spdxv1beta1.SBOMSPDXv2p3{}
-	err = json.Unmarshal(bytes, &spdxData)
+	var spdxData spdxv1beta1.SBOMSPDXv2p3
+	err = gob.NewDecoder(dataFile).Decode(&spdxData)
+	_ = dataFile.Close()
 	if err != nil {
 		return nil, err
 	}
