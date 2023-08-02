@@ -47,6 +47,7 @@ func TestLoadConfig(t *testing.T) {
 			path: "../../configuration",
 			want: Config{
 				EnableRelevancy:  true,
+				InitialDelay:     2 * time.Minute,
 				MaxSniffingTime:  6 * time.Hour,
 				UpdateDataPeriod: 1 * time.Minute,
 			},

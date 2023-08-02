@@ -33,6 +33,7 @@ func LoadClusterData(path string) (ClusterData, error) {
 
 type Config struct {
 	EnableRelevancy  bool          `mapstructure:"relevantCVEServiceEnabled"`
+	InitialDelay     time.Duration `mapstructure:"initialDelay"`
 	MaxSniffingTime  time.Duration `mapstructure:"maxSniffingTimePerContainer"`
 	UpdateDataPeriod time.Duration `mapstructure:"updateDataPeriod"`
 }
@@ -42,6 +43,8 @@ func LoadConfig(path string) (Config, error) {
 	viper.AddConfigPath(path)
 	viper.SetConfigName("config")
 	viper.SetConfigType("json")
+
+	viper.SetDefault("initialDelay", 2*time.Minute)
 
 	viper.AutomaticEnv()
 

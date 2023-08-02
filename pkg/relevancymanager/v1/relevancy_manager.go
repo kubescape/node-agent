@@ -154,7 +154,7 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 }
 
 func (rm *RelevancyManager) deleteResources(watchedContainer watchedContainerData, containerID string) {
-	watchedContainer.snifferTicker.Stop()
+	watchedContainer.updateDataTicker.Stop()
 	if watchedContainer.sbomClient != nil {
 		watchedContainer.sbomClient.CleanResources()
 	}
@@ -281,8 +281,8 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 	defer span.End()
 
 	watchedContainer := watchedContainerData{
-		snifferTicker: time.NewTicker(rm.cfg.UpdateDataPeriod),
-		container:     container,
+		updateDataTicker: time.NewTicker(rm.cfg.InitialDelay),
+		container:        container,
 		syncChannel: map[string]chan error{
 			StepGetSBOM:         make(chan error, 10),
 			StepEventAggregator: make(chan error, 10),
@@ -301,8 +301,8 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 	rm.containerHandler.UnregisterContainer(container)
 	rm.deleteResources(watchedContainer, container.ID)
 }
-func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer watchedContainerData) error {
 
+func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer watchedContainerData) error {
 	now := time.Now()
 	stopSniffingTime := now.Add(rm.cfg.MaxSniffingTime)
 	for time.Now().Before(stopSniffingTime) {
@@ -322,16 +322,20 @@ func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *con
 func (rm *RelevancyManager) waitForTicks(watchedContainer watchedContainerData, containerID string) error {
 	var err error
 	select {
-	case <-watchedContainer.snifferTicker.C:
+	case <-watchedContainer.updateDataTicker.C:
 		if rm.cfg.EnableRelevancy {
 			rm.afterTimerActionsChannel <- afterTimerActionsData{
 				containerID: containerID,
 				service:     RelevantCVEsService,
 			}
 		}
+		if !watchedContainer.initialDelayExpired {
+			watchedContainer.initialDelayExpired = true
+			watchedContainer.updateDataTicker.Reset(rm.cfg.UpdateDataPeriod)
+		}
 	case err = <-watchedContainer.syncChannel[StepEventAggregator]:
 		if errors.Is(err, containerHasTerminatedError) {
-			watchedContainer.snifferTicker.Stop()
+			watchedContainer.updateDataTicker.Stop()
 			err = containerHasTerminatedError
 		}
 	case err = <-watchedContainer.syncChannel[StepValidateSBOM]:
