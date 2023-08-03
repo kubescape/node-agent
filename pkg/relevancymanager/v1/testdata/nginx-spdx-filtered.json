@@ -47,7 +47,7 @@
         "created": "2023-02-26T13:34:46Z",
         "comment": ""
       },
-      "packages": [
+      "packages": ["<<UNORDERED>>",
         {
           "hasFiles": null,
           "name": "adduser",
@@ -93,7 +93,7 @@
           "annotations": null
         }
       ],
-      "files": [
+      "files": ["<<UNORDERED>>",
         {
           "fileName": "/usr/sbin/deluser",
           "SPDXID": "SPDXRef-1a35bf77abe6053c",
@@ -115,10 +115,38 @@
           "attributionTexts": null,
           "fileDependencies": null,
           "annotations": null
+        },
+        {
+          "fileName": "/etc/deluser.conf",
+          "SPDXID": "SPDXRef-3ec7e593276354ae",
+          "fileTypes": null,
+          "checksums": [
+            {
+              "algorithm": "SHA1",
+              "checksumValue": "0000000000000000000000000000000000000000"
+            }
+          ],
+          "licenseConcluded": "NOASSERTION",
+          "licenseInfoInFiles": null,
+          "licenseComments": "",
+          "copyrightText": "",
+          "artifactOfs": null,
+          "comment": "layerID: sha256:67a4178b7d47beb6a1f697a593bd0c6841c67eb0da00f2badefb05fd30671490",
+          "noticeText": "",
+          "fileContributors": null,
+          "attributionTexts": null,
+          "fileDependencies": null,
+          "annotations": null
         }
       ],
       "hasExtractedLicensingInfos": null,
-      "relationships": [
+      "relationships": ["<<UNORDERED>>",
+        {
+          "spdxElementId": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
+          "relatedSpdxElement": "SPDXRef-3ec7e593276354ae",
+          "relationshipType": "CONTAINS",
+          "comment": ""
+        },
         {
           "spdxElementId": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
           "relatedSpdxElement": "SPDXRef-1a35bf77abe6053c",

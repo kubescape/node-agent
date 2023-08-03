@@ -12,5 +12,4 @@ type RelevancyManagerClient interface {
 	ReportContainerTerminated(ctx context.Context, container *containercollection.Container)
 	ReportFileAccess(ctx context.Context, namespace, pod, container, file string)
 	SetContainerHandler(containerHandler containerwatcher.ContainerWatcher)
-	StartRelevancyManager(ctx context.Context)
 }

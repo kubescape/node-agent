@@ -1,6 +1,8 @@
 package k8sclient
 
 import (
+	"node-agent/pkg/storage"
+
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 )
@@ -29,7 +31,7 @@ func (k K8sClientMock) GetWorkload(namespace, _, name string) (k8sinterface.IWor
 			"containerStatuses": []interface{}{
 				map[string]interface{}{
 					"name":    "cont",
-					"imageID": "nginx@sha256:6a59f1cbb8d28ac484176d52c473494859a512ddba3ea62a547258cf16c9b3ae",
+					"imageID": storage.NginxImageID,
 				},
 			},
 		},

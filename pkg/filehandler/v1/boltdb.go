@@ -41,7 +41,8 @@ func (b BoltFileHandler) Close() {
 	_ = b.fileDB.Close()
 }
 
-func (b BoltFileHandler) GetFiles(container string) (map[string]bool, error) {
+// GetAndDeleteFiles returns a list of files for a container, but does not delete them for BoltFileHandler
+func (b BoltFileHandler) GetAndDeleteFiles(container string) (map[string]bool, error) {
 	fileList := make(map[string]bool)
 	err := b.fileDB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(container))

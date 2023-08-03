@@ -2,7 +2,8 @@
     "apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
     "kind": "SBOMSPDXv2p3",
     "metadata": {
-        "name": "aa0afebbb3cfa473099a62c4b32e9b3fb73ed23f2a75a65ce1d4b4f55a5c2ef2"
+        "name": "aa0afebbb3cfa473099a62c4b32e9b3fb73ed23f2a75a65ce1d4b4f55a5c2ef2",
+        "resourceVersion": "1"
     },
     "spec": {
         "spdx": {
