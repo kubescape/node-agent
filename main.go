@@ -74,7 +74,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(k8sClient, relevancyManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, k8sClient, relevancyManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

@@ -32,10 +32,11 @@ func LoadClusterData(path string) (ClusterData, error) {
 }
 
 type Config struct {
-	EnableRelevancy  bool          `mapstructure:"relevantCVEServiceEnabled"`
-	InitialDelay     time.Duration `mapstructure:"initialDelay"`
-	MaxSniffingTime  time.Duration `mapstructure:"maxSniffingTimePerContainer"`
-	UpdateDataPeriod time.Duration `mapstructure:"updateDataPeriod"`
+	EnableFullPathTracing bool          `mapstructure:"fullPathTracingEnabled"`
+	EnableRelevancy       bool          `mapstructure:"relevantCVEServiceEnabled"`
+	InitialDelay          time.Duration `mapstructure:"initialDelay"`
+	MaxSniffingTime       time.Duration `mapstructure:"maxSniffingTimePerContainer"`
+	UpdateDataPeriod      time.Duration `mapstructure:"updateDataPeriod"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -44,6 +45,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("json")
 
+	viper.SetDefault("fullPathTracingEnabled", true)
 	viper.SetDefault("initialDelay", 2*time.Minute)
 
 	viper.AutomaticEnv()
