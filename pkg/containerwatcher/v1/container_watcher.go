@@ -9,7 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/gammazero/workerpool"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -23,24 +22,23 @@ import (
 )
 
 const (
-	eventsWorkersConcurrency = 10
-	execTraceName            = "trace_exec"
-	openTraceName            = "trace_open"
+	execTraceName = "trace_exec"
+	openTraceName = "trace_open"
 )
 
 type IGContainerWatcher struct {
+	cfg                 config.Config
 	containerCollection *containercollection.ContainerCollection
 	k8sClient           *k8sinterface.KubernetesApi
 	relevancyManager    relevancymanager.RelevancyManagerClient
 	tracerCollection    *tracercollection.TracerCollection
 	tracerExec          *tracerexec.Tracer
 	tracerOpen          *traceropen.Tracer
-	eventWorkerPool     *workerpool.WorkerPool
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -50,11 +48,11 @@ func CreateIGContainerWatcher(k8sClient *k8sinterface.KubernetesApi, relevancyMa
 	}
 
 	return &IGContainerWatcher{
+		cfg:                 cfg,
 		containerCollection: containerCollection,
 		k8sClient:           k8sClient,
 		tracerCollection:    tracerCollection,
 		relevancyManager:    relevancyManager,
-		eventWorkerPool:     workerpool.New(eventsWorkersConcurrency),
 	}, nil
 }
 
@@ -64,14 +62,14 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	ch.relevancyManager.StartRelevancyManager(ctx)
 
 	callback := func(notif containercollection.PubSubEvent) {
-		logger.L().Debug("GetEventCallback", helpers.String("namespaceName", notif.Container.Namespace), helpers.String("podName", notif.Container.Podname), helpers.String("containerName", notif.Container.Name), helpers.String("containerID", notif.Container.ID), helpers.String("type", notif.Type.String()))
+		logger.L().Debug("GetEventCallback", helpers.String("namespace", notif.Container.K8s.Namespace), helpers.String("Pod name", notif.Container.K8s.PodName), helpers.String("ContainerID", notif.Container.Runtime.ContainerID), helpers.String("Container name", notif.Container.K8s.ContainerName), helpers.String("type", notif.Type.String()))
 		switch notif.Type {
 		case containercollection.EventTypeAddContainer:
-			logger.L().Debug("container has started", helpers.String("namespace", notif.Container.Namespace), helpers.String("Pod name", notif.Container.Podname), helpers.String("ContainerID", notif.Container.ID), helpers.String("Container name", notif.Container.Name))
+			logger.L().Debug("container has started", helpers.String("namespace", notif.Container.K8s.Namespace), helpers.String("Pod name", notif.Container.K8s.PodName), helpers.String("ContainerID", notif.Container.Runtime.ContainerID), helpers.String("Container name", notif.Container.K8s.ContainerName))
 			// notify the relevancy manager that a new container has started
 			ch.relevancyManager.ReportContainerStarted(ctx, notif.Container)
 		case containercollection.EventTypeRemoveContainer:
-			logger.L().Debug("container has Terminated", helpers.String("namespace", notif.Container.Namespace), helpers.String("Pod name", notif.Container.Podname), helpers.String("ContainerID", notif.Container.ID), helpers.String("Container name", notif.Container.Name))
+			logger.L().Debug("container has Terminated", helpers.String("namespace", notif.Container.K8s.Namespace), helpers.String("Pod name", notif.Container.K8s.PodName), helpers.String("ContainerID", notif.Container.Runtime.ContainerID), helpers.String("Container name", notif.Container.K8s.ContainerName))
 			// notify the relevancy manager that a container has terminated
 			ch.relevancyManager.ReportContainerTerminated(ctx, notif.Container)
 		}
@@ -118,9 +116,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			if len(event.Args) > 0 {
 				procImageName = event.Args[0]
 			}
-			ch.eventWorkerPool.Submit(func() {
-				ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, procImageName)
-			})
+			ch.relevancyManager.ReportFileAccess(ctx, event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName, procImageName)
 		}
 	}
 	if err := ch.tracerCollection.AddTracer(execTraceName, containerSelector); err != nil {
@@ -135,9 +131,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			return
 		}
 		if event.Ret > -1 {
-			ch.eventWorkerPool.Submit(func() {
-				ch.relevancyManager.ReportFileAccess(ctx, event.Namespace, event.Pod, event.Container, event.FullPath)
-			})
+			ch.relevancyManager.ReportFileAccess(ctx, event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName, event.Path)
 		}
 	}
 	if err := ch.tracerCollection.AddTracer(openTraceName, containerSelector); err != nil {
@@ -162,8 +156,8 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 		return fmt.Errorf("error creating tracerExec: %s\n", err)
 	}
 
-	// Create the exec tracer
-	ch.tracerOpen, err = traceropen.NewTracer(&traceropen.Config{MountnsMap: openMountnsmap, FullPath: true}, ch.containerCollection, openEventCallback)
+	// Create the open tracer
+	ch.tracerOpen, err = traceropen.NewTracer(&traceropen.Config{MountnsMap: openMountnsmap, FullPath: ch.cfg.EnableFullPathTracing}, ch.containerCollection, openEventCallback)
 	if err != nil {
 		return fmt.Errorf("error creating tracerOpen: %s\n", err)
 	}
@@ -195,7 +189,7 @@ func (ch *IGContainerWatcher) Stop() {
 	ch.tracerCollection.Close()
 }
 
-func (ch *IGContainerWatcher) UnregisterContainer(ctx context.Context, container *containercollection.Container) {
+func (ch *IGContainerWatcher) UnregisterContainer(container *containercollection.Container) {
 
 	event := containercollection.PubSubEvent{
 		Timestamp: time.Now().Format(time.RFC3339),

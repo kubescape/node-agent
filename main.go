@@ -52,7 +52,9 @@ func main() {
 
 	if _, present := os.LookupEnv("ENABLE_PROFILER"); present {
 		logger.L().Info("Starting profiler on port 6060")
-		go http.ListenAndServe("localhost:6060", nil)
+		go func() {
+			_ = http.ListenAndServe("localhost:6060", nil)
+		}()
 	}
 
 	// Create the relevancy manager
@@ -60,9 +62,8 @@ func main() {
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("failed to create fileDB", helpers.Error(err))
 	}
-	defer fileHandler.Close()
 	k8sClient := k8sinterface.NewKubernetesApi()
-	storageClient, err := storageclient.CreateSBOMStorageK8SAggregatedAPIClient(ctx)
+	storageClient, err := storageclient.CreateSBOMStorageK8SAggregatedAPIClient()
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
@@ -72,7 +73,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(k8sClient, relevancyManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, k8sClient, relevancyManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

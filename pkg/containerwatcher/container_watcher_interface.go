@@ -9,5 +9,5 @@ import (
 type ContainerWatcher interface {
 	Start(ctx context.Context) error
 	Stop()
-	UnregisterContainer(ctx context.Context, container *containercollection.Container)
+	UnregisterContainer(container *containercollection.Container)
 }

@@ -16,11 +16,12 @@ type afterTimerActionsData struct {
 }
 
 type watchedContainerData struct {
-	snifferTicker  *time.Ticker
-	container      *containercollection.Container
-	syncChannel    map[string]chan error
-	sbomClient     sbom.SBOMClient
-	imageID        string
-	instanceID     instanceidhandler.IInstanceID
-	k8sContainerID string
+	updateDataTicker    *time.Ticker
+	container           *containercollection.Container
+	syncChannel         map[string]chan error
+	sbomClient          sbom.SBOMClient
+	imageID             string
+	instanceID          instanceidhandler.IInstanceID
+	k8sContainerID      string
+	initialDelayExpired bool
 }

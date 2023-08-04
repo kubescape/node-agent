@@ -7,6 +7,7 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher"
 	"node-agent/pkg/filehandler"
+	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/relevancymanager"
 	"node-agent/pkg/sbom"
 	sbomV1 "node-agent/pkg/sbom/v1"
@@ -21,8 +22,8 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/panjf2000/ants/v2"
 	"github.com/spf13/afero"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -30,10 +31,11 @@ import (
 )
 
 const (
-	RelevantCVEsService = "RelevantCVEsService"
-	StepGetSBOM         = "StepGetSBOM"
-	StepValidateSBOM    = "StepValidateSBOM"
-	StepEventAggregator = "StepEventAggregator"
+	eventsWorkersConcurrency = 10
+	RelevantCVEsService      = "RelevantCVEsService"
+	StepGetSBOM              = "StepGetSBOM"
+	StepValidateSBOM         = "StepValidateSBOM"
+	StepEventAggregator      = "StepEventAggregator"
 )
 
 var (
@@ -47,15 +49,23 @@ type RelevancyManager struct {
 	// FIXME we need this circular dependency to unregister the tracer at the end of startRelevancyProcess
 	containerHandler  containerwatcher.ContainerWatcher
 	fileHandler       filehandler.FileHandler
-	k8sClient         *k8sinterface.KubernetesApi
+	k8sClient         k8sclient.K8sClientInterface
 	sbomFs            afero.Fs
 	storageClient     storageclient.StorageClient
 	watchedContainers sync.Map
+	eventWorkerPool   *ants.PoolWithFunc
 }
 
 var _ relevancymanager.RelevancyManagerClient = (*RelevancyManager)(nil)
 
-func CreateRelevancyManager(cfg config.Config, clusterName string, fileHandler filehandler.FileHandler, k8sClient *k8sinterface.KubernetesApi, sbomFs afero.Fs, storageClient storageclient.StorageClient) (*RelevancyManager, error) {
+func CreateRelevancyManager(cfg config.Config, clusterName string, fileHandler filehandler.FileHandler, k8sClient k8sclient.K8sClientInterface, sbomFs afero.Fs, storageClient storageclient.StorageClient) (*RelevancyManager, error) {
+	pool, err := ants.NewPoolWithFunc(eventsWorkersConcurrency, func(i interface{}) {
+		s := i.([2]string)
+		fileHandler.AddFile(s[0], s[1])
+	})
+	if err != nil {
+		return nil, err
+	}
 	return &RelevancyManager{
 		afterTimerActionsChannel: make(chan afterTimerActionsData, 50),
 		cfg:                      cfg,
@@ -65,6 +75,7 @@ func CreateRelevancyManager(cfg config.Config, clusterName string, fileHandler f
 		sbomFs:                   sbomFs,
 		storageClient:            storageClient,
 		watchedContainers:        sync.Map{},
+		eventWorkerPool:          pool,
 	}, nil
 }
 
@@ -86,8 +97,8 @@ func (rm *RelevancyManager) handleRelevancy(ctx context.Context, containerData w
 	}
 	logger.L().Debug("fileList generated", helpers.String("container ID", containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.String("file list", fmt.Sprintf("%v", fileList)))
 
-	if err = containerData.sbomClient.FilterSBOM(ctx, fileList); err != nil {
-		rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
+	if err = containerData.sbomClient.FilterSBOM(fileList); err != nil {
+		_ = rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
 		ctx, span := otel.Tracer("").Start(ctxPostSBOM, "FilterSBOM")
 		defer span.End()
 		logger.L().Ctx(ctx).Warning("failed to filter SBOM", helpers.String("container ID", containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
@@ -95,16 +106,16 @@ func (rm *RelevancyManager) handleRelevancy(ctx context.Context, containerData w
 	}
 	filterSBOMKey, err := containerData.instanceID.GetSlug()
 	if err != nil {
-		rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
+		_ = rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
 		ctx, span := otel.Tracer("").Start(ctxPostSBOM, "filterSBOMKey")
 		defer span.End()
 		logger.L().Ctx(ctx).Warning("failed to get filterSBOMKey for store filter SBOM", helpers.String("container ID", containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
 		return
 	}
 	// it is safe to use containerData.imageID directly since we needed it to retrieve the SBOM
-	if err = containerData.sbomClient.StoreFilterSBOM(ctx, containerData.imageID, filterSBOMKey); err != nil {
+	if err = containerData.sbomClient.StoreFilterSBOM(containerData.imageID, filterSBOMKey); err != nil {
 		if !errors.Is(err, sbom.IsAlreadyExist()) {
-			rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
+			_ = rm.fileHandler.AddFiles(containerData.k8sContainerID, fileList)
 			ctx, span := otel.Tracer("").Start(ctxPostSBOM, "StoreFilterSBOM")
 			defer span.End()
 			logger.L().Ctx(ctx).Error("failed to store filtered SBOM", helpers.String("container ID", containerID), helpers.String("k8s workload", containerData.k8sContainerID), helpers.Error(err))
@@ -143,21 +154,21 @@ func (rm *RelevancyManager) afterTimerActions(ctx context.Context) error {
 }
 
 func (rm *RelevancyManager) deleteResources(watchedContainer watchedContainerData, containerID string) {
-	watchedContainer.snifferTicker.Stop()
+	watchedContainer.updateDataTicker.Stop()
 	if watchedContainer.sbomClient != nil {
 		watchedContainer.sbomClient.CleanResources()
 	}
 	rm.watchedContainers.Delete(containerID)
 
 	// Remove container from the file DB
-	rm.fileHandler.RemoveBucket(containerID)
+	_ = rm.fileHandler.RemoveBucket(watchedContainer.k8sContainerID)
 }
 
 func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercollection.Container) {
 	ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.getSBOM")
 	defer span.End()
 	// get watchedContainer from map
-	containerDataInterface, exist := rm.watchedContainers.Load(container.ID)
+	containerDataInterface, exist := rm.watchedContainers.Load(container.Runtime.ContainerID)
 	if !exist {
 		return
 	}
@@ -170,7 +181,7 @@ func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercol
 	// FIXME: this is a workaround to let the pod be updated with container information, avoiding another try
 	utils.RandomSleep(2, 10)
 	// get watchedContainer from map
-	containerDataInterface, exist = rm.watchedContainers.Load(container.ID)
+	containerDataInterface, exist = rm.watchedContainers.Load(container.Runtime.ContainerID)
 	if !exist {
 		return
 	}
@@ -182,14 +193,14 @@ func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercol
 	}
 	// end of FIXME
 	// get pod information, we cannot do this during ReportContainerStarted because the pod might not be updated yet with container information
-	wl, err := rm.k8sClient.GetWorkload(container.Namespace, "Pod", container.Podname)
+	wl, err := rm.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to get pod", helpers.Error(err), helpers.String("namespace", container.Namespace), helpers.String("Pod name", container.Podname))
+		logger.L().Ctx(ctx).Error("failed to get pod", helpers.Error(err), helpers.String("namespace", container.K8s.Namespace), helpers.String("Pod name", container.K8s.PodName))
 		watchedContainer.syncChannel[StepGetSBOM] <- err
 		return
 	}
 	workload := wl.(*workloadinterface.Workload)
-	imageID, imageTag, parentWlid, instanceID, err := rm.parsePodData(ctx, workload, container)
+	imageID, imageTag, parentWlid, instanceID, err := rm.parsePodData(workload, container)
 	// This behavior will happen when the running container is an initContainer
 	if err != nil || imageID == "" || imageTag == "" || parentWlid == "" || instanceID == nil {
 		watchedContainer.syncChannel[StepGetSBOM] <- err
@@ -205,13 +216,13 @@ func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercol
 	watchedContainer.imageID = imageID
 	watchedContainer.instanceID = instanceID
 	watchedContainer.sbomClient = sbomClient
-	rm.watchedContainers.Store(container.ID, watchedContainer)
+	rm.watchedContainers.Store(container.Runtime.ContainerID, watchedContainer)
 
 	// notify the channel. This call must be at the end of the function as it will unblock the waitForTicks function
 	watchedContainer.syncChannel[StepGetSBOM] <- err
 }
 
-func (rm *RelevancyManager) parsePodData(ctx context.Context, pod *workloadinterface.Workload, container *containercollection.Container) (string, string, string, instanceidhandler.IInstanceID, error) {
+func (rm *RelevancyManager) parsePodData(pod *workloadinterface.Workload, container *containercollection.Container) (string, string, string, instanceidhandler.IInstanceID, error) {
 
 	kind, name, err := rm.k8sClient.CalculateWorkloadParentRecursive(pod)
 	if err != nil {
@@ -234,7 +245,7 @@ func (rm *RelevancyManager) parsePodData(ctx context.Context, pod *workloadinter
 	}
 	imageTag := ""
 	for i := range containers {
-		if containers[i].Name == container.Name {
+		if containers[i].Name == container.K8s.ContainerName {
 			imageTag = containers[i].Image
 		}
 	}
@@ -245,7 +256,7 @@ func (rm *RelevancyManager) parsePodData(ctx context.Context, pod *workloadinter
 	}
 	imageID := ""
 	for i := range status.ContainerStatuses {
-		if status.ContainerStatuses[i].Name == container.Name {
+		if status.ContainerStatuses[i].Name == container.K8s.ContainerName {
 			imageID = status.ContainerStatuses[i].ImageID
 		}
 	}
@@ -256,7 +267,7 @@ func (rm *RelevancyManager) parsePodData(ctx context.Context, pod *workloadinter
 	}
 	instanceID := instanceIDs[0]
 	for i := range instanceIDs {
-		if instanceIDs[i].GetContainerName() == container.Name {
+		if instanceIDs[i].GetContainerName() == container.K8s.ContainerName {
 			instanceID = instanceIDs[i]
 		}
 	}
@@ -270,8 +281,8 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 	defer span.End()
 
 	watchedContainer := watchedContainerData{
-		snifferTicker: time.NewTicker(rm.cfg.UpdateDataPeriod),
-		container:     container,
+		updateDataTicker: time.NewTicker(rm.cfg.InitialDelay),
+		container:        container,
 		syncChannel: map[string]chan error{
 			StepGetSBOM:         make(chan error, 10),
 			StepEventAggregator: make(chan error, 10),
@@ -279,24 +290,24 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 		},
 		k8sContainerID: k8sContainerID,
 	}
-	rm.watchedContainers.Store(container.ID, watchedContainer)
+	rm.watchedContainers.Store(container.Runtime.ContainerID, watchedContainer)
 
 	if err := rm.monitorContainer(ctx, container, watchedContainer); err != nil {
-		logger.L().Info("stop monitor on container", helpers.String("reason", err.Error()), helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
+		logger.L().Info("stop monitor on container", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	} else {
-		logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
+		logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
 
-	rm.containerHandler.UnregisterContainer(ctx, container)
-	rm.deleteResources(watchedContainer, container.ID)
+	rm.containerHandler.UnregisterContainer(container)
+	rm.deleteResources(watchedContainer, container.Runtime.ContainerID)
 }
-func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer watchedContainerData) error {
 
+func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer watchedContainerData) error {
 	now := time.Now()
 	stopSniffingTime := now.Add(rm.cfg.MaxSniffingTime)
 	for time.Now().Before(stopSniffingTime) {
 		rm.getSBOM(ctx, container)
-		err := rm.waitForTicks(watchedContainer, container.ID)
+		err := rm.waitForTicks(watchedContainer, container.Runtime.ContainerID)
 		if err != nil {
 			if errors.Is(err, containerHasTerminatedError) {
 				return fmt.Errorf("container terminated")
@@ -311,16 +322,20 @@ func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *con
 func (rm *RelevancyManager) waitForTicks(watchedContainer watchedContainerData, containerID string) error {
 	var err error
 	select {
-	case <-watchedContainer.snifferTicker.C:
+	case <-watchedContainer.updateDataTicker.C:
 		if rm.cfg.EnableRelevancy {
 			rm.afterTimerActionsChannel <- afterTimerActionsData{
 				containerID: containerID,
 				service:     RelevantCVEsService,
 			}
 		}
+		if !watchedContainer.initialDelayExpired {
+			watchedContainer.initialDelayExpired = true
+			watchedContainer.updateDataTicker.Reset(rm.cfg.UpdateDataPeriod)
+		}
 	case err = <-watchedContainer.syncChannel[StepEventAggregator]:
 		if errors.Is(err, containerHasTerminatedError) {
-			watchedContainer.snifferTicker.Stop()
+			watchedContainer.updateDataTicker.Stop()
 			err = containerHasTerminatedError
 		}
 	case err = <-watchedContainer.syncChannel[StepValidateSBOM]:
@@ -332,51 +347,48 @@ func (rm *RelevancyManager) waitForTicks(watchedContainer watchedContainerData, 
 }
 
 func (rm *RelevancyManager) ReportContainerStarted(ctx context.Context, container *containercollection.Container) {
-	k8sContainerID := utils.CreateK8sContainerID(container.Namespace, container.Podname, container.Name)
-	ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.ReportContainerStarted", trace.WithAttributes(attribute.String("containerID", container.ID), attribute.String("k8s workload", k8sContainerID)))
+	k8sContainerID := utils.CreateK8sContainerID(container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)
+	ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.ReportContainerStarted", trace.WithAttributes(attribute.String("containerID", container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
 	defer span.End()
 
 	logger.L().Debug("handleContainerRunningEvent", helpers.Interface("container", container))
-	_, exist := rm.watchedContainers.Load(container.ID)
+	_, exist := rm.watchedContainers.Load(container.Runtime.ContainerID)
 	if exist {
-		logger.L().Debug("container already exist in memory", helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
+		logger.L().Debug("container already exist in memory", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		return
 	}
-	logger.L().Info("new container has loaded - start monitor it", helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
+	logger.L().Info("new container has loaded - start monitor it", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	go rm.startRelevancyProcess(ctx, container, k8sContainerID)
 }
 
 func (rm *RelevancyManager) ReportContainerTerminated(ctx context.Context, container *containercollection.Container) {
-	k8sContainerID := utils.CreateK8sContainerID(container.Namespace, container.Podname, container.Name)
-	ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.ReportContainerTerminated", trace.WithAttributes(attribute.String("containerID", container.ID), attribute.String("k8s workload", k8sContainerID)))
+	k8sContainerID := utils.CreateK8sContainerID(container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)
+	_, span := otel.Tracer("").Start(ctx, "RelevancyManager.ReportContainerTerminated", trace.WithAttributes(attribute.String("containerID", container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
 	defer span.End()
 
-	if watchedContainer, ok := rm.watchedContainers.LoadAndDelete(container.ID); ok {
+	if watchedContainer, ok := rm.watchedContainers.LoadAndDelete(container.Runtime.ContainerID); ok {
 		data, ok := watchedContainer.(watchedContainerData)
 		if !ok {
-			logger.L().Debug("container not found in memory", helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
+			logger.L().Debug("container not found in memory", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			return
 		}
 		err := rm.fileHandler.RemoveBucket(k8sContainerID)
 		if err != nil {
-			logger.L().Error("failed to remove container bucket", helpers.Error(err), helpers.String("container ID", container.ID), helpers.String("k8s workload", k8sContainerID))
+			logger.L().Error("failed to remove container bucket", helpers.Error(err), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			return
 		}
 		data.syncChannel[StepEventAggregator] <- containerHasTerminatedError
 	}
 }
 
-func (rm *RelevancyManager) ReportFileAccess(ctx context.Context, namespace, pod, container, file string) {
+func (rm *RelevancyManager) ReportFileAccess(_ context.Context, namespace, pod, container, file string) {
 	// log accessed files for all containers to avoid race condition
 	// this won't record unnecessary containers as the containerCollection takes care of filtering them
 	if file == "" {
 		return
 	}
 	k8sContainerID := utils.CreateK8sContainerID(namespace, pod, container)
-	err := rm.fileHandler.AddFile(k8sContainerID, file)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to add file to container file list", helpers.Error(err), helpers.Interface("k8sContainerID", k8sContainerID), helpers.String("file", file))
-	}
+	_ = rm.eventWorkerPool.Invoke([2]string{k8sContainerID, file})
 }
 
 func (rm *RelevancyManager) SetContainerHandler(containerHandler containerwatcher.ContainerWatcher) {
