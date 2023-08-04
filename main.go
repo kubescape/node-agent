@@ -62,7 +62,6 @@ func main() {
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("failed to create fileDB", helpers.Error(err))
 	}
-	defer fileHandler.Close()
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageClient, err := storageclient.CreateSBOMStorageK8SAggregatedAPIClient()
 	if err != nil {

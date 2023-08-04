@@ -3,6 +3,7 @@ package utils
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestUtilsBetween(t *testing.T) {
@@ -40,5 +41,95 @@ func TestCurrentDir(t *testing.T) {
 	dir := CurrentDir()
 	if !strings.Contains(dir, "pkg/utils") {
 		t.Fatalf("CurrentDir failed")
+	}
+}
+
+func TestCreateK8sContainerID(t *testing.T) {
+	type args struct {
+		namespaceName string
+		podName       string
+		containerName string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "normal",
+			args: args{
+				namespaceName: "namespaceName",
+				podName:       "podName",
+				containerName: "containerName",
+			},
+			want: "namespaceName/podName/containerName",
+		},
+		{
+			name: "missing namespaceName",
+			args: args{
+				podName:       "podName",
+				containerName: "containerName",
+			},
+			want: "/podName/containerName",
+		},
+		{
+			name: "missing podName",
+			args: args{
+				namespaceName: "namespaceName",
+				containerName: "containerName",
+			},
+			want: "namespaceName//containerName",
+		},
+		{
+			name: "missing containerName",
+			args: args{
+				namespaceName: "namespaceName",
+				podName:       "podName",
+			},
+			want: "namespaceName/podName/",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CreateK8sContainerID(tt.args.namespaceName, tt.args.podName, tt.args.containerName); got != tt.want {
+				t.Errorf("CreateK8sContainerID() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRandomSleep(t *testing.T) {
+	type args struct {
+		min int
+		max int
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "normal",
+			args: args{
+				min: 1,
+				max: 3,
+			},
+		},
+		{
+			name: "min equals max",
+			args: args{
+				min: 1,
+				max: 1,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start := time.Now()
+			RandomSleep(tt.args.min, tt.args.max)
+			elapsed := int(time.Since(start).Seconds())
+			if elapsed < tt.args.min || elapsed > tt.args.max {
+				t.Errorf("RandomSleep() = %v, want between %v and %v", elapsed, tt.args.min, tt.args.max)
+			}
+		})
 	}
 }

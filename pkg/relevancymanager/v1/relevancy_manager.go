@@ -7,6 +7,7 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher"
 	"node-agent/pkg/filehandler"
+	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/relevancymanager"
 	"node-agent/pkg/sbom"
 	sbomV1 "node-agent/pkg/sbom/v1"
@@ -21,7 +22,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/panjf2000/ants/v2"
 	"github.com/spf13/afero"
@@ -49,7 +49,7 @@ type RelevancyManager struct {
 	// FIXME we need this circular dependency to unregister the tracer at the end of startRelevancyProcess
 	containerHandler  containerwatcher.ContainerWatcher
 	fileHandler       filehandler.FileHandler
-	k8sClient         *k8sinterface.KubernetesApi
+	k8sClient         k8sclient.K8sClientInterface
 	sbomFs            afero.Fs
 	storageClient     storageclient.StorageClient
 	watchedContainers sync.Map
@@ -58,7 +58,7 @@ type RelevancyManager struct {
 
 var _ relevancymanager.RelevancyManagerClient = (*RelevancyManager)(nil)
 
-func CreateRelevancyManager(cfg config.Config, clusterName string, fileHandler filehandler.FileHandler, k8sClient *k8sinterface.KubernetesApi, sbomFs afero.Fs, storageClient storageclient.StorageClient) (*RelevancyManager, error) {
+func CreateRelevancyManager(cfg config.Config, clusterName string, fileHandler filehandler.FileHandler, k8sClient k8sclient.K8sClientInterface, sbomFs afero.Fs, storageClient storageclient.StorageClient) (*RelevancyManager, error) {
 	pool, err := ants.NewPoolWithFunc(eventsWorkersConcurrency, func(i interface{}) {
 		s := i.([2]string)
 		fileHandler.AddFile(s[0], s[1])
@@ -161,7 +161,7 @@ func (rm *RelevancyManager) deleteResources(watchedContainer watchedContainerDat
 	rm.watchedContainers.Delete(containerID)
 
 	// Remove container from the file DB
-	_ = rm.fileHandler.RemoveBucket(containerID)
+	_ = rm.fileHandler.RemoveBucket(watchedContainer.k8sContainerID)
 }
 
 func (rm *RelevancyManager) getSBOM(ctx context.Context, container *containercollection.Container) {

@@ -1,6 +1,7 @@
 package filehandler
 
 import (
+	"errors"
 	"fmt"
 	"node-agent/pkg/filehandler"
 
@@ -15,8 +16,8 @@ type BoltFileHandler struct {
 
 var _ filehandler.FileHandler = (*BoltFileHandler)(nil)
 
-func CreateBoltFileHandler() (*BoltFileHandler, error) {
-	db, err := bolt.Open("/data/file.db", 0644, nil)
+func CreateBoltFileHandler(path string) (*BoltFileHandler, error) {
+	db, err := bolt.Open(path, 0644, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -60,13 +61,27 @@ func (b BoltFileHandler) RemoveBucket(bucket string) error {
 	return b.fileDB.Update(func(tx *bolt.Tx) error {
 		err := tx.DeleteBucket([]byte(bucket))
 		if err != nil {
+			if errors.Is(err, bolt.ErrBucketNotFound) {
+				return nil
+			}
 			return fmt.Errorf("delete bucket: %s", err)
 		}
 		logger.L().Debug("deleted file bucket", helpers.String("bucket", bucket))
 		return nil
 	})
 }
-func (b BoltFileHandler) AddFiles(_ string, _ map[string]bool) error {
-	// do nothing
-	return nil
+
+func (b BoltFileHandler) AddFiles(bucket string, files map[string]bool) error {
+	return b.fileDB.Batch(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		if err != nil {
+			return err
+		}
+		for file := range files {
+			if err := b.Put([]byte(file), nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

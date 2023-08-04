@@ -12,6 +12,7 @@ import (
 )
 
 type StorageHttpClientMock struct {
+	FilteredSBOMs      []*spdxv1beta1.SBOMSPDXv2p3Filtered
 	nginxSBOMSpdxBytes *spdxv1beta1.SBOMSPDXv2p3
 }
 
@@ -51,7 +52,8 @@ func (sc *StorageHttpClientMock) GetData(key string) (any, error) {
 func (sc *StorageHttpClientMock) PutData(_ string, _ any) error {
 	return nil
 }
-func (sc *StorageHttpClientMock) PostData(_ any) error {
+func (sc *StorageHttpClientMock) PostData(data any) error {
+	sc.FilteredSBOMs = append(sc.FilteredSBOMs, data.(*spdxv1beta1.SBOMSPDXv2p3Filtered))
 	return nil
 }
 func (sc *StorageHttpClientMock) GetResourceVersion(_ context.Context, _ string) string {

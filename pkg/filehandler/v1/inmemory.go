@@ -54,10 +54,6 @@ func (s *InMemoryFileHandler) AddFile(bucket, file string) {
 	bucketFiles.lock.Unlock()
 }
 
-func (s *InMemoryFileHandler) Close() {
-	// Nothing to do
-}
-
 func shallowCopyMapStringBool(m map[string]bool) map[string]bool {
 	if m == nil {
 		return nil
@@ -85,6 +81,7 @@ func (s *InMemoryFileHandler) GetFiles(bucket string) (map[string]bool, error) {
 
 	return shallow, nil
 }
+
 func (s *InMemoryFileHandler) RemoveBucket(bucket string) error {
 	s.mutex.Lock()
 	delete(s.buckets, bucket)
