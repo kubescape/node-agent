@@ -15,7 +15,7 @@ jobs:
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/node-agent
       IMAGE_TAG: v0.1.${{ github.run_number }}
-      COMPONENT_NAME: node-agent
+      COMPONENT_NAME: nodeAgent
       CGO_ENABLED: 0
       GO111MODULE: "on"
       BUILD_PLATFORM: linux/amd64,linux/arm64
