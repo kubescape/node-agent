@@ -131,7 +131,11 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			return
 		}
 		if event.Ret > -1 {
-			ch.relevancyManager.ReportFileAccess(ctx, event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName, event.Path)
+			p := event.Path
+			if event.FullPath != "" {
+				p = event.FullPath
+			}
+			ch.relevancyManager.ReportFileAccess(ctx, event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName, p)
 		}
 	}
 	if err := ch.tracerCollection.AddTracer(openTraceName, containerSelector); err != nil {
