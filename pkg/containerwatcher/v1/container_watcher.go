@@ -132,7 +132,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 		}
 		if event.Ret > -1 {
 			p := event.Path
-			if event.FullPath != "" {
+			if ch.cfg.EnableFullPathTracing {
 				p = event.FullPath
 			}
 			ch.relevancyManager.ReportFileAccess(ctx, event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName, p)
