@@ -22,6 +22,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/panjf2000/ants/v2"
 	"github.com/spf13/afero"
@@ -246,7 +247,10 @@ func (rm *RelevancyManager) parsePodData(pod *workloadinterface.Workload, contai
 	imageTag := ""
 	for i := range containers {
 		if containers[i].Name == container.K8s.ContainerName {
-			imageTag = containers[i].Image
+			imageTag, err = names.NormalizeImageName(containers[i].Image)
+			if err != nil {
+				logger.L().Debug("fail to normalize imageTag", helpers.Error(err), helpers.String("imageTag", containers[i].Image))
+			}
 		}
 	}
 
@@ -257,7 +261,10 @@ func (rm *RelevancyManager) parsePodData(pod *workloadinterface.Workload, contai
 	imageID := ""
 	for i := range status.ContainerStatuses {
 		if status.ContainerStatuses[i].Name == container.K8s.ContainerName {
-			imageID = status.ContainerStatuses[i].ImageID
+			imageID, err = names.NormalizeImageName(status.ContainerStatuses[i].ImageID)
+			if err != nil {
+				logger.L().Debug("fail to normalize imageID", helpers.Error(err), helpers.String("imageID", status.ContainerStatuses[i].ImageID))
+			}
 		}
 	}
 
