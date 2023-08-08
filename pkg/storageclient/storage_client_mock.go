@@ -21,9 +21,9 @@ type StorageHttpClientFailureMock struct {
 }
 
 const (
-	NGINX_KEY       = "nginx-c9b3ae"
+	NGINX_KEY       = "docker.io-library-nginx-c9b3ae"
 	NGINX           = "6a59f1cbb8d28ac484176d52c473494859a512ddba3ea62a547258cf16c9b3ae"
-	NGINX_IMAGE_TAG = "nginx"
+	NGINX_IMAGE_TAG = "docker.io-library-nginx"
 )
 
 func CreateSBOMStorageHttpClientMock() *StorageHttpClientMock {
