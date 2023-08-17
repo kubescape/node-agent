@@ -7,6 +7,7 @@ require (
 	github.com/cilium/ebpf v0.11.0
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/inspektor-gadget/inspektor-gadget v0.18.2-0.20230802150404-2f6b36dd8642
+	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/go-logger v0.0.13
 	github.com/kubescape/k8s-interface v0.0.134
 	github.com/kubescape/storage v0.0.8
