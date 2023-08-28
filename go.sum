@@ -61,8 +61,8 @@ github.com/armosec/armoapi-go v0.0.191 h1:+fC9dnFzOHOAlid34xOi2DI7+1AT+f7mZ03KpV
 github.com/armosec/armoapi-go v0.0.191/go.mod h1:ANarxE0icSvdufFB1x3JAax7XKrWIKe8b/SvLnuDtGw=
 github.com/armosec/utils-go v0.0.14 h1:Q6HGxOyc5aPObgUM2FQpkYGXjj7/LSrUPkppFJGTexU=
 github.com/armosec/utils-go v0.0.14/go.mod h1:F/K1mI/qcj7fNuJl7xktoCeHM83azOF0Zq6eC2WuPyU=
-github.com/armosec/utils-k8s-go v0.0.16 h1:h46PoxAb4OHA2p719PzcAS03lADw4lH4TyRMaZ3ix/g=
-github.com/armosec/utils-k8s-go v0.0.16/go.mod h1:QX0QAGlH7KCZq810eO9QjTYqkhjw8cvrr96TZfaUGrk=
+github.com/armosec/utils-k8s-go v0.0.17 h1:HUntJGR0/PHt7bp8S0zLhVcJ6sDz061Hc9mAM9ha1lA=
+github.com/armosec/utils-k8s-go v0.0.17/go.mod h1:FJRG/MRz7jT4ExSEYHIFsilVsAF11M+GJRhLl4PFZ4s=
 github.com/benbjohnson/clock v1.1.0 h1:Q92kusRqC1XV2MjkWETPvjJVqKetz1OzxZB7mHJLju8=
 github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24TaqPxmxbtue+5NUziq4I4S80YR8gNf3Q=
 github.com/bradfitz/go-smtpd v0.0.0-20170404230938-deb6d6237625/go.mod h1:HYsPBTaaSFSlLx/70C2HPIMNZpVV8+vt/A+FMnYP11g=
