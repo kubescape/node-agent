@@ -14,6 +14,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -30,7 +32,7 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
 
-	clusterData, err := config.LoadClusterData("/etc/config")
+	clusterData, err := utilsmetadata.LoadConfig("/etc/config/clusterData.json")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
 	}

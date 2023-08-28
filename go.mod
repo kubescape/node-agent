@@ -3,7 +3,7 @@ module node-agent
 go 1.20
 
 require (
-	github.com/armosec/utils-k8s-go v0.0.16
+	github.com/armosec/utils-k8s-go v0.0.17
 	github.com/cilium/ebpf v0.11.0
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/inspektor-gadget/inspektor-gadget v0.18.2-0.20230802150404-2f6b36dd8642
