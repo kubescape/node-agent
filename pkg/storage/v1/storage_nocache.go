@@ -70,12 +70,6 @@ func (sc StorageNoCache) GetSBOM(name string) (*v1beta1.SBOMSPDXv2p3, error) {
 		return nil, err
 	}
 
-	// remove fields that are not needed
-	SBOM.ResourceVersion = ""
-	SBOM.CreationTimestamp = metav1.Time{}
-	SBOM.Generation = 0
-	SBOM.UID = ""
-
 	return SBOM, nil
 }
 
