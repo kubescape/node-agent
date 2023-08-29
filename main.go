@@ -9,7 +9,8 @@ import (
 	"node-agent/pkg/containerwatcher/v1"
 	"node-agent/pkg/filehandler/v1"
 	"node-agent/pkg/relevancymanager/v1"
-	"node-agent/pkg/storageclient"
+	"node-agent/pkg/sbomhandler/v1"
+	"node-agent/pkg/storage/v1"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,9 +20,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/spf13/afero"
-
-	_ "net/http/pprof"
 )
 
 func main() {
@@ -65,11 +63,12 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("failed to create fileDB", helpers.Error(err))
 	}
 	k8sClient := k8sinterface.NewKubernetesApi()
-	storageClient, err := storageclient.CreateSBOMStorageK8SAggregatedAPIClient()
+	storageClient, err := storage.CreateStorageNoCache()
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
-	relevancyManager, err := relevancymanager.CreateRelevancyManager(cfg, clusterData.ClusterName, fileHandler, k8sClient, afero.NewOsFs(), storageClient)
+	sbomHandler := sbomhandler.CreateSBOMHandler(storageClient)
+	relevancyManager, err := relevancymanager.CreateRelevancyManager(cfg, clusterData.ClusterName, fileHandler, k8sClient, sbomHandler)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
 	}

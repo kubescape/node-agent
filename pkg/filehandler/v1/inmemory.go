@@ -65,7 +65,8 @@ func shallowCopyMapStringBool(m map[string]bool) map[string]bool {
 	return mCopy
 }
 
-func (s *InMemoryFileHandler) GetFiles(bucket string) (map[string]bool, error) {
+// GetAndDeleteFiles returns a list of files for a container and purges the list for InMemoryFileHandler
+func (s *InMemoryFileHandler) GetAndDeleteFiles(bucket string) (map[string]bool, error) {
 	s.mutex.RLock()
 	bucketFiles, ok := s.buckets[bucket]
 	s.mutex.RUnlock()

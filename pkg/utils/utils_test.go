@@ -133,3 +133,36 @@ func TestRandomSleep(t *testing.T) {
 		})
 	}
 }
+
+func TestAtoi(t *testing.T) {
+	type args struct {
+		s string
+	}
+	tests := []struct {
+		name string
+		args args
+		want int
+	}{
+		{
+			name: "normal",
+			args: args{
+				s: "123",
+			},
+			want: 123,
+		},
+		{
+			name: "failure returns 0",
+			args: args{
+				s: "not a number",
+			},
+			want: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Atoi(tt.args.s); got != tt.want {
+				t.Errorf("Atoi() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

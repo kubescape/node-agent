@@ -4,9 +4,36 @@ import (
 	"math/rand"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kubescape/k8s-interface/instanceidhandler"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
+
+type PackageSourceInfoData struct {
+	Exist                 bool
+	PackageSPDXIdentifier []v1beta1.ElementID
+}
+
+type WatchedContainerData struct {
+	ContainerID                              string
+	FilteredSpdxData                         *v1beta1.SBOMSPDXv2p3Filtered
+	FirstReport                              bool
+	ImageID                                  string
+	ImageTag                                 string
+	InitialDelayExpired                      bool
+	InstanceID                               instanceidhandler.IInstanceID
+	K8sContainerID                           string
+	NewRelevantData                          bool
+	RelevantRealtimeFilesByPackageSourceInfo map[string]*PackageSourceInfoData
+	RelevantRealtimeFilesBySPDXIdentifier    map[v1beta1.ElementID]bool
+	SBOMResourceVersion                      int
+	SyncChannel                              chan error
+	UpdateDataTicker                         *time.Ticker
+	Wlid                                     string
+}
 
 func Between(value string, a string, b string) string {
 	// Get substring between two strings.
@@ -54,4 +81,12 @@ func RandomSleep(min, max int) {
 	// we don't initialize the seed, so we will get the same sequence of random numbers every time
 	randomDuration := time.Duration(rand.Intn(max+1-min)+min) * time.Second
 	time.Sleep(randomDuration)
+}
+
+func Atoi(s string) int {
+	i, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
+	return i
 }

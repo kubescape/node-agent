@@ -59,7 +59,6 @@ func CreateIGContainerWatcher(cfg config.Config, k8sClient *k8sinterface.Kuberne
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 
 	ch.relevancyManager.SetContainerHandler(ch)
-	ch.relevancyManager.StartRelevancyManager(ctx)
 
 	callback := func(notif containercollection.PubSubEvent) {
 		logger.L().Debug("GetEventCallback", helpers.String("namespace", notif.Container.K8s.Namespace), helpers.String("Pod name", notif.Container.K8s.PodName), helpers.String("ContainerID", notif.Container.Runtime.ContainerID), helpers.String("Container name", notif.Container.K8s.ContainerName), helpers.String("type", notif.Type.String()))

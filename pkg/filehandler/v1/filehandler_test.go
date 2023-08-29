@@ -61,7 +61,7 @@ func TestAddFile(t *testing.T) {
 				fileHandler.AddFile(tt.args.bucket, tt.args.file)
 
 				// Assert that the file exists in the bucket
-				files, _ := fileHandler.GetFiles(tt.args.bucket)
+				files, _ := fileHandler.GetAndDeleteFiles(tt.args.bucket)
 				_, exists := files[tt.args.file]
 				assert.Truef(t, exists, "Expected file %v in bucket %v", tt.args.file, tt.args.bucket)
 			})
@@ -80,13 +80,13 @@ func TestAddFile(t *testing.T) {
 			}
 			wg.Wait()
 
-			files, _ := fileHandler.GetFiles("concurrentBucket")
+			files, _ := fileHandler.GetAndDeleteFiles("concurrentBucket")
 			assert.Equal(t, routines, len(files))
 		})
 	}
 }
 
-func TestGetFiles(t *testing.T) {
+func TestGetAndDeleteFiles(t *testing.T) {
 	type args struct {
 		bucket string
 		files  map[string]bool
@@ -139,16 +139,16 @@ func TestGetFiles(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				got, err := fileHandler.GetFiles(tt.args.bucket)
+				got, err := fileHandler.GetAndDeleteFiles(tt.args.bucket)
 
 				if !tt.wantErr(t, err) {
 					return
 				}
-				assert.Equalf(t, tt.want, got, "GetFiles(%v)", tt.args.bucket)
+				assert.Equalf(t, tt.want, got, "GetAndDeleteFiles(%v)", tt.args.bucket)
 			})
 		}
 
-		t.Run("Race condition check for GetFiles", func(t *testing.T) {
+		t.Run("Race condition check for GetAndDeleteFiles", func(t *testing.T) {
 			const routines = 1000
 			wg := &sync.WaitGroup{}
 			wg.Add(routines)
@@ -164,7 +164,7 @@ func TestGetFiles(t *testing.T) {
 					defer wg.Done()
 					e := fileHandler.AddFiles("concurrentBucketGet", files)
 					assert.NoError(t, e)
-					_, err := fileHandler.GetFiles("concurrentBucketGet")
+					_, err := fileHandler.GetAndDeleteFiles("concurrentBucketGet")
 					assert.NoError(t, err)
 				}()
 			}
@@ -238,7 +238,7 @@ func TestAddFiles(t *testing.T) {
 
 		// After adding, let's check if all buckets have been created
 		for i := 0; i < routines; i++ {
-			_, err := fileHandler.GetFiles(fmt.Sprintf("concurrentBucket%d", i))
+			_, err := fileHandler.GetAndDeleteFiles(fmt.Sprintf("concurrentBucket%d", i))
 			assert.NoError(t, err)
 		}
 	})
@@ -313,7 +313,7 @@ func Test_RemoveBucket(t *testing.T) {
 
 			// After removal, let's check to ensure all buckets have been removed
 			for i := 0; i < routines; i++ {
-				_, err := fileHandler.GetFiles(fmt.Sprintf("concurrentBucket%d", i))
+				_, err := fileHandler.GetAndDeleteFiles(fmt.Sprintf("concurrentBucket%d", i))
 				assert.Error(t, err) // As buckets are removed, an error is expected when trying to retrieve files
 			}
 		})
