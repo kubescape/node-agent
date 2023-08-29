@@ -118,9 +118,17 @@ func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 				}
 			}
 		}
+		// save files, packages and relationships
+		files := watchedContainer.FilteredSpdxData.Spec.SPDX.Files
+		packages := watchedContainer.FilteredSpdxData.Spec.SPDX.Packages
+		relationships := watchedContainer.FilteredSpdxData.Spec.SPDX.Relationships
 		// copy spec and status
 		watchedContainer.FilteredSpdxData.Spec = spdxData.Spec
 		watchedContainer.FilteredSpdxData.Status = spdxData.Status
+		// restore files, packages and relationships
+		watchedContainer.FilteredSpdxData.Spec.SPDX.Files = files
+		watchedContainer.FilteredSpdxData.Spec.SPDX.Packages = packages
+		watchedContainer.FilteredSpdxData.Spec.SPDX.Relationships = relationships
 		// rewrite creation info
 		if watchedContainer.FilteredSpdxData.Spec.SPDX.CreationInfo != nil {
 			watchedContainer.FilteredSpdxData.Spec.SPDX.CreationInfo.Creators = append(watchedContainer.FilteredSpdxData.Spec.SPDX.CreationInfo.Creators, []v1beta1.Creator{
@@ -134,12 +142,9 @@ func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 				},
 			}...)
 		}
-		// empty some data
-		watchedContainer.FilteredSpdxData.Spec.SPDX.Files = make([]*v1beta1.File, 0)
-		watchedContainer.FilteredSpdxData.Spec.SPDX.Packages = make([]*v1beta1.Package, 0)
-		watchedContainer.FilteredSpdxData.Spec.SPDX.Relationships = make([]*v1beta1.Relationship, 0)
 		// update resource version
 		watchedContainer.SBOMResourceVersion = utils.Atoi(spdxData.ResourceVersion)
+		watchedContainer.NewRelevantData = true
 	}
 
 	// filter relevant file list
