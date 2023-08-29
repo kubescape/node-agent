@@ -50,20 +50,18 @@ func TestSBOMHandler_FilterSBOM(t *testing.T) {
 	instanceID, _ := instanceidhandler.GenerateInstanceIDFromString("apiVersion-v1/namespace-aaa/kind-deployment/name-redis/containerName-redis")
 	storageClient := storage.CreateSBOMStorageHttpClientMock()
 	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr bool
+		name   string
+		fields fields
+		args   args
 	}{
 		{
 			name: "TestFilterSBOM",
 			args: args{
 				watchedContainer: &utils.WatchedContainerData{
-					ContainerID: storage.NginxKey,
-					ImageID:     storage.NginxImageID,
-					ImageTag:    storage.NginxImageTag,
-					InstanceID:  instanceID,
-					//RelevantRealtimeFilesByPackageSourceInfo: map[string]*utils.PackageSourceInfoData{},
+					ContainerID:                           storage.NginxKey,
+					ImageID:                               storage.NginxImageID,
+					ImageTag:                              storage.NginxImageTag,
+					InstanceID:                            instanceID,
 					RelevantRealtimeFilesBySPDXIdentifier: map[v1beta1.ElementID]bool{},
 				},
 				sbomFileRelevantMap: map[string]bool{
@@ -80,14 +78,19 @@ func TestSBOMHandler_FilterSBOM(t *testing.T) {
 			sc := &SBOMHandler{
 				storageClient: tt.fields.storageClient,
 			}
-			if err := sc.FilterSBOM(tt.args.watchedContainer, tt.args.sbomFileRelevantMap); (err != nil) != tt.wantErr {
-				t.Errorf("FilterSBOM() error = %v, wantErr %v", err, tt.wantErr)
-			}
+			// filter sbom with tt.args.sbomFileRelevantMap
+			err := sc.FilterSBOM(tt.args.watchedContainer, tt.args.sbomFileRelevantMap)
+			assert.NoError(t, err)
+			// run a second time with updated SBOM but no new relevant files
+			// need to reset resource version since the mock won't increment it
+			tt.args.watchedContainer.SBOMResourceVersion = 0
+			err = sc.FilterSBOM(tt.args.watchedContainer, map[string]bool{})
+			assert.NoError(t, err)
 			// verify files are reported
 			assert.NotNil(t, storageClient.FilteredSBOMs)
-			assert.Equal(t, 1, len(storageClient.FilteredSBOMs))
-			assert.Equal(t, 1, len(storageClient.FilteredSBOMs[0].Spec.SPDX.Files))
-			assert.Equal(t, "/usr/sbin/deluser", storageClient.FilteredSBOMs[0].Spec.SPDX.Files[0].FileName)
+			assert.Equal(t, 2, len(storageClient.FilteredSBOMs))
+			assert.Equal(t, 1, len(storageClient.FilteredSBOMs[1].Spec.SPDX.Files))
+			assert.Equal(t, "/usr/sbin/deluser", storageClient.FilteredSBOMs[1].Spec.SPDX.Files[0].FileName)
 		})
 	}
 }
