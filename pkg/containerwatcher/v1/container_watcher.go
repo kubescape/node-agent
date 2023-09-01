@@ -9,7 +9,9 @@ import (
 	"os"
 	"time"
 
+	gadgetv1alpha1 "github.com/inspektor-gadget/inspektor-gadget/pkg/apis/gadget/v1alpha1"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-collection/gadgets"
 	tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
@@ -102,6 +104,15 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 
 	// Empty selector to get all containers
 	containerSelector := containercollection.ContainerSelector{}
+
+	// ...except if we selects events from pods with these labels
+	if len(ch.cfg.PodWatchLabels) > 0 {
+		containerSelector = *gadgets.ContainerSelectorFromContainerFilter(
+			&gadgetv1alpha1.ContainerFilter{
+				Labels: ch.cfg.PodWatchLabels,
+			},
+		)
+	}
 
 	// Define a callback to handle exec events
 	execEventCallback := func(event *tracerexectype.Event) {
