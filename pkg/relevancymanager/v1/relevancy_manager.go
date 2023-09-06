@@ -32,10 +32,6 @@ const (
 	eventsWorkersConcurrency = 10
 )
 
-var (
-	containerHasTerminatedError = errors.New("container has terminated")
-)
-
 type RelevancyManager struct {
 	cfg         config.Config
 	clusterName string
@@ -197,12 +193,15 @@ func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *con
 			// handle collection of relevant data
 			rm.handleRelevancy(ctx, watchedContainer, container.Runtime.ContainerID)
 		case err := <-watchedContainer.SyncChannel:
-			if errors.Is(err, containerHasTerminatedError) {
+			switch {
+			case errors.Is(err, relevancymanager.ContainerHasTerminatedError):
 				// ensure we know the imageID
 				rm.ensureImageID(container, watchedContainer)
 				// handle collection of relevant data one more time
 				rm.handleRelevancy(ctx, watchedContainer, container.Runtime.ContainerID)
-				return fmt.Errorf("container terminated")
+				return relevancymanager.ContainerHasTerminatedError
+			case errors.Is(err, relevancymanager.IncompleteSBOMError):
+				return relevancymanager.IncompleteSBOMError
 			}
 		}
 	}
@@ -262,7 +261,7 @@ func (rm *RelevancyManager) ReportContainerTerminated(ctx context.Context, conta
 			logger.L().Debug("container not found in memory", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			return
 		}
-		channel.(chan error) <- containerHasTerminatedError
+		channel.(chan error) <- relevancymanager.ContainerHasTerminatedError
 	}
 }
 

@@ -46,7 +46,7 @@ func TestRelevancyManager(t *testing.T) {
 	fileHandler, err := filehandler.CreateInMemoryFileHandler()
 	assert.NoError(t, err)
 	k8sClient := &k8sclient.K8sClientMock{}
-	storageClient := storage.CreateSBOMStorageHttpClientMock()
+	storageClient := storage.CreateSBOMStorageHttpClientMock("nginx-spdx-format-mock.json")
 	sbomHandler := sbomhandler.CreateSBOMHandler(storageClient)
 	relevancyManager, err := CreateRelevancyManager(cfg, "cluster", fileHandler, k8sClient, sbomHandler)
 	assert.NoError(t, err)
@@ -109,4 +109,50 @@ func TestRelevancyManager(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	_, err = fileHandler.GetAndDeleteFiles("ns/pod/cont")
 	assert.ErrorContains(t, err, "bucket does not exist for container ns/pod/cont")
+}
+
+func TestRelevancyManagerIncompleteSBOM(t *testing.T) {
+	// create a new relevancy manager
+	cfg := config.Config{
+		EnableRelevancy:  true,
+		InitialDelay:     1 * time.Second,
+		MaxSniffingTime:  5 * time.Minute,
+		UpdateDataPeriod: 20 * time.Second,
+	}
+	ctx := context.TODO()
+	fileHandler, err := filehandler.CreateInMemoryFileHandler()
+	assert.NoError(t, err)
+	k8sClient := &k8sclient.K8sClientMock{}
+	storageClient := storage.CreateSBOMStorageHttpClientMock("sbom-incomplete-mock.json")
+	sbomHandler := sbomhandler.CreateSBOMHandler(storageClient)
+	relevancyManager, err := CreateRelevancyManager(cfg, "cluster", fileHandler, k8sClient, sbomHandler)
+	assert.NoError(t, err)
+	relevancyManager.SetContainerHandler(containerwatcher.ContainerWatcherMock{})
+	// report container started
+	container := &containercollection.Container{
+		K8s: containercollection.K8sMetadata{
+			BasicK8sMetadata: types.BasicK8sMetadata{
+				Namespace:     "ns",
+				PodName:       "pod",
+				ContainerName: "cont",
+			},
+		},
+		Runtime: containercollection.RuntimeMetadata{
+			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
+				ContainerID: "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+			},
+		},
+	}
+	relevancyManager.ReportContainerStarted(ctx, container)
+	// report file access
+	relevancyManager.ReportFileAccess(ctx, "ns", "pod", "cont", "/usr/sbin/deluser")
+	// let it run for a while
+	time.Sleep(10 * time.Second)
+	// report container stopped
+	relevancyManager.ReportContainerTerminated(ctx, container)
+	// let it stop
+	time.Sleep(1 * time.Second)
+	// verify filtered SBOM is created
+	assert.NotNil(t, storageClient.FilteredSBOMs)
+	assert.Equal(t, 1, len(storageClient.FilteredSBOMs))
 }

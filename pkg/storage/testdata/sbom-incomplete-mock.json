@@ -6,7 +6,8 @@
         "annotations": {
             "kubescape.io/image-id": "quay.io/kubescape/kubevuln@sha256:0a992168e92055d1905c34d1e11cb7d3f0847759998458443561bd0a4d60b4e2",
             "kubescape.io/status": "incomplete"
-        }
+        },
+        "resourceVersion": "1"
     },
     "spec": {
         "spdx": {
