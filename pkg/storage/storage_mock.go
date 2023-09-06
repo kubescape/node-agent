@@ -23,9 +23,9 @@ type StorageHttpClientMock struct {
 
 var _ StorageClient = (*StorageHttpClientMock)(nil)
 
-func CreateSBOMStorageHttpClientMock() *StorageHttpClientMock {
+func CreateSBOMStorageHttpClientMock(sbom string) *StorageHttpClientMock {
 	var data spdxv1beta1.SBOMSPDXv2p3
-	nginxSBOMPath := path.Join(utils.CurrentDir(), "testdata", "nginx-spdx-format-mock.json")
+	nginxSBOMPath := path.Join(utils.CurrentDir(), "testdata", sbom)
 	bytes, err := os.ReadFile(nginxSBOMPath)
 	if err != nil {
 		return nil

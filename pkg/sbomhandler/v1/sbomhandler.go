@@ -2,6 +2,7 @@ package sbomhandler
 
 import (
 	"errors"
+	"node-agent/pkg/relevancymanager"
 	"node-agent/pkg/sbomhandler"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
@@ -96,8 +97,8 @@ func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 	if status, ok := spdxData.Annotations[instanceidhandler.StatusMetadataKey]; ok {
 		watchedContainer.FilteredSpdxData.Annotations[instanceidhandler.StatusMetadataKey] = status
 		if status == instanceidhandler.Incomplete {
-			logger.L().Debug("SBOM is incomplete, skipping", helpers.String("containerID", watchedContainer.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			return nil
+			// stop processing after storing filtered SBOM
+			watchedContainer.SyncChannel <- relevancymanager.IncompleteSBOMError
 		}
 	}
 

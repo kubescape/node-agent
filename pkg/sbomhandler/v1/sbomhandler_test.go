@@ -27,7 +27,7 @@ func TestSBOMHandler_CountImageUse(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			storageClient := storage.CreateSBOMStorageHttpClientMock()
+			storageClient := storage.CreateSBOMStorageHttpClientMock("nginx-spdx-format-mock.json")
 			sc := CreateSBOMHandler(storageClient)
 			sc.IncrementImageUse(tt.args.imageID)
 			assert.Equal(t, 1, storageClient.ImageCounters[tt.args.imageID])
@@ -48,7 +48,7 @@ func TestSBOMHandler_FilterSBOM(t *testing.T) {
 		sbomFileRelevantMap map[string]bool
 	}
 	instanceID, _ := instanceidhandler.GenerateInstanceIDFromString("apiVersion-v1/namespace-aaa/kind-deployment/name-redis/containerName-redis")
-	storageClient := storage.CreateSBOMStorageHttpClientMock()
+	storageClient := storage.CreateSBOMStorageHttpClientMock("nginx-spdx-format-mock.json")
 	tests := []struct {
 		name   string
 		fields fields
