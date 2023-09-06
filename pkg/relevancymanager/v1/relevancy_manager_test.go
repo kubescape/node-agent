@@ -77,8 +77,12 @@ func TestRelevancyManager(t *testing.T) {
 		relevancyManager.ReportFileAccess(ctx, "ns", "pod", "cont", file)
 	}
 	// let it run for a while
-	time.Sleep(10 * time.Second)
-	// verify files are reported
+	time.Sleep(5 * time.Second)
+	// report a same file again, should do noop
+	relevancyManager.ReportFileAccess(ctx, "ns", "pod", "cont", "/usr/sbin/deluser")
+	// let it run for a while
+	time.Sleep(5 * time.Second)
+	// verify files are reported and we have only 1 filtered SBOM
 	assert.NotNil(t, storageClient.FilteredSBOMs)
 	assert.Equal(t, 1, len(storageClient.FilteredSBOMs))
 	assert.Equal(t, 1, len(storageClient.FilteredSBOMs[0].Spec.SPDX.Files))
