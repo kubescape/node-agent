@@ -18,12 +18,13 @@ import (
 )
 
 const (
-	KubeConfig         = "KUBECONFIG"
-	KubescapeNamespace = "kubescape"
+	KubeConfig       = "KUBECONFIG"
+	defaultNamespace = "kubescape"
 )
 
 type StorageNoCache struct {
 	StorageClient spdxv1beta1.SpdxV1beta1Interface
+	namespace     string
 }
 
 var _ storage.StorageClient = (*StorageNoCache)(nil)
@@ -47,17 +48,26 @@ func CreateStorageNoCache() (*StorageNoCache, error) {
 
 	return &StorageNoCache{
 		StorageClient: clientset.SpdxV1beta1(),
+		namespace:     getNamespace(),
 	}, nil
 }
 
 func CreateFakeStorageNoCache() (*StorageNoCache, error) {
 	return &StorageNoCache{
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
+		namespace:     getNamespace(),
 	}, nil
 }
 
+func getNamespace() string {
+	if ns, ok := os.LookupEnv("NAMESPACE"); ok {
+		return ns
+	}
+	return defaultNamespace
+}
+
 func (sc StorageNoCache) CreateFilteredSBOM(SBOM *v1beta1.SBOMSPDXv2p3Filtered) error {
-	_, err := sc.StorageClient.SBOMSPDXv2p3Filtereds(KubescapeNamespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
+	_, err := sc.StorageClient.SBOMSPDXv2p3Filtereds(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
@@ -65,7 +75,7 @@ func (sc StorageNoCache) CreateFilteredSBOM(SBOM *v1beta1.SBOMSPDXv2p3Filtered) 
 }
 
 func (sc StorageNoCache) GetSBOM(name string) (*v1beta1.SBOMSPDXv2p3, error) {
-	SBOM, err := sc.StorageClient.SBOMSPDXv2p3s(KubescapeNamespace).Get(context.Background(), name, metav1.GetOptions{})
+	SBOM, err := sc.StorageClient.SBOMSPDXv2p3s(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +88,7 @@ func (sc StorageNoCache) PatchFilteredSBOM(name string, SBOM *v1beta1.SBOMSPDXv2
 	if err != nil {
 		return err
 	}
-	_, err = sc.StorageClient.SBOMSPDXv2p3Filtereds(KubescapeNamespace).Patch(context.Background(), name, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+	_, err = sc.StorageClient.SBOMSPDXv2p3Filtereds(sc.namespace).Patch(context.Background(), name, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		return err
 	}
