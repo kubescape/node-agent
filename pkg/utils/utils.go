@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"math/rand"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,11 @@ import (
 
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+)
+
+var (
+	ContainerHasTerminatedError = errors.New("container has terminated")
+	IncompleteSBOMError         = errors.New("incomplete SBOM")
 )
 
 type PackageSourceInfoData struct {
@@ -33,6 +39,7 @@ type WatchedContainerData struct {
 	SyncChannel                              chan error
 	UpdateDataTicker                         *time.Ticker
 	Wlid                                     string
+	NsMntId                                  uint64
 }
 
 func Between(value string, a string, b string) string {
@@ -76,11 +83,11 @@ func CreateK8sContainerID(namespaceName string, podName string, containerName st
 	return strings.Join([]string{namespaceName, podName, containerName}, "/")
 }
 
-// RandomSleep sleeps between min and max seconds
-func RandomSleep(min, max int) {
+// AddRandomDuration adds between min and max seconds to duration
+func AddRandomDuration(min, max int, duration time.Duration) time.Duration {
 	// we don't initialize the seed, so we will get the same sequence of random numbers every time
 	randomDuration := time.Duration(rand.Intn(max+1-min)+min) * time.Second
-	time.Sleep(randomDuration)
+	return randomDuration + duration
 }
 
 func Atoi(s string) int {

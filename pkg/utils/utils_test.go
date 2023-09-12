@@ -125,10 +125,10 @@ func TestRandomSleep(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			start := time.Now()
-			RandomSleep(tt.args.min, tt.args.max)
+			time.Sleep(AddRandomDuration(tt.args.min, tt.args.max, 0))
 			elapsed := int(time.Since(start).Seconds())
 			if elapsed < tt.args.min || elapsed > tt.args.max {
-				t.Errorf("RandomSleep() = %v, want between %v and %v", elapsed, tt.args.min, tt.args.max)
+				t.Errorf("AddRandomDuration() = %v, want between %v and %v", elapsed, tt.args.min, tt.args.max)
 			}
 		})
 	}

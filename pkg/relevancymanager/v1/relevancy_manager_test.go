@@ -28,7 +28,7 @@ func BenchmarkRelevancyManager_ReportFileAccess(b *testing.B) {
 	relevancyManager, err := CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, nil, nil)
 	assert.NoError(b, err)
 	for i := 0; i < b.N; i++ {
-		relevancyManager.ReportFileAccess("ns", "pod", "cont", "file")
+		relevancyManager.ReportFileAccess("ns", "file")
 	}
 	b.ReportAllocs()
 }

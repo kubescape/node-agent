@@ -177,14 +177,14 @@ func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *con
 			rm.handleRelevancy(ctx, watchedContainer, container.Runtime.ContainerID)
 		case err := <-watchedContainer.SyncChannel:
 			switch {
-			case errors.Is(err, relevancymanager.ContainerHasTerminatedError):
+			case errors.Is(err, utils.ContainerHasTerminatedError):
 				// ensure we know the imageID
 				rm.ensureImageInfo(container, watchedContainer)
 				// handle collection of relevant data one more time
 				rm.handleRelevancy(ctx, watchedContainer, container.Runtime.ContainerID)
-				return relevancymanager.ContainerHasTerminatedError
-			case errors.Is(err, relevancymanager.IncompleteSBOMError):
-				return relevancymanager.IncompleteSBOMError
+				return nil
+			case errors.Is(err, utils.IncompleteSBOMError):
+				return utils.IncompleteSBOMError
 			}
 		}
 	}
@@ -205,7 +205,7 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 	rm.watchedContainerChannels.Store(watchedContainer.ContainerID, watchedContainer.SyncChannel)
 
 	if err := rm.monitorContainer(ctx, container, watchedContainer); err != nil {
-		logger.L().Info("stop monitor on container", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+		logger.L().Info("RelevancyManager - stop monitor on container", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
 
 	err := rm.fileHandler.RemoveBucket(k8sContainerID)
@@ -227,7 +227,6 @@ func (rm *RelevancyManager) ContainerCallback(notif containercollection.PubSubEv
 			logger.L().Debug("container already exist in memory", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			return
 		}
-		logger.L().Info("new container has loaded - start monitor it", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		go rm.startRelevancyProcess(ctx, notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:
 		if channel, ok := rm.watchedContainerChannels.LoadAndDelete(notif.Container.Runtime.ContainerID); ok {
@@ -235,17 +234,11 @@ func (rm *RelevancyManager) ContainerCallback(notif containercollection.PubSubEv
 				logger.L().Debug("container not found in memory", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 				return
 			}
-			channel.(chan error) <- relevancymanager.ContainerHasTerminatedError
+			channel.(chan error) <- utils.ContainerHasTerminatedError
 		}
 	}
 }
 
-func (rm *RelevancyManager) ReportFileAccess(namespace, pod, container, file string) {
-	// log accessed files for all containers to avoid race condition
-	// this won't record unnecessary containers as the containerCollection takes care of filtering them
-	if file == "" {
-		return
-	}
-	k8sContainerID := utils.CreateK8sContainerID(namespace, pod, container)
+func (rm *RelevancyManager) ReportFileAccess(k8sContainerID, file string) {
 	rm.fileHandler.AddFile(k8sContainerID, file)
 }

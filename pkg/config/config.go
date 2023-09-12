@@ -9,11 +9,12 @@ import (
 const NodeNameEnvVar = "NODE_NAME"
 
 type Config struct {
-	EnableFullPathTracing bool          `mapstructure:"fullPathTracingEnabled"`
-	EnableRelevancy       bool          `mapstructure:"relevantCVEServiceEnabled"`
-	InitialDelay          time.Duration `mapstructure:"initialDelay"`
-	MaxSniffingTime       time.Duration `mapstructure:"maxSniffingTimePerContainer"`
-	UpdateDataPeriod      time.Duration `mapstructure:"updateDataPeriod"`
+	EnableFullPathTracing    bool          `mapstructure:"fullPathTracingEnabled"`
+	EnableApplicationProfile bool          `mapstructure:"applicationProfileServiceEnabled"`
+	EnableRelevancy          bool          `mapstructure:"relevantCVEServiceEnabled"`
+	InitialDelay             time.Duration `mapstructure:"initialDelay"`
+	MaxSniffingTime          time.Duration `mapstructure:"maxSniffingTimePerContainer"`
+	UpdateDataPeriod         time.Duration `mapstructure:"updateDataPeriod"`
 }
 
 // LoadConfig reads configuration from file or environment variables.

@@ -3,6 +3,7 @@ package containerwatcher
 import (
 	"context"
 	"fmt"
+	"node-agent/pkg/applicationprofilemanager"
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher"
 	"node-agent/pkg/relevancymanager"
@@ -11,8 +12,11 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
+	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
+	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
+	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -33,8 +37,9 @@ type IGContainerWatcher struct {
 	containerSelector containercollection.ContainerSelector
 	ctx               context.Context
 	// Clients
-	k8sClient        *k8sinterface.KubernetesApi
-	relevancyManager relevancymanager.RelevancyManagerClient
+	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
+	k8sClient                 *k8sinterface.KubernetesApi
+	relevancyManager          relevancymanager.RelevancyManagerClient
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
@@ -51,7 +56,7 @@ type IGContainerWatcher struct {
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -61,25 +66,37 @@ func CreateIGContainerWatcher(cfg config.Config, k8sClient *k8sinterface.Kuberne
 	}
 	// Create a capabilities worker pool
 	capabilitiesWorkerPool, err := ants.NewPoolWithFunc(1, func(i interface{}) {
-		s := i.([5]string)
-		k8sContainerID := utils.CreateK8sContainerID(s[0], s[1], s[2])
-		logger.L().Info("capability detected", helpers.String("k8sContainerID", k8sContainerID), helpers.String("syscall", s[3]), helpers.String("capability", s[4]))
+		event := i.(tracercapabilitiestype.Event)
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating capabilities worker pool: %w", err)
 	}
 	// Create an exec worker pool
 	execWorkerPool, err := ants.NewPoolWithFunc(2, func(i interface{}) {
-		s := i.([4]string)
-		relevancyManager.ReportFileAccess(s[0], s[1], s[2], s[3])
+		event := i.(tracerexectype.Event)
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+		path := event.Comm
+		if len(event.Args) > 0 {
+			path = event.Args[0]
+		}
+		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
+		relevancyManager.ReportFileAccess(k8sContainerID, path)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating exec worker pool: %w", err)
 	}
 	// Create an open worker pool
 	openWorkerPool, err := ants.NewPoolWithFunc(8, func(i interface{}) {
-		s := i.([4]string)
-		relevancyManager.ReportFileAccess(s[0], s[1], s[2], s[3])
+		event := i.(traceropentype.Event)
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+		path := event.Path
+		if cfg.EnableFullPathTracing {
+			path = event.FullPath
+		}
+		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
+		relevancyManager.ReportFileAccess(k8sContainerID, path)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating open worker pool: %w", err)
@@ -90,8 +107,9 @@ func CreateIGContainerWatcher(cfg config.Config, k8sClient *k8sinterface.Kuberne
 		cfg:               cfg,
 		containerSelector: containercollection.ContainerSelector{}, // Empty selector to get all containers
 		// Clients
-		k8sClient:        k8sClient,
-		relevancyManager: relevancyManager,
+		applicationProfileManager: applicationProfileManager,
+		k8sClient:                 k8sClient,
+		relevancyManager:          relevancyManager,
 		// IG Collections
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,
@@ -100,13 +118,6 @@ func CreateIGContainerWatcher(cfg config.Config, k8sClient *k8sinterface.Kuberne
 		execWorkerPool:         execWorkerPool,
 		openWorkerPool:         openWorkerPool,
 	}, nil
-}
-
-func (ch *IGContainerWatcher) PeekSyscallInContainer(nsMountId uint64) ([]string, error) {
-	if ch == nil || !ch.running {
-		return nil, fmt.Errorf("tracing not running")
-	}
-	return ch.syscallTracer.Peek(nsMountId)
 }
 
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {

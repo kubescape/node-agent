@@ -13,6 +13,8 @@ func (ch *IGContainerWatcher) startSystemcallTracing() error {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
 	ch.syscallTracer = syscallTracer
+	// Register peek func for application profile manager
+	ch.applicationProfileManager.RegisterPeekFunc(ch.syscallTracer.Peek)
 	return nil
 }
 

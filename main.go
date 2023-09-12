@@ -5,10 +5,13 @@ import (
 	"net/http"
 	"net/url"
 	"node-agent/internal/validator"
+	"node-agent/pkg/applicationprofilemanager"
+	applicationprofilemanagerv1 "node-agent/pkg/applicationprofilemanager/v1"
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher/v1"
 	"node-agent/pkg/filehandler/v1"
-	"node-agent/pkg/relevancymanager/v1"
+	"node-agent/pkg/relevancymanager"
+	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
 	"node-agent/pkg/sbomhandler/v1"
 	"node-agent/pkg/storage/v1"
 	"os"
@@ -57,24 +60,42 @@ func main() {
 		}()
 	}
 
-	// Create the relevancy manager
-	fileHandler, err := filehandler.CreateInMemoryFileHandler()
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to create fileDB", helpers.Error(err))
-	}
+	// Create clients
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageClient, err := storage.CreateStorageNoCache()
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
-	sbomHandler := sbomhandler.CreateSBOMHandler(storageClient)
-	relevancyManager, err := relevancymanager.CreateRelevancyManager(ctx, cfg, clusterData.ClusterName, fileHandler, k8sClient, sbomHandler)
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
+
+	// Create the application profile manager
+	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
+	if cfg.EnableApplicationProfile {
+		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, k8sClient, storageClient)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating the application profile manager", helpers.Error(err))
+		}
+	} else {
+		applicationProfileManager = applicationprofilemanager.CreateApplicationProfileManagerMock()
+	}
+
+	// Create the relevancy manager
+	var relevancyManager relevancymanager.RelevancyManagerClient
+	if cfg.EnableRelevancy {
+		fileHandler, err := filehandler.CreateInMemoryFileHandler()
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("failed to create the filehandler for relevancy manager", helpers.Error(err))
+		}
+		sbomHandler := sbomhandler.CreateSBOMHandler(storageClient)
+		relevancyManager, err = relevancymanagerv1.CreateRelevancyManager(ctx, cfg, clusterData.ClusterName, fileHandler, k8sClient, sbomHandler)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
+		}
+	} else {
+		relevancymanager.CreateRelevancyManagerMock()
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, k8sClient, relevancyManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

@@ -19,7 +19,7 @@ func BenchmarkIGContainerWatcher_openEventCallback(b *testing.B) {
 	assert.NoError(b, err)
 	relevancyManager, err := relevancymanager.CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, nil, nil)
 	assert.NoError(b, err)
-	mainHandler, err := CreateIGContainerWatcher(cfg, nil, relevancyManager)
+	mainHandler, err := CreateIGContainerWatcher(cfg, nil, nil, relevancyManager)
 	assert.NoError(b, err)
 	event := &traceropentype.Event{
 		Event: types.Event{

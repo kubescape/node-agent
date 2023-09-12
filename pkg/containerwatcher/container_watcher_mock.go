@@ -6,10 +6,6 @@ import (
 
 type ContainerWatcherMock struct{}
 
-func (c ContainerWatcherMock) PeekSyscallInContainer(nsMountId uint64) ([]string, error) {
-	return []string{}, nil
-}
-
 func (c ContainerWatcherMock) Start(_ context.Context) error {
 	return nil
 }

@@ -16,14 +16,8 @@ func (ch *IGContainerWatcher) execEventCallback(event *tracerexectype.Event) {
 		logger.L().Ctx(ch.ctx).Warning("exec tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
-	if event.Retval > -1 {
-		p := event.Comm
-		if len(event.Args) > 0 {
-			p = event.Args[0]
-		}
-		if p != "" {
-			_ = ch.execWorkerPool.Invoke([4]string{event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName, p})
-		}
+	if event.Retval > -1 && event.Comm != "" {
+		_ = ch.execWorkerPool.Invoke(*event)
 	}
 }
 

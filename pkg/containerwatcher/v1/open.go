@@ -16,14 +16,8 @@ func (ch *IGContainerWatcher) openEventCallback(event *traceropentype.Event) {
 		logger.L().Ctx(ch.ctx).Warning("open tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
-	if event.Ret > -1 {
-		p := event.Path
-		if ch.cfg.EnableFullPathTracing {
-			p = event.FullPath
-		}
-		if p != "" {
-			_ = ch.openWorkerPool.Invoke([4]string{event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName, p})
-		}
+	if event.Ret > -1 && event.Path != "" {
+		_ = ch.openWorkerPool.Invoke(*event)
 	}
 }
 

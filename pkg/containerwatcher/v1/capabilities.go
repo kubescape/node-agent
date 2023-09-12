@@ -16,7 +16,7 @@ func (ch *IGContainerWatcher) capabilitiesEventCallback(event *tracercapabilitie
 		logger.L().Ctx(ch.ctx).Warning("capabilities tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
-	_ = ch.capabilitiesWorkerPool.Invoke([5]string{event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName, event.Syscall, event.CapName})
+	_ = ch.capabilitiesWorkerPool.Invoke(*event)
 }
 
 func (ch *IGContainerWatcher) startCapabilitiesTracing() error {
