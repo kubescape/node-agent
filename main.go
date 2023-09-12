@@ -68,7 +68,7 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
 	sbomHandler := sbomhandler.CreateSBOMHandler(storageClient)
-	relevancyManager, err := relevancymanager.CreateRelevancyManager(cfg, clusterData.ClusterName, fileHandler, k8sClient, sbomHandler)
+	relevancyManager, err := relevancymanager.CreateRelevancyManager(ctx, cfg, clusterData.ClusterName, fileHandler, k8sClient, sbomHandler)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
 	}

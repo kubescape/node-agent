@@ -2,12 +2,10 @@ package containerwatcher
 
 import (
 	"context"
-
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 )
 
 type ContainerWatcher interface {
+	PeekSyscallInContainer(nsMountId uint64) ([]string, error)
 	Start(ctx context.Context) error
 	Stop()
-	UnregisterContainer(container *containercollection.Container)
 }

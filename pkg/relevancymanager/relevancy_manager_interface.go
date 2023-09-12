@@ -1,9 +1,7 @@
 package relevancymanager
 
 import (
-	"context"
 	"errors"
-	"node-agent/pkg/containerwatcher"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 )
@@ -14,8 +12,6 @@ var (
 )
 
 type RelevancyManagerClient interface {
-	ReportContainerStarted(ctx context.Context, container *containercollection.Container)
-	ReportContainerTerminated(ctx context.Context, container *containercollection.Container)
-	ReportFileAccess(ctx context.Context, namespace, pod, container, file string)
-	SetContainerHandler(containerHandler containerwatcher.ContainerWatcher)
+	ContainerCallback(notif containercollection.PubSubEvent)
+	ReportFileAccess(namespace, pod, container, file string)
 }

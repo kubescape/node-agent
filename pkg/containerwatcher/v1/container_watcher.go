@@ -6,34 +6,47 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher"
 	"node-agent/pkg/relevancymanager"
-	"os"
-	"time"
+	"node-agent/pkg/utils"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
+	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
 	tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/panjf2000/ants/v2"
 )
 
 const (
-	execTraceName = "trace_exec"
-	openTraceName = "trace_open"
+	capabilitiesTraceName = "trace_capabilities"
+	execTraceName         = "trace_exec"
+	openTraceName         = "trace_open"
 )
 
 type IGContainerWatcher struct {
-	cfg                 config.Config
+	running bool
+	// Configuration
+	cfg               config.Config
+	containerSelector containercollection.ContainerSelector
+	ctx               context.Context
+	// Clients
+	k8sClient        *k8sinterface.KubernetesApi
+	relevancyManager relevancymanager.RelevancyManagerClient
+	// IG Collections
 	containerCollection *containercollection.ContainerCollection
-	k8sClient           *k8sinterface.KubernetesApi
-	relevancyManager    relevancymanager.RelevancyManagerClient
 	tracerCollection    *tracercollection.TracerCollection
-	tracerExec          *tracerexec.Tracer
-	tracerOpen          *traceropen.Tracer
+	// IG Tracers
+	capabilitiesTracer *tracercapabilities.Tracer
+	execTracer         *tracerexec.Tracer
+	openTracer         *traceropen.Tracer
+	syscallTracer      *tracerseccomp.Tracer
+	// Worker pools
+	capabilitiesWorkerPool *ants.PoolWithFunc
+	execWorkerPool         *ants.PoolWithFunc
+	openWorkerPool         *ants.PoolWithFunc
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
@@ -44,160 +57,82 @@ func CreateIGContainerWatcher(cfg config.Config, k8sClient *k8sinterface.Kuberne
 	// Create a tracer collection instance
 	tracerCollection, err := tracercollection.NewTracerCollection(containerCollection)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create trace-collection: %s\n", err)
+		return nil, fmt.Errorf("creating tracer collection: %w", err)
+	}
+	// Create a capabilities worker pool
+	capabilitiesWorkerPool, err := ants.NewPoolWithFunc(1, func(i interface{}) {
+		s := i.([5]string)
+		k8sContainerID := utils.CreateK8sContainerID(s[0], s[1], s[2])
+		logger.L().Info("capability detected", helpers.String("k8sContainerID", k8sContainerID), helpers.String("syscall", s[3]), helpers.String("capability", s[4]))
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating capabilities worker pool: %w", err)
+	}
+	// Create an exec worker pool
+	execWorkerPool, err := ants.NewPoolWithFunc(2, func(i interface{}) {
+		s := i.([4]string)
+		relevancyManager.ReportFileAccess(s[0], s[1], s[2], s[3])
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating exec worker pool: %w", err)
+	}
+	// Create an open worker pool
+	openWorkerPool, err := ants.NewPoolWithFunc(8, func(i interface{}) {
+		s := i.([4]string)
+		relevancyManager.ReportFileAccess(s[0], s[1], s[2], s[3])
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating open worker pool: %w", err)
 	}
 
 	return &IGContainerWatcher{
-		cfg:                 cfg,
+		// Configuration
+		cfg:               cfg,
+		containerSelector: containercollection.ContainerSelector{}, // Empty selector to get all containers
+		// Clients
+		k8sClient:        k8sClient,
+		relevancyManager: relevancyManager,
+		// IG Collections
 		containerCollection: containerCollection,
-		k8sClient:           k8sClient,
 		tracerCollection:    tracerCollection,
-		relevancyManager:    relevancyManager,
+		// Worker pools
+		capabilitiesWorkerPool: capabilitiesWorkerPool,
+		execWorkerPool:         execWorkerPool,
+		openWorkerPool:         openWorkerPool,
 	}, nil
 }
 
+func (ch *IGContainerWatcher) PeekSyscallInContainer(nsMountId uint64) ([]string, error) {
+	if ch == nil || !ch.running {
+		return nil, fmt.Errorf("tracing not running")
+	}
+	return ch.syscallTracer.Peek(nsMountId)
+}
+
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {
-
-	ch.relevancyManager.SetContainerHandler(ch)
-
-	callback := func(notif containercollection.PubSubEvent) {
-		logger.L().Debug("GetEventCallback", helpers.String("namespace", notif.Container.K8s.Namespace), helpers.String("Pod name", notif.Container.K8s.PodName), helpers.String("ContainerID", notif.Container.Runtime.ContainerID), helpers.String("Container name", notif.Container.K8s.ContainerName), helpers.String("type", notif.Type.String()))
-		switch notif.Type {
-		case containercollection.EventTypeAddContainer:
-			logger.L().Debug("container has started", helpers.String("namespace", notif.Container.K8s.Namespace), helpers.String("Pod name", notif.Container.K8s.PodName), helpers.String("ContainerID", notif.Container.Runtime.ContainerID), helpers.String("Container name", notif.Container.K8s.ContainerName))
-			// notify the relevancy manager that a new container has started
-			ch.relevancyManager.ReportContainerStarted(ctx, notif.Container)
-		case containercollection.EventTypeRemoveContainer:
-			logger.L().Debug("container has Terminated", helpers.String("namespace", notif.Container.K8s.Namespace), helpers.String("Pod name", notif.Container.K8s.PodName), helpers.String("ContainerID", notif.Container.Runtime.ContainerID), helpers.String("Container name", notif.Container.K8s.ContainerName))
-			// notify the relevancy manager that a container has terminated
-			ch.relevancyManager.ReportContainerTerminated(ctx, notif.Container)
+	if !ch.running {
+		err := ch.startContainerCollection(ctx)
+		if err != nil {
+			return fmt.Errorf("setting up container collection: %w", err)
 		}
-	}
-	containerEventFuncs := []containercollection.FuncNotify{callback}
-
-	// Define the different options for the container collection instance
-	opts := []containercollection.ContainerCollectionOption{
-		containercollection.WithTracerCollection(ch.tracerCollection),
-
-		// Get containers created with runc
-		containercollection.WithRuncFanotify(),
-
-		// Get containers created with docker
-		containercollection.WithCgroupEnrichment(),
-
-		// Enrich events with Linux namespaces information, it is needed for per container filtering
-		containercollection.WithLinuxNamespaceEnrichment(),
-
-		// Enrich those containers with data from the Kubernetes API
-		containercollection.WithKubernetesEnrichment(os.Getenv(config.NodeNameEnvVar), ch.k8sClient.K8SConfig),
-
-		// Get Notifications from the container collection
-		containercollection.WithPubSub(containerEventFuncs...),
-	}
-
-	// Initialize the container collection
-	if err := ch.containerCollection.Initialize(opts...); err != nil {
-		return fmt.Errorf("failed to initialize container collection: %s\n", err)
-	}
-
-	// Empty selector to get all containers
-	containerSelector := containercollection.ContainerSelector{}
-
-	// Define a callback to handle exec events
-	execEventCallback := func(event *tracerexectype.Event) {
-		if event.Type != types.NORMAL {
-			// dropped event
-			logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-			return
+		err = ch.startTracers()
+		if err != nil {
+			ch.stopContainerCollection()
+			return fmt.Errorf("starting app behavior tracing: %w", err)
 		}
-		if event.Retval > -1 {
-			procImageName := event.Comm
-			if len(event.Args) > 0 {
-				procImageName = event.Args[0]
-			}
-			ch.relevancyManager.ReportFileAccess(ctx, event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName, procImageName)
-		}
+		logger.L().Info("main container handler started")
+		ch.running = true
 	}
-	if err := ch.tracerCollection.AddTracer(execTraceName, containerSelector); err != nil {
-		return fmt.Errorf("error adding exec tracer: %s\n", err)
-	}
-
-	// Define a callback to handle open events
-	openEventCallback := func(event *traceropentype.Event) {
-		if event.Type != types.NORMAL {
-			// dropped event
-			logger.L().Ctx(ctx).Warning("container monitoring got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-			return
-		}
-		if event.Ret > -1 {
-			p := event.Path
-			if ch.cfg.EnableFullPathTracing {
-				p = event.FullPath
-			}
-			ch.relevancyManager.ReportFileAccess(ctx, event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName, p)
-		}
-	}
-	if err := ch.tracerCollection.AddTracer(openTraceName, containerSelector); err != nil {
-		return fmt.Errorf("error adding open tracer: %s\n", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	execMountnsmap, err := ch.tracerCollection.TracerMountNsMap(execTraceName)
-	if err != nil {
-		return fmt.Errorf("failed to get execMountnsmap: %s\n", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	openMountnsmap, err := ch.tracerCollection.TracerMountNsMap(openTraceName)
-	if err != nil {
-		return fmt.Errorf("failed to get openMountnsmap: %s\n", err)
-	}
-
-	// Create the exec tracer
-	ch.tracerExec, err = tracerexec.NewTracer(&tracerexec.Config{MountnsMap: execMountnsmap}, ch.containerCollection, execEventCallback)
-	if err != nil {
-		return fmt.Errorf("error creating tracerExec: %s\n", err)
-	}
-
-	// Create the open tracer
-	ch.tracerOpen, err = traceropen.NewTracer(&traceropen.Config{MountnsMap: openMountnsmap, FullPath: ch.cfg.EnableFullPathTracing}, ch.containerCollection, openEventCallback)
-	if err != nil {
-		return fmt.Errorf("error creating tracerOpen: %s\n", err)
-	}
-
-	logger.L().Info("main container handler started")
-
 	return nil
 }
 
-//lint:ignore U1000 Ignore unused function temporarily for debugging
-func (ch *IGContainerWatcher) printNsMap(id string) {
-	nsMap, _ := ch.tracerCollection.TracerMountNsMap(id)
-	var (
-		key     string
-		value   uint32
-		entries = nsMap.Iterate()
-	)
-	for entries.Next(&key, &value) { // Order of keys is non-deterministic due to randomized map seed
-		logger.L().Debug("map entry", helpers.String("key", key), helpers.Int("value", int(value)))
-	}
-}
-
 func (ch *IGContainerWatcher) Stop() {
-	ch.containerCollection.Close()
-	ch.tracerExec.Stop()
-	_ = ch.tracerCollection.RemoveTracer(execTraceName)
-	ch.tracerOpen.Stop()
-	_ = ch.tracerCollection.RemoveTracer(openTraceName)
-	ch.tracerCollection.Close()
-}
-
-func (ch *IGContainerWatcher) UnregisterContainer(container *containercollection.Container) {
-
-	event := containercollection.PubSubEvent{
-		Timestamp: time.Now().Format(time.RFC3339),
-		Type:      containercollection.EventTypeRemoveContainer,
-		Container: container,
+	if ch.running {
+		ch.stopContainerCollection()
+		err := ch.stopTracers()
+		if err != nil {
+			logger.L().Ctx(ch.ctx).Warning("error stopping app behavior tracing", helpers.Error(err))
+		}
+		ch.running = false
 	}
-	ch.tracerCollection.TracerMapsUpdater()(event)
 }
