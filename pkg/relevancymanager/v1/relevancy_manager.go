@@ -73,8 +73,8 @@ func (rm *RelevancyManager) deleteResources(watchedContainer *utils.WatchedConta
 	_ = rm.fileHandler.RemoveBucket(watchedContainer.ContainerID)
 }
 
-func (rm *RelevancyManager) ensureImageID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
-	if watchedContainer.ImageID == "" {
+func (rm *RelevancyManager) ensureImageInfo(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
+	if watchedContainer.ImageID == "" || watchedContainer.ImageTag == "" || watchedContainer.InstanceID == nil || watchedContainer.Wlid == "" {
 		imageID, imageTag, parentWlid, instanceID, err := rm.getContainerInfo(container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)
 		if err != nil {
 			logger.L().Debug("failed to get imageTag", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Error(err))
@@ -189,14 +189,14 @@ func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *con
 				watchedContainer.UpdateDataTicker.Reset(rm.cfg.UpdateDataPeriod)
 			}
 			// ensure we know the imageID
-			rm.ensureImageID(container, watchedContainer)
+			rm.ensureImageInfo(container, watchedContainer)
 			// handle collection of relevant data
 			rm.handleRelevancy(ctx, watchedContainer, container.Runtime.ContainerID)
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, relevancymanager.ContainerHasTerminatedError):
 				// ensure we know the imageID
-				rm.ensureImageID(container, watchedContainer)
+				rm.ensureImageInfo(container, watchedContainer)
 				// handle collection of relevant data one more time
 				rm.handleRelevancy(ctx, watchedContainer, container.Runtime.ContainerID)
 				return relevancymanager.ContainerHasTerminatedError
