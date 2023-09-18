@@ -95,41 +95,6 @@ func TestSBOMHandler_FilterSBOM(t *testing.T) {
 	}
 }
 
-func Test_getLabels(t *testing.T) {
-	type args struct {
-		watchedContainer *utils.WatchedContainerData
-	}
-	instanceID, _ := instanceidhandler.GenerateInstanceIDFromString("apiVersion-v1/namespace-aaa/kind-deployment/name-redis/containerName-redis")
-	tests := []struct {
-		name string
-		args args
-		want map[string]string
-	}{
-		{
-			name: "TestGetLabels",
-			args: args{
-				watchedContainer: &utils.WatchedContainerData{
-					InstanceID: instanceID,
-					Wlid:       "wlid://cluster-name/namespace-aaa/deployment-redis",
-				},
-			},
-			want: map[string]string{
-				"kubescape.io/workload-api-version":    "v1",
-				"kubescape.io/workload-container-name": "redis",
-				"kubescape.io/workload-kind":           "Deployment",
-				"kubescape.io/workload-name":           "redis",
-				"kubescape.io/workload-namespace":      "aaa",
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := getLabels(tt.args.watchedContainer)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func Test_parsedFilesBySourceInfo(t *testing.T) {
 	type args struct {
 		packageSourceInfo string

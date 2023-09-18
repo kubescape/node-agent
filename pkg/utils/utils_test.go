@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestUtilsBetween(t *testing.T) {
@@ -163,6 +166,41 @@ func TestAtoi(t *testing.T) {
 			if got := Atoi(tt.args.s); got != tt.want {
 				t.Errorf("Atoi() = %v, want %v", got, tt.want)
 			}
+		})
+	}
+}
+
+func Test_GetLabels(t *testing.T) {
+	type args struct {
+		watchedContainer *WatchedContainerData
+	}
+	instanceID, _ := instanceidhandler.GenerateInstanceIDFromString("apiVersion-v1/namespace-aaa/kind-deployment/name-redis/containerName-redis")
+	tests := []struct {
+		name string
+		args args
+		want map[string]string
+	}{
+		{
+			name: "TestGetLabels",
+			args: args{
+				watchedContainer: &WatchedContainerData{
+					InstanceID: instanceID,
+					Wlid:       "wlid://cluster-name/namespace-aaa/deployment-redis",
+				},
+			},
+			want: map[string]string{
+				"kubescape.io/workload-api-version":    "v1",
+				"kubescape.io/workload-container-name": "redis",
+				"kubescape.io/workload-kind":           "Deployment",
+				"kubescape.io/workload-name":           "redis",
+				"kubescape.io/workload-namespace":      "aaa",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetLabels(tt.args.watchedContainer)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

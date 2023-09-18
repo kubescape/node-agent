@@ -7,7 +7,6 @@ import (
 	"node-agent/pkg/utils"
 	"strings"
 
-	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
@@ -15,7 +14,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
@@ -78,7 +76,7 @@ func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 					instanceidhandler.ImageIDMetadataKey:       watchedContainer.ImageID,
 					instanceidhandler.StatusMetadataKey:        "",
 				},
-				Labels: getLabels(watchedContainer),
+				Labels: utils.GetLabels(watchedContainer),
 			},
 		}
 	}
@@ -222,30 +220,6 @@ func (sc *SBOMHandler) IncrementImageUse(imageID string) {
 
 func (sc *SBOMHandler) DecrementImageUse(imageID string) {
 	sc.storageClient.DecrementImageUse(imageID)
-}
-
-func getLabels(watchedContainer *utils.WatchedContainerData) map[string]string {
-	labels := watchedContainer.InstanceID.GetLabels()
-	for i := range labels {
-		if labels[i] == "" {
-			delete(labels, i)
-		} else {
-			if i == instanceidhandler.KindMetadataKey {
-				labels[i] = wlid.GetKindFromWlid(watchedContainer.Wlid)
-			} else if i == instanceidhandler.NameMetadataKey {
-				labels[i] = wlid.GetNameFromWlid(watchedContainer.Wlid)
-			}
-			errs := validation.IsValidLabelValue(labels[i])
-			if len(errs) != 0 {
-				logger.L().Debug("label is not valid", helpers.String("label", labels[i]))
-				for j := range errs {
-					logger.L().Debug("label err description", helpers.String("Err: ", errs[j]))
-				}
-				delete(labels, i)
-			}
-		}
-	}
-	return labels
 }
 
 func parsedFilesBySourceInfo(packageSourceInfo string) []string {

@@ -9,8 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
+	instanceidhandler2 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 var (
@@ -96,4 +101,28 @@ func Atoi(s string) int {
 		return 0
 	}
 	return i
+}
+
+func GetLabels(watchedContainer *WatchedContainerData) map[string]string {
+	labels := watchedContainer.InstanceID.GetLabels()
+	for i := range labels {
+		if labels[i] == "" {
+			delete(labels, i)
+		} else {
+			if i == instanceidhandler2.KindMetadataKey {
+				labels[i] = wlid.GetKindFromWlid(watchedContainer.Wlid)
+			} else if i == instanceidhandler2.NameMetadataKey {
+				labels[i] = wlid.GetNameFromWlid(watchedContainer.Wlid)
+			}
+			errs := validation.IsValidLabelValue(labels[i])
+			if len(errs) != 0 {
+				logger.L().Debug("label is not valid", helpers.String("label", labels[i]))
+				for j := range errs {
+					logger.L().Debug("label err description", helpers.String("Err: ", errs[j]))
+				}
+				delete(labels, i)
+			}
+		}
+	}
+	return labels
 }

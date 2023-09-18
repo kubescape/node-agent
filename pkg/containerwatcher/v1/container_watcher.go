@@ -25,9 +25,12 @@ import (
 )
 
 const (
-	capabilitiesTraceName = "trace_capabilities"
-	execTraceName         = "trace_exec"
-	openTraceName         = "trace_open"
+	capabilitiesTraceName      = "trace_capabilities"
+	execTraceName              = "trace_exec"
+	openTraceName              = "trace_open"
+	capabilitiesWorkerPoolSize = 1
+	execWorkerPoolSize         = 2
+	openWorkerPoolSize         = 8
 )
 
 type IGContainerWatcher struct {
@@ -65,7 +68,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		return nil, fmt.Errorf("creating tracer collection: %w", err)
 	}
 	// Create a capabilities worker pool
-	capabilitiesWorkerPool, err := ants.NewPoolWithFunc(1, func(i interface{}) {
+	capabilitiesWorkerPool, err := ants.NewPoolWithFunc(capabilitiesWorkerPoolSize, func(i interface{}) {
 		event := i.(tracercapabilitiestype.Event)
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
@@ -74,7 +77,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		return nil, fmt.Errorf("creating capabilities worker pool: %w", err)
 	}
 	// Create an exec worker pool
-	execWorkerPool, err := ants.NewPoolWithFunc(2, func(i interface{}) {
+	execWorkerPool, err := ants.NewPoolWithFunc(execWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerexectype.Event)
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		path := event.Comm
@@ -88,7 +91,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		return nil, fmt.Errorf("creating exec worker pool: %w", err)
 	}
 	// Create an open worker pool
-	openWorkerPool, err := ants.NewPoolWithFunc(8, func(i interface{}) {
+	openWorkerPool, err := ants.NewPoolWithFunc(openWorkerPoolSize, func(i interface{}) {
 		event := i.(traceropentype.Event)
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		path := event.Path

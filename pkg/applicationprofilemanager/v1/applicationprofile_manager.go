@@ -15,7 +15,7 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/otel"
@@ -68,7 +68,7 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 	}
 	pod := wl.(*workloadinterface.Workload)
 	// find instanceID
-	instanceIDs, err := instanceidhandlerV1.GenerateInstanceID(pod)
+	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to generate instanceID", helpers.Error(err))
 		return
@@ -129,6 +129,14 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	activity := &v1beta1.ApplicationActivity{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: slug,
+			Annotations: map[string]string{
+				instanceidhandler.WlidMetadataKey:          watchedContainer.Wlid,
+				instanceidhandler.InstanceIDMetadataKey:    watchedContainer.InstanceID.GetStringFormatted(),
+				instanceidhandler.ContainerNameMetadataKey: watchedContainer.InstanceID.GetContainerName(),
+				instanceidhandler.ImageIDMetadataKey:       watchedContainer.ImageID,
+				instanceidhandler.StatusMetadataKey:        "",
+			},
+			Labels: utils.GetLabels(watchedContainer),
 		},
 	}
 	syscalls, err := am.syscallPeekFunc(watchedContainer.NsMntId)
@@ -145,6 +153,14 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	profile := &v1beta1.ApplicationProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: slug,
+			Annotations: map[string]string{
+				instanceidhandler.WlidMetadataKey:          watchedContainer.Wlid,
+				instanceidhandler.InstanceIDMetadataKey:    watchedContainer.InstanceID.GetStringFormatted(),
+				instanceidhandler.ContainerNameMetadataKey: watchedContainer.InstanceID.GetContainerName(),
+				instanceidhandler.ImageIDMetadataKey:       watchedContainer.ImageID,
+				instanceidhandler.StatusMetadataKey:        "",
+			},
+			Labels: utils.GetLabels(watchedContainer),
 		},
 	}
 	// add capabilities
