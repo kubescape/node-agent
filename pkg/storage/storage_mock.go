@@ -25,11 +25,19 @@ type StorageHttpClientMock struct {
 }
 
 func (sc *StorageHttpClientMock) GetApplicationActivity(_, _ string) (*spdxv1beta1.ApplicationActivity, error) {
-	return nil, nil
+	return &spdxv1beta1.ApplicationActivity{
+		Spec: spdxv1beta1.ApplicationActivitySpec{
+			Syscalls: []string{"open"},
+		},
+	}, nil
 }
 
 func (sc *StorageHttpClientMock) GetApplicationProfile(_, _ string) (*spdxv1beta1.ApplicationProfile, error) {
-	return nil, nil
+	return &spdxv1beta1.ApplicationProfile{
+		Spec: spdxv1beta1.ApplicationProfileSpec{
+			Capabilities: []string{"NET_BROADCAST"},
+		},
+	}, nil
 }
 
 var _ StorageClient = (*StorageHttpClientMock)(nil)

@@ -75,12 +75,12 @@ func TestRelevancyManager(t *testing.T) {
 		"/usr/sbin/deluser",
 	}
 	for _, file := range files {
-		relevancyManager.fileHandler.AddFile("ns/pod/cont", file)
+		relevancyManager.ReportFileAccess("ns/pod/cont", file)
 	}
 	// let it run for a while
 	time.Sleep(5 * time.Second)
 	// report a same file again, should do noop
-	relevancyManager.fileHandler.AddFile("ns/pod/cont", "/usr/sbin/deluser")
+	relevancyManager.ReportFileAccess("ns/pod/cont", "/usr/sbin/deluser")
 	// let it run for a while
 	time.Sleep(5 * time.Second)
 	// verify files are reported and we have only 1 filtered SBOM
@@ -89,7 +89,7 @@ func TestRelevancyManager(t *testing.T) {
 	assert.Equal(t, 1, len(storageClient.FilteredSBOMs[0].Spec.SPDX.Files))
 	assert.Equal(t, "/usr/sbin/deluser", storageClient.FilteredSBOMs[0].Spec.SPDX.Files[0].FileName)
 	// add one more vulnerable file
-	relevancyManager.fileHandler.AddFile("ns/pod/cont", "/etc/deluser.conf")
+	relevancyManager.ReportFileAccess("ns/pod/cont", "/etc/deluser.conf")
 	time.Sleep(1 * time.Second)
 	// report container stopped
 	relevancyManager.ContainerCallback(containercollection.PubSubEvent{
@@ -151,7 +151,7 @@ func TestRelevancyManagerIncompleteSBOM(t *testing.T) {
 		Container: container,
 	})
 	// report file access
-	relevancyManager.fileHandler.AddFile("ns/pod/cont", "/usr/sbin/deluser")
+	relevancyManager.ReportFileAccess("ns/pod/cont", "/usr/sbin/deluser")
 	// let it run for a while
 	time.Sleep(10 * time.Second)
 	// report container stopped
