@@ -8,10 +8,10 @@ import (
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
-	"sync"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -27,23 +27,13 @@ import (
 type ApplicationProfileManager struct {
 	cfg                      config.Config
 	ctx                      context.Context
-	capabilitiesSets         sync.Map // key is k8sContainerID
-	execSets                 sync.Map // key is k8sContainerID
-	openSets                 sync.Map // key is k8sContainerID
-	watchedContainerChannels sync.Map // key is ContainerID
+	capabilitiesSets         maps.SafeMap[string, mapset.Set[string]]            // key is k8sContainerID
+	execSets                 maps.SafeMap[string, map[string]mapset.Set[string]] // key is k8sContainerID
+	openSets                 maps.SafeMap[string, map[string]mapset.Set[string]] // key is k8sContainerID
+	watchedContainerChannels maps.SafeMap[string, chan error]                    // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
 	storageClient            storage.StorageClient
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
-}
-
-type execStruct struct {
-	path string
-	args mapset.Set[string]
-}
-
-type openStruct struct {
-	path  string
-	flags mapset.Set[string]
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
@@ -125,10 +115,15 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		return
 	}
 
-	// FIXME: need to get existing activity/profile and update sets before filling CRDs
-
-	// activity
-	activity := &v1beta1.ApplicationActivity{
+	// activity sets
+	syscalls := mapset.NewSet[string]()
+	// existing activity
+	existingActivity, _ := am.storageClient.GetApplicationActivity(slug, namespace)
+	if existingActivity != nil {
+		syscalls.Append(existingActivity.Spec.Syscalls...)
+	}
+	// new activity
+	newActivity := &v1beta1.ApplicationActivity{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: slug,
 			Annotations: map[string]string{
@@ -141,18 +136,41 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			Labels: utils.GetLabels(watchedContainer),
 		},
 	}
-	syscalls, err := am.syscallPeekFunc(watchedContainer.NsMntId)
+	// add syscalls
+	newSyscalls, err := am.syscallPeekFunc(watchedContainer.NsMntId)
 	if err == nil {
-		activity.Spec.Syscalls = syscalls
+		syscalls.Append(newSyscalls...)
 	} else {
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get syscalls", helpers.Error(err))
 	}
-	if err := am.storageClient.CreateApplicationActivity(activity, namespace); err != nil {
+	newActivity.Spec.Syscalls = syscalls.ToSlice()
+	if err := am.storageClient.CreateApplicationActivity(newActivity, namespace); err != nil {
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application activity", helpers.Error(err))
 	}
 
-	// profile
-	profile := &v1beta1.ApplicationProfile{
+	// profile sets
+	capabilities := am.capabilitiesSets.Get(watchedContainer.K8sContainerID)
+	execs := am.execSets.Get(watchedContainer.K8sContainerID)
+	opens := am.openSets.Get(watchedContainer.K8sContainerID)
+	// existing profile
+	existingProfile, _ := am.storageClient.GetApplicationProfile(slug, namespace)
+	if existingProfile != nil {
+		capabilities.Append(existingProfile.Spec.Capabilities...)
+		for _, exec := range existingProfile.Spec.Execs {
+			if _, exist := execs[exec.Path]; !exist {
+				execs[exec.Path] = mapset.NewSet[string]()
+			}
+			execs[exec.Path].Append(exec.Args...)
+		}
+		for _, open := range existingProfile.Spec.Opens {
+			if _, exist := opens[open.Path]; !exist {
+				opens[open.Path] = mapset.NewSet[string]()
+			}
+			opens[open.Path].Append(open.Flags...)
+		}
+	}
+	// new profile
+	newProfile := &v1beta1.ApplicationProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: slug,
 			Annotations: map[string]string{
@@ -166,38 +184,29 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		},
 	}
 	// add capabilities
-	if value, ok := am.capabilitiesSets.Load(watchedContainer.K8sContainerID); ok {
-		set := value.(*mapset.Set[string])
-		profile.Spec.Capabilities = (*set).ToSlice()
-	}
+	newProfile.Spec.Capabilities = capabilities.ToSlice()
 	// add execs
-	if value, ok := am.execSets.Load(watchedContainer.K8sContainerID); ok {
-		set := value.(*mapset.Set[execStruct])
-		profile.Spec.Execs = make([]v1beta1.ExecCalls, 0)
-		for _, exec := range (*set).ToSlice() {
-			profile.Spec.Execs = append(profile.Spec.Execs, v1beta1.ExecCalls{
-				Path: exec.path,
-				Args: exec.args.ToSlice(),
-			})
-		}
+	newProfile.Spec.Execs = make([]v1beta1.ExecCalls, 0)
+	for path, exec := range execs {
+		newProfile.Spec.Execs = append(newProfile.Spec.Execs, v1beta1.ExecCalls{
+			Path: path,
+			Args: exec.ToSlice(),
+		})
 	}
 	// add opens
-	if value, ok := am.openSets.Load(watchedContainer.K8sContainerID); ok {
-		set := value.(*mapset.Set[openStruct])
-		profile.Spec.Opens = make([]v1beta1.OpenCalls, 0)
-		for _, open := range (*set).ToSlice() {
-			profile.Spec.Opens = append(profile.Spec.Opens, v1beta1.OpenCalls{
-				Path:  open.path,
-				Flags: open.flags.ToSlice(),
-			})
-		}
+	newProfile.Spec.Opens = make([]v1beta1.OpenCalls, 0)
+	for path, open := range opens {
+		newProfile.Spec.Opens = append(newProfile.Spec.Opens, v1beta1.OpenCalls{
+			Path:  path,
+			Flags: open.ToSlice(),
+		})
 	}
-	if err := am.storageClient.CreateApplicationProfile(profile, namespace); err != nil {
+	if err := am.storageClient.CreateApplicationProfile(newProfile, namespace); err != nil {
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application profile", helpers.Error(err))
 	}
 	// profile summary
 	summary := &v1beta1.ApplicationProfileSummary{
-		ObjectMeta: profile.ObjectMeta,
+		ObjectMeta: newProfile.ObjectMeta,
 	}
 	if err := am.storageClient.CreateApplicationProfileSummary(summary, namespace); err != nil {
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application profile summary", helpers.Error(err))
@@ -209,7 +218,7 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 	defer span.End()
 
 	syncChannel := make(chan error, 10)
-	am.watchedContainerChannels.Store(container.Runtime.ContainerID, syncChannel)
+	am.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:      container.Runtime.ContainerID,
@@ -233,26 +242,20 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		_, exist := am.watchedContainerChannels.Load(notif.Container.Runtime.ContainerID)
-		if exist {
+		if am.watchedContainerChannels.Has(notif.Container.Runtime.ContainerID) {
 			logger.L().Debug("container already exist in memory", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			return
 		}
-		capabilitiesSet := mapset.NewSet[string]()
-		am.capabilitiesSets.Store(k8sContainerID, &capabilitiesSet)
-		execSet := mapset.NewSet[execStruct]()
-		am.execSets.Store(k8sContainerID, &execSet)
-		openSet := mapset.NewSet[openStruct]()
-		am.openSets.Store(k8sContainerID, &openSet)
+		am.capabilitiesSets.Set(k8sContainerID, mapset.NewSet[string]())
+		am.execSets.Set(k8sContainerID, make(map[string]mapset.Set[string]))
+		am.openSets.Set(k8sContainerID, make(map[string]mapset.Set[string]))
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:
-		if channel, ok := am.watchedContainerChannels.LoadAndDelete(notif.Container.Runtime.ContainerID); ok {
-			if !ok {
-				logger.L().Debug("container not found in memory", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-				return
-			}
-			channel.(chan error) <- utils.ContainerHasTerminatedError
+		channel := am.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
+		if channel != nil {
+			channel <- utils.ContainerHasTerminatedError
 		}
+		am.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 
@@ -261,28 +264,21 @@ func (am *ApplicationProfileManager) RegisterPeekFunc(peek func(mntns uint64) ([
 }
 
 func (am *ApplicationProfileManager) ReportCapability(k8sContainerID, capability string) {
-	if value, ok := am.capabilitiesSets.Load(k8sContainerID); ok {
-		set := value.(*mapset.Set[string])
-		(*set).Add(capability)
-	}
+	am.capabilitiesSets.Get(k8sContainerID).Add(capability)
 }
 
 func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string, args []string) {
-	if value, ok := am.execSets.Load(k8sContainerID); ok {
-		set := value.(*mapset.Set[execStruct])
-		(*set).Add(execStruct{
-			path: path,
-			args: mapset.NewSet[string](args...),
-		})
+	execs := am.execSets.Get(k8sContainerID)
+	if _, exist := execs[path]; !exist {
+		execs[path] = mapset.NewSet[string]()
 	}
+	execs[path].Append(args...)
 }
 
 func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID, path string, flags []string) {
-	if value, ok := am.openSets.Load(k8sContainerID); ok {
-		set := value.(*mapset.Set[openStruct])
-		(*set).Add(openStruct{
-			path:  path,
-			flags: mapset.NewSet[string](flags...),
-		})
+	opens := am.openSets.Get(k8sContainerID)
+	if _, exist := opens[path]; !exist {
+		opens[path] = mapset.NewSet[string]()
 	}
+	opens[path].Append(flags...)
 }

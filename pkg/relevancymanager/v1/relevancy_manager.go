@@ -10,10 +10,10 @@ import (
 	"node-agent/pkg/relevancymanager"
 	"node-agent/pkg/sbomhandler"
 	"node-agent/pkg/utils"
-	"sync"
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -33,7 +33,7 @@ type RelevancyManager struct {
 	fileHandler              filehandler.FileHandler
 	k8sClient                k8sclient.K8sClientInterface
 	sbomHandler              sbomhandler.SBOMHandlerClient
-	watchedContainerChannels sync.Map
+	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
 }
 
 var _ relevancymanager.RelevancyManagerClient = (*RelevancyManager)(nil)
@@ -202,7 +202,7 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 		RelevantRealtimeFilesByPackageSourceInfo: map[string]*utils.PackageSourceInfoData{},
 		RelevantRealtimeFilesBySPDXIdentifier:    map[v1beta1.ElementID]bool{},
 	}
-	rm.watchedContainerChannels.Store(watchedContainer.ContainerID, watchedContainer.SyncChannel)
+	rm.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
 
 	if err := rm.monitorContainer(ctx, container, watchedContainer); err != nil {
 		logger.L().Info("RelevancyManager - stop monitor on container", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
@@ -222,20 +222,17 @@ func (rm *RelevancyManager) ContainerCallback(notif containercollection.PubSubEv
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		_, exist := rm.watchedContainerChannels.Load(notif.Container.Runtime.ContainerID)
-		if exist {
+		if rm.watchedContainerChannels.Has(notif.Container.Runtime.ContainerID) {
 			logger.L().Debug("container already exist in memory", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			return
 		}
 		go rm.startRelevancyProcess(ctx, notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:
-		if channel, ok := rm.watchedContainerChannels.LoadAndDelete(notif.Container.Runtime.ContainerID); ok {
-			if !ok {
-				logger.L().Debug("container not found in memory", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-				return
-			}
-			channel.(chan error) <- utils.ContainerHasTerminatedError
+		channel := rm.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
+		if channel != nil {
+			channel <- utils.ContainerHasTerminatedError
 		}
+		rm.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 

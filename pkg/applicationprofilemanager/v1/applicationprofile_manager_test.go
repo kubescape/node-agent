@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/stretchr/testify/assert"
@@ -66,10 +65,7 @@ func TestApplicationProfileManager_ReportCapability(t *testing.T) {
 				Container: container,
 			})
 			am.ReportCapability("ns/pod/cont", tt.args.capability)
-			value, ok := am.capabilitiesSets.Load("ns/pod/cont")
-			assert.True(t, ok)
-			set := value.(*mapset.Set[string])
-			assert.Equal(t, []string{tt.args.capability}, (*set).ToSlice())
+			assert.Equal(t, []string{tt.args.capability}, am.capabilitiesSets.Get("ns/pod/cont").ToSlice())
 		})
 	}
 }

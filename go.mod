@@ -7,6 +7,7 @@ require (
 	github.com/cilium/ebpf v0.11.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
+	github.com/goradd/maps v0.1.5
 	github.com/inspektor-gadget/inspektor-gadget v0.20.1-0.20230919195508-052fbf78b54c
 	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/go-logger v0.0.21

@@ -24,6 +24,14 @@ type StorageHttpClientMock struct {
 	nginxSBOMSpdxBytes          *spdxv1beta1.SBOMSPDXv2p3
 }
 
+func (sc *StorageHttpClientMock) GetApplicationActivity(_, _ string) (*spdxv1beta1.ApplicationActivity, error) {
+	return nil, nil
+}
+
+func (sc *StorageHttpClientMock) GetApplicationProfile(_, _ string) (*spdxv1beta1.ApplicationProfile, error) {
+	return nil, nil
+}
+
 var _ StorageClient = (*StorageHttpClientMock)(nil)
 
 func CreateSBOMStorageHttpClientMock(sbom string) *StorageHttpClientMock {
