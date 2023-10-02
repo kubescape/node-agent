@@ -56,7 +56,7 @@ func CreateSBOMHandler(sc storage.StorageClient) *SBOMHandler {
 }
 
 func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, sbomFileRelevantMap map[string]bool) error {
-	watchedContainer.NewRelevantData = false
+	newRelevantData := false
 
 	if watchedContainer.FilteredSpdxData == nil {
 		if watchedContainer.InstanceID == nil {
@@ -142,7 +142,7 @@ func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 		}
 		// update resource version
 		watchedContainer.SBOMResourceVersion = utils.Atoi(spdxData.ResourceVersion)
-		watchedContainer.NewRelevantData = true
+		newRelevantData = true
 	}
 
 	// filter relevant file list
@@ -151,7 +151,7 @@ func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 			if !watchedContainer.RelevantRealtimeFilesBySPDXIdentifier[spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier] {
 				watchedContainer.FilteredSpdxData.Spec.SPDX.Files = append(watchedContainer.FilteredSpdxData.Spec.SPDX.Files, spdxData.Spec.SPDX.Files[i])
 				watchedContainer.RelevantRealtimeFilesBySPDXIdentifier[spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier] = true
-				watchedContainer.NewRelevantData = true
+				newRelevantData = true
 			}
 		}
 	}
@@ -164,11 +164,11 @@ func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 			for i := range packageData.PackageSPDXIdentifier {
 				relevantPackageFromSourceInfoMap[packageData.PackageSPDXIdentifier[i]] = true
 			}
-			watchedContainer.NewRelevantData = true
+			newRelevantData = true
 		}
 	}
 
-	if watchedContainer.NewRelevantData {
+	if newRelevantData {
 		// filter relationship list
 		relationships := sets.New[*v1beta1.Relationship](watchedContainer.FilteredSpdxData.Spec.SPDX.Relationships...)
 		for i := range spdxData.Spec.SPDX.Relationships {

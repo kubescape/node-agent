@@ -125,6 +125,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		return
 	}
 
+	// FIXME: need to get existing activity/profile and update sets before filling CRDs
+
 	// activity
 	activity := &v1beta1.ApplicationActivity{
 		ObjectMeta: metav1.ObjectMeta{

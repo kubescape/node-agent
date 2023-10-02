@@ -31,13 +31,11 @@ type PackageSourceInfoData struct {
 type WatchedContainerData struct {
 	ContainerID                              string
 	FilteredSpdxData                         *v1beta1.SBOMSPDXv2p3Filtered
-	FirstReport                              bool
 	ImageID                                  string
 	ImageTag                                 string
 	InitialDelayExpired                      bool
 	InstanceID                               instanceidhandler.IInstanceID
 	K8sContainerID                           string
-	NewRelevantData                          bool
 	RelevantRealtimeFilesByPackageSourceInfo map[string]*PackageSourceInfoData
 	RelevantRealtimeFilesBySPDXIdentifier    map[v1beta1.ElementID]bool
 	SBOMResourceVersion                      int
