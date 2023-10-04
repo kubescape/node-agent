@@ -18,11 +18,12 @@ func TestLoadConfig(t *testing.T) {
 			name: "TestLoadConfig",
 			path: "../../configuration",
 			want: Config{
-				EnableFullPathTracing: true,
-				EnableRelevancy:       true,
-				InitialDelay:          2 * time.Minute,
-				MaxSniffingTime:       6 * time.Hour,
-				UpdateDataPeriod:      1 * time.Minute,
+				EnableFullPathTracing:    true,
+				EnableApplicationProfile: true,
+				EnableRelevancy:          true,
+				InitialDelay:             2 * time.Minute,
+				MaxSniffingTime:          6 * time.Hour,
+				UpdateDataPeriod:         1 * time.Minute,
 			},
 		},
 	}

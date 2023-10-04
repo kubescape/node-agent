@@ -66,6 +66,38 @@ func getNamespace() string {
 	return defaultNamespace
 }
 
+func (sc StorageNoCache) CreateApplicationActivity(activity *v1beta1.ApplicationActivity, namespace string) error {
+	_, err := sc.StorageClient.ApplicationActivities(namespace).Create(context.Background(), activity, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (sc StorageNoCache) GetApplicationActivity(namespace, name string) (*v1beta1.ApplicationActivity, error) {
+	return sc.StorageClient.ApplicationActivities(namespace).Get(context.Background(), name, metav1.GetOptions{})
+}
+
+func (sc StorageNoCache) CreateApplicationProfile(profile *v1beta1.ApplicationProfile, namespace string) error {
+	_, err := sc.StorageClient.ApplicationProfiles(namespace).Create(context.Background(), profile, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (sc StorageNoCache) GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
+	return sc.StorageClient.ApplicationProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
+}
+
+func (sc StorageNoCache) CreateApplicationProfileSummary(profile *v1beta1.ApplicationProfileSummary, namespace string) error {
+	_, err := sc.StorageClient.ApplicationProfileSummaries(namespace).Create(context.Background(), profile, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (sc StorageNoCache) CreateFilteredSBOM(SBOM *v1beta1.SBOMSPDXv2p3Filtered) error {
 	_, err := sc.StorageClient.SBOMSPDXv2p3Filtereds(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
 	if err != nil {
@@ -75,12 +107,7 @@ func (sc StorageNoCache) CreateFilteredSBOM(SBOM *v1beta1.SBOMSPDXv2p3Filtered) 
 }
 
 func (sc StorageNoCache) GetSBOM(name string) (*v1beta1.SBOMSPDXv2p3, error) {
-	SBOM, err := sc.StorageClient.SBOMSPDXv2p3s(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	return SBOM, nil
+	return sc.StorageClient.SBOMSPDXv2p3s(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
 func (sc StorageNoCache) PatchFilteredSBOM(name string, SBOM *v1beta1.SBOMSPDXv2p3Filtered) error {

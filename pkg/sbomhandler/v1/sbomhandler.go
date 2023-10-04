@@ -2,13 +2,11 @@ package sbomhandler
 
 import (
 	"errors"
-	"node-agent/pkg/relevancymanager"
 	"node-agent/pkg/sbomhandler"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
 	"strings"
 
-	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
@@ -16,7 +14,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
@@ -59,7 +56,7 @@ func CreateSBOMHandler(sc storage.StorageClient) *SBOMHandler {
 }
 
 func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, sbomFileRelevantMap map[string]bool) error {
-	watchedContainer.NewRelevantData = false
+	newRelevantData := false
 
 	if watchedContainer.FilteredSpdxData == nil {
 		if watchedContainer.InstanceID == nil {
@@ -79,7 +76,7 @@ func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 					instanceidhandler.ImageIDMetadataKey:       watchedContainer.ImageID,
 					instanceidhandler.StatusMetadataKey:        "",
 				},
-				Labels: getLabels(watchedContainer),
+				Labels: utils.GetLabels(watchedContainer),
 			},
 		}
 	}
@@ -98,7 +95,7 @@ func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 		watchedContainer.FilteredSpdxData.Annotations[instanceidhandler.StatusMetadataKey] = status
 		if status == instanceidhandler.Incomplete {
 			// stop processing after storing filtered SBOM
-			watchedContainer.SyncChannel <- relevancymanager.IncompleteSBOMError
+			watchedContainer.SyncChannel <- utils.IncompleteSBOMError
 		}
 	}
 
@@ -145,7 +142,7 @@ func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 		}
 		// update resource version
 		watchedContainer.SBOMResourceVersion = utils.Atoi(spdxData.ResourceVersion)
-		watchedContainer.NewRelevantData = true
+		newRelevantData = true
 	}
 
 	// filter relevant file list
@@ -154,7 +151,7 @@ func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 			if !watchedContainer.RelevantRealtimeFilesBySPDXIdentifier[spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier] {
 				watchedContainer.FilteredSpdxData.Spec.SPDX.Files = append(watchedContainer.FilteredSpdxData.Spec.SPDX.Files, spdxData.Spec.SPDX.Files[i])
 				watchedContainer.RelevantRealtimeFilesBySPDXIdentifier[spdxData.Spec.SPDX.Files[i].FileSPDXIdentifier] = true
-				watchedContainer.NewRelevantData = true
+				newRelevantData = true
 			}
 		}
 	}
@@ -167,11 +164,11 @@ func (sc *SBOMHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 			for i := range packageData.PackageSPDXIdentifier {
 				relevantPackageFromSourceInfoMap[packageData.PackageSPDXIdentifier[i]] = true
 			}
-			watchedContainer.NewRelevantData = true
+			newRelevantData = true
 		}
 	}
 
-	if watchedContainer.NewRelevantData {
+	if newRelevantData {
 		// filter relationship list
 		relationships := sets.New[*v1beta1.Relationship](watchedContainer.FilteredSpdxData.Spec.SPDX.Relationships...)
 		for i := range spdxData.Spec.SPDX.Relationships {
@@ -223,30 +220,6 @@ func (sc *SBOMHandler) IncrementImageUse(imageID string) {
 
 func (sc *SBOMHandler) DecrementImageUse(imageID string) {
 	sc.storageClient.DecrementImageUse(imageID)
-}
-
-func getLabels(watchedContainer *utils.WatchedContainerData) map[string]string {
-	labels := watchedContainer.InstanceID.GetLabels()
-	for i := range labels {
-		if labels[i] == "" {
-			delete(labels, i)
-		} else {
-			if i == instanceidhandler.KindMetadataKey {
-				labels[i] = wlid.GetKindFromWlid(watchedContainer.Wlid)
-			} else if i == instanceidhandler.NameMetadataKey {
-				labels[i] = wlid.GetNameFromWlid(watchedContainer.Wlid)
-			}
-			errs := validation.IsValidLabelValue(labels[i])
-			if len(errs) != 0 {
-				logger.L().Debug("label is not valid", helpers.String("label", labels[i]))
-				for j := range errs {
-					logger.L().Debug("label err description", helpers.String("Err: ", errs[j]))
-				}
-				delete(labels, i)
-			}
-		}
-	}
-	return labels
 }
 
 func parsedFilesBySourceInfo(packageSourceInfo string) []string {

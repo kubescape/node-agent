@@ -1,4 +1,5 @@
 {
+  "applicationProfileServiceEnabled": true,
   "relevantCVEServiceEnabled": true,
   "maxSniffingTimePerContainer": "6h",
   "updateDataPeriod": "1m"
