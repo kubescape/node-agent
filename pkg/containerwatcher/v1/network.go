@@ -13,7 +13,11 @@ import (
 )
 
 func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Event) {
-	if event.Type != types.NORMAL && event.Type != types.DEBUG {
+	if event.Type == types.DEBUG {
+		return
+	}
+
+	if event.Type != types.NORMAL {
 		// dropped event
 		logger.L().Ctx(ch.ctx).Warning("network tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return

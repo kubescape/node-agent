@@ -2,6 +2,8 @@ package networkmanager
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"node-agent/pkg/config"
@@ -21,6 +23,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type NetworkManager struct {
@@ -29,21 +32,22 @@ type NetworkManager struct {
 	k8sClient                  k8sclient.K8sClientInterface
 	storageClient              storage.StorageClient
 	containerAndPodToWLIDMap   maps.SafeMap[string, string]
-	containerAndPodToEventsMap maps.SafeMap[string, []*NetworkEvent]
+	containerAndPodToEventsMap maps.SafeMap[string, []*NetworkEvent] // TODO: change it to set
 	clusterName                string
 	watchedContainerChannels   maps.SafeMap[string, chan error] // key is ContainerID
 }
 
 type Destination struct {
-	Namespace    string
-	Name         string
-	EndpointKind string
-	PodLabels    map[string]string
-	IPAddress    string
+	Namespace string
+	Name      string
+	Kind      EndpointKind
+	PodLabels map[string]string
+	IPAddress string
 }
 
 type NetworkEvent struct {
 	Port        uint16
+	PktType     string
 	Protocol    string
 	PodLabels   map[string]string
 	Destination Destination
@@ -72,17 +76,17 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 			logger.L().Debug("container already exist in memory", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			return
 		}
-		am.handleContainerStarted(ctx, notif.Container, k8sContainerID)
+		go am.handleContainerStarted(ctx, notif.Container, k8sContainerID)
 
 	case containercollection.EventTypeRemoveContainer:
 	}
 }
 
-func (am *NetworkManager) SaveNetworkEvent(containerName, podName string, networkEvent *NetworkEvent) {
-	networkEvents := am.containerAndPodToEventsMap.Get(containerName + podName)
+func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, networkEvent *NetworkEvent) {
+	networkEvents := am.containerAndPodToEventsMap.Get(containerID + podName)
 	networkEvents = append(networkEvents, networkEvent)
 
-	am.containerAndPodToEventsMap.Set(containerName+podName, networkEvents)
+	am.containerAndPodToEventsMap.Set(containerID+podName, networkEvents)
 }
 
 func (am *NetworkManager) handleContainerStarted(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
@@ -209,5 +213,80 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 	name := wlid.GetNameFromWlid(parentWlid)
 	fmt.Printf("namespace: %s, kind: %s, name: %s\n", namespace, kind, name)
 
+	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
+
+	networkEntries := generateNetworkNeighborsEntries(container, networkEvents)
+
 	//TODO: issue patch command
+	networkEntriesMarshalled, err := json.Marshal(networkEntries)
+	if err != nil {
+		logger.L().Error("failed to marshal network entries", helpers.Error(err))
+	}
+
+	fmt.Println(string(networkEntriesMarshalled))
+
+	am.containerAndPodToEventsMap.Set(container.Runtime.ContainerID+container.K8s.PodName, []*NetworkEvent{})
+}
+
+func generateNetworkNeighborsEntries(container *containercollection.Container, networkEvents []*NetworkEvent) []NeighborEntry {
+	var neighborEntries []NeighborEntry
+
+	for i := range networkEvents {
+		var neighborEntry NeighborEntry
+
+		if networkEvents[i].PktType == "HOST" {
+			neighborEntry.Type = "internal"
+		} else if networkEvents[i].PktType == "OUTGOING" {
+			neighborEntry.Type = "external"
+		}
+
+		if networkEvents[i].Destination.Kind == EndpointKindPod {
+			neighborEntry.PodSelector = &metav1.LabelSelector{
+				MatchLabels: filterLabels(networkEvents[i].Destination.PodLabels),
+			}
+			if networkEvents[i].Destination.Namespace != container.K8s.Namespace {
+				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"kubernetes.io/metadata.name": networkEvents[i].Destination.Namespace,
+					},
+				}
+			}
+		} else if networkEvents[i].Destination.Kind == EndpointKindService {
+			neighborEntry.PodSelector = &metav1.LabelSelector{
+				MatchLabels: networkEvents[i].Destination.PodLabels,
+			}
+			if networkEvents[i].Destination.Namespace != container.K8s.Namespace {
+				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"kubernetes.io/metadata.name": networkEvents[i].Destination.Namespace,
+					},
+				}
+			}
+		} else if networkEvents[i].Destination.Kind == EndpointKindRaw {
+			if networkEvents[i].Destination.IPAddress == "127.0.0.1" {
+				// No need to generate for localhost
+				continue
+			}
+		}
+
+		neighborEntry.IPAddress = networkEvents[i].Destination.IPAddress
+		neighborEntry.Ports = []Port{
+			{
+				Protocol: networkEvents[i].Protocol,
+				Port:     networkEvents[i].Port,
+				Name:     fmt.Sprintf("%s-%d", networkEvents[i].Protocol, networkEvents[i].Port),
+			}}
+
+		// identifier is hash of everything in egress except ports
+		identifier := fmt.Sprintf("%s-%s-%s-%s-%s", neighborEntry.Type, neighborEntry.IPAddress, neighborEntry.DNS, neighborEntry.NamespaceSelector, neighborEntry.PodSelector)
+		hash := sha256.New()
+
+		hash.Write([]byte(identifier))
+
+		neighborEntry.Identifier = fmt.Sprintf("%x", hash.Sum(nil))
+
+		neighborEntries = append(neighborEntries, neighborEntry)
+	}
+
+	return neighborEntries
 }

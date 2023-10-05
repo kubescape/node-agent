@@ -122,12 +122,13 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			Port:      event.Port,
 			Protocol:  event.Proto,
 			PodLabels: event.PodLabels,
+			PktType:   event.PktType,
 			Destination: networkmanager.Destination{
-				Namespace:    event.DstEndpoint.Namespace,
-				Name:         event.DstEndpoint.Name,
-				EndpointKind: string(event.DstEndpoint.Kind),
-				PodLabels:    event.DstEndpoint.PodLabels,
-				IPAddress:    event.DstEndpoint.Addr,
+				Namespace: event.DstEndpoint.Namespace,
+				Name:      event.DstEndpoint.Name,
+				Kind:      networkmanager.EndpointKind(event.DstEndpoint.Kind),
+				PodLabels: event.DstEndpoint.PodLabels,
+				IPAddress: event.DstEndpoint.Addr,
 			},
 		}
 

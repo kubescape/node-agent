@@ -8,6 +8,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+type EndpointKind string
+
+var defaultLabelsToIgnore = map[string]struct{}{
+	"controller-revision-hash": {},
+	"pod-template-generation":  {},
+	"pod-template-hash":        {},
+}
+
+const (
+	EndpointKindPod     EndpointKind = "pod"
+	EndpointKindService EndpointKind = "svc"
+	EndpointKindRaw     EndpointKind = "raw"
+)
+
 type NetworkNeighbors struct {
 	APIVersion string   `json:"apiVersion"`
 	Kind       string   `json:"kind"`
@@ -25,34 +39,24 @@ type Metadata struct {
 type Spec struct {
 	MatchLabels      map[string]string                 `json:"matchLabels"`
 	MatchExpressions []metav1.LabelSelectorRequirement `json:"matchExpressions"`
-	Ingress          []Ingress                         `json:"ingress"`
-	Egress           []Egress                          `json:"egress"`
+	Ingress          []NeighborEntry                   `json:"ingress"`
+	Egress           []NeighborEntry                   `json:"egress"`
 }
 
-type Ingress struct {
-	Type              string      `json:"type"`
-	Identifier        string      `json:"identifier"`
-	NamespaceSelector MatchLabels `json:"namespaceSelector"`
-	PodSelector       MatchLabels `json:"podSelector"`
-	Ports             []Port      `json:"ports"`
-}
-
-type Egress struct {
-	Type       string `json:"type"`
-	Identifier string `json:"identifier"`
-	IPAddress  string `json:"ipAddress"`
-	DNS        string `json:"dns"`
-	Ports      []Port `json:"ports"`
-}
-
-type MatchLabels struct {
-	MatchLabels map[string]string `json:"matchLabels"`
+type NeighborEntry struct {
+	Type              string                `json:"type"`
+	Identifier        string                `json:"identifier"`
+	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector"`
+	PodSelector       *metav1.LabelSelector `json:"podSelector"`
+	Ports             []Port                `json:"ports"`
+	IPAddress         string                `json:"ipAddress"`
+	DNS               string                `json:"dns"`
 }
 
 type Port struct {
 	Name     string `json:"name"`
 	Protocol string `json:"protocol"`
-	Port     int    `json:"port"`
+	Port     uint16 `json:"port"`
 }
 
 func createNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWorkloadSelector *metav1.LabelSelector) *NetworkNeighbors {
@@ -80,4 +84,17 @@ func generateNetworkNeighborsLabels(workload k8sinterface.IWorkload) map[string]
 		instanceidhandlerV1.KindMetadataKey:       workload.GetKind(),
 		instanceidhandlerV1.NameMetadataKey:       workload.GetName(),
 	}
+}
+
+func filterLabels(labels map[string]string) map[string]string {
+	filteredLabels := make(map[string]string)
+
+	for i := range labels {
+		if _, ok := defaultLabelsToIgnore[i]; ok {
+			continue
+		}
+		filteredLabels[i] = labels[i]
+	}
+
+	return filteredLabels
 }
