@@ -2,6 +2,7 @@ package networkmanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
@@ -23,14 +24,32 @@ import (
 )
 
 type NetworkManager struct {
-	cfg                      config.Config
-	ctx                      context.Context
-	k8sClient                k8sclient.K8sClientInterface
-	storageClient            storage.StorageClient
-	containerAndPodToWLIDMap maps.SafeMap[string, string]
-	clusterName              string
-	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
+	cfg                        config.Config
+	ctx                        context.Context
+	k8sClient                  k8sclient.K8sClientInterface
+	storageClient              storage.StorageClient
+	containerAndPodToWLIDMap   maps.SafeMap[string, string]
+	containerAndPodToEventsMap maps.SafeMap[string, []*NetworkEvent]
+	clusterName                string
+	watchedContainerChannels   maps.SafeMap[string, chan error] // key is ContainerID
 }
+
+type Destination struct {
+	Namespace    string
+	Name         string
+	EndpointKind string
+	PodLabels    map[string]string
+	IPAddress    string
+}
+
+type NetworkEvent struct {
+	Port        uint16
+	Protocol    string
+	PodLabels   map[string]string
+	Destination Destination
+}
+
+var _ NetworkManagerClient = (*NetworkManager)(nil)
 
 func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string) (*NetworkManager, error) {
 	return &NetworkManager{
@@ -59,6 +78,13 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 	}
 }
 
+func (am *NetworkManager) SaveNetworkEvent(containerName, podName string, networkEvent *NetworkEvent) {
+	networkEvents := am.containerAndPodToEventsMap.Get(containerName + podName)
+	networkEvents = append(networkEvents, networkEvent)
+
+	am.containerAndPodToEventsMap.Set(containerName+podName, networkEvents)
+}
+
 func (am *NetworkManager) handleContainerStarted(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:                              container.Runtime.ContainerID,
@@ -73,12 +99,14 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 	// retrieve parent WL
 	parentWL, err := am.getParentWorkloadFromContainer(container)
 	if err != nil {
-		fmt.Println(err.Error())
+		logger.L().Info("NetworkManager - failed to get parent workload", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+		return
 	}
 
 	selector, err := parentWL.GetSelector()
 	if err != nil {
-		fmt.Println(err.Error())
+		logger.L().Info("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+		return
 	}
 
 	// TODO: check if it has network neighbor on storage
@@ -96,7 +124,7 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		logger.L().Info("NetworkManager - stop monitor on container", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
 
-	// TODO: clean up
+	am.handleContainerStopped(container)
 }
 
 // TODO: implement
@@ -140,10 +168,46 @@ func (am *NetworkManager) getParentWorkloadFromContainer(container *containercol
 }
 
 func (am *NetworkManager) handleContainerStopped(container *containercollection.Container) {
+	// clean up
 	am.containerAndPodToWLIDMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
+	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
+	am.watchedContainerChannels.Delete(container.Runtime.ContainerID)
 }
 
 // TODO: implement
 func (am *NetworkManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	return nil
+	for {
+		select {
+		case <-watchedContainer.UpdateDataTicker.C:
+			// adjust ticker after first tick
+			if !watchedContainer.InitialDelayExpired {
+				watchedContainer.InitialDelayExpired = true
+				watchedContainer.UpdateDataTicker.Reset(am.cfg.UpdateDataPeriod)
+			}
+
+			am.handleNetworkEvents(ctx, container, watchedContainer)
+		case err := <-watchedContainer.SyncChannel:
+			switch {
+			case errors.Is(err, utils.ContainerHasTerminatedError):
+				am.handleNetworkEvents(ctx, container, watchedContainer)
+				return nil
+			}
+		}
+	}
+}
+
+func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
+	fmt.Print(am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName))
+
+	// TODO: dns enrichment
+
+	// update CRD based on events
+	parentWlid := am.containerAndPodToWLIDMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
+
+	namespace := wlid.GetNamespaceFromWlid(parentWlid)
+	kind := wlid.GetKindFromWlid(parentWlid)
+	name := wlid.GetNameFromWlid(parentWlid)
+	fmt.Printf("namespace: %s, kind: %s, name: %s\n", namespace, kind, name)
+
+	//TODO: issue patch command
 }

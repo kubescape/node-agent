@@ -11,6 +11,7 @@ const NodeNameEnvVar = "NODE_NAME"
 type Config struct {
 	EnableFullPathTracing    bool          `mapstructure:"fullPathTracingEnabled"`
 	EnableApplicationProfile bool          `mapstructure:"applicationProfileServiceEnabled"`
+	EnableNetworkTracing     bool          `mapstructure:"networkServiceEnabled"`
 	EnableRelevancy          bool          `mapstructure:"relevantCVEServiceEnabled"`
 	InitialDelay             time.Duration `mapstructure:"initialDelay"`
 	MaxSniffingTime          time.Duration `mapstructure:"maxSniffingTimePerContainer"`

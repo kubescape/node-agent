@@ -73,14 +73,11 @@ func createNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWork
 }
 
 func generateNetworkNeighborsLabels(workload k8sinterface.IWorkload) map[string]string {
-
-	labels := map[string]string{
+	return map[string]string{
 		instanceidhandlerV1.ApiGroupMetadataKey:   "NetworkNeighbor", // TOOD: take from storage sdk
 		instanceidhandlerV1.ApiVersionMetadataKey: "v1",              // TOOD: take from storage sdk
 		instanceidhandlerV1.NamespaceMetadataKey:  workload.GetNamespace(),
 		instanceidhandlerV1.KindMetadataKey:       workload.GetKind(),
 		instanceidhandlerV1.NameMetadataKey:       workload.GetName(),
 	}
-
-	return labels
 }

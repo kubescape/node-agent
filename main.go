@@ -10,6 +10,7 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher/v1"
 	"node-agent/pkg/filehandler/v1"
+	"node-agent/pkg/networkmanager"
 	"node-agent/pkg/relevancymanager"
 	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
 	"node-agent/pkg/sbomhandler/v1"
@@ -27,13 +28,14 @@ import (
 
 func main() {
 	ctx := context.Background()
+	logger.L().SetLevel("debug")
 
-	cfg, err := config.LoadConfig("/etc/config")
+	cfg, err := config.LoadConfig("./.vscode/")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
 
-	clusterData, err := utilsmetadata.LoadConfig("/etc/config/clusterData.json")
+	clusterData, err := utilsmetadata.LoadConfig("/home/daniel/armo/node-agent/.vscode/clusterData.json")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
 	}
@@ -94,8 +96,16 @@ func main() {
 		relevancymanager.CreateRelevancyManagerMock()
 	}
 
+	var networkManager networkmanager.NetworkManagerClient
+	if cfg.EnableNetworkTracing {
+		networkManager, err = networkmanager.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating the network manager", helpers.Error(err))
+		}
+	}
+
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
