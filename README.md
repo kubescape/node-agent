@@ -1,4 +1,5 @@
 ## NodeAgent
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kubescape/node-agent/badge)](https://securityscorecards.dev/viewer/?uri=github.com/kubescape/node-agent)
 
 1. Run minikube:
 
