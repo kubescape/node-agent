@@ -27,6 +27,7 @@ func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Eve
 }
 
 func (ch *IGContainerWatcher) startNetworkTracing() error {
+	//TODO: remove
 	host.Init(host.Config{AutoMountFilesystems: true})
 
 	if err := ch.tracerCollection.AddTracer(networkTraceName, ch.containerSelector); err != nil {

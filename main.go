@@ -28,14 +28,13 @@ import (
 
 func main() {
 	ctx := context.Background()
-	logger.L().SetLevel("debug")
 
-	cfg, err := config.LoadConfig("./.vscode/")
+	cfg, err := config.LoadConfig("/etc/config")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
 
-	clusterData, err := utilsmetadata.LoadConfig("/home/daniel/armo/node-agent/.vscode/clusterData.json")
+	clusterData, err := utilsmetadata.LoadConfig("/etc/config/clusterData.json")
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
 	}

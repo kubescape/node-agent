@@ -2,7 +2,6 @@ package networkmanager
 
 import (
 	"context"
-	"fmt"
 	"node-agent/pkg/config"
 	"node-agent/pkg/storage"
 	"testing"
@@ -81,7 +80,5 @@ func TestNetworkManager(t *testing.T) {
 		am.SaveNetworkEvent(container.Runtime.ContainerID, container.K8s.PodName, networkEvents[i])
 	}
 	time.Sleep(150 * time.Second)
-
-	fmt.Println("bla")
 
 }

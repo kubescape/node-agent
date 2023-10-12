@@ -64,16 +64,21 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 		go am.handleContainerStarted(ctx, notif.Container, k8sContainerID)
 
 	case containercollection.EventTypeRemoveContainer:
+		channel := am.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
+		if channel != nil {
+			channel <- utils.ContainerHasTerminatedError
+		}
+		am.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 
 func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, networkEvent *NetworkEvent) {
-	set := am.containerAndPodToEventsMap.Get(containerID + podName)
-	if set == nil {
-		set = mapset.NewSet[NetworkEvent]()
+	networkEventsSet := am.containerAndPodToEventsMap.Get(containerID + podName)
+	if am.containerAndPodToEventsMap.Get(containerID+podName) == nil {
+		networkEventsSet = mapset.NewSet[NetworkEvent]()
 	}
-	set.Add(*networkEvent)
-	am.containerAndPodToEventsMap.Set(containerID+podName, set)
+	networkEventsSet.Add(*networkEvent)
+	am.containerAndPodToEventsMap.Set(containerID+podName, networkEventsSet)
 }
 
 func (am *NetworkManager) handleContainerStarted(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
@@ -265,9 +270,9 @@ func generateNetworkNeighborsEntries(container *containercollection.Container, n
 				// No need to generate for localhost
 				continue
 			}
+			neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 		}
 
-		neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 		neighborEntry.Ports = []Port{
 			{
 				Protocol: networkEvent.Protocol,

@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// TODO: remove structs when we have it on storage
 type NetworkNeighbors struct {
 	APIVersion string   `json:"apiVersion"`
 	Kind       string   `json:"kind"`
@@ -72,6 +73,7 @@ func generateNetworkNeighborsLabels(workload k8sinterface.IWorkload) map[string]
 	}
 }
 
+// filterLabels filters out labels that are not relevant for the network neighbor
 func filterLabels(labels map[string]string) map[string]string {
 	filteredLabels := make(map[string]string)
 
