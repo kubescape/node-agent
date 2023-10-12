@@ -119,18 +119,18 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		event := i.(tracernetworktype.Event)
 
 		networkEvent := &networkmanager.NetworkEvent{
-			Port:      event.Port,
-			Protocol:  event.Proto,
-			PodLabels: event.PodLabels,
-			PktType:   event.PktType,
+			Port:     event.Port,
+			Protocol: event.Proto,
+			PktType:  event.PktType,
 			Destination: networkmanager.Destination{
 				Namespace: event.DstEndpoint.Namespace,
 				Name:      event.DstEndpoint.Name,
 				Kind:      networkmanager.EndpointKind(event.DstEndpoint.Kind),
-				PodLabels: event.DstEndpoint.PodLabels,
 				IPAddress: event.DstEndpoint.Addr,
 			},
 		}
+		networkEvent.SetPodLabels(event.PodLabels)
+		networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
 
 		networkManagerClient.SaveNetworkEvent(event.K8s.ContainerName, event.K8s.PodName, networkEvent)
 	})

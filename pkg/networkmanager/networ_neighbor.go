@@ -8,20 +8,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type EndpointKind string
-
-var defaultLabelsToIgnore = map[string]struct{}{
-	"controller-revision-hash": {},
-	"pod-template-generation":  {},
-	"pod-template-hash":        {},
-}
-
-const (
-	EndpointKindPod     EndpointKind = "pod"
-	EndpointKindService EndpointKind = "svc"
-	EndpointKindRaw     EndpointKind = "raw"
-)
-
 type NetworkNeighbors struct {
 	APIVersion string   `json:"apiVersion"`
 	Kind       string   `json:"kind"`

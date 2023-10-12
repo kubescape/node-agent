@@ -49,19 +49,28 @@ func TestNetworkManager(t *testing.T) {
 
 	networkEvents := []*NetworkEvent{
 		{
-			Port:     80,
-			PktType:  "HOST",
-			Protocol: "tcp",
-			PodLabels: map[string]string{
-				"app": "nginx",
-			},
+			Port:      80,
+			PktType:   "HOST",
+			Protocol:  "tcp",
+			PodLabels: "app=nginx",
 			Destination: Destination{
 				Namespace: "default",
 				Name:      "nginx-deployment-cbdccf466-csh9c",
 				Kind:      EndpointKindPod,
-				PodLabels: map[string]string{
-					"app": "nginx",
-				},
+				PodLabels: "app=nginx",
+				IPAddress: "19.64.52.5",
+			},
+		},
+		{
+			Port:      80,
+			PktType:   "HOST",
+			Protocol:  "tcp",
+			PodLabels: "app=nginx",
+			Destination: Destination{
+				Namespace: "default",
+				Name:      "nginx-deployment-cbdccf466-csh9c",
+				Kind:      EndpointKindPod,
+				PodLabels: "app=nginx",
 				IPAddress: "19.64.52.4",
 			},
 		},

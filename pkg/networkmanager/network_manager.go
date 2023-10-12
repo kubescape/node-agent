@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
@@ -32,25 +33,9 @@ type NetworkManager struct {
 	k8sClient                  k8sclient.K8sClientInterface
 	storageClient              storage.StorageClient
 	containerAndPodToWLIDMap   maps.SafeMap[string, string]
-	containerAndPodToEventsMap maps.SafeMap[string, []*NetworkEvent] // TODO: change it to set
+	containerAndPodToEventsMap maps.SafeMap[string, mapset.Set[NetworkEvent]] // TODO: change it to set
 	clusterName                string
 	watchedContainerChannels   maps.SafeMap[string, chan error] // key is ContainerID
-}
-
-type Destination struct {
-	Namespace string
-	Name      string
-	Kind      EndpointKind
-	PodLabels map[string]string
-	IPAddress string
-}
-
-type NetworkEvent struct {
-	Port        uint16
-	PktType     string
-	Protocol    string
-	PodLabels   map[string]string
-	Destination Destination
 }
 
 var _ NetworkManagerClient = (*NetworkManager)(nil)
@@ -83,10 +68,12 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 }
 
 func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, networkEvent *NetworkEvent) {
-	networkEvents := am.containerAndPodToEventsMap.Get(containerID + podName)
-	networkEvents = append(networkEvents, networkEvent)
-
-	am.containerAndPodToEventsMap.Set(containerID+podName, networkEvents)
+	set := am.containerAndPodToEventsMap.Get(containerID + podName)
+	if set == nil {
+		set = mapset.NewSet[NetworkEvent]()
+	}
+	set.Add(*networkEvent)
+	am.containerAndPodToEventsMap.Set(containerID+podName, set)
 }
 
 func (am *NetworkManager) handleContainerStarted(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
@@ -201,7 +188,11 @@ func (am *NetworkManager) monitorContainer(ctx context.Context, container *conta
 }
 
 func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
-	fmt.Print(am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName))
+	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
+	if networkEvents == nil {
+		// no events to handle
+		return
+	}
 
 	// TODO: dns enrichment
 
@@ -211,9 +202,8 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 	namespace := wlid.GetNamespaceFromWlid(parentWlid)
 	kind := wlid.GetKindFromWlid(parentWlid)
 	name := wlid.GetNameFromWlid(parentWlid)
+	// TODO: use it to retrieve CRD
 	fmt.Printf("namespace: %s, kind: %s, name: %s\n", namespace, kind, name)
-
-	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
 
 	networkEntries := generateNetworkNeighborsEntries(container, networkEvents)
 
@@ -223,58 +213,66 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		logger.L().Error("failed to marshal network entries", helpers.Error(err))
 	}
 
+	// TODO: remove
 	fmt.Println(string(networkEntriesMarshalled))
 
-	am.containerAndPodToEventsMap.Set(container.Runtime.ContainerID+container.K8s.PodName, []*NetworkEvent{})
+	// clear event
+	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 }
 
-func generateNetworkNeighborsEntries(container *containercollection.Container, networkEvents []*NetworkEvent) []NeighborEntry {
+func generateNetworkNeighborsEntries(container *containercollection.Container, networkEvents mapset.Set[NetworkEvent]) []NeighborEntry {
 	var neighborEntries []NeighborEntry
 
-	for i := range networkEvents {
+	networkEventsIterator := networkEvents.Iterator()
+	if networkEventsIterator == nil {
+		return neighborEntries
+	}
+
+	for networkEvent := range networkEventsIterator.C {
 		var neighborEntry NeighborEntry
 
-		if networkEvents[i].PktType == "HOST" {
+		if networkEvent.PktType == "HOST" {
 			neighborEntry.Type = "internal"
-		} else if networkEvents[i].PktType == "OUTGOING" {
+		} else if networkEvent.PktType == "OUTGOING" {
 			neighborEntry.Type = "external"
 		}
 
-		if networkEvents[i].Destination.Kind == EndpointKindPod {
+		if networkEvent.Destination.Kind == EndpointKindPod {
 			neighborEntry.PodSelector = &metav1.LabelSelector{
-				MatchLabels: filterLabels(networkEvents[i].Destination.PodLabels),
+				MatchLabels: filterLabels(networkEvent.GetDestinationPodLabels()),
 			}
-			if networkEvents[i].Destination.Namespace != container.K8s.Namespace {
+			if networkEvent.Destination.Namespace != container.K8s.Namespace {
 				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						"kubernetes.io/metadata.name": networkEvents[i].Destination.Namespace,
+						"kubernetes.io/metadata.name": networkEvent.Destination.Namespace,
 					},
 				}
 			}
-		} else if networkEvents[i].Destination.Kind == EndpointKindService {
+		} else if networkEvent.Destination.Kind == EndpointKindService {
+
 			neighborEntry.PodSelector = &metav1.LabelSelector{
-				MatchLabels: networkEvents[i].Destination.PodLabels,
+				MatchLabels: networkEvent.GetDestinationPodLabels(),
 			}
-			if networkEvents[i].Destination.Namespace != container.K8s.Namespace {
+			if networkEvent.Destination.Namespace != container.K8s.Namespace {
 				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						"kubernetes.io/metadata.name": networkEvents[i].Destination.Namespace,
+						"kubernetes.io/metadata.name": networkEvent.Destination.Namespace,
 					},
 				}
 			}
-		} else if networkEvents[i].Destination.Kind == EndpointKindRaw {
-			if networkEvents[i].Destination.IPAddress == "127.0.0.1" {
+		} else if networkEvent.Destination.Kind == EndpointKindRaw {
+			if networkEvent.Destination.IPAddress == "127.0.0.1" {
 				// No need to generate for localhost
 				continue
 			}
 		}
 
-		neighborEntry.IPAddress = networkEvents[i].Destination.IPAddress
+		neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 		neighborEntry.Ports = []Port{
 			{
-				Protocol: networkEvents[i].Protocol,
-				Port:     networkEvents[i].Port,
-				Name:     fmt.Sprintf("%s-%d", networkEvents[i].Protocol, networkEvents[i].Port),
+				Protocol: networkEvent.Protocol,
+				Port:     networkEvent.Port,
+				Name:     fmt.Sprintf("%s-%d", networkEvent.Protocol, networkEvent.Port),
 			}}
 
 		// identifier is hash of everything in egress except ports
