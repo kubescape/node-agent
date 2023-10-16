@@ -1,7 +1,6 @@
 ## NodeAgent
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kubescape/node-agent/badge)](https://securityscorecards.dev/viewer/?uri=github.com/kubescape/node-agent)
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fnode-agent.svg?type=shield&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fnode-agent?ref=badge_shield&issueType=license)
-
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fsniffer.svg?type=shield&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fsniffer?ref=badge_shield&issueType=license)
 
 1. Run minikube:
 
