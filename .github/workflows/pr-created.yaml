@@ -1,11 +1,12 @@
 name: pull_request_created
+add top level permissions: read-all for openssf
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-    branches: 
+    branches:
       - 'main'
     paths-ignore:
-      - '*.md' 
+      - '*.md'
       - '*.yaml'
       - '.github/workflows/*'
 
