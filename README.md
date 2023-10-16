@@ -32,7 +32,7 @@ sudo SNIFFER_CONFIG=./configuration/SnifferConfigurationFile.json ./sniffer
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}", 
+            "program": "${workspaceFolder}",
             "env": {
                 "SNIFFER_CONFIG": "${workspaceFolder}/configuration/SnifferConfigurationFile.json"
             },
@@ -43,3 +43,6 @@ sudo SNIFFER_CONFIG=./configuration/SnifferConfigurationFile.json ./sniffer
 }
 
 ```
+## Changelog
+
+Kubescape Node-agent changes are tracked on the [release](https://github.com/kubescape/node-agent/releases) page
