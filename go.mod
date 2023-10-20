@@ -11,7 +11,7 @@ require (
 	github.com/inspektor-gadget/inspektor-gadget v0.20.1-0.20230919195508-052fbf78b54c
 	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/go-logger v0.0.21
-	github.com/kubescape/k8s-interface v0.0.141
+	github.com/kubescape/k8s-interface v0.0.145
 	github.com/kubescape/storage v0.0.22
 	github.com/panjf2000/ants/v2 v2.8.1
 	github.com/spf13/viper v1.16.0
