@@ -83,29 +83,20 @@ func (sc StorageNoCache) PatchNetworkNeighborsIngressAndEgress(name, namespace s
 	if err != nil {
 		return err
 	}
+
 	_, err = sc.StorageClient.NetworkNeighborses(namespace).Patch(context.Background(), name, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
-func (sc StorageNoCache) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors, selector *metav1.LabelSelector) error {
-	networkNeighborsUpdated := &v1beta1.NetworkNeighbors{
-		Spec: v1beta1.NetworkNeighborsSpec{
-			LabelSelector: selector,
-		},
-	}
-	updatedDoc, err := json.Marshal(networkNeighborsUpdated)
-	if err != nil {
-		return err
-	}
+func (sc StorageNoCache) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
 
-	_, err = sc.StorageClient.NetworkNeighborses(namespace).Patch(context.Background(), name, types.StrategicMergePatchType, updatedDoc, metav1.PatchOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
+	_, err := sc.StorageClient.NetworkNeighborses(namespace).Update(context.Background(), networkNeighbors, metav1.UpdateOptions{})
+
+	return err
 }
 
 func (sc StorageNoCache) CreateApplicationActivity(activity *v1beta1.ApplicationActivity, namespace string) error {

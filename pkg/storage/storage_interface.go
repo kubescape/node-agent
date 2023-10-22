@@ -2,7 +2,6 @@ package storage
 
 import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type StorageClient interface {
@@ -18,6 +17,6 @@ type StorageClient interface {
 	DecrementImageUse(imageID string)
 	GetNetworkNeighbors(namespace, name string) (*v1beta1.NetworkNeighbors, error)
 	CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error
-	PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors, selector *metav1.LabelSelector) error
+	PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error
 	PatchNetworkNeighborsIngressAndEgress(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error
 }

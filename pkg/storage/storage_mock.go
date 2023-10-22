@@ -8,7 +8,6 @@ import (
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -123,7 +122,7 @@ func (sc *StorageHttpClientMock) GetNetworkNeighbors(namespace, name string) (*v
 	return nil, nil
 }
 
-func (sc *StorageHttpClientMock) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors, selector *metav1.LabelSelector) error {
+func (sc *StorageHttpClientMock) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -17,6 +18,10 @@ const (
 )
 
 func generateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWorkloadSelector *metav1.LabelSelector) *v1beta1.NetworkNeighbors {
+	if parentWorkloadSelector.MatchLabels == nil && parentWorkloadSelector.MatchExpressions == nil {
+		parentWorkloadSelector.MatchLabels = parentWorkload.GetLabels()
+	}
+
 	return &v1beta1.NetworkNeighbors{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "NetworkNeighbors",
@@ -26,7 +31,7 @@ func generateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWo
 			Annotations: map[string]string{
 				instanceidhandler.StatusMetadataKey: incomplete,
 			},
-			Name:      generateNetworkNeighborsName(parentWorkload),
+			Name:      generateNetworkNeighborsNameFromWorkload(parentWorkload),
 			Namespace: parentWorkload.GetNamespace(),
 			Labels:    generateNetworkNeighborsLabels(parentWorkload),
 		},
@@ -39,8 +44,12 @@ func generateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWo
 	}
 }
 
-func generateNetworkNeighborsName(parentWorkload k8sinterface.IWorkload) string {
-	return fmt.Sprintf("%s-%s", strings.ToLower(parentWorkload.GetKind()), parentWorkload.GetName())
+func generateNetworkNeighborsNameFromWorkload(workload k8sinterface.IWorkload) string {
+	return fmt.Sprintf("%s-%s", strings.ToLower(workload.GetKind()), workload.GetName())
+}
+
+func generateNetworkNeighborsNameFromWlid(parentWlid string) string {
+	return fmt.Sprintf("%s-%s", strings.ToLower(wlid.GetKindFromWlid(parentWlid)), wlid.GetNameFromWlid(parentWlid))
 }
 
 func generateNetworkNeighborsLabels(workload k8sinterface.IWorkload) map[string]string {
@@ -49,13 +58,15 @@ func generateNetworkNeighborsLabels(workload k8sinterface.IWorkload) map[string]
 	if len(apiVersionSplitted) == 2 {
 		apiGroup = apiVersionSplitted[0]
 		apiVersion = apiVersionSplitted[1]
+	} else if len(apiVersionSplitted) == 1 {
+		apiVersion = apiVersionSplitted[0]
 	}
 
 	return map[string]string{
 		instanceidhandlerV1.ApiGroupMetadataKey:   apiGroup,
 		instanceidhandlerV1.ApiVersionMetadataKey: apiVersion,
 		instanceidhandlerV1.NamespaceMetadataKey:  workload.GetNamespace(),
-		instanceidhandlerV1.KindMetadataKey:       workload.GetKind(),
+		instanceidhandlerV1.KindMetadataKey:       strings.ToLower(workload.GetKind()),
 		instanceidhandlerV1.NameMetadataKey:       workload.GetName(),
 	}
 }
