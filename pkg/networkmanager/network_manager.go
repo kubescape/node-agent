@@ -3,17 +3,18 @@ package networkmanager
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
+	"strings"
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/google/uuid"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
@@ -106,12 +107,24 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 	}
 
 	// TODO: check if it has network neighbor on storage
-	// If yes, update labels
-	am.patchNetworkNeighbor(nil)
+	networkNeighbors, err := am.storageClient.GetNetworkNeighbors(parentWL.GetNamespace(), generateNetworkNeighborsName(parentWL))
+	if err != nil {
+		if !strings.Contains(err.Error(), "not found") {
+			logger.L().Info("NetworkManager - failed to get network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+			return
+		}
 
-	// If not, create CRD
-	networkNeighbors := createNetworkNeighborsCRD(parentWL, selector)
-	am.publishNetworkNeighbors(networkNeighbors)
+		// network neighbor not found, create new one
+		newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector)
+		if err = am.storageClient.CreateNetworkNeighbors(newNetworkNeighbors, parentWL.GetNamespace()); err != nil {
+			logger.L().Info("NetworkManager - failed to create network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+		}
+	} else {
+		// CRD found, update labels
+		if err = am.storageClient.PatchNetworkNeighborsMatchLabels(networkNeighbors.GetName(), networkNeighbors.GetNamespace(), networkNeighbors, selector); err != nil {
+			logger.L().Info("NetworkManager - failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+		}
+	}
 
 	// save container + pod to wlid map
 	am.containerAndPodToWLIDMap.Set(container.Runtime.ContainerID+container.K8s.PodName, parentWL.GenerateWlid(am.clusterName))
@@ -121,16 +134,6 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 	}
 
 	am.handleContainerStopped(container)
-}
-
-// TODO: implement
-func (am *NetworkManager) patchNetworkNeighbor(networkNeighbor *NetworkNeighbors) {
-	// patch to storage
-}
-
-// TODO: implement
-func (am *NetworkManager) publishNetworkNeighbors(networkNeighbor *NetworkNeighbors) {
-	// publish to storage
 }
 
 // TODO: use same function in relevancy
@@ -204,48 +207,32 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 	// update CRD based on events
 	parentWlid := am.containerAndPodToWLIDMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
 
-	namespace := wlid.GetNamespaceFromWlid(parentWlid)
-	kind := wlid.GetKindFromWlid(parentWlid)
-	name := wlid.GetNameFromWlid(parentWlid)
-	// TODO: use it to retrieve CRD
-	fmt.Printf("namespace: %s, kind: %s, name: %s\n", namespace, kind, name)
+	NetworkNeighborsSpec := generateNetworkNeighborsEntries(container, networkEvents)
 
-	networkEntries := generateNetworkNeighborsEntries(container, networkEvents)
-
-	//TODO: issue patch command
-	networkEntriesMarshalled, err := json.Marshal(networkEntries)
-	if err != nil {
-		logger.L().Error("failed to marshal network entries", helpers.Error(err))
-	}
-
-	// TODO: remove
-	fmt.Println(string(networkEntriesMarshalled))
+	am.storageClient.PatchNetworkNeighborsIngressAndEgress(wlid.GetNameFromWlid(parentWlid), wlid.GetNamespaceFromWlid(parentWlid), &v1beta1.NetworkNeighbors{
+		Spec: NetworkNeighborsSpec,
+	})
 
 	// clear event
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 }
 
-func generateNetworkNeighborsEntries(container *containercollection.Container, networkEvents mapset.Set[NetworkEvent]) []NeighborEntry {
-	var neighborEntries []NeighborEntry
+func generateNetworkNeighborsEntries(container *containercollection.Container, networkEvents mapset.Set[NetworkEvent]) v1beta1.NetworkNeighborsSpec {
+	var networhNeighborsSpec v1beta1.NetworkNeighborsSpec
 
 	networkEventsIterator := networkEvents.Iterator()
 	if networkEventsIterator == nil {
-		return neighborEntries
+		return networhNeighborsSpec
 	}
 
 	for networkEvent := range networkEventsIterator.C {
-		var neighborEntry NeighborEntry
-
-		if networkEvent.PktType == "HOST" {
-			neighborEntry.Type = "internal"
-		} else if networkEvent.PktType == "OUTGOING" {
-			neighborEntry.Type = "external"
-		}
+		var neighborEntry v1beta1.NetworkEntry
 
 		if networkEvent.Destination.Kind == EndpointKindPod {
 			neighborEntry.PodSelector = &metav1.LabelSelector{
 				MatchLabels: filterLabels(networkEvent.GetDestinationPodLabels()),
 			}
+			// from k8s 1.22, all namespaces have a label kubernetes.io/metadata.name
 			if networkEvent.Destination.Namespace != container.K8s.Namespace {
 				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
 					MatchLabels: map[string]string{
@@ -254,7 +241,6 @@ func generateNetworkNeighborsEntries(container *containercollection.Container, n
 				}
 			}
 		} else if networkEvent.Destination.Kind == EndpointKindService {
-
 			neighborEntry.PodSelector = &metav1.LabelSelector{
 				MatchLabels: networkEvent.GetDestinationPodLabels(),
 			}
@@ -273,9 +259,9 @@ func generateNetworkNeighborsEntries(container *containercollection.Container, n
 			neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 		}
 
-		neighborEntry.Ports = []Port{
+		neighborEntry.Ports = []v1beta1.NetworkPort{
 			{
-				Protocol: networkEvent.Protocol,
+				Protocol: v1beta1.Protocol(networkEvent.Protocol),
 				Port:     networkEvent.Port,
 				Name:     fmt.Sprintf("%s-%d", networkEvent.Protocol, networkEvent.Port),
 			}}
@@ -283,13 +269,20 @@ func generateNetworkNeighborsEntries(container *containercollection.Container, n
 		// identifier is hash of everything in egress except ports
 		identifier := fmt.Sprintf("%s-%s-%s-%s-%s", neighborEntry.Type, neighborEntry.IPAddress, neighborEntry.DNS, neighborEntry.NamespaceSelector, neighborEntry.PodSelector)
 		hash := sha256.New()
+		_, err := hash.Write([]byte(identifier))
+		if err != nil {
+			// if we fail to hash, use a random identifier so at least we have the data on the crd
+			logger.L().Error("failed to hash identifier", helpers.String("identifier", identifier), helpers.String("error", err.Error()))
+			identifier = uuid.New().String()
+		}
 
-		hash.Write([]byte(identifier))
+		if networkEvent.PktType == "OUTGOING" {
+			networhNeighborsSpec.Egress = append(networhNeighborsSpec.Egress, neighborEntry)
+		} else {
+			networhNeighborsSpec.Ingress = append(networhNeighborsSpec.Ingress, neighborEntry)
+		}
 
-		neighborEntry.Identifier = fmt.Sprintf("%x", hash.Sum(nil))
-
-		neighborEntries = append(neighborEntries, neighborEntry)
 	}
 
-	return neighborEntries
+	return networhNeighborsSpec
 }

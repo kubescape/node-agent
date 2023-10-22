@@ -6,7 +6,9 @@ import (
 	"os"
 	"path"
 
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -20,6 +22,7 @@ type StorageHttpClientMock struct {
 	ApplicationProfiles         []*spdxv1beta1.ApplicationProfile
 	ApplicationProfileSummaries []*spdxv1beta1.ApplicationProfileSummary
 	FilteredSBOMs               []*spdxv1beta1.SBOMSPDXv2p3Filtered
+	NetworkNeighborses          []*v1beta1.NetworkNeighbors
 	ImageCounters               map[string]int
 	nginxSBOMSpdxBytes          *spdxv1beta1.SBOMSPDXv2p3
 }
@@ -75,6 +78,11 @@ func (sc *StorageHttpClientMock) CreateApplicationProfileSummary(summary *spdxv1
 	return nil
 }
 
+func (sc *StorageHttpClientMock) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error {
+	sc.NetworkNeighborses = append(sc.NetworkNeighborses, networkNeighbors)
+	return nil
+}
+
 func (sc *StorageHttpClientMock) CreateFilteredSBOM(SBOM *spdxv1beta1.SBOMSPDXv2p3Filtered) error {
 	sc.FilteredSBOMs = append(sc.FilteredSBOMs, SBOM)
 	return nil
@@ -104,4 +112,21 @@ func (sc *StorageHttpClientMock) DecrementImageUse(imageID string) {
 	}
 	sc.ImageCounters[imageID]--
 
+}
+
+func (sc *StorageHttpClientMock) GetNetworkNeighbors(namespace, name string) (*v1beta1.NetworkNeighbors, error) {
+	for _, nn := range sc.NetworkNeighborses {
+		if nn.Name == name {
+			return nn, nil
+		}
+	}
+	return nil, nil
+}
+
+func (sc *StorageHttpClientMock) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors, selector *metav1.LabelSelector) error {
+	return nil
+}
+
+func (sc *StorageHttpClientMock) PatchNetworkNeighborsIngressAndEgress(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
+	return nil
 }

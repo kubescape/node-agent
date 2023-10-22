@@ -31,7 +31,7 @@ var _ storage.StorageClient = (*StorageNoCache)(nil)
 
 func CreateStorageNoCache() (*StorageNoCache, error) {
 	var config *rest.Config
-	kubeconfig := os.Getenv(KubeConfig)
+	kubeconfig := "/home/daniel/.kube/config"
 	// use the current context in kubeconfig
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
@@ -64,6 +64,48 @@ func getNamespace() string {
 		return ns
 	}
 	return defaultNamespace
+}
+
+func (sc StorageNoCache) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error {
+	_, err := sc.StorageClient.NetworkNeighborses(namespace).Create(context.Background(), networkNeighbors, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (sc StorageNoCache) GetNetworkNeighbors(namespace, name string) (*v1beta1.NetworkNeighbors, error) {
+	return sc.StorageClient.NetworkNeighborses(namespace).Get(context.Background(), name, metav1.GetOptions{})
+}
+
+func (sc StorageNoCache) PatchNetworkNeighborsIngressAndEgress(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
+	bytes, err := json.Marshal(networkNeighbors)
+	if err != nil {
+		return err
+	}
+	_, err = sc.StorageClient.NetworkNeighborses(namespace).Patch(context.Background(), name, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (sc StorageNoCache) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors, selector *metav1.LabelSelector) error {
+	networkNeighborsUpdated := &v1beta1.NetworkNeighbors{
+		Spec: v1beta1.NetworkNeighborsSpec{
+			LabelSelector: selector,
+		},
+	}
+	updatedDoc, err := json.Marshal(networkNeighborsUpdated)
+	if err != nil {
+		return err
+	}
+
+	_, err = sc.StorageClient.NetworkNeighborses(namespace).Patch(context.Background(), name, types.StrategicMergePatchType, updatedDoc, metav1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (sc StorageNoCache) CreateApplicationActivity(activity *v1beta1.ApplicationActivity, namespace string) error {
