@@ -2,6 +2,7 @@ package containerwatcher
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"node-agent/pkg/applicationprofilemanager"
 	"node-agent/pkg/config"
@@ -118,6 +119,12 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	networkWorkerPool, err := ants.NewPoolWithFunc(networkWorkerPoolSize, func(i interface{}) {
 		event := i.(tracernetworktype.Event)
 
+		eventMarshalled, _ := json.Marshal(event)
+
+		logger.L().Debug("NetworkManager - NewPoolWithFunc", helpers.String("event", string(eventMarshalled)))
+
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
 		networkEvent := &networkmanager.NetworkEvent{
 			Port:     event.Port,
 			Protocol: event.Proto,
@@ -132,7 +139,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkEvent.SetPodLabels(event.PodLabels)
 		networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
 
-		networkManagerClient.SaveNetworkEvent(event.K8s.ContainerName, event.K8s.PodName, networkEvent)
+		networkManagerClient.SaveNetworkEvent(k8sContainerID, event.K8s.PodName, networkEvent)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating open network pool: %w", err)
