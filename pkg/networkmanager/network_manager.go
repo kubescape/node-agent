@@ -184,7 +184,6 @@ func (am *NetworkManager) handleContainerStopped(container *containercollection.
 	am.watchedContainerChannels.Delete(container.Runtime.ContainerID)
 }
 
-// TODO: implement
 func (am *NetworkManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	for {
 		select {
@@ -222,7 +221,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 	// retrieve parent WL from internal map
 	parentWlid := am.containerAndPodToWLIDMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
 
-	networkNeighborsSpec := generateNetworkNeighborsEntries(container, networkEvents)
+	networkNeighborsSpec := generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents)
 
 	// send PATCH command using entries generated from events
 	if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(generateNetworkNeighborsNameFromWlid(parentWlid), wlid.GetNamespaceFromWlid(parentWlid), &v1beta1.NetworkNeighbors{Spec: networkNeighborsSpec}); err != nil {
@@ -234,8 +233,10 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 }
 
-func generateNetworkNeighborsEntries(container *containercollection.Container, networkEvents mapset.Set[NetworkEvent]) v1beta1.NetworkNeighborsSpec {
+func generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[NetworkEvent]) v1beta1.NetworkNeighborsSpec {
 	var networkNeighborsSpec v1beta1.NetworkNeighborsSpec
+
+	// auxiliary maps to avoid duplicates
 	ingressIdentifiersMap := make(map[string]v1beta1.NetworkEntry)
 	egressIdentifiersMap := make(map[string]v1beta1.NetworkEntry)
 
@@ -248,26 +249,24 @@ func generateNetworkNeighborsEntries(container *containercollection.Container, n
 		var neighborEntry v1beta1.NetworkEntry
 
 		if networkEvent.Destination.Kind == EndpointKindPod {
+			// for Pods we need to remove the default labels
 			neighborEntry.PodSelector = &metav1.LabelSelector{
 				MatchLabels: filterLabels(networkEvent.GetDestinationPodLabels()),
 			}
-			// from k8s 1.22, all namespaces have a label kubernetes.io/metadata.name
-			if networkEvent.Destination.Namespace != container.K8s.Namespace {
+
+			if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
 				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"kubernetes.io/metadata.name": networkEvent.Destination.Namespace,
-					},
+					MatchLabels: namespaceLabels,
 				}
 			}
+
 		} else if networkEvent.Destination.Kind == EndpointKindService {
 			neighborEntry.PodSelector = &metav1.LabelSelector{
 				MatchLabels: networkEvent.GetDestinationPodLabels(),
 			}
-			if networkEvent.Destination.Namespace != container.K8s.Namespace {
+			if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
 				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"kubernetes.io/metadata.name": networkEvent.Destination.Namespace,
-					},
+					MatchLabels: namespaceLabels,
 				}
 			}
 		} else if networkEvent.Destination.Kind == EndpointKindRaw {
@@ -287,25 +286,27 @@ func generateNetworkNeighborsEntries(container *containercollection.Container, n
 			}}
 
 		neighborEntry.Type = "internal"
-		if networkEvent.PodLabels == "" {
+		if len(networkEvent.GetDestinationPodLabels()) == 0 {
 			neighborEntry.Type = "external"
 		}
 
+		// generate identifier for this neighborEntry
 		identifier, err := generateNeighborsIdentifier(neighborEntry)
 		if err != nil {
 			// if we fail to hash, use a random identifier so at least we have the data on the crd
 			logger.L().Error("failed to hash identifier", helpers.String("identifier", identifier), helpers.String("error", err.Error()))
 			identifier = uuid.New().String()
 		}
+
 		if networkEvent.PktType == "OUTGOING" {
 			if existingNeighborEntry, ok := egressIdentifiersMap[identifier]; ok {
 				// if we already have this identifier, check if there is a new port
 				for _, port := range existingNeighborEntry.Ports {
 					if port.Name == portIdentifier {
-						// port already existsneighborEntry.Ports...
+						// port already exists in neighborEntry.Ports...
 						continue
 					}
-					// new port, add it
+					// new port, add it to same entry
 					neighborEntry.Ports = append(existingNeighborEntry.Ports, neighborEntry.Ports...)
 				}
 			}
@@ -316,11 +317,12 @@ func generateNetworkNeighborsEntries(container *containercollection.Container, n
 				// if we already have this identifier, check if there is a new port
 				for _, port := range existingNeighborEntry.Ports {
 					if port.Name == portIdentifier {
-						// port already exists
+						// port already exists in neighborEntry.Ports...
 						continue
 					}
-					// new port, add it
-					neighborEntry.Ports = append(existingNeighborEntry.Ports, port)
+					// new port, add it to same entry
+					neighborEntry.Ports = append(existingNeighborEntry.Ports, neighborEntry.Ports...)
+					break
 				}
 			}
 			neighborEntry.Identifier = identifier
@@ -339,6 +341,16 @@ func generateNetworkNeighborsEntries(container *containercollection.Container, n
 	}
 
 	return networkNeighborsSpec
+}
+
+func getNamespaceMatchLabels(destinationNamespace, sourceNamespace string) map[string]string {
+	if destinationNamespace != sourceNamespace {
+		// from version 1.22, all namespace have the kubernetes.io/metadata.name label
+		return map[string]string{
+			"kubernetes.io/metadata.name": destinationNamespace,
+		}
+	}
+	return nil
 }
 
 func generateNeighborsIdentifier(neighborEntry v1beta1.NetworkEntry) (string, error) {

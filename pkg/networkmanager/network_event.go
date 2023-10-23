@@ -34,6 +34,11 @@ const (
 
 func (ne *NetworkEvent) GetDestinationPodLabels() map[string]string {
 	podLabels := make(map[string]string, 0)
+
+	if ne.Destination.PodLabels == "" {
+		return podLabels
+	}
+
 	podLabelsSlice := strings.Split(ne.Destination.PodLabels, ",")
 	for _, podLabel := range podLabelsSlice {
 		podLabelSlice := strings.Split(podLabel, "=")
