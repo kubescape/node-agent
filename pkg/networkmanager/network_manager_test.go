@@ -27,9 +27,9 @@ func TestNetworkManager(t *testing.T) {
 	ctx := context.TODO()
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageClient, err := storagev1.CreateStorageNoCache()
-
-	am, err := CreateNetworkManager(ctx, cfg, k8sClient, storageClient, "test-cluster")
 	assert.NoError(t, err)
+
+	am := CreateNetworkManager(ctx, cfg, k8sClient, storageClient, "test-cluster")
 
 	containers := []containercollection.Container{
 		{

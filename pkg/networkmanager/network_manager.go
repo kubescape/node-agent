@@ -42,14 +42,14 @@ type NetworkManager struct {
 
 var _ NetworkManagerClient = (*NetworkManager)(nil)
 
-func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string) (*NetworkManager, error) {
+func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string) *NetworkManager {
 	return &NetworkManager{
 		cfg:           cfg,
 		ctx:           ctx,
 		k8sClient:     k8sClient,
 		storageClient: storageClient,
 		clusterName:   clusterName,
-	}, nil
+	}
 }
 
 func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEvent) {

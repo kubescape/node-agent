@@ -28,6 +28,7 @@ import (
 
 func main() {
 	ctx := context.Background()
+	logger.L().SetLevel("debug")
 
 	cfg, err := config.LoadConfig("/etc/config")
 	if err != nil {
@@ -95,16 +96,15 @@ func main() {
 		relevancymanager.CreateRelevancyManagerMock()
 	}
 
-	var networkManager networkmanager.NetworkManagerClient
+	var networkManagerClient networkmanager.NetworkManagerClient
 	if cfg.EnableNetworkTracing {
-		networkManager, err = networkmanager.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName)
-		if err != nil {
-			logger.L().Ctx(ctx).Fatal("error creating the network manager", helpers.Error(err))
-		}
+		networkManagerClient = networkmanager.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName)
+	} else {
+		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
