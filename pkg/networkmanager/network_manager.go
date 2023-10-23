@@ -88,6 +88,9 @@ func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, networkE
 }
 
 func (am *NetworkManager) handleContainerStarted(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
+	ctx, span := otel.Tracer("").Start(ctx, "NetworkManager.handleContainerStarted")
+	defer span.End()
+
 	logger.L().Debug("NetworkManager - handleContainerStarted", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 
 	watchedContainer := &utils.WatchedContainerData{
@@ -144,7 +147,7 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		logger.L().Info("NetworkManager - stop monitor on container", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
 
-	am.handleContainerStopped(container)
+	am.deleteResources(container)
 }
 
 // TODO: use same function in relevancy
@@ -177,7 +180,7 @@ func (am *NetworkManager) getParentWorkloadFromContainer(container *containercol
 	return parentWorkload, nil
 }
 
-func (am *NetworkManager) handleContainerStopped(container *containercollection.Container) {
+func (am *NetworkManager) deleteResources(container *containercollection.Container) {
 	// clean up
 	am.containerAndPodToWLIDMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
@@ -220,6 +223,10 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 
 	// retrieve parent WL from internal map
 	parentWlid := am.containerAndPodToWLIDMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
+	if parentWlid == "" {
+		logger.L().Error("failed to get parent wlid from map", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("pod name", container.K8s.PodName))
+		return
+	}
 
 	networkNeighborsSpec := generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents)
 
@@ -229,7 +236,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		return
 	}
 
-	// remove event from map
+	// remove events from map
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 }
 
