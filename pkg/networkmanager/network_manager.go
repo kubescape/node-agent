@@ -207,6 +207,7 @@ func (am *NetworkManager) monitorContainer(ctx context.Context, container *conta
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
+				logger.L().Debug("NetworkManager - container has terminated", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				am.handleNetworkEvents(ctx, container, watchedContainer)
 				return nil
 			}
