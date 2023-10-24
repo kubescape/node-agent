@@ -9,6 +9,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -172,12 +173,12 @@ func TestNetworkManager(t *testing.T) {
 func TestGenerateNeighborsIdentifier(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    v1beta1.NetworkEntry
+		input    v1beta1.NetworkNeighbor
 		expected string
 	}{
 		{
 			name: "external",
-			input: v1beta1.NetworkEntry{
+			input: v1beta1.NetworkNeighbor{
 				Type:              "external",
 				DNS:               "example.com",
 				Ports:             []v1beta1.NetworkPort{{Name: "port1", Protocol: "TCP"}},
@@ -189,7 +190,7 @@ func TestGenerateNeighborsIdentifier(t *testing.T) {
 		},
 		{
 			name: "external - different IP has different identifier",
-			input: v1beta1.NetworkEntry{
+			input: v1beta1.NetworkNeighbor{
 				Type:              "external",
 				DNS:               "example.com",
 				Ports:             []v1beta1.NetworkPort{{Name: "port1", Protocol: "TCP"}},
@@ -201,7 +202,7 @@ func TestGenerateNeighborsIdentifier(t *testing.T) {
 		},
 		{
 			name: "internal",
-			input: v1beta1.NetworkEntry{
+			input: v1beta1.NetworkNeighbor{
 				Type:              "internal",
 				DNS:               "example.com",
 				Ports:             []v1beta1.NetworkPort{{Name: "port1", Protocol: "TCP"}},
@@ -213,7 +214,7 @@ func TestGenerateNeighborsIdentifier(t *testing.T) {
 		},
 		{
 			name: "internal - different ports has same identifier",
-			input: v1beta1.NetworkEntry{
+			input: v1beta1.NetworkNeighbor{
 				Type:              "internal",
 				DNS:               "example.com",
 				Ports:             []v1beta1.NetworkPort{{Name: "port2", Protocol: "udp"}},
@@ -225,7 +226,7 @@ func TestGenerateNeighborsIdentifier(t *testing.T) {
 		},
 		{
 			name: "internal - different pod labels has different identifier",
-			input: v1beta1.NetworkEntry{
+			input: v1beta1.NetworkNeighbor{
 				Type:              "internal",
 				DNS:               "example.com",
 				Ports:             []v1beta1.NetworkPort{{Name: "port2", Protocol: "udp"}},
@@ -237,7 +238,7 @@ func TestGenerateNeighborsIdentifier(t *testing.T) {
 		},
 		{
 			name: "internal - different namespace labels has different identifier",
-			input: v1beta1.NetworkEntry{
+			input: v1beta1.NetworkNeighbor{
 				Type:              "internal",
 				DNS:               "example.com",
 				Ports:             []v1beta1.NetworkPort{{Name: "port2", Protocol: "udp"}},
@@ -249,7 +250,7 @@ func TestGenerateNeighborsIdentifier(t *testing.T) {
 		},
 		{
 			name: "internal - different dns has different identifier",
-			input: v1beta1.NetworkEntry{
+			input: v1beta1.NetworkNeighbor{
 				Type:              "internal",
 				DNS:               "another.co m",
 				Ports:             []v1beta1.NetworkPort{{Name: "port2", Protocol: "udp"}},
@@ -352,11 +353,11 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 				},
 			},
 			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkEntry{
+				Ingress: []v1beta1.NetworkNeighbor{
 					{
 						Type:              "internal",
 						DNS:               "",
-						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: 80}},
+						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
 						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
 						NamespaceSelector: nil,
 						IPAddress:         "",
@@ -384,11 +385,11 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 				},
 			},
 			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Egress: []v1beta1.NetworkEntry{
+				Egress: []v1beta1.NetworkNeighbor{
 					{
 						Type:              "internal",
 						DNS:               "",
-						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: 80}},
+						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
 						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
 						NamespaceSelector: nil,
 						IPAddress:         "",
@@ -416,11 +417,11 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 				},
 			},
 			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Egress: []v1beta1.NetworkEntry{
+				Egress: []v1beta1.NetworkNeighbor{
 					{
 						Type:              "internal",
 						DNS:               "",
-						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: 80}},
+						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
 						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
 						NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
 						IPAddress:         "",
@@ -448,11 +449,11 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 				},
 			},
 			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkEntry{
+				Ingress: []v1beta1.NetworkNeighbor{
 					{
 						Type:        "internal",
 						DNS:         "",
-						Ports:       []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: 80}},
+						Ports:       []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
 						PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
 						IPAddress:   "",
 						Identifier:  "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
@@ -479,11 +480,11 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 				},
 			},
 			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Egress: []v1beta1.NetworkEntry{
+				Egress: []v1beta1.NetworkNeighbor{
 					{
 						Type:              "internal",
 						DNS:               "",
-						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: 80}},
+						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
 						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
 						NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
 						Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
@@ -506,11 +507,11 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 				},
 			},
 			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Egress: []v1beta1.NetworkEntry{
+				Egress: []v1beta1.NetworkNeighbor{
 					{
 						Type:       "external",
 						DNS:        "",
-						Ports:      []v1beta1.NetworkPort{{Name: "UDP-80", Protocol: "UDP", Port: 80}},
+						Ports:      []v1beta1.NetworkPort{{Name: "UDP-80", Protocol: "UDP", Port: ptr.To(int32(80))}},
 						IPAddress:  "143.54.53.21",
 						Identifier: "3bbd32606a8516f97e7e3c11b0e914744c56cd6b8a2cadf010dd5fc648285535",
 					},
@@ -591,22 +592,22 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 				},
 			},
 			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkEntry{
+				Ingress: []v1beta1.NetworkNeighbor{
 					{
 						Type:              "internal",
 						DNS:               "",
-						Ports:             []v1beta1.NetworkPort{{Name: "TCP-1", Protocol: "TCP", Port: 1}, {Name: "TCP-2", Protocol: "TCP", Port: 2}, {Name: "TCP-3", Protocol: "TCP", Port: 3}},
+						Ports:             []v1beta1.NetworkPort{{Name: "TCP-1", Protocol: "TCP", Port: ptr.To(int32(1))}, {Name: "TCP-2", Protocol: "TCP", Port: ptr.To(int32(2))}, {Name: "TCP-3", Protocol: "TCP", Port: ptr.To(int32(3))}},
 						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
 						NamespaceSelector: nil,
 						IPAddress:         "",
 						Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
 					},
 				},
-				Egress: []v1beta1.NetworkEntry{
+				Egress: []v1beta1.NetworkNeighbor{
 					{
 						Type:        "internal",
 						DNS:         "",
-						Ports:       []v1beta1.NetworkPort{{Name: "TCP-3", Protocol: "TCP", Port: 3}},
+						Ports:       []v1beta1.NetworkPort{{Name: "TCP-3", Protocol: "TCP", Port: ptr.To(int32(3))}},
 						PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
 						IPAddress:   "",
 						Identifier:  "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
@@ -659,7 +660,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 				},
 			},
 			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkEntry{
+				Ingress: []v1beta1.NetworkNeighbor{
 					{
 						Type: "internal",
 						DNS:  "",
@@ -667,7 +668,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 							{
 								Name:     "TCP-1",
 								Protocol: "TCP",
-								Port:     1,
+								Port:     ptr.To(int32(1)),
 							},
 						},
 						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
@@ -704,7 +705,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 				},
 			},
 			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkEntry{
+				Ingress: []v1beta1.NetworkNeighbor{
 					{
 						Type: "external",
 						DNS:  "",
@@ -712,7 +713,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 							{
 								Name:     "TCP-1",
 								Protocol: "TCP",
-								Port:     1,
+								Port:     ptr.To(int32(1)),
 							},
 						},
 						IPAddress:  "1.2.3.4",
@@ -725,7 +726,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 							{
 								Name:     "TCP-1",
 								Protocol: "TCP",
-								Port:     1,
+								Port:     ptr.To(int32(1)),
 							},
 						},
 						IPAddress:  "4.3.2.1",
@@ -766,7 +767,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 				},
 			},
 			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkEntry{
+				Ingress: []v1beta1.NetworkNeighbor{
 					{
 						Type: "internal",
 						DNS:  "",
@@ -774,7 +775,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 							{
 								Name:     "TCP-1",
 								Protocol: "TCP",
-								Port:     1,
+								Port:     ptr.To(int32(1)),
 							},
 						},
 						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
@@ -789,7 +790,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 							{
 								Name:     "TCP-1",
 								Protocol: "TCP",
-								Port:     1,
+								Port:     ptr.To(int32(1)),
 							},
 						},
 						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination2"}},
@@ -832,7 +833,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 				},
 			},
 			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkEntry{
+				Ingress: []v1beta1.NetworkNeighbor{
 					{
 						Type:        "internal",
 						PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
@@ -841,7 +842,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 							{
 								Name:     "TCP-1",
 								Protocol: "TCP",
-								Port:     1,
+								Port:     ptr.To(int32(1)),
 							},
 						},
 						IPAddress:  "",
@@ -877,7 +878,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 						for _, port := range ingress.Ports {
 							foundPort := false
 							for _, expectedPort := range expectedIngress.Ports {
-								if port.Name == expectedPort.Name && port.Port == expectedPort.Port && port.Protocol == expectedPort.Protocol {
+								if port.Name == expectedPort.Name && *port.Port == *expectedPort.Port && port.Protocol == expectedPort.Protocol {
 									foundPort = true
 									break
 								}
@@ -909,7 +910,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 						for _, port := range egress.Ports {
 							foundPort := false
 							for _, expectedPort := range expectedEgress.Ports {
-								if port.Name == expectedPort.Name && port.Port == expectedPort.Port && port.Protocol == expectedPort.Protocol {
+								if port.Name == expectedPort.Name && *port.Port == *expectedPort.Port && port.Protocol == expectedPort.Protocol {
 									foundPort = true
 									break
 								}

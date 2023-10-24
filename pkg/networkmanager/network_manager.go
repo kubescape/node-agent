@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 type NetworkManager struct {
@@ -116,6 +117,11 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		logger.L().Info("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		return
 	}
+	if selector == nil {
+		// if we get not selector, we can't create/update network neighbor
+		logger.L().Info("NetworkManager - selector is nil", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+		return
+	}
 
 	// check if network neighbor CRD exists
 	networkNeighbors, err := am.storageClient.GetNetworkNeighbors(parentWL.GetNamespace(), generateNetworkNeighborsNameFromWorkload(parentWL))
@@ -133,7 +139,7 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		logger.L().Debug("NetworkManager - created network neighbor", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	} else {
 		// CRD found, update labels
-		networkNeighbors.Spec.LabelSelector = selector
+		networkNeighbors.Spec.LabelSelector = *selector
 		if err = am.storageClient.PatchNetworkNeighborsMatchLabels(networkNeighbors.GetName(), networkNeighbors.GetNamespace(), networkNeighbors); err != nil {
 			logger.L().Info("NetworkManager - failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		}
@@ -244,8 +250,8 @@ func generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[
 	var networkNeighborsSpec v1beta1.NetworkNeighborsSpec
 
 	// auxiliary maps to avoid duplicates
-	ingressIdentifiersMap := make(map[string]v1beta1.NetworkEntry)
-	egressIdentifiersMap := make(map[string]v1beta1.NetworkEntry)
+	ingressIdentifiersMap := make(map[string]v1beta1.NetworkNeighbor)
+	egressIdentifiersMap := make(map[string]v1beta1.NetworkNeighbor)
 
 	networkEventsIterator := networkEvents.Iterator()
 	if networkEventsIterator == nil {
@@ -253,7 +259,7 @@ func generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[
 	}
 
 	for networkEvent := range networkEventsIterator.C {
-		var neighborEntry v1beta1.NetworkEntry
+		var neighborEntry v1beta1.NetworkNeighbor
 
 		if networkEvent.Destination.Kind == EndpointKindPod {
 			// for Pods we need to remove the default labels
@@ -288,7 +294,7 @@ func generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[
 		neighborEntry.Ports = []v1beta1.NetworkPort{
 			{
 				Protocol: v1beta1.Protocol(networkEvent.Protocol),
-				Port:     networkEvent.Port,
+				Port:     ptr.To(int32(networkEvent.Port)),
 				Name:     portIdentifier,
 			}}
 
@@ -337,12 +343,12 @@ func generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[
 		}
 	}
 
-	networkNeighborsSpec.Egress = make([]v1beta1.NetworkEntry, 0, len(egressIdentifiersMap))
+	networkNeighborsSpec.Egress = make([]v1beta1.NetworkNeighbor, 0, len(egressIdentifiersMap))
 	for _, neighborEntry := range egressIdentifiersMap {
 		networkNeighborsSpec.Egress = append(networkNeighborsSpec.Egress, neighborEntry)
 	}
 
-	networkNeighborsSpec.Ingress = make([]v1beta1.NetworkEntry, 0, len(ingressIdentifiersMap))
+	networkNeighborsSpec.Ingress = make([]v1beta1.NetworkNeighbor, 0, len(ingressIdentifiersMap))
 	for _, neighborEntry := range ingressIdentifiersMap {
 		networkNeighborsSpec.Ingress = append(networkNeighborsSpec.Ingress, neighborEntry)
 	}
@@ -360,7 +366,7 @@ func getNamespaceMatchLabels(destinationNamespace, sourceNamespace string) map[s
 	return nil
 }
 
-func generateNeighborsIdentifier(neighborEntry v1beta1.NetworkEntry) (string, error) {
+func generateNeighborsIdentifier(neighborEntry v1beta1.NetworkNeighbor) (string, error) {
 	// identifier is hash of everything in egress except ports
 	identifier := fmt.Sprintf("%s-%s-%s-%s-%s", neighborEntry.Type, neighborEntry.IPAddress, neighborEntry.DNS, neighborEntry.NamespaceSelector, neighborEntry.PodSelector)
 	hash := sha256.New()

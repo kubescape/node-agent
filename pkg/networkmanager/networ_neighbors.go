@@ -36,7 +36,7 @@ func generateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWo
 			Labels:    generateNetworkNeighborsLabels(parentWorkload),
 		},
 		Spec: v1beta1.NetworkNeighborsSpec{
-			LabelSelector: &metav1.LabelSelector{
+			LabelSelector: metav1.LabelSelector{
 				MatchLabels:      parentWorkloadSelector.MatchLabels,
 				MatchExpressions: parentWorkloadSelector.MatchExpressions,
 			},

@@ -288,8 +288,8 @@ github.com/kubescape/go-logger v0.0.21 h1:4ZRIEw3UGUH6BG/cH3yiqFipzQSfGAoCrxlsZu
 github.com/kubescape/go-logger v0.0.21/go.mod h1:x3HBpZo3cMT/WIdy18BxvVVd5D0e/PWFVk/HiwBNu3g=
 github.com/kubescape/k8s-interface v0.0.141 h1:CQcK3PZsSeDFVmlvyHya48NJihGe7Qc+3kEWsmc4KnA=
 github.com/kubescape/k8s-interface v0.0.141/go.mod h1:5sz+5Cjvo98lTbTVDiDA4MmlXxeHSVMW/wR0V3hV4K8=
-github.com/kubescape/storage v0.0.23-0.20231018160537-5d43bcb9fe72 h1:GtXryaXQZqjTa+cNWwkMeuZ2RVOpVjC7yp+2dfqkUE8=
-github.com/kubescape/storage v0.0.23-0.20231018160537-5d43bcb9fe72/go.mod h1:rZlTs86bJXW8WQV3PcC9GRc1qUr7Ny3LEkTo3lQARBc=
+github.com/kubescape/storage v0.0.30-0.20231024124132-2e0325768aeb h1:z43ErEO5h8NNWXxoyaFZe4WiOFYX+6QEdlFael7zNz4=
+github.com/kubescape/storage v0.0.30-0.20231024124132-2e0325768aeb/go.mod h1:rZlTs86bJXW8WQV3PcC9GRc1qUr7Ny3LEkTo3lQARBc=
 github.com/lunixbochs/vtclean v1.0.0/go.mod h1:pHhQNgMf3btfWnGBVipUOjRYhoOsdGqdm/+2c2E2WMI=
 github.com/magiconair/properties v1.8.7 h1:IeQXZAiQcpL9mgcAe1Nu6cX9LLw6ExEHKjN0VQdvPDY=
 github.com/magiconair/properties v1.8.7/go.mod h1:Dhd985XPs7jluiymwWYZ0G4Z61jb3vdS329zhj2hYo0=

@@ -54,7 +54,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 					},
 				},
 				Spec: v1beta1.NetworkNeighborsSpec{
-					LabelSelector: &metav1.LabelSelector{
+					LabelSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"app": "nginx",
 						},
@@ -88,7 +88,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 					},
 				},
 				Spec: v1beta1.NetworkNeighborsSpec{
-					LabelSelector: &metav1.LabelSelector{
+					LabelSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"match": "fluentd-elasticsearch",
 						},
@@ -122,7 +122,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 					},
 				},
 				Spec: v1beta1.NetworkNeighborsSpec{
-					LabelSelector: &metav1.LabelSelector{
+					LabelSelector: metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"bla3":              "blu3",
 							"pod-template-hash": "fcc867f7",
