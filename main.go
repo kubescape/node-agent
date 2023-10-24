@@ -28,7 +28,6 @@ import (
 
 func main() {
 	ctx := context.Background()
-	logger.L().SetLevel("debug")
 
 	cfg, err := config.LoadConfig("/etc/config")
 	if err != nil {
