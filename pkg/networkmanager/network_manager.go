@@ -3,7 +3,6 @@ package networkmanager
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"node-agent/pkg/config"
@@ -83,9 +82,6 @@ func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, networkE
 	networkEventsSet.Add(*networkEvent)
 	am.containerAndPodToEventsMap.Set(containerID+podName, networkEventsSet)
 
-	eventMarshalled, _ := json.Marshal(networkEvent)
-
-	logger.L().Debug("NetworkManager - save network event", helpers.String("container ID", containerID), helpers.String("pod name", podName), helpers.String("event", string(eventMarshalled)))
 }
 
 func (am *NetworkManager) handleContainerStarted(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
@@ -193,6 +189,7 @@ func (am *NetworkManager) deleteResources(container *containercollection.Contain
 }
 
 func (am *NetworkManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+	logger.L().Debug("NetworkManager - monitorContainer", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	for {
 		select {
 		case <-watchedContainer.UpdateDataTicker.C:
@@ -216,12 +213,12 @@ func (am *NetworkManager) monitorContainer(ctx context.Context, container *conta
 
 // handleNetworkEvents retrieves network events from map, generate entries for CRD and sends a PATCH command to update them
 func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
+	logger.L().Debug("NetworkManager - handleNetworkEvents", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
 	if networkEvents == nil {
 		// no events to handle
 		return
 	}
-	logger.L().Debug("NetworkManager - handleNetworkEvents", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 
 	// TODO: dns enrichment
 
