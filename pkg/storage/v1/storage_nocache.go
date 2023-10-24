@@ -31,7 +31,7 @@ var _ storage.StorageClient = (*StorageNoCache)(nil)
 
 func CreateStorageNoCache() (*StorageNoCache, error) {
 	var config *rest.Config
-	kubeconfig := "/home/daniel/.kube/config"
+	kubeconfig := os.Getenv(KubeConfig)
 	// use the current context in kubeconfig
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {

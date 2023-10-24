@@ -7,7 +7,6 @@ import (
 	tracernetwork "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/tracer"
 	tracernetworktypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
@@ -29,7 +28,7 @@ func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Eve
 
 func (ch *IGContainerWatcher) startNetworkTracing() error {
 	//TODO: remove
-	host.Init(host.Config{AutoMountFilesystems: true})
+	// host.Init(host.Config{AutoMountFilesystems: true})
 
 	if err := ch.tracerCollection.AddTracer(networkTraceName, ch.containerSelector); err != nil {
 		return fmt.Errorf("adding tracer: %w", err)
