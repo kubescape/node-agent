@@ -20,6 +20,7 @@ import (
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -58,6 +59,8 @@ type IGContainerWatcher struct {
 	openTracer         *traceropen.Tracer
 	syscallTracer      *tracerseccomp.Tracer
 	networkTracer      *tracernetwork.Tracer
+	kubeIPInstance     operators.OperatorInstance
+	kubeNameInstance   operators.OperatorInstance
 	// Worker pools
 	capabilitiesWorkerPool *ants.PoolWithFunc
 	execWorkerPool         *ants.PoolWithFunc
