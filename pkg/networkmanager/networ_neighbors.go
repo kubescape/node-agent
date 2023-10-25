@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	completeStatus = "complete"
-	incomplete     = "incomplete"
+	completeStatus   = "complete"
+	incompleteStatus = "incomplete"
 )
 
 func generateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWorkloadSelector *metav1.LabelSelector) *v1beta1.NetworkNeighbors {
@@ -29,7 +29,7 @@ func generateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWo
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Annotations: map[string]string{
-				instanceidhandler.StatusMetadataKey: incomplete,
+				instanceidhandler.StatusMetadataKey: incompleteStatus,
 			},
 			Name:      generateNetworkNeighborsNameFromWorkload(parentWorkload),
 			Namespace: parentWorkload.GetNamespace(),

@@ -1,6 +1,9 @@
 package networkmanager
 
-import containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+import (
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
+)
 
 type NetworkManagerMock struct {
 }
@@ -15,5 +18,5 @@ func (am *NetworkManagerMock) ContainerCallback(notif containercollection.PubSub
 
 }
 
-func (am *NetworkManagerMock) SaveNetworkEvent(containerID, podName string, networkEvent *NetworkEvent) {
+func (am *NetworkManagerMock) SaveNetworkEvent(containerID, podName string, event tracernetworktype.Event) {
 }

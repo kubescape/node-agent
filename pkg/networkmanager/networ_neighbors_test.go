@@ -41,7 +41,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						instanceidhandlerV1.StatusMetadataKey: incomplete,
+						instanceidhandlerV1.StatusMetadataKey: "incomplete",
 					},
 					Name:      "deployment-nginx-deployment",
 					Namespace: "default",
@@ -75,7 +75,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						instanceidhandlerV1.StatusMetadataKey: incomplete,
+						instanceidhandlerV1.StatusMetadataKey: "incomplete",
 					},
 					Name:      "daemonset-fluentd-elasticsearch",
 					Namespace: "kube-system",
@@ -109,7 +109,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						instanceidhandlerV1.StatusMetadataKey: incomplete,
+						instanceidhandlerV1.StatusMetadataKey: "incomplete",
 					},
 					Name:      "pod-nginx-deployment-fcc867f7-dgjrg",
 					Namespace: "default",

@@ -128,38 +128,9 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 
-		if event.PktType != "HOST" && event.PktType != "OUTGOING" {
-			logger.L().Debug("NetworkManager - pktType is not HOST or OUTGOING", helpers.Interface("event", event))
-			return
-		}
-
-		// ignore events on host netns
-		if event.K8s.HostNetwork {
-			return
-		}
-
-		if event.PktType == "HOST" && event.PodHostIP == event.DstEndpoint.Addr {
-			return
-		}
-
-		networkEvent := &networkmanager.NetworkEvent{
-			Port:     event.Port,
-			Protocol: event.Proto,
-			PktType:  event.PktType,
-			Destination: networkmanager.Destination{
-				Namespace: event.DstEndpoint.Namespace,
-				Name:      event.DstEndpoint.Name,
-				Kind:      networkmanager.EndpointKind(event.DstEndpoint.Kind),
-				IPAddress: event.DstEndpoint.Addr,
-			},
-		}
-		networkEvent.SetPodLabels(event.PodLabels)
-		networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
-
-		logger.L().Debug("NetworkManager - pool func", helpers.Interface("event", event), helpers.String("kind", string(event.DstEndpoint.Kind)))
-
-		networkManagerClient.SaveNetworkEvent(event.Runtime.ContainerID, event.K8s.PodName, networkEvent)
+		networkManagerClient.SaveNetworkEvent(event.Runtime.ContainerID, event.K8s.PodName, event)
 	})
+
 	if err != nil {
 		return nil, fmt.Errorf("creating open network pool: %w", err)
 	}

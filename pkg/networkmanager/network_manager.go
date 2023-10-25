@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net"
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/storage"
@@ -17,8 +18,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -38,17 +41,25 @@ type NetworkManager struct {
 	containerAndPodToEventsMap maps.SafeMap[string, mapset.Set[NetworkEvent]] // TODO: change it to set
 	clusterName                string
 	watchedContainerChannels   maps.SafeMap[string, chan error] // key is ContainerID
+	ignoredSubNet              *net.IPNet
 }
 
 var _ NetworkManagerClient = (*NetworkManager)(nil)
 
 func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string) *NetworkManager {
+	ignoreNetwork := "169.254.0.2/16"
+	_, ignoreNet, err := net.ParseCIDR(ignoreNetwork)
+	if err != nil {
+		logger.L().Error("failed to parse CIDR", helpers.String("CIDR", ignoreNetwork))
+	}
+
 	return &NetworkManager{
 		cfg:           cfg,
 		ctx:           ctx,
 		k8sClient:     k8sClient,
 		storageClient: storageClient,
 		clusterName:   clusterName,
+		ignoredSubNet: ignoreNet,
 	}
 }
 
@@ -74,11 +85,25 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 	}
 }
 
-func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, networkEvent *NetworkEvent) {
-	if networkEvent == nil {
-		logger.L().Debug("NetworkManager - networkEvent is nil", helpers.String("container ID", containerID), helpers.String("pod name", podName))
+func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, event tracernetworktype.Event) {
+
+	if !am.isValidEvent(event) {
 		return
 	}
+
+	networkEvent := &NetworkEvent{
+		Port:     event.Port,
+		Protocol: event.Proto,
+		PktType:  event.PktType,
+		Destination: Destination{
+			Namespace: event.DstEndpoint.Namespace,
+			Name:      event.DstEndpoint.Name,
+			Kind:      EndpointKind(event.DstEndpoint.Kind),
+			IPAddress: event.DstEndpoint.Addr,
+		},
+	}
+	networkEvent.SetPodLabels(event.PodLabels)
+	networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
 
 	networkEventsSet := am.containerAndPodToEventsMap.Get(containerID + podName)
 	if am.containerAndPodToEventsMap.Get(containerID+podName) == nil {
@@ -87,6 +112,26 @@ func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, networkE
 	networkEventsSet.Add(*networkEvent)
 	am.containerAndPodToEventsMap.Set(containerID+podName, networkEventsSet)
 
+}
+
+func (am *NetworkManager) isValidEvent(event tracernetworktype.Event) bool {
+	if event.PktType != "HOST" && event.PktType != "OUTGOING" {
+		logger.L().Debug("NetworkManager - pktType is not HOST or OUTGOING", helpers.Interface("event", event))
+		return false
+	}
+
+	if event.PktType == "HOST" && event.PodHostIP == event.DstEndpoint.Addr {
+		return false
+	}
+
+	if event.K8s.HostNetwork {
+		return false
+	}
+
+	if am.ignoredSubNet.Contains(net.ParseIP(event.DstEndpoint.Addr)) {
+		return false
+	}
+	return true
 }
 
 func (am *NetworkManager) handleContainerStarted(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
@@ -220,8 +265,8 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 
 	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
 	if networkEvents == nil {
-		logger.L().Debug("NetworkManager - no events to handle", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 		// no events to handle
+		logger.L().Debug("NetworkManager - no events to handle", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 		return
 	}
 	// TODO: dns enrichment
@@ -237,7 +282,14 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 
 	networkNeighborsSpec := generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents)
 	// send PATCH command using entries generated from events
-	if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(generateNetworkNeighborsNameFromWlid(parentWlid), wlid.GetNamespaceFromWlid(parentWlid), &v1beta1.NetworkNeighbors{Spec: networkNeighborsSpec}); err != nil {
+	if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(generateNetworkNeighborsNameFromWlid(parentWlid), wlid.GetNamespaceFromWlid(parentWlid), &v1beta1.NetworkNeighbors{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				instanceidhandlerV1.StatusMetadataKey: completeStatus,
+			},
+		},
+		Spec: networkNeighborsSpec,
+	}); err != nil {
 		logger.L().Error("failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 		return
 	}
