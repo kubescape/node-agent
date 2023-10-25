@@ -2,6 +2,8 @@ package networkmanager
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestGeneratePodLabels(t *testing.T) {
@@ -20,7 +22,7 @@ func TestGeneratePodLabels(t *testing.T) {
 			podLabels: map[string]string{
 				"key1": "value1",
 			},
-			expectedResult: "key1=value1,",
+			expectedResult: "key1=value1",
 		},
 		{
 			name: "Multiple Labels",
@@ -29,7 +31,7 @@ func TestGeneratePodLabels(t *testing.T) {
 				"key2": "value2",
 				"key3": "value3",
 			},
-			expectedResult: "key1=value1,key2=value2,key3=value3,",
+			expectedResult: "key1=value1,key2=value2,key3=value3",
 		},
 	}
 
@@ -41,6 +43,22 @@ func TestGeneratePodLabels(t *testing.T) {
 			}
 		})
 	}
+
+	// test that pod labels are sorted
+	podLabels1 := map[string]string{
+		"key1": "value1",
+		"key2": "value2",
+	}
+
+	podLabels2 := map[string]string{
+		"key2": "value2",
+		"key1": "value1",
+	}
+
+	actualResult1 := generatePodLabels(podLabels1)
+	actualResult2 := generatePodLabels(podLabels2)
+	assert.Equal(t, actualResult1, actualResult2)
+
 }
 
 func TestSetPodLabels(t *testing.T) {
@@ -52,12 +70,20 @@ func TestSetPodLabels(t *testing.T) {
 		expectedResult string
 	}{
 		{
-			name: "Set Pod Labels",
+			name: "regular order",
 			podLabels: map[string]string{
 				"key1": "value1",
 				"key2": "value2",
 			},
-			expectedResult: "key1=value1,key2=value2,",
+			expectedResult: "key1=value1,key2=value2",
+		},
+		{
+			name: "change order",
+			podLabels: map[string]string{
+				"key2": "value2",
+				"key1": "value1",
+			},
+			expectedResult: "key1=value1,key2=value2",
 		},
 	}
 
@@ -81,12 +107,20 @@ func TestSetDestinationPodLabels(t *testing.T) {
 		expectedResult string
 	}{
 		{
-			name: "Set Destination Pod Labels",
+			name: "regular order",
 			podLabels: map[string]string{
 				"key1": "value1",
 				"key2": "value2",
 			},
-			expectedResult: "key1=value1,key2=value2,",
+			expectedResult: "key1=value1,key2=value2",
+		},
+		{
+			name: "change order",
+			podLabels: map[string]string{
+				"key2": "value2",
+				"key1": "value1",
+			},
+			expectedResult: "key1=value1,key2=value2",
 		},
 	}
 

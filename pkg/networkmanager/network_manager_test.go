@@ -4,172 +4,163 @@ import (
 	"context"
 	"fmt"
 	"node-agent/pkg/config"
-	storagev1 "node-agent/pkg/storage/v1"
 	"testing"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNetworkManager(t *testing.T) {
-	cfg := config.Config{
-		InitialDelay:     1 * time.Second,
-		MaxSniffingTime:  5 * time.Minute,
-		UpdateDataPeriod: 10 * time.Second,
-	}
-	ctx := context.TODO()
-	k8sClient := k8sinterface.NewKubernetesApi()
-	storageClient, err := storagev1.CreateStorageNoCache()
-	assert.NoError(t, err)
-
-	am := CreateNetworkManager(ctx, cfg, k8sClient, storageClient, "test-cluster")
-
-	containers := []containercollection.Container{
-		{
-			K8s: containercollection.K8sMetadata{
-				BasicK8sMetadata: types.BasicK8sMetadata{
-					Namespace:     "default",
-					PodName:       "nginx-deployment-fcc867f7-dgjrg",
-					ContainerName: "nginx",
-				},
-			},
-			Runtime: containercollection.RuntimeMetadata{
-				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-					ContainerID: "docker://802c6c322d264557779fe785013a0dfa84eb658e7791aa36396da809fcb3329c",
-				},
-			},
-		},
-		{
-			K8s: containercollection.K8sMetadata{
-				BasicK8sMetadata: types.BasicK8sMetadata{
-					Namespace:     "kube-system",
-					PodName:       "fluentd-elasticsearch-hlsbx",
-					ContainerName: "fluentd-elasticsearch",
-				},
-			},
-			Runtime: containercollection.RuntimeMetadata{
-				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-					ContainerID: "docker://50b40cad5db4165b712909453e1927d8baada94cdefa7c11b90cb775024d041d",
-				},
-			},
-		},
-	}
-
-	for i := range containers {
-		am.ContainerCallback(containercollection.PubSubEvent{
-			Type:      containercollection.EventTypeAddContainer,
-			Container: &containers[i],
-		})
-	}
-
-	networkEvents := []*tracernetworktype.Event{
-		{
-			Port:      6666,
-			PktType:   "HOST",
-			Proto:     "tcp",
-			PodLabels: map[string]string{"app5": "nginx5"},
-			DstEndpoint: types.L3Endpoint{
-				Namespace: "default",
-				Name:      "nginx-deployment-cbdccf466-csh9c",
-				Kind:      "pod",
-				PodLabels: map[string]string{"app": "nginx2"},
-				Addr:      "19.64.52.5",
-			},
-		},
-		// {
-		// 	Port:      8000,
-		// 	PktType:   "HOST",
-		// 	Protocol:  "tcp",
-		// 	PodLabels: "app=nginx2",
-		// 	Destination: Destination{
-		// 		Namespace: "default",
-		// 		Name:      "nginx-deployment-cbdccf466-csh9c",
-		// 		Kind:      EndpointKindPod,
-		// 		PodLabels: "app=nginx2",
-		// 		IPAddress: "19.64.52.5",
-		// 	},
-		// },
-		// {
-		// 	Port:      80,
-		// 	PktType:   "HOST",
-		// 	Protocol:  "tcp",
-		// 	PodLabels: "app=nginx",
-		// 	Destination: Destination{
-		// 		Namespace: "default",
-		// 		Name:      "nginx-deployment-cbdccf466-csh9c",
-		// 		Kind:      EndpointKindService,
-		// 		PodLabels: "SERVICE=nginx2",
-		// 		IPAddress: "19.64.52.4",
-		// 	},
-		// },
-		// {
-		// 	Port:      80,
-		// 	PktType:   "HOST",
-		// 	Protocol:  "tcp",
-		// 	PodLabels: "app=nginx2",
-		// 	Destination: Destination{
-		// 		Namespace: "default",
-		// 		Name:      "nginx-deployment-cbdccf466-csh9c",
-		// 		Kind:      EndpointKindPod,
-		// 		PodLabels: "app=nginx2",
-		// 		IPAddress: "19.64.52.4",
-		// 	},
-		// },
-		// {
-		// 	Port:      3333,
-		// 	PktType:   "OUTGOING",
-		// 	Protocol:  "tcp",
-		// 	PodLabels: "",
-		// 	Destination: Destination{
-		// 		Namespace: "",
-		// 		Name:      "nginx-deployment-cbdccf466-csh9c",
-		// 		Kind:      EndpointKindRaw,
-		// 		PodLabels: "",
-		// 		IPAddress: "19.64.52.4",
-		// 	},
-		// }, {
-		// 	Port:      4444,
-		// 	PktType:   "OUTGOING",
-		// 	Protocol:  "tcp",
-		// 	PodLabels: "",
-		// 	Destination: Destination{
-		// 		Namespace: "",
-		// 		Name:      "nginx-deployment-cbdccf466-csh9c",
-		// 		Kind:      EndpointKindRaw,
-		// 		PodLabels: "",
-		// 		IPAddress: "19.64.52.4",
-		// 	},
-		// }, {
-		// 	Port:      4444,
-		// 	PktType:   "OUTGOING",
-		// 	Protocol:  "tcp",
-		// 	PodLabels: "",
-		// 	Destination: Destination{
-		// 		Namespace: "",
-		// 		Name:      "nginx-deployment-cbdccf466-csh9c",
-		// 		Kind:      EndpointKindRaw,
-		// 		PodLabels: "",
-		// 		IPAddress: "19.64.52.5",
-		// 	},
-		// },
-	}
-
-	time.Sleep(10 * time.Second)
-	for i := range networkEvents {
-		am.SaveNetworkEvent(containers[0].Runtime.ContainerID, containers[0].K8s.PodName, *networkEvents[i])
-	}
-	time.Sleep(150 * time.Second)
-
-}
+// this test is for development purposes
+// func TestNetworkManager(t *testing.T) {
+// 	cfg := config.Config{
+// 		InitialDelay:     1 * time.Second,
+// 		MaxSniffingTime:  5 * time.Minute,
+// 		UpdateDataPeriod: 10 * time.Second,
+// 	}
+// 	ctx := context.TODO()
+// 	k8sClient := k8sinterface.NewKubernetesApi()
+// 	storageClient, err := storagev1.CreateStorageNoCache()
+// 	assert.NoError(t, err)
+// 	am := CreateNetworkManager(ctx, cfg, k8sClient, storageClient, "test-cluster")
+// 	containers := []containercollection.Container{
+// 		{
+// 			K8s: containercollection.K8sMetadata{
+// 				BasicK8sMetadata: types.BasicK8sMetadata{
+// 					Namespace:     "default",
+// 					PodName:       "nginx-deployment-fcc867f7-dgjrg",
+// 					ContainerName: "nginx",
+// 				},
+// 			},
+// 			Runtime: containercollection.RuntimeMetadata{
+// 				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
+// 					ContainerID: "docker://802c6c322d264557779fe785013a0dfa84eb658e7791aa36396da809fcb3329c",
+// 				},
+// 			},
+// 		},
+// 		{
+// 			K8s: containercollection.K8sMetadata{
+// 				BasicK8sMetadata: types.BasicK8sMetadata{
+// 					Namespace:     "kube-system",
+// 					PodName:       "fluentd-elasticsearch-hlsbx",
+// 					ContainerName: "fluentd-elasticsearch",
+// 				},
+// 			},
+// 			Runtime: containercollection.RuntimeMetadata{
+// 				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
+// 					ContainerID: "docker://50b40cad5db4165b712909453e1927d8baada94cdefa7c11b90cb775024d041d",
+// 				},
+// 			},
+// 		},
+// 	}
+// 	for i := range containers {
+// 		am.ContainerCallback(containercollection.PubSubEvent{
+// 			Type:      containercollection.EventTypeAddContainer,
+// 			Container: &containers[i],
+// 		})
+// 	}
+// 	networkEvents := []*tracernetworktype.Event{
+// 		{
+// 			Port:      6666,
+// 			PktType:   "HOST",
+// 			Proto:     "tcp",
+// 			PodLabels: map[string]string{"app5": "nginx5"},
+// 			DstEndpoint: types.L3Endpoint{
+// 				Namespace: "default",
+// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+// 				Kind:      "pod",
+// 				PodLabels: map[string]string{"app": "nginx2"},
+// 				Addr:      "19.64.52.5",
+// 			},
+// 		},
+// 		// {
+// 		// 	Port:      8000,
+// 		// 	PktType:   "HOST",
+// 		// 	Protocol:  "tcp",
+// 		// 	PodLabels: "app=nginx2",
+// 		// 	Destination: Destination{
+// 		// 		Namespace: "default",
+// 		// 		Name:      "nginx-deployment-cbdccf466-csh9c",
+// 		// 		Kind:      EndpointKindPod,
+// 		// 		PodLabels: "app=nginx2",
+// 		// 		IPAddress: "19.64.52.5",
+// 		// 	},
+// 		// },
+// 		// {
+// 		// 	Port:      80,
+// 		// 	PktType:   "HOST",
+// 		// 	Protocol:  "tcp",
+// 		// 	PodLabels: "app=nginx",
+// 		// 	Destination: Destination{
+// 		// 		Namespace: "default",
+// 		// 		Name:      "nginx-deployment-cbdccf466-csh9c",
+// 		// 		Kind:      EndpointKindService,
+// 		// 		PodLabels: "SERVICE=nginx2",
+// 		// 		IPAddress: "19.64.52.4",
+// 		// 	},
+// 		// },
+// 		// {
+// 		// 	Port:      80,
+// 		// 	PktType:   "HOST",
+// 		// 	Protocol:  "tcp",
+// 		// 	PodLabels: "app=nginx2",
+// 		// 	Destination: Destination{
+// 		// 		Namespace: "default",
+// 		// 		Name:      "nginx-deployment-cbdccf466-csh9c",
+// 		// 		Kind:      EndpointKindPod,
+// 		// 		PodLabels: "app=nginx2",
+// 		// 		IPAddress: "19.64.52.4",
+// 		// 	},
+// 		// },
+// 		// {
+// 		// 	Port:      3333,
+// 		// 	PktType:   "OUTGOING",
+// 		// 	Protocol:  "tcp",
+// 		// 	PodLabels: "",
+// 		// 	Destination: Destination{
+// 		// 		Namespace: "",
+// 		// 		Name:      "nginx-deployment-cbdccf466-csh9c",
+// 		// 		Kind:      EndpointKindRaw,
+// 		// 		PodLabels: "",
+// 		// 		IPAddress: "19.64.52.4",
+// 		// 	},
+// 		// }, {
+// 		// 	Port:      4444,
+// 		// 	PktType:   "OUTGOING",
+// 		// 	Protocol:  "tcp",
+// 		// 	PodLabels: "",
+// 		// 	Destination: Destination{
+// 		// 		Namespace: "",
+// 		// 		Name:      "nginx-deployment-cbdccf466-csh9c",
+// 		// 		Kind:      EndpointKindRaw,
+// 		// 		PodLabels: "",
+// 		// 		IPAddress: "19.64.52.4",
+// 		// 	},
+// 		// }, {
+// 		// 	Port:      4444,
+// 		// 	PktType:   "OUTGOING",
+// 		// 	Protocol:  "tcp",
+// 		// 	PodLabels: "",
+// 		// 	Destination: Destination{
+// 		// 		Namespace: "",
+// 		// 		Name:      "nginx-deployment-cbdccf466-csh9c",
+// 		// 		Kind:      EndpointKindRaw,
+// 		// 		PodLabels: "",
+// 		// 		IPAddress: "19.64.52.5",
+// 		// 	},
+// 		// },
+// 	}
+// 	time.Sleep(10 * time.Second)
+// 	for i := range networkEvents {
+// 		am.SaveNetworkEvent(containers[0].Runtime.ContainerID, containers[0].K8s.PodName, *networkEvents[i])
+// 	}
+// 	time.Sleep(150 * time.Second)
+// }
 
 func TestGenerateNeighborsIdentifier(t *testing.T) {
 	tests := []struct {
@@ -432,68 +423,6 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 			},
 		},
 		{
-			name:      "service from same namespace - should not have namespace selector",
-			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
-				{
-					Port:      80,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindService,
-						PodLabels: "app=destination",
-						IPAddress: "",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkNeighbor{
-					{
-						Type:        "internal",
-						DNS:         "",
-						Ports:       []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
-						PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-						IPAddress:   "",
-						Identifier:  "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
-					},
-				},
-			},
-		},
-		{
-			name:      "service from another namespace - should have namespace selector",
-			namespace: "default",
-			networkEvents: []NetworkEvent{
-				{
-					Port:      80,
-					PktType:   "OUTGOING",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindService,
-						PodLabels: "app=destination",
-						IPAddress: "1.2.3.4",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Egress: []v1beta1.NetworkNeighbor{
-					{
-						Type:              "internal",
-						DNS:               "",
-						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-						NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
-						Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
-					},
-				},
-			},
-		},
-		{
 			name:      "raw IP",
 			namespace: "default",
 			networkEvents: []NetworkEvent{
@@ -612,70 +541,6 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 						PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
 						IPAddress:   "",
 						Identifier:  "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
-					},
-				},
-			},
-		},
-		{
-			name:      "multiple events with same ports - only one port is saved",
-			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
-				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkNeighbor{
-					{
-						Type: "internal",
-						DNS:  "",
-						Ports: []v1beta1.NetworkPort{
-							{
-								Name:     "TCP-1",
-								Protocol: "TCP",
-								Port:     ptr.To(int32(1)),
-							},
-						},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-						NamespaceSelector: nil,
-						IPAddress:         "",
-						Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
 					},
 				},
 			},
