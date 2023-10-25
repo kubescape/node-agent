@@ -81,7 +81,6 @@ func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, networkE
 	}
 	networkEventsSet.Add(*networkEvent)
 	am.containerAndPodToEventsMap.Set(containerID+podName, networkEventsSet)
-	logger.L().Debug("NetworkManager - SaveNetworkEvent", helpers.String("key", containerID+podName), helpers.String("pod name", podName), helpers.Interface("network event", networkEvent))
 
 }
 

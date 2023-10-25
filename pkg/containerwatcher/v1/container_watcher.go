@@ -141,6 +141,12 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkEvent.SetPodLabels(event.PodLabels)
 		networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
 
+		// log original event
+		logger.L().Debug("NetworkManager - original event", helpers.Interface("event", event), helpers.String("k8sContainerID", k8sContainerID), helpers.Interface("networkEvent", networkEvent))
+
+		// log networkEvent
+		logger.L().Debug("NetworkManager - networkEvent", helpers.Interface("networkEvent", networkEvent))
+
 		networkManagerClient.SaveNetworkEvent(event.Runtime.ContainerID, event.K8s.PodName, networkEvent)
 	})
 	if err != nil {
