@@ -124,11 +124,9 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
 		if k8sContainerID == "//" {
-			logger.L().Debug("NetworkManager - k8sContainerID is empty", helpers.String("namespace", event.K8s.Namespace), helpers.String("podName", event.K8s.PodName), helpers.String("containerName", event.K8s.ContainerName), helpers.Interface("podLabels", event.PodLabels))
-
+			logger.L().Debug("NetworkManager - k8sContainerID is empty", helpers.Interface("event", event))
 			return
 		}
-		logger.L().Debug("NetworkManager - k8sContainerID is not empty", helpers.Interface("event", event), helpers.String("k8sContainerID", k8sContainerID))
 
 		networkEvent := &networkmanager.NetworkEvent{
 			Port:     event.Port,
@@ -144,11 +142,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkEvent.SetPodLabels(event.PodLabels)
 		networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
 
-		// log original event
-		logger.L().Debug("NetworkManager - original event", helpers.Interface("event", event), helpers.String("k8sContainerID", k8sContainerID), helpers.Interface("networkEvent", networkEvent))
-
-		// log networkEvent
-		logger.L().Debug("NetworkManager - networkEvent", helpers.Interface("networkEvent", networkEvent))
+		logger.L().Debug("NetworkManager - event destination kind", helpers.Interface("event", event), helpers.String("kind", string(event.DstEndpoint.Kind)))
 
 		networkManagerClient.SaveNetworkEvent(event.Runtime.ContainerID, event.K8s.PodName, networkEvent)
 	})

@@ -189,7 +189,6 @@ func (am *NetworkManager) deleteResources(container *containercollection.Contain
 }
 
 func (am *NetworkManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	logger.L().Debug("NetworkManager - monitorContainer", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	for {
 		select {
 		case <-watchedContainer.UpdateDataTicker.C:
@@ -213,16 +212,13 @@ func (am *NetworkManager) monitorContainer(ctx context.Context, container *conta
 
 // handleNetworkEvents retrieves network events from map, generate entries for CRD and sends a PATCH command to update them
 func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
-	logger.L().Debug("NetworkManager - handleNetworkEvents", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
+
 	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
-	logger.L().Debug("NetworkManager - handleNetworkEvents", helpers.String("key", container.Runtime.ContainerID+container.K8s.PodName), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Interface("network events", networkEvents), helpers.String("container ID", container.Runtime.ContainerID))
 	if networkEvents == nil {
 		logger.L().Debug("NetworkManager - no events to handle", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 		// no events to handle
 		return
 	}
-	logger.L().Debug("NetworkManager - handleNetworkEvents", helpers.String("key", container.Runtime.ContainerID+container.K8s.PodName), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Interface("network events", networkEvents), helpers.String("container ID", container.Runtime.ContainerID))
-
 	// TODO: dns enrichment
 
 	// update CRD based on events
@@ -233,11 +229,8 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		logger.L().Error("failed to get parent wlid from map", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("pod name", container.K8s.PodName))
 		return
 	}
-	logger.L().Debug("NetworkManager - handleNetworkEvents", helpers.String("parent wlid", parentWlid))
 
 	networkNeighborsSpec := generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents)
-	logger.L().Debug("NetworkManager - handleNetworkEvents", helpers.String("parent wlid", parentWlid), helpers.Interface("network neighbors spec", networkNeighborsSpec))
-
 	// send PATCH command using entries generated from events
 	if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(generateNetworkNeighborsNameFromWlid(parentWlid), wlid.GetNamespaceFromWlid(parentWlid), &v1beta1.NetworkNeighbors{Spec: networkNeighborsSpec}); err != nil {
 		logger.L().Error("failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
