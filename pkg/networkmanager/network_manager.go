@@ -346,11 +346,14 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - retrieved selector")
 
 			neighborEntry.PodSelector = selector
+
+			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - set selector")
 			if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
 				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
 					MatchLabels: namespaceLabels,
 				}
 			}
+			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - set getNamespaceMatchLabels")
 		} else {
 			if networkEvent.Destination.IPAddress == "127.0.0.1" {
 				// No need to generate for localhost
@@ -360,6 +363,8 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 		}
 
 		portIdentifier := generatePortIdentifier(networkEvent)
+		logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - set generatePortIdentifier")
+
 		neighborEntry.Ports = []v1beta1.NetworkPort{
 			{
 				Protocol: v1beta1.Protocol(networkEvent.Protocol),
@@ -374,6 +379,7 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 
 		// generate identifier for this neighborEntry
 		identifier, err := generateNeighborsIdentifier(neighborEntry)
+		logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - set generateNeighborsIdentifier")
 		if err != nil {
 			// if we fail to hash, use a random identifier so at least we have the data on the crd
 			logger.L().Error("failed to hash identifier", helpers.String("identifier", identifier), helpers.String("error", err.Error()))
