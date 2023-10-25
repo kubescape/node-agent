@@ -290,6 +290,33 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		},
 		Spec: networkNeighborsSpec,
 	}); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			// it may happen if the storage wasn't working well
+			parentWL, err := am.getParentWorkloadFromContainer(container)
+			if err != nil {
+				logger.L().Info("NetworkManager - failed to get parent workload", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
+				return
+			}
+
+			selector, err := parentWL.GetSelector()
+			if err != nil {
+				logger.L().Info("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
+				return
+			}
+
+			newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector)
+			// update spec and annotations
+			newNetworkNeighbors.Spec = networkNeighborsSpec
+			newNetworkNeighbors.Annotations = map[string]string{
+				instanceidhandlerV1.StatusMetadataKey: completeStatus,
+			}
+
+			if err = am.storageClient.CreateNetworkNeighbors(newNetworkNeighbors, parentWL.GetNamespace()); err != nil {
+				logger.L().Info("NetworkManager - failed to create network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
+				return
+			}
+		}
+
 		logger.L().Error("failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 		return
 	}
@@ -319,8 +346,6 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 	}
 
 	for networkEvent := range networkEventsIterator.C {
-		logger.L().Debug("NetworkManager - networkEvent", helpers.String("networkEvent", networkEvent.String()))
-
 		var neighborEntry v1beta1.NetworkNeighbor
 
 		if networkEvent.Destination.Kind == EndpointKindPod {
