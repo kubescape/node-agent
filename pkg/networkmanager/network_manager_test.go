@@ -854,13 +854,15 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		},
 	}
 
+	am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "")
+
 	for _, tc := range tests {
 		networkEventsSet := mapset.NewSet[NetworkEvent]()
 		for _, ne := range tc.networkEvents {
 			networkEventsSet.Add(ne)
 		}
 		t.Run(fmt.Sprintf("Input: %+v", tc.networkEvents), func(t *testing.T) {
-			result := generateNetworkNeighborsEntries(tc.namespace, networkEventsSet)
+			result := am.generateNetworkNeighborsEntries(tc.namespace, networkEventsSet)
 
 			assert.Equal(t, len(result.Ingress), len(tc.expectedSpec.Ingress), "Ingress IP address is not equal in test %s", tc.name)
 			found := 0

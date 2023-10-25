@@ -280,7 +280,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		return
 	}
 
-	networkNeighborsSpec := generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents)
+	networkNeighborsSpec := am.generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents)
 	// send PATCH command using entries generated from events
 	if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(generateNetworkNeighborsNameFromWlid(parentWlid), wlid.GetNamespaceFromWlid(parentWlid), &v1beta1.NetworkNeighbors{
 		ObjectMeta: metav1.ObjectMeta{
@@ -299,7 +299,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 }
 
-func generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[NetworkEvent]) v1beta1.NetworkNeighborsSpec {
+func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[NetworkEvent]) v1beta1.NetworkNeighborsSpec {
 	var networkNeighborsSpec v1beta1.NetworkNeighborsSpec
 
 	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries", helpers.Interface("network events", networkEvents))
@@ -329,9 +329,19 @@ func generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[
 			}
 
 		} else if networkEvent.Destination.Kind == EndpointKindService {
-			neighborEntry.PodSelector = &metav1.LabelSelector{
-				MatchLabels: networkEvent.GetDestinationPodLabels(),
+			svc, err := am.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
+			if err != nil {
+				logger.L().Error("failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
+				continue
 			}
+
+			selector, err := svc.GetSelector()
+			if err != nil {
+				logger.L().Error("failed to get selector", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
+				continue
+			}
+
+			neighborEntry.PodSelector = selector
 			if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
 				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
 					MatchLabels: namespaceLabels,
