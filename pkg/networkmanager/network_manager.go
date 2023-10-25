@@ -75,6 +75,11 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 }
 
 func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, networkEvent *NetworkEvent) {
+	if networkEvent == nil {
+		logger.L().Debug("NetworkManager - networkEvent is nil", helpers.String("container ID", containerID), helpers.String("pod name", podName))
+		return
+	}
+
 	networkEventsSet := am.containerAndPodToEventsMap.Get(containerID + podName)
 	if am.containerAndPodToEventsMap.Get(containerID+podName) == nil {
 		networkEventsSet = mapset.NewSet[NetworkEvent]()
