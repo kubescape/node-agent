@@ -302,7 +302,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[NetworkEvent]) v1beta1.NetworkNeighborsSpec {
 	var networkNeighborsSpec v1beta1.NetworkNeighborsSpec
 
-	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries", helpers.Interface("network events", networkEvents))
+	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries start")
 
 	// auxiliary maps to avoid duplicates
 	ingressIdentifiersMap := make(map[string]v1beta1.NetworkNeighbor)
@@ -329,17 +329,21 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 			}
 
 		} else if networkEvent.Destination.Kind == EndpointKindService {
+			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - service")
+
 			svc, err := am.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
 			if err != nil {
 				logger.L().Error("failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
 				continue
 			}
+			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - retrieved service")
 
 			selector, err := svc.GetSelector()
 			if err != nil {
 				logger.L().Error("failed to get selector", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
 				continue
 			}
+			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - retrieved selector")
 
 			neighborEntry.PodSelector = selector
 			if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
@@ -418,7 +422,7 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 		networkNeighborsSpec.Ingress = append(networkNeighborsSpec.Ingress, neighborEntry)
 	}
 
-	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries", helpers.Interface("network neighbors spec", networkNeighborsSpec))
+	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries finish")
 
 	return networkNeighborsSpec
 }
