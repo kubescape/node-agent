@@ -347,6 +347,7 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 				logger.L().Error("failed to get selector", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
 				continue
 			}
+			logger.L().Debug("NetworkManager - service selector", helpers.String("service name", networkEvent.Destination.Name), helpers.String("selector", fmt.Sprintf("%v", selector)))
 
 			neighborEntry.PodSelector = selector
 
