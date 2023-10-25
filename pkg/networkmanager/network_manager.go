@@ -253,6 +253,8 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 func generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[NetworkEvent]) v1beta1.NetworkNeighborsSpec {
 	var networkNeighborsSpec v1beta1.NetworkNeighborsSpec
 
+	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries", helpers.Interface("network events", networkEvents))
+
 	// auxiliary maps to avoid duplicates
 	ingressIdentifiersMap := make(map[string]v1beta1.NetworkNeighbor)
 	egressIdentifiersMap := make(map[string]v1beta1.NetworkNeighbor)
@@ -286,7 +288,7 @@ func generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[
 					MatchLabels: namespaceLabels,
 				}
 			}
-		} else if networkEvent.Destination.Kind == EndpointKindRaw {
+		} else {
 			if networkEvent.Destination.IPAddress == "127.0.0.1" {
 				// No need to generate for localhost
 				continue
@@ -356,6 +358,8 @@ func generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[
 	for _, neighborEntry := range ingressIdentifiersMap {
 		networkNeighborsSpec.Ingress = append(networkNeighborsSpec.Ingress, neighborEntry)
 	}
+
+	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries", helpers.Interface("network neighbors spec", networkNeighborsSpec))
 
 	return networkNeighborsSpec
 }

@@ -150,7 +150,7 @@ func (rm *RelevancyManager) handleRelevancy(ctx context.Context, watchedContaine
 		logger.L().Debug("failed to get file list", helpers.String("container ID", containerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Error(err))
 		return
 	}
-	logger.L().Debug("fileList generated", helpers.String("container ID", containerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.String("file list", fmt.Sprintf("%v", fileList)))
+	// logger.L().Debug("fileList generated", helpers.String("container ID", containerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.String("file list", fmt.Sprintf("%v", fileList)))
 
 	ctx, span := otel.Tracer("").Start(ctxPostSBOM, "SBOMClient.FilterSBOM")
 	if err = rm.sbomHandler.FilterSBOM(watchedContainer, fileList); err != nil {

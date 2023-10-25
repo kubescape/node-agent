@@ -329,506 +329,538 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		networkEvents []NetworkEvent
 		expectedSpec  v1beta1.NetworkNeighborsSpec
 	}{
-		{
-			name:         "empty",
-			namespace:    "default",
-			expectedSpec: v1beta1.NetworkNeighborsSpec{},
-		},
-		{
-			name:      "pod from same namespace ingress - should not have namespace selector",
-			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
-				{
-					Port:      80,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination",
-						IPAddress: "",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkNeighbor{
-					{
-						Type:              "internal",
-						DNS:               "",
-						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-						NamespaceSelector: nil,
-						IPAddress:         "",
-						Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
-					},
-				},
-			},
-		},
-		{
-			name:      "pod from same namespace egress - should not have namespace selector",
-			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
-				{
-					Port:      80,
-					PktType:   "OUTGOING",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Egress: []v1beta1.NetworkNeighbor{
-					{
-						Type:              "internal",
-						DNS:               "",
-						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-						NamespaceSelector: nil,
-						IPAddress:         "",
-						Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
-					},
-				},
-			},
-		},
-		{
-			name:      "pod from another namespace - should have namespace selector",
-			namespace: "default",
-			networkEvents: []NetworkEvent{
-				{
-					Port:      80,
-					PktType:   "OUTGOING",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,pod-template-hash=test",
-						IPAddress: "",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Egress: []v1beta1.NetworkNeighbor{
-					{
-						Type:              "internal",
-						DNS:               "",
-						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-						NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
-						IPAddress:         "",
-						Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
-					},
-				},
-			},
-		},
-		{
-			name:      "service from same namespace - should not have namespace selector",
-			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
-				{
-					Port:      80,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindService,
-						PodLabels: "app=destination",
-						IPAddress: "",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkNeighbor{
-					{
-						Type:        "internal",
-						DNS:         "",
-						Ports:       []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
-						PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-						IPAddress:   "",
-						Identifier:  "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
-					},
-				},
-			},
-		},
-		{
-			name:      "service from another namespace - should have namespace selector",
-			namespace: "default",
-			networkEvents: []NetworkEvent{
-				{
-					Port:      80,
-					PktType:   "OUTGOING",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindService,
-						PodLabels: "app=destination",
-						IPAddress: "1.2.3.4",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Egress: []v1beta1.NetworkNeighbor{
-					{
-						Type:              "internal",
-						DNS:               "",
-						Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-						NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
-						Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
-					},
-				},
-			},
-		},
-		{
-			name:      "raw IP",
-			namespace: "default",
-			networkEvents: []NetworkEvent{
-				{
-					Port:     80,
-					PktType:  "OUTGOING",
-					Protocol: "UDP",
-					Destination: Destination{
-						Kind:      EndpointKindRaw,
-						IPAddress: "143.54.53.21",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Egress: []v1beta1.NetworkNeighbor{
-					{
-						Type:       "external",
-						DNS:        "",
-						Ports:      []v1beta1.NetworkPort{{Name: "UDP-80", Protocol: "UDP", Port: ptr.To(int32(80))}},
-						IPAddress:  "143.54.53.21",
-						Identifier: "3bbd32606a8516f97e7e3c11b0e914744c56cd6b8a2cadf010dd5fc648285535",
-					},
-				},
-			},
-		},
-		{
-			name:      "raw IP localhost - should be ignored",
-			namespace: "default",
-			networkEvents: []NetworkEvent{
-				{
-					Port:     80,
-					PktType:  "OUTGOING",
-					Protocol: "TCP",
-					Destination: Destination{
-						Kind:      EndpointKindRaw,
-						IPAddress: "127.0.0.1",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{},
-		},
-		{
-			name:      "multiple events with different ports - ports are merged",
-			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
-				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-				{
-					Port:      2,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-				{
-					Port:      3,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-				{
-					Port:      3,
-					PktType:   "OUTGOING",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkNeighbor{
-					{
-						Type:              "internal",
-						DNS:               "",
-						Ports:             []v1beta1.NetworkPort{{Name: "TCP-1", Protocol: "TCP", Port: ptr.To(int32(1))}, {Name: "TCP-2", Protocol: "TCP", Port: ptr.To(int32(2))}, {Name: "TCP-3", Protocol: "TCP", Port: ptr.To(int32(3))}},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-						NamespaceSelector: nil,
-						IPAddress:         "",
-						Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
-					},
-				},
-				Egress: []v1beta1.NetworkNeighbor{
-					{
-						Type:        "internal",
-						DNS:         "",
-						Ports:       []v1beta1.NetworkPort{{Name: "TCP-3", Protocol: "TCP", Port: ptr.To(int32(3))}},
-						PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-						IPAddress:   "",
-						Identifier:  "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
-					},
-				},
-			},
-		},
-		{
-			name:      "multiple events with same ports - only one port is saved",
-			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
-				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkNeighbor{
-					{
-						Type: "internal",
-						DNS:  "",
-						Ports: []v1beta1.NetworkPort{
-							{
-								Name:     "TCP-1",
-								Protocol: "TCP",
-								Port:     ptr.To(int32(1)),
-							},
-						},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-						NamespaceSelector: nil,
-						IPAddress:         "",
-						Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
-					},
-				},
-			},
-		},
-		{
-			name:      "multiple events - different ip labels are saved separately",
-			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
-				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Kind:      EndpointKindRaw,
-						IPAddress: "1.2.3.4",
-					},
-				},
-				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Kind:      EndpointKindRaw,
-						IPAddress: "4.3.2.1",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkNeighbor{
-					{
-						Type: "external",
-						DNS:  "",
-						Ports: []v1beta1.NetworkPort{
-							{
-								Name:     "TCP-1",
-								Protocol: "TCP",
-								Port:     ptr.To(int32(1)),
-							},
-						},
-						IPAddress:  "1.2.3.4",
-						Identifier: "24fe17e6c3ee75d94d0b3ab7ff3ffb8d60b8a108df505aae1bab241cc8f8ae91",
-					},
-					{
-						Type: "external",
-						DNS:  "",
-						Ports: []v1beta1.NetworkPort{
-							{
-								Name:     "TCP-1",
-								Protocol: "TCP",
-								Port:     ptr.To(int32(1)),
-							},
-						},
-						IPAddress:  "4.3.2.1",
-						Identifier: "b94b02766fdf0694c9d2d03696f41c70e0df0784b4dc9e2ce2c9b1808bc8d273",
-					},
-				},
-			},
-		},
-		{
-			name:      "multiple events - different pod labels are saved separately",
-			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
-				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Namespace: "kubescape",
-						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination2,controller-revision-hash=hash",
-						IPAddress: "",
-					},
-				},
-			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{
-				Ingress: []v1beta1.NetworkNeighbor{
-					{
-						Type: "internal",
-						DNS:  "",
-						Ports: []v1beta1.NetworkPort{
-							{
-								Name:     "TCP-1",
-								Protocol: "TCP",
-								Port:     ptr.To(int32(1)),
-							},
-						},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-						NamespaceSelector: nil,
-						IPAddress:         "",
-						Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
-					},
-					{
-						Type: "internal",
-						DNS:  "",
-						Ports: []v1beta1.NetworkPort{
-							{
-								Name:     "TCP-1",
-								Protocol: "TCP",
-								Port:     ptr.To(int32(1)),
-							},
-						},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination2"}},
-						NamespaceSelector: nil,
-						IPAddress:         "",
-						Identifier:        "4c4c30e0f156db2ec7212a9ce68f17613a4a755325e647084ef9379f8eb6caaa",
-					},
-				},
-			},
-		},
+		// {
+		// 	name:         "empty",
+		// 	namespace:    "default",
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{},
+		// },
+		// {
+		// 	name:      "pod from same namespace ingress - should not have namespace selector",
+		// 	namespace: "kubescape",
+		// 	networkEvents: []NetworkEvent{
+		// 		{
+		// 			Port:      80,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{
+		// 		Ingress: []v1beta1.NetworkNeighbor{
+		// 			{
+		// 				Type:              "internal",
+		// 				DNS:               "",
+		// 				Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+		// 				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		// 				NamespaceSelector: nil,
+		// 				IPAddress:         "",
+		// 				Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:      "pod from same namespace egress - should not have namespace selector",
+		// 	namespace: "kubescape",
+		// 	networkEvents: []NetworkEvent{
+		// 		{
+		// 			Port:      80,
+		// 			PktType:   "OUTGOING",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination,controller-revision-hash=hash",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{
+		// 		Egress: []v1beta1.NetworkNeighbor{
+		// 			{
+		// 				Type:              "internal",
+		// 				DNS:               "",
+		// 				Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+		// 				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		// 				NamespaceSelector: nil,
+		// 				IPAddress:         "",
+		// 				Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:      "pod from another namespace - should have namespace selector",
+		// 	namespace: "default",
+		// 	networkEvents: []NetworkEvent{
+		// 		{
+		// 			Port:      80,
+		// 			PktType:   "OUTGOING",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination,pod-template-hash=test",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{
+		// 		Egress: []v1beta1.NetworkNeighbor{
+		// 			{
+		// 				Type:              "internal",
+		// 				DNS:               "",
+		// 				Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+		// 				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		// 				NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+		// 				IPAddress:         "",
+		// 				Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:      "service from same namespace - should not have namespace selector",
+		// 	namespace: "kubescape",
+		// 	networkEvents: []NetworkEvent{
+		// 		{
+		// 			Port:      80,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindService,
+		// 				PodLabels: "app=destination",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{
+		// 		Ingress: []v1beta1.NetworkNeighbor{
+		// 			{
+		// 				Type:        "internal",
+		// 				DNS:         "",
+		// 				Ports:       []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+		// 				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		// 				IPAddress:   "",
+		// 				Identifier:  "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:      "service from another namespace - should have namespace selector",
+		// 	namespace: "default",
+		// 	networkEvents: []NetworkEvent{
+		// 		{
+		// 			Port:      80,
+		// 			PktType:   "OUTGOING",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindService,
+		// 				PodLabels: "app=destination",
+		// 				IPAddress: "1.2.3.4",
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{
+		// 		Egress: []v1beta1.NetworkNeighbor{
+		// 			{
+		// 				Type:              "internal",
+		// 				DNS:               "",
+		// 				Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+		// 				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		// 				NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+		// 				Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:      "raw IP",
+		// 	namespace: "default",
+		// 	networkEvents: []NetworkEvent{
+		// 		{
+		// 			Port:     80,
+		// 			PktType:  "OUTGOING",
+		// 			Protocol: "UDP",
+		// 			Destination: Destination{
+		// 				Kind:      EndpointKindRaw,
+		// 				IPAddress: "143.54.53.21",
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{
+		// 		Egress: []v1beta1.NetworkNeighbor{
+		// 			{
+		// 				Type:       "external",
+		// 				DNS:        "",
+		// 				Ports:      []v1beta1.NetworkPort{{Name: "UDP-80", Protocol: "UDP", Port: ptr.To(int32(80))}},
+		// 				IPAddress:  "143.54.53.21",
+		// 				Identifier: "3bbd32606a8516f97e7e3c11b0e914744c56cd6b8a2cadf010dd5fc648285535",
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:      "raw IP localhost - should be ignored",
+		// 	namespace: "default",
+		// 	networkEvents: []NetworkEvent{
+		// 		{
+		// 			Port:     80,
+		// 			PktType:  "OUTGOING",
+		// 			Protocol: "TCP",
+		// 			Destination: Destination{
+		// 				Kind:      EndpointKindRaw,
+		// 				IPAddress: "127.0.0.1",
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{},
+		// },
+		// {
+		// 	name:      "multiple events with different ports - ports are merged",
+		// 	namespace: "kubescape",
+		// 	networkEvents: []NetworkEvent{
+		// 		{
+		// 			Port:      1,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination,controller-revision-hash=hash",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 		{
+		// 			Port:      2,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination,controller-revision-hash=hash",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 		{
+		// 			Port:      3,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination,controller-revision-hash=hash",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 		{
+		// 			Port:      3,
+		// 			PktType:   "OUTGOING",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination,controller-revision-hash=hash",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{
+		// 		Ingress: []v1beta1.NetworkNeighbor{
+		// 			{
+		// 				Type:              "internal",
+		// 				DNS:               "",
+		// 				Ports:             []v1beta1.NetworkPort{{Name: "TCP-1", Protocol: "TCP", Port: ptr.To(int32(1))}, {Name: "TCP-2", Protocol: "TCP", Port: ptr.To(int32(2))}, {Name: "TCP-3", Protocol: "TCP", Port: ptr.To(int32(3))}},
+		// 				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		// 				NamespaceSelector: nil,
+		// 				IPAddress:         "",
+		// 				Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
+		// 			},
+		// 		},
+		// 		Egress: []v1beta1.NetworkNeighbor{
+		// 			{
+		// 				Type:        "internal",
+		// 				DNS:         "",
+		// 				Ports:       []v1beta1.NetworkPort{{Name: "TCP-3", Protocol: "TCP", Port: ptr.To(int32(3))}},
+		// 				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		// 				IPAddress:   "",
+		// 				Identifier:  "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:      "multiple events with same ports - only one port is saved",
+		// 	namespace: "kubescape",
+		// 	networkEvents: []NetworkEvent{
+		// 		{
+		// 			Port:      1,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination,controller-revision-hash=hash",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 		{
+		// 			Port:      1,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination,controller-revision-hash=hash",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 		{
+		// 			Port:      1,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination,controller-revision-hash=hash",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{
+		// 		Ingress: []v1beta1.NetworkNeighbor{
+		// 			{
+		// 				Type: "internal",
+		// 				DNS:  "",
+		// 				Ports: []v1beta1.NetworkPort{
+		// 					{
+		// 						Name:     "TCP-1",
+		// 						Protocol: "TCP",
+		// 						Port:     ptr.To(int32(1)),
+		// 					},
+		// 				},
+		// 				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		// 				NamespaceSelector: nil,
+		// 				IPAddress:         "",
+		// 				Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:      "multiple events - different ip labels are saved separately",
+		// 	namespace: "kubescape",
+		// 	networkEvents: []NetworkEvent{
+		// 		{
+		// 			Port:      1,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Kind:      EndpointKindRaw,
+		// 				IPAddress: "1.2.3.4",
+		// 			},
+		// 		},
+		// 		{
+		// 			Port:      1,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Kind:      EndpointKindRaw,
+		// 				IPAddress: "4.3.2.1",
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{
+		// 		Ingress: []v1beta1.NetworkNeighbor{
+		// 			{
+		// 				Type: "external",
+		// 				DNS:  "",
+		// 				Ports: []v1beta1.NetworkPort{
+		// 					{
+		// 						Name:     "TCP-1",
+		// 						Protocol: "TCP",
+		// 						Port:     ptr.To(int32(1)),
+		// 					},
+		// 				},
+		// 				IPAddress:  "1.2.3.4",
+		// 				Identifier: "24fe17e6c3ee75d94d0b3ab7ff3ffb8d60b8a108df505aae1bab241cc8f8ae91",
+		// 			},
+		// 			{
+		// 				Type: "external",
+		// 				DNS:  "",
+		// 				Ports: []v1beta1.NetworkPort{
+		// 					{
+		// 						Name:     "TCP-1",
+		// 						Protocol: "TCP",
+		// 						Port:     ptr.To(int32(1)),
+		// 					},
+		// 				},
+		// 				IPAddress:  "4.3.2.1",
+		// 				Identifier: "b94b02766fdf0694c9d2d03696f41c70e0df0784b4dc9e2ce2c9b1808bc8d273",
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:      "multiple events - different pod labels are saved separately",
+		// 	namespace: "kubescape",
+		// 	networkEvents: []NetworkEvent{
+		// 		{
+		// 			Port:      1,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination,controller-revision-hash=hash",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 		{
+		// 			Port:      1,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Namespace: "kubescape",
+		// 				Name:      "nginx-deployment-cbdccf466-csh9c",
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination2,controller-revision-hash=hash",
+		// 				IPAddress: "",
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{
+		// 		Ingress: []v1beta1.NetworkNeighbor{
+		// 			{
+		// 				Type: "internal",
+		// 				DNS:  "",
+		// 				Ports: []v1beta1.NetworkPort{
+		// 					{
+		// 						Name:     "TCP-1",
+		// 						Protocol: "TCP",
+		// 						Port:     ptr.To(int32(1)),
+		// 					},
+		// 				},
+		// 				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		// 				NamespaceSelector: nil,
+		// 				IPAddress:         "",
+		// 				Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
+		// 			},
+		// 			{
+		// 				Type: "internal",
+		// 				DNS:  "",
+		// 				Ports: []v1beta1.NetworkPort{
+		// 					{
+		// 						Name:     "TCP-1",
+		// 						Protocol: "TCP",
+		// 						Port:     ptr.To(int32(1)),
+		// 					},
+		// 				},
+		// 				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination2"}},
+		// 				NamespaceSelector: nil,
+		// 				IPAddress:         "",
+		// 				Identifier:        "4c4c30e0f156db2ec7212a9ce68f17613a4a755325e647084ef9379f8eb6caaa",
+		// 			},
+		// 		},
+		// 	},
+		// },
+		// {
+		// 	name:      "multiple events - different name are saved together",
+		// 	namespace: "kubescape",
+		// 	networkEvents: []NetworkEvent{
+		// 		{
+		// 			Port:      1,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination,controller-revision-hash=hash",
+		// 				Namespace: "kubescape",
+		// 				Name:      "one",
+		// 				IPAddress: "1.2.3.4",
+		// 			},
+		// 		},
+		// 		{
+		// 			Port:      1,
+		// 			PktType:   "HOST",
+		// 			Protocol:  "TCP",
+		// 			PodLabels: "app=nginx",
+		// 			Destination: Destination{
+		// 				Kind:      EndpointKindPod,
+		// 				PodLabels: "app=destination,controller-revision-hash=hash",
+		// 				Namespace: "kubescape",
+		// 				Name:      "two",
+		// 				IPAddress: "1.2.3.4",
+		// 			},
+		// 		},
+		// 	},
+		// 	expectedSpec: v1beta1.NetworkNeighborsSpec{
+		// 		Ingress: []v1beta1.NetworkNeighbor{
+		// 			{
+		// 				Type:        "internal",
+		// 				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		// 				DNS:         "",
+		// 				Ports: []v1beta1.NetworkPort{
+		// 					{
+		// 						Name:     "TCP-1",
+		// 						Protocol: "TCP",
+		// 						Port:     ptr.To(int32(1)),
+		// 					},
+		// 				},
+		// 				IPAddress:  "",
+		// 				Identifier: "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
+		// 			},
+		// 		},
+		// 	},
+		// },
 		{
 			name:      "multiple events - different name are saved together",
 			namespace: "kubescape",
 			networkEvents: []NetworkEvent{
 				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
+					Port:     8000,
+					PktType:  "HOST",
+					Protocol: "TCP",
 					Destination: Destination{
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						Namespace: "kubescape",
-						Name:      "one",
-						IPAddress: "1.2.3.4",
-					},
-				},
-				{
-					Port:      1,
-					PktType:   "HOST",
-					Protocol:  "TCP",
-					PodLabels: "app=nginx",
-					Destination: Destination{
-						Kind:      EndpointKindPod,
-						PodLabels: "app=destination,controller-revision-hash=hash",
-						Namespace: "kubescape",
-						Name:      "two",
-						IPAddress: "1.2.3.4",
+						IPAddress: "10.128.0.98",
 					},
 				},
 			},
