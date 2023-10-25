@@ -301,6 +301,8 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 
 func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[NetworkEvent]) v1beta1.NetworkNeighborsSpec {
 
+	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries", helpers.Interface("networkEvents", networkEvents))
+
 	defer func() {
 		if err := recover(); err != nil { //catch
 			logger.L().Error("panic", helpers.String("error", err.(error).Error()))
@@ -308,8 +310,6 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 	}()
 
 	var networkNeighborsSpec v1beta1.NetworkNeighborsSpec
-
-	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries start")
 
 	// auxiliary maps to avoid duplicates
 	ingressIdentifiersMap := make(map[string]v1beta1.NetworkNeighbor)
@@ -336,31 +336,25 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 			}
 
 		} else if networkEvent.Destination.Kind == EndpointKindService {
-			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - service")
-
 			svc, err := am.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
 			if err != nil {
 				logger.L().Error("failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
 				continue
 			}
-			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - retrieved service")
 
 			selector, err := svc.GetSelector()
 			if err != nil {
 				logger.L().Error("failed to get selector", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
 				continue
 			}
-			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - retrieved selector")
 
 			neighborEntry.PodSelector = selector
 
-			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - set selector")
 			if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
 				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
 					MatchLabels: namespaceLabels,
 				}
 			}
-			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - set getNamespaceMatchLabels")
 		} else {
 			if networkEvent.Destination.IPAddress == "127.0.0.1" {
 				// No need to generate for localhost
@@ -370,7 +364,6 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 		}
 
 		portIdentifier := generatePortIdentifier(networkEvent)
-		logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - set generatePortIdentifier")
 
 		neighborEntry.Ports = []v1beta1.NetworkPort{
 			{
@@ -386,35 +379,27 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 
 		// generate identifier for this neighborEntry
 		identifier, err := generateNeighborsIdentifier(neighborEntry)
-		logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries - set generateNeighborsIdentifier")
 		if err != nil {
 			// if we fail to hash, use a random identifier so at least we have the data on the crd
 			logger.L().Error("failed to hash identifier", helpers.String("identifier", identifier), helpers.String("error", err.Error()))
 			identifier = uuid.New().String()
 		}
 
-		logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  start loop", helpers.String("pktType", networkEvent.PktType))
-
 		if networkEvent.PktType == "OUTGOING" {
 			if existingNeighborEntry, ok := egressIdentifiersMap[identifier]; ok {
 				logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  existingNeighborEntry", helpers.Interface("existingNeighborEntry", existingNeighborEntry))
 				// if we already have this identifier, check if there is a new port
 				for _, port := range existingNeighborEntry.Ports {
-					logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  port", helpers.Interface("port", port))
 					if port.Name == portIdentifier {
-						logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  port already exists")
 						// port already exists in neighborEntry.Ports...
 						continue
 					}
 					// new port, add it to same entry
-					logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  existingNeighborEntry", helpers.Interface("neighborEntry", neighborEntry))
 					neighborEntry.Ports = append(existingNeighborEntry.Ports, neighborEntry.Ports...)
 				}
 			}
-			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  set map")
 			neighborEntry.Identifier = identifier
 			egressIdentifiersMap[identifier] = neighborEntry
-			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  finish set map")
 		} else {
 			if existingNeighborEntry, ok := ingressIdentifiersMap[identifier]; ok {
 				// if we already have this identifier, check if there is a new port
@@ -428,17 +413,11 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 					break
 				}
 			}
-			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  set map")
 			neighborEntry.Identifier = identifier
 			ingressIdentifiersMap[identifier] = neighborEntry
-			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  finish set map")
 		}
 
-		logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  finish loop")
-
 	}
-
-	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  add to obj")
 
 	networkNeighborsSpec.Egress = make([]v1beta1.NetworkNeighbor, 0, len(egressIdentifiersMap))
 	for _, neighborEntry := range egressIdentifiersMap {
@@ -449,8 +428,6 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 	for _, neighborEntry := range ingressIdentifiersMap {
 		networkNeighborsSpec.Ingress = append(networkNeighborsSpec.Ingress, neighborEntry)
 	}
-
-	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries finish")
 
 	return networkNeighborsSpec
 }
