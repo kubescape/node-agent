@@ -124,7 +124,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
 		if k8sContainerID == "//" {
-			logger.L().Debug("NetworkManager - k8sContainerID is empty", helpers.Interface("event", event))
 			return
 		}
 
