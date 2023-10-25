@@ -2,6 +2,7 @@ package networkmanager
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -66,9 +67,21 @@ func (ne *NetworkEvent) SetDestinationPodLabels(podLabels map[string]string) {
 }
 
 func generatePodLabels(podLabels map[string]string) string {
-	var podLabelsString string
-	for key, value := range podLabels {
-		podLabelsString = podLabelsString + key + "=" + value + ","
+	var keys []string
+	for key := range podLabels {
+		keys = append(keys, key)
 	}
+
+	sort.Strings(keys)
+
+	var podLabelsString string
+	for _, key := range keys {
+		podLabelsString = podLabelsString + key + "=" + podLabels[key] + ","
+	}
+
+	if len(podLabelsString) > 0 {
+		podLabelsString = podLabelsString[:len(podLabelsString)-1]
+	}
+
 	return podLabelsString
 }
