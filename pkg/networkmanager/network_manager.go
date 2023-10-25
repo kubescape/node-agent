@@ -342,14 +342,13 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 				continue
 			}
 
-			selector, err := svc.GetSelector()
-			if err != nil {
-				logger.L().Error("failed to get selector", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
-				continue
-			}
+			selector := svc.GetServiceSelector()
+
 			logger.L().Debug("NetworkManager - service selector", helpers.String("service name", networkEvent.Destination.Name), helpers.String("selector", fmt.Sprintf("%v", selector)))
 
-			neighborEntry.PodSelector = selector
+			neighborEntry.PodSelector = &metav1.LabelSelector{
+				MatchLabels: selector,
+			}
 
 			if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
 				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
