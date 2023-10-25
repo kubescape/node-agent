@@ -1,6 +1,9 @@
 package networkmanager
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 type NetworkEvent struct {
 	Port        uint16
@@ -31,6 +34,10 @@ const (
 	EndpointKindService EndpointKind = "svc"
 	EndpointKindRaw     EndpointKind = "raw"
 )
+
+func (ne *NetworkEvent) String() string {
+	return fmt.Sprintf("Port: %d, PktType: %s, Protocol: %s, PodLabels: %s, Destination: %s", ne.Port, ne.PktType, ne.Protocol, ne.PodLabels, ne.Destination)
+}
 
 func (ne *NetworkEvent) GetDestinationPodLabels() map[string]string {
 	podLabels := make(map[string]string, 0)

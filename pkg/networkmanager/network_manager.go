@@ -301,8 +301,6 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 
 func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[NetworkEvent]) v1beta1.NetworkNeighborsSpec {
 
-	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries", helpers.Interface("networkEvents", networkEvents))
-
 	defer func() {
 		if err := recover(); err != nil { //catch
 			logger.L().Error("panic", helpers.String("error", err.(error).Error()))
@@ -321,6 +319,8 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 	}
 
 	for networkEvent := range networkEventsIterator.C {
+		logger.L().Debug("NetworkManager - networkEvent", helpers.String("networkEvent", networkEvent.String()))
+
 		var neighborEntry v1beta1.NetworkNeighbor
 
 		if networkEvent.Destination.Kind == EndpointKindPod {
@@ -387,7 +387,6 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 
 		if networkEvent.PktType == "OUTGOING" {
 			if existingNeighborEntry, ok := egressIdentifiersMap[identifier]; ok {
-				logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  existingNeighborEntry", helpers.Interface("existingNeighborEntry", existingNeighborEntry))
 				// if we already have this identifier, check if there is a new port
 				for _, port := range existingNeighborEntry.Ports {
 					if port.Name == portIdentifier {
