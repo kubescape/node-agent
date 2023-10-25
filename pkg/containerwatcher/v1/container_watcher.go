@@ -140,7 +140,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkEvent.SetPodLabels(event.PodLabels)
 		networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
 
-		networkManagerClient.SaveNetworkEvent(k8sContainerID, event.K8s.PodName, networkEvent)
+		networkManagerClient.SaveNetworkEvent(event.Runtime.ContainerID, event.K8s.PodName, networkEvent)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating open network pool: %w", err)

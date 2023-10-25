@@ -81,6 +81,7 @@ func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, networkE
 	}
 	networkEventsSet.Add(*networkEvent)
 	am.containerAndPodToEventsMap.Set(containerID+podName, networkEventsSet)
+	logger.L().Debug("NetworkManager - SaveNetworkEvent", helpers.String("key", containerID+podName), helpers.String("pod name", podName), helpers.Interface("network event", networkEvent))
 
 }
 
@@ -215,10 +216,13 @@ func (am *NetworkManager) monitorContainer(ctx context.Context, container *conta
 func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
 	logger.L().Debug("NetworkManager - handleNetworkEvents", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
+	logger.L().Debug("NetworkManager - handleNetworkEvents", helpers.String("key", container.Runtime.ContainerID+container.K8s.PodName), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Interface("network events", networkEvents), helpers.String("container ID", container.Runtime.ContainerID))
 	if networkEvents == nil {
+		logger.L().Debug("NetworkManager - no events to handle", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 		// no events to handle
 		return
 	}
+	logger.L().Debug("NetworkManager - handleNetworkEvents", helpers.String("key", container.Runtime.ContainerID+container.K8s.PodName), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Interface("network events", networkEvents), helpers.String("container ID", container.Runtime.ContainerID))
 
 	// TODO: dns enrichment
 
