@@ -60,7 +60,7 @@ func TestStorageNoCache_GetSBOM(t *testing.T) {
 			want: &v1beta1.SBOMSPDXv2p3{
 				ObjectMeta: v1.ObjectMeta{
 					Name:      storage.NginxKey,
-					Namespace: defaultNamespace,
+					Namespace: "kubescape",
 				},
 			},
 		},
@@ -74,9 +74,9 @@ func TestStorageNoCache_GetSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sc, _ := CreateFakeStorageNoCache()
+			sc, _ := CreateFakeStorageNoCache("kubescape")
 			if tt.createSBOM {
-				_, _ = sc.StorageClient.SBOMSPDXv2p3s(defaultNamespace).Create(context.Background(), tt.want, v1.CreateOptions{})
+				_, _ = sc.StorageClient.SBOMSPDXv2p3s("kubescape").Create(context.Background(), tt.want, v1.CreateOptions{})
 			}
 			got, err := sc.GetSBOM(tt.args.name)
 			if (err != nil) != tt.wantErr {
@@ -120,11 +120,11 @@ func TestStorageNoCache_PatchFilteredSBOM(t *testing.T) {
 					Name: tt.args.name,
 				},
 			}
-			_, _ = sc.StorageClient.SBOMSPDXv2p3Filtereds(defaultNamespace).Create(context.Background(), filteredSBOM, v1.CreateOptions{})
+			_, _ = sc.StorageClient.SBOMSPDXv2p3Filtereds("kubescape").Create(context.Background(), filteredSBOM, v1.CreateOptions{})
 			if err := sc.PatchFilteredSBOM(tt.args.name, tt.args.SBOM); (err != nil) != tt.wantErr {
 				t.Errorf("PatchFilteredSBOM() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			got, err := sc.StorageClient.SBOMSPDXv2p3Filtereds(defaultNamespace).Get(context.Background(), tt.args.name, v1.GetOptions{})
+			got, err := sc.StorageClient.SBOMSPDXv2p3Filtereds("kubescape").Get(context.Background(), tt.args.name, v1.GetOptions{})
 			assert.NoError(t, err)
 			assert.Equal(t, 1, len(got.Spec.SPDX.Files))
 		})
