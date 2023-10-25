@@ -32,7 +32,7 @@ func TestStorageNoCache_CreateFilteredSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sc, _ := CreateFakeStorageNoCache()
+			sc, _ := CreateFakeStorageNoCache("kubescape")
 			if err := sc.CreateFilteredSBOM(tt.args.SBOM); (err != nil) != tt.wantErr {
 				t.Errorf("CreateFilteredSBOM() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -114,7 +114,7 @@ func TestStorageNoCache_PatchFilteredSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sc, _ := CreateFakeStorageNoCache()
+			sc, _ := CreateFakeStorageNoCache("kubescape")
 			filteredSBOM := &v1beta1.SBOMSPDXv2p3Filtered{
 				ObjectMeta: v1.ObjectMeta{
 					Name: tt.args.name,

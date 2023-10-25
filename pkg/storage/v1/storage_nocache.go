@@ -28,7 +28,7 @@ type StorageNoCache struct {
 
 var _ storage.StorageClient = (*StorageNoCache)(nil)
 
-func CreateStorageNoCache(defaultNamespace string) (*StorageNoCache, error) {
+func CreateStorageNoCache(namespace string) (*StorageNoCache, error) {
 	var config *rest.Config
 	kubeconfig := os.Getenv(KubeConfig)
 	// use the current context in kubeconfig
@@ -47,14 +47,14 @@ func CreateStorageNoCache(defaultNamespace string) (*StorageNoCache, error) {
 
 	return &StorageNoCache{
 		StorageClient: clientset.SpdxV1beta1(),
-		namespace:     defaultNamespace,
+		namespace:     namespace,
 	}, nil
 }
 
-func CreateFakeStorageNoCache(defaultNamespace string) (*StorageNoCache, error) {
+func CreateFakeStorageNoCache(namespace string) (*StorageNoCache, error) {
 	return &StorageNoCache{
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
-		namespace:     defaultNamespace,
+		namespace:     namespace,
 	}, nil
 }
 
