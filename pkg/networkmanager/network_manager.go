@@ -234,14 +234,17 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		logger.L().Error("failed to get parent wlid from map", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("pod name", container.K8s.PodName))
 		return
 	}
+	logger.L().Debug("NetworkManager - handleNetworkEvents", helpers.String("parent wlid", parentWlid))
 
 	networkNeighborsSpec := generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents)
+	logger.L().Debug("NetworkManager - handleNetworkEvents", helpers.String("parent wlid", parentWlid), helpers.Interface("network neighbors spec", networkNeighborsSpec))
 
 	// send PATCH command using entries generated from events
 	if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(generateNetworkNeighborsNameFromWlid(parentWlid), wlid.GetNamespaceFromWlid(parentWlid), &v1beta1.NetworkNeighbors{Spec: networkNeighborsSpec}); err != nil {
 		logger.L().Error("failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 		return
 	}
+	logger.L().Debug("NetworkManager - updated network neighbor", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 
 	// remove events from map
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
