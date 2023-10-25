@@ -386,6 +386,8 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 			identifier = uuid.New().String()
 		}
 
+		logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  start loop", helpers.String("pktType", networkEvent.PktType))
+
 		if networkEvent.PktType == "OUTGOING" {
 			if existingNeighborEntry, ok := egressIdentifiersMap[identifier]; ok {
 				// if we already have this identifier, check if there is a new port
@@ -398,8 +400,10 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 					neighborEntry.Ports = append(existingNeighborEntry.Ports, neighborEntry.Ports...)
 				}
 			}
+			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  set map")
 			neighborEntry.Identifier = identifier
 			egressIdentifiersMap[identifier] = neighborEntry
+			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  finish set map")
 		} else {
 			if existingNeighborEntry, ok := ingressIdentifiersMap[identifier]; ok {
 				// if we already have this identifier, check if there is a new port
@@ -413,10 +417,17 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 					break
 				}
 			}
+			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  set map")
 			neighborEntry.Identifier = identifier
 			ingressIdentifiersMap[identifier] = neighborEntry
+			logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  finish set map")
 		}
+
+		logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  finish loop")
+
 	}
+
+	logger.L().Debug("NetworkManager - generateNetworkNeighborsEntries -  add to obj")
 
 	networkNeighborsSpec.Egress = make([]v1beta1.NetworkNeighbor, 0, len(egressIdentifiersMap))
 	for _, neighborEntry := range egressIdentifiersMap {
