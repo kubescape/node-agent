@@ -32,6 +32,11 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+const (
+	internalTrafficType = "internal"
+	externalTrafficType = "external"
+)
+
 type NetworkManager struct {
 	cfg                        config.Config
 	ctx                        context.Context
@@ -47,6 +52,7 @@ type NetworkManager struct {
 var _ NetworkManagerClient = (*NetworkManager)(nil)
 
 func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string) *NetworkManager {
+
 	ignoreNetwork := "169.254.0.2/16"
 	_, ignoreNet, err := net.ParseCIDR(ignoreNetwork)
 	if err != nil {
@@ -128,9 +134,13 @@ func (am *NetworkManager) isValidEvent(event tracernetworktype.Event) bool {
 		return false
 	}
 
-	if am.ignoredSubNet.Contains(net.ParseIP(event.DstEndpoint.Addr)) {
-		return false
+	if am.ignoredSubNet != nil {
+		// check if destination IP is in ignored subnet
+		if am.ignoredSubNet.Contains(net.ParseIP(event.DstEndpoint.Addr)) {
+			return false
+		}
 	}
+
 	return true
 }
 
@@ -266,7 +276,6 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
 	if networkEvents == nil {
 		// no events to handle
-		logger.L().Debug("NetworkManager - no events to handle", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 		return
 	}
 	// TODO: dns enrichment
@@ -290,13 +299,15 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		},
 		Spec: networkNeighborsSpec,
 	}); err != nil {
+		// check if error is because crd wasn't created
 
 		if !strings.Contains(err.Error(), "not found") {
 			logger.L().Error("failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 			return
 		}
 
-		// it may happen if the storage wasn't working well
+		// if the error is not found, we need to create it
+		// this can happen if the storage wasn't available when the container started
 		parentWL, err := am.getParentWorkloadFromContainer(container)
 		if err != nil {
 			logger.L().Info("NetworkManager - failed to get parent workload", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
@@ -310,6 +321,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		}
 
 		newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector)
+
 		// update spec and annotations
 		newNetworkNeighbors.Spec = networkNeighborsSpec
 		newNetworkNeighbors.Annotations = map[string]string{
@@ -328,13 +340,6 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 }
 
 func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[NetworkEvent]) v1beta1.NetworkNeighborsSpec {
-
-	defer func() {
-		if err := recover(); err != nil { //catch
-			logger.L().Error("panic", helpers.String("error", err.(error).Error()))
-		}
-	}()
-
 	var networkNeighborsSpec v1beta1.NetworkNeighborsSpec
 
 	// auxiliary maps to avoid duplicates
@@ -362,6 +367,8 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 			}
 
 		} else if networkEvent.Destination.Kind == EndpointKindService {
+			// for service, we need to retrieve it and use its selector
+
 			svc, err := am.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
 			if err != nil {
 				logger.L().Error("failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
@@ -370,7 +377,10 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 
 			selector := svc.GetServiceSelector()
 
-			logger.L().Debug("NetworkManager - service selector", helpers.String("service name", networkEvent.Destination.Name), helpers.String("selector", fmt.Sprintf("%v", selector)))
+			if len(selector) == 0 {
+				logger.L().Debug("service selector is empty", helpers.String("service name", networkEvent.Destination.Name))
+				continue
+			}
 
 			neighborEntry.PodSelector = &metav1.LabelSelector{
 				MatchLabels: selector,
@@ -398,9 +408,9 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 				Name:     portIdentifier,
 			}}
 
-		neighborEntry.Type = "internal"
+		neighborEntry.Type = internalTrafficType
 		if len(networkEvent.GetDestinationPodLabels()) == 0 {
-			neighborEntry.Type = "external"
+			neighborEntry.Type = externalTrafficType
 		}
 
 		// generate identifier for this neighborEntry
