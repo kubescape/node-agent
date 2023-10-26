@@ -63,7 +63,7 @@ func main() {
 
 	// Create clients
 	k8sClient := k8sinterface.NewKubernetesApi()
-	storageClient, err := storage.CreateStorageNoCache()
+	storageClient, err := storage.CreateStorageNoCache(clusterData.Namespace)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
