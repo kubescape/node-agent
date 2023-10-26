@@ -123,6 +123,10 @@ func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, event tr
 	networkEventsSet.Add(*networkEvent)
 	am.containerAndPodToEventsMap.Set(containerID+podName, networkEventsSet)
 
+	if event.PktType == "HOST" {
+		logger.L().Debug("saved ingress event", helpers.Interface("event", event))
+	}
+
 }
 
 func (am *NetworkManager) isValidEvent(event tracernetworktype.Event) bool {
@@ -152,8 +156,6 @@ func (am *NetworkManager) isValidEvent(event tracernetworktype.Event) bool {
 func (am *NetworkManager) handleContainerStarted(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
 	ctx, span := otel.Tracer("").Start(ctx, "NetworkManager.handleContainerStarted")
 	defer span.End()
-
-	logger.L().Debug("NetworkManager - handleContainerStarted", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:                              container.Runtime.ContainerID,
@@ -267,7 +269,6 @@ func (am *NetworkManager) monitorContainer(ctx context.Context, container *conta
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
-				logger.L().Debug("NetworkManager - container has terminated", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				am.handleNetworkEvents(ctx, container, watchedContainer)
 				return nil
 			}
