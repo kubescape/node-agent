@@ -3,7 +3,7 @@ module node-agent
 go 1.20
 
 require (
-	github.com/armosec/utils-k8s-go v0.0.17
+	github.com/armosec/utils-k8s-go v0.0.20
 	github.com/cilium/ebpf v0.11.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
@@ -29,7 +29,7 @@ require (
 	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20230306123547-8075edf89bb0 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/Microsoft/hcsshim v0.12.0-rc.0 // indirect
-	github.com/armosec/armoapi-go v0.0.211 // indirect
+	github.com/armosec/armoapi-go v0.0.234 // indirect
 	github.com/armosec/gojay v1.2.15 // indirect
 	github.com/armosec/utils-go v0.0.20 // indirect
 	github.com/briandowns/spinner v1.23.0 // indirect
@@ -51,6 +51,7 @@ require (
 	github.com/emicklei/go-restful/v3 v3.10.2 // indirect
 	github.com/evanphx/json-patch v5.6.0+incompatible // indirect
 	github.com/fatih/color v1.15.0 // indirect
+	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
