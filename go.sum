@@ -55,14 +55,14 @@ github.com/Microsoft/go-winio v0.6.1/go.mod h1:LRdKpFKfdobln8UmuiYcKPot9D2v6svN5
 github.com/Microsoft/hcsshim v0.12.0-rc.0 h1:wX/F5huJxH9APBkhKSEAqaiZsuBvbbDnyBROZAqsSaY=
 github.com/Microsoft/hcsshim v0.12.0-rc.0/go.mod h1:rvOnw3YlfoNnEp45wReUngvsXbwRW+AFQ10GVjG1kMU=
 github.com/anmitsu/go-shlex v0.0.0-20161002113705-648efa622239/go.mod h1:2FmKhYUyUczH0OGQWaF5ceTx0UBShxjsH6f8oGKYe2c=
-github.com/armosec/armoapi-go v0.0.211 h1:OS4D56sfoaU7T6FOCyrufE2Ttdzv9tP7MZkFxh82ll0=
-github.com/armosec/armoapi-go v0.0.211/go.mod h1:4AEdwBrbS1YCAn/lZzV+cOOR9BPa0MTHYHiJDlR1uRQ=
+github.com/armosec/armoapi-go v0.0.234 h1:OFbiKU/bZBWbg8tb3BCNjm1+7UwSIBrS1VUSJxvG3Nc=
+github.com/armosec/armoapi-go v0.0.234/go.mod h1:Y1ZcqPUTQ+F8JiQzErrToK5ULrPvClxZoshHmV9PIlU=
 github.com/armosec/gojay v1.2.15 h1:sSB2vnAvacUNkw9nzUYZKcPzhJOyk6/5LK2JCNdmoZY=
 github.com/armosec/gojay v1.2.15/go.mod h1:vzVAaay2TWJAngOpxu8aqLbye9jMgoKleuAOK+xsOts=
 github.com/armosec/utils-go v0.0.20 h1:bvr+TMumEYdMsGFGSsaQysST7K02nNROFvuajNuKPlw=
 github.com/armosec/utils-go v0.0.20/go.mod h1:ZEFiSv8KpTFNT19jHis1IengiF/BGDvg7tHmXo+cwxs=
-github.com/armosec/utils-k8s-go v0.0.17 h1:HUntJGR0/PHt7bp8S0zLhVcJ6sDz061Hc9mAM9ha1lA=
-github.com/armosec/utils-k8s-go v0.0.17/go.mod h1:FJRG/MRz7jT4ExSEYHIFsilVsAF11M+GJRhLl4PFZ4s=
+github.com/armosec/utils-k8s-go v0.0.20 h1:lLgowko5JVYf6LF4osQLgL+/w/LUptARdctShAChl7I=
+github.com/armosec/utils-k8s-go v0.0.20/go.mod h1:wSP3ILpyp+2bqZZD7gdZVQ/RTK3+jV17l6Dk5xCqWCg=
 github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24TaqPxmxbtue+5NUziq4I4S80YR8gNf3Q=
 github.com/bradfitz/go-smtpd v0.0.0-20170404230938-deb6d6237625/go.mod h1:HYsPBTaaSFSlLx/70C2HPIMNZpVV8+vt/A+FMnYP11g=
 github.com/briandowns/spinner v1.23.0 h1:alDF2guRWqa/FOZZYWjlMIx2L6H0wyewPxo/CH4Pt2A=
@@ -130,6 +130,8 @@ github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb/go.mod h1:bH6Xx7IW
 github.com/fatih/color v1.15.0 h1:kOqh6YHBtK8aywxGerMG2Eq3H6Qgoqeo13Bk2Mv/nBs=
 github.com/fatih/color v1.15.0/go.mod h1:0h5ZqXfHYED7Bhv2ZJamyIOUej9KtShiJESRwBDUSsw=
 github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568/go.mod h1:xEzjJPgXI435gkrCt3MPfRiAkVrwSbHsst4LCFVfpJc=
+github.com/francoispqt/gojay v1.2.13 h1:d2m3sFjloqoIUQU3TsHBgj6qg/BVGlTBeHDUmyJnXKk=
+github.com/francoispqt/gojay v1.2.13/go.mod h1:ehT5mTG4ua4581f1++1WLG0vPdaA9HaiDsoyrBGkyDY=
 github.com/frankban/quicktest v1.14.5 h1:dfYrrRyLtiqT9GyKXgdh+k4inNeTvmGbuSgZ3lx3GhA=
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=
 github.com/fsnotify/fsnotify v1.6.0 h1:n+5WquG0fcWoWp6xPWfHdbskMCQaFnG6PfBrh1Ky4HY=
