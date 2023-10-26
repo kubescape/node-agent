@@ -475,6 +475,9 @@ func (am *NetworkManager) handleServiceWithNoSelectors(svc workloadinterface.IWo
 
 	// retrieve endpoint
 	endpoints, err := am.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Endpoint", networkEvent.Destination.Name)
+	if err != nil {
+		return err
+	}
 
 	endpointsMap := endpoints.GetObject()
 
