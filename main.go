@@ -10,6 +10,7 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher/v1"
 	"node-agent/pkg/filehandler/v1"
+	"node-agent/pkg/networkmanager"
 	"node-agent/pkg/relevancymanager"
 	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
 	"node-agent/pkg/sbomhandler/v1"
@@ -94,8 +95,15 @@ func main() {
 		relevancymanager.CreateRelevancyManagerMock()
 	}
 
+	var networkManagerClient networkmanager.NetworkManagerClient
+	if cfg.EnableNetworkTracing {
+		networkManagerClient = networkmanager.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName)
+	} else {
+		networkManagerClient = networkmanager.CreateNetworkManagerMock()
+	}
+
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
