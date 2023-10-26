@@ -58,13 +58,6 @@ func CreateFakeStorageNoCache(namespace string) (*StorageNoCache, error) {
 	}, nil
 }
 
-func getNamespace() string {
-	if ns, ok := os.LookupEnv("NAMESPACE"); ok {
-		return ns
-	}
-	return defaultNamespace
-}
-
 func (sc StorageNoCache) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error {
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Create(context.Background(), networkNeighbors, metav1.CreateOptions{})
 	if err != nil {
