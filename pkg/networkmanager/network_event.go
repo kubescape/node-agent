@@ -66,6 +66,7 @@ func (ne *NetworkEvent) SetDestinationPodLabels(podLabels map[string]string) {
 	ne.Destination.PodLabels = generatePodLabels(podLabels)
 }
 
+// generatePodLabels generates a single string from a map of pod labels. This string is separated with commas and is needed so the set in network manager will work
 func generatePodLabels(podLabels map[string]string) string {
 	var keys []string
 	for key := range podLabels {

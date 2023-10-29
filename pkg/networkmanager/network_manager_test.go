@@ -6,6 +6,8 @@ import (
 	"node-agent/pkg/config"
 	"testing"
 
+	_ "embed"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -267,7 +269,7 @@ func TestGenerateNeighborsIdentifier(t *testing.T) {
 	}
 }
 
-func TestGeneratePortIdentifier(t *testing.T) {
+func TestGeneratePortIdentifierFromEvent(t *testing.T) {
 	testCases := []struct {
 		input    NetworkEvent
 		expected string
@@ -306,7 +308,7 @@ func TestGeneratePortIdentifier(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(fmt.Sprintf("Input: %+v", tc.input), func(t *testing.T) {
-			result := generatePortIdentifier(tc.input)
+			result := generatePortIdentifierFromEvent(tc.input)
 			if result != tc.expected {
 				t.Errorf("Expected: %s, Got: %s", tc.expected, result)
 			}
@@ -896,6 +898,373 @@ func TestIsValidEvent(t *testing.T) {
 		t.Run(fmt.Sprintf("Input: %s", tc.name), func(t *testing.T) {
 			result := am.isValidEvent(tc.event)
 			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestGeneratePortIdentifier(t *testing.T) {
+	tests := []struct {
+		name     string
+		port     int32
+		protocol string
+		expected string
+	}{
+		{
+			name:     "http",
+			port:     80,
+			protocol: "TCP",
+			expected: "TCP-80",
+		},
+		{
+			name:     "udp",
+			port:     333,
+			protocol: "UDP",
+			expected: "UDP-333",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("Input: %s", tc.name), func(t *testing.T) {
+			result := generatePortIdentifier(tc.protocol, tc.port)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+// saveNeighborEntry(networkEvent NetworkEvent, neighborEntry v1beta1.NetworkNeighbor, egressIdentifiersMap map[string]v1beta1.NetworkNeighbor, ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor)
+func TestSaveNeighborEntry(t *testing.T) {
+	tests := []struct {
+		name                  string
+		networkEvent          NetworkEvent
+		neighborEntry         v1beta1.NetworkNeighbor
+		egressIdentifiersMap  map[string]v1beta1.NetworkNeighbor
+		ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor
+		expectedEgressMap     map[string]v1beta1.NetworkNeighbor
+		expectedIngressMap    map[string]v1beta1.NetworkNeighbor
+	}{
+		{
+			name: "egress event is saved",
+			networkEvent: NetworkEvent{
+				Port:     80,
+				PktType:  "OUTGOING",
+				Protocol: "TCP",
+			},
+			neighborEntry: v1beta1.NetworkNeighbor{
+				Type:       "internal",
+				DNS:        "",
+				Identifier: "",
+				Ports:      []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"},
+				},
+			},
+			egressIdentifiersMap: map[string]v1beta1.NetworkNeighbor{},
+			expectedEgressMap: map[string]v1beta1.NetworkNeighbor{
+				"9f0652b5eef6b239f6a7c83778e56ab1ac3a2ad700ca7097f1cb59b1502ecee9": {
+					Type: "internal",
+					Ports: []v1beta1.NetworkPort{
+						{
+							Name:     "TCP-80",
+							Protocol: "TCP",
+							Port:     ptr.To(int32(80)),
+						},
+					},
+					Identifier: "9f0652b5eef6b239f6a7c83778e56ab1ac3a2ad700ca7097f1cb59b1502ecee9",
+					NamespaceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"},
+					},
+				},
+			},
+		},
+		{
+			name: "ingress event is saved",
+			networkEvent: NetworkEvent{
+				Port:     80,
+				PktType:  "HOST",
+				Protocol: "TCP",
+			},
+			neighborEntry: v1beta1.NetworkNeighbor{
+				Type:       "internal",
+				DNS:        "",
+				Identifier: "",
+				Ports:      []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"},
+				},
+			},
+			ingressIdentifiersMap: map[string]v1beta1.NetworkNeighbor{},
+			expectedIngressMap: map[string]v1beta1.NetworkNeighbor{
+				"9f0652b5eef6b239f6a7c83778e56ab1ac3a2ad700ca7097f1cb59b1502ecee9": {
+					Type: "internal",
+					Ports: []v1beta1.NetworkPort{
+						{
+							Name:     "TCP-80",
+							Protocol: "TCP",
+							Port:     ptr.To(int32(80)),
+						},
+					},
+					Identifier: "9f0652b5eef6b239f6a7c83778e56ab1ac3a2ad700ca7097f1cb59b1502ecee9",
+					NamespaceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"},
+					},
+				},
+			},
+		},
+		{
+			name: "existing data in map - map is updated",
+			networkEvent: NetworkEvent{
+				Port:     80,
+				PktType:  "HOST",
+				Protocol: "TCP",
+			},
+			neighborEntry: v1beta1.NetworkNeighbor{
+				Type:       "internal",
+				DNS:        "",
+				Identifier: "",
+				Ports:      []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"},
+				},
+			},
+			ingressIdentifiersMap: map[string]v1beta1.NetworkNeighbor{
+				"710652b5eef6b239f6a7c83778e56ab1ac3a2ad700ca7097f1cb59b1502ecee9": {
+					Type: "internal",
+					Ports: []v1beta1.NetworkPort{
+						{
+							Name:     "TCP-80",
+							Protocol: "TCP",
+							Port:     ptr.To(int32(80)),
+						},
+					},
+					Identifier: "710652b5eef6b239f6a7c83778e56ab1ac3a2ad700ca7097f1cb59b1502ecee9",
+					NamespaceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"test": "test"},
+					},
+				},
+			},
+			expectedIngressMap: map[string]v1beta1.NetworkNeighbor{
+				"710652b5eef6b239f6a7c83778e56ab1ac3a2ad700ca7097f1cb59b1502ecee9": {
+					Type: "internal",
+					Ports: []v1beta1.NetworkPort{
+						{
+							Name:     "TCP-80",
+							Protocol: "TCP",
+							Port:     ptr.To(int32(80)),
+						},
+					},
+					Identifier: "710652b5eef6b239f6a7c83778e56ab1ac3a2ad700ca7097f1cb59b1502ecee9",
+					NamespaceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"test": "test"},
+					},
+				},
+				"9f0652b5eef6b239f6a7c83778e56ab1ac3a2ad700ca7097f1cb59b1502ecee9": {
+					Type: "internal",
+					Ports: []v1beta1.NetworkPort{
+						{
+							Name:     "TCP-80",
+							Protocol: "TCP",
+							Port:     ptr.To(int32(80)),
+						},
+					},
+					Identifier: "9f0652b5eef6b239f6a7c83778e56ab1ac3a2ad700ca7097f1cb59b1502ecee9",
+					NamespaceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"},
+					},
+				},
+			},
+		},
+		{
+			name: "external event is saved",
+			networkEvent: NetworkEvent{
+				Port:     80,
+				PktType:  "OUTGOING",
+				Protocol: "TCP",
+			},
+			neighborEntry: v1beta1.NetworkNeighbor{
+				Type:       "external",
+				DNS:        "",
+				Identifier: "",
+				Ports:      []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+			},
+			egressIdentifiersMap: map[string]v1beta1.NetworkNeighbor{},
+			expectedEgressMap: map[string]v1beta1.NetworkNeighbor{
+				"1db1cf596388ac2f0d5eecbe6bcc9b57199beaa7d87e53a049ae18744dd62045": {
+					Type: "external",
+					Ports: []v1beta1.NetworkPort{
+						{
+							Name:     "TCP-80",
+							Protocol: "TCP",
+							Port:     ptr.To(int32(80)),
+						},
+					},
+					Identifier: "1db1cf596388ac2f0d5eecbe6bcc9b57199beaa7d87e53a049ae18744dd62045",
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("Input: %+v", tc.networkEvent), func(t *testing.T) {
+			saveNeighborEntry(tc.networkEvent, tc.neighborEntry, tc.egressIdentifiersMap, tc.ingressIdentifiersMap)
+			assert.Equal(t, tc.expectedEgressMap, tc.egressIdentifiersMap)
+			assert.Equal(t, tc.expectedIngressMap, tc.ingressIdentifiersMap)
+		})
+	}
+
+}
+
+// addToMap(identifiersMap map[string]v1beta1.NetworkNeighbor, identifier string, portIdentifier string, neighborEntry v1beta1.NetworkNeighbor)
+func TestAddToMap(t *testing.T) {
+	tests := []struct {
+		name           string
+		identifiersMap map[string]v1beta1.NetworkNeighbor
+		identifier     string
+		portIdentifier string
+		neighborEntry  v1beta1.NetworkNeighbor
+		expectedMap    map[string]v1beta1.NetworkNeighbor
+	}{
+		{
+			name:           "new identifier is added",
+			identifiersMap: map[string]v1beta1.NetworkNeighbor{},
+			identifier:     "identifier",
+			portIdentifier: "portIdentifier",
+			neighborEntry: v1beta1.NetworkNeighbor{
+				Type:       "internal",
+				DNS:        "",
+				Identifier: "",
+				Ports:      []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"},
+				},
+			},
+			expectedMap: map[string]v1beta1.NetworkNeighbor{
+				"identifier": {
+					Type:              "internal",
+					DNS:               "",
+					Identifier:        "identifier",
+					Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+				},
+			},
+		},
+		{
+			name: "same identifier with new ports - ports are appended",
+			identifiersMap: map[string]v1beta1.NetworkNeighbor{
+				"identifier": {
+					Type:              "internal",
+					DNS:               "",
+					Identifier:        "identifier",
+					Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+				},
+			},
+			identifier:     "identifier",
+			portIdentifier: "TCP-50",
+			neighborEntry: v1beta1.NetworkNeighbor{
+				Type:       "internal",
+				DNS:        "",
+				Identifier: "",
+				Ports:      []v1beta1.NetworkPort{{Name: "TCP-50", Protocol: "TCP", Port: ptr.To(int32(50))}},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"},
+				},
+			},
+			expectedMap: map[string]v1beta1.NetworkNeighbor{
+				"identifier": {
+					Type:       "internal",
+					DNS:        "",
+					Identifier: "identifier",
+					Ports: []v1beta1.NetworkPort{
+						{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))},
+						{Name: "TCP-50", Protocol: "TCP", Port: ptr.To(int32(50))},
+					},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+				},
+			},
+		},
+		{
+			name: "different identifier - identifiers are appended",
+			identifiersMap: map[string]v1beta1.NetworkNeighbor{
+				"identifier1": {
+					Type:              "internal",
+					DNS:               "",
+					Identifier:        "identifier1",
+					Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+				},
+			},
+			identifier:     "identifier2",
+			portIdentifier: "TCP-80",
+			neighborEntry: v1beta1.NetworkNeighbor{
+				Type:       "internal",
+				DNS:        "",
+				Identifier: "",
+				Ports:      []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"},
+				},
+			},
+			expectedMap: map[string]v1beta1.NetworkNeighbor{
+				"identifier1": {
+					Type:       "internal",
+					DNS:        "",
+					Identifier: "identifier1",
+					Ports: []v1beta1.NetworkPort{
+						{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))},
+					},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+				},
+				"identifier2": {
+					Type:       "internal",
+					DNS:        "",
+					Identifier: "identifier2",
+					Ports: []v1beta1.NetworkPort{
+						{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))},
+					},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+				},
+			},
+		},
+		{
+			name: "same identifier with same ports - nothing happens",
+			identifiersMap: map[string]v1beta1.NetworkNeighbor{
+				"identifier": {
+					Type:              "internal",
+					DNS:               "",
+					Identifier:        "identifier",
+					Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+				},
+			},
+			identifier:     "identifier",
+			portIdentifier: "TCP-80",
+			neighborEntry: v1beta1.NetworkNeighbor{
+				Type:       "internal",
+				DNS:        "",
+				Identifier: "",
+				Ports:      []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"},
+				},
+			},
+			expectedMap: map[string]v1beta1.NetworkNeighbor{
+				"identifier": {
+					Type:       "internal",
+					DNS:        "",
+					Identifier: "identifier",
+					Ports: []v1beta1.NetworkPort{
+						{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))},
+					},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("Input: %+v", tc.name), func(t *testing.T) {
+			addToMap(tc.identifiersMap, tc.identifier, tc.portIdentifier, tc.neighborEntry)
+			assert.Equal(t, tc.expectedMap, tc.identifiersMap)
 		})
 	}
 }

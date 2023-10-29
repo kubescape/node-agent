@@ -40,6 +40,8 @@ import (
 const (
 	internalTrafficType = "internal"
 	externalTrafficType = "external"
+	hostPktType         = "HOST"
+	outgoingPktType     = "OUTGOING"
 )
 
 type NetworkManager struct {
@@ -58,6 +60,7 @@ var _ NetworkManagerClient = (*NetworkManager)(nil)
 
 func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string) *NetworkManager {
 
+	// don't create CRDs using localhost addresses
 	ignoreNetwork := "169.254.0.2/16"
 	_, ignoreNet, err := net.ParseCIDR(ignoreNetwork)
 	if err != nil {
@@ -122,23 +125,22 @@ func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, event tr
 	}
 	networkEventsSet.Add(*networkEvent)
 	am.containerAndPodToEventsMap.Set(containerID+podName, networkEventsSet)
-
-	if event.PktType == "HOST" {
-		logger.L().Debug("saved ingress event", helpers.Interface("event", event))
-	}
-
 }
 
+// isValidEvent checks if the event is a valid event that should be saved
 func (am *NetworkManager) isValidEvent(event tracernetworktype.Event) bool {
-	if event.PktType != "HOST" && event.PktType != "OUTGOING" {
+	// unknown type, shouldn't happen
+	if event.PktType != hostPktType && event.PktType != outgoingPktType {
 		logger.L().Debug("NetworkManager - pktType is not HOST or OUTGOING", helpers.Interface("event", event))
 		return false
 	}
 
-	if event.PktType == "HOST" && event.PodHostIP == event.DstEndpoint.Addr {
+	// ignore localhost
+	if event.PktType == hostPktType && event.PodHostIP == event.DstEndpoint.Addr {
 		return false
 	}
 
+	// ignore host netns
 	if event.K8s.HostNetwork {
 		return false
 	}
@@ -180,6 +182,7 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		logger.L().Info("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		return
 	}
+
 	if selector == nil {
 		// if we get not selector, we can't create/update network neighbor
 		logger.L().Info("NetworkManager - selector is nil", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
@@ -306,7 +309,6 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		Spec: networkNeighborsSpec,
 	}); err != nil {
 		// check if error is because crd wasn't created
-
 		if !strings.Contains(err.Error(), "not found") {
 			logger.L().Error("failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 			return
@@ -374,7 +376,6 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 
 		} else if networkEvent.Destination.Kind == EndpointKindService {
 			// for service, we need to retrieve it and use its selector
-
 			svc, err := am.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
 			if err != nil {
 				logger.L().Error("failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
@@ -423,9 +424,10 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 	return networkNeighborsSpec
 }
 
+// saveNeighborEntry encapsulates the logic of generating identifiers and adding the neighborEntry to the map
 func saveNeighborEntry(networkEvent NetworkEvent, neighborEntry v1beta1.NetworkNeighbor, egressIdentifiersMap map[string]v1beta1.NetworkNeighbor, ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor) {
 
-	portIdentifier := generatePortIdentifier(networkEvent)
+	portIdentifier := generatePortIdentifierFromEvent(networkEvent)
 
 	neighborEntry.Ports = []v1beta1.NetworkPort{
 		{
@@ -447,7 +449,7 @@ func saveNeighborEntry(networkEvent NetworkEvent, neighborEntry v1beta1.NetworkN
 		identifier = uuid.New().String()
 	}
 
-	if networkEvent.PktType == "OUTGOING" {
+	if networkEvent.PktType == outgoingPktType {
 		addToMap(egressIdentifiersMap, identifier, portIdentifier, neighborEntry)
 	} else {
 		addToMap(ingressIdentifiersMap, identifier, portIdentifier, neighborEntry)
@@ -489,11 +491,12 @@ func (am *NetworkManager) handleServiceWithNoSelectors(svc workloadinterface.IWo
 
 	decoder := serializer.NewCodecFactory(scheme.Scheme).UniversalDecoder()
 	obj := &v1.Endpoints{}
-	err = runtime.DecodeInto(decoder, endpointsBytes, obj)
-	if err != nil {
+
+	if err = runtime.DecodeInto(decoder, endpointsBytes, obj); err != nil {
 		return err
 	}
 
+	// for each IP in the endpoint, generate a neighborEntry with its ports
 	for _, subset := range obj.Subsets {
 		for _, address := range subset.Addresses {
 			neighborEntry := v1beta1.NetworkNeighbor{
@@ -504,7 +507,7 @@ func (am *NetworkManager) handleServiceWithNoSelectors(svc workloadinterface.IWo
 				neighborEntry.Ports = append(neighborEntry.Ports, v1beta1.NetworkPort{
 					Protocol: v1beta1.Protocol(ports.Protocol),
 					Port:     ptr.To(int32(ports.Port)),
-					Name:     fmt.Sprintf("%s-%d", ports.Protocol, ports.Port),
+					Name:     generatePortIdentifier(string(ports.Protocol), ports.Port),
 				})
 			}
 
@@ -514,7 +517,7 @@ func (am *NetworkManager) handleServiceWithNoSelectors(svc workloadinterface.IWo
 			}
 			neighborEntry.Identifier = identifier
 
-			if networkEvent.PktType == "OUTGOING" {
+			if networkEvent.PktType == outgoingPktType {
 				egressIdentifiersMap[identifier] = neighborEntry
 			} else {
 				ingressIdentifiersMap[identifier] = neighborEntry
@@ -546,6 +549,10 @@ func generateNeighborsIdentifier(neighborEntry v1beta1.NetworkNeighbor) (string,
 	return fmt.Sprintf("%x", hash.Sum(nil)), nil
 }
 
-func generatePortIdentifier(networkEvent NetworkEvent) string {
-	return fmt.Sprintf("%s-%d", networkEvent.Protocol, networkEvent.Port)
+func generatePortIdentifierFromEvent(networkEvent NetworkEvent) string {
+	return generatePortIdentifier(networkEvent.Protocol, int32(networkEvent.Port))
+}
+
+func generatePortIdentifier(protocol string, port int32) string {
+	return fmt.Sprintf("%s-%d", protocol, port)
 }
