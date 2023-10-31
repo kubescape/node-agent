@@ -20,6 +20,7 @@ import (
 
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
 
+	"github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -40,9 +41,17 @@ func main() {
 
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
+		var accountId string
+		if credentials, err := utils.LoadCredentialsFromFile("/etc/credentials"); err != nil {
+			logger.L().Warning("failed to load credentials", helpers.Error(err))
+		} else {
+			accountId = credentials.Account
+			logger.L().Info("credentials loaded", helpers.Int("accountLength", len(credentials.Account)))
+		}
+
 		ctx = logger.InitOtel("node-agent",
 			os.Getenv("RELEASE"),
-			clusterData.AccountID,
+			accountId,
 			clusterData.ClusterName,
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
