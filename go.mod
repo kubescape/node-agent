@@ -10,6 +10,7 @@ require (
 	github.com/goradd/maps v0.1.5
 	github.com/inspektor-gadget/inspektor-gadget v0.20.1-0.20230919195508-052fbf78b54c
 	github.com/kinbiko/jsonassert v1.1.1
+	github.com/kubescape/backend v0.0.13
 	github.com/kubescape/go-logger v0.0.21
 	github.com/kubescape/k8s-interface v0.0.145
 	github.com/kubescape/storage v0.0.22
@@ -29,9 +30,9 @@ require (
 	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20230306123547-8075edf89bb0 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/Microsoft/hcsshim v0.12.0-rc.0 // indirect
-	github.com/armosec/armoapi-go v0.0.234 // indirect
+	github.com/armosec/armoapi-go v0.0.254 // indirect
 	github.com/armosec/gojay v1.2.15 // indirect
-	github.com/armosec/utils-go v0.0.20 // indirect
+	github.com/armosec/utils-go v0.0.40 // indirect
 	github.com/briandowns/spinner v1.23.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/containerd/cgroups/v3 v3.0.2 // indirect
