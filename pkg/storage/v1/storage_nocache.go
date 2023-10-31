@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"node-agent/pkg/storage"
-	"os"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
@@ -30,7 +31,7 @@ var _ storage.StorageClient = (*StorageNoCache)(nil)
 
 func CreateStorageNoCache(namespace string) (*StorageNoCache, error) {
 	var config *rest.Config
-	kubeconfig := os.Getenv(KubeConfig)
+	kubeconfig := "/home/daniel/.kube/config"
 	// use the current context in kubeconfig
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
@@ -59,6 +60,7 @@ func CreateFakeStorageNoCache(namespace string) (*StorageNoCache, error) {
 }
 
 func (sc StorageNoCache) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error {
+
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Create(context.Background(), networkNeighbors, metav1.CreateOptions{})
 	if err != nil {
 		return err
@@ -85,6 +87,7 @@ func (sc StorageNoCache) PatchNetworkNeighborsIngressAndEgress(name, namespace s
 }
 
 func (sc StorageNoCache) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
+	logger.L().Debug("Patching NetworkNeighbors", helpers.String("name", name), helpers.String("namespace", namespace), helpers.String("labels", fmt.Sprintf("%+v", networkNeighbors.Labels)))
 
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Update(context.Background(), networkNeighbors, metav1.UpdateOptions{})
 

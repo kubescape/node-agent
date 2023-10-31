@@ -197,6 +197,9 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		} else {
 			// network neighbor not found, create new one
 			newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector)
+
+			logger.L().Debug("NetworkManager - creating network neighbor", helpers.Interface("labels", selector), helpers.String("k8s workload", k8sContainerID))
+
 			if err = am.storageClient.CreateNetworkNeighbors(newNetworkNeighbors, parentWL.GetNamespace()); err != nil {
 				logger.L().Info("NetworkManager - failed to create network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			}
@@ -204,11 +207,12 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		}
 	} else {
 		// CRD found, update labels
+		logger.L().Debug("NetworkManager - updating network neighbor", helpers.Interface("labels", selector), helpers.String("k8s workload", k8sContainerID))
 		networkNeighbors.Spec.LabelSelector = *selector
 		if err = am.storageClient.PatchNetworkNeighborsMatchLabels(networkNeighbors.GetName(), networkNeighbors.GetNamespace(), networkNeighbors); err != nil {
 			logger.L().Info("NetworkManager - failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		}
-		logger.L().Debug("NetworkManager - updated network neighbor", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+		logger.L().Debug("NetworkManager - updated network neighbor labels", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
 
 	// save container + pod to wlid map
