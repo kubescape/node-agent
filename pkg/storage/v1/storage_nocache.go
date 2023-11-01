@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"node-agent/pkg/storage"
 
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
@@ -60,7 +58,6 @@ func CreateFakeStorageNoCache(namespace string) (*StorageNoCache, error) {
 }
 
 func (sc StorageNoCache) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error {
-
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Create(context.Background(), networkNeighbors, metav1.CreateOptions{})
 	if err != nil {
 		return err
@@ -87,8 +84,6 @@ func (sc StorageNoCache) PatchNetworkNeighborsIngressAndEgress(name, namespace s
 }
 
 func (sc StorageNoCache) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
-	logger.L().Debug("Patching NetworkNeighbors", helpers.String("name", name), helpers.String("namespace", namespace), helpers.String("labels", fmt.Sprintf("%+v", networkNeighbors.Labels)))
-
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Update(context.Background(), networkNeighbors, metav1.UpdateOptions{})
 
 	return err
