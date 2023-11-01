@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/storage"
@@ -53,27 +52,17 @@ type NetworkManager struct {
 	containerAndPodToEventsMap maps.SafeMap[string, mapset.Set[NetworkEvent]] // TODO: change it to set
 	clusterName                string
 	watchedContainerChannels   maps.SafeMap[string, chan error] // key is ContainerID
-	ignoredSubNet              *net.IPNet
 }
 
 var _ NetworkManagerClient = (*NetworkManager)(nil)
 
 func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string) *NetworkManager {
-
-	// don't create CRDs using localhost addresses
-	ignoreNetwork := "169.254.0.2/16"
-	_, ignoreNet, err := net.ParseCIDR(ignoreNetwork)
-	if err != nil {
-		logger.L().Error("failed to parse CIDR", helpers.String("CIDR", ignoreNetwork))
-	}
-
 	return &NetworkManager{
 		cfg:           cfg,
 		ctx:           ctx,
 		k8sClient:     k8sClient,
 		storageClient: storageClient,
 		clusterName:   clusterName,
-		ignoredSubNet: ignoreNet,
 	}
 }
 
@@ -143,13 +132,6 @@ func (am *NetworkManager) isValidEvent(event tracernetworktype.Event) bool {
 	// ignore host netns
 	if event.K8s.HostNetwork {
 		return false
-	}
-
-	if am.ignoredSubNet != nil {
-		// check if destination IP is in ignored subnet
-		if am.ignoredSubNet.Contains(net.ParseIP(event.DstEndpoint.Addr)) {
-			return false
-		}
 	}
 
 	return true
