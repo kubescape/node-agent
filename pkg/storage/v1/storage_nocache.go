@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"node-agent/pkg/storage"
+	"os"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
@@ -29,7 +30,7 @@ var _ storage.StorageClient = (*StorageNoCache)(nil)
 
 func CreateStorageNoCache(namespace string) (*StorageNoCache, error) {
 	var config *rest.Config
-	kubeconfig := "/home/daniel/.kube/config"
+	kubeconfig := os.Getenv(KubeConfig)
 	// use the current context in kubeconfig
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {

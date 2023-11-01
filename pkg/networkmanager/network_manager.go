@@ -154,20 +154,20 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 	// retrieve parent WL
 	parentWL, err := am.getParentWorkloadFromContainer(container)
 	if err != nil {
-		logger.L().Info("NetworkManager - failed to get parent workload", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+		logger.L().Warning("NetworkManager - failed to get parent workload", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		return
 	}
 
 	selector, err := parentWL.GetSelector()
 	if err != nil {
 		// if we get not selector, we can't create/update network neighbor
-		logger.L().Info("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+		logger.L().Warning("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		return
 	}
 
 	if selector == nil {
 		// if we get not selector, we can't create/update network neighbor
-		logger.L().Info("NetworkManager - selector is nil", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+		logger.L().Warning("NetworkManager - selector is nil", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		return
 	}
 
@@ -175,13 +175,13 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 	networkNeighbors, err := am.storageClient.GetNetworkNeighbors(parentWL.GetNamespace(), generateNetworkNeighborsNameFromWorkload(parentWL))
 	if err != nil {
 		if !strings.Contains(err.Error(), "not found") {
-			logger.L().Info("NetworkManager - failed to get network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+			logger.L().Warning("NetworkManager - failed to get network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		} else {
 			// network neighbor not found, create new one
 			newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector)
 
 			if err = am.storageClient.CreateNetworkNeighbors(newNetworkNeighbors, parentWL.GetNamespace()); err != nil {
-				logger.L().Info("NetworkManager - failed to create network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+				logger.L().Warning("NetworkManager - failed to create network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			}
 			logger.L().Debug("NetworkManager - created network neighbor", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		}
@@ -189,7 +189,7 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		// CRD found, update labels
 		networkNeighbors.Spec.LabelSelector = *selector
 		if err = am.storageClient.PatchNetworkNeighborsMatchLabels(networkNeighbors.GetName(), networkNeighbors.GetNamespace(), networkNeighbors); err != nil {
-			logger.L().Info("NetworkManager - failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+			logger.L().Warning("NetworkManager - failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		}
 		logger.L().Debug("NetworkManager - updated network neighbor labels", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
@@ -277,7 +277,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 	// retrieve parent WL from internal map
 	parentWlid := am.containerAndPodToWLIDMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
 	if parentWlid == "" {
-		logger.L().Error("failed to get parent wlid from map", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("pod name", container.K8s.PodName))
+		logger.L().Warning("failed to get parent wlid from map", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("pod name", container.K8s.PodName))
 		return
 	}
 
@@ -293,7 +293,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 	}); err != nil {
 		// check if error is because crd wasn't created
 		if !strings.Contains(err.Error(), "not found") {
-			logger.L().Error("failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
+			logger.L().Warning("failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 			return
 		}
 
@@ -301,13 +301,13 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		// this can happen if the storage wasn't available when the container started
 		parentWL, err := am.getParentWorkloadFromContainer(container)
 		if err != nil {
-			logger.L().Info("NetworkManager - failed to get parent workload", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
+			logger.L().Warning("NetworkManager - failed to get parent workload", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
 			return
 		}
 
 		selector, err := parentWL.GetSelector()
 		if err != nil {
-			logger.L().Info("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
+			logger.L().Warning("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
 			return
 		}
 		newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector)
@@ -322,7 +322,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		logger.L().Debug("NetworkManager - creating network neighbor", helpers.Interface("labels", selector), helpers.String("container ID", container.Runtime.ContainerID), helpers.Interface("labels", newNetworkNeighbors.Spec.LabelSelector))
 
 		if err = am.storageClient.CreateNetworkNeighbors(newNetworkNeighbors, parentWL.GetNamespace()); err != nil {
-			logger.L().Info("NetworkManager - failed to create network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
+			logger.L().Warning("NetworkManager - failed to create network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
 			return
 		}
 	}
@@ -363,14 +363,14 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 			// for service, we need to retrieve it and use its selector
 			svc, err := am.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
 			if err != nil {
-				logger.L().Error("failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
+				logger.L().Warning("failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
 				continue
 			}
 
 			selector := svc.GetServiceSelector()
 			if len(selector) == 0 {
 				if err = am.handleServiceWithNoSelectors(svc, networkEvent, egressIdentifiersMap, ingressIdentifiersMap); err != nil {
-					logger.L().Error("failed to handle service with no selectors", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
+					logger.L().Warning("failed to handle service with no selectors", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
 				}
 				continue
 			} else {
