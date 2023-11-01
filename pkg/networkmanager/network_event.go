@@ -40,6 +40,7 @@ func (ne *NetworkEvent) String() string {
 	return fmt.Sprintf("Port: %d, PktType: %s, Protocol: %s, PodLabels: %s, Destination: %s", ne.Port, ne.PktType, ne.Protocol, ne.PodLabels, ne.Destination)
 }
 
+// GetDestinationPodLabels returns a map of pod labels from the string in the network event. The labels are saved separated by commas, so we need to split them
 func (ne *NetworkEvent) GetDestinationPodLabels() map[string]string {
 	podLabels := make(map[string]string, 0)
 
