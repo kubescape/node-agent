@@ -1,6 +1,8 @@
 package storage
 
-import "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+import (
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+)
 
 type StorageClient interface {
 	CreateApplicationActivity(activity *v1beta1.ApplicationActivity, namespace string) error
@@ -13,4 +15,8 @@ type StorageClient interface {
 	PatchFilteredSBOM(name string, SBOM *v1beta1.SBOMSPDXv2p3Filtered) error
 	IncrementImageUse(imageID string)
 	DecrementImageUse(imageID string)
+	GetNetworkNeighbors(namespace, name string) (*v1beta1.NetworkNeighbors, error)
+	CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error
+	PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error
+	PatchNetworkNeighborsIngressAndEgress(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error
 }

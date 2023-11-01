@@ -36,6 +36,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.containerCallback,
 		ch.applicationProfileManager.ContainerCallback,
 		ch.relevancyManager.ContainerCallback,
+		ch.networkManager.ContainerCallback,
 	}
 
 	// Define the different options for the container collection instance
@@ -98,6 +99,15 @@ func (ch *IGContainerWatcher) startTracers() error {
 			return err
 		}
 	}
+
+	if ch.cfg.EnableNetworkTracing {
+		// Start network tracer
+		if err := ch.startNetworkTracing(); err != nil {
+			logger.L().Error("error starting network tracing", helpers.Error(err))
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -127,6 +137,15 @@ func (ch *IGContainerWatcher) stopTracers() error {
 			errs = errors.Join(err, ch.stopCapabilitiesTracing())
 		}
 	}
+
+	if ch.cfg.EnableNetworkTracing {
+		// Stop network tracer
+		if err := ch.stopNetworkTracing(); err != nil {
+			logger.L().Error("error stopping network tracing", helpers.Error(err))
+			errs = errors.Join(err, ch.stopNetworkTracing())
+		}
+	}
+
 	return errs
 }
 
@@ -152,4 +171,5 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 	ch.tracerCollection.TracerMapsUpdater()(event)
 	ch.applicationProfileManager.ContainerCallback(event)
 	ch.relevancyManager.ContainerCallback(event)
+	ch.networkManager.ContainerCallback(event)
 }
