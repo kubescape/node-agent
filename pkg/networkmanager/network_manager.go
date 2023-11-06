@@ -49,7 +49,7 @@ type NetworkManager struct {
 	k8sClient                  k8sclient.K8sClientInterface
 	storageClient              storage.StorageClient
 	containerAndPodToWLIDMap   maps.SafeMap[string, string]
-	containerAndPodToEventsMap maps.SafeMap[string, mapset.Set[NetworkEvent]] // TODO: change it to set
+	containerAndPodToEventsMap maps.SafeMap[string, mapset.Set[NetworkEvent]]
 	clusterName                string
 	watchedContainerChannels   maps.SafeMap[string, chan error] // key is ContainerID
 }

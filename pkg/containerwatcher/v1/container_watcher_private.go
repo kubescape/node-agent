@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"node-agent/pkg/config"
 	"node-agent/pkg/utils"
-	"os"
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -37,6 +35,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.applicationProfileManager.ContainerCallback,
 		ch.relevancyManager.ContainerCallback,
 		ch.networkManager.ContainerCallback,
+		ch.dnsManager.ContainerCallback,
 	}
 
 	// Define the different options for the container collection instance
@@ -50,10 +49,10 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		containercollection.WithCgroupEnrichment(),
 
 		// Enrich events with Linux namespaces information, it is needed for per container filtering
-		containercollection.WithLinuxNamespaceEnrichment(),
+		// containercollection.WithLinuxNamespaceEnrichment(),
 
 		// Enrich those containers with data from the Kubernetes API
-		containercollection.WithKubernetesEnrichment(os.Getenv(config.NodeNameEnvVar), ch.k8sClient.K8SConfig),
+		// containercollection.WithKubernetesEnrichment(os.Getenv(config.NodeNameEnvVar), ch.k8sClient.K8SConfig),
 
 		// Get Notifications from the container collection
 		containercollection.WithPubSub(containerEventFuncs...),
@@ -104,6 +103,12 @@ func (ch *IGContainerWatcher) startTracers() error {
 		// Start network tracer
 		if err := ch.startNetworkTracing(); err != nil {
 			logger.L().Error("error starting network tracing", helpers.Error(err))
+			return err
+		}
+
+		// Start dns tracer
+		if err := ch.startDNSTracing(); err != nil {
+			logger.L().Error("error starting dns tracing", helpers.Error(err))
 			return err
 		}
 	}
@@ -172,4 +177,5 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 	ch.applicationProfileManager.ContainerCallback(event)
 	ch.relevancyManager.ContainerCallback(event)
 	ch.networkManager.ContainerCallback(event)
+	ch.dnsManager.ContainerCallback(event)
 }

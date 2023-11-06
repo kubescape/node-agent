@@ -6,6 +6,7 @@ import (
 	"node-agent/pkg/applicationprofilemanager"
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher"
+	"node-agent/pkg/containerwatcher/dnsmanager"
 	"node-agent/pkg/networkmanager"
 	"node-agent/pkg/relevancymanager"
 	"node-agent/pkg/utils"
@@ -14,6 +15,8 @@ import (
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
+	tracerdns "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/tracer"
+	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetwork "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/tracer"
@@ -32,6 +35,7 @@ const (
 	capabilitiesTraceName      = "trace_capabilities"
 	execTraceName              = "trace_exec"
 	networkTraceName           = "trace_network"
+	dnsTraceName               = "trace_dns"
 	openTraceName              = "trace_open"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
@@ -50,6 +54,7 @@ type IGContainerWatcher struct {
 	k8sClient                 *k8sinterface.KubernetesApi
 	relevancyManager          relevancymanager.RelevancyManagerClient
 	networkManager            networkmanager.NetworkManagerClient
+	dnsManager                dnsmanager.DNSManagerClient
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
@@ -59,6 +64,7 @@ type IGContainerWatcher struct {
 	openTracer         *traceropen.Tracer
 	syscallTracer      *tracerseccomp.Tracer
 	networkTracer      *tracernetwork.Tracer
+	dnsTracer          *tracerdns.Tracer
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
 	// Worker pools
@@ -66,11 +72,12 @@ type IGContainerWatcher struct {
 	execWorkerPool         *ants.PoolWithFunc
 	openWorkerPool         *ants.PoolWithFunc
 	networkWorkerPool      *ants.PoolWithFunc
+	dnsWorkerPool          *ants.PoolWithFunc
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -130,6 +137,17 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkManagerClient.SaveNetworkEvent(event.Runtime.ContainerID, event.K8s.PodName, event)
 	})
 
+	// Create a dns worker pool
+	dnsWorkerPool, err := ants.NewPoolWithFunc(networkWorkerPoolSize, func(i interface{}) {
+		event := i.(tracerdnstype.Event)
+
+		if event.Qr != tracerdnstype.DNSPktTypeResponse {
+			return
+		}
+
+		dnsManagerClient.SaveNetworkEvent(event)
+	})
+
 	if err != nil {
 		return nil, fmt.Errorf("creating open network pool: %w", err)
 	}
@@ -143,6 +161,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		k8sClient:                 k8sClient,
 		relevancyManager:          relevancyManager,
 		networkManager:            networkManagerClient,
+		dnsManager:                dnsManagerClient,
 		// IG Collections
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,
@@ -151,6 +170,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		execWorkerPool:         execWorkerPool,
 		openWorkerPool:         openWorkerPool,
 		networkWorkerPool:      networkWorkerPool,
+		dnsWorkerPool:          dnsWorkerPool,
 	}, nil
 }
 
