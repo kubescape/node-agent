@@ -77,10 +77,10 @@ func (n *DNSManager) handleContainerStarted(ctx context.Context, container *cont
 	n.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
 }
 
-func (n *DNSManager) SaveNetworkEvent(dnsEvent tracerdnstype.Event) {
+func (n *DNSManager) SaveNetworkEvent(podName string, dnsEvent tracerdnstype.Event) {
 	for _, address := range dnsEvent.Addresses {
 		n.adressToDomainMap.Set(address, dnsEvent.DNSName)
 	}
 
-	logger.L().Debug("DNS event", helpers.Interface("event", dnsEvent))
+	logger.L().Debug("DNS event", helpers.Interface("event", dnsEvent), helpers.String("pod name", podName))
 }

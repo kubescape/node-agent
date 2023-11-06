@@ -18,5 +18,5 @@ func (am *DNSManagerMock) ContainerCallback(notif containercollection.PubSubEven
 
 }
 
-func (am *DNSManagerMock) SaveNetworkEvent(event tracerdnstype.Event) {
+func (am *DNSManagerMock) SaveNetworkEvent(podName string, event tracerdnstype.Event) {
 }

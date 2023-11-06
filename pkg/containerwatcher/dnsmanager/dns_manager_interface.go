@@ -7,5 +7,5 @@ import (
 
 type DNSManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
-	SaveNetworkEvent(networkEvent tracerdnstype.Event)
+	SaveNetworkEvent(podName string, networkEvent tracerdnstype.Event)
 }
