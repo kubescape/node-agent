@@ -38,7 +38,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.applicationProfileManager.ContainerCallback,
 		ch.relevancyManager.ContainerCallback,
 		ch.networkManager.ContainerCallback,
-		ch.dnsManager.ContainerCallback,
+		// ch.dnsManager.ContainerCallback,
 	}
 
 	// Define the different options for the container collection instance
@@ -186,5 +186,5 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 	ch.applicationProfileManager.ContainerCallback(event)
 	ch.relevancyManager.ContainerCallback(event)
 	ch.networkManager.ContainerCallback(event)
-	ch.dnsManager.ContainerCallback(event)
+	// ch.dnsManager.ContainerCallback(event)
 }

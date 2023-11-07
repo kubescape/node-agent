@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
 
@@ -111,7 +110,7 @@ func main() {
 
 	if cfg.EnableNetworkTracing {
 		dnsCfg := cfg
-		dnsCfg.InitialDelay = cfg.InitialDelay - 30*time.Second
+		dnsCfg.InitialDelay = cfg.InitialDelay
 
 		dnsManager := dnsmanager.CreateDNSManager(ctx, dnsCfg, k8sClient, storageClient, clusterData.ClusterName)
 		dnsManagerClient = dnsManager

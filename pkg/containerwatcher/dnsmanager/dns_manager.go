@@ -5,28 +5,19 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/storage"
-	"node-agent/pkg/utils"
-	"time"
 
 	"github.com/goradd/maps"
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 type DNSManager struct {
-	cfg                      config.Config
-	ctx                      context.Context
-	k8sClient                k8sclient.K8sClientInterface
-	storageClient            storage.StorageClient
-	clusterName              string
-	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
-	addressToDomainMap       maps.SafeMap[string, string]
+	cfg config.Config
+	ctx context.Context
+	// k8sClient                k8sclient.K8sClientInterface
+	// storageClient            storage.StorageClient
+	// clusterName              string
+	// watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
+	addressToDomainMap maps.SafeMap[string, string] // this map is used to resolve IP address to domain name
 }
 
 var _ DNSManagerClient = (*DNSManager)(nil)
@@ -34,62 +25,58 @@ var _ DNSResolver = (*DNSManager)(nil)
 
 func CreateDNSManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string) *DNSManager {
 	return &DNSManager{
-		cfg:           cfg,
-		ctx:           ctx,
-		k8sClient:     k8sClient,
-		storageClient: storageClient,
-		clusterName:   clusterName,
-	}
-}
-func (n *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
-	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
-	ctx, span := otel.Tracer("").Start(n.ctx, "NetworkManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
-	defer span.End()
-
-	switch notif.Type {
-	case containercollection.EventTypeAddContainer:
-		if n.watchedContainerChannels.Has(notif.Container.Runtime.ContainerID) {
-			logger.L().Debug("container already exist in memory", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-			return
-		}
-		go n.handleContainerStarted(ctx, notif.Container, k8sContainerID)
-
-	case containercollection.EventTypeRemoveContainer:
-		channel := n.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
-		if channel != nil {
-			channel <- utils.ContainerHasTerminatedError
-		}
-		n.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
+		cfg: cfg,
+		ctx: ctx,
+		// k8sClient:     k8sClient,
+		// storageClient: storageClient,
+		// clusterName:   clusterName,
 	}
 }
 
-func (n *DNSManager) handleContainerStarted(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
-	ctx, span := otel.Tracer("").Start(ctx, "DNSManager.handleContainerStarted")
-	defer span.End()
+// func (dn *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
+// 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
+// 	ctx, span := otel.Tracer("").Start(dn.ctx, "NetworkManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
+// 	defer span.End()
 
-	watchedContainer := &utils.WatchedContainerData{
-		ContainerID:                              container.Runtime.ContainerID,
-		UpdateDataTicker:                         time.NewTicker(n.cfg.InitialDelay - 30*time.Second),
-		SyncChannel:                              make(chan error, 10),
-		K8sContainerID:                           k8sContainerID,
-		RelevantRealtimeFilesByPackageSourceInfo: map[string]*utils.PackageSourceInfoData{},
-		RelevantRealtimeFilesBySPDXIdentifier:    map[v1beta1.ElementID]bool{},
-	}
-	n.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
-}
+// 	switch notif.Type {
+// 	case containercollection.EventTypeAddContainer:
+// 		if dn.watchedContainerChannels.Has(notif.Container.Runtime.ContainerID) {
+// 			logger.L().Debug("container already exist in memory", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+// 			return
+// 		}
+// 		go dn.handleContainerStarted(ctx, notif.Container, k8sContainerID)
 
-func (n *DNSManager) SaveNetworkEvent(podName string, dnsEvent tracerdnstype.Event) {
+// 	case containercollection.EventTypeRemoveContainer:
+// 		channel := dn.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
+// 		if channel != nil {
+// 			channel <- utils.ContainerHasTerminatedError
+// 		}
+// 		dn.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
+// 	}
+// }
+
+// func (dn *DNSManager) handleContainerStarted(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
+// 	ctx, span := otel.Tracer("").Start(ctx, "DNSManager.handleContainerStarted")
+// 	defer span.End()
+
+// 	watchedContainer := &utils.WatchedContainerData{
+// 		ContainerID:                              container.Runtime.ContainerID,
+// 		UpdateDataTicker:                         time.NewTicker(dn.cfg.InitialDelay),
+// 		SyncChannel:                              make(chan error, 10),
+// 		K8sContainerID:                           k8sContainerID,
+// 		RelevantRealtimeFilesByPackageSourceInfo: map[string]*utils.PackageSourceInfoData{},
+// 		RelevantRealtimeFilesBySPDXIdentifier:    map[v1beta1.ElementID]bool{},
+// 	}
+// 	dn.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
+// }
+
+func (dn *DNSManager) SaveNetworkEvent(podName string, dnsEvent tracerdnstype.Event) {
 	for _, address := range dnsEvent.Addresses {
-		n.addressToDomainMap.Set(address, dnsEvent.DNSName)
+		dn.addressToDomainMap.Set(address, dnsEvent.DNSName)
 	}
-
-	logger.L().Debug("DNS event", helpers.Interface("event", dnsEvent), helpers.String("pod name", podName))
 }
 
-func (n *DNSManager) ResolveIPAddress(ipAddr string) (string, bool) {
-	domain := n.addressToDomainMap.Get(ipAddr)
-	if domain == "" {
-		return "", false
-	}
-	return domain, true
+func (dn *DNSManager) ResolveIPAddress(ipAddr string) (string, bool) {
+	domain := dn.addressToDomainMap.Get(ipAddr)
+	return domain, domain != ""
 }
