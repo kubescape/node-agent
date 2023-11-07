@@ -110,8 +110,8 @@ func (ch *IGContainerWatcher) startTracers() error {
 		}
 
 		if err := ch.startDNSTracing(); err != nil {
+			// not failing on dns tracing error
 			logger.L().Error("error starting dns tracing", helpers.Error(err))
-			return err
 		}
 
 		if err := ch.startNetworkTracing(); err != nil {
