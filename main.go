@@ -109,10 +109,7 @@ func main() {
 	var dnsManagerClient dnsmanager.DNSManagerClient
 
 	if cfg.EnableNetworkTracing {
-		dnsCfg := cfg
-		dnsCfg.InitialDelay = cfg.InitialDelay
-
-		dnsManager := dnsmanager.CreateDNSManager(ctx, dnsCfg, k8sClient, storageClient, clusterData.ClusterName)
+		dnsManager := dnsmanager.CreateDNSManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName)
 		dnsManagerClient = dnsManager
 
 		networkManagerClient = networkmanager.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName, dnsManager)

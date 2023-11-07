@@ -398,8 +398,6 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 				domain, ok := am.dnsResolverClient.ResolveIPAddress(networkEvent.Destination.IPAddress)
 				if ok {
 					neighborEntry.DNS = domain
-				} else {
-					logger.L().Debug("failed to resolve ip address", helpers.String("ip address", networkEvent.Destination.IPAddress), helpers.Interface("am.dnsResolverClient", am.dnsResolverClient))
 				}
 			}
 		}
