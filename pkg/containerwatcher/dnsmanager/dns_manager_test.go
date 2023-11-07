@@ -40,7 +40,7 @@ func TestResolveIPAddress(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dm := &DNSManager{}
-			dm.SaveNetworkEvent(tt.dnsEvent)
+			dm.ProcessDNSEvent(tt.dnsEvent)
 			got, _ := dm.ResolveIPAddress(tt.ipAddr)
 			if got != tt.want {
 				t.Errorf("ResolveIPAddress() got = %v, want %v", got, tt.want)

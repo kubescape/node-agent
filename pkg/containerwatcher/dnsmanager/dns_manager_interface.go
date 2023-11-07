@@ -5,7 +5,7 @@ import (
 )
 
 type DNSManagerClient interface {
-	SaveNetworkEvent(networkEvent tracerdnstype.Event)
+	ProcessDNSEvent(networkEvent tracerdnstype.Event)
 }
 
 type DNSResolver interface {

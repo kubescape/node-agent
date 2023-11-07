@@ -22,7 +22,7 @@ func CreateDNSManager(ctx context.Context, cfg config.Config, k8sClient k8sclien
 	return &DNSManager{}
 }
 
-func (dm *DNSManager) SaveNetworkEvent(dnsEvent tracerdnstype.Event) {
+func (dm *DNSManager) ProcessDNSEvent(dnsEvent tracerdnstype.Event) {
 	for _, address := range dnsEvent.Addresses {
 		dm.addressToDomainMap.Set(address, dnsEvent.DNSName)
 	}

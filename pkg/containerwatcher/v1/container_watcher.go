@@ -146,7 +146,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 
-		dnsManagerClient.SaveNetworkEvent(event)
+		dnsManagerClient.ProcessDNSEvent(event)
 	})
 
 	if err != nil {
