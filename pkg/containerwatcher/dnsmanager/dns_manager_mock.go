@@ -1,7 +1,6 @@
 package dnsmanager
 
 import (
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 )
 
@@ -15,11 +14,7 @@ func CreateDNSManagerMock() *DNSManagerMock {
 	return &DNSManagerMock{}
 }
 
-func (n *DNSManagerMock) ContainerCallback(notif containercollection.PubSubEvent) {
-
-}
-
-func (n *DNSManagerMock) SaveNetworkEvent(podName string, event tracerdnstype.Event) {
+func (n *DNSManagerMock) SaveNetworkEvent(event tracerdnstype.Event) {
 }
 
 func (n *DNSManagerMock) ResolveIPAddress(ipAddr string) (string, bool) {

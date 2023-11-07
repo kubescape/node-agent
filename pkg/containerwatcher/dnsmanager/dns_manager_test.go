@@ -1,53 +1,50 @@
 package dnsmanager
 
-// func TestDNSManager(t *testing.T) {
-// 	cfg := config.Config{
-// 		InitialDelay:     1 * time.Second,
-// 		MaxSniffingTime:  5 * time.Minute,
-// 		UpdateDataPeriod: 20 * time.Second,
-// 	}
+import (
+	"testing"
 
-// 	ctx := context.TODO()
-// 	k8sClient := &k8sclient.K8sClientMock{}
-// 	storageClient := &storage.StorageHttpClientMock{}
-// 	nm := CreateDNSManager(ctx, cfg, k8sClient, storageClient, "test")
+	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
+)
 
-// 	container := &containercollection.Container{
-// 		K8s: containercollection.K8sMetadata{
-// 			BasicK8sMetadata: types.BasicK8sMetadata{
-// 				Namespace:     "ns",
-// 				PodName:       "pod",
-// 				ContainerName: "cont",
-// 			},
-// 		},
-// 		Runtime: containercollection.RuntimeMetadata{
-// 			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-// 				ContainerID: "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
-// 			},
-// 		},
-// 	}
-// 	nm.ContainerCallback(containercollection.PubSubEvent{
-// 		Type:      containercollection.EventTypeAddContainer,
-// 		Container: container,
-// 	})
+func TestResolveIPAddress(t *testing.T) {
+	tests := []struct {
+		name     string
+		dnsEvent tracerdnstype.Event
+		ipAddr   string
+		want     string
+	}{
+		{
+			name:   "ip found",
+			ipAddr: "14.23.332.4",
+			dnsEvent: tracerdnstype.Event{
+				DNSName: "test.com",
+				Addresses: []string{
+					"14.23.332.4",
+				},
+			},
+			want: "test.com",
+		},
+		{
+			name:   "ip not found",
+			ipAddr: "14.23.332.4",
+			dnsEvent: tracerdnstype.Event{
+				DNSName: "test.com",
+				Addresses: []string{
+					"54.23.332.4",
+				},
+			},
+			want: "",
+		},
+	}
 
-// 	dnsEvent := &tracerdnstype.Event{
-// 		Qr:      tracerdnstype.DNSPktTypeResponse,
-// 		QType:   "A",
-// 		DNSName: "google.com",
-// 		Addresses: []string{
-// 			"15.52.34.53",
-// 			"12.52.34.53",
-// 		},
-// 	}
-
-// 	nm.SaveNetworkEvent("test", *dnsEvent)
-// 	time.Sleep(12 * time.Second)
-
-// 	nm.ContainerCallback(containercollection.PubSubEvent{
-// 		Type:      containercollection.EventTypeRemoveContainer,
-// 		Container: container,
-// 	})
-
-// 	assert.Equal(t, 2, len(nm.addressToDomainMap.Keys()))
-// }
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dm := &DNSManager{}
+			dm.SaveNetworkEvent(tt.dnsEvent)
+			got, _ := dm.ResolveIPAddress(tt.ipAddr)
+			if got != tt.want {
+				t.Errorf("ResolveIPAddress() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
