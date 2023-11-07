@@ -10,6 +10,7 @@ import (
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
@@ -102,17 +103,23 @@ func (ch *IGContainerWatcher) startTracers() error {
 	}
 
 	if ch.cfg.EnableNetworkTracing {
-		// Start network tracer
+		host.Init(host.Config{AutoMountFilesystems: true})
+
+		if err := ch.startKubernetesResolution(); err != nil {
+			logger.L().Error("error starting kubernetes resolution", helpers.Error(err))
+			return err
+		}
+
+		if err := ch.startDNSTracing(); err != nil {
+			logger.L().Error("error starting dns tracing", helpers.Error(err))
+			return err
+		}
+
 		if err := ch.startNetworkTracing(); err != nil {
 			logger.L().Error("error starting network tracing", helpers.Error(err))
 			return err
 		}
 
-		// Start dns tracer
-		if err := ch.startDNSTracing(); err != nil {
-			logger.L().Error("error starting dns tracing", helpers.Error(err))
-			return err
-		}
 	}
 
 	return nil

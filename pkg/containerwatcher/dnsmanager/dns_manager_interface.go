@@ -9,3 +9,7 @@ type DNSManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
 	SaveNetworkEvent(podName string, networkEvent tracerdnstype.Event)
 }
+
+type DNSResolver interface {
+	ResolveIPAddress(ipAddr string) (string, bool)
+}

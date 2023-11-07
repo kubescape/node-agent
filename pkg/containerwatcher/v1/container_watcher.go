@@ -41,6 +41,7 @@ const (
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
 	networkWorkerPoolSize      = 1
+	dnsWorkerPoolSize          = 5
 )
 
 type IGContainerWatcher struct {
@@ -138,7 +139,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	})
 
 	// Create a dns worker pool
-	dnsWorkerPool, err := ants.NewPoolWithFunc(networkWorkerPoolSize, func(i interface{}) {
+	dnsWorkerPool, err := ants.NewPoolWithFunc(dnsWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerdnstype.Event)
 
 		if event.Qr != tracerdnstype.DNSPktTypeResponse {

@@ -10,7 +10,6 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubeipresolver"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubenameresolver"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
@@ -34,7 +33,6 @@ func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Eve
 }
 
 func (ch *IGContainerWatcher) startNetworkTracing() error {
-	host.Init(host.Config{AutoMountFilesystems: true})
 
 	if err := ch.tracerCollection.AddTracer(networkTraceName, ch.containerSelector); err != nil {
 		return fmt.Errorf("adding tracer: %w", err)
@@ -43,24 +41,6 @@ func (ch *IGContainerWatcher) startNetworkTracing() error {
 	tracerNetwork, err := tracernetwork.NewTracer()
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
-	}
-
-	kubeIPOp := operators.GetRaw(kubeipresolver.OperatorName).(*kubeipresolver.KubeIPResolver)
-	kubeIPOp.Init(nil)
-	ch.kubeIPInstance, err = kubeIPOp.Instantiate(nil, nil, nil)
-	if err == nil {
-		ch.kubeIPInstance.PreGadgetRun()
-	} else {
-		return fmt.Errorf("creating kube ip resolver: %w", err)
-	}
-
-	kubeNameOp := operators.GetRaw(kubenameresolver.OperatorName).(*kubenameresolver.KubeNameResolver)
-	kubeNameOp.Init(nil)
-	ch.kubeNameInstance, err = kubeNameOp.Instantiate(nil, nil, nil)
-	if err == nil {
-		ch.kubeNameInstance.PreGadgetRun()
-	} else {
-		return fmt.Errorf("creating kube name resolver: %w", err)
 	}
 
 	tracerNetwork.SetEventHandler(ch.networkEventCallback)
@@ -78,6 +58,32 @@ func (ch *IGContainerWatcher) startNetworkTracing() error {
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
+
+	return nil
+}
+
+// startKubernetesResolution starts the kubeIP and kube name resolution, which are used to enrich network communication data
+func (ch *IGContainerWatcher) startKubernetesResolution() error {
+	kubeIPOp := operators.GetRaw(kubeipresolver.OperatorName).(*kubeipresolver.KubeIPResolver)
+	kubeIPOp.Init(nil)
+
+	kubeIPInstance, err := kubeIPOp.Instantiate(nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("creating kube ip resolver: %w", err)
+	}
+
+	ch.kubeIPInstance = kubeIPInstance
+	ch.kubeIPInstance.PreGadgetRun()
+
+	kubeNameOp := operators.GetRaw(kubenameresolver.OperatorName).(*kubenameresolver.KubeNameResolver)
+	kubeNameOp.Init(nil)
+	kubeNameInstance, err := kubeNameOp.Instantiate(nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("creating kube name resolver: %w", err)
+	}
+
+	ch.kubeNameInstance = kubeNameInstance
+	ch.kubeNameInstance.PreGadgetRun()
 
 	return nil
 }

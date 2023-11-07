@@ -26,10 +26,11 @@ type DNSManager struct {
 	storageClient            storage.StorageClient
 	clusterName              string
 	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
-	adressToDomainMap        maps.SafeMap[string, string]
+	addressToDomainMap       maps.SafeMap[string, string]
 }
 
 var _ DNSManagerClient = (*DNSManager)(nil)
+var _ DNSResolver = (*DNSManager)(nil)
 
 func CreateDNSManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string) *DNSManager {
 	return &DNSManager{
@@ -68,7 +69,7 @@ func (n *DNSManager) handleContainerStarted(ctx context.Context, container *cont
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:                              container.Runtime.ContainerID,
-		UpdateDataTicker:                         time.NewTicker(n.cfg.InitialDelay),
+		UpdateDataTicker:                         time.NewTicker(n.cfg.InitialDelay - 30*time.Second),
 		SyncChannel:                              make(chan error, 10),
 		K8sContainerID:                           k8sContainerID,
 		RelevantRealtimeFilesByPackageSourceInfo: map[string]*utils.PackageSourceInfoData{},
@@ -79,8 +80,16 @@ func (n *DNSManager) handleContainerStarted(ctx context.Context, container *cont
 
 func (n *DNSManager) SaveNetworkEvent(podName string, dnsEvent tracerdnstype.Event) {
 	for _, address := range dnsEvent.Addresses {
-		n.adressToDomainMap.Set(address, dnsEvent.DNSName)
+		n.addressToDomainMap.Set(address, dnsEvent.DNSName)
 	}
 
 	logger.L().Debug("DNS event", helpers.Interface("event", dnsEvent), helpers.String("pod name", podName))
+}
+
+func (n *DNSManager) ResolveIPAddress(ipAddr string) (string, bool) {
+	domain := n.addressToDomainMap.Get(ipAddr)
+	if domain == "" {
+		return "", false
+	}
+	return domain, true
 }
