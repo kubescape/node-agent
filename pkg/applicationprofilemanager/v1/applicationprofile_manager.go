@@ -8,6 +8,7 @@ import (
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
+	"sort"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -69,6 +70,38 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 			watchedContainer.InstanceID = instanceIDs[i]
 		}
 	}
+	// find container type and index
+	// containers
+	if watchedContainer.ContainerType == utils.Unknown {
+		containers, err := pod.GetContainers()
+		if err != nil {
+			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get containers", helpers.Error(err))
+			return
+		}
+		for i, c := range containers {
+			if c.Name == container.K8s.ContainerName {
+				watchedContainer.ContainerIndex = i
+				watchedContainer.ContainerType = utils.Container
+				break
+			}
+		}
+	}
+	// initContainers
+	if watchedContainer.ContainerType == utils.Unknown {
+		initContainers, err := pod.GetInitContainers()
+		if err != nil {
+			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get init containers", helpers.Error(err))
+			return
+		}
+		for i, c := range initContainers {
+			if c.Name == container.K8s.ContainerName {
+				watchedContainer.ContainerIndex = i
+				watchedContainer.ContainerType = utils.InitContainer
+				break
+			}
+		}
+	}
+	// FIXME ephemeralContainers are not supported yet
 }
 
 func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
@@ -154,15 +187,16 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	opens := am.openSets.Get(watchedContainer.K8sContainerID)
 	// existing profile
 	existingProfile, _ := am.storageClient.GetApplicationProfile(slug, namespace)
+	existingProfileContainer := utils.GetApplicationProfileContainer(existingProfile, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
 	if existingProfile != nil {
-		capabilities.Append(existingProfile.Spec.Capabilities...)
-		for _, exec := range existingProfile.Spec.Execs {
+		capabilities.Append(existingProfileContainer.Capabilities...)
+		for _, exec := range existingProfileContainer.Execs {
 			if _, exist := execs[exec.Path]; !exist {
 				execs[exec.Path] = mapset.NewSet[string]()
 			}
 			execs[exec.Path].Append(exec.Args...)
 		}
-		for _, open := range existingProfile.Spec.Opens {
+		for _, open := range existingProfileContainer.Opens {
 			if _, exist := opens[open.Path]; !exist {
 				opens[open.Path] = mapset.NewSet[string]()
 			}
@@ -183,27 +217,37 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			Labels: utils.GetLabels(watchedContainer),
 		},
 	}
+	newProfileContainer := v1beta1.ApplicationProfileContainer{}
 	// add capabilities
-	newProfile.Spec.Capabilities = capabilities.ToSlice()
+	newProfileContainer.Capabilities = capabilities.ToSlice()
+	sort.Strings(newProfileContainer.Capabilities)
 	// add execs
-	newProfile.Spec.Execs = make([]v1beta1.ExecCalls, 0)
+	newProfileContainer.Execs = make([]v1beta1.ExecCalls, 0)
 	for path, exec := range execs {
-		newProfile.Spec.Execs = append(newProfile.Spec.Execs, v1beta1.ExecCalls{
+		args := exec.ToSlice()
+		sort.Strings(args)
+		newProfileContainer.Execs = append(newProfileContainer.Execs, v1beta1.ExecCalls{
 			Path: path,
-			Args: exec.ToSlice(),
+			Args: args,
 		})
 	}
 	// add opens
-	newProfile.Spec.Opens = make([]v1beta1.OpenCalls, 0)
+	newProfileContainer.Opens = make([]v1beta1.OpenCalls, 0)
 	for path, open := range opens {
-		newProfile.Spec.Opens = append(newProfile.Spec.Opens, v1beta1.OpenCalls{
+		flags := open.ToSlice()
+		sort.Strings(flags)
+		newProfileContainer.Opens = append(newProfileContainer.Opens, v1beta1.OpenCalls{
 			Path:  path,
-			Flags: open.ToSlice(),
+			Flags: flags,
 		})
 	}
+	// insert application profile container
+	utils.InsertApplicationProfileContainer(newProfile, watchedContainer.ContainerType, watchedContainer.ContainerIndex, newProfileContainer)
+	// save application profile
 	if err := am.storageClient.CreateApplicationProfile(newProfile, namespace); err != nil {
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application profile", helpers.Error(err))
 	}
+	logger.L().Debug("ApplicationProfileManager - saved application profile", helpers.String("slug", slug), helpers.String("container ID", watchedContainer.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Interface("profile", newProfile))
 	// profile summary
 	summary := &v1beta1.ApplicationProfileSummary{
 		ObjectMeta: newProfile.ObjectMeta,
