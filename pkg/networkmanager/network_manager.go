@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"node-agent/pkg/config"
+	"node-agent/pkg/containerwatcher/dnsmanager"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
@@ -49,20 +50,22 @@ type NetworkManager struct {
 	k8sClient                  k8sclient.K8sClientInterface
 	storageClient              storage.StorageClient
 	containerAndPodToWLIDMap   maps.SafeMap[string, string]
-	containerAndPodToEventsMap maps.SafeMap[string, mapset.Set[NetworkEvent]] // TODO: change it to set
+	containerAndPodToEventsMap maps.SafeMap[string, mapset.Set[NetworkEvent]]
 	clusterName                string
 	watchedContainerChannels   maps.SafeMap[string, chan error] // key is ContainerID
+	dnsResolverClient          dnsmanager.DNSResolver
 }
 
 var _ NetworkManagerClient = (*NetworkManager)(nil)
 
-func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string) *NetworkManager {
+func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string, dnsResolverClient dnsmanager.DNSResolver) *NetworkManager {
 	return &NetworkManager{
-		cfg:           cfg,
-		ctx:           ctx,
-		k8sClient:     k8sClient,
-		storageClient: storageClient,
-		clusterName:   clusterName,
+		cfg:               cfg,
+		ctx:               ctx,
+		k8sClient:         k8sClient,
+		storageClient:     storageClient,
+		clusterName:       clusterName,
+		dnsResolverClient: dnsResolverClient,
 	}
 }
 
@@ -390,6 +393,13 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 				continue
 			}
 			neighborEntry.IPAddress = networkEvent.Destination.IPAddress
+
+			if am.dnsResolverClient != nil {
+				domain, ok := am.dnsResolverClient.ResolveIPAddress(networkEvent.Destination.IPAddress)
+				if ok {
+					neighborEntry.DNS = domain
+				}
+			}
 		}
 
 		saveNeighborEntry(networkEvent, neighborEntry, egressIdentifiersMap, ingressIdentifiersMap)

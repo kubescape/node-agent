@@ -8,6 +8,7 @@ import (
 	"node-agent/pkg/applicationprofilemanager"
 	applicationprofilemanagerv1 "node-agent/pkg/applicationprofilemanager/v1"
 	"node-agent/pkg/config"
+	"node-agent/pkg/containerwatcher/dnsmanager"
 	"node-agent/pkg/containerwatcher/v1"
 	"node-agent/pkg/filehandler/v1"
 	"node-agent/pkg/networkmanager"
@@ -105,14 +106,21 @@ func main() {
 	}
 
 	var networkManagerClient networkmanager.NetworkManagerClient
+	var dnsManagerClient dnsmanager.DNSManagerClient
+
 	if cfg.EnableNetworkTracing {
-		networkManagerClient = networkmanager.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName)
+		dnsManager := dnsmanager.CreateDNSManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName)
+		dnsManagerClient = dnsManager
+
+		networkManagerClient = networkmanager.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName, dnsManager)
+
 	} else {
 		networkManagerClient = networkmanager.CreateNetworkManagerMock()
+		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

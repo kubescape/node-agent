@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"node-agent/pkg/config"
+	"node-agent/pkg/containerwatcher/dnsmanager"
 	"testing"
 
 	_ "embed"
@@ -12,6 +13,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goradd/maps"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -316,17 +318,30 @@ func TestGeneratePortIdentifierFromEvent(t *testing.T) {
 	}
 }
 
+type dnsResolverMock struct {
+	addressToDomainMap *maps.SafeMap[string, string]
+}
+
+func (d *dnsResolverMock) ResolveIPAddress(ipAddr string) (string, bool) {
+	domain := d.addressToDomainMap.Get(ipAddr)
+	return domain, domain != ""
+}
+
 func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 	tests := []struct {
-		name          string
-		namespace     string
-		networkEvents []NetworkEvent
-		expectedSpec  v1beta1.NetworkNeighborsSpec
+		name               string
+		namespace          string
+		networkEvents      []NetworkEvent
+		expectedSpec       v1beta1.NetworkNeighborsSpec
+		addressToDomainMap map[string]string
 	}{
 		{
-			name:         "empty",
-			namespace:    "default",
-			expectedSpec: v1beta1.NetworkNeighborsSpec{},
+			name:      "empty",
+			namespace: "default",
+			expectedSpec: v1beta1.NetworkNeighborsSpec{
+				Egress:  []v1beta1.NetworkNeighbor{},
+				Ingress: []v1beta1.NetworkNeighbor{},
+			},
 		},
 		{
 			name:      "pod from same namespace ingress - should not have namespace selector",
@@ -358,6 +373,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 						Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
 					},
 				},
+				Egress: []v1beta1.NetworkNeighbor{},
 			},
 		},
 		{
@@ -390,6 +406,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 						Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
 					},
 				},
+				Ingress: []v1beta1.NetworkNeighbor{},
 			},
 		},
 		{
@@ -422,6 +439,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 						Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
 					},
 				},
+				Ingress: []v1beta1.NetworkNeighbor{},
 			},
 		},
 		{
@@ -448,6 +466,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 						Identifier: "3bbd32606a8516f97e7e3c11b0e914744c56cd6b8a2cadf010dd5fc648285535",
 					},
 				},
+				Ingress: []v1beta1.NetworkNeighbor{},
 			},
 		},
 		{
@@ -464,7 +483,10 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 					},
 				},
 			},
-			expectedSpec: v1beta1.NetworkNeighborsSpec{},
+			expectedSpec: v1beta1.NetworkNeighborsSpec{
+				Egress:  []v1beta1.NetworkNeighbor{},
+				Ingress: []v1beta1.NetworkNeighbor{},
+			},
 		},
 		{
 			name:      "multiple events with different ports - ports are merged",
@@ -601,6 +623,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 						Identifier: "b94b02766fdf0694c9d2d03696f41c70e0df0784b4dc9e2ce2c9b1808bc8d273",
 					},
 				},
+				Egress: []v1beta1.NetworkNeighbor{},
 			},
 		},
 		{
@@ -646,10 +669,10 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 								Port:     ptr.To(int32(1)),
 							},
 						},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination2"}},
 						NamespaceSelector: nil,
 						IPAddress:         "",
-						Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
+						Identifier:        "4c4c30e0f156db2ec7212a9ce68f17613a4a755325e647084ef9379f8eb6caaa",
 					},
 					{
 						Type: "internal",
@@ -661,12 +684,13 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 								Port:     ptr.To(int32(1)),
 							},
 						},
-						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination2"}},
+						PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
 						NamespaceSelector: nil,
 						IPAddress:         "",
-						Identifier:        "4c4c30e0f156db2ec7212a9ce68f17613a4a755325e647084ef9379f8eb6caaa",
+						Identifier:        "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
 					},
 				},
+				Egress: []v1beta1.NetworkNeighbor{},
 			},
 		},
 		{
@@ -717,13 +741,56 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 						Identifier: "0d13d659ca4ba62f02f78781a15e1bfb4f88b29761d06c1b90cfa8834d9845c7",
 					},
 				},
+				Egress: []v1beta1.NetworkNeighbor{},
+			},
+		},
+		{
+			name:      "IP is resolved - DNS is enriched",
+			namespace: "kubescape",
+			networkEvents: []NetworkEvent{
+				{
+					Port:     1,
+					PktType:  "HOST",
+					Protocol: "TCP",
+					Destination: Destination{
+						Kind:      EndpointKindRaw,
+						IPAddress: "1.2.3.4",
+					},
+				},
+			},
+			expectedSpec: v1beta1.NetworkNeighborsSpec{
+				Ingress: []v1beta1.NetworkNeighbor{
+					{
+						Type: "external",
+						DNS:  "domain.com",
+						Ports: []v1beta1.NetworkPort{
+							{
+								Name:     "TCP-1",
+								Protocol: "TCP",
+								Port:     ptr.To(int32(1)),
+							},
+						},
+						IPAddress:  "1.2.3.4",
+						Identifier: "12f9a2d88f8ca830047d7b6324e9ded773a803e42b50a01a36009fc447fc6fb0",
+					},
+				},
+				Egress: []v1beta1.NetworkNeighbor{},
+			},
+			addressToDomainMap: map[string]string{
+				"1.2.3.4": "domain.com",
 			},
 		},
 	}
 
-	am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "")
-
 	for _, tc := range tests {
+		dnsResolver := dnsResolverMock{}
+		dnsResolver.addressToDomainMap = &maps.SafeMap[string, string]{}
+
+		for k, v := range tc.addressToDomainMap {
+			dnsResolver.addressToDomainMap.Set(k, v)
+		}
+
+		am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "", &dnsResolver)
 		networkEventsSet := mapset.NewSet[NetworkEvent]()
 		for _, ne := range tc.networkEvents {
 			networkEventsSet.Add(ne)
@@ -892,7 +959,8 @@ func TestIsValidEvent(t *testing.T) {
 		},
 	}
 
-	am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "test")
+	dnsResolver := dnsmanager.CreateDNSManagerMock()
+	am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "test", dnsResolver)
 
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("Input: %s", tc.name), func(t *testing.T) {
