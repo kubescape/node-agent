@@ -181,13 +181,10 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		ObjectMeta: metav1.ObjectMeta{
 			Name: slug,
 			Annotations: map[string]string{
-				instanceidhandler.WlidMetadataKey:          watchedContainer.Wlid,
-				instanceidhandler.InstanceIDMetadataKey:    watchedContainer.InstanceID.GetStringFormatted(),
-				instanceidhandler.ContainerNameMetadataKey: watchedContainer.InstanceID.GetContainerName(),
-				instanceidhandler.ImageIDMetadataKey:       watchedContainer.ImageID,
-				instanceidhandler.StatusMetadataKey:        "",
+				instanceidhandler.WlidMetadataKey:   watchedContainer.Wlid,
+				instanceidhandler.StatusMetadataKey: "",
 			},
-			Labels: utils.GetLabels(watchedContainer),
+			Labels: utils.GetLabels(watchedContainer, true),
 		},
 	}
 	// add syscalls
@@ -229,16 +226,15 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		ObjectMeta: metav1.ObjectMeta{
 			Name: slug,
 			Annotations: map[string]string{
-				instanceidhandler.WlidMetadataKey:          watchedContainer.Wlid,
-				instanceidhandler.InstanceIDMetadataKey:    watchedContainer.InstanceID.GetStringFormatted(),
-				instanceidhandler.ContainerNameMetadataKey: watchedContainer.InstanceID.GetContainerName(),
-				instanceidhandler.ImageIDMetadataKey:       watchedContainer.ImageID,
-				instanceidhandler.StatusMetadataKey:        "",
+				instanceidhandler.WlidMetadataKey:   watchedContainer.Wlid,
+				instanceidhandler.StatusMetadataKey: "",
 			},
-			Labels: utils.GetLabels(watchedContainer),
+			Labels: utils.GetLabels(watchedContainer, true),
 		},
 	}
-	newProfileContainer := v1beta1.ApplicationProfileContainer{}
+	newProfileContainer := v1beta1.ApplicationProfileContainer{
+		Name: watchedContainer.InstanceID.GetContainerName(),
+	}
 	// add capabilities
 	newProfileContainer.Capabilities = capabilities.ToSlice()
 	sort.Strings(newProfileContainer.Capabilities)

@@ -112,10 +112,12 @@ func Atoi(s string) int {
 	return i
 }
 
-func GetLabels(watchedContainer *WatchedContainerData) map[string]string {
+func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[string]string {
 	labels := watchedContainer.InstanceID.GetLabels()
 	for i := range labels {
 		if labels[i] == "" {
+			delete(labels, i)
+		} else if stripContainer && i == instanceidhandler2.ContainerNameMetadataKey {
 			delete(labels, i)
 		} else {
 			if i == instanceidhandler2.KindMetadataKey {
