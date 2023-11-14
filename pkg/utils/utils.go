@@ -138,31 +138,34 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 	return labels
 }
 
-func GetApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) v1beta1.ApplicationProfileContainer {
+func GetApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) *v1beta1.ApplicationProfileContainer {
+	if profile == nil {
+		return nil
+	}
 	switch containerType {
 	case Container:
 		if len(profile.Spec.Containers) > containerIndex {
-			return profile.Spec.Containers[containerIndex]
+			return &profile.Spec.Containers[containerIndex]
 		}
 	case InitContainer:
 		if len(profile.Spec.InitContainers) > containerIndex {
-			return profile.Spec.InitContainers[containerIndex]
+			return &profile.Spec.InitContainers[containerIndex]
 		}
 	}
-	return v1beta1.ApplicationProfileContainer{}
+	return nil
 }
 
-func InsertApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int, profileContainer v1beta1.ApplicationProfileContainer) {
+func InsertApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int, profileContainer *v1beta1.ApplicationProfileContainer) {
 	switch containerType {
 	case Container:
 		if len(profile.Spec.Containers) <= containerIndex {
 			profile.Spec.Containers = append(profile.Spec.Containers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.Containers)+1)...)
 		}
-		profile.Spec.Containers[containerIndex] = profileContainer
+		profile.Spec.Containers[containerIndex] = *profileContainer
 	case InitContainer:
 		if len(profile.Spec.InitContainers) <= containerIndex {
 			profile.Spec.InitContainers = append(profile.Spec.InitContainers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.InitContainers)+1)...)
 		}
-		profile.Spec.InitContainers[containerIndex] = profileContainer
+		profile.Spec.InitContainers[containerIndex] = *profileContainer
 	}
 }
