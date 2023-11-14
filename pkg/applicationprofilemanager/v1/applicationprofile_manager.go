@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/armosec/utils-k8s-go/wlid"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -27,6 +28,7 @@ import (
 
 type ApplicationProfileManager struct {
 	cfg                      config.Config
+	clusterName              string
 	ctx                      context.Context
 	capabilitiesSets         maps.SafeMap[string, mapset.Set[string]]            // key is k8sContainerID
 	execSets                 maps.SafeMap[string, map[string]mapset.Set[string]] // key is k8sContainerID
@@ -39,9 +41,10 @@ type ApplicationProfileManager struct {
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient) (*ApplicationProfileManager, error) {
+func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
 		cfg:           cfg,
+		clusterName:   clusterName,
 		ctx:           ctx,
 		k8sClient:     k8sClient,
 		storageClient: storageClient,
@@ -58,6 +61,24 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 		return
 	}
 	pod := wl.(*workloadinterface.Workload)
+	// find parentWlid
+	kind, name, err := am.k8sClient.CalculateWorkloadParentRecursive(pod)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to calculate workload parent", helpers.Error(err))
+		return
+	}
+	parentWorkload, err := am.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get parent workload", helpers.Error(err))
+		return
+	}
+	w := parentWorkload.(*workloadinterface.Workload)
+	watchedContainer.Wlid = w.GenerateWlid(am.clusterName)
+	err = wlid.IsWlidValid(watchedContainer.Wlid)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to validate WLID", helpers.Error(err))
+		return
+	}
 	// find instanceID
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {

@@ -24,7 +24,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	ctx := context.TODO()
 	k8sClient := &k8sclient.K8sClientMock{}
 	storageClient := &storage.StorageHttpClientMock{}
-	am, err := CreateApplicationProfileManager(ctx, cfg, k8sClient, storageClient)
+	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient)
 	assert.NoError(t, err)
 	// report container started
 	container := &containercollection.Container{
