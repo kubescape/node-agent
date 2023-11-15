@@ -37,7 +37,12 @@ func (sc *StorageHttpClientMock) GetApplicationActivity(_, _ string) (*spdxv1bet
 
 func (sc *StorageHttpClientMock) GetApplicationProfile(_, _ string) (*spdxv1beta1.ApplicationProfile, error) {
 	return &spdxv1beta1.ApplicationProfile{
-		Spec: spdxv1beta1.ApplicationProfileSpec{},
+		Spec: spdxv1beta1.ApplicationProfileSpec{
+			Containers: []spdxv1beta1.ApplicationProfileContainer{
+				{Capabilities: []string{"SYS_ADMIN"}},
+				{Capabilities: []string{"NET_BROADCAST"}},
+			},
+		},
 	}, nil
 }
 

@@ -24,7 +24,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	ctx := context.TODO()
 	k8sClient := &k8sclient.K8sClientMock{}
 	storageClient := &storage.StorageHttpClientMock{}
-	am, err := CreateApplicationProfileManager(ctx, cfg, k8sClient, storageClient)
+	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient)
 	assert.NoError(t, err)
 	// report container started
 	container := &containercollection.Container{
@@ -69,9 +69,9 @@ func TestApplicationProfileManager(t *testing.T) {
 	sort.Strings(storageClient.ApplicationActivities[0].Spec.Syscalls)
 	assert.Equal(t, []string{"dup", "listen", "open"}, storageClient.ApplicationActivities[0].Spec.Syscalls)
 	assert.Equal(t, 2, len(storageClient.ApplicationProfiles))
-	sort.Strings(storageClient.ApplicationProfiles[0].Spec.Capabilities)
-	assert.Equal(t, []string{"NET_BIND_SERVICE", "NET_BROADCAST"}, storageClient.ApplicationProfiles[0].Spec.Capabilities)
-	assert.Equal(t, []v1beta1.ExecCalls{{Path: "/bin/bash", Args: []string{"-c", "ls"}, Envs: []string(nil)}}, storageClient.ApplicationProfiles[0].Spec.Execs)
-	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Opens)
+	sort.Strings(storageClient.ApplicationProfiles[0].Spec.Containers[0].Capabilities)
+	assert.Equal(t, []string{"NET_BIND_SERVICE", "NET_BROADCAST"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Capabilities)
+	assert.Equal(t, []v1beta1.ExecCalls{{Path: "/bin/bash", Args: []string{"-c", "ls"}, Envs: []string(nil)}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Execs)
+	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Opens)
 	assert.Equal(t, 2, len(storageClient.ApplicationProfileSummaries))
 }

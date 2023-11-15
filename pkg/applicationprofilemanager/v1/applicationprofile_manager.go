@@ -8,8 +8,10 @@ import (
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
+	"sort"
 	"time"
 
+	"github.com/armosec/utils-k8s-go/wlid"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -26,6 +28,7 @@ import (
 
 type ApplicationProfileManager struct {
 	cfg                      config.Config
+	clusterName              string
 	ctx                      context.Context
 	capabilitiesSets         maps.SafeMap[string, mapset.Set[string]]            // key is k8sContainerID
 	execSets                 maps.SafeMap[string, map[string]mapset.Set[string]] // key is k8sContainerID
@@ -38,9 +41,10 @@ type ApplicationProfileManager struct {
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient) (*ApplicationProfileManager, error) {
+func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
 		cfg:           cfg,
+		clusterName:   clusterName,
 		ctx:           ctx,
 		k8sClient:     k8sClient,
 		storageClient: storageClient,
@@ -57,6 +61,24 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 		return
 	}
 	pod := wl.(*workloadinterface.Workload)
+	// find parentWlid
+	kind, name, err := am.k8sClient.CalculateWorkloadParentRecursive(pod)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to calculate workload parent", helpers.Error(err))
+		return
+	}
+	parentWorkload, err := am.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get parent workload", helpers.Error(err))
+		return
+	}
+	w := parentWorkload.(*workloadinterface.Workload)
+	watchedContainer.Wlid = w.GenerateWlid(am.clusterName)
+	err = wlid.IsWlidValid(watchedContainer.Wlid)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to validate WLID", helpers.Error(err))
+		return
+	}
 	// find instanceID
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {
@@ -69,6 +91,38 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 			watchedContainer.InstanceID = instanceIDs[i]
 		}
 	}
+	// find container type and index
+	// containers
+	if watchedContainer.ContainerType == utils.Unknown {
+		containers, err := pod.GetContainers()
+		if err != nil {
+			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get containers", helpers.Error(err))
+			return
+		}
+		for i, c := range containers {
+			if c.Name == container.K8s.ContainerName {
+				watchedContainer.ContainerIndex = i
+				watchedContainer.ContainerType = utils.Container
+				break
+			}
+		}
+	}
+	// initContainers
+	if watchedContainer.ContainerType == utils.Unknown {
+		initContainers, err := pod.GetInitContainers()
+		if err != nil {
+			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get init containers", helpers.Error(err))
+			return
+		}
+		for i, c := range initContainers {
+			if c.Name == container.K8s.ContainerName {
+				watchedContainer.ContainerIndex = i
+				watchedContainer.ContainerType = utils.InitContainer
+				break
+			}
+		}
+	}
+	// FIXME ephemeralContainers are not supported yet
 }
 
 func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
@@ -115,101 +169,130 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		return
 	}
 
-	// activity sets
+	// check if we have new activities to save
+	var addedActivities int
 	syscalls := mapset.NewSet[string]()
 	// existing activity
-	existingActivity, _ := am.storageClient.GetApplicationActivity(slug, namespace)
-	if existingActivity != nil {
+	existingActivity, _ := am.storageClient.GetApplicationActivity(namespace, slug)
+	if existingActivity != nil && existingActivity.Spec.Syscalls != nil {
 		syscalls.Append(existingActivity.Spec.Syscalls...)
 	}
-	// new activity
-	newActivity := &v1beta1.ApplicationActivity{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: slug,
-			Annotations: map[string]string{
-				instanceidhandler.WlidMetadataKey:          watchedContainer.Wlid,
-				instanceidhandler.InstanceIDMetadataKey:    watchedContainer.InstanceID.GetStringFormatted(),
-				instanceidhandler.ContainerNameMetadataKey: watchedContainer.InstanceID.GetContainerName(),
-				instanceidhandler.ImageIDMetadataKey:       watchedContainer.ImageID,
-				instanceidhandler.StatusMetadataKey:        "",
-			},
-			Labels: utils.GetLabels(watchedContainer),
-		},
-	}
-	// add syscalls
-	newSyscalls, err := am.syscallPeekFunc(watchedContainer.NsMntId)
-	if err == nil {
-		syscalls.Append(newSyscalls...)
-	} else {
+	// get syscalls from IG
+	observedSyscalls, err := am.syscallPeekFunc(watchedContainer.NsMntId)
+	if err != nil {
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get syscalls", helpers.Error(err))
 	}
-	newActivity.Spec.Syscalls = syscalls.ToSlice()
-	if err := am.storageClient.CreateApplicationActivity(newActivity, namespace); err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application activity", helpers.Error(err))
+	addedActivities += syscalls.Append(observedSyscalls...)
+	// new activity
+	if addedActivities > 0 {
+		newActivity := &v1beta1.ApplicationActivity{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: slug,
+				Annotations: map[string]string{
+					instanceidhandler.WlidMetadataKey:   watchedContainer.Wlid,
+					instanceidhandler.StatusMetadataKey: "",
+				},
+				Labels: utils.GetLabels(watchedContainer, true),
+			},
+		}
+		// add syscalls
+		newActivity.Spec.Syscalls = syscalls.ToSlice()
+		// save application activity
+		if err := am.storageClient.CreateApplicationActivity(newActivity, namespace); err != nil {
+			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application activity", helpers.Error(err))
+		}
+		logger.L().Debug("ApplicationProfileManager - saved application activity", helpers.String("slug", slug), helpers.String("container ID", watchedContainer.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
 
 	// profile sets
-	capabilities := am.capabilitiesSets.Get(watchedContainer.K8sContainerID)
-	execs := am.execSets.Get(watchedContainer.K8sContainerID)
-	opens := am.openSets.Get(watchedContainer.K8sContainerID)
+	var addedProfiles int
+	capabilities := mapset.NewSet[string]()
+	execs := make(map[string]mapset.Set[string])
+	opens := make(map[string]mapset.Set[string])
 	// existing profile
-	existingProfile, _ := am.storageClient.GetApplicationProfile(slug, namespace)
-	if existingProfile != nil {
-		capabilities.Append(existingProfile.Spec.Capabilities...)
-		for _, exec := range existingProfile.Spec.Execs {
+	existingProfile, _ := am.storageClient.GetApplicationProfile(namespace, slug)
+	existingProfileContainer := utils.GetApplicationProfileContainer(existingProfile, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
+	if existingProfileContainer != nil {
+		capabilities.Append(existingProfileContainer.Capabilities...)
+		for _, exec := range existingProfileContainer.Execs {
 			if _, exist := execs[exec.Path]; !exist {
 				execs[exec.Path] = mapset.NewSet[string]()
 			}
 			execs[exec.Path].Append(exec.Args...)
 		}
-		for _, open := range existingProfile.Spec.Opens {
+		for _, open := range existingProfileContainer.Opens {
 			if _, exist := opens[open.Path]; !exist {
 				opens[open.Path] = mapset.NewSet[string]()
 			}
 			opens[open.Path].Append(open.Flags...)
 		}
 	}
+	// get capabilities, execs and opens from IG
+	addedProfiles += capabilities.Append(am.capabilitiesSets.Get(watchedContainer.K8sContainerID).ToSlice()...)
+	for path, exec := range am.execSets.Get(watchedContainer.K8sContainerID) {
+		if _, exist := execs[path]; !exist {
+			execs[path] = mapset.NewSet[string]()
+		}
+		addedProfiles += execs[path].Append(exec.ToSlice()...)
+	}
+	for path, open := range am.openSets.Get(watchedContainer.K8sContainerID) {
+		if _, exist := opens[path]; !exist {
+			opens[path] = mapset.NewSet[string]()
+		}
+		addedProfiles += opens[path].Append(open.ToSlice()...)
+	}
 	// new profile
-	newProfile := &v1beta1.ApplicationProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: slug,
-			Annotations: map[string]string{
-				instanceidhandler.WlidMetadataKey:          watchedContainer.Wlid,
-				instanceidhandler.InstanceIDMetadataKey:    watchedContainer.InstanceID.GetStringFormatted(),
-				instanceidhandler.ContainerNameMetadataKey: watchedContainer.InstanceID.GetContainerName(),
-				instanceidhandler.ImageIDMetadataKey:       watchedContainer.ImageID,
-				instanceidhandler.StatusMetadataKey:        "",
+	if addedProfiles > 0 {
+		newProfile := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: slug,
+				Annotations: map[string]string{
+					instanceidhandler.WlidMetadataKey:   watchedContainer.Wlid,
+					instanceidhandler.StatusMetadataKey: "",
+				},
+				Labels: utils.GetLabels(watchedContainer, true),
 			},
-			Labels: utils.GetLabels(watchedContainer),
-		},
-	}
-	// add capabilities
-	newProfile.Spec.Capabilities = capabilities.ToSlice()
-	// add execs
-	newProfile.Spec.Execs = make([]v1beta1.ExecCalls, 0)
-	for path, exec := range execs {
-		newProfile.Spec.Execs = append(newProfile.Spec.Execs, v1beta1.ExecCalls{
-			Path: path,
-			Args: exec.ToSlice(),
-		})
-	}
-	// add opens
-	newProfile.Spec.Opens = make([]v1beta1.OpenCalls, 0)
-	for path, open := range opens {
-		newProfile.Spec.Opens = append(newProfile.Spec.Opens, v1beta1.OpenCalls{
-			Path:  path,
-			Flags: open.ToSlice(),
-		})
-	}
-	if err := am.storageClient.CreateApplicationProfile(newProfile, namespace); err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application profile", helpers.Error(err))
-	}
-	// profile summary
-	summary := &v1beta1.ApplicationProfileSummary{
-		ObjectMeta: newProfile.ObjectMeta,
-	}
-	if err := am.storageClient.CreateApplicationProfileSummary(summary, namespace); err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application profile summary", helpers.Error(err))
+		}
+		newProfileContainer := &v1beta1.ApplicationProfileContainer{
+			Name: watchedContainer.InstanceID.GetContainerName(),
+		}
+		// add capabilities
+		newProfileContainer.Capabilities = capabilities.ToSlice()
+		sort.Strings(newProfileContainer.Capabilities)
+		// add execs
+		newProfileContainer.Execs = make([]v1beta1.ExecCalls, 0)
+		for path, exec := range execs {
+			args := exec.ToSlice()
+			sort.Strings(args)
+			newProfileContainer.Execs = append(newProfileContainer.Execs, v1beta1.ExecCalls{
+				Path: path,
+				Args: args,
+			})
+		}
+		// add opens
+		newProfileContainer.Opens = make([]v1beta1.OpenCalls, 0)
+		for path, open := range opens {
+			flags := open.ToSlice()
+			sort.Strings(flags)
+			newProfileContainer.Opens = append(newProfileContainer.Opens, v1beta1.OpenCalls{
+				Path:  path,
+				Flags: flags,
+			})
+		}
+		// insert application profile container
+		utils.InsertApplicationProfileContainer(newProfile, watchedContainer.ContainerType, watchedContainer.ContainerIndex, newProfileContainer)
+		// save application profile
+		if err := am.storageClient.CreateApplicationProfile(newProfile, namespace); err != nil {
+			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application profile", helpers.Error(err))
+		}
+		logger.L().Debug("ApplicationProfileManager - saved application profile", helpers.String("slug", slug), helpers.String("container ID", watchedContainer.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		// profile summary
+		summary := &v1beta1.ApplicationProfileSummary{
+			ObjectMeta: newProfile.ObjectMeta,
+		}
+		if err := am.storageClient.CreateApplicationProfileSummary(summary, namespace); err != nil {
+			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application profile summary", helpers.Error(err))
+		}
 	}
 }
 
