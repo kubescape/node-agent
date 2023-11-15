@@ -2,11 +2,12 @@ package relevancymanager
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"node-agent/pkg/config"
 	"node-agent/pkg/filehandler/v1"
 	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/sbomhandler/v1"
+	"node-agent/pkg/sbomhandler/syfthandler"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
 	"os"
@@ -17,6 +18,8 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kinbiko/jsonassert"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -33,6 +36,9 @@ func BenchmarkRelevancyManager_ReportFileAccess(b *testing.B) {
 	b.ReportAllocs()
 }
 
+//go:embed testdata/nginx-syft-crd.json
+var nginxSyftCRD []byte
+
 func TestRelevancyManager(t *testing.T) {
 	// create a new relevancy manager
 	cfg := config.Config{
@@ -41,12 +47,18 @@ func TestRelevancyManager(t *testing.T) {
 		MaxSniffingTime:  5 * time.Minute,
 		UpdateDataPeriod: 20 * time.Second,
 	}
+
 	ctx := context.TODO()
 	fileHandler, err := filehandler.CreateInMemoryFileHandler()
 	assert.NoError(t, err)
 	k8sClient := &k8sclient.K8sClientMock{}
-	storageClient := storage.CreateSBOMStorageHttpClientMock("nginx-spdx-format-mock.json")
-	sbomHandler := sbomhandler.CreateSBOMHandler(storageClient)
+	var syftDoc v1beta1.SBOMSyft
+	err = json.Unmarshal(nginxSyftCRD, &syftDoc)
+	assert.NoError(t, err)
+
+	storageClient := storage.CreateSyftSBOMStorageHttpClientMock(syftDoc)
+	sbomHandler := syfthandler.CreateSyftSBOMHandler(storageClient)
+
 	relevancyManager, err := CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, k8sClient, sbomHandler)
 	assert.NoError(t, err)
 	// report container started
@@ -68,15 +80,18 @@ func TestRelevancyManager(t *testing.T) {
 		Type:      containercollection.EventTypeAddContainer,
 		Container: container,
 	})
+
 	// report file access
 	files := []string{
 		"/path/to/file",
 		"/path/to/file2",
 		"/usr/sbin/deluser",
 	}
+
 	for _, file := range files {
 		relevancyManager.ReportFileAccess("ns/pod/cont", file)
 	}
+
 	// let it run for a while
 	time.Sleep(5 * time.Second)
 	// report a same file again, should do noop
@@ -84,10 +99,11 @@ func TestRelevancyManager(t *testing.T) {
 	// let it run for a while
 	time.Sleep(5 * time.Second)
 	// verify files are reported and we have only 1 filtered SBOM
-	assert.NotNil(t, storageClient.FilteredSBOMs)
-	assert.Equal(t, 1, len(storageClient.FilteredSBOMs))
-	assert.Equal(t, 1, len(storageClient.FilteredSBOMs[0].Spec.SPDX.Files))
-	assert.Equal(t, "/usr/sbin/deluser", storageClient.FilteredSBOMs[0].Spec.SPDX.Files[0].FileName)
+	assert.NotNil(t, storageClient.FilteredSyftSBOMs)
+	assert.Equal(t, 1, len(storageClient.FilteredSyftSBOMs))
+	assert.Equal(t, 1, len(storageClient.FilteredSyftSBOMs[0].Spec.Syft.Files))
+	assert.Equal(t, "/usr/sbin/deluser", storageClient.FilteredSyftSBOMs[0].Spec.Syft.Files[0].Location.RealPath)
+
 	// add one more vulnerable file
 	relevancyManager.ReportFileAccess("ns/pod/cont", "/etc/deluser.conf")
 	time.Sleep(1 * time.Second)
@@ -96,15 +112,25 @@ func TestRelevancyManager(t *testing.T) {
 		Type:      containercollection.EventTypeRemoveContainer,
 		Container: container,
 	})
+
 	// let it stop
 	time.Sleep(1 * time.Second)
+
 	// verify files are reported (old and new ones)
-	assert.Equal(t, 2, len(storageClient.FilteredSBOMs[1].Spec.SPDX.Files))
-	assert.Equal(t, "/usr/sbin/deluser", storageClient.FilteredSBOMs[1].Spec.SPDX.Files[0].FileName)
-	assert.Equal(t, "/etc/deluser.conf", storageClient.FilteredSBOMs[1].Spec.SPDX.Files[1].FileName)
-	// check full content
-	gotBytes, err := json.Marshal(storageClient.FilteredSBOMs[0])
+	assert.Equal(t, 2, len(storageClient.FilteredSyftSBOMs[1].Spec.Syft.Files))
+	foundFiles := 0
+	for _, file := range storageClient.FilteredSyftSBOMs[1].Spec.Syft.Files {
+		if file.Location.RealPath == "/usr/sbin/deluser" || file.Location.RealPath == "/etc/deluser.conf" {
+			foundFiles++
+		}
+	}
+
+	assert.Equal(t, foundFiles, 2)
+
+	// write filtered sbom to json file
+	gotBytes, err := json.Marshal(storageClient.FilteredSyftSBOMs[0])
 	assert.NoError(t, err)
+
 	wantBytes, err := os.ReadFile(path.Join(utils.CurrentDir(), "testdata", "nginx-spdx-filtered.json"))
 	assert.NoError(t, err)
 	ja := jsonassert.New(t)
@@ -116,21 +142,29 @@ func TestRelevancyManager(t *testing.T) {
 }
 
 func TestRelevancyManagerIncompleteSBOM(t *testing.T) {
-	// create a new relevancy manager
 	cfg := config.Config{
 		EnableRelevancy:  true,
 		InitialDelay:     1 * time.Second,
 		MaxSniffingTime:  5 * time.Minute,
 		UpdateDataPeriod: 20 * time.Second,
 	}
+
 	ctx := context.TODO()
 	fileHandler, err := filehandler.CreateInMemoryFileHandler()
 	assert.NoError(t, err)
+
 	k8sClient := &k8sclient.K8sClientMock{}
-	storageClient := storage.CreateSBOMStorageHttpClientMock("sbom-incomplete-mock.json")
-	sbomHandler := sbomhandler.CreateSBOMHandler(storageClient)
+	var syftDoc v1beta1.SBOMSyft
+	err = json.Unmarshal(nginxSyftCRD, &syftDoc)
+	assert.NoError(t, err)
+	syftDoc.Annotations = map[string]string{
+		instanceidhandler.StatusMetadataKey: "incomplete"}
+
+	storageClient := storage.CreateSyftSBOMStorageHttpClientMock(syftDoc)
+	sbomHandler := syfthandler.CreateSyftSBOMHandler(storageClient)
 	relevancyManager, err := CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, k8sClient, sbomHandler)
 	assert.NoError(t, err)
+
 	// report container started
 	container := &containercollection.Container{
 		K8s: containercollection.K8sMetadata{
@@ -162,6 +196,6 @@ func TestRelevancyManagerIncompleteSBOM(t *testing.T) {
 	// let it stop
 	time.Sleep(1 * time.Second)
 	// verify filtered SBOM is created
-	assert.NotNil(t, storageClient.FilteredSBOMs)
-	assert.Equal(t, 1, len(storageClient.FilteredSBOMs))
+	assert.NotNil(t, storageClient.FilteredSyftSBOMs)
+	assert.Equal(t, 1, len(storageClient.FilteredSyftSBOMs))
 }

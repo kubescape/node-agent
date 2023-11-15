@@ -29,20 +29,18 @@ type PackageSourceInfoData struct {
 }
 
 type WatchedContainerData struct {
-	ContainerID                              string
-	FilteredSpdxData                         *v1beta1.SBOMSPDXv2p3Filtered
-	ImageID                                  string
-	ImageTag                                 string
-	InitialDelayExpired                      bool
-	InstanceID                               instanceidhandler.IInstanceID
-	K8sContainerID                           string
-	RelevantRealtimeFilesByPackageSourceInfo map[string]*PackageSourceInfoData
-	RelevantRealtimeFilesBySPDXIdentifier    map[v1beta1.ElementID]bool
-	SBOMResourceVersion                      int
-	SyncChannel                              chan error
-	UpdateDataTicker                         *time.Ticker
-	Wlid                                     string
-	NsMntId                                  uint64
+	ContainerID                   string
+	ImageID                       string
+	ImageTag                      string
+	InitialDelayExpired           bool
+	InstanceID                    instanceidhandler.IInstanceID
+	K8sContainerID                string
+	RelevantSyftFilesByIdentifier map[string]bool
+	SBOMResourceVersion           int
+	SyncChannel                   chan error
+	UpdateDataTicker              *time.Ticker
+	Wlid                          string
+	NsMntId                       uint64
 }
 
 func Between(value string, a string, b string) string {

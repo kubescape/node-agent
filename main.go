@@ -14,7 +14,7 @@ import (
 	"node-agent/pkg/networkmanager"
 	"node-agent/pkg/relevancymanager"
 	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
-	"node-agent/pkg/sbomhandler/v1"
+	"node-agent/pkg/sbomhandler/syfthandler"
 	"node-agent/pkg/storage/v1"
 	"os"
 	"os/signal"
@@ -96,7 +96,8 @@ func main() {
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("failed to create the filehandler for relevancy manager", helpers.Error(err))
 		}
-		sbomHandler := sbomhandler.CreateSBOMHandler(storageClient)
+
+		sbomHandler := syfthandler.CreateSyftSBOMHandler(storageClient)
 		relevancyManager, err = relevancymanagerv1.CreateRelevancyManager(ctx, cfg, clusterData.ClusterName, fileHandler, k8sClient, sbomHandler)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))

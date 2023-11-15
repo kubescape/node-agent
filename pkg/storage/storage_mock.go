@@ -20,10 +20,11 @@ type StorageHttpClientMock struct {
 	ApplicationActivities       []*spdxv1beta1.ApplicationActivity
 	ApplicationProfiles         []*spdxv1beta1.ApplicationProfile
 	ApplicationProfileSummaries []*spdxv1beta1.ApplicationProfileSummary
-	FilteredSBOMs               []*spdxv1beta1.SBOMSPDXv2p3Filtered
+	FilteredSyftSBOMs           []*spdxv1beta1.SBOMSyftFiltered
 	NetworkNeighborses          []*v1beta1.NetworkNeighbors
 	ImageCounters               map[string]int
 	nginxSBOMSpdxBytes          *spdxv1beta1.SBOMSPDXv2p3
+	mockSBOM                    *v1beta1.SBOMSyft
 }
 
 func (sc *StorageHttpClientMock) GetApplicationActivity(_, _ string) (*spdxv1beta1.ApplicationActivity, error) {
@@ -36,13 +37,18 @@ func (sc *StorageHttpClientMock) GetApplicationActivity(_, _ string) (*spdxv1bet
 
 func (sc *StorageHttpClientMock) GetApplicationProfile(_, _ string) (*spdxv1beta1.ApplicationProfile, error) {
 	return &spdxv1beta1.ApplicationProfile{
-		Spec: spdxv1beta1.ApplicationProfileSpec{
-			Capabilities: []string{"NET_BROADCAST"},
-		},
+		Spec: spdxv1beta1.ApplicationProfileSpec{},
 	}, nil
 }
 
 var _ StorageClient = (*StorageHttpClientMock)(nil)
+
+func CreateSyftSBOMStorageHttpClientMock(sbom spdxv1beta1.SBOMSyft) *StorageHttpClientMock {
+	return &StorageHttpClientMock{
+		ImageCounters: map[string]int{},
+		mockSBOM:      &sbom,
+	}
+}
 
 func CreateSBOMStorageHttpClientMock(sbom string) *StorageHttpClientMock {
 	var data spdxv1beta1.SBOMSPDXv2p3
@@ -82,16 +88,13 @@ func (sc *StorageHttpClientMock) CreateNetworkNeighbors(networkNeighbors *v1beta
 	return nil
 }
 
-func (sc *StorageHttpClientMock) CreateFilteredSBOM(SBOM *spdxv1beta1.SBOMSPDXv2p3Filtered) error {
-	sc.FilteredSBOMs = append(sc.FilteredSBOMs, SBOM)
+func (sc *StorageHttpClientMock) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error {
+	sc.FilteredSyftSBOMs = append(sc.FilteredSyftSBOMs, SBOM)
 	return nil
 }
 
-func (sc *StorageHttpClientMock) GetSBOM(name string) (*spdxv1beta1.SBOMSPDXv2p3, error) {
-	if name == NginxKey {
-		return sc.nginxSBOMSpdxBytes, nil
-	}
-	return nil, nil
+func (sc *StorageHttpClientMock) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
+	return sc.mockSBOM, nil
 }
 
 func (sc *StorageHttpClientMock) PatchFilteredSBOM(_ string, _ *spdxv1beta1.SBOMSPDXv2p3Filtered) error {

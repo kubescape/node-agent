@@ -145,12 +145,10 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 	defer span.End()
 
 	watchedContainer := &utils.WatchedContainerData{
-		ContainerID:                              container.Runtime.ContainerID,
-		UpdateDataTicker:                         time.NewTicker(am.cfg.InitialDelay),
-		SyncChannel:                              make(chan error, 10),
-		K8sContainerID:                           k8sContainerID,
-		RelevantRealtimeFilesByPackageSourceInfo: map[string]*utils.PackageSourceInfoData{},
-		RelevantRealtimeFilesBySPDXIdentifier:    map[v1beta1.ElementID]bool{},
+		ContainerID:      container.Runtime.ContainerID,
+		UpdateDataTicker: time.NewTicker(am.cfg.InitialDelay),
+		SyncChannel:      make(chan error, 10),
+		K8sContainerID:   k8sContainerID,
 	}
 	am.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
 

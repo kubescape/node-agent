@@ -1,162 +1,825 @@
 {
-  "metadata": {
-    "name": "ns-pod-pod-cb3a-a929",
-    "creationTimestamp": null,
-    "labels": {
-      "kubescape.io/workload-api-version": "v1",
-      "kubescape.io/workload-container-name": "cont",
-      "kubescape.io/workload-kind": "Pod",
-      "kubescape.io/workload-name": "Pod",
-      "kubescape.io/workload-namespace": "ns"
-    },
-    "annotations": {
-      "kubescape.io/image-id": "nginx@sha256:6a59f1cbb8d28ac484176d52c473494859a512ddba3ea62a547258cf16c9b3ae",
-      "kubescape.io/instance-id": "apiVersion-v1/namespace-ns/kind-Pod/name-pod/containerName-cont",
-      "kubescape.io/status": "",
-      "kubescape.io/wlid": "wlid://cluster-cluster/namespace-ns/pod-pod",
-      "kubescape.io/workload-container-name": "cont"
-    }
-  },
-  "spec": {
     "metadata": {
-      "tool": {
-        "name": "",
-        "version": ""
-      },
-      "report": {
-        "createdAt": null
-      }
+        "name": "ns-pod-pod-cb3a-a929",
+        "creationTimestamp": null,
+        "labels": {
+            "kubescape.io/workload-api-version": "v1",
+            "kubescape.io/workload-container-name": "cont",
+            "kubescape.io/workload-kind": "Pod",
+            "kubescape.io/workload-name": "Pod",
+            "kubescape.io/workload-namespace": "ns"
+        },
+        "annotations": {
+            "kubescape.io/image-id": "nginx@sha256:6a59f1cbb8d28ac484176d52c473494859a512ddba3ea62a547258cf16c9b3ae",
+            "kubescape.io/instance-id": "apiVersion-v1/namespace-ns/kind-Pod/name-pod/containerName-cont",
+            "kubescape.io/wlid": "wlid://cluster-cluster/namespace-ns/pod-pod",
+            "kubescape.io/workload-container-name": "cont"
+        }
     },
-    "spdx": {
-      "documentDescribes": null,
-      "spdxVersion": "SPDX-2.3",
-      "dataLicense": "CC0-1.0",
-      "SPDXID": "SPDXRef-DOCUMENT",
-      "name": "nginx",
-      "documentNamespace": "https://anchore.com/syft/image/nginx-b0a8069e-2bcf-445e-b535-de6d078a6d36",
-      "externalDocumentRefs": null,
-      "comment": "",
-      "creationInfo": {
-        "licenseListVersion": "3.19",
-        "creators": [
-          "Organization: Anchore, Inc",
-          "Tool: syft-0.70.0",
-          "Organization: Kubescape",
-          "Tool: KubescapeNodeAgent"
-        ],
-        "created": "2023-02-26T13:34:46Z",
-        "comment": ""
-      },
-      "packages": ["<<UNORDERED>>",
-        {
-          "hasFiles": null,
-          "name": "adduser",
-          "SPDXID": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
-          "versionInfo": "3.118",
-          "packageFileName": "",
-          "supplier": null,
-          "originator": "Person: Debian Adduser Developers \u003cadduser@packages.debian.org\u003e",
-          "downloadLocation": "NOASSERTION",
-          "filesAnalyzed": false,
-          "packageVerificationCode": null,
-          "checksums": null,
-          "homepage": "",
-          "sourceInfo": "acquired package info from DPKG DB: /usr/share/doc/adduser/copyright, /var/lib/dpkg/info/adduser.conffiles, /var/lib/dpkg/info/adduser.md5sums, /var/lib/dpkg/status",
-          "licenseConcluded": "GPL-2.0-only",
-          "licenseInfoFromFiles": null,
-          "licenseDeclared": "GPL-2.0-only",
-          "licenseComments": "",
-          "copyrightText": "NOASSERTION",
-          "summary": "",
-          "description": "",
-          "comment": "",
-          "externalRefs": [
-            {
-              "referenceCategory": "SECURITY",
-              "referenceType": "cpe23Type",
-              "referenceLocator": "cpe:2.3:a:adduser:adduser:3.118:*:*:*:*:*:*:*",
-              "comment": ""
+    "spec": {
+        "metadata": {
+            "tool": {
+                "name": "",
+                "version": ""
             },
-            {
-              "referenceCategory": "PACKAGE-MANAGER",
-              "referenceType": "purl",
-              "referenceLocator": "pkg:deb/debian/adduser@3.118?arch=all\u0026distro=debian-11",
-              "comment": ""
+            "report": {
+                "createdAt": null
             }
-          ],
-          "attributionTexts": null,
-          "primaryPackagePurpose": "",
-          "releaseDate": "",
-          "builtDate": "",
-          "validUntilDate": "",
-          "files": null,
-          "annotations": null
-        }
-      ],
-      "files": ["<<UNORDERED>>",
-        {
-          "fileName": "/usr/sbin/deluser",
-          "SPDXID": "SPDXRef-1a35bf77abe6053c",
-          "fileTypes": null,
-          "checksums": [
-            {
-              "algorithm": "SHA1",
-              "checksumValue": "0000000000000000000000000000000000000000"
-            }
-          ],
-          "licenseConcluded": "NOASSERTION",
-          "licenseInfoInFiles": null,
-          "licenseComments": "",
-          "copyrightText": "",
-          "artifactOfs": null,
-          "comment": "layerID: sha256:67a4178b7d47beb6a1f697a593bd0c6841c67eb0da00f2badefb05fd30671490",
-          "noticeText": "",
-          "fileContributors": null,
-          "attributionTexts": null,
-          "fileDependencies": null,
-          "annotations": null
         },
-        {
-          "fileName": "/etc/deluser.conf",
-          "SPDXID": "SPDXRef-3ec7e593276354ae",
-          "fileTypes": null,
-          "checksums": [
-            {
-              "algorithm": "SHA1",
-              "checksumValue": "0000000000000000000000000000000000000000"
+        "syft": {
+            "artifacts": [
+                {
+                    "id": "5aeab6f311d0e8bb",
+                    "name": "adduser",
+                    "version": "3.134",
+                    "type": "deb",
+                    "foundBy": "dpkgdb-cataloger",
+                    "locations": [
+                        {
+                            "path": "/usr/share/doc/adduser/copyright",
+                            "layerID": "sha256:1c3daa06574284614db07a23682ab6d1c344f09f8093ee10e5de4152a51677a1",
+                            "accessPath": "",
+                            "annotations": {
+                                "evidence": "supporting"
+                            }
+                        },
+                        {
+                            "path": "/var/lib/dpkg/info/adduser.conffiles",
+                            "layerID": "sha256:1c3daa06574284614db07a23682ab6d1c344f09f8093ee10e5de4152a51677a1",
+                            "accessPath": "",
+                            "annotations": {
+                                "evidence": "supporting"
+                            }
+                        },
+                        {
+                            "path": "/var/lib/dpkg/info/adduser.md5sums",
+                            "layerID": "sha256:1c3daa06574284614db07a23682ab6d1c344f09f8093ee10e5de4152a51677a1",
+                            "accessPath": "",
+                            "annotations": {
+                                "evidence": "supporting"
+                            }
+                        },
+                        {
+                            "path": "/var/lib/dpkg/status",
+                            "layerID": "sha256:dcb816d1345ed4a429dec632c0933e2af8887b808259985bfc555d155d8c615d",
+                            "accessPath": "",
+                            "annotations": {
+                                "evidence": "primary"
+                            }
+                        }
+                    ],
+                    "licenses": [
+                        {
+                            "value": "GPL-2",
+                            "spdxExpression": "GPL-2.0-only",
+                            "type": "declared",
+                            "urls": [],
+                            "locations": [
+                                {
+                                    "path": "/usr/share/doc/adduser/copyright",
+                                    "layerID": "sha256:1c3daa06574284614db07a23682ab6d1c344f09f8093ee10e5de4152a51677a1",
+                                    "accessPath": ""
+                                }
+                            ]
+                        },
+                        {
+                            "value": "GPL-2+",
+                            "spdxExpression": "GPL-2.0-or-later",
+                            "type": "declared",
+                            "urls": [],
+                            "locations": [
+                                {
+                                    "path": "/usr/share/doc/adduser/copyright",
+                                    "layerID": "sha256:1c3daa06574284614db07a23682ab6d1c344f09f8093ee10e5de4152a51677a1",
+                                    "accessPath": ""
+                                }
+                            ]
+                        }
+                    ],
+                    "language": "",
+                    "cpes": [
+                        "cpe:2.3:a:adduser:adduser:3.134:*:*:*:*:*:*:*"
+                    ],
+                    "purl": "pkg:deb/debian/adduser@3.134?arch=all\u0026distro=debian-12",
+                    "metadata": {
+                        "architecture": "all",
+                        "depends": [
+                            "passwd"
+                        ],
+                        "files": [
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "cc3493ecd2d09837ffdcc3e25fdfff18"
+                                },
+                                "isConfigFile": true,
+                                "path": "/etc/adduser.conf"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "11a06baf8245fd8d690b99024d228c1f"
+                                },
+                                "isConfigFile": true,
+                                "path": "/etc/deluser.conf"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "2ba08fece3b3434a669f3c529bbea383"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/sbin/adduser"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "808647b72aa26222070ae241158f22bf"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/sbin/deluser"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "0091c90861f50e7be138d37764779d22"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/NEWS.Debian.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "30b17d2e2e9c784208f01d130f196864"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/README.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "a4537699e4951748913a3d3e212be34e"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/TODO"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "30bb154dfdc69a2c0ff31ec465681b39"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/changelog.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "ad1acbe264ddc19bf4f50095c1ca50e5"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/copyright"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "55f158219a06612fcb6d35952d1b95f2"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/examples/INSTALL"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "ff484e503a7f8b0d6f62e8bfda86c0a2"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/examples/README"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "cc3493ecd2d09837ffdcc3e25fdfff18"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/examples/adduser.conf"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "04bf7a834a790dbcf91d9126ec2a93bf"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/examples/adduser.local"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "51367088cb922ab47b652cad2fdf1ed1"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/examples/adduser.local.conf"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "7a0388cf3e93997d82f705c29c90892a"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/examples/adduser.local.conf.examples/bash.bashrc"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "c4869bc559365ab84733b15280332ae9"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/examples/adduser.local.conf.examples/profile"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "82589559808bbaade90a966287e51627"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/examples/adduser.local.conf.examples/skel.other/index.html"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "95c9c80ac808659d74ec72d7bd86a118"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/examples/adduser.local.conf.examples/skel/dot.bash_logout"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "7e25a53e7588cdb05870608583b05b19"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/examples/adduser.local.conf.examples/skel/dot.bash_profile"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "6f2fe654cd11a739ba9fb6a9f13881fe"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/examples/adduser.local.conf.examples/skel/dot.bashrc"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "11a06baf8245fd8d690b99024d228c1f"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/doc/adduser/examples/deluser.conf"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "b702b3ed20154b001d1b2375ec7e488f"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/ca/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "0ca2951f2ef978d48c1f7f1ce153f5e8"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/cs/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "961b561f85178991cc846cd50571799b"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/da/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "1c47fa9200cb5cce8b9d8c1ed2345ed8"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/de/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "3b3cba03fcb342b5abfa8bca5afec4df"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/es/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "2d4b6195cf6ba1d3a33c5bf55b6ecf3c"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/eu/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "6c4ab5ed96290a2477b457889d68b081"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/fr/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "6d7d3d40c026e6389aeb5c2f7e2ad043"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/gl/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "50b5a14c95b5a85b8ef249146556dcbb"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/hu/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "74d23efa1335e149d0b07ad464765afd"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/it/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "16eae53fcaa3879d6c2cb1b23e392cea"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/ja/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "3e064773563de4e35534e73bc92ebf68"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/ko/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "d88de4925b4da406cd560f57ba4b1ce2"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/nb/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "fdaa7ffe6cadbc41f6a6e7138bd3af5d"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/nl/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "c8295a7067aa3fda053d3f57d4a4ade2"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/pl/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "e1c98d35dac5ca0e73b3a7e225bc7920"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/pt/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "f1642f13df692ea16e96f6f61f86443d"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/pt_BR/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "f16bf5c78b024661e685304cc84eb322"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/ru/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "0b4f60e88db1d73b2f4bc3e3fcd71c4d"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/sk/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "6069303f3206caed75ef429164a5c29a"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/sv/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "b13acd3c3039b256184446a35075679a"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/uk/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "a99328519237e94580cbfd2a18d0834c"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/vi/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "b62097a2043612a43b7de5bd2ef6ce78"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/locale/zh_CN/LC_MESSAGES/adduser.mo"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "279bc4b2fcee033a51226d002a619bbd"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/de/man5/adduser.conf.5.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "4be1449aa85465c1d1e1c230bcb65dd0"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/de/man5/deluser.conf.5.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "1f6de0932af4b53ad2e2b3dbc67eda78"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/de/man8/adduser.8.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "0c139260599a1fbe30dda5bf13735765"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/de/man8/deluser.8.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "f9f06923354ca40ac5a4153133400df3"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/fr/man5/adduser.conf.5.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "3f0b00c3117649f32d4ae2fd4b8f2635"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/fr/man5/deluser.conf.5.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "44703ebd828a02000329a9fb78336eb3"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/fr/man8/adduser.8.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "8c743ace7c9fec6fd736f340285187fe"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/fr/man8/deluser.8.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "72d8a98aca954db1e307f0af4d0e0741"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/man5/adduser.conf.5.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "d77325d2847f9445a98505ed6258cfbc"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/man5/deluser.conf.5.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "ca2b03a3887d2ef87cdaf01d5e249ba1"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/man8/adduser.8.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "205bd0d71b8575d75e1169b4d21a4b38"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/man8/adduser.local.8.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "bd68f00caa2c02cdb17cbefca0983a1f"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/man8/deluser.8.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "298d0b083299fd5aac8d8e823aeef531"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/nl/man5/adduser.conf.5.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "573812c7b0bdb53be8810adf5a8bca04"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/nl/man5/deluser.conf.5.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "d66066537e31f55b9f68b5ceabc2bb5c"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/nl/man8/adduser.8.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "86c181cd2cd77fe92165ce54088b1fcd"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/nl/man8/deluser.8.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "f12ac762e03c1ce1f858e141142424a2"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/pt/man5/adduser.conf.5.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "bcb31d0138c1d3feed06cf9153a9302a"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/pt/man5/deluser.conf.5.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "21910b8714511335642c53ec92a3e2e0"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/pt/man8/adduser.8.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "dfee1fa5f7449c26b3cf7289321309f5"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/man/pt/man8/deluser.8.gz"
+                            },
+                            {
+                                "digest": {
+                                    "algorithm": "md5",
+                                    "value": "840faf09c56199b8c10c4ef15e376224"
+                                },
+                                "isConfigFile": false,
+                                "path": "/usr/share/perl5/Debian/AdduserCommon.pm"
+                            }
+                        ],
+                        "installedSize": 686,
+                        "maintainer": "Debian Adduser Developers \u003cadduser@packages.debian.org\u003e",
+                        "package": "adduser",
+                        "source": "",
+                        "sourceVersion": "",
+                        "version": "3.134"
+                    }
+                }
+            ],
+            "artifactRelationships": [
+                {
+                    "parent": "5aeab6f311d0e8bb",
+                    "child": "a0cb282860d88d7e",
+                    "type": "contains"
+                }
+            ],
+            "files": [
+                {
+                    "id": "a0cb282860d88d7e",
+                    "location": {
+                        "path": "/usr/sbin/deluser",
+                        "layerID": "sha256:1c3daa06574284614db07a23682ab6d1c344f09f8093ee10e5de4152a51677a1"
+                    }
+                }
+            ],
+            "source": {
+                "id": "a5a12146fa884980227750eacb1fed4720b40953fcb8731773701e67905a2a07",
+                "name": "nginx",
+                "version": "sha256:a5a12146fa884980227750eacb1fed4720b40953fcb8731773701e67905a2a07",
+                "type": "image",
+                "metadata": {
+                    "userInput": "nginx",
+                    "imageID": "sha256:ab73c7fd672341e41ec600081253d0b99ea31d0c1acdfb46a1485004472da7ac",
+                    "manifestDigest": "sha256:a5a12146fa884980227750eacb1fed4720b40953fcb8731773701e67905a2a07",
+                    "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+                    "tags": [
+                        "nginx:latest"
+                    ],
+                    "imageSize": 192037957,
+                    "layers": [
+                        {
+                            "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                            "digest": "sha256:1c3daa06574284614db07a23682ab6d1c344f09f8093ee10e5de4152a51677a1",
+                            "size": 97098352
+                        },
+                        {
+                            "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                            "digest": "sha256:dcb816d1345ed4a429dec632c0933e2af8887b808259985bfc555d155d8c615d",
+                            "size": 94927925
+                        },
+                        {
+                            "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                            "digest": "sha256:8cc0ce26d320f5a342eda516e03ae2bd1ddaa82826b1eed977e3dd484995c2c0",
+                            "size": 1620
+                        },
+                        {
+                            "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                            "digest": "sha256:78cdcd2ba4bbe6067ab5976dd4c38b3a3ad4b8d41c38972a037c9ebd4731988c",
+                            "size": 2125
+                        },
+                        {
+                            "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                            "digest": "sha256:def14911cf6a8e011b5ba8f39441a22097170c433a4905b60ec69e84a9df78fd",
+                            "size": 298
+                        },
+                        {
+                            "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                            "digest": "sha256:3ccc534e961ca62536dc8629a756fa921e989ba9cc8a5fca617d8ff5e40e7d92",
+                            "size": 3018
+                        },
+                        {
+                            "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                            "digest": "sha256:e005f3c090e08bbf9eb7dd8a289f07124c08556cb959b8aa17dd6e6c8840e4c7",
+                            "size": 4619
+                        }
+                    ],
+                    "manifest": "eyJzY2hlbWFWZXJzaW9uIjoyLCJtZWRpYVR5cGUiOiJhcHBsaWNhdGlvbi92bmQuZG9ja2VyLmRpc3RyaWJ1dGlvbi5tYW5pZmVzdC52Mitqc29uIiwiY29uZmlnIjp7Im1lZGlhVHlwZSI6ImFwcGxpY2F0aW9uL3ZuZC5kb2NrZXIuY29udGFpbmVyLmltYWdlLnYxK2pzb24iLCJzaXplIjo4MTY0LCJkaWdlc3QiOiJzaGEyNTY6YWI3M2M3ZmQ2NzIzNDFlNDFlYzYwMDA4MTI1M2QwYjk5ZWEzMWQwYzFhY2RmYjQ2YTE0ODUwMDQ0NzJkYTdhYyJ9LCJsYXllcnMiOlt7Im1lZGlhVHlwZSI6ImFwcGxpY2F0aW9uL3ZuZC5kb2NrZXIuaW1hZ2Uucm9vdGZzLmRpZmYudGFyLmd6aXAiLCJzaXplIjoxMDAxMDgyODgsImRpZ2VzdCI6InNoYTI1NjoxYzNkYWEwNjU3NDI4NDYxNGRiMDdhMjM2ODJhYjZkMWMzNDRmMDlmODA5M2VlMTBlNWRlNDE1MmE1MTY3N2ExIn0seyJtZWRpYVR5cGUiOiJhcHBsaWNhdGlvbi92bmQuZG9ja2VyLmltYWdlLnJvb3Rmcy5kaWZmLnRhci5nemlwIiwic2l6ZSI6OTYwNTE3MTIsImRpZ2VzdCI6InNoYTI1NjpkY2I4MTZkMTM0NWVkNGE0MjlkZWM2MzJjMDkzM2UyYWY4ODg3YjgwODI1OTk4NWJmYzU1NWQxNTVkOGM2MTVkIn0seyJtZWRpYVR5cGUiOiJhcHBsaWNhdGlvbi92bmQuZG9ja2VyLmltYWdlLnJvb3Rmcy5kaWZmLnRhci5nemlwIiwic2l6ZSI6MzU4NCwiZGlnZXN0Ijoic2hhMjU2OjhjYzBjZTI2ZDMyMGY1YTM0MmVkYTUxNmUwM2FlMmJkMWRkYWE4MjgyNmIxZWVkOTc3ZTNkZDQ4NDk5NWMyYzAifSx7Im1lZGlhVHlwZSI6ImFwcGxpY2F0aW9uL3ZuZC5kb2NrZXIuaW1hZ2Uucm9vdGZzLmRpZmYudGFyLmd6aXAiLCJzaXplIjo0NjA4LCJkaWdlc3QiOiJzaGEyNTY6NzhjZGNkMmJhNGJiZTYwNjdhYjU5NzZkZDRjMzhiM2EzYWQ0YjhkNDFjMzg5NzJhMDM3YzllYmQ0NzMxOTg4YyJ9LHsibWVkaWFUeXBlIjoiYXBwbGljYXRpb24vdm5kLmRvY2tlci5pbWFnZS5yb290ZnMuZGlmZi50YXIuZ3ppcCIsInNpemUiOjI1NjAsImRpZ2VzdCI6InNoYTI1NjpkZWYxNDkxMWNmNmE4ZTAxMWI1YmE4ZjM5NDQxYTIyMDk3MTcwYzQzM2E0OTA1YjYwZWM2OWU4NGE5ZGY3OGZkIn0seyJtZWRpYVR5cGUiOiJhcHBsaWNhdGlvbi92bmQuZG9ja2VyLmltYWdlLnJvb3Rmcy5kaWZmLnRhci5nemlwIiwic2l6ZSI6NTEyMCwiZGlnZXN0Ijoic2hhMjU2OjNjY2M1MzRlOTYxY2E2MjUzNmRjODYyOWE3NTZmYTkyMWU5ODliYTljYzhhNWZjYTYxN2Q4ZmY1ZTQwZTdkOTIifSx7Im1lZGlhVHlwZSI6ImFwcGxpY2F0aW9uL3ZuZC5kb2NrZXIuaW1hZ2Uucm9vdGZzLmRpZmYudGFyLmd6aXAiLCJzaXplIjo3MTY4LCJkaWdlc3QiOiJzaGEyNTY6ZTAwNWYzYzA5MGUwOGJiZjllYjdkZDhhMjg5ZjA3MTI0YzA4NTU2Y2I5NTliOGFhMTdkZDZlNmM4ODQwZTRjNyJ9XX0=",
+                    "config": "eyJhcmNoaXRlY3R1cmUiOiJhcm02NCIsImNvbmZpZyI6eyJIb3N0bmFtZSI6IiIsIkRvbWFpbm5hbWUiOiIiLCJVc2VyIjoiIiwiQXR0YWNoU3RkaW4iOmZhbHNlLCJBdHRhY2hTdGRvdXQiOmZhbHNlLCJBdHRhY2hTdGRlcnIiOmZhbHNlLCJFeHBvc2VkUG9ydHMiOnsiODAvdGNwIjp7fX0sIlR0eSI6ZmFsc2UsIk9wZW5TdGRpbiI6ZmFsc2UsIlN0ZGluT25jZSI6ZmFsc2UsIkVudiI6WyJQQVRIPS91c3IvbG9jYWwvc2JpbjovdXNyL2xvY2FsL2JpbjovdXNyL3NiaW46L3Vzci9iaW46L3NiaW46L2JpbiIsIk5HSU5YX1ZFUlNJT049MS4yNS4yIiwiTkpTX1ZFUlNJT049MC44LjAiLCJQS0dfUkVMRUFTRT0xfmJvb2t3b3JtIl0sIkNtZCI6WyJuZ2lueCIsIi1nIiwiZGFlbW9uIG9mZjsiXSwiSW1hZ2UiOiJzaGEyNTY6YTkwZmNjZmQwZGE3M2Q4M2RkZThmNjU0ODVlNjM4NWFlNjg3ZWRhM2JjOTJhNDMwYmM5NTJiOTkwZjhhMzMxYiIsIlZvbHVtZXMiOm51bGwsIldvcmtpbmdEaXIiOiIiLCJFbnRyeXBvaW50IjpbIi9kb2NrZXItZW50cnlwb2ludC5zaCJdLCJPbkJ1aWxkIjpudWxsLCJMYWJlbHMiOnsibWFpbnRhaW5lciI6Ik5HSU5YIERvY2tlciBNYWludGFpbmVycyBcdTAwM2Nkb2NrZXItbWFpbnRAbmdpbnguY29tXHUwMDNlIn0sIlN0b3BTaWduYWwiOiJTSUdRVUlUIn0sImNvbnRhaW5lciI6ImMyNGEzZGU1YjBkOWZlOTQzOTRiMzM1YmZjZDgzMjAzNWY5ODUxNTFhNGQzZThlOGRjZmM2ODRmYTgyYTlmZWQiLCJjb250YWluZXJfY29uZmlnIjp7Ikhvc3RuYW1lIjoiYzI0YTNkZTViMGQ5IiwiRG9tYWlubmFtZSI6IiIsIlVzZXIiOiIiLCJBdHRhY2hTdGRpbiI6ZmFsc2UsIkF0dGFjaFN0ZG91dCI6ZmFsc2UsIkF0dGFjaFN0ZGVyciI6ZmFsc2UsIkV4cG9zZWRQb3J0cyI6eyI4MC90Y3AiOnt9fSwiVHR5IjpmYWxzZSwiT3BlblN0ZGluIjpmYWxzZSwiU3RkaW5PbmNlIjpmYWxzZSwiRW52IjpbIlBBVEg9L3Vzci9sb2NhbC9zYmluOi91c3IvbG9jYWwvYmluOi91c3Ivc2JpbjovdXNyL2Jpbjovc2JpbjovYmluIiwiTkdJTlhfVkVSU0lPTj0xLjI1LjIiLCJOSlNfVkVSU0lPTj0wLjguMCIsIlBLR19SRUxFQVNFPTF+Ym9va3dvcm0iXSwiQ21kIjpbIi9iaW4vc2giLCItYyIsIiMobm9wKSAiLCJDTUQgW1wibmdpbnhcIiBcIi1nXCIgXCJkYWVtb24gb2ZmO1wiXSJdLCJJbWFnZSI6InNoYTI1NjphOTBmY2NmZDBkYTczZDgzZGRlOGY2NTQ4NWU2Mzg1YWU2ODdlZGEzYmM5MmE0MzBiYzk1MmI5OTBmOGEzMzFiIiwiVm9sdW1lcyI6bnVsbCwiV29ya2luZ0RpciI6IiIsIkVudHJ5cG9pbnQiOlsiL2RvY2tlci1lbnRyeXBvaW50LnNoIl0sIk9uQnVpbGQiOm51bGwsIkxhYmVscyI6eyJtYWludGFpbmVyIjoiTkdJTlggRG9ja2VyIE1haW50YWluZXJzIFx1MDAzY2RvY2tlci1tYWludEBuZ2lueC5jb21cdTAwM2UifSwiU3RvcFNpZ25hbCI6IlNJR1FVSVQifSwiY3JlYXRlZCI6IjIwMjMtMDgtMTVUMjM6NTg6MjYuNDgwMDUxOTQ5WiIsImRvY2tlcl92ZXJzaW9uIjoiMjAuMTAuMjMiLCJoaXN0b3J5IjpbeyJjcmVhdGVkIjoiMjAyMy0wOC0xNVQyMzozOTo1Ny4xNzg1MDUwODFaIiwiY3JlYXRlZF9ieSI6Ii9iaW4vc2ggLWMgIyhub3ApIEFERCBmaWxlOmJjNTg5NTZmYTNkMWFmZjJlZmIwMjY0NjU1ZDAzOWZlZGZmZjI4ZGM0ZmYxOWE2NWEyMzVlODI3NTRlZTFjZmEgaW4gLyAifSx7ImNyZWF0ZWQiOiIyMDIzLTA4LTE1VDIzOjM5OjU3LjU3NDQzMTMwM1oiLCJjcmVhdGVkX2J5IjoiL2Jpbi9zaCAtYyAjKG5vcCkgIENNRCBbXCJiYXNoXCJdIiwiZW1wdHlfbGF5ZXIiOnRydWV9LHsiY3JlYXRlZCI6IjIwMjMtMDgtMTVUMjM6NTg6MDMuOTkxOTkyMTM1WiIsImNyZWF0ZWRfYnkiOiIvYmluL3NoIC1jICMobm9wKSAgTEFCRUwgbWFpbnRhaW5lcj1OR0lOWCBEb2NrZXIgTWFpbnRhaW5lcnMgXHUwMDNjZG9ja2VyLW1haW50QG5naW54LmNvbVx1MDAzZSIsImVtcHR5X2xheWVyIjp0cnVlfSx7ImNyZWF0ZWQiOiIyMDIzLTA4LTE1VDIzOjU4OjA0LjA3MTA2MzgwNVoiLCJjcmVhdGVkX2J5IjoiL2Jpbi9zaCAtYyAjKG5vcCkgIEVOViBOR0lOWF9WRVJTSU9OPTEuMjUuMiIsImVtcHR5X2xheWVyIjp0cnVlfSx7ImNyZWF0ZWQiOiIyMDIzLTA4LTE1VDIzOjU4OjA0LjE1MzEwNDcxNloiLCJjcmVhdGVkX2J5IjoiL2Jpbi9zaCAtYyAjKG5vcCkgIEVOViBOSlNfVkVSU0lPTj0wLjguMCIsImVtcHR5X2xheWVyIjp0cnVlfSx7ImNyZWF0ZWQiOiIyMDIzLTA4LTE1VDIzOjU4OjA0LjIzNDc3MzI3MloiLCJjcmVhdGVkX2J5IjoiL2Jpbi9zaCAtYyAjKG5vcCkgIEVOViBQS0dfUkVMRUFTRT0xfmJvb2t3b3JtIiwiZW1wdHlfbGF5ZXIiOnRydWV9LHsiY3JlYXRlZCI6IjIwMjMtMDgtMTVUMjM6NTg6MjUuNTQ2ODIwMTcyWiIsImNyZWF0ZWRfYnkiOiIvYmluL3NoIC1jIHNldCAteCAgICAgXHUwMDI2XHUwMDI2IGdyb3VwYWRkIC0tc3lzdGVtIC0tZ2lkIDEwMSBuZ2lueCAgICAgXHUwMDI2XHUwMDI2IHVzZXJhZGQgLS1zeXN0ZW0gLS1naWQgbmdpbnggLS1uby1jcmVhdGUtaG9tZSAtLWhvbWUgL25vbmV4aXN0ZW50IC0tY29tbWVudCBcIm5naW54IHVzZXJcIiAtLXNoZWxsIC9iaW4vZmFsc2UgLS11aWQgMTAxIG5naW54ICAgICBcdTAwMjZcdTAwMjYgYXB0LWdldCB1cGRhdGUgICAgIFx1MDAyNlx1MDAyNiBhcHQtZ2V0IGluc3RhbGwgLS1uby1pbnN0YWxsLXJlY29tbWVuZHMgLS1uby1pbnN0YWxsLXN1Z2dlc3RzIC15IGdudXBnMSBjYS1jZXJ0aWZpY2F0ZXMgICAgIFx1MDAyNlx1MDAyNiAgICAgTkdJTlhfR1BHS0VZPTU3M0JGRDZCM0Q4RkJDNjQxMDc5QTZBQkFCRjVCRDgyN0JEOUJGNjI7ICAgICBOR0lOWF9HUEdLRVlfUEFUSD0vdXNyL3NoYXJlL2tleXJpbmdzL25naW54LWFyY2hpdmUta2V5cmluZy5ncGc7ICAgICBleHBvcnQgR05VUEdIT01FPVwiJChta3RlbXAgLWQpXCI7ICAgICBmb3VuZD0nJzsgICAgIGZvciBzZXJ2ZXIgaW4gICAgICAgICBoa3A6Ly9rZXlzZXJ2ZXIudWJ1bnR1LmNvbTo4MCAgICAgICAgIHBncC5taXQuZWR1ICAgICA7IGRvICAgICAgICAgZWNobyBcIkZldGNoaW5nIEdQRyBrZXkgJE5HSU5YX0dQR0tFWSBmcm9tICRzZXJ2ZXJcIjsgICAgICAgICBncGcxIC0ta2V5c2VydmVyIFwiJHNlcnZlclwiIC0ta2V5c2VydmVyLW9wdGlvbnMgdGltZW91dD0xMCAtLXJlY3Yta2V5cyBcIiROR0lOWF9HUEdLRVlcIiBcdTAwMjZcdTAwMjYgZm91bmQ9eWVzIFx1MDAyNlx1MDAyNiBicmVhazsgICAgIGRvbmU7ICAgICB0ZXN0IC16IFwiJGZvdW5kXCIgXHUwMDI2XHUwMDI2IGVjaG8gXHUwMDNlXHUwMDI2MiBcImVycm9yOiBmYWlsZWQgdG8gZmV0Y2ggR1BHIGtleSAkTkdJTlhfR1BHS0VZXCIgXHUwMDI2XHUwMDI2IGV4aXQgMTsgICAgIGdwZzEgLS1leHBvcnQgXCIkTkdJTlhfR1BHS0VZXCIgXHUwMDNlIFwiJE5HSU5YX0dQR0tFWV9QQVRIXCIgOyAgICAgcm0gLXJmIFwiJEdOVVBHSE9NRVwiOyAgICAgYXB0LWdldCByZW1vdmUgLS1wdXJnZSAtLWF1dG8tcmVtb3ZlIC15IGdudXBnMSBcdTAwMjZcdTAwMjYgcm0gLXJmIC92YXIvbGliL2FwdC9saXN0cy8qICAgICBcdTAwMjZcdTAwMjYgZHBrZ0FyY2g9XCIkKGRwa2cgLS1wcmludC1hcmNoaXRlY3R1cmUpXCIgICAgIFx1MDAyNlx1MDAyNiBuZ2lueFBhY2thZ2VzPVwiICAgICAgICAgbmdpbng9JHtOR0lOWF9WRVJTSU9OfS0ke1BLR19SRUxFQVNFfSAgICAgICAgIG5naW54LW1vZHVsZS14c2x0PSR7TkdJTlhfVkVSU0lPTn0tJHtQS0dfUkVMRUFTRX0gICAgICAgICBuZ2lueC1tb2R1bGUtZ2VvaXA9JHtOR0lOWF9WRVJTSU9OfS0ke1BLR19SRUxFQVNFfSAgICAgICAgIG5naW54LW1vZHVsZS1pbWFnZS1maWx0ZXI9JHtOR0lOWF9WRVJTSU9OfS0ke1BLR19SRUxFQVNFfSAgICAgICAgIG5naW54LW1vZHVsZS1uanM9JHtOR0lOWF9WRVJTSU9OfSske05KU19WRVJTSU9OfS0ke1BLR19SRUxFQVNFfSAgICAgXCIgICAgIFx1MDAyNlx1MDAyNiBjYXNlIFwiJGRwa2dBcmNoXCIgaW4gICAgICAgICBhbWQ2NHxhcm02NCkgICAgICAgICAgICAgZWNobyBcImRlYiBbc2lnbmVkLWJ5PSROR0lOWF9HUEdLRVlfUEFUSF0gaHR0cHM6Ly9uZ2lueC5vcmcvcGFja2FnZXMvbWFpbmxpbmUvZGViaWFuLyBib29rd29ybSBuZ2lueFwiIFx1MDAzZVx1MDAzZSAvZXRjL2FwdC9zb3VyY2VzLmxpc3QuZC9uZ2lueC5saXN0ICAgICAgICAgICAgIFx1MDAyNlx1MDAyNiBhcHQtZ2V0IHVwZGF0ZSAgICAgICAgICAgICA7OyAgICAgICAgICopICAgICAgICAgICAgIGVjaG8gXCJkZWItc3JjIFtzaWduZWQtYnk9JE5HSU5YX0dQR0tFWV9QQVRIXSBodHRwczovL25naW54Lm9yZy9wYWNrYWdlcy9tYWlubGluZS9kZWJpYW4vIGJvb2t3b3JtIG5naW54XCIgXHUwMDNlXHUwMDNlIC9ldGMvYXB0L3NvdXJjZXMubGlzdC5kL25naW54Lmxpc3QgICAgICAgICAgICAgICAgICAgICAgICAgXHUwMDI2XHUwMDI2IHRlbXBEaXI9XCIkKG1rdGVtcCAtZClcIiAgICAgICAgICAgICBcdTAwMjZcdTAwMjYgY2htb2QgNzc3IFwiJHRlbXBEaXJcIiAgICAgICAgICAgICAgICAgICAgICAgICBcdTAwMjZcdTAwMjYgc2F2ZWRBcHRNYXJrPVwiJChhcHQtbWFyayBzaG93bWFudWFsKVwiICAgICAgICAgICAgICAgICAgICAgICAgIFx1MDAyNlx1MDAyNiBhcHQtZ2V0IHVwZGF0ZSAgICAgICAgICAgICBcdTAwMjZcdTAwMjYgYXB0LWdldCBidWlsZC1kZXAgLXkgJG5naW54UGFja2FnZXMgICAgICAgICAgICAgXHUwMDI2XHUwMDI2ICggICAgICAgICAgICAgICAgIGNkIFwiJHRlbXBEaXJcIiAgICAgICAgICAgICAgICAgXHUwMDI2XHUwMDI2IERFQl9CVUlMRF9PUFRJT05TPVwibm9jaGVjayBwYXJhbGxlbD0kKG5wcm9jKVwiICAgICAgICAgICAgICAgICAgICAgYXB0LWdldCBzb3VyY2UgLS1jb21waWxlICRuZ2lueFBhY2thZ2VzICAgICAgICAgICAgICkgICAgICAgICAgICAgICAgICAgICAgICAgXHUwMDI2XHUwMDI2IGFwdC1tYXJrIHNob3dtYW51YWwgfCB4YXJncyBhcHQtbWFyayBhdXRvIFx1MDAzZSAvZGV2L251bGwgICAgICAgICAgICAgXHUwMDI2XHUwMDI2IHsgWyAteiBcIiRzYXZlZEFwdE1hcmtcIiBdIHx8IGFwdC1tYXJrIG1hbnVhbCAkc2F2ZWRBcHRNYXJrOyB9ICAgICAgICAgICAgICAgICAgICAgICAgIFx1MDAyNlx1MDAyNiBscyAtbEFGaCBcIiR0ZW1wRGlyXCIgICAgICAgICAgICAgXHUwMDI2XHUwMDI2ICggY2QgXCIkdGVtcERpclwiIFx1MDAyNlx1MDAyNiBkcGtnLXNjYW5wYWNrYWdlcyAuIFx1MDAzZSBQYWNrYWdlcyApICAgICAgICAgICAgIFx1MDAyNlx1MDAyNiBncmVwICdeUGFja2FnZTogJyBcIiR0ZW1wRGlyL1BhY2thZ2VzXCIgICAgICAgICAgICAgXHUwMDI2XHUwMDI2IGVjaG8gXCJkZWIgWyB0cnVzdGVkPXllcyBdIGZpbGU6Ly8kdGVtcERpciAuL1wiIFx1MDAzZSAvZXRjL2FwdC9zb3VyY2VzLmxpc3QuZC90ZW1wLmxpc3QgICAgICAgICAgICAgXHUwMDI2XHUwMDI2IGFwdC1nZXQgLW8gQWNxdWlyZTo6R3ppcEluZGV4ZXM9ZmFsc2UgdXBkYXRlICAgICAgICAgICAgIDs7ICAgICBlc2FjICAgICAgICAgXHUwMDI2XHUwMDI2IGFwdC1nZXQgaW5zdGFsbCAtLW5vLWluc3RhbGwtcmVjb21tZW5kcyAtLW5vLWluc3RhbGwtc3VnZ2VzdHMgLXkgICAgICAgICAgICAgICAgICAgICAgICAgJG5naW54UGFja2FnZXMgICAgICAgICAgICAgICAgICAgICAgICAgZ2V0dGV4dC1iYXNlICAgICAgICAgICAgICAgICAgICAgICAgIGN1cmwgICAgIFx1MDAyNlx1MDAyNiBhcHQtZ2V0IHJlbW92ZSAtLXB1cmdlIC0tYXV0by1yZW1vdmUgLXkgXHUwMDI2XHUwMDI2IHJtIC1yZiAvdmFyL2xpYi9hcHQvbGlzdHMvKiAvZXRjL2FwdC9zb3VyY2VzLmxpc3QuZC9uZ2lueC5saXN0ICAgICAgICAgXHUwMDI2XHUwMDI2IGlmIFsgLW4gXCIkdGVtcERpclwiIF07IHRoZW4gICAgICAgICBhcHQtZ2V0IHB1cmdlIC15IC0tYXV0by1yZW1vdmUgICAgICAgICBcdTAwMjZcdTAwMjYgcm0gLXJmIFwiJHRlbXBEaXJcIiAvZXRjL2FwdC9zb3VyY2VzLmxpc3QuZC90ZW1wLmxpc3Q7ICAgICBmaSAgICAgXHUwMDI2XHUwMDI2IGxuIC1zZiAvZGV2L3N0ZG91dCAvdmFyL2xvZy9uZ2lueC9hY2Nlc3MubG9nICAgICBcdTAwMjZcdTAwMjYgbG4gLXNmIC9kZXYvc3RkZXJyIC92YXIvbG9nL25naW54L2Vycm9yLmxvZyAgICAgXHUwMDI2XHUwMDI2IG1rZGlyIC9kb2NrZXItZW50cnlwb2ludC5kIn0seyJjcmVhdGVkIjoiMjAyMy0wOC0xNVQyMzo1ODoyNS44OTEwNzk5MjNaIiwiY3JlYXRlZF9ieSI6Ii9iaW4vc2ggLWMgIyhub3ApIENPUFkgZmlsZTowMWU3NWM2ZGQwY2UzMTdkNTE2OTI4YTE3NTg0ZDExMWNkMDgyODQwYzAxZTU4YmUwYWZjODUxYjMzYWRiOTE2IGluIC8gIn0seyJjcmVhdGVkIjoiMjAyMy0wOC0xNVQyMzo1ODoyNS45NjMzNzYxNDlaIiwiY3JlYXRlZF9ieSI6Ii9iaW4vc2ggLWMgIyhub3ApIENPUFkgZmlsZTpjYWVjMzY4ZjVhNTRmNzBhODQ0YTEzMDA1ZWIyMjU1YmVkNzc4ODA5YjM2NzJkNTE2ZTcxOWNlMmY0YmNlMTIzIGluIC9kb2NrZXItZW50cnlwb2ludC5kICJ9LHsiY3JlYXRlZCI6IjIwMjMtMDgtMTVUMjM6NTg6MjYuMDM0Mzg4MTAzWiIsImNyZWF0ZWRfYnkiOiIvYmluL3NoIC1jICMobm9wKSBDT1BZIGZpbGU6M2IxYjk5MTViN2RkODk4YTBlMzJmN2ViOTcxNWEzNWM5ZmVhYjkxNDAyMmVmZmY2OGJhOTkwYmMxZWM3ZDE2OSBpbiAvZG9ja2VyLWVudHJ5cG9pbnQuZCAifSx7ImNyZWF0ZWQiOiIyMDIzLTA4LTE1VDIzOjU4OjI2LjEwNzA0NTk5NFoiLCJjcmVhdGVkX2J5IjoiL2Jpbi9zaCAtYyAjKG5vcCkgQ09QWSBmaWxlOjU3ODQ2NjMyYWNjYzg5NzUzZjQ1Y2JjMDBjYjllNjIyM2Q5OTFlMWQzMTI5N2VlYzMzOTVhN2NhNThlZWQ2YTYgaW4gL2RvY2tlci1lbnRyeXBvaW50LmQgIn0seyJjcmVhdGVkIjoiMjAyMy0wOC0xNVQyMzo1ODoyNi4xNzgwNDkzMTJaIiwiY3JlYXRlZF9ieSI6Ii9iaW4vc2ggLWMgIyhub3ApIENPUFkgZmlsZTo5ZTNiMmI2M2RiOWY4ZmM3MDJlMmRjMmJkZDA5NDNiZTBkOTkwYzAyOGNkZGNmMWMxNTlmNTU1NmE4YmEzMDMwIGluIC9kb2NrZXItZW50cnlwb2ludC5kICJ9LHsiY3JlYXRlZCI6IjIwMjMtMDgtMTVUMjM6NTg6MjYuMjUwMjA4ODcyWiIsImNyZWF0ZWRfYnkiOiIvYmluL3NoIC1jICMobm9wKSAgRU5UUllQT0lOVCBbXCIvZG9ja2VyLWVudHJ5cG9pbnQuc2hcIl0iLCJlbXB0eV9sYXllciI6dHJ1ZX0seyJjcmVhdGVkIjoiMjAyMy0wOC0xNVQyMzo1ODoyNi4zMjQ0MDUyNDZaIiwiY3JlYXRlZF9ieSI6Ii9iaW4vc2ggLWMgIyhub3ApICBFWFBPU0UgODAiLCJlbXB0eV9sYXllciI6dHJ1ZX0seyJjcmVhdGVkIjoiMjAyMy0wOC0xNVQyMzo1ODoyNi40MDUwMzY4OThaIiwiY3JlYXRlZF9ieSI6Ii9iaW4vc2ggLWMgIyhub3ApICBTVE9QU0lHTkFMIFNJR1FVSVQiLCJlbXB0eV9sYXllciI6dHJ1ZX0seyJjcmVhdGVkIjoiMjAyMy0wOC0xNVQyMzo1ODoyNi40ODAwNTE5NDlaIiwiY3JlYXRlZF9ieSI6Ii9iaW4vc2ggLWMgIyhub3ApICBDTUQgW1wibmdpbnhcIiBcIi1nXCIgXCJkYWVtb24gb2ZmO1wiXSIsImVtcHR5X2xheWVyIjp0cnVlfV0sIm9zIjoibGludXgiLCJyb290ZnMiOnsidHlwZSI6ImxheWVycyIsImRpZmZfaWRzIjpbInNoYTI1NjoxYzNkYWEwNjU3NDI4NDYxNGRiMDdhMjM2ODJhYjZkMWMzNDRmMDlmODA5M2VlMTBlNWRlNDE1MmE1MTY3N2ExIiwic2hhMjU2OmRjYjgxNmQxMzQ1ZWQ0YTQyOWRlYzYzMmMwOTMzZTJhZjg4ODdiODA4MjU5OTg1YmZjNTU1ZDE1NWQ4YzYxNWQiLCJzaGEyNTY6OGNjMGNlMjZkMzIwZjVhMzQyZWRhNTE2ZTAzYWUyYmQxZGRhYTgyODI2YjFlZWQ5NzdlM2RkNDg0OTk1YzJjMCIsInNoYTI1Njo3OGNkY2QyYmE0YmJlNjA2N2FiNTk3NmRkNGMzOGIzYTNhZDRiOGQ0MWMzODk3MmEwMzdjOWViZDQ3MzE5ODhjIiwic2hhMjU2OmRlZjE0OTExY2Y2YThlMDExYjViYThmMzk0NDFhMjIwOTcxNzBjNDMzYTQ5MDViNjBlYzY5ZTg0YTlkZjc4ZmQiLCJzaGEyNTY6M2NjYzUzNGU5NjFjYTYyNTM2ZGM4NjI5YTc1NmZhOTIxZTk4OWJhOWNjOGE1ZmNhNjE3ZDhmZjVlNDBlN2Q5MiIsInNoYTI1NjplMDA1ZjNjMDkwZTA4YmJmOWViN2RkOGEyODlmMDcxMjRjMDg1NTZjYjk1OWI4YWExN2RkNmU2Yzg4NDBlNGM3Il19LCJ2YXJpYW50IjoidjgifQ==",
+                    "repoDigests": [
+                        "nginx@sha256:104c7c5c54f2685f0f46f3be607ce60da7085da3eaa5ad22d3d9f01594295e9c"
+                    ],
+                    "architecture": "arm64",
+                    "os": "linux"
+                }
+            },
+            "distro": {
+                "prettyName": "Debian GNU/Linux 12 (bookworm)",
+                "name": "Debian GNU/Linux",
+                "id": "debian",
+                "version": "12 (bookworm)",
+                "versionID": "12",
+                "versionCodename": "bookworm",
+                "homeURL": "https://www.debian.org/",
+                "supportURL": "https://www.debian.org/support",
+                "bugReportURL": "https://bugs.debian.org/"
+            },
+            "descriptor": {
+                "name": "syft",
+                "version": "0.94.0",
+                "configuration": {
+                    "catalogers": null,
+                    "package": {
+                        "cataloger": {
+                            "enabled": true,
+                            "scope": "Squashed"
+                        },
+                        "search-unindexed-archives": false,
+                        "search-indexed-archives": true
+                    },
+                    "golang": {
+                        "search-local-mod-cache-licenses": false,
+                        "local-mod-cache-dir": "",
+                        "search-remote-licenses": false,
+                        "proxy": "",
+                        "no-proxy": ""
+                    },
+                    "linux-kernel": {
+                        "catalog-modules": true
+                    },
+                    "python": {
+                        "guess-unpinned-requirements": false
+                    },
+                    "file-metadata": {
+                        "cataloger": {
+                            "enabled": false,
+                            "scope": "Squashed"
+                        },
+                        "digests": [
+                            "sha256"
+                        ]
+                    },
+                    "file-classification": {
+                        "cataloger": {
+                            "enabled": false,
+                            "scope": "Squashed"
+                        }
+                    },
+                    "file-contents": {
+                        "cataloger": {
+                            "enabled": false,
+                            "scope": "Squashed"
+                        },
+                        "skip-files-above-size": 1048576,
+                        "globs": null
+                    },
+                    "secrets": {
+                        "cataloger": {
+                            "enabled": false,
+                            "scope": "AllLayers"
+                        },
+                        "additional-patterns": null,
+                        "exclude-pattern-names": null,
+                        "reveal-values": false,
+                        "skip-files-above-size": 1048576
+                    },
+                    "registry": {
+                        "insecure-skip-tls-verify": false,
+                        "insecure-use-http": false,
+                        "auth": null,
+                        "ca-cert": ""
+                    },
+                    "exclude": [],
+                    "platform": "",
+                    "name": "",
+                    "source": {
+                        "name": "",
+                        "version": "",
+                        "file": {
+                            "digests": [
+                                "sha256"
+                            ]
+                        }
+                    },
+                    "parallelism": 1,
+                    "default-image-pull-source": "",
+                    "base-path": "",
+                    "exclude-binary-overlap-by-ownership": true
+                }
+            },
+            "schema": {
+                "version": "11.0.1",
+                "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-11.0.1.json"
             }
-          ],
-          "licenseConcluded": "NOASSERTION",
-          "licenseInfoInFiles": null,
-          "licenseComments": "",
-          "copyrightText": "",
-          "artifactOfs": null,
-          "comment": "layerID: sha256:67a4178b7d47beb6a1f697a593bd0c6841c67eb0da00f2badefb05fd30671490",
-          "noticeText": "",
-          "fileContributors": null,
-          "attributionTexts": null,
-          "fileDependencies": null,
-          "annotations": null
         }
-      ],
-      "hasExtractedLicensingInfos": null,
-      "relationships": ["<<UNORDERED>>",
-        {
-          "spdxElementId": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
-          "relatedSpdxElement": "SPDXRef-3ec7e593276354ae",
-          "relationshipType": "CONTAINS",
-          "comment": ""
-        },
-        {
-          "spdxElementId": "SPDXRef-Package-deb-adduser-3e9282034226b93f",
-          "relatedSpdxElement": "SPDXRef-1a35bf77abe6053c",
-          "relationshipType": "CONTAINS",
-          "comment": ""
-        }
-      ],
-      "annotations": null,
-      "snippets": null
-    }
-  },
-  "status": {}
+    },
+    "status": {}
 }
