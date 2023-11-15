@@ -58,6 +58,7 @@ type WatchedContainerData struct {
 	ContainerIndex                           int
 	NsMntId                                  uint64
 	InitialDelayExpired                      bool
+	RelevantSyftFilesByIdentifier            map[string]bool
 }
 
 func Between(value string, a string, b string) string {
