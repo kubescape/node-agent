@@ -46,7 +46,7 @@ func (sc *SyftHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 				instanceidhandler.ContainerNameMetadataKey: watchedContainer.InstanceID.GetContainerName(),
 				instanceidhandler.ImageIDMetadataKey:       watchedContainer.ImageID,
 			},
-			Labels: utils.GetLabels(watchedContainer),
+			Labels: utils.GetLabels(watchedContainer, false),
 		},
 	}
 
