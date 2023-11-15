@@ -173,6 +173,7 @@ func TestAtoi(t *testing.T) {
 func Test_GetLabels(t *testing.T) {
 	type args struct {
 		watchedContainer *WatchedContainerData
+		stripContainer   bool
 	}
 	instanceID, _ := instanceidhandler.GenerateInstanceIDFromString("apiVersion-v1/namespace-aaa/kind-deployment/name-redis/containerName-redis")
 	tests := []struct {
@@ -196,10 +197,26 @@ func Test_GetLabels(t *testing.T) {
 				"kubescape.io/workload-namespace":      "aaa",
 			},
 		},
+		{
+			name: "TestGetLabels",
+			args: args{
+				watchedContainer: &WatchedContainerData{
+					InstanceID: instanceID,
+					Wlid:       "wlid://cluster-name/namespace-aaa/deployment-redis",
+				},
+				stripContainer: true,
+			},
+			want: map[string]string{
+				"kubescape.io/workload-api-version": "v1",
+				"kubescape.io/workload-kind":        "Deployment",
+				"kubescape.io/workload-name":        "redis",
+				"kubescape.io/workload-namespace":   "aaa",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := GetLabels(tt.args.watchedContainer)
+			got := GetLabels(tt.args.watchedContainer, tt.args.stripContainer)
 			assert.Equal(t, tt.want, got)
 		})
 	}

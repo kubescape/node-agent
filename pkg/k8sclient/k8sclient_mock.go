@@ -22,6 +22,10 @@ func (k K8sClientMock) GetWorkload(namespace, _, name string) (k8sinterface.IWor
 		"spec": map[string]interface{}{
 			"containers": []interface{}{
 				map[string]interface{}{
+					"name":  "log",
+					"image": "fluentbit",
+				},
+				map[string]interface{}{
 					"name":  "cont",
 					"image": "nginx",
 				},
