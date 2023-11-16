@@ -203,10 +203,11 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 	defer span.End()
 
 	watchedContainer := &utils.WatchedContainerData{
-		ContainerID:      container.Runtime.ContainerID,
-		UpdateDataTicker: time.NewTicker(rm.cfg.InitialDelay),
-		SyncChannel:      make(chan error, 10),
-		K8sContainerID:   k8sContainerID,
+		ContainerID:                   container.Runtime.ContainerID,
+		UpdateDataTicker:              time.NewTicker(rm.cfg.InitialDelay),
+		SyncChannel:                   make(chan error, 10),
+		K8sContainerID:                k8sContainerID,
+		RelevantSyftFilesByIdentifier: make(map[string]bool),
 	}
 	rm.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
 
