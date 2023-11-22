@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"node-agent/pkg/config"
-	"node-agent/pkg/containerwatcher/dnsmanager"
+	"node-agent/pkg/dnsmanager"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
