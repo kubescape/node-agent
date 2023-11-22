@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"node-agent/pkg/config"
-	"node-agent/pkg/containerwatcher/dnsmanager"
+	"node-agent/pkg/dnsmanager"
 	"testing"
 
 	_ "embed"
