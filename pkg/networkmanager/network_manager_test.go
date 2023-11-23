@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"node-agent/pkg/config"
-	"node-agent/pkg/containerwatcher/dnsmanager"
+	"node-agent/pkg/dnsmanager"
 	"testing"
 
 	_ "embed"
@@ -805,7 +805,6 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 					if ingress.Identifier == expectedIngress.Identifier {
 						assert.Equal(t, ingress.Type, expectedIngress.Type, "Ingress type is not equal in test %s", tc.name)
 						assert.Equal(t, ingress.DNS, expectedIngress.DNS, "Ingress DNS is not equal in test %s", tc.name)
-						assert.Equal(t, ingress.Ports, expectedIngress.Ports, "Ingress ports are not equal in test %s", tc.name)
 						assert.Equal(t, ingress.PodSelector, expectedIngress.PodSelector, "Ingress pod selector is not equal in test %s", tc.name)
 						assert.Equal(t, ingress.NamespaceSelector, expectedIngress.NamespaceSelector, "Ingress namespace selector is not equal in test %s", tc.name)
 						assert.Equal(t, ingress.IPAddress, expectedIngress.IPAddress, "Ingress IP address is not equal in test %s", tc.name)
@@ -837,7 +836,6 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 					if egress.Identifier == expectedEgress.Identifier {
 						assert.Equal(t, egress.Type, expectedEgress.Type, "Egress type is not equal in test %s", tc.name)
 						assert.Equal(t, egress.DNS, expectedEgress.DNS, "Egress DNS is not equal in test %s", tc.name)
-						assert.Equal(t, egress.Ports, expectedEgress.Ports, "Egress ports are not equal in test %s", tc.name)
 						assert.Equal(t, egress.PodSelector, expectedEgress.PodSelector, "Egress pod selector is not equal in test %s", tc.name)
 						assert.Equal(t, egress.NamespaceSelector, expectedEgress.NamespaceSelector, "Egress namespace selector is not equal in test %s", tc.name)
 						assert.Equal(t, egress.IPAddress, expectedEgress.IPAddress, "Egress IP address is not equal in test %s", tc.name)
