@@ -60,7 +60,7 @@ func (rm *RelevancyManager) deleteResources(watchedContainer *utils.WatchedConta
 
 func (rm *RelevancyManager) ensureImageInfo(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
 	if watchedContainer.ImageID == "" || watchedContainer.ImageTag == "" || watchedContainer.InstanceID == nil || watchedContainer.Wlid == "" {
-		imageID, imageTag, parentWlid, instanceID, err := rm.getContainerInfo(container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)
+		imageID, imageTag, parentWlid, parentResourceVersion, instanceID, err := rm.getContainerInfo(container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)
 		if err != nil {
 			logger.L().Debug("failed to get image info", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Error(err))
 			return
@@ -69,39 +69,42 @@ func (rm *RelevancyManager) ensureImageInfo(container *containercollection.Conta
 		watchedContainer.ImageTag = imageTag
 		watchedContainer.InstanceID = instanceID
 		watchedContainer.Wlid = parentWlid
+		watchedContainer.ParentResourceVersion = parentResourceVersion
 		rm.sbomHandler.IncrementImageUse(watchedContainer.ImageID)
 	}
 }
 
-func (rm *RelevancyManager) getContainerInfo(namespace, podName, containerName string) (string, string, string, instanceidhandler.IInstanceID, error) {
+func (rm *RelevancyManager) getContainerInfo(namespace, podName, containerName string) (string, string, string, string, instanceidhandler.IInstanceID, error) {
 	imageID := ""
 	imageTag := ""
 	parentWlid := ""
+	parentResourceVersion := ""
 	var instanceID instanceidhandler.IInstanceID
 	wl, err := rm.k8sClient.GetWorkload(namespace, "Pod", podName)
 	if err != nil {
-		return imageID, imageTag, parentWlid, instanceID, fmt.Errorf("fail to get pod %s in namespace %s with error: %v", podName, namespace, err)
+		return imageID, imageTag, parentWlid, parentResourceVersion, instanceID, fmt.Errorf("fail to get pod %s in namespace %s with error: %v", podName, namespace, err)
 	}
 	pod := wl.(*workloadinterface.Workload)
 	// find parentWlid
 	kind, name, err := rm.k8sClient.CalculateWorkloadParentRecursive(pod)
 	if err != nil {
-		return imageID, imageTag, parentWlid, instanceID, fmt.Errorf("fail to get workload owner parent %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
+		return imageID, imageTag, parentWlid, parentResourceVersion, instanceID, fmt.Errorf("fail to get workload owner parent %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 	parentWorkload, err := rm.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
 	if err != nil {
-		return imageID, imageTag, parentWlid, instanceID, fmt.Errorf("fail to get parent workload %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
+		return imageID, imageTag, parentWlid, parentResourceVersion, instanceID, fmt.Errorf("fail to get parent workload %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 	w := parentWorkload.(*workloadinterface.Workload)
 	parentWlid = w.GenerateWlid(rm.clusterName)
+	parentResourceVersion = w.GetResourceVersion()
 	err = wlid.IsWlidValid(parentWlid)
 	if err != nil {
-		return imageID, imageTag, parentWlid, instanceID, fmt.Errorf("WLID of parent workload is not in the right %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
+		return imageID, imageTag, parentWlid, parentResourceVersion, instanceID, fmt.Errorf("WLID of parent workload is not in the right %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 	// find imageTag
 	containers, err := pod.GetContainers()
 	if err != nil {
-		return imageID, imageTag, parentWlid, instanceID, fmt.Errorf("fail to get containers for pod %s in namespace %s with error: %v", podName, namespace, err)
+		return imageID, imageTag, parentWlid, parentResourceVersion, instanceID, fmt.Errorf("fail to get containers for pod %s in namespace %s with error: %v", podName, namespace, err)
 	}
 	for i := range containers {
 		if containers[i].Name == containerName {
@@ -109,12 +112,12 @@ func (rm *RelevancyManager) getContainerInfo(namespace, podName, containerName s
 		}
 	}
 	if imageTag == "" {
-		return imageID, imageTag, parentWlid, instanceID, fmt.Errorf("fail to find container %s in pod %s in namespace %s", containerName, podName, namespace)
+		return imageID, imageTag, parentWlid, parentResourceVersion, instanceID, fmt.Errorf("fail to find container %s in pod %s in namespace %s", containerName, podName, namespace)
 	}
 	// find imageID
 	status, err := pod.GetPodStatus() // Careful this is not available on container creation
 	if err != nil {
-		return imageID, imageTag, parentWlid, instanceID, fmt.Errorf("fail to get status for pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
+		return imageID, imageTag, parentWlid, parentResourceVersion, instanceID, fmt.Errorf("fail to get status for pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 	for i := range status.ContainerStatuses {
 		if status.ContainerStatuses[i].Name == containerName {
@@ -122,12 +125,12 @@ func (rm *RelevancyManager) getContainerInfo(namespace, podName, containerName s
 		}
 	}
 	if imageID == "" {
-		return imageID, imageTag, parentWlid, instanceID, fmt.Errorf("fail to find container status %s in pod %s in namespace %s", containerName, podName, namespace)
+		return imageID, imageTag, parentWlid, parentResourceVersion, instanceID, fmt.Errorf("fail to find container status %s in pod %s in namespace %s", containerName, podName, namespace)
 	}
 	// find instanceID
 	instanceIDs, err := instanceidhandlerV1.GenerateInstanceID(pod)
 	if err != nil {
-		return imageID, imageTag, parentWlid, instanceID, fmt.Errorf("fail to create InstanceID to pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
+		return imageID, imageTag, parentWlid, parentResourceVersion, instanceID, fmt.Errorf("fail to create InstanceID to pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 	instanceID = instanceIDs[0]
 	for i := range instanceIDs {
@@ -135,7 +138,7 @@ func (rm *RelevancyManager) getContainerInfo(namespace, podName, containerName s
 			instanceID = instanceIDs[i]
 		}
 	}
-	return imageID, imageTag, parentWlid, instanceID, nil
+	return imageID, imageTag, parentWlid, parentResourceVersion, instanceID, nil
 }
 
 // Handle relevant data

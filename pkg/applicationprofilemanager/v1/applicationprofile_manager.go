@@ -79,6 +79,7 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to validate WLID", helpers.Error(err))
 		return
 	}
+	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
 	// find instanceID
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {
