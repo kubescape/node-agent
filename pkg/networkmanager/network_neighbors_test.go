@@ -46,8 +46,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 					Name:      "deployment-nginx-deployment",
 					Namespace: "default",
 					Labels: map[string]string{
-						"kubescape.io/workload-api-group":        "apps",
-						"kubescape.io/workload-api-version":      "v1",
+						"kubescape.io/workload-api-version":      "apps/v1",
 						"kubescape.io/workload-namespace":        "default",
 						"kubescape.io/workload-kind":             "deployment",
 						"kubescape.io/workload-name":             "nginx-deployment",
@@ -81,8 +80,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 					Name:      "daemonset-fluentd-elasticsearch",
 					Namespace: "kube-system",
 					Labels: map[string]string{
-						"kubescape.io/workload-api-group":        "apps",
-						"kubescape.io/workload-api-version":      "v1",
+						"kubescape.io/workload-api-version":      "apps/v1",
 						"kubescape.io/workload-namespace":        "kube-system",
 						"kubescape.io/workload-kind":             "daemonset",
 						"kubescape.io/workload-name":             "fluentd-elasticsearch",
@@ -116,7 +114,6 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 					Name:      "pod-nginx-deployment-fcc867f7-dgjrg",
 					Namespace: "default",
 					Labels: map[string]string{
-						"kubescape.io/workload-api-group":        "",
 						"kubescape.io/workload-api-version":      "v1",
 						"kubescape.io/workload-namespace":        "default",
 						"kubescape.io/workload-kind":             "pod",
@@ -228,8 +225,7 @@ func TestGenerateNetworkNeighborsLabels(t *testing.T) {
 			name:     "deployment",
 			workload: deploymentJson,
 			expectedLabels: map[string]string{
-				"kubescape.io/workload-api-group":        "apps",
-				"kubescape.io/workload-api-version":      "v1",
+				"kubescape.io/workload-api-version":      "apps/v1",
 				"kubescape.io/workload-namespace":        "default",
 				"kubescape.io/workload-kind":             "deployment",
 				"kubescape.io/workload-name":             "nginx-deployment",
@@ -241,8 +237,7 @@ func TestGenerateNetworkNeighborsLabels(t *testing.T) {
 			name:     "daemonset",
 			workload: daemonsetJson,
 			expectedLabels: map[string]string{
-				"kubescape.io/workload-api-group":        "apps",
-				"kubescape.io/workload-api-version":      "v1",
+				"kubescape.io/workload-api-version":      "apps/v1",
 				"kubescape.io/workload-namespace":        "kube-system",
 				"kubescape.io/workload-kind":             "daemonset",
 				"kubescape.io/workload-name":             "fluentd-elasticsearch",
@@ -254,7 +249,6 @@ func TestGenerateNetworkNeighborsLabels(t *testing.T) {
 			name:     "pod",
 			workload: podJson,
 			expectedLabels: map[string]string{
-				"kubescape.io/workload-api-group":        "",
 				"kubescape.io/workload-api-version":      "v1",
 				"kubescape.io/workload-namespace":        "default",
 				"kubescape.io/workload-kind":             "pod",
