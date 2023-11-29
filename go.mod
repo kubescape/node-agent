@@ -11,7 +11,7 @@ require (
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/google/uuid v1.4.0
 	github.com/goradd/maps v0.1.5
-	github.com/inspektor-gadget/inspektor-gadget v0.21.0
+	github.com/inspektor-gadget/inspektor-gadget v0.22.1-0.20231128180916-c54d8a4b979c
 	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/backend v0.0.13
 	github.com/kubescape/go-logger v0.0.21
@@ -176,7 +176,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.3.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
-
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspektor-gadget v0.0.0-20231128122238-ce3af6eccf0a
 
 replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6
