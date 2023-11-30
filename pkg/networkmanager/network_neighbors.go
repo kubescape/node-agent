@@ -53,21 +53,12 @@ func generateNetworkNeighborsNameFromWlid(parentWlid string) string {
 }
 
 func generateNetworkNeighborsLabels(workload k8sinterface.IWorkload) map[string]string {
-	var apiVersion, apiGroup string
-	apiVersionSplitted := strings.Split(workload.GetApiVersion(), "/")
-	if len(apiVersionSplitted) == 2 {
-		apiGroup = apiVersionSplitted[0]
-		apiVersion = apiVersionSplitted[1]
-	} else if len(apiVersionSplitted) == 1 {
-		apiVersion = apiVersionSplitted[0]
-	}
-
 	return map[string]string{
-		instanceidhandlerV1.ApiGroupMetadataKey:   apiGroup,
-		instanceidhandlerV1.ApiVersionMetadataKey: apiVersion,
-		instanceidhandlerV1.NamespaceMetadataKey:  workload.GetNamespace(),
-		instanceidhandlerV1.KindMetadataKey:       strings.ToLower(workload.GetKind()),
-		instanceidhandlerV1.NameMetadataKey:       workload.GetName(),
+		instanceidhandlerV1.ApiVersionMetadataKey:      workload.GetApiVersion(),
+		instanceidhandlerV1.NamespaceMetadataKey:       workload.GetNamespace(),
+		instanceidhandlerV1.KindMetadataKey:            strings.ToLower(workload.GetKind()),
+		instanceidhandlerV1.NameMetadataKey:            workload.GetName(),
+		instanceidhandlerV1.ResourceVersionMetadataKey: workload.GetResourceVersion(),
 	}
 }
 
