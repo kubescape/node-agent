@@ -1,5 +1,7 @@
 {
   "applicationProfileServiceEnabled": true,
+  "fullPathTracingEnabled": true,
+  "networkServiceEnabled": true,
   "relevantCVEServiceEnabled": true,
   "maxSniffingTimePerContainer": "6h",
   "updateDataPeriod": "1m"

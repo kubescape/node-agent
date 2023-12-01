@@ -44,8 +44,8 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 	opts := []containercollection.ContainerCollectionOption{
 		containercollection.WithTracerCollection(ch.tracerCollection),
 
-		// Get containers created with runc
-		containercollection.WithRuncFanotify(),
+		// Get containers created with ebpf (works also if hostPid=false)
+		containercollection.WithContainerFanotifyEbpf(),
 
 		// Get containers created with docker
 		containercollection.WithCgroupEnrichment(),

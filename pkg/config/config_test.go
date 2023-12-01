@@ -21,6 +21,7 @@ func TestLoadConfig(t *testing.T) {
 				EnableFullPathTracing:    true,
 				EnableApplicationProfile: true,
 				EnableRelevancy:          true,
+				EnableNetworkTracing:     true,
 				InitialDelay:             2 * time.Minute,
 				MaxSniffingTime:          6 * time.Hour,
 				UpdateDataPeriod:         1 * time.Minute,
