@@ -30,6 +30,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	k8sv1beta1 "k8s.io/api/batch/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -161,11 +162,29 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		return
 	}
 
-	selector, err := parentWL.GetSelector()
-	if err != nil {
-		// if we get not selector, we can't create/update network neighbor
-		logger.L().Warning("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-		return
+	var selector *metav1.LabelSelector
+	if parentWL.GetKind() == "CronJob" {
+		obj := parentWL.GetObject()
+		jsonBytes, err := json.Marshal(obj)
+		if err != nil {
+			logger.L().Warning("NetworkManager - failed to marshal cronjob", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+			return
+		}
+		var cronjob k8sv1beta1.CronJob
+		if err = json.Unmarshal(jsonBytes, &cronjob); err != nil {
+			logger.L().Warning("NetworkManager - failed to unmarshal cronjob", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+			return
+		}
+		selector = &metav1.LabelSelector{
+			MatchLabels: cronjob.Spec.JobTemplate.Spec.Template.ObjectMeta.Labels,
+		}
+	} else {
+		selector, err = parentWL.GetSelector()
+		if err != nil {
+			// if we get not selector, we can't create/update network neighbor
+			logger.L().Warning("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+			return
+		}
 	}
 
 	if selector == nil {
