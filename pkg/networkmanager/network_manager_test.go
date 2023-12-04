@@ -16,6 +16,7 @@ import (
 	"github.com/goradd/maps"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 )
@@ -1332,5 +1333,50 @@ func TestAddToMap(t *testing.T) {
 			addToMap(tc.identifiersMap, tc.identifier, tc.portIdentifier, tc.neighborEntry)
 			assert.Equal(t, tc.expectedMap, tc.identifiersMap)
 		})
+	}
+}
+
+func TestGetSelectorFromWorkload(t *testing.T) {
+	tests := []struct {
+		name             string
+		parentWL         []byte
+		expectedSelector *metav1.LabelSelector
+	}{
+		{
+			name:     "deployment",
+			parentWL: deploymentJson,
+			expectedSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "nginx"},
+			},
+		},
+		{
+			name:     "daemonset",
+			parentWL: daemonsetJson,
+			expectedSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"match": "fluentd-elasticsearch"},
+			},
+		},
+		{
+			name:     "cronjob",
+			parentWL: cronjobJson,
+			expectedSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app":                    "kubescape-scheduler",
+					"app.kubernetes.io/name": "kubescape-scheduler",
+					"armo.tier":              "kubescape-scan",
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		parentWL, err := workloadinterface.NewWorkload(tc.parentWL)
+		assert.NoError(t, err)
+
+		result, err := getSelectorFromWorkload(parentWL)
+		assert.NoError(t, err)
+
+		assert.Equal(t, tc.expectedSelector, result)
+
 	}
 }

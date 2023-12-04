@@ -9,7 +9,8 @@
         "creationTimestamp": "2023-10-22T10:56:49Z",
         "generation": 1,
         "labels": {
-            "app": "nginx"
+            "app": "nginx",
+            "bla3": "blu3"
         },
         "name": "nginx-deployment",
         "namespace": "default",
