@@ -30,6 +30,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	k8sv1beta1 "k8s.io/api/batch/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -161,7 +162,7 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		return
 	}
 
-	selector, err := parentWL.GetSelector()
+	selector, err := getSelectorFromWorkload(parentWL)
 	if err != nil {
 		// if we get not selector, we can't create/update network neighbor
 		logger.L().Warning("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
@@ -205,6 +206,30 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 	}
 
 	am.deleteResources(container)
+}
+
+func getSelectorFromWorkload(workload k8sinterface.IWorkload) (*metav1.LabelSelector, error) {
+	if workload.GetKind() == "CronJob" {
+		obj := workload.GetObject()
+		jsonBytes, err := json.Marshal(obj)
+		if err != nil {
+			return nil, err
+		}
+		var cronjob k8sv1beta1.CronJob
+		if err = json.Unmarshal(jsonBytes, &cronjob); err != nil {
+			return nil, err
+		}
+		selector := &metav1.LabelSelector{
+			MatchLabels: cronjob.Spec.JobTemplate.Spec.Template.ObjectMeta.Labels,
+		}
+		return selector, nil
+	}
+
+	selector, err := workload.GetSelector()
+	if err != nil {
+		return nil, err
+	}
+	return selector, nil
 }
 
 // TODO: use same function in relevancy

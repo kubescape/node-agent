@@ -12,6 +12,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+//go:embed testdata/cronjob.json
+var cronjobJson []byte
+
 //go:embed testdata/deployment.json
 var deploymentJson []byte
 
