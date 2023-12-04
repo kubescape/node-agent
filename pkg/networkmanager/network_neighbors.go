@@ -63,11 +63,12 @@ func generateNetworkNeighborsLabels(workload k8sinterface.IWorkload) map[string]
 	}
 
 	return map[string]string{
-		instanceidhandlerV1.ApiGroupMetadataKey:   apiGroup,
-		instanceidhandlerV1.ApiVersionMetadataKey: apiVersion,
-		instanceidhandlerV1.NamespaceMetadataKey:  workload.GetNamespace(),
-		instanceidhandlerV1.KindMetadataKey:       strings.ToLower(workload.GetKind()),
-		instanceidhandlerV1.NameMetadataKey:       workload.GetName(),
+		instanceidhandlerV1.ApiGroupMetadataKey:        apiGroup,
+		instanceidhandlerV1.ApiVersionMetadataKey:      apiVersion,
+		instanceidhandlerV1.NamespaceMetadataKey:       workload.GetNamespace(),
+		instanceidhandlerV1.KindMetadataKey:            strings.ToLower(workload.GetKind()),
+		instanceidhandlerV1.NameMetadataKey:            workload.GetName(),
+		instanceidhandlerV1.ResourceVersionMetadataKey: workload.GetResourceVersion(),
 	}
 }
 

@@ -47,6 +47,7 @@ type WatchedContainerData struct {
 	InitialDelayExpired                      bool
 	InstanceID                               instanceidhandler.IInstanceID
 	K8sContainerID                           string
+	ParentResourceVersion                    string
 	RelevantRealtimeFilesByPackageSourceInfo map[string]*PackageSourceInfoData
 	RelevantRealtimeFilesBySPDXIdentifier    map[v1beta1.ElementID]bool
 	SBOMResourceVersion                      int
@@ -134,6 +135,9 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 				delete(labels, i)
 			}
 		}
+	}
+	if watchedContainer.ParentResourceVersion != "" {
+		labels[instanceidhandler2.ResourceVersionMetadataKey] = watchedContainer.ParentResourceVersion
 	}
 	return labels
 }
