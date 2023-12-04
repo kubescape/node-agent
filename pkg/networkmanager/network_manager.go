@@ -208,9 +208,9 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 	am.deleteResources(container)
 }
 
-func getSelectorFromWorkload(parentWL k8sinterface.IWorkload) (*metav1.LabelSelector, error) {
-	if parentWL.GetKind() == "CronJob" {
-		obj := parentWL.GetObject()
+func getSelectorFromWorkload(workload k8sinterface.IWorkload) (*metav1.LabelSelector, error) {
+	if workload.GetKind() == "CronJob" {
+		obj := workload.GetObject()
 		jsonBytes, err := json.Marshal(obj)
 		if err != nil {
 			return nil, err
@@ -225,7 +225,7 @@ func getSelectorFromWorkload(parentWL k8sinterface.IWorkload) (*metav1.LabelSele
 		return selector, nil
 	}
 
-	selector, err := parentWL.GetSelector()
+	selector, err := workload.GetSelector()
 	if err != nil {
 		return nil, err
 	}
