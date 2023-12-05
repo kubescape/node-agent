@@ -15,23 +15,43 @@ func TestResolveIPAddress(t *testing.T) {
 	}{
 		{
 			name:   "ip found",
-			ipAddr: "14.23.332.4",
+			ipAddr: "67.225.146.248",
 			dnsEvent: tracerdnstype.Event{
-				DNSName: "test.com",
+				DNSName:    "test.com",
+				NumAnswers: 1,
 				Addresses: []string{
-					"14.23.332.4",
+					"67.225.146.248",
 				},
 			},
 			want: "test.com",
 		},
 		{
 			name:   "ip not found",
-			ipAddr: "14.23.332.4",
+			ipAddr: "67.225.146.248",
 			dnsEvent: tracerdnstype.Event{
-				DNSName: "test.com",
+				DNSName:    "test.com",
+				NumAnswers: 1,
 				Addresses: []string{
 					"54.23.332.4",
 				},
+			},
+			want: "",
+		},
+		{
+			name:   "dns resolution fallback",
+			ipAddr: "67.225.146.248",
+			dnsEvent: tracerdnstype.Event{
+				DNSName:    "test.com",
+				NumAnswers: 1,
+			},
+			want: "test.com",
+		},
+		{
+			name:   "no address",
+			ipAddr: "67.225.146.248",
+			dnsEvent: tracerdnstype.Event{
+				DNSName:    "test.com",
+				NumAnswers: 0, // will not resolve
 			},
 			want: "",
 		},

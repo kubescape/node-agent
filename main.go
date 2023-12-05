@@ -102,14 +102,14 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
 		}
 	} else {
-		relevancymanager.CreateRelevancyManagerMock()
+		relevancyManager = relevancymanager.CreateRelevancyManagerMock()
 	}
 
 	var networkManagerClient networkmanager.NetworkManagerClient
 	var dnsManagerClient dnsmanager.DNSManagerClient
 
 	if cfg.EnableNetworkTracing {
-		dnsManager := dnsmanager.CreateDNSManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName)
+		dnsManager := dnsmanager.CreateDNSManager()
 		dnsManagerClient = dnsManager
 
 		networkManagerClient = networkmanager.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName, dnsManager)

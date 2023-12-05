@@ -1,13 +1,12 @@
 package dnsmanager
 
 import (
-	"context"
-	"node-agent/pkg/config"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/storage"
+	"net"
 
 	"github.com/goradd/maps"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 // DNSManager is used to manage DNS events and save IP resolutions. It exposes an API to resolve IP address to domain name.
@@ -18,13 +17,26 @@ type DNSManager struct {
 var _ DNSManagerClient = (*DNSManager)(nil)
 var _ DNSResolver = (*DNSManager)(nil)
 
-func CreateDNSManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string) *DNSManager {
+func CreateDNSManager() *DNSManager {
 	return &DNSManager{}
 }
 
 func (dm *DNSManager) ProcessDNSEvent(dnsEvent tracerdnstype.Event) {
-	for _, address := range dnsEvent.Addresses {
-		dm.addressToDomainMap.Set(address, dnsEvent.DNSName)
+	if dnsEvent.NumAnswers > 0 {
+		if len(dnsEvent.Addresses) > 0 {
+			for _, address := range dnsEvent.Addresses {
+				dm.addressToDomainMap.Set(address, dnsEvent.DNSName)
+			}
+		} else {
+			logger.L().Debug("DNS event has no addresses, using net.LookupIP instead", helpers.String("dnsName", dnsEvent.DNSName))
+			addresses, err := net.LookupIP(dnsEvent.DNSName)
+			if err != nil {
+				return
+			}
+			for _, address := range addresses {
+				dm.addressToDomainMap.Set(address.String(), dnsEvent.DNSName)
+			}
+		}
 	}
 }
 

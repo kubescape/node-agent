@@ -12,7 +12,7 @@ import (
 )
 
 func (ch *IGContainerWatcher) dnsEventCallback(event *tracerdnstype.Event) {
-	if event.Type != types.NORMAL {
+	if event.Type != types.NORMAL && event.Type != types.DEBUG {
 		logger.L().Ctx(ch.ctx).Warning("dns tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
