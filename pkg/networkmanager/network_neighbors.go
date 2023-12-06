@@ -17,7 +17,7 @@ const (
 	incompleteStatus = "incomplete"
 )
 
-func generateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWorkloadSelector *metav1.LabelSelector) *v1beta1.NetworkNeighbors {
+func generateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWorkloadSelector *metav1.LabelSelector, clusterName string) *v1beta1.NetworkNeighbors {
 	if parentWorkloadSelector.MatchLabels == nil && parentWorkloadSelector.MatchExpressions == nil {
 		parentWorkloadSelector.MatchLabels = parentWorkload.GetLabels()
 	}
@@ -29,6 +29,7 @@ func generateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWo
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Annotations: map[string]string{
+				instanceidhandler.WlidMetadataKey:   parentWorkload.GenerateWlid(clusterName),
 				instanceidhandler.StatusMetadataKey: incompleteStatus,
 			},
 			Name:      generateNetworkNeighborsNameFromWorkload(parentWorkload),
