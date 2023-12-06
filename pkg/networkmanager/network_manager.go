@@ -182,7 +182,7 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 			logger.L().Warning("NetworkManager - failed to get network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		} else {
 			// network neighbor not found, create new one
-			newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector)
+			newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector, am.clusterName)
 
 			if err = am.storageClient.CreateNetworkNeighbors(newNetworkNeighbors, parentWL.GetNamespace()); err != nil {
 				logger.L().Warning("NetworkManager - failed to create network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
@@ -338,7 +338,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 			logger.L().Warning("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
 			return
 		}
-		newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector)
+		newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector, am.clusterName)
 
 		// update spec and annotations
 		networkNeighborsSpec.LabelSelector = *selector

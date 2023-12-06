@@ -44,6 +44,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
+						instanceidhandlerV1.WlidMetadataKey:   "wlid://cluster-minikube/namespace-default/deployment-nginx-deployment",
 						instanceidhandlerV1.StatusMetadataKey: "incomplete",
 					},
 					Name:      "deployment-nginx-deployment",
@@ -79,6 +80,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
+						instanceidhandlerV1.WlidMetadataKey:   "wlid://cluster-minikube/namespace-kube-system/daemonset-fluentd-elasticsearch",
 						instanceidhandlerV1.StatusMetadataKey: "incomplete",
 					},
 					Name:      "daemonset-fluentd-elasticsearch",
@@ -114,6 +116,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
+						instanceidhandlerV1.WlidMetadataKey:   "wlid://cluster-minikube/namespace-default/pod-nginx-deployment-fcc867f7-dgjrg",
 						instanceidhandlerV1.StatusMetadataKey: "incomplete",
 					},
 					Name:      "pod-nginx-deployment-fcc867f7-dgjrg",
@@ -146,7 +149,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 			selector, err := wl.GetSelector()
 			assert.Nil(t, err)
 
-			actualNetworkNeighbors := generateNetworkNeighborsCRD(wl, selector)
+			actualNetworkNeighbors := generateNetworkNeighborsCRD(wl, selector, "minikube")
 			assert.Equal(t, test.expectedNetworkNeighbors, actualNetworkNeighbors)
 		})
 	}
