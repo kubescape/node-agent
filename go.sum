@@ -319,6 +319,8 @@ github.com/kubescape/backend v0.0.16 h1:bkQGY39GSoNIeFfnAJ2zlcrGEyXk6LGYv1/MgS51
 github.com/kubescape/backend v0.0.16/go.mod h1:ug9NFmmxT4DcQx3sgdLRzlLPWMKGHE/fpbcYUm5G5Qo=
 github.com/kubescape/go-logger v0.0.22 h1:gle7wH6emOiGv9ljdpVi82pWLQ3jGucrUucvil6JXHE=
 github.com/kubescape/go-logger v0.0.22/go.mod h1:x3HBpZo3cMT/WIdy18BxvVVd5D0e/PWFVk/HiwBNu3g=
+github.com/kubescape/host-scanner v0.0.0-20230815131417-6e97c07e07da h1:7C6TX/i078UouHAMibUEePmRZmhoHinY3y61RfaFVRI=
+github.com/kubescape/host-scanner v0.0.0-20230815131417-6e97c07e07da/go.mod h1:HrTFA+wNEJzQWrxS+zPGEHDC0+Nsnl7WZd9XGjSXM1I=
 github.com/kubescape/k8s-interface v0.0.152 h1:1tm2zPYVK7+1fewpca0/MCoK3TgUNButpM3F3uZz6yo=
 github.com/kubescape/k8s-interface v0.0.152/go.mod h1:5sz+5Cjvo98lTbTVDiDA4MmlXxeHSVMW/wR0V3hV4K8=
 github.com/kubescape/storage v0.0.39 h1:zxdu6pQ/8Fdzp0Er0yX+KWApMYvNZh9y7ONWyJcbb08=
@@ -337,6 +339,8 @@ github.com/mattn/go-isatty v0.0.16/go.mod h1:kYGgaQfpe5nmfYZH+SKPsOc2e4SrIfOl2e/
 github.com/mattn/go-isatty v0.0.19 h1:JITubQf0MOLdlGRuRq+jtsDlekdYPia9ZFsB8h/APPA=
 github.com/mattn/go-isatty v0.0.19/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/matttproud/golang_protobuf_extensions v1.0.1/go.mod h1:D8He9yQNgCq6Z5Ld7szi9bcBfOoFv/3dc6xSMkL2PC0=
+github.com/maxatome/go-testdeep v1.12.0 h1:Ql7Go8Tg0C1D/uMMX59LAoYK7LffeJQ6X2T04nTH68g=
+github.com/maxatome/go-testdeep v1.12.0/go.mod h1:lPZc/HAcJMP92l7yI6TRz1aZN5URwUBUAfUNvrclaNM=
 github.com/microcosm-cc/bluemonday v1.0.1/go.mod h1:hsXNsILzKxV+sX77C5b8FSuKF00vh2OMYv+xgHpAMF4=
 github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=

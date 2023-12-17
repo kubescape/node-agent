@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/node-agent/sensor/internal/utils"
+	// "github.com/kubescape/node-agent/sensor/internal/utils"
+	"github.com/kubescape/host-scanner/sensor/internal/utils"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -24,7 +26,7 @@ func Test_makeHostDirFilesInfo(t *testing.T) {
 	defer os.Remove(f.Name()) // clean up
 	logger.InitLogger("pretty")
 	logger.L().SetWriter(f)
-	
+
 	// test
 	fileInfos, err = makeHostDirFilesInfoVerbose(context.TODO(), "testdata/testmakehostfiles", true, nil, maxRecursionDepth-1)
 	assert.NoError(t, err)

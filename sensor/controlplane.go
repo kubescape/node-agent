@@ -11,8 +11,10 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"gopkg.in/yaml.v3"
 
-	ds "github.com/kubescape/node-agent/sensor/datastructures"
-	"github.com/kubescape/node-agent/sensor/internal/utils"
+	// ds "github.com/kubescape/node-agent/sensor/datastructures"
+	ds "github.com/kubescape/host-scanner/sensor/datastructures"
+	// "github.com/kubescape/node-agent/sensor/internal/utils"
+	"github.com/kubescape/host-scanner/sensor/internal/utils"
 )
 
 const (

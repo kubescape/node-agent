@@ -1,8 +1,11 @@
 package sensor
 
 import (
+	"node-agent/sensor/internal/utils"
+
 	"github.com/armosec/utils-go/httputils"
-	"github.com/kubescape/node-agent/sensor/internal/utils"
+	"github.com/kubescape/host-scanner/sensor/internal/utils"
+	// "github.com/kubescape/node-agent/sensor/internal/utils"
 )
 
 // CloudProviderInfo holds information about the Cloud Provider

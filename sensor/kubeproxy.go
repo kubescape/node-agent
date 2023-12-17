@@ -5,8 +5,10 @@ import (
 	"fmt"
 
 	"github.com/kubescape/go-logger/helpers"
-	ds "github.com/kubescape/node-agent/sensor/datastructures"
-	"github.com/kubescape/node-agent/sensor/internal/utils"
+	// ds "github.com/kubescape/node-agent/sensor/datastructures"
+	ds "github.com/kubescape/host-scanner/sensor/datastructures"
+	// "github.com/kubescape/node-agent/sensor/internal/utils"
+	"github.com/kubescape/host-scanner/sensor/internal/utils"
 )
 
 const (

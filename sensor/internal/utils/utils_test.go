@@ -5,8 +5,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/kubescape/node-agent/sensor/datastructures"
-	ds "github.com/kubescape/node-agent/sensor/datastructures"
+	// "github.com/kubescape/node-agent/sensor/datastructures"
+	"github.com/kubescape/host-scanner/sensor/datastructures"
+
+	// ds "github.com/kubescape/node-agent/sensor/datastructures"
+	ds "github.com/kubescape/host-scanner/sensor/datastructures"
 	"github.com/stretchr/testify/assert"
 )
 
