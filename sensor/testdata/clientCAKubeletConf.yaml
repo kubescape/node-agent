@@ -1,0 +1,19 @@
+apiVersion: kubelet.config.k8s.io/v1beta1
+authentication:
+  anonymous:
+    enabled: false
+  webhook:
+    cacheTTL: 0s
+    enabled: true
+  x509:
+    clientCAFile: /var/lib/minikube/certs/ca.crt
+evictionHard:
+  imagefs.available: 0%
+  nodefs.available: 0%
+  nodefs.inodesFree: 0%
+logging:
+  flushFrequency: 0
+  options:
+    json:
+      infoBufferSize: "0"
+  verbosity: 0

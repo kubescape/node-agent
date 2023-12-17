@@ -1,0 +1,11 @@
+apiVersion: kubelet.config.k8s.io/v1beta1
+evictionHard:
+  imagefs.available: 0%
+  nodefs.available: 0%
+  nodefs.inodesFree: 0%
+logging:
+  flushFrequency: 0
+  options:
+    json:
+      infoBufferSize: "0"
+  verbosity: 0

@@ -33,6 +33,7 @@ require (
 require (
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20230811130428-ced1acdcaa24 // indirect
 	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20230306123547-8075edf89bb0 // indirect
+	github.com/BurntSushi/toml v1.3.2
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/Microsoft/hcsshim v0.12.0-rc.1 // indirect
 	github.com/armosec/armoapi-go v0.0.254 // indirect
@@ -83,6 +84,7 @@ require (
 	github.com/hashicorp/hcl v1.0.1-vault-5 // indirect
 	github.com/imdario/mergo v0.3.16 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/jarcoal/httpmock v1.3.1
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.17.3 // indirect
@@ -130,6 +132,7 @@ require (
 	github.com/uptrace/opentelemetry-go-extra/otelzap v0.2.2 // indirect
 	github.com/uptrace/uptrace-go v1.18.0 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
+	github.com/weaveworks/procspy v0.0.0-20150706124340-cb970aa190c3
 	github.com/xlab/treeprint v1.2.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.44.0 // indirect
