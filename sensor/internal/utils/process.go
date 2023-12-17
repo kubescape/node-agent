@@ -36,7 +36,7 @@ func LocateProcessByExecSuffix(processSuffix string) (*ProcessDetails, error) {
 	for pidDirs, err = procDir.Readdirnames(100); err == nil; pidDirs, err = procDir.Readdirnames(100) {
 		for pidIdx := range pidDirs {
 			// since processes are about to die in the middle of the loop, we will ignore next errors
-			pid, err := strconv.ParseInt(pidDirs[pidIdx], 10, 0)
+			pid, err := strconv.ParseInt(pidDirs[pidIdx], 10, 32)
 			if err != nil {
 				continue
 			}
