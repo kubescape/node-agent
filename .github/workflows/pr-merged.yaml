@@ -31,7 +31,12 @@ jobs:
                         "relevancy_golang",
                         "relevancy_java",
                         "relevancy_java_and_python",
-                        "relevancy_golang_dynamic"
+                        "relevancy_golang_dynamic",
+                        "network_policy",
+                        "network_policy_data_appended",
+                        "network_policy_pod_restarted",
+                        "network_policy_multiple_replicas",
+                        "network_policy_known_servers"
                       ]'
       COSIGN: true
       HELM_E2E_TEST: true
