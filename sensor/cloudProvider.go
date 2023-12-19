@@ -3,9 +3,7 @@ package sensor
 import (
 	"node-agent/sensor/internal/utils"
 
-	"github.com/armosec/utils-go/httputils"
-	"github.com/kubescape/host-scanner/sensor/internal/utils"
-	// "github.com/kubescape/node-agent/sensor/internal/utils"
+	httpUtils "github.com/armosec/utils-go/httputils"
 )
 
 // CloudProviderInfo holds information about the Cloud Provider
@@ -52,7 +50,7 @@ func hasMetaDataAPIAccess() bool {
 	client.Timeout = 1000000000
 
 	for _, req := range CloudProviderMetaDataAPIs {
-		res, err := httputils.HttpGet(client, req.url, req.headers)
+		res, err := httpUtils.HttpGet(client, req.url, req.headers)
 
 		if err == nil && res.StatusCode == 200 {
 			return true

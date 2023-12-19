@@ -37,4 +37,4 @@ WORKDIR /root
 
 # Define entrypoint
 # NOTE: This needs to be adjusted if both applications can't run simultaneously
-ENTRYPOINT ["/usr/bin/node-agent"]
+ENTRYPOINT ["node-agent"]

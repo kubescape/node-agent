@@ -7,9 +7,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/go-logger"
-	// "github.com/kubescape/node-agent/sensor/internal/utils"
-	"github.com/kubescape/host-scanner/sensor/internal/utils"
-
+	"github.com/kubescape/node-agent/sensor/internal/utils"
 	"github.com/stretchr/testify/assert"
 )
 
