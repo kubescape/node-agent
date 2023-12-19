@@ -1,7 +1,7 @@
 package sensor
 
 import (
-	"node-agent/sensor/internal/utils"
+	sensorUtils "node-agent/pkg/sensor/internal/utils"
 
 	httpUtils "github.com/armosec/utils-go/httputils"
 )
@@ -46,7 +46,7 @@ func SenseCloudProviderInfo() (*CloudProviderInfo, error) {
 
 // hasMetaDataAPIAccess - checks if there is an access to cloud provider meta data
 func hasMetaDataAPIAccess() bool {
-	client := utils.GetHttpClient()
+	client := sensorUtils.GetHttpClient()
 	client.Timeout = 1000000000
 
 	for _, req := range CloudProviderMetaDataAPIs {
@@ -56,7 +56,5 @@ func hasMetaDataAPIAccess() bool {
 			return true
 		}
 	}
-
 	return false
-
 }

@@ -6,13 +6,14 @@ import (
 	"regexp"
 	"testing"
 
+	sensorUtils "node-agent/pkg/sensor/internal/utils"
+
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/node-agent/sensor/internal/utils"
 	"github.com/stretchr/testify/assert"
 )
 
 func Test_makeHostDirFilesInfo(t *testing.T) {
-	utils.HostFileSystemDefaultLocation = "."
+	sensorUtils.HostFileSystemDefaultLocation = "."
 	fileInfos, err := makeHostDirFilesInfoVerbose(context.TODO(), "testdata/testmakehostfiles", true, nil, 0)
 	assert.NoError(t, err)
 	assert.Len(t, fileInfos, 4)

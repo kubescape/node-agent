@@ -11,10 +11,8 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"gopkg.in/yaml.v3"
 
-	// ds "github.com/kubescape/node-agent/sensor/datastructures"
-	ds "github.com/kubescape/host-scanner/sensor/datastructures"
-	// "github.com/kubescape/node-agent/sensor/internal/utils"
-	"github.com/kubescape/host-scanner/sensor/internal/utils"
+	sensorDs "node-agent/pkg/sensor/datastructures"
+	sensorUtils "node-agent/pkg/sensor/internal/utils"
 )
 
 const (
@@ -45,44 +43,44 @@ var (
 
 // KubeProxyInfo holds information about kube-proxy process
 type ControlPlaneInfo struct {
-	APIServerInfo         *ApiServerInfo  `json:"APIServerInfo,omitempty"`
-	ControllerManagerInfo *K8sProcessInfo `json:"controllerManagerInfo,omitempty"`
-	SchedulerInfo         *K8sProcessInfo `json:"schedulerInfo,omitempty"`
-	EtcdConfigFile        *ds.FileInfo    `json:"etcdConfigFile,omitempty"`
-	EtcdDataDir           *ds.FileInfo    `json:"etcdDataDir,omitempty"`
-	AdminConfigFile       *ds.FileInfo    `json:"adminConfigFile,omitempty"`
-	PKIDIr                *ds.FileInfo    `json:"PKIDir,omitempty"`
-	PKIFiles              []*ds.FileInfo  `json:"PKIFiles,omitempty"`
+	APIServerInfo         *ApiServerInfo       `json:"APIServerInfo,omitempty"`
+	ControllerManagerInfo *K8sProcessInfo      `json:"controllerManagerInfo,omitempty"`
+	SchedulerInfo         *K8sProcessInfo      `json:"schedulerInfo,omitempty"`
+	EtcdConfigFile        *sensorDs.FileInfo   `json:"etcdConfigFile,omitempty"`
+	EtcdDataDir           *sensorDs.FileInfo   `json:"etcdDataDir,omitempty"`
+	AdminConfigFile       *sensorDs.FileInfo   `json:"adminConfigFile,omitempty"`
+	PKIDIr                *sensorDs.FileInfo   `json:"PKIDir,omitempty"`
+	PKIFiles              []*sensorDs.FileInfo `json:"PKIFiles,omitempty"`
 }
 
 // K8sProcessInfo holds information about a k8s process
 type K8sProcessInfo struct {
 	// Information about the process specs file (if relevant)
-	SpecsFile *ds.FileInfo `json:"specsFile,omitempty"`
+	SpecsFile *sensorDs.FileInfo `json:"specsFile,omitempty"`
 
 	// Information about the process config file (if relevant)
-	ConfigFile *ds.FileInfo `json:"configFile,omitempty"`
+	ConfigFile *sensorDs.FileInfo `json:"configFile,omitempty"`
 
 	// Information about the process kubeconfig file (if relevant)
-	KubeConfigFile *ds.FileInfo `json:"kubeConfigFile,omitempty"`
+	KubeConfigFile *sensorDs.FileInfo `json:"kubeConfigFile,omitempty"`
 
 	// Information about the process client ca file (if relevant)
-	ClientCAFile *ds.FileInfo `json:"clientCAFile,omitempty"`
+	ClientCAFile *sensorDs.FileInfo `json:"clientCAFile,omitempty"`
 
 	// Raw cmd line of the process
 	CmdLine string `json:"cmdLine"`
 }
 
 type ApiServerInfo struct {
-	EncryptionProviderConfigFile *ds.FileInfo `json:"encryptionProviderConfigFile,omitempty"`
-	AuditPolicyFile              *ds.FileInfo `json:"auditPolicyFile,omitempty"`
+	EncryptionProviderConfigFile *sensorDs.FileInfo `json:"encryptionProviderConfigFile,omitempty"`
+	AuditPolicyFile              *sensorDs.FileInfo `json:"auditPolicyFile,omitempty"`
 	*K8sProcessInfo              `json:",inline"`
 }
 
 // getEtcdDataDir find the `data-dir` path of etcd k8s component
 func getEtcdDataDir() (string, error) {
 
-	proc, err := utils.LocateProcessByExecSuffix(etcdExe)
+	proc, err := sensorUtils.LocateProcessByExecSuffix(etcdExe)
 	if err != nil {
 		return "", fmt.Errorf("failed to locate etcd process: %w", err)
 	}
@@ -95,12 +93,12 @@ func getEtcdDataDir() (string, error) {
 	return dataDir, nil
 }
 
-func makeProcessInfoVerbose(ctx context.Context, p *utils.ProcessDetails, specsPath, configPath, kubeConfigPath, clientCaPath string) *K8sProcessInfo {
+func makeProcessInfoVerbose(ctx context.Context, p *sensorUtils.ProcessDetails, specsPath, configPath, kubeConfigPath, clientCaPath string) *K8sProcessInfo {
 	ret := K8sProcessInfo{}
 
 	// init files
 	files := []struct {
-		data **ds.FileInfo
+		data **sensorDs.FileInfo
 		path string
 		file string
 	}{
@@ -136,14 +134,14 @@ func makeProcessInfoVerbose(ctx context.Context, p *utils.ProcessDetails, specsP
 }
 
 // makeAPIserverEncryptionProviderConfigFile returns a ds.FileInfo object for the encryption provider config file of the API server. Required for https://workbench.cisecurity.org/sections/1126663/recommendations/1838675
-func makeAPIserverEncryptionProviderConfigFile(ctx context.Context, p *utils.ProcessDetails) *ds.FileInfo {
+func makeAPIserverEncryptionProviderConfigFile(ctx context.Context, p *sensorUtils.ProcessDetails) *sensorDs.FileInfo {
 	encryptionProviderConfigPath, ok := p.GetArg(apiEncryptionProviderConfigArg)
 	if !ok {
 		logger.L().Ctx(ctx).Warning("failed to find encryption provider config path", helpers.String("in", "makeAPIserverEncryptionProviderConfigFile"))
 		return nil
 	}
 
-	fi, err := utils.MakeContaineredFileInfo(ctx, p, encryptionProviderConfigPath, true)
+	fi, err := sensorUtils.MakeContaineredFileInfo(ctx, p, encryptionProviderConfigPath, true)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to create encryption provider config file info", helpers.Error(err))
 		return nil
@@ -223,7 +221,7 @@ func removeEncryptionProviderConfigSecrets(data map[string]interface{}) {
 }
 
 // makeAPIserverAuditPolicyFile returns a ds.FileInfo object for an audit policy file of the API server. Required for https://workbench.cisecurity.org/sections/1126663/recommendations/1838675
-func makeAPIserverAuditPolicyFile(ctx context.Context, p *utils.ProcessDetails) *ds.FileInfo {
+func makeAPIserverAuditPolicyFile(ctx context.Context, p *sensorUtils.ProcessDetails) *sensorDs.FileInfo {
 	auditPolicyFilePath, ok := p.GetArg(auditPolicyFileArg)
 	if !ok {
 		logger.L().Info("audit-policy-file argument was not set ", helpers.String("in", "makeAPIserverAuditPolicyFile"))
@@ -242,7 +240,7 @@ func SenseControlPlaneInfo(ctx context.Context) (*ControlPlaneInfo, error) {
 
 	debugInfo := helpers.String("in", "SenseControlPlaneInfo")
 
-	apiProc, err := utils.LocateProcessByExecSuffix(apiServerExe)
+	apiProc, err := sensorUtils.LocateProcessByExecSuffix(apiServerExe)
 	if err == nil {
 		ret.APIServerInfo = &ApiServerInfo{}
 		ret.APIServerInfo.K8sProcessInfo = makeProcessInfoVerbose(ctx, apiProc, apiServerSpecsPath, "", "", "")
@@ -252,14 +250,14 @@ func SenseControlPlaneInfo(ctx context.Context) (*ControlPlaneInfo, error) {
 		logger.L().Ctx(ctx).Warning("SenseControlPlaneInfo", helpers.Error(err))
 	}
 
-	controllerMangerProc, err := utils.LocateProcessByExecSuffix(controllerManagerExe)
+	controllerMangerProc, err := sensorUtils.LocateProcessByExecSuffix(controllerManagerExe)
 	if err == nil {
 		ret.ControllerManagerInfo = makeProcessInfoVerbose(ctx, controllerMangerProc, controllerManagerSpecsPath, controllerManagerConfigPath, "", "")
 	} else {
 		logger.L().Ctx(ctx).Warning("SenseControlPlaneInfo", helpers.Error(err))
 	}
 
-	SchedulerProc, err := utils.LocateProcessByExecSuffix(schedulerExe)
+	SchedulerProc, err := sensorUtils.LocateProcessByExecSuffix(schedulerExe)
 	if err == nil {
 		ret.SchedulerInfo = makeProcessInfoVerbose(ctx, SchedulerProc, schedulerSpecsPath, schedulerConfigPath, "", "")
 	} else {

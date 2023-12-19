@@ -9,10 +9,8 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 
-	// ds "github.com/kubescape/node-agent/sensor/datastructures"
-	// "github.com/kubescape/node-agent/sensor/internal/utils"
-	ds "github.com/kubescape/host-scanner/sensor/datastructures"
-	"github.com/kubescape/host-scanner/sensor/internal/utils"
+	sensorDs "node-agent/pkg/sensor/datastructures"
+	sensorUtils "node-agent/pkg/sensor/internal/utils"
 )
 
 const (
@@ -25,13 +23,13 @@ const (
 func SenseOsRelease() ([]byte, error) {
 	osFileName, err := getOsReleaseFile()
 	if err == nil {
-		return utils.ReadFileOnHostFileSystem(path.Join(etcDirName, osFileName))
+		return sensorUtils.ReadFileOnHostFileSystem(path.Join(etcDirName, osFileName))
 	}
 	return []byte{}, fmt.Errorf("failed to find os-release file: %v", err)
 }
 
 func getOsReleaseFile() (string, error) {
-	hostEtcDir := utils.HostPath(etcDirName)
+	hostEtcDir := sensorUtils.HostPath(etcDirName)
 	etcDir, err := os.Open(hostEtcDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to open etc dir: %v", err)
@@ -50,17 +48,17 @@ func getOsReleaseFile() (string, error) {
 }
 
 func SenseKernelVersion() ([]byte, error) {
-	return utils.ReadFileOnHostFileSystem(path.Join(procDirName, "version"))
+	return sensorUtils.ReadFileOnHostFileSystem(path.Join(procDirName, "version"))
 }
 
 func getAppArmorStatus() string {
 	statusStr := "unloaded"
-	hostAppArmorProfilesFileName := utils.HostPath(appArmorProfilesFileName)
+	hostAppArmorProfilesFileName := sensorUtils.HostPath(appArmorProfilesFileName)
 	profFile, err := os.Open(hostAppArmorProfilesFileName)
 	if err == nil {
 		defer profFile.Close()
 		statusStr = "stopped"
-		content, err := utils.ReadFileOnHostFileSystem(appArmorProfilesFileName)
+		content, err := sensorUtils.ReadFileOnHostFileSystem(appArmorProfilesFileName)
 		if err == nil && len(content) > 0 {
 			statusStr = string(content)
 		}
@@ -70,11 +68,11 @@ func getAppArmorStatus() string {
 
 func getSELinuxStatus() string {
 	statusStr := "not found"
-	hostAppArmorProfilesFileName := utils.HostPath(seLinuxConfigFileName)
+	hostAppArmorProfilesFileName := sensorUtils.HostPath(seLinuxConfigFileName)
 	conFile, err := os.Open(hostAppArmorProfilesFileName)
 	if err == nil {
 		defer conFile.Close()
-		content, err := utils.ReadFileOnHostFileSystem(appArmorProfilesFileName)
+		content, err := sensorUtils.ReadFileOnHostFileSystem(appArmorProfilesFileName)
 		if err == nil && len(content) > 0 {
 			statusStr = string(content)
 		}
@@ -82,8 +80,8 @@ func getSELinuxStatus() string {
 	return statusStr
 }
 
-func SenseLinuxSecurityHardening() (*ds.LinuxSecurityHardeningStatus, error) {
-	res := ds.LinuxSecurityHardeningStatus{}
+func SenseLinuxSecurityHardening() (*sensorDs.LinuxSecurityHardeningStatus, error) {
+	res := sensorDs.LinuxSecurityHardeningStatus{}
 
 	res.AppArmor = getAppArmorStatus()
 	res.SeLinux = getSELinuxStatus()

@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	sensorDs "node-agent/pkg/sensor/datastructures"
+	sensorUtils "node-agent/pkg/sensor/internal/utils"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-
-	// ds "github.com/kubescape/node-agent/sensor/datastructures"
-	ds "github.com/kubescape/host-scanner/sensor/datastructures"
-	// "github.com/kubescape/node-agent/sensor/internal/utils"
-	"github.com/kubescape/host-scanner/sensor/internal/utils"
 	"sigs.k8s.io/yaml"
 )
 
@@ -35,39 +33,39 @@ var kubeletKubeConfigDefaultPathList = []string{
 type KubeletInfo struct {
 	// ServiceFile is a list of files used to configure the kubelet service.
 	// Most of the times it will be a single file, under /etc/systemd/system/kubelet.service.d.
-	ServiceFiles []ds.FileInfo `json:"serviceFiles,omitempty"`
+	ServiceFiles []sensorDs.FileInfo `json:"serviceFiles,omitempty"`
 
 	// Information about kubelete config file
-	ConfigFile *ds.FileInfo `json:"configFile,omitempty"`
+	ConfigFile *sensorDs.FileInfo `json:"configFile,omitempty"`
 
 	// Information about the kubeconfig file of kubelet
-	KubeConfigFile *ds.FileInfo `json:"kubeConfigFile,omitempty"`
+	KubeConfigFile *sensorDs.FileInfo `json:"kubeConfigFile,omitempty"`
 
 	// Information about the client ca file of kubelet (if exist)
-	ClientCAFile *ds.FileInfo `json:"clientCAFile,omitempty"`
+	ClientCAFile *sensorDs.FileInfo `json:"clientCAFile,omitempty"`
 
 	// Raw cmd line of kubelet process
 	CmdLine string `json:"cmdLine"`
 }
 
-func LocateKubeletProcess() (*utils.ProcessDetails, error) {
-	return utils.LocateProcessByExecSuffix(kubeletProcessSuffix)
+func LocateKubeletProcess() (*sensorUtils.ProcessDetails, error) {
+	return sensorUtils.LocateProcessByExecSuffix(kubeletProcessSuffix)
 }
 
 func ReadKubeletConfig(kubeletConfArgs string) ([]byte, error) {
-	conte, err := utils.ReadFileOnHostFileSystem(kubeletConfArgs)
+	conte, err := sensorUtils.ReadFileOnHostFileSystem(kubeletConfArgs)
 	logger.L().Debug("raw content", helpers.String("cont", string(conte)))
 	return conte, err
 }
 
-func makeKubeletServiceFilesInfo(ctx context.Context, pid int) []ds.FileInfo {
-	files, err := utils.GetKubeletServiceFiles(pid)
+func makeKubeletServiceFilesInfo(ctx context.Context, pid int) []sensorDs.FileInfo {
+	files, err := sensorUtils.GetKubeletServiceFiles(pid)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to getKubeletServiceFiles", helpers.Error(err))
 		return nil
 	}
 
-	serviceFiles := []ds.FileInfo{}
+	serviceFiles := []sensorDs.FileInfo{}
 	for _, file := range files {
 		info := makeHostFileInfoVerbose(ctx, file, false, helpers.String("in", "makeProcessInfoVerbose"))
 		if info != nil {

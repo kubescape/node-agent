@@ -7,15 +7,13 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 
-	// ds "github.com/kubescape/node-agent/sensor/datastructures"
-	ds "github.com/kubescape/host-scanner/sensor/datastructures"
-	// "github.com/kubescape/node-agent/sensor/internal/utils"
-	hostUtils "github.com/kubescape/host-scanner/sensor/internal/utils"
+	sensorDs "node-agent/pkg/sensor/datastructures"
+	sensorUtils "node-agent/pkg/sensor/internal/utils"
 )
 
 // KubeProxyInfo holds information about kube-proxy process
 type CNIInfo struct {
-	CNIConfigFiles []*ds.FileInfo `json:"CNIConfigFiles,omitempty"`
+	CNIConfigFiles []*sensorDs.FileInfo `json:"CNIConfigFiles,omitempty"`
 
 	// The name of the running CNI
 	CNINames []string `json:"CNINames,omitempty"`
@@ -42,14 +40,14 @@ func SenseCNIInfo(ctx context.Context) (*CNIInfo, error) {
 }
 
 // makeCNIConfigFilesInfo - returns a list of FileInfos of cni config files.
-func makeCNIConfigFilesInfo(ctx context.Context) ([]*ds.FileInfo, error) {
+func makeCNIConfigFilesInfo(ctx context.Context) ([]*sensorDs.FileInfo, error) {
 	// *** Start handling CNI Files
 	kubeletProc, err := LocateKubeletProcess()
 	if err != nil {
 		return nil, err
 	}
 
-	CNIConfigDir := hostUtils.GetCNIConfigPath(ctx, kubeletProc)
+	CNIConfigDir := sensorUtils.GetCNIConfigPath(ctx, kubeletProc)
 
 	if CNIConfigDir == "" {
 		return nil, fmt.Errorf("no CNI Config dir found in getCNIConfigPath")
@@ -89,7 +87,7 @@ func getCNINames(ctx context.Context) []string {
 	}
 
 	for _, cni := range supportedCNIs {
-		p, _ := hostUtils.LocateProcessByExecSuffix(cni.processSuffix)
+		p, _ := sensorUtils.LocateProcessByExecSuffix(cni.processSuffix)
 
 		if p != nil {
 			logger.L().Debug("CNI process found", helpers.String("name", cni.name))

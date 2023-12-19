@@ -9,13 +9,11 @@ import (
 	"path"
 	"sort"
 
+	sensorDs "node-agent/pkg/sensor/datastructures"
+	sensorUtils "node-agent/pkg/sensor/internal/utils"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-
-	// ds "github.com/kubescape/node-agent/sensor/datastructures"
-	// "github.com/kubescape/node-agent/sensor/internal/utils"
-	ds "github.com/kubescape/host-scanner/sensor/datastructures"
-	"github.com/kubescape/host-scanner/sensor/internal/utils"
 )
 
 const (
@@ -25,15 +23,16 @@ const (
 // makeHostFileInfoVerbose makes a file info object
 // for the given path on the host file system, and with error logging.
 // It returns nil on error.
-func makeHostFileInfoVerbose(ctx context.Context, path string, readContent bool, failMsgs ...helpers.IDetails) *ds.FileInfo {
-	return makeChangedRootFileInfoVerbose(ctx, utils.HostFileSystemDefaultLocation, path, readContent, failMsgs...)
+func makeHostFileInfoVerbose(ctx context.Context, path string, readContent bool, failMsgs ...helpers.IDetails) *sensorDs.FileInfo {
+	return makeChangedRootFileInfoVerbose(ctx, sensorUtils.HostFileSystemDefaultLocation, path, readContent, failMsgs...)
 }
 
 // makeContaineredFileInfoFromListVerbose makes a file info object
 // for a given process file system view, and with error logging.
 // It tries to find the file in the given list of paths, by the order of the list.
 // It returns nil on error.
-func makeContaineredFileInfoFromListVerbose(ctx context.Context, p *utils.ProcessDetails, filePathList []string, readContent bool, failMsgs ...helpers.IDetails) *ds.FileInfo {
+func makeContaineredFileInfoFromListVerbose(ctx context.Context, p *sensorUtils.ProcessDetails,
+	filePathList []string, readContent bool, failMsgs ...helpers.IDetails) *sensorDs.FileInfo {
 
 	for _, filePath := range filePathList {
 		fileInfo := makeChangedRootFileInfoVerbose(ctx, p.RootDir(), filePath, readContent, failMsgs...)
@@ -47,14 +46,16 @@ func makeContaineredFileInfoFromListVerbose(ctx context.Context, p *utils.Proces
 // makeContaineredFileInfoVerbose makes a file info object
 // for a given process file system view, and with error logging.
 // It returns nil on error.
-func makeContaineredFileInfoVerbose(ctx context.Context, p *utils.ProcessDetails, filePath string, readContent bool, failMsgs ...helpers.IDetails) *ds.FileInfo {
+func makeContaineredFileInfoVerbose(ctx context.Context, p *sensorUtils.ProcessDetails, filePath string, readContent bool,
+	failMsgs ...helpers.IDetails) *sensorDs.FileInfo {
 	return makeChangedRootFileInfoVerbose(ctx, p.RootDir(), filePath, readContent, failMsgs...)
 }
 
 // makeChangedRootFileInfoVerbose makes a file info object
 // for the given path on the given root directory, and with error logging.
-func makeChangedRootFileInfoVerbose(ctx context.Context, rootDir string, path string, readContent bool, failMsgs ...helpers.IDetails) *ds.FileInfo {
-	fileInfo, err := utils.MakeChangedRootFileInfo(ctx, rootDir, path, readContent)
+func makeChangedRootFileInfoVerbose(ctx context.Context, rootDir string, path string, readContent bool,
+	failMsgs ...helpers.IDetails) *sensorDs.FileInfo {
+	fileInfo, err := sensorUtils.MakeChangedRootFileInfo(ctx, rootDir, path, readContent)
 	if err != nil {
 		logArgs := append([]helpers.IDetails{
 			helpers.String("path", path),
@@ -70,15 +71,16 @@ func makeChangedRootFileInfoVerbose(ctx context.Context, rootDir string, path st
 // makeHostDirFilesInfo iterate over a directory and make a list of
 // file infos for all the files inside it. If `recursive` is set to true,
 // the file infos will be added recursively until `maxRecursionDepth` is reached
-func makeHostDirFilesInfoVerbose(ctx context.Context, dir string, recursive bool, fileInfos *[]*ds.FileInfo, recursionLevel int) ([]*ds.FileInfo, error) {
-	dirInfo, err := os.Open(utils.HostPath(dir))
+func makeHostDirFilesInfoVerbose(ctx context.Context, dir string, recursive bool, fileInfos *[]*sensorDs.FileInfo,
+	recursionLevel int) ([]*sensorDs.FileInfo, error) {
+	dirInfo, err := os.Open(sensorUtils.HostPath(dir))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open dir at %s: %w", dir, err)
 	}
 	defer dirInfo.Close()
 
 	if fileInfos == nil {
-		fileInfos = &([]*ds.FileInfo{})
+		fileInfos = &([]*sensorDs.FileInfo{})
 	}
 
 	var fileNames []string
@@ -89,7 +91,7 @@ func makeHostDirFilesInfoVerbose(ctx context.Context, dir string, recursive bool
 			filePath := path.Join(dir, fileNames[i])
 
 			// Check if is directory
-			stats, err := os.Stat(utils.HostPath(filePath))
+			stats, err := os.Stat(sensorUtils.HostPath(filePath))
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("failed to get file stats",
 					helpers.String("in", "makeHostDirFilesInfo"),
@@ -126,6 +128,5 @@ func makeHostDirFilesInfoVerbose(ctx context.Context, dir string, recursive bool
 	if errors.Is(err, io.EOF) {
 		err = nil
 	}
-
 	return *fileInfos, err
 }

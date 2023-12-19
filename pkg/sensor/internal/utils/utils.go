@@ -9,8 +9,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	ds "github.com/kubescape/host-scanner/sensor/datastructures"
-	// ds "github.com/kubescape/node-agent/sensor/datastructures"
+	sensorDs "node-agent/pkg/sensor/datastructures"
 )
 
 var (
@@ -70,8 +69,8 @@ func IsPathExists(filename string) bool {
 // MakeFileInfo returns a `ds.FileInfo` object for given path
 // If `readContent` is set to `true`, it adds the file content
 // On access error, it returns the error as is
-func MakeFileInfo(filePath string, readContent bool) (*ds.FileInfo, error) {
-	ret := ds.FileInfo{Path: filePath}
+func MakeFileInfo(filePath string, readContent bool) (*sensorDs.FileInfo, error) {
+	ret := sensorDs.FileInfo{Path: filePath}
 
 	logger.L().Debug("making file info", helpers.String("path", filePath))
 
@@ -84,7 +83,7 @@ func MakeFileInfo(filePath string, readContent bool) (*ds.FileInfo, error) {
 
 	// Ownership
 	uid, gid, err := GetFileUNIXOwnership(filePath)
-	ret.Ownership = &ds.FileOwnership{UID: uid, GID: gid}
+	ret.Ownership = &sensorDs.FileOwnership{UID: uid, GID: gid}
 	if err != nil {
 		ret.Ownership.Err = err.Error()
 	}
@@ -103,7 +102,7 @@ func MakeFileInfo(filePath string, readContent bool) (*ds.FileInfo, error) {
 
 // MakeChangedRootFileInfo makes a file info object
 // for the given path on the given root directory.
-func MakeChangedRootFileInfo(ctx context.Context, rootDir string, filePath string, readContent bool) (*ds.FileInfo, error) {
+func MakeChangedRootFileInfo(ctx context.Context, rootDir string, filePath string, readContent bool) (*sensorDs.FileInfo, error) {
 	fullPath := path.Join(rootDir, filePath)
 	obj, err := MakeFileInfo(fullPath, readContent)
 
@@ -135,12 +134,12 @@ func MakeChangedRootFileInfo(ctx context.Context, rootDir string, filePath strin
 
 // MakeContaineredFileInfo makes a file info object
 // for a given process file system view.
-func MakeContaineredFileInfo(ctx context.Context, p *ProcessDetails, filePath string, readContent bool) (*ds.FileInfo, error) {
+func MakeContaineredFileInfo(ctx context.Context, p *ProcessDetails, filePath string, readContent bool) (*sensorDs.FileInfo, error) {
 	return MakeChangedRootFileInfo(ctx, p.RootDir(), filePath, readContent)
 }
 
 // MakeHostFileInfo makes a file info object
 // for the given path on the host file system.
-func makeHostFileInfo(ctx context.Context, filePath string, readContent bool) (*ds.FileInfo, error) {
+func makeHostFileInfo(ctx context.Context, filePath string, readContent bool) (*sensorDs.FileInfo, error) {
 	return MakeChangedRootFileInfo(ctx, HostFileSystemDefaultLocation, filePath, readContent)
 }

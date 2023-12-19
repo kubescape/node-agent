@@ -5,11 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	// "github.com/kubescape/node-agent/sensor/datastructures"
-	"github.com/kubescape/host-scanner/sensor/datastructures"
+	sensorDs "node-agent/pkg/sensor/datastructures"
 
-	// ds "github.com/kubescape/node-agent/sensor/datastructures"
-	ds "github.com/kubescape/host-scanner/sensor/datastructures"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -92,7 +89,7 @@ func Test_MakeFileInfo(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    *ds.FileInfo
+		want    *sensorDs.FileInfo
 		wantErr bool
 	}{
 		{
@@ -101,8 +98,8 @@ func Test_MakeFileInfo(t *testing.T) {
 				filePath:    "./testdata/test_1",
 				readContent: true,
 			},
-			want: &datastructures.FileInfo{
-				Ownership:   &ds.FileOwnership{},
+			want: &sensorDs.FileInfo{
+				Ownership:   &sensorDs.FileOwnership{},
 				Path:        "./testdata/test_1",
 				Content:     []byte("not empty file"),
 				Permissions: 420,
@@ -115,8 +112,8 @@ func Test_MakeFileInfo(t *testing.T) {
 				filePath:    "./testdata/test_2",
 				readContent: true,
 			},
-			want: &datastructures.FileInfo{
-				Ownership:   &ds.FileOwnership{},
+			want: &sensorDs.FileInfo{
+				Ownership:   &sensorDs.FileOwnership{},
 				Path:        "./testdata/test_2",
 				Content:     []byte(""),
 				Permissions: 493,

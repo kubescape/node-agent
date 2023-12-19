@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	sensorDs "node-agent/pkg/sensor/datastructures"
+	sensorUtils "node-agent/pkg/sensor/internal/utils"
+
 	"github.com/kubescape/go-logger/helpers"
-	// ds "github.com/kubescape/node-agent/sensor/datastructures"
-	ds "github.com/kubescape/host-scanner/sensor/datastructures"
-	// "github.com/kubescape/node-agent/sensor/internal/utils"
-	"github.com/kubescape/host-scanner/sensor/internal/utils"
 )
 
 const (
@@ -18,7 +17,7 @@ const (
 // KubeProxyInfo holds information about kube-proxy process
 type KubeProxyInfo struct {
 	// Information about the kubeconfig file of kube-proxy
-	KubeConfigFile *ds.FileInfo `json:"kubeConfigFile,omitempty"`
+	KubeConfigFile *sensorDs.FileInfo `json:"kubeConfigFile,omitempty"`
 
 	// Raw cmd line of kubelet process
 	CmdLine string `json:"cmdLine"`
@@ -29,7 +28,7 @@ func SenseKubeProxyInfo(ctx context.Context) (*KubeProxyInfo, error) {
 	ret := KubeProxyInfo{}
 
 	// Get process
-	proc, err := utils.LocateProcessByExecSuffix(kubeProxyExe)
+	proc, err := sensorUtils.LocateProcessByExecSuffix(kubeProxyExe)
 	if err != nil {
 		return &ret, fmt.Errorf("failed to locate kube-proxy process: %w", err)
 	}
