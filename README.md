@@ -1,17 +1,26 @@
-## NodeAgent
+# NodeAgent
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kubescape/node-agent/badge)](https://securityscorecards.dev/viewer/?uri=github.com/kubescape/node-agent)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fsniffer.svg?type=shield&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fsniffer?ref=badge_shield&issueType=license)
 
-1. Run minikube:
-
+## Prerequisites
+1. [Minikube](https://minikube.sigs.k8s.io/docs/start/)  
+Start minikube with the following command:
 ```
 minikube start
 ```
+2. Linux kernel version 5.4 and above.
 
-2. Run NodeAgent:
 
+## Running the Node Agent  
+Make sure to set the `NODE_NAME` environment variable to the name of the node you want to scan.    
+Also make sure you have the `KUBECONFIG` environment variable set to the path of your kubeconfig file.  
+You can then build the binary by running:
 ```
-sudo SNIFFER_CONFIG=./configuration/SnifferConfigurationFile.json ./sniffer
+go build .
+```
+Then run the binarty with root privileges:
+```
+sudo ./node-agent
 ```
 
 ## Limitations:
@@ -23,9 +32,6 @@ sudo SNIFFER_CONFIG=./configuration/SnifferConfigurationFile.json ./sniffer
 # file for vscode:
 ```
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
@@ -33,15 +39,17 @@ sudo SNIFFER_CONFIG=./configuration/SnifferConfigurationFile.json ./sniffer
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}",
+            "program": "${workspaceFolder}/main.go",
             "env": {
-                "SNIFFER_CONFIG": "${workspaceFolder}/configuration/SnifferConfigurationFile.json"
+                "NODE_NAME": "<node name>",
+                "KUBECONFIG": "<path_to_kubeconfig>",
             },
             "console": "integratedTerminal",
-            "asRoot": true
+            "asRoot": true,
         }
     ]
 }
+
 
 ```
 ## Changelog
