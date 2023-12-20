@@ -52,6 +52,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	// report capability
 	am.ReportCapability("ns/pod/cont", "NET_BIND_SERVICE")
 	// report file exec
+	am.ReportFileExec("ns/pod/cont", "", []string{"ls"})
 	am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"})
 	// report file open
 	am.ReportFileOpen("ns/pod/cont", "/etc/passwd", []string{"O_RDONLY"})
