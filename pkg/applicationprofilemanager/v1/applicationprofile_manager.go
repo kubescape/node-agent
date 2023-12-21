@@ -31,8 +31,8 @@ type ApplicationProfileManager struct {
 	clusterName              string
 	ctx                      context.Context
 	capabilitiesSets         maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
-	execSets                 maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
-	openSets                 maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
+	execMaps                 maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
+	openMaps                 maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
 	watchedContainerChannels maps.SafeMap[string, chan error]                                // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
 	storageClient            storage.StorageClient
@@ -129,8 +129,8 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
 	watchedContainer.UpdateDataTicker.Stop()
 	am.capabilitiesSets.Delete(watchedContainer.K8sContainerID)
-	am.execSets.Delete(watchedContainer.K8sContainerID)
-	am.openSets.Delete(watchedContainer.K8sContainerID)
+	am.execMaps.Delete(watchedContainer.K8sContainerID)
+	am.openMaps.Delete(watchedContainer.K8sContainerID)
 	am.watchedContainerChannels.Delete(watchedContainer.ContainerID)
 }
 
@@ -229,23 +229,27 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		}
 	}
 	// get capabilities, execs and opens from IG
-	addedProfiles += capabilities.Append(am.capabilitiesSets.Get(watchedContainer.K8sContainerID).ToSlice()...)
-	execMap := am.execSets.Get(watchedContainer.K8sContainerID)
-	execMap.Range(func(path string, exec mapset.Set[string]) bool {
-		if _, exist := execs[path]; !exist {
-			execs[path] = mapset.NewSet[string]()
-		}
-		addedProfiles += execs[path].Append(exec.ToSlice()...)
-		return true
-	})
-	openMap := am.openSets.Get(watchedContainer.K8sContainerID)
-	openMap.Range(func(path string, open mapset.Set[string]) bool {
-		if _, exist := opens[path]; !exist {
-			opens[path] = mapset.NewSet[string]()
-		}
-		addedProfiles += opens[path].Append(open.ToSlice()...)
-		return true
-	})
+	if capabilitiesSet, ok := am.capabilitiesSets.Load(watchedContainer.K8sContainerID); ok {
+		addedProfiles += capabilities.Append(capabilitiesSet.ToSlice()...)
+	}
+	if execMap, ok := am.execMaps.Load(watchedContainer.K8sContainerID); ok {
+		execMap.Range(func(path string, exec mapset.Set[string]) bool {
+			if _, exist := execs[path]; !exist {
+				execs[path] = mapset.NewSet[string]()
+			}
+			addedProfiles += execs[path].Append(exec.ToSlice()...)
+			return true
+		})
+	}
+	if openMap, ok := am.openMaps.Load(watchedContainer.K8sContainerID); ok {
+		openMap.Range(func(path string, open mapset.Set[string]) bool {
+			if _, exist := opens[path]; !exist {
+				opens[path] = mapset.NewSet[string]()
+			}
+			addedProfiles += opens[path].Append(open.ToSlice()...)
+			return true
+		})
+	}
 	// new profile
 	if addedProfiles > 0 {
 		newProfile := &v1beta1.ApplicationProfile{
@@ -335,8 +339,8 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 			return
 		}
 		am.capabilitiesSets.Set(k8sContainerID, mapset.NewSet[string]())
-		am.execSets.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
-		am.openSets.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
+		am.execMaps.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
+		am.openMaps.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:
 		channel := am.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
@@ -352,7 +356,11 @@ func (am *ApplicationProfileManager) RegisterPeekFunc(peek func(mntns uint64) ([
 }
 
 func (am *ApplicationProfileManager) ReportCapability(k8sContainerID, capability string) {
-	am.capabilitiesSets.Get(k8sContainerID).Add(capability)
+	capabilitiesSet, err := utils.WaitGetSafeMap(&am.capabilitiesSets, k8sContainerID)
+	if err != nil {
+		return
+	}
+	capabilitiesSet.Add(capability)
 }
 
 func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string, args []string) {
@@ -360,7 +368,10 @@ func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string,
 	if path == "" {
 		return
 	}
-	execMap := am.execSets.Get(k8sContainerID)
+	execMap, err := utils.WaitGetSafeMap(&am.execMaps, k8sContainerID)
+	if err != nil {
+		return
+	}
 	if execMap.Has(path) {
 		execMap.Get(path).Append(args...)
 	} else {
@@ -369,7 +380,10 @@ func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string,
 }
 
 func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID, path string, flags []string) {
-	openMap := am.openSets.Get(k8sContainerID)
+	openMap, err := utils.WaitGetSafeMap(&am.openMaps, k8sContainerID)
+	if err != nil {
+		return
+	}
 	if openMap.Has(path) {
 		openMap.Get(path).Append(flags...)
 	} else {

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"errors"
+	"github.com/goradd/maps"
 	"math/rand"
 	"path/filepath"
 	"runtime"
@@ -171,5 +172,21 @@ func InsertApplicationProfileContainer(profile *v1beta1.ApplicationProfile, cont
 			profile.Spec.InitContainers = append(profile.Spec.InitContainers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.InitContainers)+1)...)
 		}
 		profile.Spec.InitContainers[containerIndex] = *profileContainer
+	}
+}
+
+// WaitGetSafeMap waits for a value to be loaded into a SafeMap, with a timeout of 1 minute
+func WaitGetSafeMap[K comparable, V any](m *maps.SafeMap[K, V], k K) (V, error) {
+	var tries int
+	for {
+		v, ok := m.Load(k)
+		if ok {
+			return v, nil
+		}
+		if tries > 60 {
+			return v, errors.New("timeout")
+		}
+		time.Sleep(1 * time.Second)
+		tries++
 	}
 }
