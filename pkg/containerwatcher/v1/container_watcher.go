@@ -89,6 +89,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	// Create a capabilities worker pool
 	capabilitiesWorkerPool, err := ants.NewPoolWithFunc(capabilitiesWorkerPoolSize, func(i interface{}) {
 		event := i.(tracercapabilitiestype.Event)
+		// ignore events with empty container name
+		if event.K8s.ContainerName == "" {
+			return
+		}
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
 	})
@@ -98,6 +102,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	// Create an exec worker pool
 	execWorkerPool, err := ants.NewPoolWithFunc(execWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerexectype.Event)
+		// ignore events with empty container name
+		if event.K8s.ContainerName == "" {
+			return
+		}
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		path := event.Comm
 		if len(event.Args) > 0 {
@@ -109,10 +117,13 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	if err != nil {
 		return nil, fmt.Errorf("creating exec worker pool: %w", err)
 	}
-
 	// Create an open worker pool
 	openWorkerPool, err := ants.NewPoolWithFunc(openWorkerPoolSize, func(i interface{}) {
 		event := i.(traceropentype.Event)
+		// ignore events with empty container name
+		if event.K8s.ContainerName == "" {
+			return
+		}
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		path := event.Path
 		if cfg.EnableFullPathTracing {
@@ -124,33 +135,32 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	if err != nil {
 		return nil, fmt.Errorf("creating open worker pool: %w", err)
 	}
-
 	// Create a network worker pool
 	networkWorkerPool, err := ants.NewPoolWithFunc(networkWorkerPoolSize, func(i interface{}) {
 		event := i.(tracernetworktype.Event)
-
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
-
-		if k8sContainerID == "//" {
+		// ignore events with empty container name
+		if event.K8s.ContainerName == "" {
 			return
 		}
-
 		networkManagerClient.SaveNetworkEvent(event.Runtime.ContainerID, event.K8s.PodName, event)
 	})
-
+	if err != nil {
+		return nil, fmt.Errorf("creating network worker pool: %w", err)
+	}
 	// Create a dns worker pool
 	dnsWorkerPool, err := ants.NewPoolWithFunc(dnsWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerdnstype.Event)
-
+		// ignore events with empty container name
+		if event.K8s.ContainerName == "" {
+			return
+		}
 		if event.Qr != tracerdnstype.DNSPktTypeResponse {
 			return
 		}
-
 		dnsManagerClient.ProcessDNSEvent(event)
 	})
-
 	if err != nil {
-		return nil, fmt.Errorf("creating open network pool: %w", err)
+		return nil, fmt.Errorf("creating dns worker pool: %w", err)
 	}
 
 	return &IGContainerWatcher{
