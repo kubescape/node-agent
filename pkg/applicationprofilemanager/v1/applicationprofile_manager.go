@@ -356,6 +356,10 @@ func (am *ApplicationProfileManager) ReportCapability(k8sContainerID, capability
 }
 
 func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string, args []string) {
+	// skip empty path
+	if path == "" {
+		return
+	}
 	execMap := am.execSets.Get(k8sContainerID)
 	if execMap.Has(path) {
 		execMap.Get(path).Append(args...)
