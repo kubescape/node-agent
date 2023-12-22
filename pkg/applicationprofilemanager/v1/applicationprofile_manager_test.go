@@ -26,7 +26,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	storageClient := &storage.StorageHttpClientMock{}
 	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient)
 	assert.NoError(t, err)
-	// report container started
+	// prepare container
 	container := &containercollection.Container{
 		K8s: containercollection.K8sMetadata{
 			BasicK8sMetadata: types.BasicK8sMetadata{
@@ -41,21 +41,22 @@ func TestApplicationProfileManager(t *testing.T) {
 			},
 		},
 	}
+	// register peek function for syscall tracer
+	go am.RegisterPeekFunc(func(_ uint64) ([]string, error) {
+		return []string{"dup", "listen"}, nil
+	})
+	// report capability
+	go am.ReportCapability("ns/pod/cont", "NET_BIND_SERVICE")
+	// report file exec
+	go am.ReportFileExec("ns/pod/cont", "", []string{"ls"})
+	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"})
+	// report file open
+	go am.ReportFileOpen("ns/pod/cont", "/etc/passwd", []string{"O_RDONLY"})
+	// report container started (race condition with reports)
 	am.ContainerCallback(containercollection.PubSubEvent{
 		Type:      containercollection.EventTypeAddContainer,
 		Container: container,
 	})
-	// register peek function for syscall tracer
-	am.RegisterPeekFunc(func(_ uint64) ([]string, error) {
-		return []string{"dup", "listen"}, nil
-	})
-	// report capability
-	am.ReportCapability("ns/pod/cont", "NET_BIND_SERVICE")
-	// report file exec
-	am.ReportFileExec("ns/pod/cont", "", []string{"ls"})
-	am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"})
-	// report file open
-	am.ReportFileOpen("ns/pod/cont", "/etc/passwd", []string{"O_RDONLY"})
 	// let it run for a while
 	time.Sleep(12 * time.Second) // need to sleep longer because of AddRandomDuration in startApplicationProfiling
 	// report container stopped
