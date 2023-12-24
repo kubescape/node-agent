@@ -315,8 +315,8 @@ github.com/kubescape/backend v0.0.16 h1:bkQGY39GSoNIeFfnAJ2zlcrGEyXk6LGYv1/MgS51
 github.com/kubescape/backend v0.0.16/go.mod h1:ug9NFmmxT4DcQx3sgdLRzlLPWMKGHE/fpbcYUm5G5Qo=
 github.com/kubescape/go-logger v0.0.22 h1:gle7wH6emOiGv9ljdpVi82pWLQ3jGucrUucvil6JXHE=
 github.com/kubescape/go-logger v0.0.22/go.mod h1:x3HBpZo3cMT/WIdy18BxvVVd5D0e/PWFVk/HiwBNu3g=
-github.com/kubescape/k8s-interface v0.0.152 h1:1tm2zPYVK7+1fewpca0/MCoK3TgUNButpM3F3uZz6yo=
-github.com/kubescape/k8s-interface v0.0.152/go.mod h1:5sz+5Cjvo98lTbTVDiDA4MmlXxeHSVMW/wR0V3hV4K8=
+github.com/kubescape/k8s-interface v0.0.154 h1:D6TRgSBjbD/eTf2FKswSB9rdd9dsW2AQJL0RUm3NPH8=
+github.com/kubescape/k8s-interface v0.0.154/go.mod h1:5sz+5Cjvo98lTbTVDiDA4MmlXxeHSVMW/wR0V3hV4K8=
 github.com/kubescape/storage v0.0.39 h1:zxdu6pQ/8Fdzp0Er0yX+KWApMYvNZh9y7ONWyJcbb08=
 github.com/kubescape/storage v0.0.39/go.mod h1:ObCIVOnVyWwRwU0iuKTzOnrJQScqPgkw0FgvSINwosY=
 github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de h1:9TO3cAIGXtEhnIaL+V+BEER86oLrvS+kWobKpbJuye0=
