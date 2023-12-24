@@ -2,13 +2,14 @@ package utils
 
 import (
 	"errors"
-	"github.com/goradd/maps"
 	"math/rand"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/goradd/maps"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
@@ -39,23 +40,24 @@ const (
 )
 
 type WatchedContainerData struct {
-	ContainerID                              string
-	ContainerIndex                           int
-	ContainerType                            ContainerType
-	FilteredSpdxData                         *v1beta1.SBOMSPDXv2p3Filtered
-	ImageID                                  string
-	ImageTag                                 string
-	InitialDelayExpired                      bool
 	InstanceID                               instanceidhandler.IInstanceID
-	K8sContainerID                           string
-	ParentResourceVersion                    string
-	RelevantRealtimeFilesByPackageSourceInfo map[string]*PackageSourceInfoData
-	RelevantRealtimeFilesBySPDXIdentifier    map[v1beta1.ElementID]bool
-	SBOMResourceVersion                      int
-	SyncChannel                              chan error
 	UpdateDataTicker                         *time.Ticker
+	SyncChannel                              chan error
+	FilteredSpdxData                         *v1beta1.SBOMSPDXv2p3Filtered
+	RelevantRealtimeFilesBySPDXIdentifier    map[v1beta1.ElementID]bool
+	RelevantRealtimeFilesByPackageSourceInfo map[string]*PackageSourceInfoData
+	K8sContainerID                           string
+	ContainerID                              string
+	ParentResourceVersion                    string
+	ImageTag                                 string
+	ImageID                                  string
 	Wlid                                     string
+	TemplateHash                             string
+	SBOMResourceVersion                      int
+	ContainerType                            ContainerType
+	ContainerIndex                           int
 	NsMntId                                  uint64
+	InitialDelayExpired                      bool
 }
 
 func Between(value string, a string, b string) string {
@@ -139,6 +141,9 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 	}
 	if watchedContainer.ParentResourceVersion != "" {
 		labels[instanceidhandler2.ResourceVersionMetadataKey] = watchedContainer.ParentResourceVersion
+	}
+	if watchedContainer.TemplateHash != "" {
+		labels[instanceidhandler2.TemplateHashKey] = watchedContainer.TemplateHash
 	}
 	return labels
 }

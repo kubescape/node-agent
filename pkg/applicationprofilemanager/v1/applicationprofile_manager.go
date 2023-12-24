@@ -61,6 +61,10 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 		return
 	}
 	pod := wl.(*workloadinterface.Workload)
+
+	// get pod template hash
+	watchedContainer.TemplateHash, _ = pod.GetLabel("pod-template-hash")
+
 	// find parentWlid
 	kind, name, err := am.k8sClient.CalculateWorkloadParentRecursive(pod)
 	if err != nil {
