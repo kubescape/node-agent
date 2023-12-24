@@ -113,7 +113,6 @@ func (sc *SyftHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 
 func filterRelevantFilesInSBOM(syftDoc v1beta1.SyftDocument, sbomFileRelevantMap map[string]bool) v1beta1.SyftDocument {
 	relevantSBOM := v1beta1.SyftDocument{
-		Secrets:        syftDoc.Secrets,
 		SyftSource:     syftDoc.SyftSource,
 		Distro:         syftDoc.Distro,
 		SyftDescriptor: syftDoc.SyftDescriptor,
