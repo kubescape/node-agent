@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "name": "pod-pod-cb3a-a929",
+    "name": "pod-pod-cont-cb3a-a929",
     "creationTimestamp": null,
     "labels": {
       "kubescape.io/workload-api-version": "v1",
