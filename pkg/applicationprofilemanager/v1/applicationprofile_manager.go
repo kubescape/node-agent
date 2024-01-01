@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/otel"
@@ -168,7 +169,9 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - instanceID is nil")
 		return
 	}
-	slug, err := watchedContainer.InstanceID.GetSlug()
+
+	// leave container name empty this way the "slug" will represent a workload
+	slug, err := names.InstanceIDToSlug(watchedContainer.InstanceID.GetName(), watchedContainer.InstanceID.GetKind(), "", watchedContainer.InstanceID.GetHashed())
 	if err != nil {
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get slug", helpers.Error(err))
 		return
