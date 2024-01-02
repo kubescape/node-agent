@@ -12,7 +12,7 @@ import (
 
 func TestStorageNoCache_CreateFilteredSBOM(t *testing.T) {
 	type args struct {
-		SBOM *v1beta1.SBOMSPDXv2p3Filtered
+		SBOM *v1beta1.SBOMSyftFiltered
 	}
 	tests := []struct {
 		name    string
@@ -22,7 +22,7 @@ func TestStorageNoCache_CreateFilteredSBOM(t *testing.T) {
 		{
 			name: "TestCreateFilteredSBOM",
 			args: args{
-				SBOM: &v1beta1.SBOMSPDXv2p3Filtered{
+				SBOM: &v1beta1.SBOMSyftFiltered{
 					ObjectMeta: v1.ObjectMeta{
 						Name: storage.NginxKey,
 					},

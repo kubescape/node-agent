@@ -122,16 +122,16 @@ func (sc StorageNoCache) CreateApplicationProfileSummary(profile *v1beta1.Applic
 	return nil
 }
 
-func (sc StorageNoCache) CreateFilteredSBOM(SBOM *v1beta1.SBOMSPDXv2p3Filtered) error {
-	_, err := sc.StorageClient.SBOMSPDXv2p3Filtereds(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
+func (sc StorageNoCache) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error {
+	_, err := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (sc StorageNoCache) GetSBOM(name string) (*v1beta1.SBOMSPDXv2p3, error) {
-	return sc.StorageClient.SBOMSPDXv2p3s(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
+func (sc StorageNoCache) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
+	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
 func (sc StorageNoCache) PatchFilteredSBOM(name string, SBOM *v1beta1.SBOMSPDXv2p3Filtered) error {

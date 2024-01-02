@@ -20,7 +20,6 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -204,12 +203,11 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 	defer span.End()
 
 	watchedContainer := &utils.WatchedContainerData{
-		ContainerID:                              container.Runtime.ContainerID,
-		UpdateDataTicker:                         time.NewTicker(rm.cfg.InitialDelay),
-		SyncChannel:                              make(chan error, 10),
-		K8sContainerID:                           k8sContainerID,
-		RelevantRealtimeFilesByPackageSourceInfo: map[string]*utils.PackageSourceInfoData{},
-		RelevantRealtimeFilesBySPDXIdentifier:    map[v1beta1.ElementID]bool{},
+		ContainerID:                   container.Runtime.ContainerID,
+		UpdateDataTicker:              time.NewTicker(rm.cfg.InitialDelay),
+		SyncChannel:                   make(chan error, 10),
+		K8sContainerID:                k8sContainerID,
+		RelevantSyftFilesByIdentifier: make(map[string]bool),
 	}
 	rm.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
 
