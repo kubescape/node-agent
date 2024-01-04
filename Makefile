@@ -31,7 +31,7 @@ docker-push:
 # Running e2e tests in a KinD instance
 .PHONY: e2e
 e2e/%: ginkgo
-	$(MAKE) e2e-build/$* && $(MAKE) e2e-exec && $(MAKE) e2e-destroy
+	$(MAKE) e2e-build/$* && $(MAKE) e2e-exec #&& $(MAKE) e2e-destroy
 
 e2e-build/%:
 	kind create cluster --wait=60s --name node-agent --image=kindest/node:$*
@@ -48,6 +48,8 @@ e2e-install:
 		--install kubescape \
 		./charts/kubescape-operator \
 		-n kubescape --create-namespace \
+		--set nodeAgent.tag=$(VERSION) \
+		--set nodeAgent.pullPolicy=Never \
 		--set clusterName=`kubectl config current-context` \
 		--set capabilities.networkPolicyService=enable \
 		--set capabilities.vulnerabilityScan=disable \
@@ -59,7 +61,7 @@ e2e-load-image: docker-build
 
 .PHONY: e2e-exec
 e2e-exec: ginkgo
-	$(GINKGO) -v -tags e2e ./e2e
+	$(GINKGO) -v ./e2e
 
 .PHONY: e2e-destroy
 e2e-destroy:
