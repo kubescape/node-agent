@@ -102,7 +102,7 @@ func (sc *StorageHttpClientMock) GetSBOM(name string) (*v1beta1.SBOMSyft, error)
 	return sc.mockSBOM, nil
 }
 
-func (sc *StorageHttpClientMock) PatchFilteredSBOM(_ string, _ *spdxv1beta1.SBOMSPDXv2p3Filtered) error {
+func (sc *StorageHttpClientMock) PatchFilteredSBOM(_ string, _ *spdxv1beta1.SBOMSyftFiltered) error {
 	return nil
 }
 

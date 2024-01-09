@@ -153,7 +153,7 @@ func (rm *RelevancyManager) handleRelevancy(ctx context.Context, watchedContaine
 	defer spanPostSBOM.End()
 
 	if watchedContainer.InstanceID == nil {
-		logger.L().Debug("ignoring container with empty instanceID", helpers.String("container ID", containerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Error(err))
+		logger.L().Debug("ignoring container with empty instanceID", helpers.String("container ID", containerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 		return
 	}
 	fileList, err := rm.fileHandler.GetAndDeleteFiles(watchedContainer.K8sContainerID)

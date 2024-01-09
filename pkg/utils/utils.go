@@ -43,22 +43,22 @@ type WatchedContainerData struct {
 	InstanceID                               instanceidhandler.IInstanceID
 	UpdateDataTicker                         *time.Ticker
 	SyncChannel                              chan error
-	FilteredSpdxData                         *v1beta1.SBOMSPDXv2p3Filtered
+	FilteredSpdxData                         *v1beta1.SBOMSyftFiltered
 	RelevantRealtimeFilesBySPDXIdentifier    map[v1beta1.ElementID]bool
 	RelevantRealtimeFilesByPackageSourceInfo map[string]*PackageSourceInfoData
-	K8sContainerID                           string
-	ContainerID                              string
+	RelevantSyftFilesByIdentifier            map[string]bool
 	ParentResourceVersion                    string
+	ContainerID                              string
 	ImageTag                                 string
 	ImageID                                  string
 	Wlid                                     string
 	TemplateHash                             string
+	K8sContainerID                           string
 	SBOMResourceVersion                      int
 	ContainerType                            ContainerType
 	ContainerIndex                           int
 	NsMntId                                  uint64
 	InitialDelayExpired                      bool
-	RelevantSyftFilesByIdentifier            map[string]bool
 }
 
 func Between(value string, a string, b string) string {
