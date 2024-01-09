@@ -42,6 +42,8 @@ var _ = BeforeSuite(func() {
 
 	cfg, err := testEnv.Start()
 	Expect(err).To(BeNil())
+
+	Expect(err).To(BeNil())
 	k8sClient, err = kubernetes.NewForConfig(cfg)
 	Expect(err).To(BeNil())
 
