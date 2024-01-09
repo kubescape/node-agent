@@ -91,7 +91,7 @@ func TestStorageNoCache_GetSBOM(t *testing.T) {
 func TestStorageNoCache_PatchFilteredSBOM(t *testing.T) {
 	type args struct {
 		name string
-		SBOM *v1beta1.SBOMSPDXv2p3Filtered
+		SBOM *v1beta1.SBOMSyftFiltered
 	}
 	tests := []struct {
 		name    string
@@ -102,10 +102,10 @@ func TestStorageNoCache_PatchFilteredSBOM(t *testing.T) {
 			name: "TestPatchFilteredSBOM",
 			args: args{
 				name: storage.NginxKey,
-				SBOM: &v1beta1.SBOMSPDXv2p3Filtered{
-					Spec: v1beta1.SBOMSPDXv2p3Spec{
-						SPDX: v1beta1.Document{
-							Files: []*v1beta1.File{{FileName: "test"}},
+				SBOM: &v1beta1.SBOMSyftFiltered{
+					Spec: v1beta1.SBOMSyftSpec{
+						Syft: v1beta1.SyftDocument{
+							Files: []v1beta1.SyftFile{v1beta1.SyftFile{ID: "test"}},
 						},
 					},
 				},
@@ -115,18 +115,18 @@ func TestStorageNoCache_PatchFilteredSBOM(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sc, _ := CreateFakeStorageNoCache("kubescape")
-			filteredSBOM := &v1beta1.SBOMSPDXv2p3Filtered{
+			filteredSBOM := &v1beta1.SBOMSyftFiltered{
 				ObjectMeta: v1.ObjectMeta{
 					Name: tt.args.name,
 				},
 			}
-			_, _ = sc.StorageClient.SBOMSPDXv2p3Filtereds("kubescape").Create(context.Background(), filteredSBOM, v1.CreateOptions{})
+			_, _ = sc.StorageClient.SBOMSyftFiltereds("kubescape").Create(context.Background(), filteredSBOM, v1.CreateOptions{})
 			if err := sc.PatchFilteredSBOM(tt.args.name, tt.args.SBOM); (err != nil) != tt.wantErr {
 				t.Errorf("PatchFilteredSBOM() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			got, err := sc.StorageClient.SBOMSPDXv2p3Filtereds("kubescape").Get(context.Background(), tt.args.name, v1.GetOptions{})
+			got, err := sc.StorageClient.SBOMSyftFiltereds("kubescape").Get(context.Background(), tt.args.name, v1.GetOptions{})
 			assert.NoError(t, err)
-			assert.Equal(t, 1, len(got.Spec.SPDX.Files))
+			assert.Equal(t, 1, len(got.Spec.Syft.Files))
 		})
 	}
 }
