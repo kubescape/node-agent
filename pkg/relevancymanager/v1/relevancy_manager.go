@@ -152,8 +152,10 @@ func (rm *RelevancyManager) handleRelevancy(ctx context.Context, watchedContaine
 	ctxPostSBOM, spanPostSBOM := otel.Tracer("").Start(ctx, "RelevancyManager.handleRelevancy")
 	defer spanPostSBOM.End()
 
-	// SBOM validation moved to monitorContainer
-
+	if watchedContainer.InstanceID == nil {
+		logger.L().Debug("ignoring container with empty instanceID", helpers.String("container ID", containerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Error(err))
+		return
+	}
 	fileList, err := rm.fileHandler.GetAndDeleteFiles(watchedContainer.K8sContainerID)
 	if err != nil {
 		logger.L().Debug("failed to get file list", helpers.String("container ID", containerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Error(err))
