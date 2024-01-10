@@ -10,7 +10,6 @@ metadata:
     kubescape.io/image-name: docker-io-library-nginx
   name: nginx-b49026
   namespace: kubescape
-  resourceVersion: "1"
   uid: 9895a25e-407f-4793-a44e-3abfcb2e0fd8
 spec:
   metadata:

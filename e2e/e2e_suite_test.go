@@ -1,12 +1,11 @@
 package e2e
 
 import (
-	"flag"
+	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -15,13 +14,9 @@ import (
 )
 
 var (
-	cfg             *rest.Config
-	k8sClient       *kubernetes.Clientset
-	testEnv         *envtest.Environment
-	deployment      *appsv1.Deployment
-	namespace       string  = "kubescape-host-scanner"
-	localServerPort *string = flag.String("port", "7888", "destination port")
-	url             string
+	cfg       *rest.Config
+	k8sClient *kubernetes.Clientset
+	testEnv   *envtest.Environment
 )
 
 func TestE2e(t *testing.T) {
@@ -48,11 +43,16 @@ var _ = BeforeSuite(func() {
 	Expect(err).To(BeNil())
 
 	// wait until all the needed pods are in Running state
-	err = waitForPod(k8sClient, "node-agent", "kubescape", 60)
+	label := fmt.Sprintf("app.kubernetes.io/name=%s", "node-agent")
+	err = waitForPod(k8sClient, "node-agent", "kubescape", label, 60)
 	Expect(err).To(BeNil())
-	err = waitForPod(k8sClient, "operator", "kubescape", 50)
+
+	label = fmt.Sprintf("app.kubernetes.io/name=%s", "operator")
+	err = waitForPod(k8sClient, "operator", "kubescape", label, 60)
 	Expect(err).To(BeNil())
-	err = waitForPod(k8sClient, "storage", "kubescape", 50)
+
+	label = fmt.Sprintf("app.kubernetes.io/name=%s", "storage")
+	err = waitForPod(k8sClient, "storage", "kubescape", label, 60)
 	Expect(err).To(BeNil())
 })
 
