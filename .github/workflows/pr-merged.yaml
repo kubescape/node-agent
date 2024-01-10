@@ -4,6 +4,7 @@ on:
     types: [closed]
     branches:
     - 'main'
+    - 'hotfix-v0.1.135'
     paths-ignore:
       - '**.md' ### Ignore running when README.MD changed.
       - '.github/workflows/*' ### Ignore running when files under path: .github/workflows/* changed.
