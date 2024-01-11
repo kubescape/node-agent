@@ -29,9 +29,10 @@ docker-push:
 	docker push $(IMAGE):$(VERSION)
 	
 # Running e2e tests in a KinD instance
+# this section was highly inspired from Capsule project (github.com/projectcapsule/capsule)
 .PHONY: e2e
 e2e/%: ginkgo
-	$(MAKE) e2e-build/$* && $(MAKE) e2e-exec #&& $(MAKE) e2e-destroy
+	$(MAKE) e2e-build/$* && $(MAKE) e2e-exec && $(MAKE) e2e-destroy
 
 e2e-build/%:
 	kind create cluster --wait=60s --name node-agent --image=kindest/node:$*
