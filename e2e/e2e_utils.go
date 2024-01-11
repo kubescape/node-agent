@@ -63,6 +63,16 @@ func createPod(k8sClient *kubernetes.Clientset, pod *v1.Pod) (*v1.Pod, error) {
 	return data, nil
 }
 
+func deletePod(k8sClient *kubernetes.Clientset, pod *v1.Pod) error {
+	err := k8sClient.CoreV1().
+		Pods("default").
+		Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})
+	if err != nil {
+		return fmt.Errorf("error creating Pod: %v", err)
+	}
+	return nil
+}
+
 func createCustomResource(k8sClient *kubernetes.Clientset, path string, body interface{}) ([]byte, error) {
 	data, err := k8sClient.CoreV1().
 		RESTClient().

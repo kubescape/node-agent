@@ -17,17 +17,38 @@ import (
 var (
 	//go:embed testdata/nginx-sbomspdx.json
 	nginxSbomSpdxBytes []byte
+
+	//go:embed testdata/nginx-sbomspdx-filtered.json
+	nginxSbomSpdxBytesFiltered []byte
+
+	expectedSbomFiltered string = "pod-nginx-nginx-1ba5-4aaf"
 )
 
 var _ = Describe("Generate filtered SBOM", func() {
 	sbom := &storagev1beta1.SBOMSPDXv2p3{}
 	err := json.Unmarshal(nginxSbomSpdxBytes, sbom)
-	if err != nil {
-		fmt.Println("error unmarshaling SBOMSPDXv2p3 manifest:", err)
-		return
+	Expect(err).To(BeNil())
+
+	pod := &v1.Pod{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Pod",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "nginx",
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:  "nginx",
+					Image: "nginx",
+				},
+			},
+		},
 	}
+
 	JustBeforeEach(func() {
-		time.Sleep(5 * time.Second)
+		time.Sleep(10 * time.Second)
 		// retrieve SBOMSPDXv2p3 resource from testdata
 		// create CustomResource SBOMSPDXv2p3 on the cluster
 		// should be: /apis/spdx.softwarecomposition.kubescape.io/v1beta1/namespaces/kubescape/sbomspdxv2p3s
@@ -36,33 +57,39 @@ var _ = Describe("Generate filtered SBOM", func() {
 		Expect(err).To(BeNil())
 
 		// create test Pod that will make node-agent generate the SBOMSPDXv2p3Filtered resource
-		pod := &v1.Pod{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       "Pod",
-				APIVersion: "v1",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "nginx",
-			},
-			Spec: v1.PodSpec{
-				Containers: []v1.Container{
-					{
-						Name:  "nginx",
-						Image: "nginx",
-					},
-				},
-			},
-		}
 		_, err = createPod(k8sClient, pod)
 		Expect(err).To(BeNil())
 		err = waitForPod(k8sClient, "nginx", "default", "", 60)
 		Expect(err).To(BeNil())
 	})
+
+	JustAfterEach(func() {
+		err := deletePod(k8sClient, pod)
+		Expect(err).To(BeNil())
+	})
+
 	It("should generate a SBOMSPDXv2p3Filtered resource within 2 minutes", func() {
 		// wait for ~2 minutes to let the node-agent generate the filtered resource
 		path := fmt.Sprintf("/apis/%s/namespaces/%s/sbomspdxv2p3filtereds", sbom.APIVersion, sbom.Namespace)
-		fmt.Println(path)
 		err := waitForCustomResource(k8sClient, path, 150)
 		Expect(err).To(BeNil())
+
+		// /apis/spdx.softwarecomposition.kubescape.io/v1beta1/namespaces/kubescape/sbomspdxv2p3filtereds/pod-nginx-nginx-1ba5-4aaf
+		path = fmt.Sprintf("/apis/%s/namespaces/%s/sbomspdxv2p3filtereds/%s", sbom.APIVersion, sbom.Namespace, expectedSbomFiltered)
+		dataFiltered, err := getCustomResource(k8sClient, path)
+		Expect(err).To(BeNil())
+
+		// retrieve generatede filtered sbomspdx resource
+		sbomFiltered := &storagev1beta1.SBOMSPDXv2p3Filtered{}
+		err = json.Unmarshal(dataFiltered, sbomFiltered)
+		Expect(err).To(BeNil())
+
+		// retrieve expected filtered sbomspdx resource
+		expectedSbomFiltered := &storagev1beta1.SBOMSPDXv2p3Filtered{}
+		err = json.Unmarshal(nginxSbomSpdxBytesFiltered, expectedSbomFiltered)
+		Expect(err).To(BeNil())
+
+		// compare generated with filtered resources
+		Expect(sbomFiltered.Annotations).To(Equal(expectedSbomFiltered.Annotations))
 	})
 })
