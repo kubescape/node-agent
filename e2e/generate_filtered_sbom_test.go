@@ -21,6 +21,7 @@ var (
 	//go:embed testdata/nginx-sbomspdx-filtered.json
 	nginxSbomSpdxBytesFiltered []byte
 
+	expectedSbom         string = "nginx-b49026"
 	expectedSbomFiltered string = "pod-nginx-nginx-1ba5-4aaf"
 )
 
@@ -65,6 +66,14 @@ var _ = Describe("Generate filtered SBOM", func() {
 
 	JustAfterEach(func() {
 		err := deletePod(k8sClient, pod)
+		Expect(err).To(BeNil())
+
+		path := fmt.Sprintf("/apis/%s/namespaces/%s/sbomspdxv2p3s/%s", sbom.APIVersion, sbom.Namespace, expectedSbom)
+		_, err = deleteCustomResourceData(k8sClient, path)
+		Expect(err).To(BeNil())
+
+		path = fmt.Sprintf("/apis/%s/namespaces/%s/sbomspdxv2p3filtereds/%s", sbom.APIVersion, sbom.Namespace, expectedSbomFiltered)
+		_, err = deleteCustomResourceData(k8sClient, path)
 		Expect(err).To(BeNil())
 	})
 

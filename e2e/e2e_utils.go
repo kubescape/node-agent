@@ -93,6 +93,13 @@ func getCustomResourceData(k8sClient *kubernetes.Clientset, path string) ([]byte
 		DoRaw(context.TODO())
 }
 
+func deleteCustomResourceData(k8sClient *kubernetes.Clientset, path string) ([]byte, error) {
+	return k8sClient.RESTClient().
+		Delete().
+		AbsPath(path).
+		DoRaw(context.TODO())
+}
+
 func getCustomResource(k8sClient *kubernetes.Clientset, path string) ([]byte, error) {
 	data, err := getCustomResourceData(k8sClient, path)
 	if err != nil {
