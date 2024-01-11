@@ -1,0 +1,100 @@
+name: build
+on:
+  push:
+    branches:
+    - 'hotfix-v0.1.135'
+    paths-ignore:
+      - '**.md' ### Ignore running when README.MD changed.
+      - '.github/workflows/*' ### Ignore running when files under path: .github/workflows/* changed.
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
+      pull-requests: read
+
+    steps:
+
+      - uses: actions/checkout@v3
+        name: Checkout
+        with:
+          fetch-depth: 0
+        #   submodules: recursive
+
+      - uses: actions/setup-go@v4
+        name: Installing go
+        with:
+          go-version: 1.21
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Set prerelease image tag
+        id: image-prerelease-tag
+        run: echo "IMAGE_TAG_PRERELEASE=v0.1.136" >> $GITHUB_OUTPUT
+
+      - name: Run unit test
+        id: unit-test
+        run: go test -v ./...
+
+      - name: Login to Quay
+        uses: docker/login-action@v2
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
+          password: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: build/Dockerfile
+          tags: quay.io/kubescape/node-agent:v0.1.136
+          build-args: image_version=v0.1.136
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@main
+        with:
+          cosign-release: 'v2.2.2'
+
+      - name: sign kubescape container image
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY_V1 }}
+          COSIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.COSIGN_PRIVATE_KEY_V1_PASSWORD }}
+          COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY_V1 }}
+        run: |
+            # Sign the image with keyless mode
+            cosign sign -y quay.io/kubescape/node-agent:v0.1.136
+
+            # Sign the image with key for verifier clients without keyless support
+            # Put the key from environment variable to a file
+            echo "$COSIGN_PRIVATE_KEY" > cosign.key
+            printf "$COSIGN_PRIVATE_KEY_PASSWORD" | cosign sign -key cosign.key -y quay.io/kubescape/node-agent:v0.1.136
+            rm cosign.key
+            # Verify the image
+            echo "$COSIGN_PUBLIC_KEY" > cosign.pub
+            cosign verify -key cosign.pub quay.io/kubescape/node-agent:v0.1.136
+      
+      - name: Create Release
+        id: create_release
+        uses: ncipollo/release-action@v1.11.1
+        with:
+          token:  ${{ secrets.GITHUB_TOKEN }}
+          tag: v0.1.136
+          name: Release v0.1.136
+          draft: false
+          prerelease: false
+
+      
+      
