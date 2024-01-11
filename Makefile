@@ -8,8 +8,12 @@ GIT_HEAD_COMMIT ?= $(shell git rev-parse --short HEAD)
 VERSION         ?= $(or $(shell git describe --abbrev=0 --tags --match "v*" 2>/dev/null),$(GIT_HEAD_COMMIT))
 GINKGO          := $(shell pwd)/bin/ginkgo
 GINGKO_VERSION  := v2.13.2
-ginkgo: ## Download ginkgo locally if necessary.
+ginkgo: ## Download ginkgo locall.
 	$(call go-install-tool,$(GINKGO),github.com/onsi/ginkgo/v2/ginkgo@$(GINGKO_VERSION))
+
+HELM = $(shell pwd)/bin/helm
+helm: ## Download helm locally
+	$(call go-install-tool,$(HELM),helm.sh/helm/v3/cmd/helm@v3.9.0)
 
 # go-install-tool will 'go install' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -40,12 +44,12 @@ e2e-build/%:
 	make e2e-install
 
 .PHONY: e2e-install
-e2e-install:
+e2e-install: helm
 	git clone git@github.com:kubescape/helm-charts.git; \
 	cd helm-charts; \
-	helm repo add kubescape https://kubescape.github.io/helm-charts/; \
-       	helm repo update; \
-	helm upgrade \
+	$(HELM) repo add kubescape https://kubescape.github.io/helm-charts/; \
+       	$(HELM) repo update; \
+	$(HELM) upgrade \
 		--install kubescape \
 		./charts/kubescape-operator \
 		-n kubescape --create-namespace \
