@@ -48,7 +48,7 @@ func TestStorageNoCache_GetSBOM(t *testing.T) {
 		createSBOM bool
 		name       string
 		args       args
-		want       *v1beta1.SBOMSPDXv2p3
+		want       *v1beta1.SBOMSyft
 		wantErr    bool
 	}{
 		{
@@ -57,7 +57,7 @@ func TestStorageNoCache_GetSBOM(t *testing.T) {
 				name: storage.NginxKey,
 			},
 			createSBOM: true,
-			want: &v1beta1.SBOMSPDXv2p3{
+			want: &v1beta1.SBOMSyft{
 				ObjectMeta: v1.ObjectMeta{
 					Name:      storage.NginxKey,
 					Namespace: "kubescape",
@@ -76,7 +76,7 @@ func TestStorageNoCache_GetSBOM(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sc, _ := CreateFakeStorageNoCache("kubescape")
 			if tt.createSBOM {
-				_, _ = sc.StorageClient.SBOMSPDXv2p3s("kubescape").Create(context.Background(), tt.want, v1.CreateOptions{})
+				_, _ = sc.StorageClient.SBOMSyfts("kubescape").Create(context.Background(), tt.want, v1.CreateOptions{})
 			}
 			got, err := sc.GetSBOM(tt.args.name)
 			if (err != nil) != tt.wantErr {
