@@ -26,8 +26,12 @@ func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Eve
 	}
 	ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
 
-	ch.kubeIPInstance.EnrichEvent(event)
-	ch.kubeNameInstance.EnrichEvent(event)
+	if ch.kubeIPInstance != nil {
+		ch.kubeIPInstance.EnrichEvent(event)
+	}
+	if ch.kubeNameInstance != nil {
+		ch.kubeNameInstance.EnrichEvent(event)
+	}
 
 	_ = ch.networkWorkerPool.Invoke(*event)
 }

@@ -3,6 +3,7 @@ package syfthandler
 import (
 	_ "embed"
 	"encoding/json"
+	"github.com/stretchr/testify/require"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
 	"testing"
@@ -15,12 +16,15 @@ import (
 //go:embed testdata/kollector-syft.json
 var syftKollectorSBOM []byte
 
+//go:embed testdata/kollector-syft-filtered.json
+var syftKollectorSBOMfiltered []byte
+
 func TestFilterRelevantFilesInSBOM(t *testing.T) {
 	tests := []struct {
-		name                string
-		syftDocInBytes      []byte
-		sbomFileRelevantMap map[string]bool
-		expectedSyftDoc     v1beta1.SyftDocument
+		name                   string
+		syftDocInBytes         []byte
+		sbomFileRelevantMap    map[string]bool
+		expectedSyftDocInBytes []byte
 	}{
 		{
 			name:           "kollector",
@@ -28,18 +32,22 @@ func TestFilterRelevantFilesInSBOM(t *testing.T) {
 			sbomFileRelevantMap: map[string]bool{
 				"/bin/busybox": true,
 			},
+			expectedSyftDocInBytes: syftKollectorSBOMfiltered,
 		},
 	}
 
 	var syftDoc v1beta1.SyftDocument
+	var expectedSyftDoc v1beta1.SyftDocument
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := json.Unmarshal(tt.syftDocInBytes, &syftDoc)
-			assert.NoError(t, err)
+			require.NoError(t, err)
+			err = json.Unmarshal(tt.expectedSyftDocInBytes, &expectedSyftDoc)
+			require.NoError(t, err)
 
 			filteredSyftDoc := filterRelevantFilesInSBOM(syftDoc, tt.sbomFileRelevantMap)
 
-			assert.Equal(t, tt.expectedSyftDoc, filteredSyftDoc)
+			assert.Equal(t, expectedSyftDoc, filteredSyftDoc)
 		})
 	}
 }
