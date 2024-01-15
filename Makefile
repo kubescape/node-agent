@@ -28,10 +28,10 @@ binary:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)
 
 docker-build:
-	docker buildx build --platform linux/amd64 -t $(IMAGE):$(VERSION) -f $(DOCKERFILE_PATH) .
+	docker buildx build --platform linux/amd64 -t $(IMAGE):$(VERSION) -f $(DOCKERFILE_PATH) --load .
 docker-push:
 	docker push $(IMAGE):$(VERSION)
-	
+
 # Running e2e tests in a KinD instance
 # this section was highly inspired from Capsule project (github.com/projectcapsule/capsule)
 .PHONY: e2e
