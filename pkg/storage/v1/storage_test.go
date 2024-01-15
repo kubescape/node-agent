@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"node-agent/pkg/storage"
 	"testing"
 
@@ -103,9 +104,20 @@ func TestStorageNoCache_PatchFilteredSBOM(t *testing.T) {
 			args: args{
 				name: storage.NginxKey,
 				SBOM: &v1beta1.SBOMSyftFiltered{
+					TypeMeta: v1.TypeMeta{
+						Kind:       "SBOMSyftFiltered",
+						APIVersion: "softwarecomposition.kubescape.io/v1beta1",
+					},
 					Spec: v1beta1.SBOMSyftSpec{
 						Syft: v1beta1.SyftDocument{
-							Files: []v1beta1.SyftFile{v1beta1.SyftFile{ID: "test"}},
+							Artifacts: []v1beta1.SyftPackage{
+								{
+									PackageBasicData: v1beta1.PackageBasicData{
+										Name: "test",
+										ID:   "test",
+									},
+								},
+							},
 						},
 					},
 				},
@@ -120,13 +132,17 @@ func TestStorageNoCache_PatchFilteredSBOM(t *testing.T) {
 					Name: tt.args.name,
 				},
 			}
-			_, _ = sc.StorageClient.SBOMSyftFiltereds("kubescape").Create(context.Background(), filteredSBOM, v1.CreateOptions{})
+			c, e := sc.StorageClient.SBOMSyftFiltereds("kubescape").Create(context.Background(), filteredSBOM, v1.CreateOptions{})
+			if e != nil {
+				t.Errorf("CreateFilteredSBOM() error = %v, wantErr %v", e, tt.wantErr)
+			}
+			fmt.Println(c)
 			if err := sc.PatchFilteredSBOM(tt.args.name, tt.args.SBOM); (err != nil) != tt.wantErr {
 				t.Errorf("PatchFilteredSBOM() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			got, err := sc.StorageClient.SBOMSyftFiltereds("kubescape").Get(context.Background(), tt.args.name, v1.GetOptions{})
 			assert.NoError(t, err)
-			assert.Equal(t, 1, len(got.Spec.Syft.Files))
+			assert.Equal(t, 1, len(got.Spec.Syft.Artifacts))
 		})
 	}
 }

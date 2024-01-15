@@ -40,25 +40,25 @@ const (
 )
 
 type WatchedContainerData struct {
-	InstanceID                               instanceidhandler.IInstanceID
-	UpdateDataTicker                         *time.Ticker
-	SyncChannel                              chan error
-	FilteredSpdxData                         *v1beta1.SBOMSyftFiltered
-	RelevantRealtimeFilesBySPDXIdentifier    map[v1beta1.ElementID]bool
-	RelevantRealtimeFilesByPackageSourceInfo map[string]*PackageSourceInfoData
-	RelevantSyftFilesByIdentifier            map[string]bool
-	ParentResourceVersion                    string
-	ContainerID                              string
-	ImageTag                                 string
-	ImageID                                  string
-	Wlid                                     string
-	TemplateHash                             string
-	K8sContainerID                           string
-	SBOMResourceVersion                      int
-	ContainerType                            ContainerType
-	ContainerIndex                           int
-	NsMntId                                  uint64
-	InitialDelayExpired                      bool
+	InstanceID                                 instanceidhandler.IInstanceID
+	UpdateDataTicker                           *time.Ticker
+	SyncChannel                                chan error
+	SBOMSyftFiltered                           *v1beta1.SBOMSyftFiltered
+	RelevantRealtimeFilesByIdentifier          map[string]bool
+	RelevantRelationshipsArtifactsByIdentifier map[string]bool
+	RelevantArtifactsFilesByIdentifier         map[string]bool
+	ParentResourceVersion                      string
+	ContainerID                                string
+	ImageTag                                   string
+	ImageID                                    string
+	Wlid                                       string
+	TemplateHash                               string
+	K8sContainerID                             string
+	SBOMResourceVersion                        int
+	ContainerType                              ContainerType
+	ContainerIndex                             int
+	NsMntId                                    uint64
+	InitialDelayExpired                        bool
 }
 
 func Between(value string, a string, b string) string {

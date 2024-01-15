@@ -130,6 +130,10 @@ func (sc StorageNoCache) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) erro
 	return nil
 }
 
+func (sc StorageNoCache) GetFilteredSBOM(name string) (*v1beta1.SBOMSyftFiltered, error) {
+	return sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
+}
+
 func (sc StorageNoCache) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
