@@ -107,6 +107,7 @@ func (rm *RelevancyManager) getContainerInfo(namespace, podName, containerName s
 	if err != nil {
 		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("WLID of parent workload is not in the right %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
+
 	// find imageTag
 	containers, err := pod.GetContainers()
 	if err != nil {
@@ -117,6 +118,20 @@ func (rm *RelevancyManager) getContainerInfo(namespace, podName, containerName s
 			imageTag = containers[i].Image
 		}
 	}
+
+	if imageTag == "" {
+		// search in init containers
+		initContainers, err := pod.GetInitContainers()
+		if err != nil {
+			return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get containers for pod %s in namespace %s with error: %v", podName, namespace, err)
+		}
+		for i := range initContainers {
+			if initContainers[i].Name == containerName {
+				imageTag = containers[i].Image
+			}
+		}
+	}
+
 	if imageTag == "" {
 		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to find container %s in pod %s in namespace %s", containerName, podName, namespace)
 	}
@@ -131,8 +146,17 @@ func (rm *RelevancyManager) getContainerInfo(namespace, podName, containerName s
 		}
 	}
 	if imageID == "" {
+		// search in init containers
+		for i := range status.InitContainerStatuses {
+			if status.InitContainerStatuses[i].Name == containerName {
+				imageID = status.InitContainerStatuses[i].ImageID
+			}
+		}
+	}
+	if imageID == "" {
 		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to find container status %s in pod %s in namespace %s", containerName, podName, namespace)
 	}
+
 	// find instanceID
 	instanceIDs, err := instanceidhandlerV1.GenerateInstanceID(pod)
 	if err != nil {
@@ -205,11 +229,13 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 	defer span.End()
 
 	watchedContainer := &utils.WatchedContainerData{
-		ContainerID:                   container.Runtime.ContainerID,
-		UpdateDataTicker:              time.NewTicker(rm.cfg.InitialDelay),
-		SyncChannel:                   make(chan error, 10),
-		K8sContainerID:                k8sContainerID,
-		RelevantSyftFilesByIdentifier: make(map[string]bool),
+		ContainerID:      container.Runtime.ContainerID,
+		UpdateDataTicker: time.NewTicker(rm.cfg.InitialDelay),
+		SyncChannel:      make(chan error, 10),
+		K8sContainerID:   k8sContainerID,
+		RelevantRelationshipsArtifactsByIdentifier: make(map[string]bool),
+		RelevantArtifactsFilesByIdentifier:         make(map[string]bool),
+		RelevantRealtimeFilesByIdentifier:          make(map[string]bool),
 	}
 	rm.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
 
