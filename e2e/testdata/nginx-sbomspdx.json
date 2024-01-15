@@ -11,7 +11,7 @@
       "kubescape.io/image-id": "docker-io-library-nginx-sha256-2bdc49f2f8ae8d8dc50ed00f2ee56d00",
       "kubescape.io/image-name": "docker-io-library-nginx"
     },
-    "name": "nginx-b49026",
+    "name": "docker.io-library-nginx-sha256-2bdc49f2f8ae8d8dc50ed00f2ee56d00385c6f8bc8a8b320d0a294d9e3b49026-b49026",
     "namespace": "kubescape",
     "uid": "9895a25e-407f-4793-a44e-3abfcb2e0fd8"
   },

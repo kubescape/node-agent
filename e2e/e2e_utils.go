@@ -47,7 +47,7 @@ func waitForPod(k8sClient *kubernetes.Clientset, podName, namespace, label strin
 				return nil
 			case false:
 				fmt.Printf("pod: %s not ready yet\n", podName)
-				time.Sleep(2 * time.Second)
+				time.Sleep(5 * time.Second)
 			}
 		}
 	}
@@ -145,7 +145,7 @@ func waitForCustomResource(k8sClient *kubernetes.Clientset, path string, timeout
 				return nil
 			case false:
 				fmt.Printf("resource: %s not ready yet\n", path)
-				time.Sleep(2 * time.Second)
+				time.Sleep(10 * time.Second)
 			}
 		}
 	}

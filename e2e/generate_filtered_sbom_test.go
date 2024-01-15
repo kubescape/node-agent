@@ -21,7 +21,7 @@ var (
 	//go:embed testdata/nginx-sbomspdx-filtered.json
 	nginxSbomSpdxBytesFiltered []byte
 
-	expectedSbom         string = "nginx-b49026"
+	expectedSbom         string = "docker.io-library-nginx-sha256-2bdc49f2f8ae8d8dc50ed00f2ee56d00385c6f8bc8a8b320d0a294d9e3b49026-b49026"
 	expectedSbomFiltered string = "pod-nginx-nginx-1ba5-4aaf"
 )
 
@@ -42,7 +42,7 @@ var _ = Describe("Generate filtered SBOM", func() {
 			Containers: []v1.Container{
 				{
 					Name:  "nginx",
-					Image: "nginx",
+					Image: "docker.io/library/nginx@sha256:2bdc49f2f8ae8d8dc50ed00f2ee56d00385c6f8bc8a8b320d0a294d9e3b49026",
 				},
 			},
 		},
