@@ -11,6 +11,8 @@ import (
 	"sort"
 	"time"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"github.com/armosec/utils-k8s-go/wlid"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -197,8 +199,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			ObjectMeta: metav1.ObjectMeta{
 				Name: slug,
 				Annotations: map[string]string{
-					instanceidhandler.WlidMetadataKey:   watchedContainer.Wlid,
-					instanceidhandler.StatusMetadataKey: "",
+					helpersv1.WlidMetadataKey:   watchedContainer.Wlid,
+					helpersv1.StatusMetadataKey: helpersv1.Ready,
 				},
 				Labels: utils.GetLabels(watchedContainer, true),
 			},
@@ -263,8 +265,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			ObjectMeta: metav1.ObjectMeta{
 				Name: slug,
 				Annotations: map[string]string{
-					instanceidhandler.WlidMetadataKey:   watchedContainer.Wlid,
-					instanceidhandler.StatusMetadataKey: "",
+					helpersv1.WlidMetadataKey:   watchedContainer.Wlid,
+					helpersv1.StatusMetadataKey: helpersv1.Ready,
 				},
 				Labels: utils.GetLabels(watchedContainer, true),
 			},

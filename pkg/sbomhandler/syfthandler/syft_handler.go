@@ -6,9 +6,10 @@ import (
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -50,8 +51,12 @@ func (sc *SyftHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 
 	// check SBOM is complete
 	if syftData.Annotations != nil {
-		if status, ok := syftData.Annotations[instanceidhandler.StatusMetadataKey]; ok {
-			if status == instanceidhandler.Incomplete {
+		if status, ok := syftData.Annotations[helpersv1.StatusMetadataKey]; ok {
+			if status == helpersv1.Incomplete {
+				watchedContainer.SyncChannel <- utils.IncompleteSBOMError
+			}
+			// dwertent
+			if status == helpersv1.Unauthorize {
 				watchedContainer.SyncChannel <- utils.IncompleteSBOMError
 			}
 		}
@@ -69,10 +74,11 @@ func (sc *SyftHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 				ObjectMeta: metav1.ObjectMeta{
 					Name: filteredSBOMKey,
 					Annotations: map[string]string{
-						instanceidhandler.WlidMetadataKey:          watchedContainer.Wlid,
-						instanceidhandler.InstanceIDMetadataKey:    watchedContainer.InstanceID.GetStringFormatted(),
-						instanceidhandler.ContainerNameMetadataKey: watchedContainer.InstanceID.GetContainerName(),
-						instanceidhandler.ImageIDMetadataKey:       watchedContainer.ImageID,
+						helpersv1.WlidMetadataKey:          watchedContainer.Wlid,
+						helpersv1.InstanceIDMetadataKey:    watchedContainer.InstanceID.GetStringFormatted(),
+						helpersv1.ContainerNameMetadataKey: watchedContainer.InstanceID.GetContainerName(),
+						helpersv1.ImageIDMetadataKey:       watchedContainer.ImageID,
+						helpersv1.StatusMetadataKey:        helpersv1.Ready,
 					},
 					Labels: utils.GetLabels(watchedContainer, false),
 				},

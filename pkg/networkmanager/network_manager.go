@@ -22,7 +22,7 @@ import (
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -312,7 +312,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 	if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(generateNetworkNeighborsNameFromWlid(parentWlid), wlid.GetNamespaceFromWlid(parentWlid), &v1beta1.NetworkNeighbors{
 		ObjectMeta: metav1.ObjectMeta{
 			Annotations: map[string]string{
-				instanceidhandlerV1.StatusMetadataKey: completeStatus,
+				helpersv1.StatusMetadataKey: helpersv1.Ready,
 			},
 		},
 		Spec: networkNeighborsSpec,
@@ -342,7 +342,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		networkNeighborsSpec.LabelSelector = *selector
 		newNetworkNeighbors.Spec = networkNeighborsSpec
 		newNetworkNeighbors.Annotations = map[string]string{
-			instanceidhandlerV1.StatusMetadataKey: completeStatus,
+			helpersv1.StatusMetadataKey: helpersv1.Ready,
 		}
 
 		logger.L().Debug("NetworkManager - creating network neighbor", helpers.Interface("labels", selector), helpers.String("container ID", container.Runtime.ContainerID), helpers.Interface("labels", newNetworkNeighbors.Spec.LabelSelector))

@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/goradd/maps"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
-	instanceidhandler2 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
@@ -122,12 +122,12 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 	for i := range labels {
 		if labels[i] == "" {
 			delete(labels, i)
-		} else if stripContainer && i == instanceidhandler2.ContainerNameMetadataKey {
+		} else if stripContainer && i == helpersv1.ContainerNameMetadataKey {
 			delete(labels, i)
 		} else {
-			if i == instanceidhandler2.KindMetadataKey {
+			if i == helpersv1.KindMetadataKey {
 				labels[i] = wlid.GetKindFromWlid(watchedContainer.Wlid)
-			} else if i == instanceidhandler2.NameMetadataKey {
+			} else if i == helpersv1.NameMetadataKey {
 				labels[i] = wlid.GetNameFromWlid(watchedContainer.Wlid)
 			}
 			errs := validation.IsValidLabelValue(labels[i])
@@ -141,10 +141,10 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 		}
 	}
 	if watchedContainer.ParentResourceVersion != "" {
-		labels[instanceidhandler2.ResourceVersionMetadataKey] = watchedContainer.ParentResourceVersion
+		labels[helpersv1.ResourceVersionMetadataKey] = watchedContainer.ParentResourceVersion
 	}
 	if watchedContainer.TemplateHash != "" {
-		labels[instanceidhandler2.TemplateHashKey] = watchedContainer.TemplateHash
+		labels[helpersv1.TemplateHashKey] = watchedContainer.TemplateHash
 	}
 	return labels
 }
