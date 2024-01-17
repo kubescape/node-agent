@@ -127,7 +127,6 @@ func (sc *SyftHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 
 	filterRelevantFilesInSBOM(watchedContainer, syftData.Spec.Syft, sbomFileRelevantMap, &newRelevantData)
 
-	logger.L().Debug("has new relevant data", helpers.Interface("newRelevantData", newRelevantData), helpers.String("containerID", watchedContainer.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.String("filtered SBOM name", watchedContainer.SBOMSyftFiltered.Name))
 	if !newRelevantData {
 		return nil
 	}
