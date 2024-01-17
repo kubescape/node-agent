@@ -42,7 +42,7 @@ func (sc *SyftHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 
 	syftData, err := sc.storageClient.GetSBOM(SBOMKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get SBOM from storage: %w", err)
 	}
 	if syftData == nil {
 		return nil
@@ -127,12 +127,13 @@ func (sc *SyftHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 
 	filterRelevantFilesInSBOM(watchedContainer, syftData.Spec.Syft, sbomFileRelevantMap, &newRelevantData)
 
+	logger.L().Debug("has new relevant data", helpers.Interface("newRelevantData", newRelevantData), helpers.String("containerID", watchedContainer.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.String("filtered SBOM name", watchedContainer.SBOMSyftFiltered.Name))
 	if !newRelevantData {
 		return nil
 	}
 
 	if err = sc.storageClient.CreateFilteredSBOM(watchedContainer.SBOMSyftFiltered); err != nil {
-		return err
+		return fmt.Errorf("failed to store filtered SBOM: %w", err)
 	}
 	logger.L().Info("filtered SBOM has been stored successfully", helpers.String("containerID", watchedContainer.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.String("filtered SBOM", watchedContainer.SBOMSyftFiltered.Name))
 
