@@ -8,6 +8,7 @@ type StorageClient interface {
 	CreateApplicationActivity(activity *v1beta1.ApplicationActivity, namespace string) error
 	GetApplicationActivity(namespace, name string) (*v1beta1.ApplicationActivity, error)
 	CreateApplicationProfile(profile *v1beta1.ApplicationProfile, namespace string) error
+	PatchApplicationProfile(name, namespace string, profile *v1beta1.ApplicationProfile) error
 	GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error)
 	CreateApplicationProfileSummary(profile *v1beta1.ApplicationProfileSummary, namespace string) error
 	CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error

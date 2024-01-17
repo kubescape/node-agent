@@ -146,3 +146,138 @@ func TestStorageNoCache_PatchFilteredSBOM(t *testing.T) {
 		})
 	}
 }
+
+func TestStorageNoCache_PatchNetworkNeighbors(t *testing.T) {
+	type args struct {
+		name      string
+		neighbors *v1beta1.NetworkNeighbors
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "test",
+			args: args{
+				name: storage.NginxKey,
+				neighbors: &v1beta1.NetworkNeighbors{
+					Spec: v1beta1.NetworkNeighborsSpec{
+						Ingress: []v1beta1.NetworkNeighbor{
+							{
+								Ports: []v1beta1.NetworkPort{
+									{Name: "test2"},
+									{Name: "test3"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc, _ := CreateFakeStorageNoCache("kubescape")
+			existingProfile := &v1beta1.NetworkNeighbors{
+				ObjectMeta: v1.ObjectMeta{
+					Name: tt.args.name,
+				},
+				Spec: v1beta1.NetworkNeighborsSpec{
+					Ingress: []v1beta1.NetworkNeighbor{
+						{
+							Ports: []v1beta1.NetworkPort{
+								{Name: "test"},
+								{Name: "test1"},
+							},
+						},
+					},
+				},
+			}
+			_, _ = sc.StorageClient.NetworkNeighborses("default").Create(context.Background(), existingProfile, v1.CreateOptions{})
+			if err := sc.PatchNetworkNeighborsIngressAndEgress(tt.args.name, "default", tt.args.neighbors); (err != nil) != tt.wantErr {
+				t.Errorf("PatchFilteredSBOM() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			got, err := sc.StorageClient.NetworkNeighborses("default").Get(context.Background(), tt.args.name, v1.GetOptions{})
+			assert.NoError(t, err)
+			assert.Equal(t, 4, len(got.Spec.Ingress[0].Ports))
+		})
+	}
+}
+
+func TestStorageNoCache_PatchApplicationProfile(t *testing.T) {
+	type args struct {
+		name    string
+		profile *v1beta1.ApplicationProfile
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "test",
+			args: args{
+				name: storage.NginxKey,
+				profile: &v1beta1.ApplicationProfile{
+					Spec: v1beta1.ApplicationProfileSpec{
+						Containers: []v1beta1.ApplicationProfileContainer{
+							{
+								Name:         "test",
+								Capabilities: []string{"SYS_ADMIN"},
+								Execs: []v1beta1.ExecCalls{
+									{Path: "/usr/bin/test2"},
+									{Path: "/usr/bin/test3"},
+								},
+								Opens: []v1beta1.OpenCalls{
+									{Path: "/usr/bin/test2"},
+									{Path: "/usr/bin/test3"},
+								},
+								Syscalls: []string{"open"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc, _ := CreateFakeStorageNoCache("kubescape")
+			existingProfile := &v1beta1.ApplicationProfile{
+				ObjectMeta: v1.ObjectMeta{
+					Name: tt.args.name,
+				},
+				Spec: v1beta1.ApplicationProfileSpec{
+					Containers: []v1beta1.ApplicationProfileContainer{
+						{
+							Name:         "test",
+							Capabilities: []string{"NET_ADMIN"},
+							Execs: []v1beta1.ExecCalls{
+								{Path: "/usr/bin/test"},
+								{Path: "/usr/bin/test1"},
+							},
+							Opens: []v1beta1.OpenCalls{
+								{Path: "/usr/bin/test"},
+								{Path: "/usr/bin/test1"},
+							},
+							Syscalls: []string{"execve"},
+						},
+					},
+				},
+			}
+			_, _ = sc.StorageClient.ApplicationProfiles("default").Create(context.Background(), existingProfile, v1.CreateOptions{})
+			if err := sc.PatchApplicationProfile(tt.args.name, "default", tt.args.profile); (err != nil) != tt.wantErr {
+				t.Errorf("PatchFilteredSBOM() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			got, err := sc.StorageClient.ApplicationProfiles("default").Get(context.Background(), tt.args.name, v1.GetOptions{})
+			assert.NoError(t, err)
+			// []string cannot be merged, so the default replace strategy is used
+			assert.Equal(t, []string{"SYS_ADMIN"}, got.Spec.Containers[0].Capabilities)
+			assert.Equal(t, []string{"open"}, got.Spec.Containers[0].Syscalls)
+			// here the slices can merge
+			assert.Equal(t, 4, len(got.Spec.Containers[0].Execs))
+			assert.Equal(t, 4, len(got.Spec.Containers[0].Opens))
+		})
+	}
+}
