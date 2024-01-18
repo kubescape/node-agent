@@ -100,36 +100,10 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 		}
 	}
 	// find container type and index
-	// containers
 	if watchedContainer.ContainerType == utils.Unknown {
-		containers, err := pod.GetContainers()
-		if err != nil {
-			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get containers", helpers.Error(err))
-			return
-		}
-		for i, c := range containers {
-			if c.Name == container.K8s.ContainerName {
-				watchedContainer.ContainerIndex = i
-				watchedContainer.ContainerType = utils.Container
-				break
-			}
-		}
+		watchedContainer.SetContainerType(pod, container.K8s.ContainerName)
 	}
-	// initContainers
-	if watchedContainer.ContainerType == utils.Unknown {
-		initContainers, err := pod.GetInitContainers()
-		if err != nil {
-			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get init containers", helpers.Error(err))
-			return
-		}
-		for i, c := range initContainers {
-			if c.Name == container.K8s.ContainerName {
-				watchedContainer.ContainerIndex = i
-				watchedContainer.ContainerType = utils.InitContainer
-				break
-			}
-		}
-	}
+
 	// FIXME ephemeralContainers are not supported yet
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/goradd/maps"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
@@ -178,6 +179,32 @@ func InsertApplicationProfileContainer(profile *v1beta1.ApplicationProfile, cont
 			profile.Spec.InitContainers = append(profile.Spec.InitContainers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.InitContainers)+1)...)
 		}
 		profile.Spec.InitContainers[containerIndex] = *profileContainer
+	}
+}
+
+func (watchedContainer *WatchedContainerData) SetContainerType(wl workloadinterface.IWorkload, containerName string) {
+	containers, err := wl.GetContainers()
+	if err != nil {
+		return
+	}
+	for i, c := range containers {
+		if c.Name == containerName {
+			watchedContainer.ContainerIndex = i
+			watchedContainer.ContainerType = Container
+			break
+		}
+	}
+	// initContainers
+	initContainers, err := wl.GetInitContainers()
+	if err != nil {
+		return
+	}
+	for i, c := range initContainers {
+		if c.Name == containerName {
+			watchedContainer.ContainerIndex = i
+			watchedContainer.ContainerType = InitContainer
+			break
+		}
 	}
 }
 
