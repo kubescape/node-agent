@@ -5,7 +5,7 @@ import (
 
 	_ "embed"
 
-	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
@@ -44,8 +44,8 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						instanceidhandlerV1.WlidMetadataKey:   "wlid://cluster-minikube/namespace-default/deployment-nginx-deployment",
-						instanceidhandlerV1.StatusMetadataKey: "incomplete",
+						helpersv1.WlidMetadataKey:   "wlid://cluster-minikube/namespace-default/deployment-nginx-deployment",
+						helpersv1.StatusMetadataKey: helpersv1.Initializing,
 					},
 					Name:      "deployment-nginx-deployment",
 					Namespace: "default",
@@ -53,7 +53,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 						"kubescape.io/workload-api-group":        "apps",
 						"kubescape.io/workload-api-version":      "v1",
 						"kubescape.io/workload-namespace":        "default",
-						"kubescape.io/workload-kind":             "deployment",
+						"kubescape.io/workload-kind":             "Deployment",
 						"kubescape.io/workload-name":             "nginx-deployment",
 						"kubescape.io/workload-resource-version": "339815",
 					},
@@ -80,8 +80,8 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						instanceidhandlerV1.WlidMetadataKey:   "wlid://cluster-minikube/namespace-kube-system/daemonset-fluentd-elasticsearch",
-						instanceidhandlerV1.StatusMetadataKey: "incomplete",
+						helpersv1.WlidMetadataKey:   "wlid://cluster-minikube/namespace-kube-system/daemonset-fluentd-elasticsearch",
+						helpersv1.StatusMetadataKey: helpersv1.Initializing,
 					},
 					Name:      "daemonset-fluentd-elasticsearch",
 					Namespace: "kube-system",
@@ -89,7 +89,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 						"kubescape.io/workload-api-group":        "apps",
 						"kubescape.io/workload-api-version":      "v1",
 						"kubescape.io/workload-namespace":        "kube-system",
-						"kubescape.io/workload-kind":             "daemonset",
+						"kubescape.io/workload-kind":             "DaemonSet",
 						"kubescape.io/workload-name":             "fluentd-elasticsearch",
 						"kubescape.io/workload-resource-version": "266406",
 					},
@@ -116,8 +116,8 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						instanceidhandlerV1.WlidMetadataKey:   "wlid://cluster-minikube/namespace-default/pod-nginx-deployment-fcc867f7-dgjrg",
-						instanceidhandlerV1.StatusMetadataKey: "incomplete",
+						helpersv1.WlidMetadataKey:   "wlid://cluster-minikube/namespace-default/pod-nginx-deployment-fcc867f7-dgjrg",
+						helpersv1.StatusMetadataKey: helpersv1.Initializing,
 					},
 					Name:      "pod-nginx-deployment-fcc867f7-dgjrg",
 					Namespace: "default",
@@ -125,7 +125,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 						"kubescape.io/workload-api-group":        "",
 						"kubescape.io/workload-api-version":      "v1",
 						"kubescape.io/workload-namespace":        "default",
-						"kubescape.io/workload-kind":             "pod",
+						"kubescape.io/workload-kind":             "Pod",
 						"kubescape.io/workload-name":             "nginx-deployment-fcc867f7-dgjrg",
 						"kubescape.io/workload-resource-version": "339809",
 					},
@@ -237,7 +237,7 @@ func TestGenerateNetworkNeighborsLabels(t *testing.T) {
 				"kubescape.io/workload-api-group":        "apps",
 				"kubescape.io/workload-api-version":      "v1",
 				"kubescape.io/workload-namespace":        "default",
-				"kubescape.io/workload-kind":             "deployment",
+				"kubescape.io/workload-kind":             "Deployment",
 				"kubescape.io/workload-name":             "nginx-deployment",
 				"kubescape.io/workload-resource-version": "339815",
 			},
@@ -250,7 +250,7 @@ func TestGenerateNetworkNeighborsLabels(t *testing.T) {
 				"kubescape.io/workload-api-group":        "apps",
 				"kubescape.io/workload-api-version":      "v1",
 				"kubescape.io/workload-namespace":        "kube-system",
-				"kubescape.io/workload-kind":             "daemonset",
+				"kubescape.io/workload-kind":             "DaemonSet",
 				"kubescape.io/workload-name":             "fluentd-elasticsearch",
 				"kubescape.io/workload-resource-version": "266406",
 			},
@@ -263,7 +263,7 @@ func TestGenerateNetworkNeighborsLabels(t *testing.T) {
 				"kubescape.io/workload-api-group":        "",
 				"kubescape.io/workload-api-version":      "v1",
 				"kubescape.io/workload-namespace":        "default",
-				"kubescape.io/workload-kind":             "pod",
+				"kubescape.io/workload-kind":             "Pod",
 				"kubescape.io/workload-name":             "nginx-deployment-fcc867f7-dgjrg",
 				"kubescape.io/workload-resource-version": "339809",
 			},

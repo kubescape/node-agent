@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/goradd/maps"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
-	instanceidhandler2 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
@@ -40,25 +41,25 @@ const (
 )
 
 type WatchedContainerData struct {
-	InstanceID                               instanceidhandler.IInstanceID
-	UpdateDataTicker                         *time.Ticker
-	SyncChannel                              chan error
-	FilteredSpdxData                         *v1beta1.SBOMSPDXv2p3Filtered
-	RelevantRealtimeFilesBySPDXIdentifier    map[v1beta1.ElementID]bool
-	RelevantRealtimeFilesByPackageSourceInfo map[string]*PackageSourceInfoData
-	K8sContainerID                           string
-	ContainerID                              string
-	ParentResourceVersion                    string
-	ImageTag                                 string
-	ImageID                                  string
-	Wlid                                     string
-	TemplateHash                             string
-	SBOMResourceVersion                      int
-	ContainerType                            ContainerType
-	ContainerIndex                           int
-	NsMntId                                  uint64
-	InitialDelayExpired                      bool
-	RelevantSyftFilesByIdentifier            map[string]bool
+	InstanceID                                 instanceidhandler.IInstanceID
+	UpdateDataTicker                           *time.Ticker
+	SyncChannel                                chan error
+	SBOMSyftFiltered                           *v1beta1.SBOMSyftFiltered
+	RelevantRealtimeFilesByIdentifier          map[string]bool
+	RelevantRelationshipsArtifactsByIdentifier map[string]bool
+	RelevantArtifactsFilesByIdentifier         map[string]bool
+	ParentResourceVersion                      string
+	ContainerID                                string
+	ImageTag                                   string
+	ImageID                                    string
+	Wlid                                       string
+	TemplateHash                               string
+	K8sContainerID                             string
+	SBOMResourceVersion                        int
+	ContainerType                              ContainerType
+	ContainerIndex                             int
+	NsMntId                                    uint64
+	InitialDelayExpired                        bool
 }
 
 func Between(value string, a string, b string) string {
@@ -122,12 +123,12 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 	for i := range labels {
 		if labels[i] == "" {
 			delete(labels, i)
-		} else if stripContainer && i == instanceidhandler2.ContainerNameMetadataKey {
+		} else if stripContainer && i == helpersv1.ContainerNameMetadataKey {
 			delete(labels, i)
 		} else {
-			if i == instanceidhandler2.KindMetadataKey {
+			if i == helpersv1.KindMetadataKey {
 				labels[i] = wlid.GetKindFromWlid(watchedContainer.Wlid)
-			} else if i == instanceidhandler2.NameMetadataKey {
+			} else if i == helpersv1.NameMetadataKey {
 				labels[i] = wlid.GetNameFromWlid(watchedContainer.Wlid)
 			}
 			errs := validation.IsValidLabelValue(labels[i])
@@ -141,10 +142,10 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 		}
 	}
 	if watchedContainer.ParentResourceVersion != "" {
-		labels[instanceidhandler2.ResourceVersionMetadataKey] = watchedContainer.ParentResourceVersion
+		labels[helpersv1.ResourceVersionMetadataKey] = watchedContainer.ParentResourceVersion
 	}
 	if watchedContainer.TemplateHash != "" {
-		labels[instanceidhandler2.TemplateHashKey] = watchedContainer.TemplateHash
+		labels[helpersv1.TemplateHashKey] = watchedContainer.TemplateHash
 	}
 	return labels
 }
@@ -178,6 +179,32 @@ func InsertApplicationProfileContainer(profile *v1beta1.ApplicationProfile, cont
 			profile.Spec.InitContainers = append(profile.Spec.InitContainers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.InitContainers)+1)...)
 		}
 		profile.Spec.InitContainers[containerIndex] = *profileContainer
+	}
+}
+
+func (watchedContainer *WatchedContainerData) SetContainerType(wl workloadinterface.IWorkload, containerName string) {
+	containers, err := wl.GetContainers()
+	if err != nil {
+		return
+	}
+	for i, c := range containers {
+		if c.Name == containerName {
+			watchedContainer.ContainerIndex = i
+			watchedContainer.ContainerType = Container
+			break
+		}
+	}
+	// initContainers
+	initContainers, err := wl.GetInitContainers()
+	if err != nil {
+		return
+	}
+	for i, c := range initContainers {
+		if c.Name == containerName {
+			watchedContainer.ContainerIndex = i
+			watchedContainer.ContainerType = InitContainer
+			break
+		}
 	}
 }
 

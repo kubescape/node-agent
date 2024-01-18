@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	v1 "k8s.io/api/core/v1"
 )
 
 type RelevancyManager struct {
@@ -58,10 +59,11 @@ func (rm *RelevancyManager) deleteResources(watchedContainer *utils.WatchedConta
 }
 
 func (rm *RelevancyManager) ensureImageInfo(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
+
 	if watchedContainer.ImageID == "" || watchedContainer.ImageTag == "" || watchedContainer.InstanceID == nil || watchedContainer.Wlid == "" {
-		imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, err := rm.getContainerInfo(container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)
+		imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, err := rm.getContainerInfo(watchedContainer, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)
 		if err != nil {
-			logger.L().Debug("failed to get image info", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Error(err))
+			logger.L().Debug("failed to get image info", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Interface("ContainerType", watchedContainer.ContainerType), helpers.Error(err))
 			return
 		}
 		watchedContainer.ImageID = imageID
@@ -74,7 +76,7 @@ func (rm *RelevancyManager) ensureImageInfo(container *containercollection.Conta
 	}
 }
 
-func (rm *RelevancyManager) getContainerInfo(namespace, podName, containerName string) (string, string, string, string, string, instanceidhandler.IInstanceID, error) {
+func (rm *RelevancyManager) getContainerInfo(watchedContainer *utils.WatchedContainerData, namespace, podName, containerName string) (string, string, string, string, string, instanceidhandler.IInstanceID, error) {
 	imageID := ""
 	imageTag := ""
 	parentWlid := ""
@@ -87,6 +89,8 @@ func (rm *RelevancyManager) getContainerInfo(namespace, podName, containerName s
 		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get pod %s in namespace %s with error: %v", podName, namespace, err)
 	}
 	pod := wl.(*workloadinterface.Workload)
+
+	watchedContainer.SetContainerType(pod, containerName)
 
 	// get pod template hash
 	podTemplateHash, _ = pod.GetLabel("pod-template-hash")
@@ -107,32 +111,24 @@ func (rm *RelevancyManager) getContainerInfo(namespace, podName, containerName s
 	if err != nil {
 		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("WLID of parent workload is not in the right %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
-	// find imageTag
-	containers, err := pod.GetContainers()
+
+	imageTag, err = findImageTag(pod, containerName, watchedContainer.ContainerType)
 	if err != nil {
 		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get containers for pod %s in namespace %s with error: %v", podName, namespace, err)
 	}
-	for i := range containers {
-		if containers[i].Name == containerName {
-			imageTag = containers[i].Image
-		}
-	}
 	if imageTag == "" {
-		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to find container %s in pod %s in namespace %s", containerName, podName, namespace)
+		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("failed to find container %s in pod %s in namespace %s", containerName, podName, namespace)
 	}
+
 	// find imageID
-	status, err := pod.GetPodStatus() // Careful this is not available on container creation
+	imageID, err = findImageID(pod, containerName, watchedContainer.ContainerType)
 	if err != nil {
-		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get status for pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
-	}
-	for i := range status.ContainerStatuses {
-		if status.ContainerStatuses[i].Name == containerName {
-			imageID = status.ContainerStatuses[i].ImageID
-		}
+		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get containers for pod %s in namespace %s with error: %v", podName, namespace, err)
 	}
 	if imageID == "" {
-		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to find container status %s in pod %s in namespace %s", containerName, podName, namespace)
+		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("failed to find container status %s in pod %s in namespace %s", containerName, podName, namespace)
 	}
+
 	// find instanceID
 	instanceIDs, err := instanceidhandlerV1.GenerateInstanceID(pod)
 	if err != nil {
@@ -152,8 +148,10 @@ func (rm *RelevancyManager) handleRelevancy(ctx context.Context, watchedContaine
 	ctxPostSBOM, spanPostSBOM := otel.Tracer("").Start(ctx, "RelevancyManager.handleRelevancy")
 	defer spanPostSBOM.End()
 
-	// SBOM validation moved to monitorContainer
-
+	if watchedContainer.InstanceID == nil {
+		logger.L().Debug("ignoring container with empty instanceID", helpers.String("container ID", containerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		return
+	}
 	fileList, err := rm.fileHandler.GetAndDeleteFiles(watchedContainer.K8sContainerID)
 	if err != nil {
 		logger.L().Debug("failed to get file list", helpers.String("container ID", containerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Error(err))
@@ -170,6 +168,54 @@ func (rm *RelevancyManager) handleRelevancy(ctx context.Context, watchedContaine
 	span.End()
 }
 
+func findImageID(pod workloadinterface.IWorkload, containerName string, containerType utils.ContainerType) (string, error) {
+	var containerStatuses []v1.ContainerStatus
+	// find imageID
+	podStatus, err := pod.GetPodStatus() // Careful this is not available on container creation
+	if err != nil {
+		return "", err
+	}
+	switch containerType {
+	case utils.Container:
+		containerStatuses = podStatus.ContainerStatuses
+	case utils.InitContainer:
+		containerStatuses = podStatus.InitContainerStatuses
+	}
+
+	for i := range containerStatuses {
+		if containerStatuses[i].Name == containerName {
+			return containerStatuses[i].ImageID, nil
+		}
+	}
+	return "", nil
+
+}
+func findImageTag(pod workloadinterface.IWorkload, containerName string, containerType utils.ContainerType) (string, error) {
+	var containers []v1.Container
+	var err error
+
+	switch containerType {
+	case utils.Container:
+		containers, err = pod.GetContainers()
+		if err != nil {
+			return "", err
+		}
+	case utils.InitContainer:
+		containers, err = pod.GetInitContainers()
+		if err != nil {
+			return "", err
+		}
+
+	}
+	for i := range containers {
+		if containers[i].Name == containerName {
+			return containers[i].Image, nil
+		}
+	}
+
+	return "", nil
+
+}
 func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	for {
 		select {
@@ -203,14 +249,15 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 	defer span.End()
 
 	watchedContainer := &utils.WatchedContainerData{
-		ContainerID:                   container.Runtime.ContainerID,
-		UpdateDataTicker:              time.NewTicker(rm.cfg.InitialDelay),
-		SyncChannel:                   make(chan error, 10),
-		K8sContainerID:                k8sContainerID,
-		RelevantSyftFilesByIdentifier: make(map[string]bool),
+		ContainerID:      container.Runtime.ContainerID,
+		UpdateDataTicker: time.NewTicker(rm.cfg.InitialDelay),
+		SyncChannel:      make(chan error, 10),
+		K8sContainerID:   k8sContainerID,
+		RelevantRelationshipsArtifactsByIdentifier: make(map[string]bool),
+		RelevantArtifactsFilesByIdentifier:         make(map[string]bool),
+		RelevantRealtimeFilesByIdentifier:          make(map[string]bool),
 	}
 	rm.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
-
 	if err := rm.monitorContainer(ctx, container, watchedContainer); err != nil {
 		logger.L().Info("RelevancyManager - stop monitor on container", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}

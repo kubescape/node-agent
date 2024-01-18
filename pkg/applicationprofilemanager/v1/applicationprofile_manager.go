@@ -11,6 +11,8 @@ import (
 	"sort"
 	"time"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"github.com/armosec/utils-k8s-go/wlid"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -98,36 +100,10 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 		}
 	}
 	// find container type and index
-	// containers
 	if watchedContainer.ContainerType == utils.Unknown {
-		containers, err := pod.GetContainers()
-		if err != nil {
-			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get containers", helpers.Error(err))
-			return
-		}
-		for i, c := range containers {
-			if c.Name == container.K8s.ContainerName {
-				watchedContainer.ContainerIndex = i
-				watchedContainer.ContainerType = utils.Container
-				break
-			}
-		}
+		watchedContainer.SetContainerType(pod, container.K8s.ContainerName)
 	}
-	// initContainers
-	if watchedContainer.ContainerType == utils.Unknown {
-		initContainers, err := pod.GetInitContainers()
-		if err != nil {
-			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get init containers", helpers.Error(err))
-			return
-		}
-		for i, c := range initContainers {
-			if c.Name == container.K8s.ContainerName {
-				watchedContainer.ContainerIndex = i
-				watchedContainer.ContainerType = utils.InitContainer
-				break
-			}
-		}
-	}
+
 	// FIXME ephemeralContainers are not supported yet
 }
 
@@ -197,8 +173,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			ObjectMeta: metav1.ObjectMeta{
 				Name: slug,
 				Annotations: map[string]string{
-					instanceidhandler.WlidMetadataKey:   watchedContainer.Wlid,
-					instanceidhandler.StatusMetadataKey: "",
+					helpersv1.WlidMetadataKey:   watchedContainer.Wlid,
+					helpersv1.StatusMetadataKey: helpersv1.Ready,
 				},
 				Labels: utils.GetLabels(watchedContainer, true),
 			},
@@ -263,8 +239,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			ObjectMeta: metav1.ObjectMeta{
 				Name: slug,
 				Annotations: map[string]string{
-					instanceidhandler.WlidMetadataKey:   watchedContainer.Wlid,
-					instanceidhandler.StatusMetadataKey: "",
+					helpersv1.WlidMetadataKey:   watchedContainer.Wlid,
+					helpersv1.StatusMetadataKey: helpersv1.Ready,
 				},
 				Labels: utils.GetLabels(watchedContainer, true),
 			},

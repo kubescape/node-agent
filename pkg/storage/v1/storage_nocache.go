@@ -130,16 +130,20 @@ func (sc StorageNoCache) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) erro
 	return nil
 }
 
+func (sc StorageNoCache) GetFilteredSBOM(name string) (*v1beta1.SBOMSyftFiltered, error) {
+	return sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
+}
+
 func (sc StorageNoCache) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func (sc StorageNoCache) PatchFilteredSBOM(name string, SBOM *v1beta1.SBOMSPDXv2p3Filtered) error {
+func (sc StorageNoCache) PatchFilteredSBOM(name string, SBOM *v1beta1.SBOMSyftFiltered) error {
 	bytes, err := json.Marshal(SBOM)
 	if err != nil {
 		return err
 	}
-	_, err = sc.StorageClient.SBOMSPDXv2p3Filtereds(sc.namespace).Patch(context.Background(), name, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+	_, err = sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Patch(context.Background(), name, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		return err
 	}

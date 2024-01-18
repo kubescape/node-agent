@@ -4,17 +4,12 @@ import (
 	"fmt"
 	"strings"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"github.com/armosec/utils-k8s-go/wlid"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
-
-const (
-	completeStatus   = "complete"
-	incompleteStatus = "incomplete"
 )
 
 func generateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWorkloadSelector *metav1.LabelSelector, clusterName string) *v1beta1.NetworkNeighbors {
@@ -29,8 +24,8 @@ func generateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWo
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Annotations: map[string]string{
-				instanceidhandler.WlidMetadataKey:   parentWorkload.GenerateWlid(clusterName),
-				instanceidhandler.StatusMetadataKey: incompleteStatus,
+				helpersv1.WlidMetadataKey:   parentWorkload.GenerateWlid(clusterName),
+				helpersv1.StatusMetadataKey: helpersv1.Initializing,
 			},
 			Name:      generateNetworkNeighborsNameFromWorkload(parentWorkload),
 			Namespace: parentWorkload.GetNamespace(),
@@ -64,12 +59,12 @@ func generateNetworkNeighborsLabels(workload k8sinterface.IWorkload) map[string]
 	}
 
 	return map[string]string{
-		instanceidhandlerV1.ApiGroupMetadataKey:        apiGroup,
-		instanceidhandlerV1.ApiVersionMetadataKey:      apiVersion,
-		instanceidhandlerV1.NamespaceMetadataKey:       workload.GetNamespace(),
-		instanceidhandlerV1.KindMetadataKey:            strings.ToLower(workload.GetKind()),
-		instanceidhandlerV1.NameMetadataKey:            workload.GetName(),
-		instanceidhandlerV1.ResourceVersionMetadataKey: workload.GetResourceVersion(),
+		helpersv1.ApiGroupMetadataKey:        apiGroup,
+		helpersv1.ApiVersionMetadataKey:      apiVersion,
+		helpersv1.NamespaceMetadataKey:       workload.GetNamespace(),
+		helpersv1.KindMetadataKey:            workload.GetKind(),
+		helpersv1.NameMetadataKey:            workload.GetName(),
+		helpersv1.ResourceVersionMetadataKey: workload.GetResourceVersion(),
 	}
 }
 
