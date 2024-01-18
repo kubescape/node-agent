@@ -13,12 +13,14 @@ import (
 	"os"
 	"path"
 	"testing"
+
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kinbiko/jsonassert"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 )
@@ -158,7 +160,7 @@ func TestRelevancyManagerIncompleteSBOM(t *testing.T) {
 	err = json.Unmarshal(nginxSyftCRD, &syftDoc)
 	assert.NoError(t, err)
 	syftDoc.Annotations = map[string]string{
-		instanceidhandler.StatusMetadataKey: "incomplete"}
+		helpersv1.StatusMetadataKey: helpersv1.Incomplete}
 
 	storageClient := storage.CreateSyftSBOMStorageHttpClientMock(syftDoc)
 	sbomHandler := syfthandler.CreateSyftSBOMHandler(storageClient)

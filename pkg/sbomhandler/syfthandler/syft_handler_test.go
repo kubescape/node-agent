@@ -61,8 +61,8 @@ func TestFilterSBOM(t *testing.T) {
 	type args struct {
 		watchedContainer      *utils.WatchedContainerData
 		sbomFileRelevantMap   map[string]bool
-		expectedFilteredSBOMS int
 		expectedFilteredFiles []string
+		expectedFilteredSBOMS int
 	}
 	instanceID, _ := instanceidhandler.GenerateInstanceIDFromString("apiVersion-v1/namespace-aaa/kind-deployment/name-kollector/containerName-kollector")
 
@@ -80,10 +80,13 @@ func TestFilterSBOM(t *testing.T) {
 			name: "new relevant files - new filtered sbom",
 			args: args{
 				watchedContainer: &utils.WatchedContainerData{
-					ContainerID: "kollector-402d69",
-					ImageID:     "quay.io/kubescape/kollector@sha256:84ce233dd3256f097282ea4079e8908c5c0d0a895ae1aa9ae86e12aa74402d69",
-					ImageTag:    "kollector",
-					InstanceID:  instanceID,
+					ContainerID:                       "kollector-402d69",
+					ImageID:                           "quay.io/kubescape/kollector@sha256:84ce233dd3256f097282ea4079e8908c5c0d0a895ae1aa9ae86e12aa74402d69",
+					ImageTag:                          "kollector",
+					InstanceID:                        instanceID,
+					RelevantRealtimeFilesByIdentifier: make(map[string]bool),
+					RelevantRelationshipsArtifactsByIdentifier: make(map[string]bool),
+					RelevantArtifactsFilesByIdentifier:         make(map[string]bool),
 				},
 				sbomFileRelevantMap: map[string]bool{
 					"/bin/busybox": true,
@@ -106,6 +109,8 @@ func TestFilterSBOM(t *testing.T) {
 					RelevantRealtimeFilesByIdentifier: map[string]bool{
 						"dad6eaf501b8c3b7": true,
 					},
+					RelevantRelationshipsArtifactsByIdentifier: make(map[string]bool),
+					RelevantArtifactsFilesByIdentifier:         make(map[string]bool),
 				},
 				sbomFileRelevantMap: map[string]bool{
 					"/bin/busybox": true,
@@ -129,6 +134,8 @@ func TestFilterSBOM(t *testing.T) {
 					RelevantRealtimeFilesByIdentifier: map[string]bool{
 						"dad6eaf501b8c3b7": true,
 					},
+					RelevantRelationshipsArtifactsByIdentifier: make(map[string]bool),
+					RelevantArtifactsFilesByIdentifier:         make(map[string]bool),
 				},
 				sbomFileRelevantMap: map[string]bool{
 					"/bin/busybox": true,
