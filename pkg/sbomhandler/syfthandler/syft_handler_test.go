@@ -136,6 +136,19 @@ func TestFilterSBOM(t *testing.T) {
 					},
 					RelevantRelationshipsArtifactsByIdentifier: make(map[string]bool),
 					RelevantArtifactsFilesByIdentifier:         make(map[string]bool),
+					SBOMSyftFiltered: &v1beta1.SBOMSyftFiltered{
+						Spec: v1beta1.SBOMSyftSpec{
+							Syft: v1beta1.SyftDocument{
+								Files: []v1beta1.SyftFile{{
+									ID: "dad6eaf501b8c3b7",
+									Location: v1beta1.Coordinates{
+										RealPath:     "/bin/busybox",
+										FileSystemID: "sha256:45cc071a8ca74fe4cd1ff622ce60aa0bf76ed8a52b68a685ea02c9e05a28142e",
+									},
+								}},
+							},
+						},
+					},
 				},
 				sbomFileRelevantMap: map[string]bool{
 					"/bin/busybox": true,
@@ -170,7 +183,7 @@ func TestFilterSBOM(t *testing.T) {
 					}
 				}
 			}
-			assert.Equal(t, filesFound, len(tt.args.expectedFilteredFiles))
+			assert.Equal(t, len(tt.args.expectedFilteredFiles), filesFound)
 		})
 	}
 }

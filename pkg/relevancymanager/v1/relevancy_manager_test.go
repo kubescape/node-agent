@@ -133,7 +133,7 @@ func TestRelevancyManager(t *testing.T) {
 	gotBytes, err := json.Marshal(storageClient.FilteredSyftSBOMs[0])
 	assert.NoError(t, err)
 
-	wantBytes, err := os.ReadFile(path.Join(utils.CurrentDir(), "testdata", "nginx-spdx-filtered.json"))
+	wantBytes, err := os.ReadFile(path.Join(utils.CurrentDir(), "testdata", "nginx-syft-filtered.json"))
 	assert.NoError(t, err)
 	ja := jsonassert.New(t)
 	ja.Assertf(string(gotBytes), string(wantBytes))
