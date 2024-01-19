@@ -3047,7 +3047,7 @@
           "cpes": [
            "cpe:2.3:a:bash:bash:5.2.15-2\\+b2:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/bash@5.2.15-2+b2?arch=arm64&upstream=bash%405.2.15-2&distro=debian-12",
+          "purl": "pkg:deb/debian/bash@5.2.15-2+b2?arch=arm64&upstream=bash@5.2.15-2&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "bash",
@@ -3848,7 +3848,7 @@
           "cpes": [
            "cpe:2.3:a:bsdutils:bsdutils:1\\:2.38.1-5\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/bsdutils@1:2.38.1-5+b1?arch=arm64&upstream=util-linux%402.38.1-5&distro=debian-12",
+          "purl": "pkg:deb/debian/bsdutils@1:2.38.1-5+b1?arch=arm64&upstream=util-linux@2.38.1-5&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "bsdutils",
@@ -18749,7 +18749,7 @@
           "cpes": [
            "cpe:2.3:a:libblkid1:libblkid1:2.38.1-5\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libblkid1@2.38.1-5+b1?arch=arm64&upstream=util-linux%402.38.1-5&distro=debian-12",
+          "purl": "pkg:deb/debian/libblkid1@2.38.1-5+b1?arch=arm64&upstream=util-linux@2.38.1-5&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libblkid1",
@@ -18861,7 +18861,7 @@
           "cpes": [
            "cpe:2.3:a:libbrotli1:libbrotli1:1.0.9-2\\+b6:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libbrotli1@1.0.9-2+b6?arch=arm64&upstream=brotli%401.0.9-2&distro=debian-12",
+          "purl": "pkg:deb/debian/libbrotli1@1.0.9-2+b6?arch=arm64&upstream=brotli@1.0.9-2&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libbrotli1",
@@ -19271,7 +19271,7 @@
            "cpe:2.3:a:libbz2:libbz2-1.0:1.0.8-5\\+b1:*:*:*:*:*:*:*",
            "cpe:2.3:a:libbz2:libbz2_1.0:1.0.8-5\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libbz2-1.0@1.0.8-5+b1?arch=arm64&upstream=bzip2%401.0.8-5&distro=debian-12",
+          "purl": "pkg:deb/debian/libbz2-1.0@1.0.8-5+b1?arch=arm64&upstream=bzip2@1.0.8-5&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libbz2-1.0",
@@ -22160,7 +22160,7 @@
            "cpe:2.3:a:libcap:libcap-ng0:0.8.3-1\\+b3:*:*:*:*:*:*:*",
            "cpe:2.3:a:libcap:libcap_ng0:0.8.3-1\\+b3:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libcap-ng0@0.8.3-1+b3?arch=arm64&upstream=libcap-ng%400.8.3-1&distro=debian-12",
+          "purl": "pkg:deb/debian/libcap-ng0@0.8.3-1+b3?arch=arm64&upstream=libcap-ng@0.8.3-1&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libcap-ng0",
@@ -24582,7 +24582,7 @@
            "cpe:2.3:a:libgav1:libgav1-1:0.18.0-1\\+b1:*:*:*:*:*:*:*",
            "cpe:2.3:a:libgav1:libgav1_1:0.18.0-1\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libgav1-1@0.18.0-1+b1?arch=arm64&upstream=libgav1%400.18.0-1&distro=debian-12",
+          "purl": "pkg:deb/debian/libgav1-1@0.18.0-1+b1?arch=arm64&upstream=libgav1@0.18.0-1&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libgav1-1",
@@ -26841,7 +26841,7 @@
            "cpe:2.3:a:libidn2:libidn2-0:2.3.3-1\\+b1:*:*:*:*:*:*:*",
            "cpe:2.3:a:libidn2:libidn2_0:2.3.3-1\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libidn2-0@2.3.3-1+b1?arch=arm64&upstream=libidn2%402.3.3-1&distro=debian-12",
+          "purl": "pkg:deb/debian/libidn2-0@2.3.3-1+b1?arch=arm64&upstream=libidn2@2.3.3-1&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libidn2-0",
@@ -29137,7 +29137,7 @@
           "cpes": [
            "cpe:2.3:a:libmount1:libmount1:2.38.1-5\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libmount1@2.38.1-5+b1?arch=arm64&upstream=util-linux%402.38.1-5&distro=debian-12",
+          "purl": "pkg:deb/debian/libmount1@2.38.1-5+b1?arch=arm64&upstream=util-linux@2.38.1-5&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libmount1",
@@ -33365,7 +33365,7 @@
           "cpes": [
            "cpe:2.3:a:librtmp1:librtmp1:2.4\\+20151223.gitfa8646d.1-2\\+b2:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/librtmp1@2.4+20151223.gitfa8646d.1-2+b2?arch=arm64&upstream=rtmpdump%402.4+20151223.gitfa8646d.1-2&distro=debian-12",
+          "purl": "pkg:deb/debian/librtmp1@2.4+20151223.gitfa8646d.1-2+b2?arch=arm64&upstream=rtmpdump@2.4+20151223.gitfa8646d.1-2&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "librtmp1",
@@ -34130,7 +34130,7 @@
           "cpes": [
            "cpe:2.3:a:libseccomp2:libseccomp2:2.5.4-1\\+b3:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libseccomp2@2.5.4-1+b3?arch=arm64&upstream=libseccomp%402.5.4-1&distro=debian-12",
+          "purl": "pkg:deb/debian/libseccomp2@2.5.4-1+b3?arch=arm64&upstream=libseccomp@2.5.4-1&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libseccomp2",
@@ -34246,7 +34246,7 @@
           "cpes": [
            "cpe:2.3:a:libselinux1:libselinux1:3.4-1\\+b6:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libselinux1@3.4-1+b6?arch=arm64&upstream=libselinux%403.4-1&distro=debian-12",
+          "purl": "pkg:deb/debian/libselinux1@3.4-1+b6?arch=arm64&upstream=libselinux@3.4-1&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libselinux1",
@@ -34480,7 +34480,7 @@
           "cpes": [
            "cpe:2.3:a:libsemanage2:libsemanage2:3.4-1\\+b5:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libsemanage2@3.4-1+b5?arch=arm64&upstream=libsemanage%403.4-1&distro=debian-12",
+          "purl": "pkg:deb/debian/libsemanage2@3.4-1+b5?arch=arm64&upstream=libsemanage@3.4-1&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libsemanage2",
@@ -34897,7 +34897,7 @@
           "cpes": [
            "cpe:2.3:a:libsmartcols1:libsmartcols1:2.38.1-5\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libsmartcols1@2.38.1-5+b1?arch=arm64&upstream=util-linux%402.38.1-5&distro=debian-12",
+          "purl": "pkg:deb/debian/libsmartcols1@2.38.1-5+b1?arch=arm64&upstream=util-linux@2.38.1-5&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libsmartcols1",
@@ -35211,7 +35211,7 @@
            "cpe:2.3:a:libssh2:libssh2-1:1.10.0-3\\+b1:*:*:*:*:*:*:*",
            "cpe:2.3:a:libssh2:libssh2_1:1.10.0-3\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libssh2-1@1.10.0-3+b1?arch=arm64&upstream=libssh2%401.10.0-3&distro=debian-12",
+          "purl": "pkg:deb/debian/libssh2-1@1.10.0-3+b1?arch=arm64&upstream=libssh2@1.10.0-3&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libssh2-1",
@@ -36965,7 +36965,7 @@
           "cpes": [
            "cpe:2.3:a:libuuid1:libuuid1:2.38.1-5\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libuuid1@2.38.1-5+b1?arch=arm64&upstream=util-linux%402.38.1-5&distro=debian-12",
+          "purl": "pkg:deb/debian/libuuid1@2.38.1-5+b1?arch=arm64&upstream=util-linux@2.38.1-5&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libuuid1",
@@ -38941,7 +38941,7 @@
            "cpe:2.3:a:libx265:libx265-199:3.5-2\\+b1:*:*:*:*:*:*:*",
            "cpe:2.3:a:libx265:libx265_199:3.5-2\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/libx265-199@3.5-2+b1?arch=arm64&upstream=x265%403.5-2&distro=debian-12",
+          "purl": "pkg:deb/debian/libx265-199@3.5-2+b1?arch=arm64&upstream=x265@3.5-2&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "libx265-199",
@@ -40068,7 +40068,7 @@
           "cpes": [
            "cpe:2.3:a:login:login:1\\:4.13\\+dfsg1-1\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/login@1:4.13+dfsg1-1+b1?arch=arm64&upstream=shadow%401:4.13+dfsg1-1&distro=debian-12",
+          "purl": "pkg:deb/debian/login@1:4.13+dfsg1-1+b1?arch=arm64&upstream=shadow@1:4.13+dfsg1-1&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "login",
@@ -41860,7 +41860,7 @@
           "cpes": [
            "cpe:2.3:a:mount:mount:2.38.1-5\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/mount@2.38.1-5+b1?arch=arm64&upstream=util-linux%402.38.1-5&distro=debian-12",
+          "purl": "pkg:deb/debian/mount@2.38.1-5+b1?arch=arm64&upstream=util-linux@2.38.1-5&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "mount",
@@ -45486,7 +45486,7 @@
           "cpes": [
            "cpe:2.3:a:passwd:passwd:1\\:4.13\\+dfsg1-1\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/passwd@1:4.13+dfsg1-1+b1?arch=arm64&upstream=shadow%401:4.13+dfsg1-1&distro=debian-12",
+          "purl": "pkg:deb/debian/passwd@1:4.13+dfsg1-1+b1?arch=arm64&upstream=shadow@1:4.13+dfsg1-1&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "passwd",
@@ -62273,7 +62273,7 @@
            "cpe:2.3:a:util:util-linux:2.38.1-5\\+b1:*:*:*:*:*:*:*",
            "cpe:2.3:a:util:util_linux:2.38.1-5\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/util-linux@2.38.1-5+b1?arch=arm64&upstream=util-linux%402.38.1-5&distro=debian-12",
+          "purl": "pkg:deb/debian/util-linux@2.38.1-5+b1?arch=arm64&upstream=util-linux@2.38.1-5&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "util-linux",
@@ -64831,7 +64831,7 @@
            "cpe:2.3:a:util:util-linux-extra:2.38.1-5\\+b1:*:*:*:*:*:*:*",
            "cpe:2.3:a:util:util_linux_extra:2.38.1-5\\+b1:*:*:*:*:*:*:*"
           ],
-          "purl": "pkg:deb/debian/util-linux-extra@2.38.1-5+b1?arch=arm64&upstream=util-linux%402.38.1-5&distro=debian-12",
+          "purl": "pkg:deb/debian/util-linux-extra@2.38.1-5+b1?arch=arm64&upstream=util-linux@2.38.1-5&distro=debian-12",
           "metadataType": "DpkgMetadata",
           "metadata": {
            "package": "util-linux-extra",
