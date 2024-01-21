@@ -195,7 +195,7 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		networkNeighbors.Spec.LabelSelector = *selector
 		am.status = networkNeighbors.GetAnnotations()[helpersv1.StatusMetadataKey]
 		if err = am.storageClient.PatchNetworkNeighborsMatchLabels(networkNeighbors.GetName(), networkNeighbors.GetNamespace(), networkNeighbors); err != nil {
-			logger.L().Warning("NetworkManager - failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+			logger.L().Warning("NetworkManager - failed to update network neighbor labels", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		}
 		logger.L().Debug("NetworkManager - updated network neighbor labels", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
@@ -301,21 +301,32 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		return
 	}
 
+	name := generateNetworkNeighborsNameFromWlid(parentWlid)
+	namespace := wlid.GetNamespaceFromWlid(parentWlid)
+	networkNeighborsExists := false
+	networkNeighbors, err := am.storageClient.GetNetworkNeighbors(namespace, name)
+	if err == nil {
+		networkNeighborsExists = true
+	}
+
 	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
+	// no events to handle
 	if networkEvents == nil {
-		// no events to handle
-		if am.status == helpersv1.Initializing {
-			// if we are in initializing state, we need to update the CRD to ready
-			if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(generateNetworkNeighborsNameFromWlid(parentWlid), wlid.GetNamespaceFromWlid(parentWlid), &v1beta1.NetworkNeighbors{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						helpersv1.StatusMetadataKey: helpersv1.Ready,
+		if networkNeighborsExists {
+			// update status to ready
+			if networkNeighbors.GetAnnotations()[helpersv1.StatusMetadataKey] == helpersv1.Initializing {
+				// if we are in initializing state, we need to update the CRD to ready
+				if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(name, namespace, &v1beta1.NetworkNeighbors{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							helpersv1.StatusMetadataKey: helpersv1.Ready,
+						},
 					},
-				},
-			}); err != nil {
-				logger.L().Warning("NetworkManager - failed to patch network neighbor status", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			} else {
-				logger.L().Debug("NetworkManager - status updated to ready", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
+				}); err != nil {
+					logger.L().Warning("NetworkManager - failed to patch network neighbor status", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
+				} else {
+					logger.L().Debug("NetworkManager - status updated to ready", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
+				}
 			}
 		}
 		return
@@ -323,23 +334,29 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 	// TODO: dns enrichment
 
 	// update CRD based on events
-	networkNeighborsSpec := am.generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents)
-	// send PATCH command using entries generated from events
-	if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(generateNetworkNeighborsNameFromWlid(parentWlid), wlid.GetNamespaceFromWlid(parentWlid), &v1beta1.NetworkNeighbors{
-		ObjectMeta: metav1.ObjectMeta{
-			Annotations: map[string]string{
-				helpersv1.StatusMetadataKey: helpersv1.Ready,
-			},
-		},
-		Spec: networkNeighborsSpec,
-	}); err != nil {
-		// check if error is because crd wasn't created
-		if !strings.Contains(err.Error(), "not found") {
-			logger.L().Warning("NetworkManager - failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			return
-		}
+	networkNeighborsSpec := am.generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents, networkNeighbors.Spec)
 
-		// if the error is not found, we need to create it
+	if networkNeighborsExists {
+		// patch only if there are changes
+		if len(networkNeighbors.Spec.Egress) > 0 || len(networkNeighbors.Spec.Ingress) > 0 {
+			// send PATCH command using entries generated from events
+			nn := &v1beta1.NetworkNeighbors{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						helpersv1.StatusMetadataKey: helpersv1.Ready,
+					},
+				},
+				Spec: networkNeighborsSpec,
+			}
+			if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(name, namespace, nn); err != nil {
+				logger.L().Warning("NetworkManager - failed to patch network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
+				return
+			} else {
+				logger.L().Debug("NetworkManager - patched network neighbor", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
+			}
+		}
+	} else {
+		// if not found, we need to create it
 		// this can happen if the storage wasn't available when the container started
 		parentWL, err := am.getParentWorkloadFromContainer(container)
 		if err != nil {
@@ -365,19 +382,33 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 			logger.L().Warning("NetworkManager - failed to create network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
 			return
 		}
+		logger.L().Debug("NetworkManager - created network neighbor", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
-	logger.L().Debug("NetworkManager - updated network neighbor", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 
 	// remove events from map
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 }
-
-func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[NetworkEvent]) v1beta1.NetworkNeighborsSpec {
+func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[NetworkEvent], currSpec v1beta1.NetworkNeighborsSpec) v1beta1.NetworkNeighborsSpec {
 	var networkNeighborsSpec v1beta1.NetworkNeighborsSpec
 
 	// auxiliary maps to avoid duplicates
 	ingressIdentifiersMap := make(map[string]v1beta1.NetworkNeighbor)
 	egressIdentifiersMap := make(map[string]v1beta1.NetworkNeighbor)
+
+	// auxiliary maps to avoid duplicates
+	currIngressIdentifiersMap := make(map[string]bool)
+	currEgressIdentifiersMap := make(map[string]bool)
+
+	for i := range currSpec.Egress {
+		if identifier, err := generateNeighborsIdentifier(currSpec.Egress[i]); err == nil {
+			currEgressIdentifiersMap[identifier] = true
+		}
+	}
+	for i := range currSpec.Ingress {
+		if identifier, err := generateNeighborsIdentifier(currSpec.Ingress[i]); err == nil {
+			currIngressIdentifiersMap[identifier] = true
+		}
+	}
 
 	networkEventsIterator := networkEvents.Iterator()
 	if networkEventsIterator == nil {
@@ -439,7 +470,7 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 			}
 		}
 
-		saveNeighborEntry(networkEvent, neighborEntry, egressIdentifiersMap, ingressIdentifiersMap)
+		saveNeighborEntry(networkEvent, neighborEntry, egressIdentifiersMap, ingressIdentifiersMap, currEgressIdentifiersMap, currIngressIdentifiersMap)
 
 	}
 
@@ -457,7 +488,7 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 }
 
 // saveNeighborEntry encapsulates the logic of generating identifiers and adding the neighborEntry to the map
-func saveNeighborEntry(networkEvent NetworkEvent, neighborEntry v1beta1.NetworkNeighbor, egressIdentifiersMap map[string]v1beta1.NetworkNeighbor, ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor) {
+func saveNeighborEntry(networkEvent NetworkEvent, neighborEntry v1beta1.NetworkNeighbor, egressIdentifiersMap, ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor, currEgressIdentifiersMap, currIngressIdentifiersMap map[string]bool) {
 
 	portIdentifier := generatePortIdentifierFromEvent(networkEvent)
 
@@ -479,6 +510,10 @@ func saveNeighborEntry(networkEvent NetworkEvent, neighborEntry v1beta1.NetworkN
 		// if we fail to hash, use a random identifier so at least we have the data on the crd
 		logger.L().Debug("failed to hash identifier", helpers.String("identifier", identifier), helpers.String("error", err.Error()))
 		identifier = uuid.New().String()
+	}
+	if ok := currEgressIdentifiersMap[identifier]; ok {
+		// if identifier already exists, we don't need to add it again
+		return
 	}
 
 	if networkEvent.PktType == outgoingPktType {

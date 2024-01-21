@@ -5,8 +5,6 @@ import (
 
 	"github.com/goradd/maps"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 )
 
 // DNSManager is used to manage DNS events and save IP resolutions. It exposes an API to resolve IP address to domain name.
@@ -28,7 +26,6 @@ func (dm *DNSManager) ProcessDNSEvent(dnsEvent tracerdnstype.Event) {
 				dm.addressToDomainMap.Set(address, dnsEvent.DNSName)
 			}
 		} else {
-			logger.L().Debug("DNS event has no addresses, using net.LookupIP instead", helpers.String("dnsName", dnsEvent.DNSName))
 			addresses, err := net.LookupIP(dnsEvent.DNSName)
 			if err != nil {
 				return

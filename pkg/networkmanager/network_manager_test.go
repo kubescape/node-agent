@@ -797,7 +797,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 			networkEventsSet.Add(ne)
 		}
 		t.Run(fmt.Sprintf("Input: %+v", tc.networkEvents), func(t *testing.T) {
-			result := am.generateNetworkNeighborsEntries(tc.namespace, networkEventsSet)
+			result := am.generateNetworkNeighborsEntries(tc.namespace, networkEventsSet, v1beta1.NetworkNeighborsSpec{})
 
 			assert.Equal(t, len(result.Ingress), len(tc.expectedSpec.Ingress), "Ingress IP address is not equal in test %s", tc.name)
 			found := 0
@@ -1172,7 +1172,8 @@ func TestSaveNeighborEntry(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("Input: %+v", tc.networkEvent), func(t *testing.T) {
-			saveNeighborEntry(tc.networkEvent, tc.neighborEntry, tc.egressIdentifiersMap, tc.ingressIdentifiersMap)
+			curr := make(map[string]bool)
+			saveNeighborEntry(tc.networkEvent, tc.neighborEntry, tc.egressIdentifiersMap, tc.ingressIdentifiersMap, curr, curr)
 			assert.Equal(t, tc.expectedEgressMap, tc.egressIdentifiersMap)
 			assert.Equal(t, tc.expectedIngressMap, tc.ingressIdentifiersMap)
 		})
