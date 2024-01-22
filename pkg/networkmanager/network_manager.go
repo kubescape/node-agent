@@ -305,6 +305,12 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 	namespace := wlid.GetNamespaceFromWlid(parentWlid)
 	networkNeighborsExists := false
 	networkNeighbors, err := am.storageClient.GetNetworkNeighbors(namespace, name)
+	if err != nil {
+		if !strings.Contains(err.Error(), "the server is currently unable to handle the request") {
+			logger.L().Warning("NetworkManager - failed to update network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
+			return
+		}
+	}
 	if err == nil {
 		networkNeighborsExists = true
 	}
