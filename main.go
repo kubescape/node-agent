@@ -29,6 +29,7 @@ import (
 )
 
 func main() {
+
 	ctx := context.Background()
 
 	cfg, err := config.LoadConfig("/etc/config")
