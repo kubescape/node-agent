@@ -344,7 +344,7 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 
 	if networkNeighborsExists {
 		// patch only if there are changes
-		if len(networkNeighbors.Spec.Egress) > 0 || len(networkNeighbors.Spec.Ingress) > 0 {
+		if len(networkNeighborsSpec.Egress) > 0 || len(networkNeighborsSpec.Ingress) > 0 {
 			// send PATCH command using entries generated from events
 			nn := &v1beta1.NetworkNeighbors{
 				ObjectMeta: metav1.ObjectMeta{
@@ -517,16 +517,17 @@ func saveNeighborEntry(networkEvent NetworkEvent, neighborEntry v1beta1.NetworkN
 		logger.L().Debug("failed to hash identifier", helpers.String("identifier", identifier), helpers.String("error", err.Error()))
 		identifier = uuid.New().String()
 	}
-	if ok := currEgressIdentifiersMap[identifier]; ok {
-		// if identifier already exists, we don't need to add it again
-		return
-	}
 
 	if networkEvent.PktType == outgoingPktType {
-		addToMap(egressIdentifiersMap, identifier, portIdentifier, neighborEntry)
+		if ok := currEgressIdentifiersMap[identifier]; !ok {
+			addToMap(egressIdentifiersMap, identifier, portIdentifier, neighborEntry)
+		}
 	} else {
-		addToMap(ingressIdentifiersMap, identifier, portIdentifier, neighborEntry)
+		if ok := currIngressIdentifiersMap[identifier]; !ok {
+			addToMap(ingressIdentifiersMap, identifier, portIdentifier, neighborEntry)
+		}
 	}
+
 }
 
 // addToMap adds neighborEntry to identifiersMap, if identifier already exists, it will add the ports to the existing entry
