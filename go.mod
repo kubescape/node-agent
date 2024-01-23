@@ -15,7 +15,7 @@ require (
 	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/backend v0.0.16
 	github.com/kubescape/go-logger v0.0.22
-	github.com/kubescape/k8s-interface v0.0.158-0.20240117162237-b087cd69bcf1
+	github.com/kubescape/k8s-interface v0.0.158-0.20240123155300-c2a152fdc0d8
 	github.com/kubescape/storage v0.0.59
 	github.com/panjf2000/ants/v2 v2.9.0
 	github.com/spf13/viper v1.18.2
