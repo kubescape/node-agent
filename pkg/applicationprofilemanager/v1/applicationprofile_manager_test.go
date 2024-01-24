@@ -19,7 +19,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	cfg := config.Config{
 		InitialDelay:     1 * time.Second,
 		MaxSniffingTime:  5 * time.Minute,
-		UpdateDataPeriod: 20 * time.Second,
+		UpdateDataPeriod: 1 * time.Second,
 	}
 	ctx := context.TODO()
 	k8sClient := &k8sclient.K8sClientMock{}
@@ -59,6 +59,10 @@ func TestApplicationProfileManager(t *testing.T) {
 	})
 	// let it run for a while
 	time.Sleep(12 * time.Second) // need to sleep longer because of AddRandomDuration in startApplicationProfiling
+	// report another file open
+	go am.ReportFileOpen("ns/pod/cont", "/etc/hosts", []string{"O_RDONLY"})
+	// sleep more
+	time.Sleep(1 * time.Second)
 	// report container stopped
 	am.ContainerCallback(containercollection.PubSubEvent{
 		Type:      containercollection.EventTypeRemoveContainer,
@@ -67,13 +71,19 @@ func TestApplicationProfileManager(t *testing.T) {
 	// let it stop
 	time.Sleep(1 * time.Second)
 	// verify generated CRDs
-	assert.Equal(t, 2, len(storageClient.ApplicationActivities))
+	assert.Equal(t, 1, len(storageClient.ApplicationActivities))
 	sort.Strings(storageClient.ApplicationActivities[0].Spec.Syscalls)
-	assert.Equal(t, []string{"dup", "listen", "open"}, storageClient.ApplicationActivities[0].Spec.Syscalls)
+	assert.Equal(t, []string{"dup", "listen"}, storageClient.ApplicationActivities[0].Spec.Syscalls)
 	assert.Equal(t, 2, len(storageClient.ApplicationProfiles))
+	assert.Equal(t, 2, len(storageClient.ApplicationProfileSummaries))
+	// check the first profile
 	sort.Strings(storageClient.ApplicationProfiles[0].Spec.Containers[0].Capabilities)
-	assert.Equal(t, []string{"NET_BIND_SERVICE", "NET_BROADCAST"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Capabilities)
+	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Capabilities)
 	assert.Equal(t, []v1beta1.ExecCalls{{Path: "/bin/bash", Args: []string{"-c", "ls"}, Envs: []string(nil)}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Execs)
 	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Opens)
-	assert.Equal(t, 2, len(storageClient.ApplicationProfileSummaries))
+	// check the second profile - this is a patch for execs and opens
+	sort.Strings(storageClient.ApplicationProfiles[1].Spec.Containers[0].Capabilities)
+	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Capabilities)
+	assert.Equal(t, []v1beta1.ExecCalls{}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Execs)
+	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/hosts", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Opens)
 }

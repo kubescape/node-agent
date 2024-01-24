@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"node-agent/pkg/utils"
 	"os"
 	"path"
@@ -26,6 +27,7 @@ type StorageHttpClientMock struct {
 	ImageCounters               map[string]int
 	nginxSBOMSpdxBytes          *spdxv1beta1.SBOMSPDXv2p3
 	mockSBOM                    *v1beta1.SBOMSyft
+	failedOnce                  bool
 }
 
 func (sc *StorageHttpClientMock) GetApplicationActivity(_, _ string) (*spdxv1beta1.ApplicationActivity, error) {
@@ -80,6 +82,18 @@ func (sc *StorageHttpClientMock) CreateApplicationActivity(activity *spdxv1beta1
 }
 
 func (sc *StorageHttpClientMock) CreateApplicationProfile(profile *spdxv1beta1.ApplicationProfile, _ string) error {
+	if !sc.failedOnce {
+		sc.failedOnce = true
+		return errors.New("first time fail")
+	}
+	sc.ApplicationProfiles = append(sc.ApplicationProfiles, profile)
+	return nil
+}
+
+func (sc *StorageHttpClientMock) PatchApplicationProfile(name, namespace string, profile *spdxv1beta1.ApplicationProfile) error {
+	if len(sc.ApplicationProfiles) == 0 {
+		return apierrors.NewNotFound(v1beta1.Resource("applicationprofile"), name)
+	}
 	sc.ApplicationProfiles = append(sc.ApplicationProfiles, profile)
 	return nil
 }

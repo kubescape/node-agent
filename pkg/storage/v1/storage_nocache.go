@@ -110,6 +110,18 @@ func (sc StorageNoCache) CreateApplicationProfile(profile *v1beta1.ApplicationPr
 	return nil
 }
 
+func (sc StorageNoCache) PatchApplicationProfile(name, namespace string, profile *v1beta1.ApplicationProfile) error {
+	bytes, err := json.Marshal(profile)
+	if err != nil {
+		return fmt.Errorf("marshal neighbors: %w", err)
+	}
+	_, err = sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), name, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+	if err != nil {
+		return fmt.Errorf("patch neighbors: %w", err)
+	}
+	return nil
+}
+
 func (sc StorageNoCache) GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
 	return sc.StorageClient.ApplicationProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
