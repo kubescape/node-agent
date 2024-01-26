@@ -260,7 +260,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			})
 		}
 		// insert application profile container
-		utils.InsertApplicationProfileContainer(newProfile, watchedContainer.ContainerType, watchedContainer.ContainerIndex, newProfileContainer)
+		utils.InsertApplicationProfileContainer(newProfile, watchedContainer.ContainerType, newProfileContainer)
 		// save application profile
 		var gotErr error
 		if err := am.storageClient.PatchApplicationProfile(slug, namespace, newProfile); err != nil {
