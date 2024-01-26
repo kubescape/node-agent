@@ -8,6 +8,7 @@ require (
 	github.com/armosec/utils-k8s-go v0.0.25
 	github.com/cilium/ebpf v0.12.3
 	github.com/deckarep/golang-set/v2 v2.5.0
+	github.com/evanphx/json-patch v5.6.0+incompatible
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/google/uuid v1.6.0
 	github.com/goradd/maps v0.1.5
@@ -73,7 +74,6 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dsnet/compress v0.0.2-0.20210315054119-f66993602bf5 // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
-	github.com/evanphx/json-patch v5.6.0+incompatible // indirect
 	github.com/facebookincubator/nvdtools v0.1.5 // indirect
 	github.com/fatih/color v1.15.0 // indirect
 	github.com/felixge/fgprof v0.9.3 // indirect

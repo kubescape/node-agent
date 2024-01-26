@@ -78,12 +78,15 @@ func TestApplicationProfileManager(t *testing.T) {
 	assert.Equal(t, 2, len(storageClient.ApplicationProfileSummaries))
 	// check the first profile
 	sort.Strings(storageClient.ApplicationProfiles[0].Spec.Containers[0].Capabilities)
-	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[0].Spec.Containers[0].Capabilities)
-	assert.Equal(t, []v1beta1.ExecCalls{{Path: "/bin/bash", Args: []string{"-c", "ls"}, Envs: []string(nil)}}, storageClient.ApplicationProfiles[0].Spec.Containers[0].Execs)
-	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[0].Opens)
+	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Capabilities)
+	assert.Equal(t, []v1beta1.ExecCalls{{Path: "/bin/bash", Args: []string{"-c", "ls"}, Envs: []string(nil)}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Execs)
+	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Opens)
 	// check the second profile - this is a patch for execs and opens
 	sort.Strings(storageClient.ApplicationProfiles[1].Spec.Containers[0].Capabilities)
-	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[1].Spec.Containers[0].Capabilities)
-	assert.Equal(t, []v1beta1.ExecCalls{}, storageClient.ApplicationProfiles[1].Spec.Containers[0].Execs)
-	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/hosts", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[1].Spec.Containers[0].Opens)
+	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Capabilities)
+	assert.Equal(t, []v1beta1.ExecCalls{{Path: "/bin/bash", Args: []string{"-c", "ls"}, Envs: []string(nil)}}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Execs)
+	assert.Equal(t, []v1beta1.OpenCalls{
+		{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}},
+		{Path: "/etc/hosts", Flags: []string{"O_RDONLY"}},
+	}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Opens)
 }

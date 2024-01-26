@@ -3,11 +3,13 @@ package storage
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"node-agent/pkg/utils"
 	"os"
 	"path"
 
+	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -90,20 +92,37 @@ func (sc *StorageHttpClientMock) CreateApplicationProfile(profile *spdxv1beta1.A
 	return nil
 }
 
-func (sc *StorageHttpClientMock) PatchApplicationProfile(name, namespace string, profile *spdxv1beta1.ApplicationProfile) error {
+func (sc *StorageHttpClientMock) PatchApplicationProfile(name, _ string, patchJSON []byte) error {
 	if len(sc.ApplicationProfiles) == 0 {
 		return apierrors.NewNotFound(v1beta1.Resource("applicationprofile"), name)
+	}
+	// get last profile
+	lastProfile, err := json.Marshal(sc.ApplicationProfiles[len(sc.ApplicationProfiles)-1])
+	if err != nil {
+		return fmt.Errorf("marshal last profile: %w", err)
+	}
+	patch, err := jsonpatch.DecodePatch(patchJSON)
+	if err != nil {
+		return fmt.Errorf("decode patch: %w", err)
+	}
+	patchedProfile, err := patch.Apply(lastProfile)
+	if err != nil {
+		return fmt.Errorf("apply patch: %w", err)
+	}
+	profile := &spdxv1beta1.ApplicationProfile{}
+	if err := json.Unmarshal(patchedProfile, profile); err != nil {
+		return fmt.Errorf("unmarshal patched profile: %w", err)
 	}
 	sc.ApplicationProfiles = append(sc.ApplicationProfiles, profile)
 	return nil
 }
 
-func (sc *StorageHttpClientMock) CreateApplicationProfileSummary(summary *spdxv1beta1.ApplicationProfileSummary, namespace string) error {
+func (sc *StorageHttpClientMock) CreateApplicationProfileSummary(summary *spdxv1beta1.ApplicationProfileSummary, _ string) error {
 	sc.ApplicationProfileSummaries = append(sc.ApplicationProfileSummaries, summary)
 	return nil
 }
 
-func (sc *StorageHttpClientMock) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error {
+func (sc *StorageHttpClientMock) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, _ string) error {
 	sc.NetworkNeighborses = append(sc.NetworkNeighborses, networkNeighbors)
 	return nil
 }
@@ -121,7 +140,7 @@ func (sc *StorageHttpClientMock) GetFilteredSBOM(name string) (*v1beta1.SBOMSyft
 	}
 	return nil, errors.New("not found")
 }
-func (sc *StorageHttpClientMock) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
+func (sc *StorageHttpClientMock) GetSBOM(_ string) (*v1beta1.SBOMSyft, error) {
 	return sc.mockSBOM, nil
 }
 
@@ -144,7 +163,7 @@ func (sc *StorageHttpClientMock) DecrementImageUse(imageID string) {
 
 }
 
-func (sc *StorageHttpClientMock) GetNetworkNeighbors(namespace, name string) (*v1beta1.NetworkNeighbors, error) {
+func (sc *StorageHttpClientMock) GetNetworkNeighbors(_, name string) (*v1beta1.NetworkNeighbors, error) {
 	for _, nn := range sc.NetworkNeighborses {
 		if nn.Name == name {
 			return nn, nil
@@ -153,10 +172,10 @@ func (sc *StorageHttpClientMock) GetNetworkNeighbors(namespace, name string) (*v
 	return nil, nil
 }
 
-func (sc *StorageHttpClientMock) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
+func (sc *StorageHttpClientMock) PatchNetworkNeighborsMatchLabels(_, _ string, _ *v1beta1.NetworkNeighbors) error {
 	return nil
 }
 
-func (sc *StorageHttpClientMock) PatchNetworkNeighborsIngressAndEgress(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
+func (sc *StorageHttpClientMock) PatchNetworkNeighborsIngressAndEgress(_, _ string, _ *v1beta1.NetworkNeighbors) error {
 	return nil
 }
