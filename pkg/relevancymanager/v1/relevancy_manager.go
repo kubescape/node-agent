@@ -136,6 +136,9 @@ func (rm *RelevancyManager) getContainerInfo(watchedContainer *utils.WatchedCont
 	}
 	instanceID = instanceIDs[0]
 	for i := range instanceIDs {
+		if instanceIDs[i].GetInstanceType() != utils.ToInstanceType(watchedContainer.ContainerType) {
+			continue
+		}
 		if instanceIDs[i].GetContainerName() == containerName {
 			instanceID = instanceIDs[i]
 		}
