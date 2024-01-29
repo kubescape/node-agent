@@ -150,23 +150,6 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 	return labels
 }
 
-func GetApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) *v1beta1.ApplicationProfileContainer {
-	if profile == nil {
-		return nil
-	}
-	switch containerType {
-	case Container:
-		if len(profile.Spec.Containers) > containerIndex {
-			return &profile.Spec.Containers[containerIndex]
-		}
-	case InitContainer:
-		if len(profile.Spec.InitContainers) > containerIndex {
-			return &profile.Spec.InitContainers[containerIndex]
-		}
-	}
-	return nil
-}
-
 func InsertApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int, profileContainer *v1beta1.ApplicationProfileContainer) {
 	switch containerType {
 	case Container:

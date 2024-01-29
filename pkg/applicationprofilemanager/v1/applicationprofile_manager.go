@@ -2,7 +2,9 @@ package applicationprofilemanager
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"node-agent/pkg/applicationprofilemanager"
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
@@ -140,6 +142,12 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 	}
 }
 
+type PatchOperation struct {
+	Op    string      `json:"op"`
+	Path  string      `json:"path"`
+	Value interface{} `json:"value"`
+}
+
 func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedContainer *utils.WatchedContainerData, namespace string) {
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.saveProfile")
 	defer span.End()
@@ -190,7 +198,11 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	opens := make(map[string]mapset.Set[string])
 	// get capabilities, execs and opens from IG
 	var observedCapabilities []string
-	if capabilitiesSet, ok := am.capabilitiesSets.Load(watchedContainer.K8sContainerID); ok {
+	newCapabilitiesSet := mapset.NewSet[string]()
+	capabilitiesSet, ok := am.capabilitiesSets.Load(watchedContainer.K8sContainerID)
+	if ok {
+		// replace the capabilities set with a new one
+		am.capabilitiesSets.Set(watchedContainer.K8sContainerID, newCapabilitiesSet)
 		observedCapabilities = capabilitiesSet.ToSlice()
 	}
 	newExecMap := new(maps.SafeMap[string, mapset.Set[string]])
@@ -223,6 +235,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	}
 	// new profile
 	if addedProfiles > 0 || len(observedCapabilities) > am.savedCapabilities.Get(watchedContainer.K8sContainerID) {
+		var profileOperations []PatchOperation
 		newProfile := &v1beta1.ApplicationProfile{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: slug,
@@ -237,33 +250,61 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			Name: watchedContainer.InstanceID.GetContainerName(),
 		}
 		// add capabilities
+		sort.Strings(observedCapabilities)
 		newProfileContainer.Capabilities = observedCapabilities
-		sort.Strings(newProfileContainer.Capabilities)
+		capabilitiesPath := fmt.Sprintf("/spec/containers/%d/capabilities/-", watchedContainer.ContainerIndex)
+		for _, capability := range observedCapabilities {
+			profileOperations = append(profileOperations, PatchOperation{
+				Op:    "add",
+				Path:  capabilitiesPath,
+				Value: capability,
+			})
+		}
 		// add execs
 		newProfileContainer.Execs = make([]v1beta1.ExecCalls, 0)
+		execsPath := fmt.Sprintf("/spec/containers/%d/execs/-", watchedContainer.ContainerIndex)
 		for path, exec := range execs {
 			args := exec.ToSlice()
 			sort.Strings(args)
-			newProfileContainer.Execs = append(newProfileContainer.Execs, v1beta1.ExecCalls{
+			newExec := v1beta1.ExecCalls{
 				Path: path,
 				Args: args,
+			}
+			newProfileContainer.Execs = append(newProfileContainer.Execs, newExec)
+			profileOperations = append(profileOperations, PatchOperation{
+				Op:    "add",
+				Path:  execsPath,
+				Value: newExec,
 			})
 		}
 		// add opens
 		newProfileContainer.Opens = make([]v1beta1.OpenCalls, 0)
+		opensPath := fmt.Sprintf("/spec/containers/%d/opens/-", watchedContainer.ContainerIndex)
 		for path, open := range opens {
 			flags := open.ToSlice()
 			sort.Strings(flags)
-			newProfileContainer.Opens = append(newProfileContainer.Opens, v1beta1.OpenCalls{
+			newOpen := v1beta1.OpenCalls{
 				Path:  path,
 				Flags: flags,
+			}
+			newProfileContainer.Opens = append(newProfileContainer.Opens, newOpen)
+			profileOperations = append(profileOperations, PatchOperation{
+				Op:    "add",
+				Path:  opensPath,
+				Value: newOpen,
 			})
 		}
 		// insert application profile container
 		utils.InsertApplicationProfileContainer(newProfile, watchedContainer.ContainerType, watchedContainer.ContainerIndex, newProfileContainer)
+		// calculate patch
+		patch, err := json.Marshal(profileOperations)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to marshal patch", helpers.Error(err))
+			return
+		}
 		// save application profile
 		var gotErr error
-		if err := am.storageClient.PatchApplicationProfile(slug, namespace, newProfile); err != nil {
+		if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch); err != nil {
 			if apierrors.IsNotFound(err) {
 				if err := am.storageClient.CreateApplicationProfile(newProfile, namespace); err != nil {
 					gotErr = err
@@ -275,6 +316,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			}
 		}
 		if gotErr != nil {
+			// restore capabilities set
+			newCapabilitiesSet.Append(capabilitiesSet.ToSlice()...)
 			// restore execMap entries
 			execMap.Range(func(k string, v mapset.Set[string]) bool {
 				if newExecMap.Has(k) {

@@ -207,8 +207,8 @@ func TestStorageNoCache_PatchNetworkNeighbors(t *testing.T) {
 
 func TestStorageNoCache_PatchApplicationProfile(t *testing.T) {
 	type args struct {
-		name    string
-		profile *v1beta1.ApplicationProfile
+		name  string
+		patch []byte
 	}
 	tests := []struct {
 		name    string
@@ -219,25 +219,38 @@ func TestStorageNoCache_PatchApplicationProfile(t *testing.T) {
 			name: "test",
 			args: args{
 				name: storage.NginxKey,
-				profile: &v1beta1.ApplicationProfile{
-					Spec: v1beta1.ApplicationProfileSpec{
-						Containers: []v1beta1.ApplicationProfileContainer{
-							{
-								Name:         "test",
-								Capabilities: []string{"SYS_ADMIN"},
-								Execs: []v1beta1.ExecCalls{
-									{Path: "/usr/bin/test2"},
-									{Path: "/usr/bin/test3"},
-								},
-								Opens: []v1beta1.OpenCalls{
-									{Path: "/usr/bin/test2"},
-									{Path: "/usr/bin/test3"},
-								},
-								Syscalls: []string{"open"},
-							},
-						},
-					},
-				},
+				patch: []byte(`[
+  {
+    "op": "add",
+    "path": "/spec/containers/0/capabilities/-",
+    "value": "SYS_ADMIN"
+  },
+  {
+    "op": "add",
+    "path": "/spec/containers/0/execs/-",
+    "value": {"path": "/usr/bin/test2"}
+  },
+  {
+    "op": "add",
+    "path": "/spec/containers/0/execs/-",
+    "value": {"path": "/usr/bin/test3"}
+  },
+  {
+    "op": "add",
+    "path": "/spec/containers/0/opens/-",
+    "value": {"path": "/usr/bin/test2"}
+  },
+  {
+    "op": "add",
+    "path": "/spec/containers/0/opens/-",
+    "value": {"path": "/usr/bin/test3"}
+  },
+  {
+    "op": "add",
+    "path": "/spec/containers/0/syscalls/-",
+    "value": "open"
+  }
+]`),
 			},
 		},
 	}
@@ -267,15 +280,13 @@ func TestStorageNoCache_PatchApplicationProfile(t *testing.T) {
 				},
 			}
 			_, _ = sc.StorageClient.ApplicationProfiles("default").Create(context.Background(), existingProfile, v1.CreateOptions{})
-			if err := sc.PatchApplicationProfile(tt.args.name, "default", tt.args.profile); (err != nil) != tt.wantErr {
+			if err := sc.PatchApplicationProfile(tt.args.name, "default", tt.args.patch); (err != nil) != tt.wantErr {
 				t.Errorf("PatchFilteredSBOM() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			got, err := sc.StorageClient.ApplicationProfiles("default").Get(context.Background(), tt.args.name, v1.GetOptions{})
 			assert.NoError(t, err)
-			// []string cannot be merged, so the default replace strategy is used
-			assert.Equal(t, []string{"SYS_ADMIN"}, got.Spec.Containers[0].Capabilities)
-			assert.Equal(t, []string{"open"}, got.Spec.Containers[0].Syscalls)
-			// here the slices can merge
+			assert.Equal(t, []string{"NET_ADMIN", "SYS_ADMIN"}, got.Spec.Containers[0].Capabilities)
+			assert.Equal(t, []string{"execve", "open"}, got.Spec.Containers[0].Syscalls)
 			assert.Equal(t, 4, len(got.Spec.Containers[0].Execs))
 			assert.Equal(t, 4, len(got.Spec.Containers[0].Opens))
 		})
