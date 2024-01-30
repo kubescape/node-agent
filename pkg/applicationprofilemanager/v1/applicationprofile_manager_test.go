@@ -19,7 +19,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	cfg := config.Config{
 		InitialDelay:     1 * time.Second,
 		MaxSniffingTime:  5 * time.Minute,
-		UpdateDataPeriod: 2 * time.Second,
+		UpdateDataPeriod: 1 * time.Second,
 	}
 	ctx := context.TODO()
 	k8sClient := &k8sclient.K8sClientMock{}
@@ -48,7 +48,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	// report capability
 	go am.ReportCapability("ns/pod/cont", "NET_BIND_SERVICE")
 	// report file exec
-	go am.ReportFileExec("ns/pod/cont", "", []string{"ls"})
+	go am.ReportFileExec("ns/pod/cont", "", []string{"ls"}) // will not be reported
 	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"})
 	// report file open
 	go am.ReportFileOpen("ns/pod/cont", "/etc/passwd", []string{"O_RDONLY"})
@@ -58,7 +58,7 @@ func TestApplicationProfileManager(t *testing.T) {
 		Container: container,
 	})
 	// let it run for a while
-	time.Sleep(12 * time.Second) // need to sleep longer because of AddRandomDuration in startApplicationProfiling
+	time.Sleep(15 * time.Second) // need to sleep longer because of AddRandomDuration in startApplicationProfiling
 	// report another file open
 	go am.ReportFileOpen("ns/pod/cont", "/etc/hosts", []string{"O_RDONLY"})
 	// sleep more

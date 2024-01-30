@@ -214,6 +214,7 @@ func TestStorageNoCache_PatchApplicationProfile(t *testing.T) {
 		name    string
 		args    args
 		wantErr bool
+		want    *v1beta1.ApplicationProfile
 	}{
 		{
 			name: "test",
@@ -252,6 +253,60 @@ func TestStorageNoCache_PatchApplicationProfile(t *testing.T) {
   }
 ]`),
 			},
+			want: &v1beta1.ApplicationProfile{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      storage.NginxKey,
+					Namespace: "default",
+				},
+				Spec: v1beta1.ApplicationProfileSpec{
+					Containers: []v1beta1.ApplicationProfileContainer{{
+						Name:         "test",
+						Capabilities: []string{"NET_ADMIN", "SYS_ADMIN"},
+						Execs: []v1beta1.ExecCalls{
+							{Path: "/usr/bin/test"},
+							{Path: "/usr/bin/test1"},
+							{Path: "/usr/bin/test2"},
+							{Path: "/usr/bin/test3"},
+						},
+						Opens: []v1beta1.OpenCalls{
+							{Path: "/usr/bin/test"},
+							{Path: "/usr/bin/test1"},
+							{Path: "/usr/bin/test2"},
+							{Path: "/usr/bin/test3"},
+						},
+						Syscalls: []string{"execve", "open"},
+					}},
+				},
+			},
+		},
+		{
+			name: "test",
+			args: args{
+				name:  storage.NginxKey,
+				patch: []byte(`[{"op":"add","path":"/spec/initContainers","value":[{},{},{"name":"toto"}]}]`),
+			},
+			want: &v1beta1.ApplicationProfile{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      storage.NginxKey,
+					Namespace: "default",
+				},
+				Spec: v1beta1.ApplicationProfileSpec{
+					Containers: []v1beta1.ApplicationProfileContainer{{
+						Name:         "test",
+						Capabilities: []string{"NET_ADMIN"},
+						Execs: []v1beta1.ExecCalls{
+							{Path: "/usr/bin/test"},
+							{Path: "/usr/bin/test1"},
+						},
+						Opens: []v1beta1.OpenCalls{
+							{Path: "/usr/bin/test"},
+							{Path: "/usr/bin/test1"},
+						},
+						Syscalls: []string{"execve"},
+					}},
+					InitContainers: []v1beta1.ApplicationProfileContainer{{}, {}, {Name: "toto"}},
+				},
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -285,10 +340,7 @@ func TestStorageNoCache_PatchApplicationProfile(t *testing.T) {
 			}
 			got, err := sc.StorageClient.ApplicationProfiles("default").Get(context.Background(), tt.args.name, v1.GetOptions{})
 			assert.NoError(t, err)
-			assert.Equal(t, []string{"NET_ADMIN", "SYS_ADMIN"}, got.Spec.Containers[0].Capabilities)
-			assert.Equal(t, []string{"execve", "open"}, got.Spec.Containers[0].Syscalls)
-			assert.Equal(t, 4, len(got.Spec.Containers[0].Execs))
-			assert.Equal(t, 4, len(got.Spec.Containers[0].Opens))
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
