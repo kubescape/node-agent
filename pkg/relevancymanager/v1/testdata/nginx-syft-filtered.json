@@ -10,7 +10,7 @@
       "kubescape.io/workload-namespace": "ns"
     },
     "annotations": {
-      "kubescape.io/image-tag": "nginx:1.21.3",
+      "kubescape.io/image-tag": "nginx",
       "kubescape.io/image-id": "nginx@sha256:6a59f1cbb8d28ac484176d52c473494859a512ddba3ea62a547258cf16c9b3ae",
       "kubescape.io/instance-id": "apiVersion-v1/namespace-ns/kind-Pod/name-pod/containerName-cont",
       "kubescape.io/status": "ready",
