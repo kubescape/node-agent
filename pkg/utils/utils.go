@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/goradd/maps"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1/containerinstance"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1/initcontainerinstance"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -205,4 +207,16 @@ func WaitGetSafeMap[K comparable, V any](m *maps.SafeMap[K, V], k K) (V, error) 
 		time.Sleep(1 * time.Second)
 		tries++
 	}
+}
+
+func ToInstanceType(c ContainerType) helpersv1.InstanceType {
+	switch c {
+	case Container:
+		return containerinstance.InstanceType
+	case InitContainer:
+		return initcontainerinstance.InstanceType
+	}
+
+	// FIXME: support EphemeralContainer
+	return containerinstance.InstanceType
 }

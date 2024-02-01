@@ -78,6 +78,7 @@ func (sc *SyftHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 						helpersv1.InstanceIDMetadataKey:    watchedContainer.InstanceID.GetStringFormatted(),
 						helpersv1.ContainerNameMetadataKey: watchedContainer.InstanceID.GetContainerName(),
 						helpersv1.ImageIDMetadataKey:       watchedContainer.ImageID,
+						helpersv1.ImageTagMetadataKey:      watchedContainer.ImageTag,
 						helpersv1.StatusMetadataKey:        helpersv1.Ready,
 					},
 					Labels: utils.GetLabels(watchedContainer, false),
@@ -88,6 +89,10 @@ func (sc *SyftHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 			filteredSBOM.ObjectMeta.ResourceVersion = ""
 			filteredSBOM.ObjectMeta.CreationTimestamp = metav1.Time{}
 			filteredSBOM.ObjectMeta.UID = ""
+
+			// update annotations with the correct imageID
+			filteredSBOM.Annotations[helpersv1.ImageIDMetadataKey] = watchedContainer.ImageID
+			filteredSBOM.Annotations[helpersv1.ImageTagMetadataKey] = watchedContainer.ImageTag
 
 			for i := range filteredSBOM.Spec.Syft.ArtifactRelationships {
 				watchedContainer.RelevantRelationshipsArtifactsByIdentifier[getRelationshipID(filteredSBOM.Spec.Syft.ArtifactRelationships[i])] = true
