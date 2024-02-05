@@ -28,6 +28,7 @@ import (
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	storageUtils "github.com/kubescape/storage/pkg/utils"
 	"go.opentelemetry.io/otel"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,6 +38,7 @@ type ApplicationProfileManager struct {
 	cfg                      config.Config
 	clusterName              string
 	ctx                      context.Context
+	containerMutexes         *storageUtils.Mutex[string]                                     // key is k8sContainerID
 	trackedContainers        mapset.Set[string]                                              // key is k8sContainerID
 	savedCapabilities        maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
 	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
@@ -60,6 +62,7 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		ctx:               ctx,
 		k8sClient:         k8sClient,
 		storageClient:     storageClient,
+		containerMutexes:  storageUtils.NewMapMutex[string](),
 		trackedContainers: mapset.NewSet[string](),
 	}, nil
 }
@@ -133,6 +136,10 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 }
 
 func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
+	// make sure we don't run deleteResources and saveProfile at the same time
+	am.containerMutexes.TryLock(watchedContainer.K8sContainerID)
+	defer am.containerMutexes.Unlock(watchedContainer.K8sContainerID)
+	// delete resources
 	watchedContainer.UpdateDataTicker.Stop()
 	am.trackedContainers.Remove(watchedContainer.K8sContainerID)
 	am.savedCapabilities.Delete(watchedContainer.K8sContainerID)
@@ -171,6 +178,19 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.saveProfile")
 	defer span.End()
 
+	// make sure we don't run deleteResources and saveProfile at the same time
+	am.containerMutexes.TryLock(watchedContainer.K8sContainerID)
+	defer am.containerMutexes.Unlock(watchedContainer.K8sContainerID)
+
+	// verify the container hasn't already been deleted
+	if !am.trackedContainers.Contains(watchedContainer.K8sContainerID) {
+		logger.L().Ctx(ctx).Debug("ApplicationProfileManager - container isn't tracked, not saving profile",
+			helpers.Int("container index", watchedContainer.ContainerIndex),
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		return
+	}
+
 	if watchedContainer.InstanceID == nil {
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - instanceID is nil",
 			helpers.Int("container index", watchedContainer.ContainerIndex),
@@ -204,11 +224,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
 	// check if we have new activities to save
-	savedSyscalls, ok := am.savedSyscalls.Load(watchedContainer.K8sContainerID)
-	if !ok {
-		// fallback to empty set
-		savedSyscalls = mapset.NewSet[string]()
-	}
+	savedSyscalls := am.savedSyscalls.Get(watchedContainer.K8sContainerID)
 	toSaveSyscalls := mapset.NewSet[string](observedSyscalls...).Difference(savedSyscalls)
 	if !toSaveSyscalls.IsEmpty() {
 		newActivity := &v1beta1.ApplicationActivity{
@@ -247,10 +263,10 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	execs := make(map[string]mapset.Set[string])
 	opens := make(map[string]mapset.Set[string])
 	// get capabilities from IG
-	if v, ok := am.toSaveCapabilities.Load(watchedContainer.K8sContainerID); ok {
+	if toSaveCapabilities := am.toSaveCapabilities.Get(watchedContainer.K8sContainerID); toSaveCapabilities.Cardinality() > 0 {
 		// remove capabilities to save in a thread safe way using Pop
 		for {
-			capability, continuePop := v.Pop()
+			capability, continuePop := toSaveCapabilities.Pop()
 			if continuePop {
 				capabilities = append(capabilities, capability)
 			} else {
@@ -259,11 +275,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		}
 	}
 	// get pointer to execs map from IG
-	toSaveExecs, ok := am.toSaveExecs.Load(watchedContainer.K8sContainerID)
-	if !ok {
-		// fallback to empty map
-		toSaveExecs = new(maps.SafeMap[string, mapset.Set[string]])
-	}
+	toSaveExecs := am.toSaveExecs.Get(watchedContainer.K8sContainerID)
 	// point IG to a new exec map
 	am.toSaveExecs.Set(watchedContainer.K8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 	// prepare execs map
@@ -275,11 +287,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		return true
 	})
 	// get pointer to opens map from IG
-	toSaveOpens, ok := am.toSaveOpens.Load(watchedContainer.K8sContainerID)
-	if !ok {
-		// fallback to empty map
-		toSaveOpens = new(maps.SafeMap[string, mapset.Set[string]])
-	}
+	toSaveOpens := am.toSaveOpens.Get(watchedContainer.K8sContainerID)
 	// point IG to a new opens map
 	am.toSaveOpens.Set(watchedContainer.K8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 	// prepare opens map
@@ -291,9 +299,17 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		return true
 	})
 	// new profile activity
+	// the process tries to use JSON patching to avoid conflicts between updates on the same profile from different containers
+	// 0. create both a patch and a new profile
+	// 1. try to apply the patch
+	// 2a. the profile doesn't exist - create the new profile
+	// 2b. the patch was invalid - get existing object to fix the patch
+	// 3a. the profile is missing Containers or InitContainers - ADD one with the container profile at the right index
+	// 3b. the profile is missing the container profile - ADD the container profile at the right index
+	// 3c. default - patch the container ourselves and REPLACE it at the right index
 	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 {
 		// calculate patch
-		profileOperations := utils.CreatePatchOperations(capabilities, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+		profileOperations := utils.CreateCapabilitiesPatchOperations(capabilities, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		patch, err := json.Marshal(profileOperations)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to marshal patch", helpers.Error(err),

@@ -249,7 +249,7 @@ type PatchOperation struct {
 	Value interface{} `json:"value"`
 }
 
-func CreatePatchOperations(capabilities []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string], containerType string, containerIndex int) []PatchOperation {
+func CreateCapabilitiesPatchOperations(capabilities []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string], containerType string, containerIndex int) []PatchOperation {
 	var profileOperations []PatchOperation
 	// add capabilities
 	sort.Strings(capabilities)
