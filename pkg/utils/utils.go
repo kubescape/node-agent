@@ -2,9 +2,12 @@ package utils
 
 import (
 	"errors"
+	"fmt"
+	"github.com/deckarep/golang-set/v2"
 	"math/rand"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +44,10 @@ const (
 	InitContainer
 	EphemeralContainer
 )
+
+func (c ContainerType) String() string {
+	return [...]string{"unknown", "containers", "initContainers", "ephemeralContainers"}[c]
+}
 
 type WatchedContainerData struct {
 	InstanceID                                 instanceidhandler.IInstanceID
@@ -152,6 +159,23 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 	return labels
 }
 
+func GetApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) *v1beta1.ApplicationProfileContainer {
+	if profile == nil {
+		return nil
+	}
+	switch containerType {
+	case Container:
+		if len(profile.Spec.Containers) > containerIndex {
+			return &profile.Spec.Containers[containerIndex]
+		}
+	case InitContainer:
+		if len(profile.Spec.InitContainers) > containerIndex {
+			return &profile.Spec.InitContainers[containerIndex]
+		}
+	}
+	return nil
+}
+
 func InsertApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int, profileContainer *v1beta1.ApplicationProfileContainer) {
 	switch containerType {
 	case Container:
@@ -193,19 +217,90 @@ func (watchedContainer *WatchedContainerData) SetContainerType(wl workloadinterf
 	}
 }
 
-// WaitGetSafeMap waits for a value to be loaded into a SafeMap, with a timeout of 1 minute
-func WaitGetSafeMap[K comparable, V any](m *maps.SafeMap[K, V], k K) (V, error) {
-	var tries int
-	for {
-		v, ok := m.Load(k)
-		if ok {
-			return v, nil
+func EnrichProfileContainer(newProfileContainer *v1beta1.ApplicationProfileContainer, observedCapabilities []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string]) {
+	// add capabilities
+	sort.Strings(observedCapabilities)
+	newProfileContainer.Capabilities = observedCapabilities
+	// add execs
+	newProfileContainer.Execs = make([]v1beta1.ExecCalls, 0)
+	for path, exec := range execs {
+		args := exec.ToSlice()
+		sort.Strings(args)
+		newProfileContainer.Execs = append(newProfileContainer.Execs, v1beta1.ExecCalls{
+			Path: path,
+			Args: args,
+		})
+	}
+	// add opens
+	newProfileContainer.Opens = make([]v1beta1.OpenCalls, 0)
+	for path, open := range opens {
+		flags := open.ToSlice()
+		sort.Strings(flags)
+		newProfileContainer.Opens = append(newProfileContainer.Opens, v1beta1.OpenCalls{
+			Path:  path,
+			Flags: flags,
+		})
+	}
+}
+
+type PatchOperation struct {
+	Op    string      `json:"op"`
+	Path  string      `json:"path"`
+	Value interface{} `json:"value"`
+}
+
+func CreateCapabilitiesPatchOperations(capabilities []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string], containerType string, containerIndex int) []PatchOperation {
+	var profileOperations []PatchOperation
+	// add capabilities
+	sort.Strings(capabilities)
+	capabilitiesPath := fmt.Sprintf("/spec/%s/%d/capabilities/-", containerType, containerIndex)
+	for _, capability := range capabilities {
+		profileOperations = append(profileOperations, PatchOperation{
+			Op:    "add",
+			Path:  capabilitiesPath,
+			Value: capability,
+		})
+	}
+	// add execs
+	execsPath := fmt.Sprintf("/spec/%s/%d/execs/-", containerType, containerIndex)
+	for path, exec := range execs {
+		args := exec.ToSlice()
+		sort.Strings(args)
+		profileOperations = append(profileOperations, PatchOperation{
+			Op:   "add",
+			Path: execsPath,
+			Value: v1beta1.ExecCalls{
+				Path: path,
+				Args: args,
+			},
+		})
+	}
+	// add opens
+	opensPath := fmt.Sprintf("/spec/%s/%d/opens/-", containerType, containerIndex)
+	for path, open := range opens {
+		flags := open.ToSlice()
+		sort.Strings(flags)
+
+		profileOperations = append(profileOperations, PatchOperation{
+			Op:   "add",
+			Path: opensPath,
+			Value: v1beta1.OpenCalls{
+				Path:  path,
+				Flags: flags,
+			},
+		})
+	}
+	return profileOperations
+}
+
+func SetInMap(newExecMap *maps.SafeMap[string, mapset.Set[string]]) func(k string, v mapset.Set[string]) bool {
+	return func(k string, v mapset.Set[string]) bool {
+		if newExecMap.Has(k) {
+			newExecMap.Get(k).Append(v.ToSlice()...)
+		} else {
+			newExecMap.Set(k, v)
 		}
-		if tries > 60 {
-			return v, errors.New("timeout")
-		}
-		time.Sleep(1 * time.Second)
-		tries++
+		return true
 	}
 }
 

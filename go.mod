@@ -6,6 +6,7 @@ toolchain go1.21.4
 
 require (
 	github.com/armosec/utils-k8s-go v0.0.25
+	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cilium/ebpf v0.12.3
 	github.com/deckarep/golang-set/v2 v2.5.0
 	github.com/evanphx/json-patch v5.6.0+incompatible
@@ -17,7 +18,7 @@ require (
 	github.com/kubescape/backend v0.0.16
 	github.com/kubescape/go-logger v0.0.22
 	github.com/kubescape/k8s-interface v0.0.159-0.20240128085543-a829d861c684
-	github.com/kubescape/storage v0.0.61
+	github.com/kubescape/storage v0.0.66
 	github.com/panjf2000/ants/v2 v2.9.0
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.8.4
@@ -52,7 +53,6 @@ require (
 	github.com/becheran/wildmatch-go v1.0.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
 	github.com/briandowns/spinner v1.23.0 // indirect
-	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/containerd/cgroups/v3 v3.0.2 // indirect
 	github.com/containerd/containerd v1.7.12 // indirect
 	github.com/containerd/continuity v0.4.2 // indirect

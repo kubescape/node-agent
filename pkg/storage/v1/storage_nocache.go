@@ -103,6 +103,8 @@ func (sc StorageNoCache) GetApplicationActivity(namespace, name string) (*v1beta
 }
 
 func (sc StorageNoCache) CreateApplicationProfile(profile *v1beta1.ApplicationProfile, namespace string) error {
+	// unset resourceVersion
+	profile.ResourceVersion = ""
 	_, err := sc.StorageClient.ApplicationProfiles(namespace).Create(context.Background(), profile, metav1.CreateOptions{})
 	if err != nil {
 		return err
@@ -111,7 +113,7 @@ func (sc StorageNoCache) CreateApplicationProfile(profile *v1beta1.ApplicationPr
 }
 
 func (sc StorageNoCache) PatchApplicationProfile(name, namespace string, patch []byte) error {
-	_, err := sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), name, types.JSONPatchType, []byte(patch), metav1.PatchOptions{})
+	_, err := sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), name, types.JSONPatchType, patch, metav1.PatchOptions{})
 	if err != nil {
 		return fmt.Errorf("patch application profile: %w", err)
 	}
