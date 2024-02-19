@@ -38,7 +38,7 @@ type ApplicationProfileManager struct {
 	cfg                      config.Config
 	clusterName              string
 	ctx                      context.Context
-	containerMutexes         *storageUtils.Mutex[string]                                     // key is k8sContainerID
+	containerMutexes         storageUtils.MapMutex[string]                                   // key is k8sContainerID
 	trackedContainers        mapset.Set[string]                                              // key is k8sContainerID
 	savedCapabilities        maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
 	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
@@ -137,7 +137,7 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 
 func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
 	// make sure we don't run deleteResources and saveProfile at the same time
-	am.containerMutexes.TryLock(watchedContainer.K8sContainerID)
+	am.containerMutexes.Lock(watchedContainer.K8sContainerID)
 	defer am.containerMutexes.Unlock(watchedContainer.K8sContainerID)
 	// delete resources
 	watchedContainer.UpdateDataTicker.Stop()
@@ -179,7 +179,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	defer span.End()
 
 	// make sure we don't run deleteResources and saveProfile at the same time
-	am.containerMutexes.TryLock(watchedContainer.K8sContainerID)
+	am.containerMutexes.Lock(watchedContainer.K8sContainerID)
 	defer am.containerMutexes.Unlock(watchedContainer.K8sContainerID)
 
 	// verify the container hasn't already been deleted
