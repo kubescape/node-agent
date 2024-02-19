@@ -67,17 +67,13 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 	}, nil
 }
 
-func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
+func (am *ApplicationProfileManager) ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	if watchedContainer.InstanceID != nil {
-		return
+		return nil
 	}
 	wl, err := am.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get workload", helpers.Error(err),
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
-		return
+		return fmt.Errorf("failed to get workload: %w", err)
 	}
 	pod := wl.(*workloadinterface.Workload)
 
@@ -87,39 +83,23 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 	// find parentWlid
 	kind, name, err := am.k8sClient.CalculateWorkloadParentRecursive(pod)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to calculate workload parent", helpers.Error(err),
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
-		return
+		return fmt.Errorf("failed to calculate workload parent: %w", err)
 	}
 	parentWorkload, err := am.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get parent workload", helpers.Error(err),
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
-		return
+		return fmt.Errorf("failed to get parent workload: %w", err)
 	}
 	w := parentWorkload.(*workloadinterface.Workload)
 	watchedContainer.Wlid = w.GenerateWlid(am.clusterName)
 	err = wlid.IsWlidValid(watchedContainer.Wlid)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to validate WLID", helpers.Error(err),
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
-		return
+		return fmt.Errorf("failed to validate WLID: %w", err)
 	}
 	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
 	// find instanceID
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to generate instanceID", helpers.Error(err),
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
-		return
+		return fmt.Errorf("failed to generate instanceID: %w", err)
 	}
 	watchedContainer.InstanceID = instanceIDs[0]
 	for i := range instanceIDs {
@@ -133,6 +113,7 @@ func (am *ApplicationProfileManager) ensureInstanceID(ctx context.Context, conta
 	}
 
 	// FIXME ephemeralContainers are not supported yet
+	return nil
 }
 
 func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
@@ -161,12 +142,10 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 				watchedContainer.InitialDelayExpired = true
 				watchedContainer.UpdateDataTicker.Reset(am.cfg.UpdateDataPeriod)
 			}
-			am.ensureInstanceID(ctx, container, watchedContainer)
 			am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
-				am.ensureInstanceID(ctx, container, watchedContainer)
 				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
 				return nil
 			}
@@ -493,6 +472,16 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		SyncChannel:      syncChannel,
 		K8sContainerID:   k8sContainerID,
 		NsMntId:          container.Mntns,
+	}
+
+	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
+	if err := backoff.Retry(func() error {
+		return am.ensureInstanceID(container, watchedContainer)
+	}, backoff.NewExponentialBackOff()); err != nil {
+		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to ensure instanceID", helpers.Error(err),
+			helpers.Int("container index", watchedContainer.ContainerIndex),
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
 
 	if err := am.monitorContainer(ctx, container, watchedContainer); err != nil {
