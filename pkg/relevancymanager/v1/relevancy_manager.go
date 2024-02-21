@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cenkalti/backoff/v4"
 	"node-agent/pkg/config"
 	"node-agent/pkg/filehandler"
 	"node-agent/pkg/k8sclient"
@@ -58,13 +59,12 @@ func (rm *RelevancyManager) deleteResources(watchedContainer *utils.WatchedConta
 	_ = rm.fileHandler.RemoveBucket(watchedContainer.ContainerID)
 }
 
-func (rm *RelevancyManager) ensureImageInfo(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
+func (rm *RelevancyManager) ensureImageInfo(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 
 	if watchedContainer.ImageID == "" || watchedContainer.ImageTag == "" || watchedContainer.InstanceID == nil || watchedContainer.Wlid == "" {
 		imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, err := rm.getContainerInfo(watchedContainer, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)
 		if err != nil {
-			logger.L().Debug("failed to get image info", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID), helpers.Interface("ContainerType", watchedContainer.ContainerType), helpers.Error(err))
-			return
+			return fmt.Errorf("failed to get image info: %v", err)
 		}
 		watchedContainer.ImageID = imageID
 		watchedContainer.ImageTag = imageTag
@@ -74,6 +74,7 @@ func (rm *RelevancyManager) ensureImageInfo(container *containercollection.Conta
 		watchedContainer.TemplateHash = podTemplateHash
 		rm.sbomHandler.IncrementImageUse(watchedContainer.ImageID)
 	}
+	return nil
 }
 
 func (rm *RelevancyManager) getContainerInfo(watchedContainer *utils.WatchedContainerData, namespace, podName, containerName string) (string, string, string, string, string, instanceidhandler.IInstanceID, error) {
@@ -228,15 +229,11 @@ func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *con
 				watchedContainer.InitialDelayExpired = true
 				watchedContainer.UpdateDataTicker.Reset(rm.cfg.UpdateDataPeriod)
 			}
-			// ensure we know the imageID
-			rm.ensureImageInfo(container, watchedContainer)
 			// handle collection of relevant data
 			rm.handleRelevancy(ctx, watchedContainer, container.Runtime.ContainerID)
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
-				// ensure we know the imageID
-				rm.ensureImageInfo(container, watchedContainer)
 				// handle collection of relevant data one more time
 				rm.handleRelevancy(ctx, watchedContainer, container.Runtime.ContainerID)
 				return nil
@@ -260,6 +257,16 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 		RelevantArtifactsFilesByIdentifier:         make(map[string]bool),
 		RelevantRealtimeFilesByIdentifier:          make(map[string]bool),
 	}
+
+	// don't start monitoring until we have the image info - need to retry until the Pod is updated
+	if err := backoff.Retry(func() error {
+		return rm.ensureImageInfo(container, watchedContainer)
+	}, backoff.NewExponentialBackOff()); err != nil {
+		logger.L().Ctx(ctx).Error("RelevancyManager - failed to ensure image info", helpers.Error(err),
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+	}
+
 	rm.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
 	if err := rm.monitorContainer(ctx, container, watchedContainer); err != nil {
 		logger.L().Info("RelevancyManager - stop monitor on container", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
