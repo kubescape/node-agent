@@ -337,7 +337,6 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		}
 		return
 	}
-	// TODO: dns enrichment
 
 	// update CRD based on events
 	networkNeighborsSpec := am.generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents, networkNeighbors.Spec)
@@ -471,7 +470,7 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 			if am.dnsResolverClient != nil {
 				domain, ok := am.dnsResolverClient.ResolveIPAddress(networkEvent.Destination.IPAddress)
 				if ok {
-					neighborEntry.DNS = domain
+					neighborEntry.DNS = strings.TrimSuffix(domain, ".")
 				}
 			}
 		}
