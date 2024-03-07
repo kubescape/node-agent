@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"strings"
+
 	"net/http"
 	"net/url"
 	"node-agent/internal/validator"
@@ -16,20 +18,20 @@ import (
 	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
 	"node-agent/pkg/sbomhandler/syfthandler"
 	"node-agent/pkg/storage/v1"
+	"node-agent/pkg/utils"
 	"os"
 	"os/signal"
 	"syscall"
 
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
 
-	"github.com/kubescape/backend/pkg/utils"
+	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 )
 
 func main() {
-
 	ctx := context.Background()
 
 	cfg, err := config.LoadConfig("/etc/config")
@@ -45,7 +47,7 @@ func main() {
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		var accountId string
-		if credentials, err := utils.LoadCredentialsFromFile("/etc/credentials"); err != nil {
+		if credentials, err := beUtils.LoadCredentialsFromFile("/etc/credentials"); err != nil {
 			logger.L().Warning("failed to load credentials", helpers.Error(err))
 		} else {
 			accountId = credentials.Account
@@ -62,7 +64,13 @@ func main() {
 
 	err = validator.CheckPrerequisites()
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error during validation", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("error during validation", helpers.Error(err))
+
+		if strings.Contains(err.Error(), utils.ErrKernelVersion) {
+			os.Exit(utils.ExitCodeIncompatibleKernel)
+		} else {
+			os.Exit(utils.ExitCodeError)
+		}
 	}
 
 	if _, present := os.LookupEnv("ENABLE_PROFILER"); present {
@@ -130,7 +138,12 @@ func main() {
 	// Start the container handler
 	err = mainHandler.Start(ctx)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error starting the container watcher", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("error starting the container watcher", helpers.Error(err))
+		if strings.Contains(err.Error(), utils.ErrRuncNotFound) {
+			os.Exit(utils.ExitCodeRuncNotFound)
+		} else {
+			os.Exit(utils.ExitCodeError)
+		}
 	}
 	defer mainHandler.Stop()
 
@@ -140,5 +153,5 @@ func main() {
 	<-shutdown
 
 	// Exit with success
-	os.Exit(0)
+	os.Exit(utils.ExitCodeSuccess)
 }

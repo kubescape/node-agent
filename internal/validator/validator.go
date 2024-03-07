@@ -3,6 +3,7 @@ package validator
 import (
 	"fmt"
 	"node-agent/pkg/config"
+	"node-agent/pkg/utils"
 	"os"
 	"syscall"
 
@@ -95,7 +96,7 @@ func CheckPrerequisites() error {
 	// Check kernel version
 	logger.L().Debug("checking kernel version")
 	if err := checkKernelVersion(KubescapeEBPFEngineMinKernelVersionSupport); err != nil {
-		return err
+		return fmt.Errorf("%s: %w", utils.ErrKernelVersion, err)
 	}
 	// Get Node name from environment variable
 	logger.L().Debug("checking node name")
