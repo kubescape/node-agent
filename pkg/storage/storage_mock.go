@@ -95,7 +95,7 @@ func (sc *StorageHttpClientMock) CreateApplicationProfile(profile *spdxv1beta1.A
 	return nil
 }
 
-func (sc *StorageHttpClientMock) PatchApplicationProfile(name, _ string, patchJSON []byte) error {
+func (sc *StorageHttpClientMock) PatchApplicationProfile(name, _ string, patchJSON []byte, _ chan error) error {
 	if len(sc.ApplicationProfiles) == 0 {
 		return apierrors.NewNotFound(v1beta1.Resource("applicationprofile"), name)
 	}

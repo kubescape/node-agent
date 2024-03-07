@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"node-agent/pkg/storage"
+	"node-agent/pkg/utils"
 	"os"
+	"strconv"
 
+	iidhelpers "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
@@ -18,12 +21,14 @@ import (
 )
 
 const (
-	KubeConfig = "KUBECONFIG"
+	DefaultMaxApplicationProfileSize = 10000
+	KubeConfig                       = "KUBECONFIG"
 )
 
 type StorageNoCache struct {
-	StorageClient spdxv1beta1.SpdxV1beta1Interface
-	namespace     string
+	StorageClient             spdxv1beta1.SpdxV1beta1Interface
+	maxApplicationProfileSize int
+	namespace                 string
 }
 
 var _ storage.StorageClient = (*StorageNoCache)(nil)
@@ -45,9 +50,15 @@ func CreateStorageNoCache(namespace string) (*StorageNoCache, error) {
 		return nil, fmt.Errorf("failed to create K8S Aggregated API Client with err: %v", err)
 	}
 
+	maxApplicationProfileSize, err := strconv.Atoi(os.Getenv("MAX_APPLICATION_PROFILE_SIZE"))
+	if err != nil {
+		maxApplicationProfileSize = DefaultMaxApplicationProfileSize
+	}
+
 	return &StorageNoCache{
-		StorageClient: clientset.SpdxV1beta1(),
-		namespace:     namespace,
+		StorageClient:             clientset.SpdxV1beta1(),
+		maxApplicationProfileSize: maxApplicationProfileSize,
+		namespace:                 namespace,
 	}, nil
 }
 
@@ -112,10 +123,47 @@ func (sc StorageNoCache) CreateApplicationProfile(profile *v1beta1.ApplicationPr
 	return nil
 }
 
-func (sc StorageNoCache) PatchApplicationProfile(name, namespace string, patch []byte) error {
-	_, err := sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), name, types.JSONPatchType, patch, metav1.PatchOptions{})
+func (sc StorageNoCache) PatchApplicationProfile(name, namespace string, patch []byte, channel chan error) error {
+	profile, err := sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), name, types.JSONPatchType, patch, metav1.PatchOptions{})
 	if err != nil {
 		return fmt.Errorf("patch application profile: %w", err)
+	}
+	// check if returned profile is full
+	if s, ok := profile.Annotations[iidhelpers.StatusMetadataKey]; ok {
+		if s == iidhelpers.TooLarge {
+			if channel != nil {
+				channel <- utils.FullApplicationProfileError
+			}
+		}
+		return nil
+	}
+	// check if returned profile is too big
+	if s, ok := profile.Annotations[iidhelpers.ResourceSizeMetadataKey]; ok {
+		size, err := strconv.Atoi(s)
+		if err != nil {
+			return fmt.Errorf("parse size: %w", err)
+		}
+		if size > sc.maxApplicationProfileSize {
+			// add annotation to indicate that the profile is full
+			annotationOperations := []utils.PatchOperation{
+				{
+					Op:    "replace",
+					Path:  "/metadata/annotations/" + utils.EscapeJSONPointerElement(iidhelpers.StatusMetadataKey),
+					Value: iidhelpers.TooLarge,
+				},
+			}
+			annotationsPatch, err := json.Marshal(annotationOperations)
+			if err != nil {
+				return fmt.Errorf("create patch for annotations: %w", err)
+			}
+			_, err = sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), name, types.JSONPatchType, annotationsPatch, metav1.PatchOptions{})
+			if err != nil {
+				return fmt.Errorf("patch application profile annotations: %w", err)
+			}
+			if channel != nil {
+				channel <- utils.FullApplicationProfileError
+			}
+		}
 	}
 	return nil
 }

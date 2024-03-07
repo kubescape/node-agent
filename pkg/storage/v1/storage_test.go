@@ -335,7 +335,7 @@ func TestStorageNoCache_PatchApplicationProfile(t *testing.T) {
 				},
 			}
 			_, _ = sc.StorageClient.ApplicationProfiles("default").Create(context.Background(), existingProfile, v1.CreateOptions{})
-			if err := sc.PatchApplicationProfile(tt.args.name, "default", tt.args.patch); (err != nil) != tt.wantErr {
+			if err := sc.PatchApplicationProfile(tt.args.name, "default", tt.args.patch, nil); (err != nil) != tt.wantErr {
 				t.Errorf("PatchFilteredSBOM() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			got, err := sc.StorageClient.ApplicationProfiles("default").Get(context.Background(), tt.args.name, v1.GetOptions{})

@@ -148,6 +148,8 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 			case errors.Is(err, utils.ContainerHasTerminatedError):
 				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
 				return nil
+			case errors.Is(err, utils.FullApplicationProfileError):
+				return nil
 			}
 		}
 	}
@@ -300,7 +302,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		}
 		// try to patch application profile
 		var gotErr error
-		if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch); err != nil {
+		if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
 			if apierrors.IsNotFound(err) {
 				// new application profile
 				newProfile := &v1beta1.ApplicationProfile{
@@ -404,7 +406,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							helpers.String("k8s workload", watchedContainer.K8sContainerID))
 						return
 					}
-					if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch); err != nil {
+					if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
 						gotErr = err
 						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to patch application profile", helpers.Error(err),
 							helpers.String("slug", slug),
