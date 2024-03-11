@@ -28,6 +28,7 @@ import (
 
 var (
 	ContainerHasTerminatedError = errors.New("container has terminated")
+	FullApplicationProfileError = errors.New("application profile is full")
 	IncompleteSBOMError         = errors.New("incomplete SBOM")
 )
 
@@ -247,6 +248,14 @@ type PatchOperation struct {
 	Op    string      `json:"op"`
 	Path  string      `json:"path"`
 	Value interface{} `json:"value"`
+}
+
+// EscapeJSONPointerElement escapes a JSON pointer element
+// See https://www.rfc-editor.org/rfc/rfc6901#section-3
+func EscapeJSONPointerElement(s string) string {
+	s = strings.ReplaceAll(s, "~", "~0")
+	s = strings.ReplaceAll(s, "/", "~1")
+	return s
 }
 
 func CreateCapabilitiesPatchOperations(capabilities []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string], containerType string, containerIndex int) []PatchOperation {
