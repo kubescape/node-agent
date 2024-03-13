@@ -121,7 +121,6 @@ func main() {
 	if cfg.EnableNetworkTracing {
 		dnsManager := dnsmanager.CreateDNSManager()
 		dnsManagerClient = dnsManager
-
 		networkManagerClient = networkmanager.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName, dnsManager)
 
 	} else {

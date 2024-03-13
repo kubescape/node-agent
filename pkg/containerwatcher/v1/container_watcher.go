@@ -11,6 +11,7 @@ import (
 	"node-agent/pkg/relevancymanager"
 	"node-agent/pkg/utils"
 
+	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
@@ -56,9 +57,12 @@ type IGContainerWatcher struct {
 	relevancyManager          relevancymanager.RelevancyManagerClient
 	networkManager            networkmanager.NetworkManagerClient
 	dnsManager                dnsmanager.DNSManagerClient
+
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
+	tracingState        maps.SafeMap[EventType, TracingState]
+
 	// IG Tracers
 	capabilitiesTracer *tracercapabilities.Tracer
 	execTracer         *tracerexec.Tracer
@@ -68,6 +72,7 @@ type IGContainerWatcher struct {
 	dnsTracer          *tracerdns.Tracer
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
+
 	// Worker pools
 	capabilitiesWorkerPool *ants.PoolWithFunc
 	execWorkerPool         *ants.PoolWithFunc
@@ -81,11 +86,6 @@ var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
-	// Create a tracer collection instance
-	tracerCollection, err := tracercollection.NewTracerCollection(containerCollection)
-	if err != nil {
-		return nil, fmt.Errorf("creating tracer collection: %w", err)
-	}
 	// Create a capabilities worker pool
 	capabilitiesWorkerPool, err := ants.NewPoolWithFunc(capabilitiesWorkerPoolSize, func(i interface{}) {
 		event := i.(tracercapabilitiestype.Event)
@@ -113,6 +113,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileAccess(k8sContainerID, path)
+		// report exec event to rule manager (kdr)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating exec worker pool: %w", err)
@@ -175,7 +176,8 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		dnsManager:                dnsManagerClient,
 		// IG Collections
 		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
+		tracingState:        *new(maps.SafeMap[EventType, TracingState]),
+
 		// Worker pools
 		capabilitiesWorkerPool: capabilitiesWorkerPool,
 		execWorkerPool:         execWorkerPool,
@@ -211,4 +213,62 @@ func (ch *IGContainerWatcher) Stop() {
 		}
 		ch.running = false
 	}
+}
+func (ch *IGContainerWatcher) StartTraceContainer(mntns uint64, pid uint32, eventType EventType) error {
+	if ch == nil || !ch.running {
+		return fmt.Errorf("tracing not running")
+	}
+	var eventTypesToStart []EventType
+	if eventType == AllEventType {
+		eventTypesToStart = []EventType{NetworkEventType, DnsEventType, ExecveEventType, CapabilitiesEventType, OpenEventType}
+	} else {
+		eventTypesToStart = append(eventTypesToStart, eventType)
+	}
+	for _, startEventType := range eventTypesToStart {
+		if ch.tracingState.Get(startEventType).gadget != nil {
+			// Tracing gadget with nsmap control
+			one := uint32(1)
+			mntnsC := uint64(mntns)
+			ch.tracingState.Get(startEventType).eBpfContainerFilterMap.Put(&mntnsC, &one)
+			ch.tracingState.Get(startEventType).usageReferenceCount[mntns]++
+		} else if ch.tracingState.Get(startEventType).attachable != nil {
+			// Tracing gadget with peekable interface
+			ch.tracingState.Get(startEventType).attachable.Attach(pid)
+		} else {
+			return fmt.Errorf("not a tracable event type")
+		}
+	}
+	return nil
+}
+
+func (ch *IGContainerWatcher) StopTraceContainer(mntns uint64, pid uint32, eventType EventType) error {
+	if ch == nil || !ch.running {
+		return fmt.Errorf("tracing not running")
+	}
+	var eventTypesToStop []EventType
+	if eventType == AllEventType {
+		eventTypesToStop = []EventType{NetworkEventType, DnsEventType, ExecveEventType, CapabilitiesEventType, OpenEventType}
+	} else {
+		eventTypesToStop = append(eventTypesToStop, eventType)
+	}
+	for _, stopEventType := range eventTypesToStop {
+		if ch.tracingState.Get(stopEventType).gadget != nil {
+			// Tracing gadget with nsmap control
+			if ch.tracingState.Get(stopEventType).usageReferenceCount[mntns] == 0 {
+				continue
+			}
+			ch.tracingState.Get(stopEventType).usageReferenceCount[mntns]--
+			if ch.tracingState.Get(stopEventType).usageReferenceCount[mntns] == 0 {
+				zero := uint32(0)
+				mntnsC := uint64(mntns)
+				ch.tracingState.Get(stopEventType).eBpfContainerFilterMap.Put(&mntnsC, &zero)
+			}
+		} else if ch.tracingState.Get(stopEventType).attachable != nil {
+			// Tracing gadget with peekable interface
+			ch.tracingState.Get(stopEventType).attachable.Detach(pid)
+		} else {
+			return fmt.Errorf("not a tracable event type")
+		}
+	}
+	return nil
 }
