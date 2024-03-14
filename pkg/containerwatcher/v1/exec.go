@@ -31,7 +31,8 @@ func (ch *IGContainerWatcher) startExecTracing() error {
 	if err != nil {
 		return fmt.Errorf("getting execMountnsmap: %w", err)
 	}
-
+	// list all containers and add to map
+	execMountnsmap.Put()
 	tracerExec, err := tracerexec.NewTracer(&tracerexec.Config{MountnsMap: execMountnsmap}, ch.containerCollection, ch.execEventCallback)
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
