@@ -113,6 +113,8 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileAccess(k8sContainerID, path)
+		// signature rule manager -> (event, rules)
+		// anomaly rule manager -> (event, rules, applicationProfile)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating exec worker pool: %w", err)
