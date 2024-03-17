@@ -31,5 +31,3 @@ type RuntimeAlertRuleBindingRule struct {
 	Severity   string                 `json:"severity" yaml:"severity"`
 	Parameters map[string]interface{} `json:"parameters" yaml:"parameters"`
 }
-
-// type RuleBindingChangedHandler func(ruleBinding RuntimeAlertRuleBinding)

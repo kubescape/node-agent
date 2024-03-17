@@ -55,7 +55,7 @@ func CreateRuleR1006UnshareSyscall() *R1006UnshareSyscall {
 func (rule *R1006UnshareSyscall) DeleteRule() {
 }
 
-func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache ruleengine.K8sCache) ruleengine.RuleFailure {
 	if rule.aleadyNotified {
 		return nil
 	}

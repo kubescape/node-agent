@@ -174,7 +174,7 @@ func CreateRuleR1007CryptoMiners() *R1007CryptoMiners {
 func (rule *R1007CryptoMiners) DeleteRule() {
 }
 
-func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache ruleengine.K8sCache) ruleengine.RuleFailure {
 	if eventType != utils.NetworkEventType && eventType != tracing.DnsEventType && eventType != tracing.RandomXEventType {
 		return nil
 	}

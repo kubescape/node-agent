@@ -58,7 +58,7 @@ func (rule *R0001UnexpectedProcessLaunched) generatePatchCommand(event *tracerex
 		event.GetContainer(), getExecPathFromEvent(event), argList)
 }
 
-func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache ruleengine.K8sCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}

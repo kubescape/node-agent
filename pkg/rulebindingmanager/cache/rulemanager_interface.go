@@ -1,4 +1,4 @@
-package cacher
+package cache
 
 // type RuleBindingChangedHandler interface {
 // 	HandleRuleBindingChanged(ruleBinding RuntimeAlertRuleBinding)

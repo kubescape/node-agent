@@ -113,7 +113,7 @@ func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interfa
 func (rule *R1003MaliciousSSHConnection) DeleteRule() {
 }
 
-func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache ruleengine.K8sCache) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType && eventType != tracing.NetworkEventType {
 		return nil
 	}

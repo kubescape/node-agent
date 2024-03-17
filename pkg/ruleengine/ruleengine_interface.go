@@ -9,18 +9,13 @@ import (
 	// "node-agent/pkg/ruleengine"
 )
 
-type K8sCacher interface {
-	GetPodSpec(podName, namespace, containerID string) (*corev1.PodSpec, error)
-	GetApiServerIpAddress() (string, error)
-}
-
 type RuleEvaluator interface {
 
 	// Rule Name
 	Name() string
 
 	// Rule processing
-	ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher K8sCacher) RuleFailure
+	ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache K8sCache) RuleFailure
 
 	// Rule requirements
 	Requirements() RuleSpec
@@ -52,4 +47,9 @@ type RuleFailure interface {
 	FixSuggestion() string
 	// Generic event
 	Event() *utils.GeneralEvent
+}
+
+type K8sCache interface {
+	GetPodSpec(namespace, podName string) (*corev1.PodSpec, error)
+	GetApiServerIpAddress() (string, error)
 }

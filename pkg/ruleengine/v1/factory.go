@@ -11,7 +11,7 @@ var ruleDescriptions []RuleDesciptor = []RuleDesciptor{
 	// R0005UnexpectedDomainRequestRuleDescriptor,
 	// R0006UnexpectedServiceAccountTokenAccessRuleDescriptor,
 	// R0007KubernetesClientExecutedDescriptor,
-	// R1000ExecFromMaliciousSourceDescriptor,
+	R1000ExecFromMaliciousSourceDescriptor,
 	// R1001ExecBinaryNotInBaseImageRuleDescriptor,
 	// R1002LoadKernelModuleRuleDescriptor,
 	// R1003MaliciousSSHConnectionRuleDescriptor,

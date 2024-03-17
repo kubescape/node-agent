@@ -44,7 +44,7 @@ func CreateRuleR1000ExecFromMaliciousSource() *R1000ExecFromMaliciousSource {
 	return &R1000ExecFromMaliciousSource{}
 }
 
-func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache ruleengine.K8sCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}

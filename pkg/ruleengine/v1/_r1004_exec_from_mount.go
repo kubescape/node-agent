@@ -61,7 +61,7 @@ func CreateRuleR1004ExecFromMount() *R1004ExecFromMount {
 func (rule *R1004ExecFromMount) DeleteRule() {
 }
 
-func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache ruleengine.K8sCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}

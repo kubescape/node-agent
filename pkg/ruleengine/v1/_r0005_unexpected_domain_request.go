@@ -59,7 +59,7 @@ func (rule *R0005UnexpectedDomainRequest) generatePatchCommand(event *tracing.Dn
 		event.ContainerName, event.DnsName)
 }
 
-func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache ruleengine.K8sCache) ruleengine.RuleFailure {
 	if eventType != utils.DnsEventType {
 		return nil
 	}
