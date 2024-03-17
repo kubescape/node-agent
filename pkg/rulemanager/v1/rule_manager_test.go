@@ -1,4 +1,4 @@
-package signaturerulemanager
+package rulemanager
 
 // func TestApplicationProfileManager(t *testing.T) {
 // 	cfg := config.Config{
