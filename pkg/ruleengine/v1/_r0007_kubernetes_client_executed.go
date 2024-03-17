@@ -2,13 +2,17 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 	"path/filepath"
 	"slices"
 
+	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -42,11 +46,11 @@ var R0007KubernetesClientExecutedDescriptor = RuleDesciptor{
 	Description: "Detecting exececution of kubernetes client",
 	Priority:    RulePriorityCritical,
 	Tags:        []string{"exec", "malicious", "whitelisted"},
-	Requirements: RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.ExecveEventType, tracing.NetworkEventType},
+	Requirements: &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.ExecveEventType, tracing.NetworkEventType},
 		NeedApplicationProfile: true,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0007KubernetesClientExecuted()
 	},
 }
@@ -106,7 +110,7 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracing.Net
 	return nil
 }
 
-func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracing.ExecveEvent, appProfileAccess approfilecache.SingleApplicationProfileAccess) *R0007KubernetesClientExecutedFailure {
+func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype.Event, appProfileAccess approfilecache.SingleApplicationProfileAccess) *R0007KubernetesClientExecutedFailure {
 	whitelistedExecs, err := appProfileAccess.GetExecList()
 	if err != nil {
 		log.Printf("Failed to get exec list from app profile: %v", err)
@@ -132,8 +136,8 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracing.Execve
 	return nil
 }
 
-func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
-	if eventType != tracing.ExecveEventType && eventType != tracing.NetworkEventType {
+func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+	if eventType != utils.ExecveEventType && eventType != tracing.NetworkEventType {
 		return nil
 	}
 
@@ -172,9 +176,9 @@ func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType tracing.EventT
 	return nil
 }
 
-func (rule *R0007KubernetesClientExecuted) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.ExecveEventType, tracing.NetworkEventType},
+func (rule *R0007KubernetesClientExecuted) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.ExecveEventType, tracing.NetworkEventType},
 		NeedApplicationProfile: true,
 	}
 }

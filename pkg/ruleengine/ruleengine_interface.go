@@ -51,5 +51,5 @@ type RuleFailure interface {
 	// Fix suggestion.
 	FixSuggestion() string
 	// Generic event
-	// Event() utils.GeneralEvent
+	Event() *utils.GeneralEvent
 }

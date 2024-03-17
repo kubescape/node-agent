@@ -2,9 +2,12 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 
 	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -18,11 +21,11 @@ var R0004UnexpectedCapabilityUsedRuleDescriptor = RuleDesciptor{
 	Description: "Detecting unexpected capabilities that are not whitelisted by application profile. Every unexpected capability is identified in context of a syscall and will be alerted only once per container.",
 	Tags:        []string{"capabilities", "whitelisted"},
 	Priority:    RulePriorityHigh,
-	Requirements: RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.CapabilitiesEventType},
+	Requirements: &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.CapabilitiesEventType},
 		NeedApplicationProfile: true,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0004UnexpectedCapabilityUsed()
 	},
 }
@@ -56,8 +59,8 @@ func (rule *R0004UnexpectedCapabilityUsed) generatePatchCommand(event *tracing.C
 		event.ContainerName, event.Syscall, event.CapabilityName)
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
-	if eventType != tracing.CapabilitiesEventType {
+func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+	if eventType != utils.CapabilitiesEventType {
 		return nil
 	}
 
@@ -112,9 +115,9 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType tracing.EventT
 	return nil
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.CapabilitiesEventType},
+func (rule *R0004UnexpectedCapabilityUsed) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.CapabilitiesEventType},
 		NeedApplicationProfile: true,
 	}
 }
@@ -127,8 +130,8 @@ func (rule *R0004UnexpectedCapabilityUsedFailure) Error() string {
 	return rule.Err
 }
 
-func (rule *R0004UnexpectedCapabilityUsedFailure) Event() tracing.GeneralEvent {
-	return rule.FailureEvent.GeneralEvent
+func (rule *R0004UnexpectedCapabilityUsedFailure) Event() *utils.GeneralEvent {
+	return rule.FailureEvent
 }
 
 func (rule *R0004UnexpectedCapabilityUsedFailure) Priority() int {

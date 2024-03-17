@@ -2,14 +2,16 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 	"slices"
 	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -48,11 +50,11 @@ var R1003MaliciousSSHConnectionRuleDescriptor = RuleDesciptor{
 	Description: "Detecting ssh connection to disallowed port",
 	Tags:        []string{"ssh", "connection", "port", "malicious"},
 	Priority:    RulePriorityHigh,
-	Requirements: RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.OpenEventType, tracing.NetworkEventType},
+	Requirements: &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.OpenEventType, tracing.NetworkEventType},
 		NeedApplicationProfile: false,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1003MaliciousSSHConnection()
 	},
 }
@@ -111,8 +113,8 @@ func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interfa
 func (rule *R1003MaliciousSSHConnection) DeleteRule() {
 }
 
-func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
-	if eventType != tracing.OpenEventType && eventType != tracing.NetworkEventType {
+func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+	if eventType != utils.OpenEventType && eventType != tracing.NetworkEventType {
 		return nil
 	}
 
@@ -173,9 +175,9 @@ func IsSSHConfigFile(path string) bool {
 	return false
 }
 
-func (rule *R1003MaliciousSSHConnection) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.OpenEventType, tracing.NetworkEventType},
+func (rule *R1003MaliciousSSHConnection) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.OpenEventType, tracing.NetworkEventType},
 		NeedApplicationProfile: false,
 	}
 }
@@ -188,8 +190,8 @@ func (rule *R1003MaliciousSSHConnectionFailure) Error() string {
 	return rule.Err
 }
 
-func (rule *R1003MaliciousSSHConnectionFailure) Event() tracing.GeneralEvent {
-	return rule.FailureEvent.GeneralEvent
+func (rule *R1003MaliciousSSHConnectionFailure) Event() *utils.GeneralEvent {
+	return rule.FailureEvent
 }
 
 func (rule *R1003MaliciousSSHConnectionFailure) Priority() int {

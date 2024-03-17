@@ -2,9 +2,12 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 
 	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -18,11 +21,11 @@ var R0005UnexpectedDomainRequestRuleDescriptor = RuleDesciptor{
 	Description: "Detecting unexpected domain requests that are not whitelisted by application profile.",
 	Tags:        []string{"dns", "whitelisted"},
 	Priority:    RulePriorityMed,
-	Requirements: RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.DnsEventType},
+	Requirements: &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.DnsEventType},
 		NeedApplicationProfile: true,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0005UnexpectedDomainRequest()
 	},
 }
@@ -56,8 +59,8 @@ func (rule *R0005UnexpectedDomainRequest) generatePatchCommand(event *tracing.Dn
 		event.ContainerName, event.DnsName)
 }
 
-func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
-	if eventType != tracing.DnsEventType {
+func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+	if eventType != utils.DnsEventType {
 		return nil
 	}
 
@@ -112,9 +115,9 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType tracing.EventTy
 	return nil
 }
 
-func (rule *R0005UnexpectedDomainRequest) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.DnsEventType},
+func (rule *R0005UnexpectedDomainRequest) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.DnsEventType},
 		NeedApplicationProfile: true,
 	}
 }
@@ -127,8 +130,8 @@ func (rule *R0005UnexpectedDomainRequestFailure) Error() string {
 	return rule.Err
 }
 
-func (rule *R0005UnexpectedDomainRequestFailure) Event() tracing.GeneralEvent {
-	return rule.FailureEvent.GeneralEvent
+func (rule *R0005UnexpectedDomainRequestFailure) Event() *utils.GeneralEvent {
+	return rule.FailureEvent
 }
 
 func (rule *R0005UnexpectedDomainRequestFailure) Priority() int {

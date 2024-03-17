@@ -7,14 +7,13 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func execPathFromExecEvent(event *tracerexectype.Event) string {
-	path := event.Comm
+func getExecPathFromEvent(event *tracerexectype.Event) string {
 	if len(event.Args) > 0 {
-		path = event.Args[0]
+		return event.Args[0]
 	}
-	return path
+	return event.Comm
 }
-func continaierFromApplicationProfile(ap *v1beta1.ApplicationProfile, containerName string) (v1beta1.ApplicationProfileContainer, error) {
+func getContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containerName string) (v1beta1.ApplicationProfileContainer, error) {
 	for i := range ap.Spec.Containers {
 		if ap.Spec.Containers[i].Name == containerName {
 			return ap.Spec.Containers[i], nil

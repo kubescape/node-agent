@@ -3,10 +3,13 @@ package ruleengine
 import (
 	"encoding/json"
 	"fmt"
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 	"strings"
 
 	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -20,13 +23,13 @@ var R0003UnexpectedSystemCallRuleDescriptor = RuleDesciptor{
 	Description: "Detecting unexpected system calls that are not whitelisted by application profile. Every unexpected system call will be alerted only once.",
 	Tags:        []string{"syscall", "whitelisted"},
 	Priority:    RulePriorityMed,
-	Requirements: RuleRequirements{
+	Requirements: &RuleRequirements{
 		EventTypes: []tracing.EventType{
 			tracing.SyscallEventType,
 		},
 		NeedApplicationProfile: true,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0003UnexpectedSystemCall()
 	},
 }
@@ -65,8 +68,8 @@ func (rule *R0003UnexpectedSystemCall) generatePatchCommand(event *tracing.Sysca
 		event.ContainerName, syscallList)
 }
 
-func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
-	if eventType != tracing.SyscallEventType {
+func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+	if eventType != utils.SyscallEventType {
 		return nil
 	}
 
@@ -135,9 +138,9 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType tracing.EventType,
 	return nil
 }
 
-func (rule *R0003UnexpectedSystemCall) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.SyscallEventType},
+func (rule *R0003UnexpectedSystemCall) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.SyscallEventType},
 		NeedApplicationProfile: true,
 	}
 }
@@ -150,8 +153,8 @@ func (rule *R0003UnexpectedSystemCallFailure) Error() string {
 	return rule.Err
 }
 
-func (rule *R0003UnexpectedSystemCallFailure) Event() tracing.GeneralEvent {
-	return rule.FailureEvent.GeneralEvent
+func (rule *R0003UnexpectedSystemCallFailure) Event() *utils.GeneralEvent {
+	return rule.FailureEvent
 }
 
 func (rule *R0003UnexpectedSystemCallFailure) Priority() int {

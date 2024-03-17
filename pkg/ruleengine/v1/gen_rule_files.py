@@ -31,11 +31,11 @@ var {rule_id}{rule_abbrev}RuleDescriptor = RuleDesciptor{
 	Name:     {rule_id}{rule_abbrev}RuleName,
 	Tags:     []string{},
 	Priority: replceme,
-	Requirements: RuleRequirements{
-		EventTypes:             []tracing.EventType{replaceme},
+	Requirements: &RuleRequirements{
+		EventTypes:             []utils.EventType{replaceme},
 		NeedApplicationProfile: replaceme,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRule{rule_id}{rule_abbrev}()
 	},
 }
@@ -61,7 +61,7 @@ func CreateRule{rule_id}{rule_abbrev}() *{rule_id}{rule_abbrev} {
 func (rule *{rule_id}{rule_abbrev}) DeleteRule() {
 }
 
-func (rule *{rule_id}{rule_abbrev}) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
+func (rule *{rule_id}{rule_abbrev}) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
 	if eventType != replaceme {
 		return nil
 	}
@@ -92,9 +92,9 @@ func (rule *{rule_id}{rule_abbrev}) ProcessEvent(eventType tracing.EventType, ev
 
 }
 
-func (rule *{rule_id}{rule_abbrev}) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{replaceme},
+func (rule *{rule_id}{rule_abbrev}) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{replaceme},
 		NeedApplicationProfile: true,
 	}
 }
@@ -107,8 +107,8 @@ func (rule *{rule_id}{rule_abbrev}Failure) Error() string {
 	return rule.Err
 }
 
-func (rule *{rule_id}{rule_abbrev}Failure) Event() tracing.GeneralEvent {
-	return rule.FailureEvent.GeneralEvent
+func (rule *{rule_id}{rule_abbrev}Failure) Event() *utils.GeneralEvent {
+	return rule.FailureEvent
 }
 
 func (rule *{rule_id}{rule_abbrev}Failure) Priority() int {

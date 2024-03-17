@@ -2,13 +2,15 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 	"strings"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -22,11 +24,11 @@ var R1004ExecFromMountRuleDescriptor = RuleDesciptor{
 	Description: "Detecting exec calls from mounted paths.",
 	Tags:        []string{"exec", "mount"},
 	Priority:    RulePriorityMed,
-	Requirements: RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.ExecveEventType},
+	Requirements: &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.ExecveEventType},
 		NeedApplicationProfile: false,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1004ExecFromMount()
 	},
 }
@@ -43,7 +45,7 @@ type R1004ExecFromMountFailure struct {
 	RulePriority     int
 	Err              string
 	FixSuggestionMsg string
-	FailureEvent     *tracing.ExecveEvent
+	FailureEvent     *utils.GeneralEvent
 }
 
 func (rule *R1004ExecFromMount) Name() string {
@@ -59,8 +61,8 @@ func CreateRuleR1004ExecFromMount() *R1004ExecFromMount {
 func (rule *R1004ExecFromMount) DeleteRule() {
 }
 
-func (rule *R1004ExecFromMount) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
-	if eventType != tracing.ExecveEventType {
+func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+	if eventType != utils.ExecveEventType {
 		return nil
 	}
 
@@ -90,7 +92,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType tracing.EventType, event 
 			return &R1004ExecFromMountFailure{
 				RuleName:         rule.Name(),
 				Err:              "Exec from mount",
-				FailureEvent:     execEvent,
+				FailureEvent:     utils.ExecToGeneralEvent(execEvent),
 				FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
 				RulePriority:     R1004ExecFromMountRuleDescriptor.Priority,
 			}
@@ -127,9 +129,9 @@ func (rule *R1004ExecFromMount) isPathContained(targetpath, basepath string) boo
 	return strings.HasPrefix(targetpath, basepath)
 }
 
-func (rule *R1004ExecFromMount) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.ExecveEventType},
+func (rule *R1004ExecFromMount) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.ExecveEventType},
 		NeedApplicationProfile: false,
 	}
 }
@@ -142,8 +144,8 @@ func (rule *R1004ExecFromMountFailure) Error() string {
 	return rule.Err
 }
 
-func (rule *R1004ExecFromMountFailure) Event() tracing.GeneralEvent {
-	return rule.FailureEvent.GeneralEvent
+func (rule *R1004ExecFromMountFailure) Event() *utils.GeneralEvent {
+	return rule.FailureEvent
 }
 
 func (rule *R1004ExecFromMountFailure) Priority() int {

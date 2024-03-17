@@ -1,7 +1,11 @@
 package utils
 
 import (
+	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
+	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
+	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 )
 
 const (
@@ -43,21 +47,87 @@ type GeneralEvent struct {
 	// ContainerID   string
 }
 
-func ExecToGeneralEvent(exec *tracerexectype.Event) *GeneralEvent {
+func ExecToGeneralEvent(event *tracerexectype.Event) *GeneralEvent {
 	return &GeneralEvent{
 		ProcessDetails: ProcessDetails{
-			Pid:  exec.Pid,
-			Ppid: exec.Ppid,
-			Comm: exec.Comm,
-			Cwd:  exec.Cwd,
-			Uid:  exec.Uid,
-			Gid:  exec.Gid,
+			Pid:  event.Pid,
+			Ppid: event.Ppid,
+			Comm: event.Comm,
+			Cwd:  event.Cwd,
+			Uid:  event.Uid,
+			Gid:  event.Gid,
 		},
-		ContainerName: exec.GetContainer(),
-		PodName:       exec.GetPod(),
-		Namespace:     exec.GetNamespace(),
-		MountNsID:     exec.MountNsID,
-		Timestamp:     int64(exec.Timestamp),
+		ContainerName: event.GetContainer(),
+		PodName:       event.GetPod(),
+		Namespace:     event.GetNamespace(),
+		MountNsID:     event.MountNsID,
+		Timestamp:     int64(event.Timestamp),
 		EventType:     ExecveEventType,
+	}
+}
+func OpenToGeneralEvent(event *traceropentype.Event) *GeneralEvent {
+	return &GeneralEvent{
+		ProcessDetails: ProcessDetails{
+			Pid:  event.Pid,
+			Comm: event.Comm,
+			Uid:  event.Uid,
+			Gid:  event.Gid,
+		},
+		ContainerName: event.GetContainer(),
+		PodName:       event.GetPod(),
+		Namespace:     event.GetNamespace(),
+		MountNsID:     event.MountNsID,
+		Timestamp:     int64(event.Timestamp),
+		EventType:     OpenEventType,
+	}
+}
+
+func CapabilitiesToGeneralEvent(event *tracercapabilitiestype.Event) *GeneralEvent {
+	return &GeneralEvent{
+		ProcessDetails: ProcessDetails{
+			Pid:  event.Pid,
+			Comm: event.Comm,
+			Uid:  event.Uid,
+			Gid:  event.Gid,
+		},
+		ContainerName: event.GetContainer(),
+		PodName:       event.GetPod(),
+		Namespace:     event.GetNamespace(),
+		MountNsID:     event.MountNsID,
+		Timestamp:     int64(event.Timestamp),
+		EventType:     CapabilitiesEventType,
+	}
+}
+
+func DnsToGeneralEvent(event *tracerdnstype.Event) *GeneralEvent {
+	return &GeneralEvent{
+		ProcessDetails: ProcessDetails{
+			Pid:  event.Pid,
+			Comm: event.Comm,
+			Uid:  event.Uid,
+			Gid:  event.Gid,
+		},
+		ContainerName: event.GetContainer(),
+		PodName:       event.GetPod(),
+		Namespace:     event.GetNamespace(),
+		MountNsID:     event.MountNsID,
+		Timestamp:     int64(event.Timestamp),
+		EventType:     DnsEventType,
+	}
+}
+func NetworkToGeneralEvent(event *tracernetworktype.Event) *GeneralEvent {
+	return &GeneralEvent{
+		ProcessDetails: ProcessDetails{
+			Pid:  event.Pid,
+			Comm: event.Comm,
+			Uid:  event.Uid,
+			Gid:  event.Gid,
+		},
+		ContainerName: event.GetContainer(),
+		PodName:       event.GetPod(),
+		Namespace:     event.GetNamespace(),
+		MountNsID:     event.MountNsID,
+		Timestamp:     int64(event.Timestamp),
+		EventType:     NetworkEventType,
 	}
 }

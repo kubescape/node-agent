@@ -2,15 +2,18 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 	"os"
 	"path/filepath"
 	"syscall"
 
+	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/prometheus/procfs"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -24,11 +27,11 @@ var R1001ExecBinaryNotInBaseImageRuleDescriptor = RuleDesciptor{
 	Description: "Detecting exec calls of binaries that are not included in the base image",
 	Tags:        []string{"exec", "malicious", "binary", "base image"},
 	Priority:    RulePriorityCritical,
-	Requirements: RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.ExecveEventType},
+	Requirements: &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.ExecveEventType},
 		NeedApplicationProfile: false,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1001ExecBinaryNotInBaseImage()
 	},
 }
@@ -42,7 +45,7 @@ type R1001ExecBinaryNotInBaseImageFailure struct {
 	Err              string
 	FixSuggestionMsg string
 	RulePriority     int
-	FailureEvent     *tracing.ExecveEvent
+	FailureEvent     *utils.GeneralEvent
 }
 
 func (rule *R1001ExecBinaryNotInBaseImage) Name() string {
@@ -56,8 +59,8 @@ func CreateRuleR1001ExecBinaryNotInBaseImage() *R1001ExecBinaryNotInBaseImage {
 func (rule *R1001ExecBinaryNotInBaseImage) DeleteRule() {
 }
 
-func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
-	if eventType != tracing.ExecveEventType {
+func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+	if eventType != utils.ExecveEventType {
 		return nil
 	}
 
@@ -74,12 +77,12 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType tracing.EventT
 		RuleName:         rule.Name(),
 		Err:              fmt.Sprintf("Process image \"%s\" binary is not from the container image \"%s\"", execEvent.PathName, "<image name TBA> via PodSpec"),
 		FixSuggestionMsg: "If this is an expected behavior it is strongly suggested to include all executables in the container image. If this is not possible you can remove the rule binding to this workload.",
-		FailureEvent:     execEvent,
+		FailureEvent:     utils.ExecToGeneralEvent(execEvent),
 		RulePriority:     R1001ExecBinaryNotInBaseImageRuleDescriptor.Priority,
 	}
 }
 
-func IsExecBinaryInUpperLayer(execEvent *tracing.ExecveEvent) bool {
+func IsExecBinaryInUpperLayer(execevent *tracerexectype.Event) bool {
 	// Find a process with the same mount namespace ID as the exec event.
 	process, err := findProcessByMountNamespace(execEvent)
 	if err != nil {
@@ -96,7 +99,7 @@ func IsExecBinaryInUpperLayer(execEvent *tracing.ExecveEvent) bool {
 	return fileExists(filepath.Join(upperLayerPath, execEvent.PathName))
 }
 
-func findProcessByMountNamespace(execEvent *tracing.ExecveEvent) (*procfs.Proc, error) {
+func findProcessByMountNamespace(execevent *tracerexectype.Event) (*procfs.Proc, error) {
 	procs, err := procfs.AllProcs()
 	if err != nil {
 		return nil, err
@@ -154,9 +157,9 @@ func fileExists(filePath string) bool {
 	return !info.IsDir()
 }
 
-func (rule *R1001ExecBinaryNotInBaseImage) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.ExecveEventType},
+func (rule *R1001ExecBinaryNotInBaseImage) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.ExecveEventType},
 		NeedApplicationProfile: false,
 	}
 }
@@ -169,8 +172,8 @@ func (rule *R1001ExecBinaryNotInBaseImageFailure) Error() string {
 	return rule.Err
 }
 
-func (rule *R1001ExecBinaryNotInBaseImageFailure) Event() tracing.GeneralEvent {
-	return rule.FailureEvent.GeneralEvent
+func (rule *R1001ExecBinaryNotInBaseImageFailure) Event() *utils.GeneralEvent {
+	return rule.FailureEvent
 }
 
 func (rule *R1001ExecBinaryNotInBaseImageFailure) Priority() int {

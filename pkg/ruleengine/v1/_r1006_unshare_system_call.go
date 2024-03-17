@@ -1,10 +1,12 @@
 package ruleengine
 
 import (
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 	"slices"
 
-	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -18,13 +20,13 @@ var R1006UnshareSyscallRuleDescriptor = RuleDesciptor{
 	Description: "Detecting Unshare System Call usage, which can be used to escape container.",
 	Tags:        []string{"syscall", "escape", "unshare"},
 	Priority:    RulePriorityHigh,
-	Requirements: RuleRequirements{
+	Requirements: &RuleRequirements{
 		EventTypes: []tracing.EventType{
 			tracing.SyscallEventType,
 		},
 		NeedApplicationProfile: false,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1006UnshareSyscall()
 	},
 }
@@ -53,12 +55,12 @@ func CreateRuleR1006UnshareSyscall() *R1006UnshareSyscall {
 func (rule *R1006UnshareSyscall) DeleteRule() {
 }
 
-func (rule *R1006UnshareSyscall) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
+func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
 	if rule.aleadyNotified {
 		return nil
 	}
 
-	if eventType != tracing.SyscallEventType {
+	if eventType != utils.SyscallEventType {
 		return nil
 	}
 
@@ -80,9 +82,9 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType tracing.EventType, event
 	return nil
 }
 
-func (rule *R1006UnshareSyscall) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.SyscallEventType},
+func (rule *R1006UnshareSyscall) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.SyscallEventType},
 		NeedApplicationProfile: false,
 	}
 }
@@ -95,8 +97,8 @@ func (rule *R1006UnshareSyscallFailure) Error() string {
 	return rule.Err
 }
 
-func (rule *R1006UnshareSyscallFailure) Event() tracing.GeneralEvent {
-	return rule.FailureEvent.GeneralEvent
+func (rule *R1006UnshareSyscallFailure) Event() *utils.GeneralEvent {
+	return rule.FailureEvent
 }
 
 func (rule *R1006UnshareSyscallFailure) Priority() int {

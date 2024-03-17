@@ -5,12 +5,7 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 
-	// tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
-	// tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	// tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	// tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-	// traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -40,16 +35,6 @@ type R0001UnexpectedProcessLaunched struct {
 	BaseRule
 }
 
-var _ ruleengine.RuleFailure = (*R0001UnexpectedProcessLaunchedFailure)(nil)
-
-type R0001UnexpectedProcessLaunchedFailure struct {
-	RuleName         string
-	Err              string
-	RulePriority     int
-	FixSuggestionMsg string
-	FailureEvent     *utils.GeneralEvent
-}
-
 func (rule *R0001UnexpectedProcessLaunched) Name() string {
 	return R0001UnexpectedProcessLaunchedRuleName
 }
@@ -70,7 +55,7 @@ func (rule *R0001UnexpectedProcessLaunched) generatePatchCommand(event *tracerex
 	argList += "]"
 	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"execs\": [{\"path\": \"%s\", \"args\": %s}]}]}}'"
 	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(),
-		event.GetContainer(), execPathFromExecEvent(event), argList)
+		event.GetContainer(), getExecPathFromEvent(event), argList)
 }
 
 func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
@@ -82,10 +67,10 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 	if !ok {
 		return nil
 	}
-	p := execPathFromExecEvent(execEvent)
+	p := getExecPathFromEvent(execEvent)
 
 	if ap == nil {
-		return &R0001UnexpectedProcessLaunchedFailure{
+		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
 			Err:              "Application profile is missing",
 			FailureEvent:     utils.ExecToGeneralEvent(execEvent),
@@ -94,9 +79,9 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		}
 	}
 
-	appProfileExecList, err := continaierFromApplicationProfile(ap, execEvent.GetContainer())
+	appProfileExecList, err := getContainerFromApplicationProfile(ap, execEvent.GetContainer())
 	if err != nil {
-		return &R0001UnexpectedProcessLaunchedFailure{
+		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
 			Err:              "Application profile is missing",
 			FailureEvent:     utils.ExecToGeneralEvent(execEvent),
@@ -111,7 +96,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		}
 	}
 
-	return &R0001UnexpectedProcessLaunchedFailure{
+	return &GenericRuleFailure{
 		RuleName:         rule.Name(),
 		Err:              fmt.Sprintf("exec call \"%s\" is not whitelisted by application profile", p),
 		FailureEvent:     utils.ExecToGeneralEvent(execEvent),
@@ -125,24 +110,4 @@ func (rule *R0001UnexpectedProcessLaunched) Requirements() ruleengine.RuleSpec {
 		EventTypes:             []utils.EventType{utils.ExecveEventType},
 		NeedApplicationProfile: true,
 	}
-}
-
-func (rule *R0001UnexpectedProcessLaunchedFailure) Name() string {
-	return rule.RuleName
-}
-
-func (rule *R0001UnexpectedProcessLaunchedFailure) Error() string {
-	return rule.Err
-}
-
-func (rule *R0001UnexpectedProcessLaunchedFailure) Event() *utils.GeneralEvent {
-	return rule.FailureEvent
-}
-
-func (rule *R0001UnexpectedProcessLaunchedFailure) Priority() int {
-	return rule.RulePriority
-}
-
-func (rule *R0001UnexpectedProcessLaunchedFailure) FixSuggestion() string {
-	return rule.FixSuggestionMsg
 }

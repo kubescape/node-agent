@@ -1,10 +1,12 @@
 package ruleengine
 
 import (
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 	"slices"
 
-	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -18,13 +20,13 @@ var R1002LoadKernelModuleRuleDescriptor = RuleDesciptor{
 	Description: "Detecting Kernel Module Load.",
 	Tags:        []string{"syscall", "kernel", "module", "load"},
 	Priority:    RulePriorityCritical,
-	Requirements: RuleRequirements{
+	Requirements: &RuleRequirements{
 		EventTypes: []tracing.EventType{
 			tracing.SyscallEventType,
 		},
 		NeedApplicationProfile: false,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1002LoadKernelModule()
 	},
 }
@@ -52,8 +54,8 @@ func CreateRuleR1002LoadKernelModule() *R1002LoadKernelModule {
 func (rule *R1002LoadKernelModule) DeleteRule() {
 }
 
-func (rule *R1002LoadKernelModule) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
-	if eventType != tracing.SyscallEventType {
+func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+	if eventType != utils.SyscallEventType {
 		return nil
 	}
 
@@ -74,9 +76,9 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType tracing.EventType, eve
 	return nil
 }
 
-func (rule *R1002LoadKernelModule) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.SyscallEventType},
+func (rule *R1002LoadKernelModule) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.SyscallEventType},
 		NeedApplicationProfile: false,
 	}
 }
@@ -89,8 +91,8 @@ func (rule *R1002LoadKernelModuleFailure) Error() string {
 	return rule.Err
 }
 
-func (rule *R1002LoadKernelModuleFailure) Event() tracing.GeneralEvent {
-	return rule.FailureEvent.GeneralEvent
+func (rule *R1002LoadKernelModuleFailure) Event() *utils.GeneralEvent {
+	return rule.FailureEvent
 }
 
 func (rule *R1002LoadKernelModuleFailure) Priority() int {

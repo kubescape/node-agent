@@ -1,10 +1,12 @@
 package ruleengine
 
 import (
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 	"slices"
 
-	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 // Current rule:
@@ -136,7 +138,7 @@ var R1007CryptoMinersRuleDescriptor = RuleDesciptor{
 	Description: "Detecting Crypto Miners by port, domain and randomx event.",
 	Tags:        []string{"network", "crypto", "miners", "malicious", "dns"},
 	Priority:    RulePriorityHigh,
-	Requirements: RuleRequirements{
+	Requirements: &RuleRequirements{
 		EventTypes: []tracing.EventType{
 			tracing.NetworkEventType,
 			tracing.DnsEventType,
@@ -144,7 +146,7 @@ var R1007CryptoMinersRuleDescriptor = RuleDesciptor{
 		},
 		NeedApplicationProfile: false,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1007CryptoMiners()
 	},
 }
@@ -172,8 +174,8 @@ func CreateRuleR1007CryptoMiners() *R1007CryptoMiners {
 func (rule *R1007CryptoMiners) DeleteRule() {
 }
 
-func (rule *R1007CryptoMiners) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
-	if eventType != tracing.NetworkEventType && eventType != tracing.DnsEventType && eventType != tracing.RandomXEventType {
+func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+	if eventType != utils.NetworkEventType && eventType != tracing.DnsEventType && eventType != tracing.RandomXEventType {
 		return nil
 	}
 
@@ -210,8 +212,8 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType tracing.EventType, event i
 	return nil
 }
 
-func (rule *R1007CryptoMiners) Requirements() RuleRequirements {
-	return RuleRequirements{
+func (rule *R1007CryptoMiners) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
 		EventTypes:             R1007CryptoMinersRuleDescriptor.Requirements.EventTypes,
 		NeedApplicationProfile: false,
 	}

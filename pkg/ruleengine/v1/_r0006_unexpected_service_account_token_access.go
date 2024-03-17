@@ -2,12 +2,15 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -27,13 +30,13 @@ var R0006UnexpectedServiceAccountTokenAccessRuleDescriptor = RuleDesciptor{
 	Description: "Detecting unexpected access to service account token.",
 	Tags:        []string{"token", "malicious", "whitelisted"},
 	Priority:    RulePriorityHigh,
-	Requirements: RuleRequirements{
+	Requirements: &RuleRequirements{
 		EventTypes: []tracing.EventType{
 			tracing.OpenEventType,
 		},
 		NeedApplicationProfile: true,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0006UnexpectedServiceAccountTokenAccess()
 	},
 }
@@ -75,8 +78,8 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) generatePatchCommand(event
 		event.ContainerName, event.PathName, flagList)
 }
 
-func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
-	if eventType != tracing.OpenEventType {
+func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+	if eventType != utils.OpenEventType {
 		return nil
 	}
 
@@ -137,9 +140,9 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType tra
 	}
 }
 
-func (rule *R0006UnexpectedServiceAccountTokenAccess) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.OpenEventType},
+func (rule *R0006UnexpectedServiceAccountTokenAccess) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.OpenEventType},
 		NeedApplicationProfile: true,
 	}
 }
@@ -152,8 +155,8 @@ func (rule *R0006UnexpectedServiceAccountTokenAccessFailure) Error() string {
 	return rule.Err
 }
 
-func (rule *R0006UnexpectedServiceAccountTokenAccessFailure) Event() tracing.GeneralEvent {
-	return rule.FailureEvent.GeneralEvent
+func (rule *R0006UnexpectedServiceAccountTokenAccessFailure) Event() *utils.GeneralEvent {
+	return rule.FailureEvent
 }
 
 func (rule *R0006UnexpectedServiceAccountTokenAccessFailure) Priority() int {

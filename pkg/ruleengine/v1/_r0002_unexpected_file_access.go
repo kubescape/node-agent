@@ -2,6 +2,8 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 	"strings"
 	"sync"
 
@@ -9,6 +11,7 @@ import (
 
 	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -22,11 +25,11 @@ var R0002UnexpectedFileAccessRuleDescriptor = RuleDesciptor{
 	Description: "Detecting file access that are not whitelisted by application profile. File access is defined by the combination of path and flags",
 	Tags:        []string{"open", "whitelisted"},
 	Priority:    RulePriorityMed,
-	Requirements: RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.OpenEventType},
+	Requirements: &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.OpenEventType},
 		NeedApplicationProfile: true,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0002UnexpectedFileAccess()
 	},
 }
@@ -110,8 +113,8 @@ func (rule *R0002UnexpectedFileAccess) generatePatchCommand(event *tracing.OpenE
 		event.ContainerName, event.PathName, flagList)
 }
 
-func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
-	if eventType != tracing.OpenEventType {
+func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+	if eventType != utils.OpenEventType {
 		return nil
 	}
 
@@ -226,9 +229,9 @@ func isPathContained(basepath, targetpath string) bool {
 	return strings.HasPrefix(targetpath, basepath)
 }
 
-func (rule *R0002UnexpectedFileAccess) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.OpenEventType},
+func (rule *R0002UnexpectedFileAccess) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.OpenEventType},
 		NeedApplicationProfile: true,
 	}
 }
@@ -241,8 +244,8 @@ func (rule *R0002UnexpectedFileAccessFailure) Error() string {
 	return rule.Err
 }
 
-func (rule *R0002UnexpectedFileAccessFailure) Event() tracing.GeneralEvent {
-	return rule.FailureEvent.GeneralEvent
+func (rule *R0002UnexpectedFileAccessFailure) Event() *utils.GeneralEvent {
+	return rule.FailureEvent
 }
 
 func (rule *R0002UnexpectedFileAccessFailure) Priority() int {
