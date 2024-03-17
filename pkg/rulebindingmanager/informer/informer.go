@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"node-agent/pkg/rulebindingmanager/types/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -36,25 +37,27 @@ var RuleBindingAlertGvr schema.GroupVersionResource = schema.GroupVersionResourc
 type dynClient interface {
 	Resource(gvr schema.GroupVersionResource) dynamic.NamespaceableResourceInterface
 }
+type RuleBindingChangedHandler func(ruleBinding types.RuntimeAlertRuleBinding)
 
-type RuleBindingK8sStore struct {
+type RuleBindingK8sInformer struct {
 	dynamicClient       dynClient
 	coreV1Client        v1.CoreV1Interface
 	informerStopChannel chan struct{}
 	nodeName            string
 	storeNamespace      string
+
 	// functions to call upon a change in a rule binding
 	callBacks []RuleBindingChangedHandler
 }
 
-func NewRuleBindingK8sStore(dynamicClient dynClient, coreV1Client v1.CoreV1Interface, nodeName, storeNamespace string) (*RuleBindingK8sStore, error) {
+func NewRuleBindingK8sInformer(dynamicClient dynClient, coreV1Client v1.CoreV1Interface, nodeName, storeNamespace string) (*RuleBindingK8sInformer, error) {
 
 	stopCh := make(chan struct{})
 	if storeNamespace == "" {
 		storeNamespace = metav1.NamespaceNone
 	}
 
-	ruleBindingStore := RuleBindingK8sStore{
+	ruleInformer := RuleBindingK8sInformer{
 		dynamicClient:       dynamicClient,
 		informerStopChannel: stopCh,
 		nodeName:            nodeName,
@@ -63,13 +66,13 @@ func NewRuleBindingK8sStore(dynamicClient dynClient, coreV1Client v1.CoreV1Inter
 	}
 
 	// TODO: should not start in intialiaztion time, should be started by the caller
-	ruleBindingStore.StartController()
+	ruleInformer.StartController()
 
-	return &ruleBindingStore, nil
+	return &ruleInformer, nil
 }
 
-func (store *RuleBindingK8sStore) getAllRuleBindings() ([]RuntimeAlertRuleBinding, error) {
-	ruleBindingList, err := store.dynamicClient.Resource(RuleBindingAlertGvr).List(context.Background(), metav1.ListOptions{})
+func (ruleInformer *RuleBindingK8sInformer) getAllRuleBindings() ([]types.RuntimeAlertRuleBinding, error) {
+	ruleBindingList, err := ruleInformer.dynamicClient.Resource(RuleBindingAlertGvr).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +82,7 @@ func (store *RuleBindingK8sStore) getAllRuleBindings() ([]RuntimeAlertRuleBindin
 		return nil, err
 	}
 
-	var ruleBindingListObj *RuntimeAlertRuleBindingList
+	var ruleBindingListObj *types.RuntimeAlertRuleBindingList
 
 	if err := json.Unmarshal(ruleBindingListBytes, &ruleBindingListObj); err != nil {
 		return nil, err
@@ -88,13 +91,13 @@ func (store *RuleBindingK8sStore) getAllRuleBindings() ([]RuntimeAlertRuleBindin
 	return ruleBindingListObj.Items, nil
 }
 
-func (store *RuleBindingK8sStore) getRuleBindingsForPod(podName, namespace string) ([]RuntimeAlertRuleBinding, error) {
-	allBindings, err := store.getAllRuleBindings()
+func (ruleInformer *RuleBindingK8sInformer) getRuleBindingsForPod(podName, namespace string) ([]types.RuntimeAlertRuleBinding, error) {
+	allBindings, err := ruleInformer.getAllRuleBindings()
 	if err != nil {
 		return nil, err
 	}
 
-	var ruleBindingsForPod []RuntimeAlertRuleBinding
+	var ruleBindingsForPod []types.RuntimeAlertRuleBinding
 	for _, ruleBinding := range allBindings {
 		// check the namespace selector fits the pod namespace
 		nsLabelSelector := ruleBinding.Spec.NamespaceSelector
@@ -109,7 +112,7 @@ func (store *RuleBindingK8sStore) getRuleBindingsForPod(podName, namespace strin
 		selectorString := metav1.FormatLabelSelector(&nsLabelSelector)
 
 		// TODO: WHY??? why do we list the namespaces?
-		nss, err := store.coreV1Client.Namespaces().List(context.Background(), metav1.ListOptions{LabelSelector: selectorString, Limit: 1})
+		nss, err := ruleInformer.coreV1Client.Namespaces().List(context.Background(), metav1.ListOptions{LabelSelector: selectorString, Limit: 1})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get namespaces for selector %s: %v", selectorString, err)
 		}
@@ -124,10 +127,10 @@ func (store *RuleBindingK8sStore) getRuleBindingsForPod(podName, namespace strin
 		} else if selectorString == "<error>" {
 			return nil, fmt.Errorf("failed to parse pod selector in ruleBinding.spec %s", selectorString)
 		}
-		pods, err := store.coreV1Client.Pods(namespace).List(context.Background(),
+		pods, err := ruleInformer.coreV1Client.Pods(namespace).List(context.Background(),
 			metav1.ListOptions{
 				LabelSelector: selectorString,
-				FieldSelector: "spec.nodeName=" + store.nodeName,
+				FieldSelector: "spec.nodeName=" + ruleInformer.nodeName,
 			},
 		)
 		if err != nil {
@@ -147,15 +150,15 @@ func (store *RuleBindingK8sStore) getRuleBindingsForPod(podName, namespace strin
 	return ruleBindingsForPod, nil
 }
 
-func (store *RuleBindingK8sStore) GetRulesForPod(podName, namespace string) ([]RuntimeAlertRuleBindingRule, error) {
+func (ruleInformer *RuleBindingK8sInformer) GetRulesForPod(podName, namespace string) ([]types.RuntimeAlertRuleBindingRule, error) {
 	// TODO: change to support parameters of rule + custom priority
-	ruleBindingsForPod, err := store.getRuleBindingsForPod(podName, namespace)
+	ruleBindingsForPod, err := ruleInformer.getRuleBindingsForPod(podName, namespace)
 	if err != nil {
 		return nil, err
 	}
 
-	var rulesSlice []RuntimeAlertRuleBindingRule
-	ruleMap := make(map[string]RuntimeAlertRuleBindingRule)
+	var rulesSlice []types.RuntimeAlertRuleBindingRule
+	ruleMap := make(map[string]types.RuntimeAlertRuleBindingRule)
 	for _, ruleBinding := range ruleBindingsForPod {
 		for _, rule := range ruleBinding.Spec.Rules {
 			// remove duplications based on RuleID
@@ -171,48 +174,48 @@ func (store *RuleBindingK8sStore) GetRulesForPod(podName, namespace string) ([]R
 	return rulesSlice, nil
 }
 
-func (store *RuleBindingK8sStore) Destroy() {
-	close(store.informerStopChannel)
+func (ruleInformer *RuleBindingK8sInformer) Destroy() {
+	close(ruleInformer.informerStopChannel)
 }
 
-func (store *RuleBindingK8sStore) ruleBindingAddedHandler(obj interface{}) {
+func (ruleInformer *RuleBindingK8sInformer) ruleBindingAddedHandler(obj interface{}) {
 	bindObj, err := getRuntimeAlertRuleBindingFromObj(obj)
 	if err != nil {
 		fmt.Println("Error getting rule binding from obj: ", err)
 		return
 	}
 	fmt.Println("Rule binding added: ", bindObj)
-	for _, callBack := range store.callBacks {
+	for _, callBack := range ruleInformer.callBacks {
 		callBack(*bindObj)
 	}
 }
 
-func (store *RuleBindingK8sStore) ruleBindingUpdatedHandler(oldObj, newObj interface{}) {
+func (ruleInformer *RuleBindingK8sInformer) ruleBindingUpdatedHandler(oldObj, newObj interface{}) {
 	// naive implementation. just call the other handlers
-	store.ruleBindingDeletedHandler(oldObj)
-	store.ruleBindingAddedHandler(newObj)
+	ruleInformer.ruleBindingDeletedHandler(oldObj)
+	ruleInformer.ruleBindingAddedHandler(newObj)
 }
 
-func (store *RuleBindingK8sStore) ruleBindingDeletedHandler(obj interface{}) {
+func (ruleInformer *RuleBindingK8sInformer) ruleBindingDeletedHandler(obj interface{}) {
 	bindObj, err := getRuntimeAlertRuleBindingFromObj(obj)
 	if err != nil {
 		fmt.Println("Error getting rule binding from obj: ", err)
 		return
 	}
 	fmt.Println("Rule binding deleted: ", bindObj)
-	for _, callBack := range store.callBacks {
+	for _, callBack := range ruleInformer.callBacks {
 		callBack(*bindObj)
 	}
 }
 
-func getRuntimeAlertRuleBindingFromObj(obj interface{}) (*RuntimeAlertRuleBinding, error) {
+func getRuntimeAlertRuleBindingFromObj(obj interface{}) (*types.RuntimeAlertRuleBinding, error) {
 	typedObj := obj.(*unstructured.Unstructured)
 	bytes, err := typedObj.MarshalJSON()
 	if err != nil {
-		return &RuntimeAlertRuleBinding{}, err
+		return &types.RuntimeAlertRuleBinding{}, err
 	}
 
-	var runtimeAlertRuleBindingObj *RuntimeAlertRuleBinding
+	var runtimeAlertRuleBindingObj *types.RuntimeAlertRuleBinding
 	err = json.Unmarshal(bytes, &runtimeAlertRuleBindingObj)
 	if err != nil {
 		return runtimeAlertRuleBindingObj, err
@@ -220,22 +223,22 @@ func getRuntimeAlertRuleBindingFromObj(obj interface{}) (*RuntimeAlertRuleBindin
 	return runtimeAlertRuleBindingObj, nil
 }
 
-func (store *RuleBindingK8sStore) StartController() {
+func (ruleInformer *RuleBindingK8sInformer) StartController() {
 
 	// Initialize factory and informer
-	informer := dynamicinformer.NewFilteredDynamicSharedInformerFactory(store.dynamicClient, 0, store.storeNamespace, nil).ForResource(RuleBindingAlertGvr).Informer()
+	informer := dynamicinformer.NewFilteredDynamicSharedInformerFactory(ruleInformer.dynamicClient, 0, ruleInformer.storeNamespace, nil).ForResource(RuleBindingAlertGvr).Informer()
 
 	// Add event handlers to informer
 	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    store.ruleBindingAddedHandler,
-		UpdateFunc: store.ruleBindingUpdatedHandler,
-		DeleteFunc: store.ruleBindingDeletedHandler,
+		AddFunc:    ruleInformer.ruleBindingAddedHandler,
+		UpdateFunc: ruleInformer.ruleBindingUpdatedHandler,
+		DeleteFunc: ruleInformer.ruleBindingDeletedHandler,
 	})
 
 	// Run the informer
-	go informer.Run(store.informerStopChannel)
+	go informer.Run(ruleInformer.informerStopChannel)
 }
 
-func (store *RuleBindingK8sStore) SetRuleBindingChangedHandlers(handlers []RuleBindingChangedHandler) {
-	store.callBacks = handlers
+func (ruleInformer *RuleBindingK8sInformer) SetRuleBindingChangedHandlers(handlers []RuleBindingChangedHandler) {
+	ruleInformer.callBacks = handlers
 }

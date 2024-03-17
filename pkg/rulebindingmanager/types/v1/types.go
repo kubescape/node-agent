@@ -1,4 +1,4 @@
-package rulebindingmanager
+package types
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,4 +32,4 @@ type RuntimeAlertRuleBindingRule struct {
 	Parameters map[string]interface{} `json:"parameters" yaml:"parameters"`
 }
 
-type RuleBindingChangedHandler func(ruleBinding RuntimeAlertRuleBinding)
+// type RuleBindingChangedHandler func(ruleBinding RuntimeAlertRuleBinding)
