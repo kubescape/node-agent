@@ -2,10 +2,13 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 	"strings"
 
-	"github.com/armosec/kubecop/pkg/approfilecache"
-	"github.com/kubescape/kapprofiler/pkg/tracing"
+	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
+
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -19,25 +22,18 @@ var R1000ExecFromMaliciousSourceDescriptor = RuleDesciptor{
 	Description: "Detecting exec calls that are from malicious source like: /dev/shm, /run, /var/run, /proc/self",
 	Priority:    RulePriorityCritical,
 	Tags:        []string{"exec", "signature"},
-	Requirements: RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.ExecveEventType},
+	Requirements: &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.ExecveEventType},
 		NeedApplicationProfile: false,
 	},
-	RuleCreationFunc: func() Rule {
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1000ExecFromMaliciousSource()
 	},
 }
+var _ ruleengine.RuleEvaluator = (*R1000ExecFromMaliciousSource)(nil)
 
 type R1000ExecFromMaliciousSource struct {
 	BaseRule
-}
-
-type R1000ExecFromMaliciousSourceFailure struct {
-	RuleName         string
-	RulePriority     int
-	FixSuggestionMsg string
-	Err              string
-	FailureEvent     *tracing.ExecveEvent
 }
 
 func (rule *R1000ExecFromMaliciousSource) Name() string {
@@ -48,15 +44,12 @@ func CreateRuleR1000ExecFromMaliciousSource() *R1000ExecFromMaliciousSource {
 	return &R1000ExecFromMaliciousSource{}
 }
 
-func (rule *R1000ExecFromMaliciousSource) DeleteRule() {
-}
-
-func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure {
-	if eventType != tracing.ExecveEventType {
+func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher ruleengine.K8sCacher) ruleengine.RuleFailure {
+	if eventType != utils.ExecveEventType {
 		return nil
 	}
 
-	execEvent, ok := event.(*tracing.ExecveEvent)
+	execEvent, ok := event.(*tracerexectype.Event)
 	if !ok {
 		return nil
 	}
@@ -74,14 +67,15 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType tracing.EventTy
 	// is memory mapped file
 
 	// The assumption here is that the event path is absolute!
+	p := getExecPathFromEvent(execEvent)
 
 	for _, maliciousExecPathPrefix := range maliciousExecPathPrefixes {
-		if strings.HasPrefix(execEvent.PathName, maliciousExecPathPrefix) {
-			return &R1000ExecFromMaliciousSourceFailure{
+		if strings.HasPrefix(p, maliciousExecPathPrefix) {
+			return &GenericRuleFailure{
 				RuleName:         rule.Name(),
-				Err:              fmt.Sprintf("exec call \"%s\" is from a malicious source \"%s\"", execEvent.PathName, maliciousExecPathPrefix),
+				Err:              fmt.Sprintf("exec call \"%s\" is from a malicious source \"%s\"", p, maliciousExecPathPrefix),
 				FixSuggestionMsg: "If this is a legitimate action, please add consider removing this workload from the binding of this rule.",
-				FailureEvent:     execEvent,
+				FailureEvent:     utils.ExecToGeneralEvent(execEvent),
 				RulePriority:     R1000ExecFromMaliciousSourceDescriptor.Priority,
 			}
 		}
@@ -90,29 +84,9 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType tracing.EventTy
 	return nil
 }
 
-func (rule *R1000ExecFromMaliciousSource) Requirements() RuleRequirements {
-	return RuleRequirements{
-		EventTypes:             []tracing.EventType{tracing.ExecveEventType},
+func (rule *R1000ExecFromMaliciousSource) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.ExecveEventType},
 		NeedApplicationProfile: false,
 	}
-}
-
-func (rule *R1000ExecFromMaliciousSourceFailure) Name() string {
-	return rule.RuleName
-}
-
-func (rule *R1000ExecFromMaliciousSourceFailure) Error() string {
-	return rule.Err
-}
-
-func (rule *R1000ExecFromMaliciousSourceFailure) Event() tracing.GeneralEvent {
-	return rule.FailureEvent.GeneralEvent
-}
-
-func (rule *R1000ExecFromMaliciousSourceFailure) Priority() int {
-	return rule.RulePriority
-}
-
-func (rule *R1000ExecFromMaliciousSourceFailure) FixSuggestion() string {
-	return rule.FixSuggestionMsg
 }
