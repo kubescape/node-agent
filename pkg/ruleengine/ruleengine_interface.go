@@ -1,7 +1,12 @@
 package ruleengine
 
 import (
+	"node-agent/pkg/utils"
+
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+
 	corev1 "k8s.io/api/core/v1"
+	// "node-agent/pkg/ruleengine"
 )
 
 type K8sCacher interface {
@@ -9,22 +14,31 @@ type K8sCacher interface {
 	GetApiServerIpAddress() (string, error)
 }
 
-type Rule interface {
+type RuleEvaluator interface {
 
-	// Rule Name.
+	// Rule Name
 	Name() string
 
-	// Needed events for the rule.
-	ProcessEvent(eventType tracing.EventType, event interface{}, appProfileAccess approfilecache.SingleApplicationProfileAccess, engineAccess EngineAccess) RuleFailure
+	// Rule processing
+	ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCacher K8sCacher) RuleFailure
 
-	// Rule requirements.
-	Requirements() RuleRequirements
+	// Rule requirements
+	Requirements() RuleSpec
 
-	// Set rule parameters.
+	// Set rule parameters
 	SetParameters(parameters map[string]interface{})
 
-	// Get rule parameters.
+	// Get rule parameters
 	GetParameters() map[string]interface{}
+}
+
+// RuleSpec is an interface for rule requirements
+type RuleSpec interface {
+	// Event types required for the rule
+	RequiredEventTypes() []utils.EventType
+
+	// Some rules need an application profile
+	IsApplicationProfileRequired() bool
 }
 
 type RuleFailure interface {
@@ -37,5 +51,5 @@ type RuleFailure interface {
 	// Fix suggestion.
 	FixSuggestion() string
 	// Generic event
-	Event() tracing.GeneralEvent
+	// Event() utils.GeneralEvent
 }
