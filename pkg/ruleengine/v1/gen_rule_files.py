@@ -61,7 +61,7 @@ func CreateRule{rule_id}{rule_abbrev}() *{rule_id}{rule_abbrev} {
 func (rule *{rule_id}{rule_abbrev}) DeleteRule() {
 }
 
-func (rule *{rule_id}{rule_abbrev}) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache ruleengine.K8sCache) ruleengine.RuleFailure {
+func (rule *{rule_id}{rule_abbrev}) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != replaceme {
 		return nil
 	}

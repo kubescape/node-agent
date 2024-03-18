@@ -59,7 +59,7 @@ func (rule *R0004UnexpectedCapabilityUsed) generatePatchCommand(event *tracing.C
 		event.ContainerName, event.Syscall, event.CapabilityName)
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache ruleengine.K8sCache) ruleengine.RuleFailure {
+func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != utils.CapabilitiesEventType {
 		return nil
 	}

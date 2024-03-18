@@ -68,7 +68,7 @@ func (rule *R0003UnexpectedSystemCall) generatePatchCommand(event *tracing.Sysca
 		event.ContainerName, syscallList)
 }
 
-func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache ruleengine.K8sCache) ruleengine.RuleFailure {
+func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != utils.SyscallEventType {
 		return nil
 	}

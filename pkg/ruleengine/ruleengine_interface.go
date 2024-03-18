@@ -21,7 +21,7 @@ type RuleEvaluator interface {
 	Name() string
 
 	// Rule processing
-	ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache K8sCache) RuleFailure
+	ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider K8sObjectProvider) RuleFailure
 
 	// Rule requirements
 	Requirements() RuleSpec
@@ -55,7 +55,7 @@ type RuleFailure interface {
 	Event() *utils.GeneralEvent
 }
 
-type K8sCache interface {
+type K8sObjectProvider interface {
 	GetPodSpec(namespace, podName string) (*corev1.PodSpec, error)
 	GetApiServerIpAddress() (string, error)
 }

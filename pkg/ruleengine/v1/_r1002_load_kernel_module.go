@@ -54,7 +54,7 @@ func CreateRuleR1002LoadKernelModule() *R1002LoadKernelModule {
 func (rule *R1002LoadKernelModule) DeleteRule() {
 }
 
-func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache ruleengine.K8sCache) ruleengine.RuleFailure {
+func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != utils.SyscallEventType {
 		return nil
 	}

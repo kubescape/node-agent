@@ -136,7 +136,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 	return nil
 }
 
-func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sCache ruleengine.K8sCache) ruleengine.RuleFailure {
+func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType && eventType != tracing.NetworkEventType {
 		return nil
 	}
