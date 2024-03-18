@@ -151,7 +151,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 		metrics.ReportEvent(utils.NetworkEventType)
-		networkManagerClient.SaveNetworkEvent(event.Runtime.ContainerID, event.K8s.PodName, event)
+		networkManagerClient.ReportNetworkEvent(event.Runtime.ContainerID, event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating network worker pool: %w", err)
@@ -167,7 +167,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 		metrics.ReportEvent(utils.DnsEventType)
-		dnsManagerClient.ProcessDNSEvent(event)
+		dnsManagerClient.ReportDNSEvent(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating dns worker pool: %w", err)

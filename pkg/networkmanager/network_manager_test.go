@@ -162,7 +162,7 @@ import (
 // 	}
 // 	time.Sleep(10 * time.Second)
 // 	for i := range networkEvents {
-// 		am.SaveNetworkEvent(containers[0].Runtime.ContainerID, containers[0].K8s.PodName, *networkEvents[i])
+// 		am.ReportNetworkEvent(containers[0].Runtime.ContainerID, containers[0].K8s.PodName, *networkEvents[i])
 // 	}
 // 	time.Sleep(150 * time.Second)
 // }

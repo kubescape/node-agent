@@ -93,7 +93,7 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 	}
 }
 
-func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, event tracernetworktype.Event) {
+func (am *NetworkManager) ReportNetworkEvent(containerID string, event tracernetworktype.Event) {
 
 	if !am.isValidEvent(event) {
 		return
@@ -113,12 +113,12 @@ func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, event tr
 	networkEvent.SetPodLabels(event.PodLabels)
 	networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
 
-	networkEventsSet := am.containerAndPodToEventsMap.Get(containerID + podName)
-	if am.containerAndPodToEventsMap.Get(containerID+podName) == nil {
+	networkEventsSet := am.containerAndPodToEventsMap.Get(containerID + event.K8s.PodName)
+	if am.containerAndPodToEventsMap.Get(containerID+event.K8s.PodName) == nil {
 		networkEventsSet = mapset.NewSet[NetworkEvent]()
 	}
 	networkEventsSet.Add(*networkEvent)
-	am.containerAndPodToEventsMap.Set(containerID+podName, networkEventsSet)
+	am.containerAndPodToEventsMap.Set(containerID+event.K8s.PodName, networkEventsSet)
 }
 
 // isValidEvent checks if the event is a valid event that should be saved
