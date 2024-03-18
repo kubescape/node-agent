@@ -1,6 +1,8 @@
 package types
 
 import (
+	"reflect"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -30,4 +32,23 @@ type RuntimeAlertRuleBindingRule struct {
 	RuleTags   []string               `json:"ruleTags" yaml:"ruleTags"`
 	Severity   string                 `json:"severity" yaml:"severity"`
 	Parameters map[string]interface{} `json:"parameters" yaml:"parameters"`
+}
+
+func (r *RuntimeAlertRuleBindingRule) Equal(other *RuntimeAlertRuleBindingRule) bool {
+	if r.RuleName != other.RuleName {
+		return false
+	}
+	if r.RuleID != other.RuleID {
+		return false
+	}
+	if !reflect.DeepEqual(r.RuleTags, other.RuleTags) {
+		return false
+	}
+	if r.Severity != other.Severity {
+		return false
+	}
+	if !reflect.DeepEqual(r.Parameters, other.Parameters) {
+		return false
+	}
+	return true
 }

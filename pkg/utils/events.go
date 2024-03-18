@@ -44,7 +44,7 @@ type GeneralEvent struct {
 	MountNsID     uint64
 	Timestamp     int64
 	EventType     EventType
-	// ContainerID   string
+	ContainerID   string // FIXME: This is not available in the event
 }
 
 func ExecToGeneralEvent(event *tracerexectype.Event) *GeneralEvent {

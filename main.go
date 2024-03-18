@@ -13,6 +13,7 @@ import (
 	"node-agent/pkg/containerwatcher/v1"
 	"node-agent/pkg/dnsmanager"
 	"node-agent/pkg/filehandler/v1"
+	metricsmanager "node-agent/pkg/metricsmanager/prometheus"
 	"node-agent/pkg/networkmanager"
 	"node-agent/pkg/relevancymanager"
 	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
@@ -114,6 +115,8 @@ func main() {
 	} else {
 		relevancyManager = relevancymanager.CreateRelevancyManagerMock()
 	}
+	// Create Prometheus metrics exporter
+	prometheusExporter := metricsmanager.NewPrometheusMetric()
 
 	var networkManagerClient networkmanager.NetworkManagerClient
 	var dnsManagerClient dnsmanager.DNSManagerClient
@@ -130,7 +133,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

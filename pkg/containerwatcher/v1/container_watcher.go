@@ -7,6 +7,7 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher"
 	"node-agent/pkg/dnsmanager"
+	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/networkmanager"
 	"node-agent/pkg/relevancymanager"
 	"node-agent/pkg/utils"
@@ -74,11 +75,13 @@ type IGContainerWatcher struct {
 	openWorkerPool         *ants.PoolWithFunc
 	networkWorkerPool      *ants.PoolWithFunc
 	dnsWorkerPool          *ants.PoolWithFunc
+
+	metrics metricsmanager.MetricsManager
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -93,6 +96,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+		metrics.ReportEvent(utils.CapabilitiesEventType)
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
 	})
@@ -111,6 +115,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if len(event.Args) > 0 {
 			path = event.Args[0]
 		}
+		metrics.ReportEvent(utils.ExecveEventType)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileAccess(k8sContainerID, path)
 		// signature rule manager -> (event, rules)
@@ -131,6 +136,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if cfg.EnableFullPathTracing {
 			path = event.FullPath
 		}
+		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
 		relevancyManager.ReportFileAccess(k8sContainerID, path)
 	})
@@ -144,6 +150,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+		metrics.ReportEvent(utils.NetworkEventType)
 		networkManagerClient.SaveNetworkEvent(event.Runtime.ContainerID, event.K8s.PodName, event)
 	})
 	if err != nil {
@@ -159,6 +166,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.Qr != tracerdnstype.DNSPktTypeResponse {
 			return
 		}
+		metrics.ReportEvent(utils.DnsEventType)
 		dnsManagerClient.ProcessDNSEvent(event)
 	})
 	if err != nil {
@@ -184,6 +192,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		openWorkerPool:         openWorkerPool,
 		networkWorkerPool:      networkWorkerPool,
 		dnsWorkerPool:          dnsWorkerPool,
+		metrics:                metrics,
 	}, nil
 }
 

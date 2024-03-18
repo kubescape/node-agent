@@ -16,7 +16,7 @@ const (
 	RulePrioritySystemIssue = 1000
 )
 
-type RuleDesciptor struct {
+type RuleDescriptor struct {
 	// Rule ID
 	ID string
 	// Rule Name
@@ -33,7 +33,7 @@ type RuleDesciptor struct {
 	RuleCreationFunc func() ruleengine.RuleEvaluator
 }
 
-func (r *RuleDesciptor) HasTags(tags []string) bool {
+func (r *RuleDescriptor) HasTags(tags []string) bool {
 	for _, tag := range tags {
 		for _, ruleTag := range r.Tags {
 			if tag == ruleTag {

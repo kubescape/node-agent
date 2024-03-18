@@ -7,6 +7,7 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/rulemanager"
+	"node-agent/pkg/rulemanager/exporters"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
 	"time"
@@ -14,6 +15,8 @@ import (
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v4"
 	"go.opentelemetry.io/otel"
+
+	bindingcache "node-agent/pkg/rulebindingmanager/cache"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -25,6 +28,8 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 )
 
@@ -37,12 +42,14 @@ type RuleManager struct {
 	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
 	storageClient            storage.StorageClient
+	rules                    *bindingcache.Cache
+	exporter                 exporters.Exporter
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, rules *bindingcache.Cache) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		clusterName:       clusterName,
@@ -51,6 +58,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName strin
 		storageClient:     storageClient,
 		containerMutexes:  storageUtils.NewMapMutex[string](),
 		trackedContainers: mapset.NewSet[string](),
+		rules:             rules,
 	}, nil
 }
 
@@ -207,10 +215,30 @@ func (rm *RuleManager) ReportCapability(k8sContainerID string, event tracercapab
 }
 
 func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectype.Event) {
-	if err := rm.waitForContainer(k8sContainerID); err != nil {
+	// TODO: Do we need to wait for this?
+	// if err := rm.waitForContainer(k8sContainerID); err != nil {
+	// 	return
+	// }
+
+	// list exec rules
+	rules, err := rm.rules.ListRulesForPod(event.GetNamespace(), event.GetPod())
+	if err != nil {
+		logger.L().Error("failed to list rules for pod", helpers.Error(err))
 		return
 	}
+
 	// process file exec
+	for _, rule := range rules {
+		// get application profile from cache
+		ap := &v1beta1.ApplicationProfile{}
+
+		res := rule.ProcessEvent(utils.ExecveEventType, event, ap, nil)
+		if res != nil {
+			rm.exporter.SendRuleAlert(res)
+			// rm.promCollector.reportRuleAlereted(rule.Name())
+		}
+		// rm.promCollector.reportRuleProcessed(rule.Name())
+	}
 
 }
 

@@ -6,8 +6,14 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
 	corev1 "k8s.io/api/core/v1"
-	// "node-agent/pkg/ruleengine"
 )
+
+// RuleCreator is an interface for creating rules by tags, IDs, and names
+type RuleCreator interface {
+	CreateRulesByTags(tags []string) []RuleEvaluator
+	CreateRuleByID(id string) RuleEvaluator
+	CreateRuleByName(name string) RuleEvaluator
+}
 
 type RuleEvaluator interface {
 

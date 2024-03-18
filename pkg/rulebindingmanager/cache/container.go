@@ -1,15 +1,150 @@
 package cache
 
 import (
+	"node-agent/pkg/rulebindingmanager/types/v1"
+	"node-agent/pkg/ruleengine"
+
 	"github.com/goradd/maps"
 )
 
 type Cache struct {
-	ContainerIDToRules            maps.SafeMap[string, containerEntry]
-	RuleBindingToContainerIDCache maps.SafeMap[string, []string]
+	// k8sAPI *k8sinterface.KubernetesApi
+	// PodToRules        maps.SafeMap[string, []types.RuntimeAlertRuleBindingRule] // podName -> rules (names)
+	// GlobalRules       []types.RuntimeAlertRuleBindingRule                       // all rules that are not bound to a specific pod
+	// RuleBindingToPods maps.SafeMap[string, mapset.Set[string]]                  // rule binding name -> pod names
+	RuleBindings maps.SafeMap[string, types.RuntimeAlertRuleBinding] // rule binding name -> rule binding
+	ruleCreator  ruleengine.RuleCreator
 }
 
-// func (engine *Engine) OnRuleBindingChanged(ruleBinding RuntimeAlertRuleBinding) {
+func NewCache() *Cache {
+	return &Cache{
+		// RuleBindingToPods: maps.SafeMap[string, mapset.Set[string]]{},
+	}
+}
+
+func (c *Cache) AddRuleBinding(ruleBinding types.RuntimeAlertRuleBinding) {
+	c.RuleBindings.Set(ruleBinding.GetName(), ruleBinding)
+}
+func (c *Cache) RemoveRuleBinding(ruleBinding types.RuntimeAlertRuleBinding) {
+	c.RuleBindings.Delete(ruleBinding.GetName())
+}
+
+func (c *Cache) ListRuleBindings() []types.RuntimeAlertRuleBinding {
+	return c.RuleBindings.Values()
+}
+
+func (c *Cache) ListRulesForPod(namespace, podName string) ([]ruleengine.RuleEvaluator, error) {
+	ruleBindingsForPod := c.ListRuleBindings()
+	// // TODO: change to support parameters of rule + custom priority
+	// ruleBindingsForPod, err := c.listRuleBindingsForPod(namespace, podName)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	var rulesSlice []types.RuntimeAlertRuleBindingRule
+	for _, ruleBinding := range ruleBindingsForPod {
+		rulesSlice = append(rulesSlice, ruleBinding.Spec.Rules...)
+	}
+	createdRules := c.createRules(rulesSlice)
+	return createdRules, nil
+}
+
+func (c *Cache) createRules(rulesForPod []types.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {
+	rules := []ruleengine.RuleEvaluator{}
+	// Get the rules that are bound to the container
+	for _, ruleParams := range rulesForPod {
+		rules = append(rules, c.createRule(&ruleParams)...)
+	}
+	return rules
+}
+func (c *Cache) createRule(r *types.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {
+
+	if r.RuleName != "" {
+		ruleDesc := c.ruleCreator.CreateRuleByName(r.RuleName)
+		if ruleDesc != nil {
+			if r.Parameters != nil {
+				ruleDesc.SetParameters(r.Parameters)
+			}
+		}
+		return []ruleengine.RuleEvaluator{ruleDesc}
+	}
+	if r.RuleID != "" {
+		ruleDesc := c.ruleCreator.CreateRuleByID(r.RuleID)
+		if ruleDesc != nil {
+			if r.Parameters != nil {
+				ruleDesc.SetParameters(r.Parameters)
+			}
+		}
+		return []ruleengine.RuleEvaluator{ruleDesc}
+	}
+	if len(r.RuleTags) > 0 {
+		ruleTagsDescs := c.ruleCreator.CreateRulesByTags(r.RuleTags)
+		if r != nil {
+			for _, ruleDesc := range ruleTagsDescs {
+				if r.Parameters != nil {
+					ruleDesc.SetParameters(r.Parameters)
+				}
+			}
+		}
+		return ruleTagsDescs
+	}
+	return []ruleengine.RuleEvaluator{}
+}
+
+// func (c *Cache) listRuleBindingsForPod(namespace, podName string) ([]types.RuntimeAlertRuleBinding, error) {
+// 	allBindings := c.ListRuleBindings()
+// 	var ruleBindingsForPod []types.RuntimeAlertRuleBinding
+
+// 	for _, ruleBinding := range allBindings {
+// 		// check the namespace selector fits the pod namespace
+// 		nsLabelSelector := ruleBinding.Spec.NamespaceSelector
+// 		if len(nsLabelSelector.MatchLabels) != 0 || len(nsLabelSelector.MatchExpressions) != 0 {
+// 			selectorString := metav1.FormatLabelSelector(&nsLabelSelector)
+// 			nss, err := c.coreV1Client.Namespaces().List(context.Background(), metav1.ListOptions{LabelSelector: selectorString, Limit: 1})
+// 			if err != nil {
+// 				return nil, fmt.Errorf("failed to get namespaces for selector %s: %v", selectorString, err)
+// 			}
+// 			if len(nss.Items) == 0 {
+// 				continue
+// 			}
+// 			// check namespace
+// 		} else if ns, ok := nsLabelSelector.MatchLabels["kubernetes.io/metadata.name"]; ok && ns != namespace {
+// 			// namespace selector doesn't match the pod namespace
+// 			continue
+// 		}
+
+// 		selectorString := metav1.FormatLabelSelector(&ruleBinding.Spec.PodSelector)
+// 		if selectorString == "<none>" {
+// 			// This rule binding applies to all pods in the namespace
+// 			ruleBindingsForPod = append(ruleBindingsForPod, ruleBinding)
+// 			continue
+// 		} else if selectorString == "<error>" {
+// 			return nil, fmt.Errorf("failed to parse pod selector in ruleBinding.spec %s", selectorString)
+// 		}
+// 		pods, err := ruleInformer.coreV1Client.Pods(namespace).List(context.Background(),
+// 			metav1.ListOptions{
+// 				LabelSelector: selectorString,
+// 				FieldSelector: "spec.nodeName=" + c.nodeName,
+// 			},
+// 		)
+// 		if err != nil {
+// 			return nil, fmt.Errorf("failed to get pods for selector %s: %v", selectorString, err)
+// 		}
+// 		if len(pods.Items) == 0 {
+// 			continue
+// 		}
+// 		for _, pod := range pods.Items {
+// 			if pod.Name == podName {
+// 				ruleBindingsForPod = append(ruleBindingsForPod, ruleBinding)
+// 				break
+// 			}
+// 		}
+// 	}
+
+// 	return ruleBindingsForPod, nil
+// }
+
+// func (c *Cache) OnRuleBindingChanged(ruleBinding types.RuntimeAlertRuleBinding) {
 // 	log.Printf("OnRuleBindingChanged: %s\n", ruleBinding.Name)
 // 	// list all namespaces which match the rule binding selectors
 // 	selectorString := metav1.FormatLabelSelector(&ruleBinding.Spec.NamespaceSelector)
@@ -143,25 +278,6 @@ type Cache struct {
 // 	}
 // }
 
-// func (engine *Engine) GetPodSpec(podName, namespace, containerID string) (*corev1.PodSpec, error) {
-// 	if podName == "" || namespace == "" {
-// 		return nil, fmt.Errorf("podName or namespace is empty")
-// 	}
-
-// 	containerIdToDetailsCacheLock.RLock()
-// 	defer containerIdToDetailsCacheLock.RUnlock()
-// 	podSpec, ok := containerIdToDetailsCache[containerID]
-// 	if !ok {
-// 		return nil, fmt.Errorf("containerID not found in cache")
-// 	}
-
-// 	if podSpec.PodSpec == nil {
-// 		return nil, fmt.Errorf("podSpec is nil")
-// 	}
-
-// 	return podSpec.PodSpec, nil
-// }
-
 // func GetRequiredEventsFromRules(rules []rule.Rule) []tracing.EventType {
 // 	neededEvents := map[tracing.EventType]bool{}
 // 	for _, rule := range rules {
@@ -237,98 +353,4 @@ type Cache struct {
 // 		return []rule.Rule{}
 // 	}
 // 	return containerDetails.BoundRules
-// }
-
-// func IsContainerIDInCache(containerID string) bool {
-
-// 	_, ok := containerIdToDetailsCache[containerID]
-// 	return ok
-// }
-
-// // getHighestOwnerOfPod gets the highest owner of a pod in the given namespace.
-// func getHighestOwnerOfPod(clientset ClientSetInterface, podName, namespace string) (metav1.OwnerReference, error) {
-// 	var retOwner metav1.OwnerReference
-
-// 	pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
-// 	if err != nil {
-// 		return retOwner, err
-// 	}
-
-// 	owner := pod.GetOwnerReferences()
-// 	// Filter Node owner
-// 	for i, ownerReference := range owner {
-// 		if ownerReference.Kind == "Node" {
-// 			owner = append(owner[:i], owner[i+1:]...)
-// 		}
-// 	}
-// 	if len(owner) == 0 {
-// 		// Return the Pod itself if it has no owner
-// 		retOwner = metav1.OwnerReference{
-// 			APIVersion: pod.APIVersion,
-// 			Kind:       "Pod",
-// 			Name:       pod.Name,
-// 		}
-// 		return retOwner, nil
-// 	}
-
-// 	// Traverse through owner references until we get the top owner
-// 	for {
-// 		ownerReference := owner[0]
-
-// 		switch ownerReference.Kind {
-// 		case "ReplicaSet":
-// 			// Get the Kubernetes object of the owner and check if it has an owner
-// 			rs, err := clientset.AppsV1().ReplicaSets(namespace).Get(context.TODO(), ownerReference.Name, metav1.GetOptions{})
-// 			if err != nil {
-// 				return retOwner, err
-// 			}
-// 			owner = rs.GetOwnerReferences()
-// 		case "Deployment":
-// 			// Get the Kubernetes object of the owner and check if it has an owner
-// 			deployment, err := clientset.AppsV1().Deployments(namespace).Get(context.TODO(), ownerReference.Name, metav1.GetOptions{})
-// 			if err != nil {
-// 				return retOwner, err
-// 			}
-// 			owner = deployment.GetOwnerReferences()
-// 		case "StatefulSet":
-// 			// Get the Kubernetes object of the owner and check if it has an owner
-// 			statefulset, err := clientset.AppsV1().StatefulSets(namespace).Get(context.TODO(), ownerReference.Name, metav1.GetOptions{})
-// 			if err != nil {
-// 				return retOwner, err
-// 			}
-// 			owner = statefulset.GetOwnerReferences()
-// 		case "DaemonSet":
-// 			// Get the Kubernetes object of the owner and check if it has an owner
-// 			daemonset, err := clientset.AppsV1().DaemonSets(namespace).Get(context.TODO(), ownerReference.Name, metav1.GetOptions{})
-// 			if err != nil {
-// 				return retOwner, err
-// 			}
-// 			owner = daemonset.GetOwnerReferences()
-// 		case "Job":
-// 			// Get the Kubernetes object of the owner and check if it has an owner
-// 			job, err := clientset.BatchV1().Jobs(namespace).Get(context.TODO(), ownerReference.Name, metav1.GetOptions{})
-// 			if err != nil {
-// 				return retOwner, err
-// 			}
-// 			owner = job.GetOwnerReferences()
-// 		case "CronJob":
-// 			// Get the Kubernetes object of the owner and check if it has an owner
-// 			cronjob, err := clientset.BatchV1().CronJobs(namespace).Get(context.TODO(), ownerReference.Name, metav1.GetOptions{})
-// 			if err != nil {
-// 				return retOwner, err
-// 			}
-// 			owner = cronjob.GetOwnerReferences()
-// 		default:
-// 			// Return the current owner if it's not a known type
-// 			retOwner = ownerReference
-// 			return retOwner, nil
-// 		}
-
-// 		if len(owner) == 0 {
-// 			// Return the current owner if it has no owner
-// 			retOwner = ownerReference
-// 			return retOwner, nil
-// 		}
-
-// 	}
 // }

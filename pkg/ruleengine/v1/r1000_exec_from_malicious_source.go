@@ -16,7 +16,7 @@ const (
 	R1000ExecFromMaliciousSourceRuleName = "Exec from malicious source"
 )
 
-var R1000ExecFromMaliciousSourceDescriptor = RuleDesciptor{
+var R1000ExecFromMaliciousSourceDescriptor = RuleDescriptor{
 	ID:          R1000ID,
 	Name:        R1000ExecFromMaliciousSourceRuleName,
 	Description: "Detecting exec calls that are from malicious source like: /dev/shm, /run, /var/run, /proc/self",
