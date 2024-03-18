@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
+	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/rulemanager"
 	"node-agent/pkg/rulemanager/exporters"
 	"node-agent/pkg/storage"
@@ -17,6 +18,8 @@ import (
 	"go.opentelemetry.io/otel"
 
 	bindingcache "node-agent/pkg/rulebindingmanager/cache"
+
+	"node-agent/pkg/metricsmanager"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -47,12 +50,13 @@ type RuleManager struct {
 	storageClient            storage.StorageClient
 	rules                    *bindingcache.Cache
 	exporter                 exporters.Exporter
+	metrics                  metricsmanager.MetricsManager
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, rules *bindingcache.Cache) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, rules *bindingcache.Cache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		clusterName:       clusterName,
@@ -62,6 +66,8 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName strin
 		containerMutexes:  storageUtils.NewMapMutex[string](),
 		trackedContainers: mapset.NewSet[string](),
 		rules:             rules,
+		exporter:          exporter,
+		metrics:           metrics,
 	}, nil
 }
 
@@ -230,19 +236,10 @@ func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectyp
 		return
 	}
 
-	// process file exec
-	for _, rule := range rules {
-		// get application profile from cache
-		ap := &v1beta1.ApplicationProfile{}
+	// get related application profile
+	ap := &v1beta1.ApplicationProfile{}
 
-		res := rule.ProcessEvent(utils.ExecveEventType, event, ap, nil)
-		if res != nil {
-			rm.exporter.SendRuleAlert(res)
-			// rm.promCollector.reportRuleAlereted(rule.Name())
-		}
-		// rm.promCollector.reportRuleProcessed(rule.Name())
-	}
-
+	rm.processEvent(utils.ExecveEventType, event, rules, ap)
 }
 
 func (rm *RuleManager) ReportFileOpen(k8sContainerID string, event traceropentype.Event) {
@@ -258,4 +255,32 @@ func (rm *RuleManager) ReportNetworkEvent(k8sContainerID string, event tracernet
 
 func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
 	// noop
+}
+
+func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator, ap *v1beta1.ApplicationProfile) {
+
+	// process file exec
+	for _, rule := range rules {
+		if !isRelevant(rule.Requirements(), eventType) {
+			continue
+		}
+
+		res := rule.ProcessEvent(eventType, event, ap, nil)
+		if res != nil {
+			rm.exporter.SendRuleAlert(res)
+			rm.metrics.ReportRuleAlert(rule.Name())
+		}
+		rm.metrics.ReportRuleProcessed(rule.Name())
+	}
+
+}
+
+// check if the event type is relevant to the rule
+func isRelevant(ruleSpec ruleengine.RuleSpec, eventType utils.EventType) bool {
+	for _, i := range ruleSpec.RequiredEventTypes() {
+		if i == eventType {
+			return true
+		}
+	}
+	return false
 }
