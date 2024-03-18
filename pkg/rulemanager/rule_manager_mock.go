@@ -14,7 +14,7 @@ type RuleManagerMock struct {
 
 var _ RuleManagerClient = (*RuleManagerMock)(nil)
 
-func CreateApplicationProfileManagerMock() *RuleManagerMock {
+func CreateRuleManagerMock() *RuleManagerMock {
 	return &RuleManagerMock{}
 }
 

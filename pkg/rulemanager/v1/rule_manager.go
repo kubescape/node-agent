@@ -48,7 +48,8 @@ type RuleManager struct {
 	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
 	storageClient            storage.StorageClient
-	rules                    *bindingcache.Cache
+	ruleBindingCache         *bindingcache.Cache
+	k8sObjectProvider        ruleengine.K8sObjectProvider
 	exporter                 exporters.Exporter
 	metrics                  metricsmanager.MetricsManager
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
@@ -56,7 +57,7 @@ type RuleManager struct {
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, rules *bindingcache.Cache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, ruleBindingCache *bindingcache.Cache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		clusterName:       clusterName,
@@ -65,7 +66,8 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName strin
 		storageClient:     storageClient,
 		containerMutexes:  storageUtils.NewMapMutex[string](),
 		trackedContainers: mapset.NewSet[string](),
-		rules:             rules,
+		ruleBindingCache:  ruleBindingCache,
+		k8sObjectProvider: ruleengine.NewK8sObjectProvider(k8sClient),
 		exporter:          exporter,
 		metrics:           metrics,
 	}, nil
@@ -230,7 +232,7 @@ func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectyp
 	// }
 
 	// list exec rules
-	rules, err := rm.rules.ListRulesForPod(event.GetNamespace(), event.GetPod())
+	rules, err := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 	if err != nil {
 		logger.L().Error("failed to list rules for pod", helpers.Error(err))
 		return

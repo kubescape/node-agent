@@ -2,6 +2,7 @@ package rulebindingmanager
 
 import (
 	"encoding/json"
+	"node-agent/pkg/k8sclient"
 	bindingcache "node-agent/pkg/rulebindingmanager/cache"
 	"node-agent/pkg/rulebindingmanager/types/v1"
 
@@ -10,7 +11,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/tools/cache"
 )
@@ -34,19 +34,16 @@ var RuleBindingAlertGvr schema.GroupVersionResource = schema.GroupVersionResourc
 	Resource: RuntimeRuleBindingAlertPlural,
 }
 
-type dynClient interface {
-	Resource(gvr schema.GroupVersionResource) dynamic.NamespaceableResourceInterface
-}
 type RuleBindingChangedHandler func(ruleBinding types.RuntimeAlertRuleBinding)
 
 type RuleBindingK8sInformer struct {
-	dynamicClient       dynClient
+	k8sClient           k8sclient.K8sClientInterface
 	informerStopChannel chan struct{}
 	storeNamespace      string
 	bindingCache        *bindingcache.Cache
 }
 
-func NewRuleBindingK8sInformer(dynamicClient dynClient, bindingCache *bindingcache.Cache, storeNamespace string) (*RuleBindingK8sInformer, error) {
+func NewRuleBindingK8sInformer(k8sClient k8sclient.K8sClientInterface, bindingCache *bindingcache.Cache, storeNamespace string) (*RuleBindingK8sInformer, error) {
 
 	stopCh := make(chan struct{})
 	if storeNamespace == "" {
@@ -54,22 +51,19 @@ func NewRuleBindingK8sInformer(dynamicClient dynClient, bindingCache *bindingcac
 	}
 
 	ruleInformer := RuleBindingK8sInformer{
-		dynamicClient:       dynamicClient,
+		k8sClient:           k8sClient,
 		informerStopChannel: stopCh,
 		storeNamespace:      storeNamespace,
 		bindingCache:        bindingCache,
 	}
 
-	// TODO: should not start in initialization time, should be started by the caller
-	ruleInformer.Start()
-
 	return &ruleInformer, nil
 }
 
-func (ruleInformer *RuleBindingK8sInformer) Start() {
+func (ruleInformer *RuleBindingK8sInformer) StartInformer() {
 
 	// Initialize factory and informer
-	informer := dynamicinformer.NewFilteredDynamicSharedInformerFactory(ruleInformer.dynamicClient, 0, ruleInformer.storeNamespace, nil).ForResource(RuleBindingAlertGvr).Informer()
+	informer := dynamicinformer.NewFilteredDynamicSharedInformerFactory(ruleInformer.k8sClient.GetDynamicClient(), 0, ruleInformer.storeNamespace, nil).ForResource(RuleBindingAlertGvr).Informer()
 
 	// Add event handlers to informer
 	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{

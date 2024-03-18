@@ -1,4 +1,4 @@
-package cache
+package rulebindingmanager
 
 // func TestAssociateRulesWithContainerInCache(t *testing.T) {
 // 	engine := &Engine{} // Create an instance of the Engine struct

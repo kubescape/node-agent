@@ -32,7 +32,7 @@ type ExporterBus struct {
 }
 
 // InitExporters initializes all exporters.
-func InitExporters(exportersConfig ExportersConfig) ExporterBus {
+func InitExporters(exportersConfig ExportersConfig) *ExporterBus {
 	exporters := []Exporter{}
 	alertManagerUrls := parseAlertManagerUrls(exportersConfig.AlertManagerExporterUrls)
 	for _, url := range alertManagerUrls {
@@ -72,7 +72,7 @@ func InitExporters(exportersConfig ExportersConfig) ExporterBus {
 	}
 	log.Info("exporters initialized")
 
-	return ExporterBus{exporters: exporters}
+	return &ExporterBus{exporters: exporters}
 }
 
 // ParseAlertManagerUrls parses the alert manager urls from the given string.

@@ -25,9 +25,9 @@ type AlertManagerExporter struct {
 	client   *client.AlertmanagerAPI
 }
 
-func InitAlertManagerExporter(alertmanagerURL string) *AlertManagerExporter {
-	// Create a new Alertmanager client
-	cfg := client.DefaultTransportConfig().WithHost(alertmanagerURL)
+func InitAlertManagerExporter(alertManagerURL string) *AlertManagerExporter {
+	// Create a new alertManager client
+	cfg := client.DefaultTransportConfig().WithHost(alertManagerURL)
 	amClient := client.NewHTTPClientWithConfig(nil, cfg)
 	hostName, err := os.Hostname()
 	if err != nil {

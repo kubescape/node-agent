@@ -1,4 +1,4 @@
-package cache
+package rulebindingmanager
 
 import (
 	"node-agent/pkg/rulebindingmanager/types/v1"
@@ -59,8 +59,8 @@ func (c *Cache) createRules(rulesForPod []types.RuntimeAlertRuleBindingRule) []r
 }
 func (c *Cache) createRule(r *types.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {
 
-	if r.RuleName != "" {
-		ruleDesc := c.ruleCreator.CreateRuleByName(r.RuleName)
+	if r.RuleID != "" {
+		ruleDesc := c.ruleCreator.CreateRuleByID(r.RuleID)
 		if ruleDesc != nil {
 			if r.Parameters != nil {
 				ruleDesc.SetParameters(r.Parameters)
@@ -68,8 +68,8 @@ func (c *Cache) createRule(r *types.RuntimeAlertRuleBindingRule) []ruleengine.Ru
 		}
 		return []ruleengine.RuleEvaluator{ruleDesc}
 	}
-	if r.RuleID != "" {
-		ruleDesc := c.ruleCreator.CreateRuleByID(r.RuleID)
+	if r.RuleName != "" {
+		ruleDesc := c.ruleCreator.CreateRuleByName(r.RuleName)
 		if ruleDesc != nil {
 			if r.Parameters != nil {
 				ruleDesc.SetParameters(r.Parameters)
