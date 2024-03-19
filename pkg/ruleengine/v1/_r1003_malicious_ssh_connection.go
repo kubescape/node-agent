@@ -44,7 +44,7 @@ var SSHRelatedFiles = []string{
 	"id_xmss.pub",
 }
 
-var R1003MaliciousSSHConnectionRuleDescriptor = RuleDesciptor{
+var R1003MaliciousSSHConnectionRuleDescriptor = RuleDescriptor{
 	ID:          R1003ID,
 	Name:        R1003MaliciousSSHConnectionRuleName,
 	Description: "Detecting ssh connection to disallowed port",
@@ -113,17 +113,17 @@ func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interfa
 func (rule *R1003MaliciousSSHConnection) DeleteRule() {
 }
 
-func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType && eventType != tracing.NetworkEventType {
 		return nil
 	}
 
-	if eventType == tracing.OpenEventType && !rule.accessRelatedFiles {
-		openEvent, ok := event.(*tracing.OpenEvent)
+	if eventType == traceropentype.EventType && !rule.accessRelatedFiles {
+		openEvent, ok := event.(*traceropentype.Event)
 		if !ok {
 			return nil
 		} else {
-			if IsSSHConfigFile(openEvent.PathName) {
+			if IsSSHConfigFile(openEvent.Path) {
 				rule.accessRelatedFiles = true
 				rule.sshInitiatorPid = openEvent.Pid
 				rule.configFileAccessTimeStamp = openEvent.Timestamp

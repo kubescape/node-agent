@@ -9,6 +9,8 @@ var _ ruleengine.RuleFailure = (*GenericRuleFailure)(nil)
 
 type GenericRuleFailure struct {
 	RuleName         string
+	RuleID           string
+	ContainerID      string
 	RulePriority     int
 	FixSuggestionMsg string
 	Err              string
@@ -17,6 +19,9 @@ type GenericRuleFailure struct {
 
 func (rule *GenericRuleFailure) Name() string {
 	return rule.RuleName
+}
+func (rule *GenericRuleFailure) ID() string {
+	return rule.RuleID
 }
 
 func (rule *GenericRuleFailure) Error() string {

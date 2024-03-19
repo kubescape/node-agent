@@ -7,7 +7,6 @@ import (
 	"node-agent/pkg/utils"
 	"strings"
 
-	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -17,7 +16,7 @@ const (
 	R0003UnexpectedSystemCallRuleName = "Unexpected system call"
 )
 
-var R0003UnexpectedSystemCallRuleDescriptor = RuleDesciptor{
+var R0003UnexpectedSystemCallRuleDescriptor = RuleDescriptor{
 	ID:          R0003ID,
 	Name:        R0003UnexpectedSystemCallRuleName,
 	Description: "Detecting unexpected system calls that are not whitelisted by application profile. Every unexpected system call will be alerted only once.",
@@ -58,17 +57,17 @@ func CreateRuleR0003UnexpectedSystemCall() *R0003UnexpectedSystemCall {
 func (rule *R0003UnexpectedSystemCall) DeleteRule() {
 }
 
-func (rule *R0003UnexpectedSystemCall) generatePatchCommand(event *tracing.SyscallEvent, unexpectedSyscalls []string, appProfileAccess approfilecache.SingleApplicationProfileAccess) string {
+func (rule *R0003UnexpectedSystemCall) generatePatchCommand(event *tracing.SyscallEvent, unexpectedSyscalls []string, ap *v1beta1.ApplicationProfile) string {
 	syscallList, err := json.Marshal(unexpectedSyscalls)
 	if err != nil {
 		return ""
 	}
 	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"syscalls\": %s}]}}'"
-	return fmt.Sprintf(baseTemplate, appProfileAccess.GetName(), appProfileAccess.GetNamespace(),
+	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(),
 		event.ContainerName, syscallList)
 }
 
-func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != utils.SyscallEventType {
 		return nil
 	}
@@ -78,7 +77,7 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 		return nil
 	}
 
-	if appProfileAccess == nil {
+	if ap == nil {
 		return &R0003UnexpectedSystemCallFailure{
 			RuleName:         rule.Name(),
 			Err:              "Application profile is missing",

@@ -18,7 +18,7 @@ const (
 	R1004ExecFromMountRuleName = "Exec from mount"
 )
 
-var R1004ExecFromMountRuleDescriptor = RuleDesciptor{
+var R1004ExecFromMountRuleDescriptor = RuleDescriptor{
 	ID:          R1004ID,
 	Name:        R1004ExecFromMountRuleName,
 	Description: "Detecting exec calls from mounted paths.",
@@ -61,7 +61,7 @@ func CreateRuleR1004ExecFromMount() *R1004ExecFromMount {
 func (rule *R1004ExecFromMount) DeleteRule() {
 }
 
-func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}
@@ -103,8 +103,8 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 
 }
 
-func (rule *R1004ExecFromMount) setMountPaths(podName string, namespace string, containerID string, containerName string, engineAccess EngineAccess) error {
-	podSpec, err := engineAccess.GetPodSpec(podName, namespace, containerID)
+func (rule *R1004ExecFromMount) setMountPaths(podName string, namespace string, containerID string, containerName string, k8sProvider ruleengine.K8sObjectProvider) error {
+	podSpec, err := k8sProvider.GetPodSpec(namespace, podName)
 	if err != nil {
 		return fmt.Errorf("failed to get pod spec: %v", err)
 	}

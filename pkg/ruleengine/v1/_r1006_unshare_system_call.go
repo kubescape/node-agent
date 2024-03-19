@@ -14,7 +14,7 @@ const (
 	R1006UnshareSyscallRuleName = "Unshare System Call usage"
 )
 
-var R1006UnshareSyscallRuleDescriptor = RuleDesciptor{
+var R1006UnshareSyscallRuleDescriptor = RuleDescriptor{
 	ID:          R1006ID,
 	Name:        R1006UnshareSyscallRuleName,
 	Description: "Detecting Unshare System Call usage, which can be used to escape container.",
@@ -55,7 +55,7 @@ func CreateRuleR1006UnshareSyscall() *R1006UnshareSyscall {
 func (rule *R1006UnshareSyscall) DeleteRule() {
 }
 
-func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if rule.aleadyNotified {
 		return nil
 	}

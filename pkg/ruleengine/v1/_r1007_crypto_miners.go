@@ -132,7 +132,7 @@ var CommonlyUsedCryptoMinersDomains = []string{
 	"zergpool.com",
 }
 
-var R1007CryptoMinersRuleDescriptor = RuleDesciptor{
+var R1007CryptoMinersRuleDescriptor = RuleDescriptor{
 	ID:          R1007ID,
 	Name:        R1007CryptoMinersRuleName,
 	Description: "Detecting Crypto Miners by port, domain and randomx event.",
@@ -174,7 +174,7 @@ func CreateRuleR1007CryptoMiners() *R1007CryptoMiners {
 func (rule *R1007CryptoMiners) DeleteRule() {
 }
 
-func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != utils.NetworkEventType && eventType != tracing.DnsEventType && eventType != tracing.RandomXEventType {
 		return nil
 	}

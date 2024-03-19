@@ -27,7 +27,7 @@ const (
 	{rule_id}{rule_abbrev}RuleName = "{rule_id} {rule_name}"
 )
 
-var {rule_id}{rule_abbrev}RuleDescriptor = RuleDesciptor{
+var {rule_id}{rule_abbrev}RuleDescriptor = RuleDescriptor{
 	Name:     {rule_id}{rule_abbrev}RuleName,
 	Tags:     []string{},
 	Priority: replceme,
@@ -61,7 +61,7 @@ func CreateRule{rule_id}{rule_abbrev}() *{rule_id}{rule_abbrev} {
 func (rule *{rule_id}{rule_abbrev}) DeleteRule() {
 }
 
-func (rule *{rule_id}{rule_abbrev}) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *{rule_id}{rule_abbrev}) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != replaceme {
 		return nil
 	}
@@ -71,7 +71,7 @@ func (rule *{rule_id}{rule_abbrev}) ProcessEvent(eventType utils.EventType, even
 		return nil
 	}
 
-	if appProfileAccess == nil {
+	if ap == nil {
 		return &{rule_id}{rule_abbrev}Failure{
 			RuleName:     rule.Name(),
 			Err:          "Application profile is missing",

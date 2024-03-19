@@ -11,6 +11,7 @@ const NodeNameEnvVar = "NODE_NAME"
 type Config struct {
 	EnableFullPathTracing    bool          `mapstructure:"fullPathTracingEnabled"`
 	EnableApplicationProfile bool          `mapstructure:"applicationProfileServiceEnabled"`
+	EnablePrometheusExporter bool          `mapstructure:"prometheusExporterEnabled"`
 	EnableRuntimeDetection   bool          `mapstructure:"runtimeDetectionEnabled"`
 	EnableNetworkTracing     bool          `mapstructure:"networkServiceEnabled"`
 	EnableRelevancy          bool          `mapstructure:"relevantCVEServiceEnabled"`

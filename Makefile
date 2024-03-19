@@ -1,8 +1,8 @@
 DOCKERFILE_PATH=./build/Dockerfile
 BINARY_NAME=node-agent
 
-IMAGE?=quay.io/kubescape/$(BINARY_NAME)
-
+IMAGE?=quay.io/dwertent/$(BINARY_NAME)
+TAG?=latest
 
 binary:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)

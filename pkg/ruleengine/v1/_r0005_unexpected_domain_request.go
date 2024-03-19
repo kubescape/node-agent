@@ -5,7 +5,6 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 
-	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -15,7 +14,7 @@ const (
 	R0005UnexpectedDomainRequestRuleName = "Unexpected domain request"
 )
 
-var R0005UnexpectedDomainRequestRuleDescriptor = RuleDesciptor{
+var R0005UnexpectedDomainRequestRuleDescriptor = RuleDescriptor{
 	ID:          R0005ID,
 	Name:        R0005UnexpectedDomainRequestRuleName,
 	Description: "Detecting unexpected domain requests that are not whitelisted by application profile.",
@@ -53,13 +52,13 @@ func CreateRuleR0005UnexpectedDomainRequest() *R0005UnexpectedDomainRequest {
 func (rule *R0005UnexpectedDomainRequest) DeleteRule() {
 }
 
-func (rule *R0005UnexpectedDomainRequest) generatePatchCommand(event *tracing.DnsEvent, appProfileAccess approfilecache.SingleApplicationProfileAccess) string {
+func (rule *R0005UnexpectedDomainRequest) generatePatchCommand(event *tracing.DnsEvent, ap *v1beta1.ApplicationProfile) string {
 	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"dns\": [{\"dnsName\": \"%s\"}]}]}}'"
-	return fmt.Sprintf(baseTemplate, appProfileAccess.GetName(), appProfileAccess.GetNamespace(),
+	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(),
 		event.ContainerName, event.DnsName)
 }
 
-func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != utils.DnsEventType {
 		return nil
 	}
@@ -69,7 +68,7 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		return nil
 	}
 
-	if appProfileAccess == nil {
+	if ap == nil {
 		return &R0005UnexpectedDomainRequestFailure{
 			RuleName:         rule.Name(),
 			Err:              "Application profile is missing",

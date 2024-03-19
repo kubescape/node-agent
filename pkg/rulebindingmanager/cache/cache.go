@@ -3,8 +3,11 @@ package rulebindingmanager
 import (
 	"node-agent/pkg/rulebindingmanager/types/v1"
 	"node-agent/pkg/ruleengine"
+	ruleenginev1 "node-agent/pkg/ruleengine/v1"
 
 	"github.com/goradd/maps"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 type Cache struct {
@@ -18,14 +21,17 @@ type Cache struct {
 
 func NewCache() *Cache {
 	return &Cache{
+		ruleCreator: ruleenginev1.NewRuleCreator(),
 		// RuleBindingToPods: maps.SafeMap[string, mapset.Set[string]]{},
 	}
 }
 
 func (c *Cache) AddRuleBinding(ruleBinding types.RuntimeAlertRuleBinding) {
+	logger.L().Info("AddRuleBinding", helpers.String("name", ruleBinding.GetName()))
 	c.RuleBindings.Set(ruleBinding.GetName(), ruleBinding)
 }
 func (c *Cache) RemoveRuleBinding(ruleBinding types.RuntimeAlertRuleBinding) {
+	logger.L().Info("DeleteRuleBinding", helpers.String("name", ruleBinding.GetName()))
 	c.RuleBindings.Delete(ruleBinding.GetName())
 }
 
@@ -45,7 +51,9 @@ func (c *Cache) ListRulesForPod(namespace, podName string) ([]ruleengine.RuleEva
 	for _, ruleBinding := range ruleBindingsForPod {
 		rulesSlice = append(rulesSlice, ruleBinding.Spec.Rules...)
 	}
+
 	createdRules := c.createRules(rulesSlice)
+
 	return createdRules, nil
 }
 
@@ -60,33 +68,30 @@ func (c *Cache) createRules(rulesForPod []types.RuntimeAlertRuleBindingRule) []r
 func (c *Cache) createRule(r *types.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {
 
 	if r.RuleID != "" {
-		ruleDesc := c.ruleCreator.CreateRuleByID(r.RuleID)
-		if ruleDesc != nil {
+		if ruleDesc := c.ruleCreator.CreateRuleByID(r.RuleID); ruleDesc != nil {
 			if r.Parameters != nil {
 				ruleDesc.SetParameters(r.Parameters)
 			}
+			return []ruleengine.RuleEvaluator{ruleDesc}
 		}
-		return []ruleengine.RuleEvaluator{ruleDesc}
 	}
 	if r.RuleName != "" {
-		ruleDesc := c.ruleCreator.CreateRuleByName(r.RuleName)
-		if ruleDesc != nil {
+		if ruleDesc := c.ruleCreator.CreateRuleByName(r.RuleName); ruleDesc != nil {
 			if r.Parameters != nil {
 				ruleDesc.SetParameters(r.Parameters)
 			}
+			return []ruleengine.RuleEvaluator{ruleDesc}
 		}
-		return []ruleengine.RuleEvaluator{ruleDesc}
 	}
 	if len(r.RuleTags) > 0 {
-		ruleTagsDescs := c.ruleCreator.CreateRulesByTags(r.RuleTags)
-		if r != nil {
+		if ruleTagsDescs := c.ruleCreator.CreateRulesByTags(r.RuleTags); ruleTagsDescs != nil {
 			for _, ruleDesc := range ruleTagsDescs {
 				if r.Parameters != nil {
 					ruleDesc.SetParameters(r.Parameters)
 				}
 			}
+			return ruleTagsDescs
 		}
-		return ruleTagsDescs
 	}
 	return []ruleengine.RuleEvaluator{}
 }

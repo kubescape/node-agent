@@ -17,6 +17,9 @@ type RuleCreator interface {
 
 type RuleEvaluator interface {
 
+	// Rule ID - this is the rules unique identifier
+	ID() string
+
 	// Rule Name
 	Name() string
 
@@ -45,6 +48,12 @@ type RuleSpec interface {
 type RuleFailure interface {
 	// Rule Name.
 	Name() string
+
+	// Rule ID.
+	ID() string
+
+	// ContainerID() string
+
 	// Priority.
 	Priority() int
 	// Error interface.

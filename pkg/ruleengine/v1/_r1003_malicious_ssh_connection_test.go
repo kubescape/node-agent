@@ -26,7 +26,7 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 		DstEndpoint: "1.1.1.1",
 	}
 
-	openEvent := &tracing.OpenEvent{
+	openEvent := &traceropentype.Event{
 		GeneralEvent: tracing.GeneralEvent{
 			ProcessDetails: tracing.ProcessDetails{
 				Pid: 1,
@@ -38,7 +38,7 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 		},
 		PathName: "/etc/ssh/sshd_config",
 	}
-	rule.ProcessEvent(tracing.OpenEventType, openEvent, nil, &EngineAccessMock{})
+	rule.ProcessEvent(traceropentype.EventType, openEvent, nil, &EngineAccessMock{})
 	failure := rule.ProcessEvent(tracing.NetworkEventType, networkEvent, nil, &EngineAccessMock{})
 	if failure == nil {
 		t.Errorf("Expected failure, but got nil")

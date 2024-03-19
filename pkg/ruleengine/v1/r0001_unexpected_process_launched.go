@@ -38,6 +38,9 @@ type R0001UnexpectedProcessLaunched struct {
 func (rule *R0001UnexpectedProcessLaunched) Name() string {
 	return R0001UnexpectedProcessLaunchedRuleName
 }
+func (rule *R0001UnexpectedProcessLaunched) ID() string {
+	return R0001ID
+}
 
 func CreateRuleR0001UnexpectedProcessLaunched() *R0001UnexpectedProcessLaunched {
 	return &R0001UnexpectedProcessLaunched{}
@@ -58,7 +61,7 @@ func (rule *R0001UnexpectedProcessLaunched) generatePatchCommand(event *tracerex
 		event.GetContainer(), getExecPathFromEvent(event), argList)
 }
 
-func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, _ ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}
@@ -72,6 +75,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 	if ap == nil {
 		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
+			RuleID:           rule.ID(),
 			Err:              "Application profile is missing",
 			FailureEvent:     utils.ExecToGeneralEvent(execEvent),
 			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod \"%s\" and add the exec call \"%s\" to the whitelist", execEvent.GetPod(), p),

@@ -12,7 +12,7 @@ func NewRuleCreator() *RuleCreatorImpl {
 	return &RuleCreatorImpl{
 		ruleDescriptions: []RuleDescriptor{
 			R0001UnexpectedProcessLaunchedRuleDescriptor,
-			// R0002UnexpectedFileAccessRuleDescriptor,
+			R0002UnexpectedFileAccessRuleDescriptor,
 			// R0003UnexpectedSystemCallRuleDescriptor,
 			// R0004UnexpectedCapabilityUsedRuleDescriptor,
 			// R0005UnexpectedDomainRequestRuleDescriptor,

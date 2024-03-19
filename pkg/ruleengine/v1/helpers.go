@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/ruleengine"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -25,4 +26,22 @@ func getContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containe
 		}
 	}
 	return v1beta1.ApplicationProfileContainer{}, fmt.Errorf("container %s not found in application profile", containerName)
+}
+
+func getContainerMountPaths(namespace, podName, containerName string, k8sProvider ruleengine.K8sObjectProvider) ([]string, error) {
+	podSpec, err := k8sProvider.GetPodSpec(namespace, podName)
+	if err != nil {
+		return []string{}, fmt.Errorf("failed to get pod spec: %v", err)
+	}
+
+	mountPaths := []string{}
+	for _, container := range podSpec.Containers {
+		if container.Name == containerName {
+			for _, volumeMount := range container.VolumeMounts {
+				mountPaths = append(mountPaths, volumeMount.MountPath)
+			}
+		}
+	}
+
+	return mountPaths, nil
 }

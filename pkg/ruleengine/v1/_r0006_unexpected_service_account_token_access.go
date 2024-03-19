@@ -8,7 +8,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -24,7 +23,7 @@ var ServiceAccountTokenPathsPrefixs = []string{
 	"/var/run/secrets/kubernetes.io/serviceaccount",
 }
 
-var R0006UnexpectedServiceAccountTokenAccessRuleDescriptor = RuleDesciptor{
+var R0006UnexpectedServiceAccountTokenAccessRuleDescriptor = RuleDescriptor{
 	ID:          R0006ID,
 	Name:        R0006UnexpectedServiceAccountTokenAccessRuleName,
 	Description: "Detecting unexpected access to service account token.",
@@ -32,7 +31,7 @@ var R0006UnexpectedServiceAccountTokenAccessRuleDescriptor = RuleDesciptor{
 	Priority:    RulePriorityHigh,
 	Requirements: &RuleRequirements{
 		EventTypes: []tracing.EventType{
-			tracing.OpenEventType,
+			traceropentype.EventType,
 		},
 		NeedApplicationProfile: true,
 	},
@@ -50,7 +49,7 @@ type R0006UnexpectedServiceAccountTokenAccessFailure struct {
 	RulePriority     int
 	Err              string
 	FixSuggestionMsg string
-	FailureEvent     *tracing.OpenEvent
+	FailureEvent     *traceropentype.Event
 }
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) Name() string {
@@ -64,7 +63,7 @@ func CreateRuleR0006UnexpectedServiceAccountTokenAccess() *R0006UnexpectedServic
 func (rule *R0006UnexpectedServiceAccountTokenAccess) DeleteRule() {
 }
 
-func (rule *R0006UnexpectedServiceAccountTokenAccess) generatePatchCommand(event *tracing.OpenEvent, appProfileAccess approfilecache.SingleApplicationProfileAccess) string {
+func (rule *R0006UnexpectedServiceAccountTokenAccess) generatePatchCommand(event *traceropentype.Event, ap *v1beta1.ApplicationProfile) string {
 	flagList := "["
 	for _, arg := range event.Flags {
 		flagList += "\"" + arg + "\","
@@ -74,16 +73,16 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) generatePatchCommand(event
 		flagList = flagList[:len(flagList)-1]
 	}
 	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"opens\": [{\"path\": \"%s\", \"flags\": %s}]}]}}'"
-	return fmt.Sprintf(baseTemplate, appProfileAccess.GetName(), appProfileAccess.GetNamespace(),
+	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(),
 		event.ContainerName, event.PathName, flagList)
 }
 
-func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType {
 		return nil
 	}
 
-	openEvent, ok := event.(*tracing.OpenEvent)
+	openEvent, ok := event.(*traceropentype.Event)
 	if !ok {
 		return nil
 	}
@@ -91,23 +90,23 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 	shouldCheckEvent := false
 
 	for _, prefix := range ServiceAccountTokenPathsPrefixs {
-		if strings.HasPrefix(openEvent.PathName, prefix) {
+		if strings.HasPrefix(openEvent.Path, prefix) {
 			shouldCheckEvent = true
 			break
 		}
 	}
 
 	if !shouldCheckEvent {
-		log.Debugf("Skipping event %s because it is not a service account token\n", openEvent.PathName)
+		log.Debugf("Skipping event %s because it is not a service account token\n", openEvent.Path)
 		return nil
 	}
 
-	if appProfileAccess == nil {
+	if ap == nil {
 		return &R0006UnexpectedServiceAccountTokenAccessFailure{
 			RuleName:         rule.Name(),
 			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", openEvent.PodName),
-			FailureEvent:     openEvent,
+			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", openEvent.GetPod()),
+			FailureEvent:     utils.OpenToGeneralEvent(openEvent),
 			RulePriority:     R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
 		}
 	}
@@ -117,8 +116,8 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		return &R0006UnexpectedServiceAccountTokenAccessFailure{
 			RuleName:         rule.Name(),
 			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", openEvent.PodName),
-			FailureEvent:     openEvent,
+			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", openEvent.GetPod()),
+			FailureEvent:     utils.OpenToGeneralEvent(openEvent),
 			RulePriority:     R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
 		}
 	}
@@ -133,9 +132,9 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 
 	return &R0006UnexpectedServiceAccountTokenAccessFailure{
 		RuleName:         rule.Name(),
-		Err:              fmt.Sprintf("Unexpected access to service account token: %s", openEvent.PathName),
-		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.PathName, openEvent.PodName, rule.generatePatchCommand(openEvent, appProfileAccess)),
-		FailureEvent:     openEvent,
+		Err:              fmt.Sprintf("Unexpected access to service account token: %s", openEvent.Path),
+		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
+		FailureEvent:     utils.OpenToGeneralEvent(openEvent),
 		RulePriority:     R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
 	}
 }

@@ -16,7 +16,7 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 	}
 
 	// Create a file access event
-	e := &tracing.OpenEvent{
+	e := &traceropentype.Event{
 		GeneralEvent: tracing.GeneralEvent{
 			ContainerID:   "test",
 			PodName:       "test",
@@ -29,14 +29,14 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 	}
 
 	// Test with nil appProfileAccess
-	ruleResult := r.ProcessEvent(tracing.OpenEventType, e, nil, &EngineAccessMock{})
+	ruleResult := r.ProcessEvent(traceropentype.EventType, e, nil, &EngineAccessMock{})
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since no appProfile")
 		return
 	}
 
 	// Test with empty appProfileAccess
-	ruleResult = r.ProcessEvent(tracing.OpenEventType, e, &MockAppProfileAccess{}, &EngineAccessMock{})
+	ruleResult = r.ProcessEvent(traceropentype.EventType, e, &MockAppProfileAccess{}, &EngineAccessMock{})
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since file is not whitelisted")
 		return
@@ -44,7 +44,7 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 
 	// Test with whitelisted file
 	e.PathName = "/run/secrets/kubernetes.io/serviceaccount/asdasd"
-	ruleResult = r.ProcessEvent(tracing.OpenEventType, e, &MockAppProfileAccess{
+	ruleResult = r.ProcessEvent(traceropentype.EventType, e, &MockAppProfileAccess{
 		OpenCalls: []collector.OpenCalls{
 			{
 				Path:  "/var/run/secrets/kubernetes.io/serviceaccount",

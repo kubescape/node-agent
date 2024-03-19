@@ -1,0 +1,196 @@
+package ruleengine
+
+import (
+	"fmt"
+	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
+	"strings"
+
+	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	log "github.com/sirupsen/logrus"
+
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+)
+
+const (
+	R0002ID                           = "R0002"
+	R0002UnexpectedFileAccessRuleName = "Unexpected file access"
+)
+
+var R0002UnexpectedFileAccessRuleDescriptor = RuleDescriptor{
+	ID:          R0002ID,
+	Name:        R0002UnexpectedFileAccessRuleName,
+	Description: "Detecting file access that are not whitelisted by application profile. File access is defined by the combination of path and flags",
+	Tags:        []string{"open", "whitelisted"},
+	Priority:    RulePriorityMed,
+	Requirements: &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.OpenEventType},
+		NeedApplicationProfile: true,
+	},
+	RuleCreationFunc: func() ruleengine.RuleEvaluator {
+		return CreateRuleR0002UnexpectedFileAccess()
+	},
+}
+
+type R0002UnexpectedFileAccess struct {
+	BaseRule
+	shouldIgnoreMounts bool
+	ignorePrefixes     []string
+}
+
+func CreateRuleR0002UnexpectedFileAccess() *R0002UnexpectedFileAccess {
+	return &R0002UnexpectedFileAccess{
+		shouldIgnoreMounts: false,
+		ignorePrefixes:     []string{},
+	}
+}
+
+func (rule *R0002UnexpectedFileAccess) Name() string {
+	return R0002UnexpectedFileAccessRuleName
+}
+func (rule *R0002UnexpectedFileAccess) ID() string {
+	return R0002ID
+}
+
+func interfaceToStringSlice(val interface{}) ([]string, bool) {
+	sliceOfInterfaces, ok := val.([]interface{})
+	if ok {
+		sliceOfStrings := []string{}
+		for _, interfaceVal := range sliceOfInterfaces {
+			sliceOfStrings = append(sliceOfStrings, fmt.Sprintf("%v", interfaceVal))
+		}
+		return sliceOfStrings, true
+	}
+	return nil, false
+}
+
+func (rule *R0002UnexpectedFileAccess) SetParameters(parameters map[string]interface{}) {
+	rule.BaseRule.SetParameters(parameters)
+
+	rule.shouldIgnoreMounts = fmt.Sprintf("%v", rule.GetParameters()["ignoreMounts"]) == "true"
+
+	ignorePrefixesInterface := rule.GetParameters()["ignorePrefixes"]
+	if ignorePrefixesInterface == nil {
+		return
+	}
+
+	ignorePrefixes, ok := interfaceToStringSlice(ignorePrefixesInterface)
+	if ok {
+		for _, prefix := range ignorePrefixes {
+			rule.ignorePrefixes = append(rule.ignorePrefixes, fmt.Sprintf("%v", prefix))
+		}
+	} else {
+		logger.L().Warning("failed to convert ignorePrefixes to []string", helpers.String("ruleID", rule.ID()))
+	}
+
+}
+
+func (rule *R0002UnexpectedFileAccess) DeleteRule() {
+}
+
+func (rule *R0002UnexpectedFileAccess) generatePatchCommand(event *traceropentype.Event, ap *v1beta1.ApplicationProfile) string {
+	flagList := "["
+	for _, arg := range event.Flags {
+		flagList += "\"" + arg + "\","
+	}
+	// remove the last comma
+	if len(flagList) > 1 {
+		flagList = flagList[:len(flagList)-1]
+	}
+	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"opens\": [{\"path\": \"%s\", \"flags\": %s}]}]}}'"
+	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(), event.GetContainer(), event.Path, flagList)
+}
+
+func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+	if eventType != utils.OpenEventType {
+		return nil
+	}
+
+	openEvent, ok := event.(*traceropentype.Event)
+	if !ok {
+		return nil
+	}
+
+	// Check if path is ignored
+	for _, prefix := range rule.ignorePrefixes {
+		if strings.HasPrefix(openEvent.Path, prefix) {
+			log.Debugf("Path %s is ignored - Skipping check", openEvent.Path)
+			return nil
+		}
+	}
+
+	if rule.shouldIgnoreMounts {
+		mounts, err := getContainerMountPaths(openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer(), k8sProvider)
+		if err != nil {
+			log.Errorf("Failed to get container mount paths: %v", err)
+			return nil
+		}
+		for _, mount := range mounts {
+			if isPathContained(mount, openEvent.Path) {
+				return nil
+			}
+		}
+	}
+
+	if ap == nil {
+		return &GenericRuleFailure{
+			RuleName:         rule.Name(),
+			RuleID:           rule.ID(),
+			Err:              "Application profile is missing",
+			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", openEvent.GetPod()),
+			FailureEvent:     utils.OpenToGeneralEvent(openEvent),
+			RulePriority:     R0002UnexpectedFileAccessRuleDescriptor.Priority,
+		}
+	}
+
+	appProfileOpenList, err := getContainerFromApplicationProfile(ap, openEvent.GetContainer())
+	if err != nil {
+		return &GenericRuleFailure{
+			RuleName:         rule.Name(),
+			RuleID:           rule.ID(),
+			Err:              "Application profile is missing",
+			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", openEvent.GetPod()),
+			FailureEvent:     utils.OpenToGeneralEvent(openEvent),
+			RulePriority:     R0002UnexpectedFileAccessRuleDescriptor.Priority,
+		}
+	}
+
+	for _, open := range appProfileOpenList.Opens {
+		if open.Path == openEvent.Path {
+			found := 0
+			for _, eventOpenFlag := range openEvent.Flags {
+				// Check that event open flag is in the open.Flags
+				for _, profileOpenFlag := range open.Flags {
+					if eventOpenFlag == profileOpenFlag {
+						found += 1
+					}
+				}
+			}
+			if found == len(openEvent.Flags) {
+				return nil
+			}
+			// TODO: optimize this list (so path will be only once in the list so we can break the loop)
+		}
+	}
+
+	return &GenericRuleFailure{
+		RuleName:         rule.Name(),
+		Err:              fmt.Sprintf("Unexpected file access: %s with flags %v", openEvent.Path, openEvent.Flags),
+		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
+		FailureEvent:     utils.OpenToGeneralEvent(openEvent),
+		RulePriority:     R0002UnexpectedFileAccessRuleDescriptor.Priority,
+	}
+}
+
+func isPathContained(basepath, targetpath string) bool {
+	return strings.HasPrefix(targetpath, basepath)
+}
+
+func (rule *R0002UnexpectedFileAccess) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes:             []utils.EventType{utils.OpenEventType},
+		NeedApplicationProfile: true,
+	}
+}

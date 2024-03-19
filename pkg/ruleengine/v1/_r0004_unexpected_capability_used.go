@@ -5,7 +5,6 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 
-	"github.com/armosec/kubecop/pkg/approfilecache"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -15,7 +14,7 @@ const (
 	R0004UnexpectedCapabilityUsedRuleName = "Unexpected capability used"
 )
 
-var R0004UnexpectedCapabilityUsedRuleDescriptor = RuleDesciptor{
+var R0004UnexpectedCapabilityUsedRuleDescriptor = RuleDescriptor{
 	ID:          R0004ID,
 	Name:        R0004UnexpectedCapabilityUsedRuleName,
 	Description: "Detecting unexpected capabilities that are not whitelisted by application profile. Every unexpected capability is identified in context of a syscall and will be alerted only once per container.",
@@ -53,13 +52,13 @@ func CreateRuleR0004UnexpectedCapabilityUsed() *R0004UnexpectedCapabilityUsed {
 func (rule *R0004UnexpectedCapabilityUsed) DeleteRule() {
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) generatePatchCommand(event *tracing.CapabilitiesEvent, appProfileAccess approfilecache.SingleApplicationProfileAccess) string {
+func (rule *R0004UnexpectedCapabilityUsed) generatePatchCommand(event *tracing.CapabilitiesEvent, ap *v1beta1.ApplicationProfile) string {
 	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"capabilities\": [{\"syscall\": \"%s\", \"caps\": [%s]}]}]}}'"
-	return fmt.Sprintf(baseTemplate, appProfileAccess.GetName(), appProfileAccess.GetNamespace(),
+	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(),
 		event.ContainerName, event.Syscall, event.CapabilityName)
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
 	if eventType != utils.CapabilitiesEventType {
 		return nil
 	}
@@ -69,7 +68,7 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
-	if appProfileAccess == nil {
+	if ap == nil {
 		return &R0004UnexpectedCapabilityUsedFailure{
 			RuleName:         rule.Name(),
 			Err:              "Application profile is missing",

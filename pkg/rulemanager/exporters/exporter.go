@@ -12,3 +12,13 @@ type Exporter interface {
 	// SendMalwareAlert sends an alert on malware detection to the exporter.
 	SendMalwareAlert(malwarescanner.MalwareDescription)
 }
+
+var _ Exporter = (*ExporterMock)(nil)
+
+type ExporterMock struct{}
+
+func (e *ExporterMock) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+}
+
+func (e *ExporterMock) SendMalwareAlert(malwareDescription malwarescanner.MalwareDescription) {
+}

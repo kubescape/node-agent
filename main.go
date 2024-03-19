@@ -13,7 +13,8 @@ import (
 	"node-agent/pkg/containerwatcher/v1"
 	"node-agent/pkg/dnsmanager"
 	"node-agent/pkg/filehandler/v1"
-	metricsmanager "node-agent/pkg/metricsmanager/prometheus"
+	metricsmanager "node-agent/pkg/metricsmanager"
+	metricprometheus "node-agent/pkg/metricsmanager/prometheus"
 	"node-agent/pkg/networkmanager"
 	"node-agent/pkg/relevancymanager"
 	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
@@ -94,7 +95,12 @@ func main() {
 	}
 
 	// Create Prometheus metrics exporter
-	prometheusExporter := metricsmanager.NewPrometheusMetric()
+	var prometheusExporter metricsmanager.MetricsManager
+	if cfg.EnablePrometheusExporter {
+		prometheusExporter = metricprometheus.NewPrometheusMetric()
+	} else {
+		prometheusExporter = metricsmanager.NewMetricsMock()
+	}
 
 	// Create the application profile manager
 	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
