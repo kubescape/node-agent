@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/utils"
 	"testing"
 
 	"github.com/kubescape/kapprofiler/pkg/tracing"
@@ -26,7 +27,7 @@ func TestR1002LoadKernelModule(t *testing.T) {
 		Syscalls: []string{"test"},
 	}
 
-	ruleResult := r.ProcessEvent(tracing.SyscallEventType, e, nil, nil)
+	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, nil, nil)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since syscall is not init_module")
@@ -43,7 +44,7 @@ func TestR1002LoadKernelModule(t *testing.T) {
 		Syscalls: []string{"init_module"},
 	}
 
-	ruleResult = r.ProcessEvent(tracing.SyscallEventType, e, nil, nil)
+	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, nil, nil)
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of init_module is not allowed")

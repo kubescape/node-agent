@@ -3,9 +3,8 @@ package ruleengine
 import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
-	"slices"
 
-	"github.com/kubescape/kapprofiler/pkg/tracing"
+	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -21,8 +20,8 @@ var R1006UnshareSyscallRuleDescriptor = RuleDescriptor{
 	Tags:        []string{"syscall", "escape", "unshare"},
 	Priority:    RulePriorityHigh,
 	Requirements: &RuleRequirements{
-		EventTypes: []tracing.EventType{
-			tracing.SyscallEventType,
+		EventTypes: []utils.EventType{
+			utils.SyscallEventType,
 		},
 		NeedApplicationProfile: false,
 	},
@@ -31,49 +30,49 @@ var R1006UnshareSyscallRuleDescriptor = RuleDescriptor{
 	},
 }
 
+var _ ruleengine.RuleEvaluator = (*R1006UnshareSyscall)(nil)
+
 type R1006UnshareSyscall struct {
 	BaseRule
-	aleadyNotified bool
+	alreadyNotified bool
 }
 
-type R1006UnshareSyscallFailure struct {
-	RuleName         string
-	RulePriority     int
-	Err              string
-	FixSuggestionMsg string
-	FailureEvent     *tracing.SyscallEvent
+func CreateRuleR1006UnshareSyscall() *R1006UnshareSyscall {
+	return &R1006UnshareSyscall{alreadyNotified: false}
 }
 
 func (rule *R1006UnshareSyscall) Name() string {
 	return R1006UnshareSyscallRuleName
 }
 
-func CreateRuleR1006UnshareSyscall() *R1006UnshareSyscall {
-	return &R1006UnshareSyscall{aleadyNotified: false}
+func (rule *R1006UnshareSyscall) ID() string {
+	return R1006ID
 }
-
 func (rule *R1006UnshareSyscall) DeleteRule() {
 }
 
 func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
-	if rule.aleadyNotified {
+	if rule.alreadyNotified {
+		// TODO: Why are we handling this logic in the rule?
 		return nil
 	}
 
-	if eventType != utils.SyscallEventType {
+	if eventType != utils.SyscallEventType && eventType != utils.CapabilitiesEventType {
 		return nil
 	}
 
-	syscallEvent, ok := event.(*tracing.SyscallEvent)
+	syscallEvent, ok := event.(*tracercapabilitiestype.Event)
 	if !ok {
 		return nil
 	}
-	if slices.Contains(syscallEvent.Syscalls, "unshare") {
-		rule.aleadyNotified = true
-		return &R1006UnshareSyscallFailure{
+
+	if syscallEvent.Syscall == "unshare" {
+		rule.alreadyNotified = true
+		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
+			RuleID:           rule.ID(),
 			Err:              "Unshare System Call usage",
-			FailureEvent:     syscallEvent,
+			FailureEvent:     utils.CapabilitiesToGeneralEvent(syscallEvent),
 			FixSuggestionMsg: "If this is a legitimate action, please add consider removing this workload from the binding of this rule",
 			RulePriority:     R1006UnshareSyscallRuleDescriptor.Priority,
 		}
@@ -87,24 +86,4 @@ func (rule *R1006UnshareSyscall) Requirements() ruleengine.RuleSpec {
 		EventTypes:             []utils.EventType{utils.SyscallEventType},
 		NeedApplicationProfile: false,
 	}
-}
-
-func (rule *R1006UnshareSyscallFailure) Name() string {
-	return rule.RuleName
-}
-
-func (rule *R1006UnshareSyscallFailure) Error() string {
-	return rule.Err
-}
-
-func (rule *R1006UnshareSyscallFailure) Event() *utils.GeneralEvent {
-	return rule.FailureEvent
-}
-
-func (rule *R1006UnshareSyscallFailure) Priority() int {
-	return rule.RulePriority
-}
-
-func (rule *R1006UnshareSyscallFailure) FixSuggestion() string {
-	return rule.FixSuggestionMsg
 }

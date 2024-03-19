@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/utils"
 	"testing"
 
 	"github.com/kubescape/kapprofiler/pkg/tracing"
@@ -26,7 +27,7 @@ func TestR1006UnshareSyscall(t *testing.T) {
 		Syscalls: []string{"test"},
 	}
 
-	ruleResult := r.ProcessEvent(tracing.SyscallEventType, e, nil, nil)
+	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, nil, nil)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since syscall is not unshare")
@@ -36,7 +37,7 @@ func TestR1006UnshareSyscall(t *testing.T) {
 	// Create a syscall event
 	e.Syscalls = append(e.Syscalls, "unshare")
 
-	ruleResult = r.ProcessEvent(tracing.SyscallEventType, e, nil, nil)
+	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, nil, nil)
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of unshare is used")

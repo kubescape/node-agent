@@ -1,8 +1,10 @@
 package ruleengine
 
 import (
+	"node-agent/pkg/utils"
 	"testing"
 
+	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	"github.com/kubescape/kapprofiler/pkg/collector"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
 )
@@ -16,7 +18,7 @@ func TestR0005UnexpectedDomainRequest(t *testing.T) {
 	}
 
 	// Create a domain request event
-	e := &tracing.DnsEvent{
+	e := &tracerdnstype.Event{
 		GeneralEvent: tracing.GeneralEvent{
 			ContainerID: "test",
 			PodName:     "test",
@@ -30,19 +32,19 @@ func TestR0005UnexpectedDomainRequest(t *testing.T) {
 	}
 
 	// Test with nil appProfileAccess
-	ruleResult := r.ProcessEvent(tracing.DnsEventType, e, nil, nil)
+	ruleResult := r.ProcessEvent(utils.DnsEventType, e, nil, nil)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since no appProfile")
 	}
 
 	// Test with empty appProfileAccess
-	ruleResult = r.ProcessEvent(tracing.DnsEventType, e, &MockAppProfileAccess{}, nil)
+	ruleResult = r.ProcessEvent(utils.DnsEventType, e, &MockAppProfileAccess{}, nil)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since domain is not whitelisted")
 	}
 
 	// Test with whitelisted domain
-	ruleResult = r.ProcessEvent(tracing.DnsEventType, e, &MockAppProfileAccess{
+	ruleResult = r.ProcessEvent(utils.DnsEventType, e, &MockAppProfileAccess{
 		Dns: []collector.DnsCalls{
 			{
 				DnsName: "test.com",

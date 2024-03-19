@@ -6,9 +6,8 @@ import (
 	"node-agent/pkg/utils"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
+	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 
-	"github.com/kubescape/kapprofiler/pkg/tracing"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -18,7 +17,7 @@ const (
 )
 
 // ServiceAccountTokenPathsPrefixs is a list because of symlinks.
-var ServiceAccountTokenPathsPrefixs = []string{
+var serviceAccountTokenPathsPrefix = []string{
 	"/run/secrets/kubernetes.io/serviceaccount",
 	"/var/run/secrets/kubernetes.io/serviceaccount",
 }
@@ -30,8 +29,8 @@ var R0006UnexpectedServiceAccountTokenAccessRuleDescriptor = RuleDescriptor{
 	Tags:        []string{"token", "malicious", "whitelisted"},
 	Priority:    RulePriorityHigh,
 	Requirements: &RuleRequirements{
-		EventTypes: []tracing.EventType{
-			traceropentype.EventType,
+		EventTypes: []utils.EventType{
+			utils.OpenEventType,
 		},
 		NeedApplicationProfile: true,
 	},
@@ -39,25 +38,21 @@ var R0006UnexpectedServiceAccountTokenAccessRuleDescriptor = RuleDescriptor{
 		return CreateRuleR0006UnexpectedServiceAccountTokenAccess()
 	},
 }
+var _ ruleengine.RuleEvaluator = (*R0006UnexpectedServiceAccountTokenAccess)(nil)
 
 type R0006UnexpectedServiceAccountTokenAccess struct {
 	BaseRule
 }
 
-type R0006UnexpectedServiceAccountTokenAccessFailure struct {
-	RuleName         string
-	RulePriority     int
-	Err              string
-	FixSuggestionMsg string
-	FailureEvent     *traceropentype.Event
+func CreateRuleR0006UnexpectedServiceAccountTokenAccess() *R0006UnexpectedServiceAccountTokenAccess {
+	return &R0006UnexpectedServiceAccountTokenAccess{}
 }
-
 func (rule *R0006UnexpectedServiceAccountTokenAccess) Name() string {
 	return R0006UnexpectedServiceAccountTokenAccessRuleName
 }
 
-func CreateRuleR0006UnexpectedServiceAccountTokenAccess() *R0006UnexpectedServiceAccountTokenAccess {
-	return &R0006UnexpectedServiceAccountTokenAccess{}
+func (rule *R0006UnexpectedServiceAccountTokenAccess) ID() string {
+	return R0006ID
 }
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) DeleteRule() {
@@ -74,7 +69,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) generatePatchCommand(event
 	}
 	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"opens\": [{\"path\": \"%s\", \"flags\": %s}]}]}}'"
 	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(),
-		event.ContainerName, event.PathName, flagList)
+		event.GetContainer(), event.Path, flagList)
 }
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
@@ -89,7 +84,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 
 	shouldCheckEvent := false
 
-	for _, prefix := range ServiceAccountTokenPathsPrefixs {
+	for _, prefix := range serviceAccountTokenPathsPrefix {
 		if strings.HasPrefix(openEvent.Path, prefix) {
 			shouldCheckEvent = true
 			break
@@ -97,12 +92,11 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 	}
 
 	if !shouldCheckEvent {
-		log.Debugf("Skipping event %s because it is not a service account token\n", openEvent.Path)
 		return nil
 	}
 
 	if ap == nil {
-		return &R0006UnexpectedServiceAccountTokenAccessFailure{
+		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
 			Err:              "Application profile is missing",
 			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", openEvent.GetPod()),
@@ -111,10 +105,11 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		}
 	}
 
-	appProfileOpenList, err := appProfileAccess.GetOpenList()
-	if err != nil || appProfileOpenList == nil {
-		return &R0006UnexpectedServiceAccountTokenAccessFailure{
+	appProfileOpenList, err := getContainerFromApplicationProfile(ap, openEvent.GetContainer())
+	if err != nil {
+		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
+			RuleID:           rule.ID(),
 			Err:              "Application profile is missing",
 			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", openEvent.GetPod()),
 			FailureEvent:     utils.OpenToGeneralEvent(openEvent),
@@ -122,16 +117,17 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		}
 	}
 
-	for _, open := range *appProfileOpenList {
-		for _, prefix := range ServiceAccountTokenPathsPrefixs {
+	for _, open := range appProfileOpenList.Opens {
+		for _, prefix := range serviceAccountTokenPathsPrefix {
 			if strings.HasPrefix(open.Path, prefix) {
 				return nil
 			}
 		}
 	}
 
-	return &R0006UnexpectedServiceAccountTokenAccessFailure{
+	return &GenericRuleFailure{
 		RuleName:         rule.Name(),
+		RuleID:           rule.ID(),
 		Err:              fmt.Sprintf("Unexpected access to service account token: %s", openEvent.Path),
 		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
 		FailureEvent:     utils.OpenToGeneralEvent(openEvent),
@@ -144,24 +140,4 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) Requirements() ruleengine.
 		EventTypes:             []utils.EventType{utils.OpenEventType},
 		NeedApplicationProfile: true,
 	}
-}
-
-func (rule *R0006UnexpectedServiceAccountTokenAccessFailure) Name() string {
-	return rule.RuleName
-}
-
-func (rule *R0006UnexpectedServiceAccountTokenAccessFailure) Error() string {
-	return rule.Err
-}
-
-func (rule *R0006UnexpectedServiceAccountTokenAccessFailure) Event() *utils.GeneralEvent {
-	return rule.FailureEvent
-}
-
-func (rule *R0006UnexpectedServiceAccountTokenAccessFailure) Priority() int {
-	return rule.RulePriority
-}
-
-func (rule *R0006UnexpectedServiceAccountTokenAccessFailure) FixSuggestion() string {
-	return rule.FixSuggestionMsg
 }

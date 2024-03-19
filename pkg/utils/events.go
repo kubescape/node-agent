@@ -48,6 +48,7 @@ type GeneralEvent struct {
 }
 
 func ExecToGeneralEvent(event *tracerexectype.Event) *GeneralEvent {
+
 	return &GeneralEvent{
 		ProcessDetails: ProcessDetails{
 			Pid:  event.Pid,
@@ -66,6 +67,7 @@ func ExecToGeneralEvent(event *tracerexectype.Event) *GeneralEvent {
 	}
 }
 func OpenToGeneralEvent(event *traceropentype.Event) *GeneralEvent {
+
 	return &GeneralEvent{
 		ProcessDetails: ProcessDetails{
 			Pid:  event.Pid,

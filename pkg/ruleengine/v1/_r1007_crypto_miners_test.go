@@ -5,6 +5,7 @@ import (
 	"node-agent/pkg/utils"
 	"testing"
 
+	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	"github.com/kubescape/kapprofiler/pkg/tracing"
 )
 
@@ -48,7 +49,7 @@ func TestR1007CryptoMiners(t *testing.T) {
 	}
 
 	// Create dns event
-	e2 := &tracing.DnsEvent{
+	e2 := &tracerdnstype.Event{
 		GeneralEvent: tracing.GeneralEvent{
 			ContainerID: "test",
 			PodName:     "test",
@@ -59,7 +60,7 @@ func TestR1007CryptoMiners(t *testing.T) {
 		Addresses: []string{},
 	}
 
-	ruleResult = r.ProcessEvent(tracing.DnsEventType, e2, nil, nil)
+	ruleResult = r.ProcessEvent(utils.DnsEventType, e2, nil, nil)
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of dns name is in the commonly used crypto miners domains")
@@ -76,7 +77,7 @@ func TestR1007CryptoMiners(t *testing.T) {
 		},
 	}
 
-	ruleResult = r.ProcessEvent(tracing.RandomXEventType, e3, nil, nil)
+	ruleResult = r.ProcessEvent(utils.RandomXEventType, e3, nil, nil)
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of RandomX event")

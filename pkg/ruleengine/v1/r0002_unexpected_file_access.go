@@ -117,7 +117,6 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 	// Check if path is ignored
 	for _, prefix := range rule.ignorePrefixes {
 		if strings.HasPrefix(openEvent.Path, prefix) {
-			log.Debugf("Path %s is ignored - Skipping check", openEvent.Path)
 			return nil
 		}
 	}

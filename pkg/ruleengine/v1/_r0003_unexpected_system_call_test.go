@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/utils"
 	"testing"
 
 	"github.com/kubescape/kapprofiler/pkg/tracing"
@@ -27,19 +28,19 @@ func TestR0003UnexpectedSystemCall(t *testing.T) {
 	}
 
 	// Test with nil appProfileAccess
-	ruleResult := r.ProcessEvent(tracing.SyscallEventType, e, nil, nil)
+	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, nil, nil)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to be nil since no syscall event")
 	}
 
 	// Test with mock appProfileAccess
-	ruleResult = r.ProcessEvent(tracing.SyscallEventType, e, &MockAppProfileAccess{}, nil)
+	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &MockAppProfileAccess{}, nil)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to be not nil since no syscall event")
 	}
 
 	// Test with mock appProfileAccess and syscall
-	ruleResult = r.ProcessEvent(tracing.SyscallEventType, e, &MockAppProfileAccess{
+	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &MockAppProfileAccess{
 		Syscalls: []string{"test"},
 	}, nil)
 	if ruleResult != nil {

@@ -5,7 +5,9 @@ import (
 	"node-agent/pkg/utils"
 	"slices"
 
-	"github.com/kubescape/kapprofiler/pkg/tracing"
+	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
+
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -24,7 +26,7 @@ var CommonlyUsedCryptoMinersPorts = []uint16{
 	45700, // Monero (XMR) - Stratum mining protocol (TCP). (stratum+tcp://xmr.pool.minergate.com)
 }
 
-var CommonlyUsedCryptoMinersDomains = []string{
+var commonlyUsedCryptoMinersDomains = []string{
 	"2cryptocalc.com",
 	"2miners.com",
 	"antpool.com",
@@ -139,10 +141,10 @@ var R1007CryptoMinersRuleDescriptor = RuleDescriptor{
 	Tags:        []string{"network", "crypto", "miners", "malicious", "dns"},
 	Priority:    RulePriorityHigh,
 	Requirements: &RuleRequirements{
-		EventTypes: []tracing.EventType{
+		EventTypes: []utils.EventType{
 			utils.NetworkEventType,
-			tracing.DnsEventType,
-			tracing.RandomXEventType,
+			utils.DnsEventType,
+			utils.RandomXEventType,
 		},
 		NeedApplicationProfile: false,
 	},
@@ -151,58 +153,59 @@ var R1007CryptoMinersRuleDescriptor = RuleDescriptor{
 	},
 }
 
+var _ ruleengine.RuleEvaluator = (*R1007CryptoMiners)(nil)
+
 type R1007CryptoMiners struct {
 	BaseRule
-}
-
-type R1007CryptoMinersFailure struct {
-	RuleName         string
-	RulePriority     int
-	Err              string
-	FixSuggestionMsg string
-	FailureEvent     *tracing.GeneralEvent
-}
-
-func (rule *R1007CryptoMiners) Name() string {
-	return R1007CryptoMinersRuleName
 }
 
 func CreateRuleR1007CryptoMiners() *R1007CryptoMiners {
 	return &R1007CryptoMiners{}
 }
 
+func (rule *R1007CryptoMiners) Name() string {
+	return R1007CryptoMinersRuleName
+}
+
+func (rule *R1007CryptoMiners) ID() string {
+	return R1007ID
+}
+
 func (rule *R1007CryptoMiners) DeleteRule() {
 }
 
 func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
-	if eventType != utils.NetworkEventType && eventType != tracing.DnsEventType && eventType != tracing.RandomXEventType {
+	if eventType != utils.NetworkEventType && eventType != utils.DnsEventType && eventType != utils.RandomXEventType {
 		return nil
 	}
 
-	if randomXEvent, ok := event.(*tracing.RandomXEvent); ok {
-		return &R1007CryptoMinersFailure{
+	if randomXEvent, ok := event.(*utils.GeneralEvent); ok {
+		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
+			RuleID:           rule.ID(),
 			Err:              "Possible Crypto Miner detected",
-			FailureEvent:     &randomXEvent.GeneralEvent,
+			FailureEvent:     randomXEvent,
 			FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 			RulePriority:     R1007CryptoMinersRuleDescriptor.Priority,
 		}
 	} else if networkEvent, ok := event.(*tracernetworktype.Event); ok {
-		if networkEvent.Protocol == "TCP" && networkEvent.PacketType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
-			return &R1007CryptoMinersFailure{
+		if networkEvent.Proto == "TCP" && networkEvent.PktType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
+			return &GenericRuleFailure{
 				RuleName:         rule.Name(),
+				RuleID:           rule.ID(),
 				Err:              "Possible Crypto Miner port detected",
-				FailureEvent:     &networkEvent.GeneralEvent,
+				FailureEvent:     utils.NetworkToGeneralEvent(networkEvent),
 				FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 				RulePriority:     R1007CryptoMinersRuleDescriptor.Priority,
 			}
 		}
-	} else if dnsEvent, ok := event.(*tracing.DnsEvent); ok {
-		if slices.Contains(CommonlyUsedCryptoMinersDomains, dnsEvent.DnsName) {
-			return &R1007CryptoMinersFailure{
+	} else if dnsEvent, ok := event.(*tracerdnstype.Event); ok {
+		if slices.Contains(commonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
+			return &GenericRuleFailure{
 				RuleName:         rule.Name(),
+				RuleID:           rule.ID(),
 				Err:              "Possible Crypto Miner domain detected",
-				FailureEvent:     &dnsEvent.GeneralEvent,
+				FailureEvent:     utils.DnsToGeneralEvent(dnsEvent),
 				FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 				RulePriority:     R1007CryptoMinersRuleDescriptor.Priority,
 			}
@@ -214,27 +217,7 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event int
 
 func (rule *R1007CryptoMiners) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R1007CryptoMinersRuleDescriptor.Requirements.EventTypes,
+		EventTypes:             []utils.EventType{utils.NetworkEventType, utils.DnsEventType, utils.RandomXEventType},
 		NeedApplicationProfile: false,
 	}
-}
-
-func (rule *R1007CryptoMinersFailure) Name() string {
-	return rule.RuleName
-}
-
-func (rule *R1007CryptoMinersFailure) Error() string {
-	return rule.Err
-}
-
-func (rule *R1007CryptoMinersFailure) Event() tracing.GeneralEvent {
-	return *rule.FailureEvent
-}
-
-func (rule *R1007CryptoMinersFailure) Priority() int {
-	return rule.RulePriority
-}
-
-func (rule *R1007CryptoMinersFailure) FixSuggestion() string {
-	return rule.FixSuggestionMsg
 }
