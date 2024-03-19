@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"node-agent/pkg/utils"
 	"testing"
 
 	"github.com/kubescape/kapprofiler/pkg/tracing"
@@ -39,14 +40,14 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 		PathName: "/etc/ssh/sshd_config",
 	}
 	rule.ProcessEvent(traceropentype.EventType, openEvent, nil, &EngineAccessMock{})
-	failure := rule.ProcessEvent(tracing.NetworkEventType, networkEvent, nil, &EngineAccessMock{})
+	failure := rule.ProcessEvent(utils.NetworkEventType, networkEvent, nil, &EngineAccessMock{})
 	if failure == nil {
 		t.Errorf("Expected failure, but got nil")
 	}
 
 	// Test case 2: SSH connection to allowed port
 	networkEvent.Port = 22
-	failure = rule.ProcessEvent(tracing.NetworkEventType, networkEvent, nil, &EngineAccessMock{})
+	failure = rule.ProcessEvent(utils.NetworkEventType, networkEvent, nil, &EngineAccessMock{})
 	if failure != nil {
 		t.Errorf("Expected failure to be nil, but got %v", failure)
 	}
@@ -54,7 +55,7 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 	// Test case 3: SSH connection to disallowed port, but not from SSH initiator
 	networkEvent.Port = 2222
 	networkEvent.Pid = 2
-	failure = rule.ProcessEvent(tracing.NetworkEventType, networkEvent, nil, &EngineAccessMock{})
+	failure = rule.ProcessEvent(utils.NetworkEventType, networkEvent, nil, &EngineAccessMock{})
 	if failure != nil {
 		t.Errorf("Expected failure to be nil, but got %v", failure)
 	}
@@ -63,7 +64,7 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 	networkEvent.Port = 2222
 	networkEvent.Pid = 1
 	networkEvent.Timestamp = 3
-	failure = rule.ProcessEvent(tracing.NetworkEventType, networkEvent, nil, &EngineAccessMock{})
+	failure = rule.ProcessEvent(utils.NetworkEventType, networkEvent, nil, &EngineAccessMock{})
 	if failure != nil {
 		t.Errorf("Expected failure to be nil, but got %v", failure)
 	}
@@ -72,7 +73,7 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 	networkEvent.Port = 2222
 	networkEvent.Pid = 1
 	networkEvent.Timestamp = 5
-	failure = rule.ProcessEvent(tracing.NetworkEventType, networkEvent, nil, &EngineAccessMock{})
+	failure = rule.ProcessEvent(utils.NetworkEventType, networkEvent, nil, &EngineAccessMock{})
 	if failure != nil {
 		t.Errorf("Expected failure to be nil, but got %v", failure)
 	}

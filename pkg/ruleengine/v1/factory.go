@@ -21,7 +21,7 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R1000ExecFromMaliciousSourceDescriptor,
 			// R1001ExecBinaryNotInBaseImageRuleDescriptor,
 			// R1002LoadKernelModuleRuleDescriptor,
-			// R1003MaliciousSSHConnectionRuleDescriptor,
+			R1003MaliciousSSHConnectionRuleDescriptor,
 			// R1004ExecFromMountRuleDescriptor,
 			// R1006UnshareSyscallRuleDescriptor,
 			// R1007CryptoMinersRuleDescriptor,

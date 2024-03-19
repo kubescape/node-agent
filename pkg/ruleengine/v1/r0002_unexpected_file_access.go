@@ -33,6 +33,7 @@ var R0002UnexpectedFileAccessRuleDescriptor = RuleDescriptor{
 		return CreateRuleR0002UnexpectedFileAccess()
 	},
 }
+var _ ruleengine.RuleEvaluator = (*R0002UnexpectedFileAccess)(nil)
 
 type R0002UnexpectedFileAccess struct {
 	BaseRule

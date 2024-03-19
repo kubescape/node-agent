@@ -140,7 +140,7 @@ var R1007CryptoMinersRuleDescriptor = RuleDescriptor{
 	Priority:    RulePriorityHigh,
 	Requirements: &RuleRequirements{
 		EventTypes: []tracing.EventType{
-			tracing.NetworkEventType,
+			utils.NetworkEventType,
 			tracing.DnsEventType,
 			tracing.RandomXEventType,
 		},
@@ -187,7 +187,7 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event int
 			FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 			RulePriority:     R1007CryptoMinersRuleDescriptor.Priority,
 		}
-	} else if networkEvent, ok := event.(*tracing.NetworkEvent); ok {
+	} else if networkEvent, ok := event.(*tracernetworktype.Event); ok {
 		if networkEvent.Protocol == "TCP" && networkEvent.PacketType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
 			return &R1007CryptoMinersFailure{
 				RuleName:         rule.Name(),

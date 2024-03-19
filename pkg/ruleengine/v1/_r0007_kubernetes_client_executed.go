@@ -46,7 +46,7 @@ var R0007KubernetesClientExecutedDescriptor = RuleDescriptor{
 	Priority:    RulePriorityCritical,
 	Tags:        []string{"exec", "malicious", "whitelisted"},
 	Requirements: &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType, tracing.NetworkEventType},
+		EventTypes:             []utils.EventType{utils.ExecveEventType, utils.NetworkEventType},
 		NeedApplicationProfile: true,
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
@@ -136,7 +136,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 }
 
 func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
-	if eventType != utils.ExecveEventType && eventType != tracing.NetworkEventType {
+	if eventType != utils.ExecveEventType && eventType != utils.NetworkEventType {
 		return nil
 	}
 
@@ -154,8 +154,8 @@ func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
-	if eventType == tracing.NetworkEventType {
-		networkEvent, ok := event.(*tracing.NetworkEvent)
+	if eventType == utils.NetworkEventType {
+		networkEvent, ok := event.(*tracernetworktype.Event)
 		if !ok {
 			return nil
 		}
@@ -177,7 +177,7 @@ func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventTyp
 
 func (rule *R0007KubernetesClientExecuted) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType, tracing.NetworkEventType},
+		EventTypes:             []utils.EventType{utils.ExecveEventType, utils.NetworkEventType},
 		NeedApplicationProfile: true,
 	}
 }

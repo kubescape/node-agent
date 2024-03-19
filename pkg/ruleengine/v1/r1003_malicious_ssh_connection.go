@@ -8,9 +8,12 @@ import (
 	"strings"
 	"time"
 
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
+
+	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+
 	log "github.com/sirupsen/logrus"
 
-	"github.com/kubescape/kapprofiler/pkg/tracing"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -51,13 +54,15 @@ var R1003MaliciousSSHConnectionRuleDescriptor = RuleDescriptor{
 	Tags:        []string{"ssh", "connection", "port", "malicious"},
 	Priority:    RulePriorityHigh,
 	Requirements: &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.OpenEventType, tracing.NetworkEventType},
+		EventTypes:             []utils.EventType{utils.OpenEventType, utils.NetworkEventType},
 		NeedApplicationProfile: false,
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1003MaliciousSSHConnection()
 	},
 }
+
+var _ ruleengine.RuleEvaluator = (*R1003MaliciousSSHConnection)(nil)
 
 type R1003MaliciousSSHConnection struct {
 	BaseRule
@@ -67,24 +72,19 @@ type R1003MaliciousSSHConnection struct {
 	allowedPorts              []uint16
 }
 
-type R1003MaliciousSSHConnectionFailure struct {
-	RuleName         string
-	Err              string
-	FixSuggestionMsg string
-	RulePriority     int
-	FailureEvent     *tracing.NetworkEvent
-}
-
-func (rule *R1003MaliciousSSHConnection) Name() string {
-	return R1003MaliciousSSHConnectionRuleName
-}
-
 func CreateRuleR1003MaliciousSSHConnection() *R1003MaliciousSSHConnection {
 	return &R1003MaliciousSSHConnection{accessRelatedFiles: false,
 		sshInitiatorPid:           0,
 		configFileAccessTimeStamp: 0,
 		allowedPorts:              []uint16{22},
 	}
+}
+func (rule *R1003MaliciousSSHConnection) Name() string {
+	return R1003MaliciousSSHConnectionRuleName
+}
+
+func (rule *R1003MaliciousSSHConnection) ID() string {
+	return R1003ID
 }
 
 func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interface{}) {
@@ -114,11 +114,11 @@ func (rule *R1003MaliciousSSHConnection) DeleteRule() {
 }
 
 func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
-	if eventType != utils.OpenEventType && eventType != tracing.NetworkEventType {
+	if eventType != utils.OpenEventType && eventType != utils.NetworkEventType {
 		return nil
 	}
 
-	if eventType == traceropentype.EventType && !rule.accessRelatedFiles {
+	if eventType == utils.OpenEventType && !rule.accessRelatedFiles {
 		openEvent, ok := event.(*traceropentype.Event)
 		if !ok {
 			return nil
@@ -126,33 +126,34 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 			if IsSSHConfigFile(openEvent.Path) {
 				rule.accessRelatedFiles = true
 				rule.sshInitiatorPid = openEvent.Pid
-				rule.configFileAccessTimeStamp = openEvent.Timestamp
+				rule.configFileAccessTimeStamp = int64(openEvent.Timestamp)
 			}
 
 			return nil
 		}
-	} else if eventType == tracing.NetworkEventType && rule.accessRelatedFiles {
-		networkEvent, ok := event.(*tracing.NetworkEvent)
+	} else if eventType == utils.NetworkEventType && rule.accessRelatedFiles {
+		networkEvent, ok := event.(*tracernetworktype.Event)
 		if !ok {
 			return nil
 		}
 
-		timestampDiffInSeconds := calculateTimestampDiffInSeconds(networkEvent.Timestamp, rule.configFileAccessTimeStamp)
+		timestampDiffInSeconds := calculateTimestampDiffInSeconds(int64(networkEvent.Timestamp), rule.configFileAccessTimeStamp)
 		if timestampDiffInSeconds > MaxTimeDiffInSeconds {
 			rule.accessRelatedFiles = false
 			rule.sshInitiatorPid = 0
 			rule.configFileAccessTimeStamp = 0
 			return nil
 		}
-		if networkEvent.Pid == rule.sshInitiatorPid && networkEvent.PacketType == "OUTGOING" && networkEvent.Protocol == "TCP" && !slices.Contains(rule.allowedPorts, networkEvent.Port) {
+		if networkEvent.Pid == rule.sshInitiatorPid && networkEvent.PktType == "OUTGOING" && networkEvent.Proto == "TCP" && !slices.Contains(rule.allowedPorts, networkEvent.Port) {
 			rule.accessRelatedFiles = false
 			rule.sshInitiatorPid = 0
 			rule.configFileAccessTimeStamp = 0
-			return &R1003MaliciousSSHConnectionFailure{
+			return &GenericRuleFailure{
 				RuleName:         rule.Name(),
+				RuleID:           rule.ID(),
 				Err:              fmt.Sprintf("ssh connection to port %d is not allowed", networkEvent.Port),
 				FixSuggestionMsg: "If this is a legitimate action, please add the port as a parameter to the binding of this rule",
-				FailureEvent:     networkEvent,
+				FailureEvent:     utils.NetworkToGeneralEvent(networkEvent),
 				RulePriority:     R1003MaliciousSSHConnectionRuleDescriptor.Priority,
 			}
 		}
@@ -177,27 +178,7 @@ func IsSSHConfigFile(path string) bool {
 
 func (rule *R1003MaliciousSSHConnection) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.OpenEventType, tracing.NetworkEventType},
+		EventTypes:             []utils.EventType{utils.OpenEventType, utils.NetworkEventType},
 		NeedApplicationProfile: false,
 	}
-}
-
-func (rule *R1003MaliciousSSHConnectionFailure) Name() string {
-	return rule.RuleName
-}
-
-func (rule *R1003MaliciousSSHConnectionFailure) Error() string {
-	return rule.Err
-}
-
-func (rule *R1003MaliciousSSHConnectionFailure) Event() *utils.GeneralEvent {
-	return rule.FailureEvent
-}
-
-func (rule *R1003MaliciousSSHConnectionFailure) Priority() int {
-	return rule.RulePriority
-}
-
-func (rule *R1003MaliciousSSHConnectionFailure) FixSuggestion() string {
-	return rule.FixSuggestionMsg
 }

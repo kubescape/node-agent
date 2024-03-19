@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"node-agent/pkg/utils"
 	"testing"
 
 	"github.com/kubescape/kapprofiler/pkg/collector"
@@ -97,7 +98,7 @@ func TestR0007KubernetesClientExecuted(t *testing.T) {
 		DstEndpoint: "1.1.1.1",
 	}
 
-	ruleResult = r.ProcessEvent(tracing.NetworkEventType, event4, appProfileAccess, &EngineAccessMock{})
+	ruleResult = r.ProcessEvent(utils.NetworkEventType, event4, appProfileAccess, &EngineAccessMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult since network event dst is kube api server and whitelisted")
 		return
@@ -122,7 +123,7 @@ func TestR0007KubernetesClientExecuted(t *testing.T) {
 		},
 	}
 
-	ruleResult = r.ProcessEvent(tracing.NetworkEventType, event4, appProfileAccess, &EngineAccessMock{})
+	ruleResult = r.ProcessEvent(utils.NetworkEventType, event4, appProfileAccess, &EngineAccessMock{})
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to be non nil since network event dst is not kube api server in the profile")
 		return

@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/utils"
 	"testing"
 
 	"github.com/kubescape/kapprofiler/pkg/tracing"
@@ -29,7 +30,7 @@ func TestR1007CryptoMiners(t *testing.T) {
 		DstEndpoint: "1.1.1.1",
 	}
 
-	ruleResult := r.ProcessEvent(tracing.NetworkEventType, e, nil, nil)
+	ruleResult := r.ProcessEvent(utils.NetworkEventType, e, nil, nil)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since dst port is not in the commonly used crypto miners ports")
@@ -39,7 +40,7 @@ func TestR1007CryptoMiners(t *testing.T) {
 	// Create network event with dst port 3333
 	e.Port = 3333
 
-	ruleResult = r.ProcessEvent(tracing.NetworkEventType, e, nil, nil)
+	ruleResult = r.ProcessEvent(utils.NetworkEventType, e, nil, nil)
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of dst port is in the commonly used crypto miners ports")
