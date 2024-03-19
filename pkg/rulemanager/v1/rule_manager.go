@@ -260,7 +260,6 @@ func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
 }
 
 func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator, ap *v1beta1.ApplicationProfile) {
-	logger.L().Info("In processEvent", helpers.Int("rules", len(rules)))
 
 	// process file exec
 	for _, rule := range rules {
@@ -274,7 +273,6 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 		if rule.Requirements().IsApplicationProfileRequired() && ap == nil {
 			continue
 		}
-		logger.L().Info("processing rule", helpers.String("rule", rule.Name()), helpers.String("ruleID", rule.ID()))
 
 		res := rule.ProcessEvent(eventType, event, ap, rm.k8sObjectProvider)
 		if res != nil {
