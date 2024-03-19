@@ -137,7 +137,7 @@ func main() {
 		ruleBindingCache := rulebindingcache.NewCache()
 
 		// create ruleBinding informer
-		informer, err := rulebindinginformer.NewRuleBindingK8sInformer(k8sClient, ruleBindingCache, clusterData.Namespace)
+		informer, err := rulebindinginformer.NewRuleBindingK8sInformer(k8sClient, ruleBindingCache, "")
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
 		}
@@ -178,9 +178,12 @@ func main() {
 	err = mainHandler.Start(ctx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("error starting the container watcher", helpers.Error(err))
-		if strings.Contains(err.Error(), utils.ErrRuncNotFound) {
-			os.Exit(utils.ExitCodeRuncNotFound)
-		} else {
+		switch {
+		case strings.Contains(err.Error(), utils.ErrKernelVersion):
+			os.Exit(utils.ExitCodeIncompatibleKernel)
+		case strings.Contains(err.Error(), utils.ErrMacOS):
+			os.Exit(utils.ExitCodeMacOS)
+		default:
 			os.Exit(utils.ExitCodeError)
 		}
 	}
