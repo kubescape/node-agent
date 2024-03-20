@@ -42,9 +42,10 @@ func InitAlertManagerExporter(alertManagerURL string) *AlertManagerExporter {
 }
 
 func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
-	sourceUrl := fmt.Sprintf("https://armosec.github.io/kubecop/alertviewer/?AlertMessage=%s&AlertRuleName=%s&AlertFix=%s&AlertNamespace=%s&AlertPod=%s&AlertContainer=%s&AlertProcess=%s",
+	sourceUrl := fmt.Sprintf("https://armosec.github.io/kubecop/alertviewer/?AlertMessage=%s&AlertRuleName=%s&AlertRuleID=%s&AlertFix=%s&AlertNamespace=%s&AlertPod=%s&AlertContainer=%s&AlertProcess=%s",
 		failedRule.Error(),
 		failedRule.Name(),
+		failedRule.ID(),
 		failedRule.FixSuggestion(),
 		failedRule.Event().Namespace,
 		failedRule.Event().PodName,
@@ -67,6 +68,7 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 			Labels: map[string]string{
 				"alertname":      "KubescapeRuleViolated",
 				"rule_name":      failedRule.Name(),
+				"rule_id":        failedRule.ID(),
 				"container_id":   failedRule.Event().ContainerID,
 				"container_name": failedRule.Event().ContainerName,
 				"namespace":      failedRule.Event().Namespace,

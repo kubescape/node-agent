@@ -9,10 +9,11 @@ import (
 	"node-agent/pkg/malwarescanner"
 	"node-agent/pkg/ruleengine"
 	ruleenginev1 "node-agent/pkg/ruleengine/v1"
-	"os"
 	"sync"
 	"time"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -81,6 +82,7 @@ type HTTPAlert struct {
 	RuleAlert     `json:",inline"`
 	MalwareAlert  `json:",inline"`
 	RuleName      string `json:"ruleName"`
+	RuleID        string `json:"ruleID"`
 	Message       string `json:"message"`
 	ContainerID   string `json:"containerID,omitempty"`
 	ContainerName string `json:"containerName,omitempty"`
@@ -97,7 +99,7 @@ func (config *HTTPExporterConfig) Validate() error {
 		return fmt.Errorf("method must be POST or PUT")
 	}
 	if config.TimeoutSeconds == 0 {
-		config.TimeoutSeconds = 1
+		config.TimeoutSeconds = 5
 	}
 	if config.MaxAlertsPerMinute == 0 {
 		config.MaxAlertsPerMinute = 10000
@@ -136,7 +138,7 @@ func (exporter *HTTPExporter) sendAlertLimitReached() {
 			FixSuggestions: "Check logs for more information",
 		},
 	}
-	fmt.Fprintf(os.Stderr, "Alert limit reached %d alerts since %s\n", exporter.alertCount, exporter.alertCountStart.Format(time.RFC3339))
+	logger.L().Error("Alert limit reached", helpers.Int("alerts", exporter.alertCount), helpers.String("since", exporter.alertCountStart.Format(time.RFC3339)))
 	exporter.sendInAlertList(httpAlert)
 }
 
@@ -150,6 +152,7 @@ func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	httpAlert := HTTPAlert{
 		Message:       failedRule.Error(),
 		RuleName:      failedRule.Name(),
+		RuleID:        failedRule.ID(),
 		ContainerID:   failedRule.Event().ContainerID,
 		ContainerName: failedRule.Event().ContainerName,
 		PodNamespace:  failedRule.Event().Namespace,
@@ -185,7 +188,7 @@ func (exporter *HTTPExporter) sendInAlertList(httpAlert HTTPAlert) {
 	// create the JSON representation of the HTTPAlertsList struct
 	bodyBytes, err := json.Marshal(httpAlertsList)
 	if err != nil {
-		fmt.Printf("Error marshalling HTTPAlertsList: %v\n", err)
+		logger.L().Error("failed to marshal HTTPAlertsList", helpers.Error(err))
 		return
 	}
 	bodyReader := bytes.NewReader(bodyBytes)
@@ -193,26 +196,28 @@ func (exporter *HTTPExporter) sendInAlertList(httpAlert HTTPAlert) {
 	// send the HTTP request
 	req, err := http.NewRequest(exporter.config.Method, exporter.config.URL, bodyReader)
 	if err != nil {
-		fmt.Printf("Error creating HTTP request: %v\n", err)
+		logger.L().Error("failed to create HTTP request", helpers.Error(err))
 		return
 	}
 	for key, value := range exporter.config.Headers {
 		req.Header.Set(key, value)
 	}
+
 	resp, err := exporter.httpClient.Do(req)
 	if err != nil {
-		fmt.Printf("Error sending HTTP request: %v\n", err)
+		logger.L().Error("failed to send HTTP request", helpers.Error(err))
 		return
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		fmt.Printf("Received non-2xx status code: %d\n", resp.StatusCode)
+		logger.L().Error("Received non-2xx status code", helpers.Int("status", resp.StatusCode))
 		return
 	}
 
 	// discard the body
 	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		fmt.Printf("Error clearing response body: %v\n", err)
+		logger.L().Error("failed to clear response body", helpers.Error(err))
 	}
 }
 
@@ -242,7 +247,6 @@ func (exporter *HTTPExporter) SendMalwareAlert(malwareDescription malwarescanner
 		},
 	}
 	exporter.sendInAlertList(httpAlert)
-
 }
 
 func (exporter *HTTPExporter) checkAlertLimit() bool {

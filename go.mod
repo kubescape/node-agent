@@ -32,6 +32,7 @@ require (
 	go.opentelemetry.io/otel v1.22.0
 	go.opentelemetry.io/otel/trace v1.22.0
 	golang.org/x/sys v0.17.0
+	gopkg.in/mcuadros/go-syslog.v2 v2.3.0
 	k8s.io/api v0.29.1
 	k8s.io/apimachinery v0.29.1
 	k8s.io/client-go v0.29.1

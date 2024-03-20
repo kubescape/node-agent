@@ -276,8 +276,11 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 
 		res := rule.ProcessEvent(eventType, event, ap, rm.k8sObjectProvider)
 		if res != nil {
+			logger.L().Info("RuleManager FAILED - rule alert", helpers.String("rule", rule.Name()))
 			rm.exporter.SendRuleAlert(res)
 			rm.metrics.ReportRuleAlert(rule.Name())
+		} else {
+			logger.L().Info("RuleManager PASSED - rule alert", helpers.String("rule", rule.Name()))
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())
 	}

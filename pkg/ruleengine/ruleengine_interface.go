@@ -8,6 +8,15 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	RulePriorityNone        = 0
+	RulePriorityLow         = 1
+	RulePriorityMed         = 5
+	RulePriorityHigh        = 8
+	RulePriorityCritical    = 10
+	RulePrioritySystemIssue = 1000
+)
+
 // RuleCreator is an interface for creating rules by tags, IDs, and names
 type RuleCreator interface {
 	CreateRulesByTags(tags []string) []RuleEvaluator

@@ -508,8 +508,6 @@ github.com/kubescape/backend v0.0.16 h1:bkQGY39GSoNIeFfnAJ2zlcrGEyXk6LGYv1/MgS51
 github.com/kubescape/backend v0.0.16/go.mod h1:ug9NFmmxT4DcQx3sgdLRzlLPWMKGHE/fpbcYUm5G5Qo=
 github.com/kubescape/go-logger v0.0.22 h1:gle7wH6emOiGv9ljdpVi82pWLQ3jGucrUucvil6JXHE=
 github.com/kubescape/go-logger v0.0.22/go.mod h1:x3HBpZo3cMT/WIdy18BxvVVd5D0e/PWFVk/HiwBNu3g=
-github.com/kubescape/k8s-interface v0.0.162 h1:tIXwuB7073GJV3OPgGMS4kXBh7N709NscVYiePMCvU4=
-github.com/kubescape/k8s-interface v0.0.162/go.mod h1:oF+Yxug3Kpfu9Yr2j63wy7gwswrKXpiqI0mLk/7gF/s=
 github.com/kubescape/k8s-interface v0.0.164-0.20240318184904-556252aa99e3 h1:bJcP1mqNq8abNZBNR9d6A4+GQBHC9EFTmGZ7uBmM45k=
 github.com/kubescape/k8s-interface v0.0.164-0.20240318184904-556252aa99e3/go.mod h1:oF+Yxug3Kpfu9Yr2j63wy7gwswrKXpiqI0mLk/7gF/s=
 github.com/kubescape/storage v0.0.67 h1:j/EaREEf37V1Ga+x75O93xOo26RZ4/32xI6znOK+8Dw=
@@ -1359,6 +1357,8 @@ gopkg.in/inf.v0 v0.9.1/go.mod h1:cWUDdTG/fYaXco+Dcufb5Vnc6Gp2YChqWtbxRZE0mXw=
 gopkg.in/ini.v1 v1.66.2/go.mod h1:pNLf8WUiyNEtQjuu5G5vTm06TEv9tsIgeAvK8hOrP4k=
 gopkg.in/ini.v1 v1.67.0 h1:Dgnx+6+nfE+IfzjUEISNeydPJh9AXNNsWbGP9KzCsOA=
 gopkg.in/ini.v1 v1.67.0/go.mod h1:pNLf8WUiyNEtQjuu5G5vTm06TEv9tsIgeAvK8hOrP4k=
+gopkg.in/mcuadros/go-syslog.v2 v2.3.0 h1:kcsiS+WsTKyIEPABJBJtoG0KkOS6yzvJ+/eZlhD79kk=
+gopkg.in/mcuadros/go-syslog.v2 v2.3.0/go.mod h1:l5LPIyOOyIdQquNg+oU6Z3524YwrcqEm0aKH+5zpt2U=
 gopkg.in/square/go-jose.v2 v2.6.0 h1:NGk74WTnPKBNUhNzQX7PYcTLUjoq7mzKk2OKbvwk2iI=
 gopkg.in/square/go-jose.v2 v2.6.0/go.mod h1:M9dMgbHiYLoDGQrXy7OpJDJWiKiU//h+vD76mk0e1AI=
 gopkg.in/yaml.v2 v2.2.1/go.mod h1:hI93XBmqTisBFMUTm0b8Fm+jr3Dg1NNxqwp+5A1VGuI=

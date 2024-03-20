@@ -151,7 +151,7 @@ func main() {
 		informer.StartInformer()
 
 		// create exporter
-		ex := exporters.InitExporters(exporters.ExportersConfig{})
+		ex := exporters.InitExporters(cfg.Exporters)
 
 		// create runtimeDetection manager
 		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, ruleBindingCache, ex, prometheusExporter)
