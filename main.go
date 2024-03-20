@@ -180,6 +180,9 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
 
+	// Start the prometheusExporter
+	prometheusExporter.Start()
+
 	// Start the container handler
 	err = mainHandler.Start(ctx)
 	if err != nil {
