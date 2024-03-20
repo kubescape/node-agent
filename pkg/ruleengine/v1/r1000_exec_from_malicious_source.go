@@ -72,9 +72,9 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 
 	// The assumption here is that the event path is absolute!
 	p := getExecPathFromEvent(execEvent)
-
 	for _, maliciousExecPathPrefix := range maliciousExecPathPrefixes {
-		if strings.HasPrefix(p, maliciousExecPathPrefix) {
+		// if the exec path or the current dir is from a malicious source
+		if strings.HasPrefix(p, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) {
 			return &GenericRuleFailure{
 				RuleName:         rule.Name(),
 				Err:              fmt.Sprintf("exec call \"%s\" is from a malicious source \"%s\"", p, maliciousExecPathPrefix),

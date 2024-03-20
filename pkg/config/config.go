@@ -1,6 +1,7 @@
 package config
 
 import (
+	"node-agent/pkg/rulemanager/exporters"
 	"time"
 
 	"github.com/spf13/viper"
@@ -9,15 +10,16 @@ import (
 const NodeNameEnvVar = "NODE_NAME"
 
 type Config struct {
-	EnableFullPathTracing    bool          `mapstructure:"fullPathTracingEnabled"`
-	EnableApplicationProfile bool          `mapstructure:"applicationProfileServiceEnabled"`
-	EnablePrometheusExporter bool          `mapstructure:"prometheusExporterEnabled"`
-	EnableRuntimeDetection   bool          `mapstructure:"runtimeDetectionEnabled"`
-	EnableNetworkTracing     bool          `mapstructure:"networkServiceEnabled"`
-	EnableRelevancy          bool          `mapstructure:"relevantCVEServiceEnabled"`
-	InitialDelay             time.Duration `mapstructure:"initialDelay"`
-	MaxSniffingTime          time.Duration `mapstructure:"maxSniffingTimePerContainer"`
-	UpdateDataPeriod         time.Duration `mapstructure:"updateDataPeriod"`
+	EnableFullPathTracing    bool                      `mapstructure:"fullPathTracingEnabled"`
+	EnableApplicationProfile bool                      `mapstructure:"applicationProfileServiceEnabled"`
+	EnablePrometheusExporter bool                      `mapstructure:"prometheusExporterEnabled"`
+	EnableRuntimeDetection   bool                      `mapstructure:"runtimeDetectionEnabled"`
+	EnableNetworkTracing     bool                      `mapstructure:"networkServiceEnabled"`
+	EnableRelevancy          bool                      `mapstructure:"relevantCVEServiceEnabled"`
+	InitialDelay             time.Duration             `mapstructure:"initialDelay"`
+	MaxSniffingTime          time.Duration             `mapstructure:"maxSniffingTimePerContainer"`
+	UpdateDataPeriod         time.Duration             `mapstructure:"updateDataPeriod"`
+	Exporters                exporters.ExportersConfig `mapstructure:"exporters"`
 }
 
 // LoadConfig reads configuration from file or environment variables.

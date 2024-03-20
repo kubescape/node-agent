@@ -440,23 +440,23 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				helpers.String("container ID", watchedContainer.ContainerID),
 				helpers.String("k8s workload", watchedContainer.K8sContainerID))
 			// profile summary
-			summary := &v1beta1.ApplicationProfileSummary{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: slug,
-					Annotations: map[string]string{
-						helpersv1.WlidMetadataKey:   watchedContainer.Wlid,
-						helpersv1.StatusMetadataKey: helpersv1.Ready,
-					},
-					Labels: utils.GetLabels(watchedContainer, true),
-				},
-			}
-			if err := am.storageClient.CreateApplicationProfileSummary(summary, namespace); err != nil {
-				logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application profile summary", helpers.Error(err),
-					helpers.String("slug", slug),
-					helpers.Int("container index", watchedContainer.ContainerIndex),
-					helpers.String("container ID", watchedContainer.ContainerID),
-					helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			}
+			// summary := &v1beta1.ApplicationProfileSummary{
+			// 	ObjectMeta: metav1.ObjectMeta{
+			// 		Name: slug,
+			// 		Annotations: map[string]string{
+			// 			helpersv1.WlidMetadataKey:   watchedContainer.Wlid,
+			// 			helpersv1.StatusMetadataKey: helpersv1.Ready,
+			// 		},
+			// 		Labels: utils.GetLabels(watchedContainer, true),
+			// 	},
+			// }
+			// if err := am.storageClient.CreateApplicationProfileSummary(summary, namespace); err != nil {
+			// 	logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application profile summary", helpers.Error(err),
+			// 		helpers.String("slug", slug),
+			// 		helpers.Int("container index", watchedContainer.ContainerIndex),
+			// 		helpers.String("container ID", watchedContainer.ContainerID),
+			// 		helpers.String("k8s workload", watchedContainer.K8sContainerID))
+			// }
 		}
 	}
 }

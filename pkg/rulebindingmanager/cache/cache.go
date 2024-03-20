@@ -120,6 +120,11 @@ func (c *RBCache) DeleteRuleBinding(ruleBinding *types.RuntimeAlertRuleBinding) 
 	c.globalRBNames.Remove(rbName)
 }
 
+func (c *RBCache) UpdateRuleBinding(ruleBinding *types.RuntimeAlertRuleBinding) {
+	c.DeleteRuleBinding(ruleBinding)
+	c.AddRuleBinding(ruleBinding)
+}
+
 func (c *RBCache) ListRuleBindings() []types.RuntimeAlertRuleBinding {
 	return c.rbNameToRB.Values()
 }

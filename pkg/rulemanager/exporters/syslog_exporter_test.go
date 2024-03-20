@@ -1,85 +1,99 @@
 package exporters
 
-// func setupServer() *syslog.Server {
-// 	channel := make(syslog.LogPartsChannel, 100)
-// 	handler := syslog.NewChannelHandler(channel)
+import (
+	"log"
+	"node-agent/pkg/malwarescanner"
+	"node-agent/pkg/utils"
+	"os"
+	"testing"
+	"time"
 
-// 	server := syslog.NewServer()
-// 	server.SetFormat(syslog.Automatic)
-// 	server.SetHandler(handler)
-// 	if err := server.ListenUDP("0.0.0.0:40000"); err != nil { // Due to permission issues, we can't listen on port 514 on the CI.
-// 		log.Fatalf("failed to listen on UDP: %v", err)
-// 	}
+	"gopkg.in/mcuadros/go-syslog.v2"
 
-// 	if err := server.Boot(); err != nil {
-// 		log.Fatalf("failed to boot the server: %v", err)
-// 	}
+	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
 
-// 	go func(channel syslog.LogPartsChannel) {
-// 		for logParts := range channel {
-// 			if assert.NotNil(nil, logParts) {
-// 				if assert.NotNil(nil, logParts["content"]) {
-// 					assert.NotEmpty(nil, logParts["content"].(string))
-// 				}
-// 			} else {
-// 				os.Exit(1)
-// 			}
-// 		}
-// 	}(channel)
+func setupServer() *syslog.Server {
+	channel := make(syslog.LogPartsChannel, 100)
+	handler := syslog.NewChannelHandler(channel)
 
-// 	go server.Wait()
+	server := syslog.NewServer()
+	server.SetFormat(syslog.Automatic)
+	server.SetHandler(handler)
+	if err := server.ListenUDP("0.0.0.0:40000"); err != nil { // Due to permission issues, we can't listen on port 514 on the CI.
+		log.Fatalf("failed to listen on UDP: %v", err)
+	}
 
-// 	return server
-// }
+	if err := server.Boot(); err != nil {
+		log.Fatalf("failed to boot the server: %v", err)
+	}
 
-// func TestSyslogExporter(t *testing.T) {
-// 	// Set up a mock syslog server
-// 	server := setupServer()
-// 	defer server.Kill()
+	go func(channel syslog.LogPartsChannel) {
+		for logParts := range channel {
+			if assert.NotNil(nil, logParts) {
+				if assert.NotNil(nil, logParts["content"]) {
+					assert.NotEmpty(nil, logParts["content"].(string))
+				}
+			} else {
+				os.Exit(1)
+			}
+		}
+	}(channel)
 
-// 	// Set up environment variables for the exporter
-// 	syslogHost := "127.0.0.1:40000"
-// 	os.Setenv("SYSLOG_HOST", syslogHost)
-// 	os.Setenv("SYSLOG_PROTOCOL", "udp")
+	go server.Wait()
 
-// 	// Initialize the syslog exporter
-// 	syslogExp := InitSyslogExporter("")
-// 	if syslogExp == nil {
-// 		t.Errorf("Expected syslogExp to not be nil")
-// 	}
+	return server
+}
 
-// 	// Send an alert
-// 	syslogExp.SendRuleAlert(&rule.R0001UnexpectedProcessLaunchedFailure{
-// 		RuleName: "testrule",
-// 		Err:      "Application profile is missing",
-// 		FailureEvent: &tracing.ExecveEvent{GeneralEvent: tracing.GeneralEvent{
-// 			ContainerName: "testcontainer", ContainerID: "testcontainerid", Namespace: "testnamespace", PodName: "testpodname"}},
-// 	})
+func TestSyslogExporter(t *testing.T) {
+	// Set up a mock syslog server
+	server := setupServer()
+	defer server.Kill()
 
-// 	syslogExp.SendRuleAlert(&rule.R0001UnexpectedProcessLaunchedFailure{
-// 		RuleName: "testrule",
-// 		Err:      "Application profile is missing",
-// 		FailureEvent: &tracing.ExecveEvent{GeneralEvent: tracing.GeneralEvent{
-// 			ContainerName: "testcontainer", ContainerID: "testcontainerid", Namespace: "testnamespace", PodName: "testpodname"}},
-// 	})
+	// Set up environment variables for the exporter
+	syslogHost := "127.0.0.1:40000"
+	os.Setenv("SYSLOG_HOST", syslogHost)
+	os.Setenv("SYSLOG_PROTOCOL", "udp")
 
-// 	syslogExp.SendMalwareAlert(malwarescanner.MalwareDescription{
-// 		Name:        "testmalware",
-// 		Hash:        "testhash",
-// 		Description: "testdescription",
-// 		Path:        "testpath",
-// 		Size:        "2MB",
-// 		Resource: schema.GroupVersionResource{
-// 			Group:    "testgroup",
-// 			Version:  "testversion",
-// 			Resource: "testresource",
-// 		},
-// 		Namespace:     "testnamespace",
-// 		PodName:       "testpodname",
-// 		ContainerName: "testcontainername",
-// 		ContainerID:   "testcontainerid",
-// 	})
+	// Initialize the syslog exporter
+	syslogExp := InitSyslogExporter("")
+	if syslogExp == nil {
+		t.Errorf("Expected syslogExp to not be nil")
+	}
 
-// 	// Allow some time for the message to reach the mock syslog server
-// 	time.Sleep(200 * time.Millisecond)
-// }
+	// Send an alert
+	syslogExp.SendRuleAlert(&GenericRuleFailure{
+		RuleName: "testrule",
+		Err:      "Application profile is missing",
+		FailureEvent: &utils.GeneralEvent{
+			ContainerName: "testcontainer", ContainerID: "testcontainerid", Namespace: "testnamespace", PodName: "testpodname"}},
+	)
+
+	syslogExp.SendRuleAlert(&GenericRuleFailure{
+		RuleName: "testrule",
+		Err:      "Application profile is missing",
+		FailureEvent: &utils.GeneralEvent{
+			ContainerName: "testcontainer", ContainerID: "testcontainerid", Namespace: "testnamespace", PodName: "testpodname"}},
+	)
+
+	syslogExp.SendMalwareAlert(malwarescanner.MalwareDescription{
+		Name:        "testmalware",
+		Hash:        "testhash",
+		Description: "testdescription",
+		Path:        "testpath",
+		Size:        "2MB",
+		Resource: schema.GroupVersionResource{
+			Group:    "testgroup",
+			Version:  "testversion",
+			Resource: "testresource",
+		},
+		Namespace:     "testnamespace",
+		PodName:       "testpodname",
+		ContainerName: "testcontainername",
+		ContainerID:   "testcontainerid",
+	})
+
+	// Allow some time for the message to reach the mock syslog server
+	time.Sleep(200 * time.Millisecond)
+}
