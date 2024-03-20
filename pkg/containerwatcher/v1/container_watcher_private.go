@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"node-agent/pkg/config"
 	"node-agent/pkg/utils"
-	"os"
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -54,7 +52,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		containercollection.WithLinuxNamespaceEnrichment(),
 
 		// Enrich those containers with data from the Kubernetes API
-		containercollection.WithKubernetesEnrichment(os.Getenv(config.NodeNameEnvVar), ch.k8sClient.K8SConfig),
+		containercollection.WithKubernetesEnrichment(ch.nodeName, ch.k8sClient.K8SConfig),
 
 		// Get Notifications from the container collection
 		containercollection.WithPubSub(containerEventFuncs...),

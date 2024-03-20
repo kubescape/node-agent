@@ -17,7 +17,7 @@ import (
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 )
 
-func CreateRuleManagerMock(clusterName string, storageClient storage.StorageClient, ruleBindingCache *bindingcache.Cache) *RuleManager {
+func CreateRuleManagerMock(clusterName string, storageClient storage.StorageClient, ruleBindingCache *bindingcache.RBCache) *RuleManager {
 	k8sClient := &k8sclient.K8sClientMock{}
 	return &RuleManager{
 		cfg:               config.Config{},

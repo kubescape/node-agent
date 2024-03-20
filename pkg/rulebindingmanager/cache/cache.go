@@ -1,45 +1,130 @@
 package rulebindingmanager
 
 import (
+	"context"
+	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/rulebindingmanager/types/v1"
 	"node-agent/pkg/ruleengine"
 	ruleenginev1 "node-agent/pkg/ruleengine/v1"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
 
-type Cache struct {
-	// k8sAPI *k8sinterface.KubernetesApi
-	// PodToRules        maps.SafeMap[string, []types.RuntimeAlertRuleBindingRule] // podName -> rules (names)
-	// GlobalRules       []types.RuntimeAlertRuleBindingRule                       // all rules that are not bound to a specific pod
-	// RuleBindingToPods maps.SafeMap[string, mapset.Set[string]]                  // rule binding name -> pod names
-	RuleBindings maps.SafeMap[string, types.RuntimeAlertRuleBinding] // rule binding name -> rule binding
-	ruleCreator  ruleengine.RuleCreator
+type RBCache struct {
+	nodeName         string
+	k8sClient        k8sclient.K8sClientInterface
+	globalRBNames    mapset.Set[string]                                  // rules without selectors
+	podToRBNames     maps.SafeMap[string, mapset.Set[string]]            // pod name -> []rule binding names
+	rbNameToRB       maps.SafeMap[string, types.RuntimeAlertRuleBinding] // rule binding name -> rule binding
+	rbNameToRules    maps.SafeMap[string, []ruleengine.RuleEvaluator]    // rule binding name -> []created rules
+	rbNameToPodNames maps.SafeMap[string, mapset.Set[string]]            // rule binding name -> []pod names
+	ruleCreator      ruleengine.RuleCreator
 }
 
-func NewCache() *Cache {
-	return &Cache{
-		ruleCreator: ruleenginev1.NewRuleCreator(),
-		// RuleBindingToPods: maps.SafeMap[string, mapset.Set[string]]{},
+func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *RBCache {
+	return &RBCache{
+		nodeName:         nodeName,
+		k8sClient:        k8sClient,
+		ruleCreator:      ruleenginev1.NewRuleCreator(),
+		globalRBNames:    mapset.NewSet[string](),
+		podToRBNames:     maps.SafeMap[string, mapset.Set[string]]{},
+		rbNameToPodNames: maps.SafeMap[string, mapset.Set[string]]{},
 	}
 }
 
-func (c *Cache) AddRuleBinding(ruleBinding types.RuntimeAlertRuleBinding) {
-	logger.L().Info("AddRuleBinding", helpers.String("name", ruleBinding.GetName()))
-	c.RuleBindings.Set(ruleBinding.GetName(), ruleBinding)
+func (c *RBCache) AddRuleBinding(ruleBinding *types.RuntimeAlertRuleBinding) {
+	rbName := ruleBinding.GetName()
+	logger.L().Info("AddRuleBinding", helpers.String("name", rbName))
+
+	// convert selectors to string
+	nsSelector, err := metav1.LabelSelectorAsSelector(&ruleBinding.Spec.NamespaceSelector)
+	// check if the selectors are valid
+	if err != nil {
+		logger.L().Error("failed to parse ns selector", helpers.String("ruleBiding", rbName), helpers.Interface("NamespaceSelector", ruleBinding.Spec.NamespaceSelector), helpers.Error(err))
+		return
+	}
+	podSelector, err := metav1.LabelSelectorAsSelector(&ruleBinding.Spec.PodSelector)
+	// check if the selectors are valid
+	if err != nil {
+		logger.L().Error("failed to parse pod selector", helpers.String("ruleBiding", rbName), helpers.Interface("PodSelector", ruleBinding.Spec.PodSelector), helpers.Error(err))
+		return
+	}
+
+	nsSelectorStr := nsSelector.String()
+	podSelectorStr := podSelector.String()
+
+	// add the rule binding to the cache
+	c.rbNameToRB.Set(rbName, *ruleBinding)
+	c.rbNameToPodNames.Set(rbName, mapset.NewSet[string]())
+	c.rbNameToRules.Set(rbName, []ruleengine.RuleEvaluator{})
+
+	// if the rule binding is global, add it to the global rules
+	if len(nsSelectorStr) == 0 && len(podSelectorStr) == 0 {
+		c.globalRBNames.Add(ruleBinding.GetName())
+		logger.L().Debug("AddRuleBinding", helpers.String("ruleBinding", rbName), helpers.String("global", "true"))
+		return
+	}
+
+	// get related namespaces
+	namespaces, err := c.k8sClient.GetKubernetesClient().CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{LabelSelector: nsSelectorStr})
+	if err != nil {
+		logger.L().Error("failed to list namespaces", helpers.String("ruleBiding", rbName), helpers.String("nsSelector", nsSelectorStr), helpers.Error(err))
+		return
+	}
+
+	// get related pods
+	for _, ns := range namespaces.Items {
+		lp := metav1.ListOptions{
+			LabelSelector: podSelectorStr,
+			FieldSelector: "spec.nodeName=" + c.nodeName,
+		}
+		pods, err := c.k8sClient.GetKubernetesClient().CoreV1().Pods(ns.GetName()).List(context.Background(), lp)
+		if err != nil {
+			logger.L().Error("failed to list pods", helpers.String("ruleBiding", rbName), helpers.String("podSelector", podSelectorStr), helpers.Error(err))
+			return
+		}
+
+		for _, pod := range pods.Items {
+			podName := pod.GetName()
+			if !c.podToRBNames.Has(podName) {
+				c.podToRBNames.Set(podName, mapset.NewSet[string]())
+			}
+
+			c.podToRBNames.Get(podName).Add(rbName)
+			c.rbNameToPodNames.Get(rbName).Add(podName)
+			c.rbNameToRules.Set(rbName, c.createRules(ruleBinding.Spec.Rules))
+
+			logger.L().Debug("AddRuleBinding", helpers.String("ruleBinding", rbName), helpers.String("pod", podName))
+		}
+	}
 }
-func (c *Cache) RemoveRuleBinding(ruleBinding types.RuntimeAlertRuleBinding) {
-	logger.L().Info("DeleteRuleBinding", helpers.String("name", ruleBinding.GetName()))
-	c.RuleBindings.Delete(ruleBinding.GetName())
+func (c *RBCache) DeleteRuleBinding(ruleBinding *types.RuntimeAlertRuleBinding) {
+	rbName := ruleBinding.GetName()
+	logger.L().Info("DeleteRuleBinding", helpers.String("name", rbName))
+
+	// remove the rule binding from the pods
+	for _, podName := range c.podToRBNames.Keys() {
+		c.podToRBNames.Get(podName).Remove(rbName)
+	}
+
+	// remove the rule binding from the cache
+	c.rbNameToRB.Delete(rbName)
+	c.rbNameToRules.Delete(rbName)
+	c.rbNameToPodNames.Delete(rbName)
+	c.globalRBNames.Remove(rbName)
 }
 
-func (c *Cache) ListRuleBindings() []types.RuntimeAlertRuleBinding {
-	return c.RuleBindings.Values()
+func (c *RBCache) ListRuleBindings() []types.RuntimeAlertRuleBinding {
+	return c.rbNameToRB.Values()
 }
 
-func (c *Cache) ListRulesForPod(namespace, podName string) ([]ruleengine.RuleEvaluator, error) {
+func (c *RBCache) ListRulesForPod(namespace, podName string) ([]ruleengine.RuleEvaluator, error) {
 	ruleBindingsForPod := c.ListRuleBindings()
 	// // TODO: change to support parameters of rule + custom priority
 	// ruleBindingsForPod, err := c.listRuleBindingsForPod(namespace, podName)
@@ -57,7 +142,7 @@ func (c *Cache) ListRulesForPod(namespace, podName string) ([]ruleengine.RuleEva
 	return createdRules, nil
 }
 
-func (c *Cache) createRules(rulesForPod []types.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {
+func (c *RBCache) createRules(rulesForPod []types.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {
 	rules := []ruleengine.RuleEvaluator{}
 	// Get the rules that are bound to the container
 	for _, ruleParams := range rulesForPod {
@@ -65,7 +150,7 @@ func (c *Cache) createRules(rulesForPod []types.RuntimeAlertRuleBindingRule) []r
 	}
 	return rules
 }
-func (c *Cache) createRule(r *types.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {
+func (c *RBCache) createRule(r *types.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {
 
 	if r.RuleID != "" {
 		if ruleDesc := c.ruleCreator.CreateRuleByID(r.RuleID); ruleDesc != nil {

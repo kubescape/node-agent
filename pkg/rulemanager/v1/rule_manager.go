@@ -48,7 +48,7 @@ type RuleManager struct {
 	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
 	storageClient            storage.StorageClient
-	ruleBindingCache         *bindingcache.Cache
+	ruleBindingCache         *bindingcache.RBCache
 	k8sObjectProvider        ruleengine.K8sObjectProvider
 	exporter                 exporters.Exporter
 	metrics                  metricsmanager.MetricsManager
@@ -57,7 +57,7 @@ type RuleManager struct {
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, ruleBindingCache *bindingcache.Cache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, ruleBindingCache *bindingcache.RBCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		clusterName:       clusterName,

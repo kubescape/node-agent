@@ -140,7 +140,7 @@ func main() {
 		// TODO
 
 		// create ruleBinding cache
-		ruleBindingCache := rulebindingcache.NewCache()
+		ruleBindingCache := rulebindingcache.NewCache(os.Getenv(config.NodeNameEnvVar), k8sClient)
 
 		// create ruleBinding informer
 		informer, err := rulebindinginformer.NewRuleBindingK8sInformer(k8sClient, ruleBindingCache, "")

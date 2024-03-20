@@ -12,6 +12,7 @@ import (
 	"node-agent/pkg/relevancymanager"
 	"node-agent/pkg/rulemanager"
 	"node-agent/pkg/utils"
+	"os"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
@@ -52,6 +53,7 @@ type IGContainerWatcher struct {
 	cfg               config.Config
 	containerSelector containercollection.ContainerSelector
 	ctx               context.Context
+	nodeName          string
 	// Clients
 	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	k8sClient                 *k8sinterface.KubernetesApi
@@ -182,6 +184,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		// Configuration
 		cfg:               cfg,
 		containerSelector: containercollection.ContainerSelector{}, // Empty selector to get all containers
+		nodeName:          os.Getenv(config.NodeNameEnvVar),
 		// Clients
 		applicationProfileManager: applicationProfileManager,
 		k8sClient:                 k8sClient,

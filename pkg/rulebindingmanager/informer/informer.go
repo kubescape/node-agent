@@ -40,10 +40,10 @@ type RuleBindingK8sInformer struct {
 	k8sClient           k8sclient.K8sClientInterface
 	informerStopChannel chan struct{}
 	storeNamespace      string
-	bindingCache        *bindingcache.Cache
+	bindingCache        *bindingcache.RBCache
 }
 
-func NewRuleBindingK8sInformer(k8sClient k8sclient.K8sClientInterface, bindingCache *bindingcache.Cache, storeNamespace string) (*RuleBindingK8sInformer, error) {
+func NewRuleBindingK8sInformer(k8sClient k8sclient.K8sClientInterface, bindingCache *bindingcache.RBCache, storeNamespace string) (*RuleBindingK8sInformer, error) {
 
 	stopCh := make(chan struct{})
 	if storeNamespace == "" {
@@ -86,7 +86,7 @@ func (ruleInformer *RuleBindingK8sInformer) ruleBindingAddedHandler(obj interfac
 		logger.L().Error("add: to parse rule binding", helpers.Error(err))
 		return
 	}
-	ruleInformer.bindingCache.AddRuleBinding(*bindObj)
+	ruleInformer.bindingCache.AddRuleBinding(bindObj)
 }
 
 func (ruleInformer *RuleBindingK8sInformer) ruleBindingUpdatedHandler(oldObj, newObj interface{}) {
@@ -101,7 +101,7 @@ func (ruleInformer *RuleBindingK8sInformer) ruleBindingDeletedHandler(obj interf
 		logger.L().Error("delete: failed to parse rule binding", helpers.Error(err))
 		return
 	}
-	ruleInformer.bindingCache.AddRuleBinding(*bindObj)
+	ruleInformer.bindingCache.DeleteRuleBinding(bindObj)
 }
 
 func getRuntimeAlertRuleBindingFromObj(obj interface{}) (*types.RuntimeAlertRuleBinding, error) {
