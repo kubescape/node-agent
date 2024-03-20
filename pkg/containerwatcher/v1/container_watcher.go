@@ -122,7 +122,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		metrics.ReportEvent(utils.ExecveEventType)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
-		relevancyManager.ReportFileAccess(k8sContainerID, path)
+		relevancyManager.ReportFileExec(k8sContainerID, path)
 		ruleManager.ReportFileExec(k8sContainerID, event)
 	})
 	if err != nil {
@@ -142,7 +142,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
-		relevancyManager.ReportFileAccess(k8sContainerID, path)
+		relevancyManager.ReportFileExec(k8sContainerID, path)
 		ruleManager.ReportFileOpen(k8sContainerID, event)
 	})
 	if err != nil {

@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func BenchmarkRelevancyManager_ReportFileAccess(b *testing.B) {
+func BenchmarkRelevancyManager_ReportFileExec(b *testing.B) {
 	cfg := config.Config{}
 	ctx := context.TODO()
 	fileHandler, err := filehandler.CreateInMemoryFileHandler()
@@ -33,7 +33,7 @@ func BenchmarkRelevancyManager_ReportFileAccess(b *testing.B) {
 	relevancyManager, err := CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, nil, nil)
 	assert.NoError(b, err)
 	for i := 0; i < b.N; i++ {
-		relevancyManager.ReportFileAccess("ns", "file")
+		relevancyManager.ReportFileExec("ns", "file")
 	}
 	b.ReportAllocs()
 }
@@ -91,13 +91,13 @@ func TestRelevancyManager(t *testing.T) {
 	}
 
 	for _, file := range files {
-		relevancyManager.ReportFileAccess("ns/pod/cont", file)
+		relevancyManager.ReportFileExec("ns/pod/cont", file)
 	}
 
 	// let it run for a while
 	time.Sleep(5 * time.Second)
 	// report a same file again, should do noop
-	relevancyManager.ReportFileAccess("ns/pod/cont", "/usr/sbin/deluser")
+	relevancyManager.ReportFileExec("ns/pod/cont", "/usr/sbin/deluser")
 	// let it run for a while
 	time.Sleep(5 * time.Second)
 	// verify files are reported and we have only 1 filtered SBOM
@@ -107,7 +107,7 @@ func TestRelevancyManager(t *testing.T) {
 	assert.Equal(t, "/usr/sbin/deluser", storageClient.FilteredSyftSBOMs[0].Spec.Syft.Files[0].Location.RealPath)
 
 	// add one more vulnerable file
-	relevancyManager.ReportFileAccess("ns/pod/cont", "/etc/deluser.conf")
+	relevancyManager.ReportFileExec("ns/pod/cont", "/etc/deluser.conf")
 	time.Sleep(1 * time.Second)
 	// report container stopped
 	relevancyManager.ContainerCallback(containercollection.PubSubEvent{
@@ -187,7 +187,7 @@ func TestRelevancyManagerIncompleteSBOM(t *testing.T) {
 		Container: container,
 	})
 	// report file access
-	relevancyManager.ReportFileAccess("ns/pod/cont", "/usr/sbin/deluser")
+	relevancyManager.ReportFileExec("ns/pod/cont", "/usr/sbin/deluser")
 	// let it run for a while
 	time.Sleep(10 * time.Second)
 	// report container stopped

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/cenkalti/backoff/v4"
 	"node-agent/pkg/config"
 	"node-agent/pkg/filehandler"
 	"node-agent/pkg/k8sclient"
@@ -12,6 +11,8 @@ import (
 	"node-agent/pkg/sbomhandler"
 	"node-agent/pkg/utils"
 	"time"
+
+	"github.com/cenkalti/backoff/v4"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/goradd/maps"
@@ -300,6 +301,6 @@ func (rm *RelevancyManager) ContainerCallback(notif containercollection.PubSubEv
 	}
 }
 
-func (rm *RelevancyManager) ReportFileAccess(k8sContainerID, file string) {
+func (rm *RelevancyManager) ReportFileExec(k8sContainerID, file string) {
 	rm.fileHandler.AddFile(k8sContainerID, file)
 }
