@@ -1,11 +1,8 @@
 package ruleengine
 
 import (
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
-
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-
-	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -33,7 +30,7 @@ type RuleEvaluator interface {
 	Name() string
 
 	// Rule processing
-	ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, K8sProvider K8sObjectProvider) RuleFailure
+	ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) RuleFailure
 
 	// Rule requirements
 	Requirements() RuleSpec
@@ -71,9 +68,4 @@ type RuleFailure interface {
 	FixSuggestion() string
 	// Generic event
 	Event() *utils.GeneralEvent
-}
-
-type K8sObjectProvider interface {
-	GetPodSpec(namespace, podName string) (*corev1.PodSpec, error)
-	GetApiServerIpAddress() (string, error)
 }

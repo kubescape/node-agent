@@ -61,7 +61,7 @@ func CreateRule{rule_id}{rule_abbrev}() *{rule_id}{rule_abbrev} {
 func (rule *{rule_id}{rule_abbrev}) DeleteRule() {
 }
 
-func (rule *{rule_id}{rule_abbrev}) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *{rule_id}{rule_abbrev}) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != replaceme {
 		return nil
 	}
@@ -71,7 +71,9 @@ func (rule *{rule_id}{rule_abbrev}) ProcessEvent(eventType utils.EventType, even
 		return nil
 	}
 
-	if ap == nil {
+		ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.GetNamespace(), execEvent.GetPod())
+
+if ap == nil {
 		return &{rule_id}{rule_abbrev}Failure{
 			RuleName:     rule.Name(),
 			Err:          "Application profile is missing",

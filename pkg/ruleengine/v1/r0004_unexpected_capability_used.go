@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
@@ -54,7 +55,7 @@ func (rule *R0004UnexpectedCapabilityUsed) generatePatchCommand(event *tracercap
 		event.GetContainer(), event.Syscall, event.CapName)
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.CapabilitiesEventType {
 		return nil
 	}
@@ -63,6 +64,8 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 	if !ok {
 		return nil
 	}
+
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(capEvent.GetNamespace(), capEvent.GetPod())
 
 	if ap == nil {
 		return &GenericRuleFailure{

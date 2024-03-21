@@ -14,7 +14,6 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/panjf2000/ants/v2"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 )
@@ -33,11 +32,11 @@ type WatchHandler struct {
 }
 
 // NewWatchHandler creates a new WatchHandler, initializes the maps and returns it
-func NewWatchHandler(nodeName string, k8sClient k8sclient.K8sClientInterface, eventQueue *cooldownqueue.CooldownQueue, handlers []watcher.Watcher) *WatchHandler {
+func NewWatchHandler(nodeName string, k8sClient k8sclient.K8sClientInterface, handlers []watcher.Watcher) *WatchHandler {
 	return &WatchHandler{
 		k8sClient:  k8sClient,
 		nodeName:   nodeName,
-		eventQueue: eventQueue,
+		eventQueue: cooldownqueue.NewCooldownQueue(cooldownqueue.DefaultQueueSize, cooldownqueue.DefaultTTL),
 		handlers:   handlers,
 	}
 }
@@ -46,7 +45,7 @@ func (wh *WatchHandler) AddHandler(handlers watcher.Watcher) {
 	wh.handlers = append(wh.handlers, handlers)
 }
 
-func (wh *WatchHandler) Watch(ctx context.Context, workerPool *ants.PoolWithFunc) error {
+func (wh *WatchHandler) Watch(ctx context.Context) {
 	watchOpts := v1.ListOptions{
 		Watch:         true,
 		FieldSelector: "spec.nodeName=" + wh.nodeName, // only when the pod is running
@@ -59,25 +58,26 @@ func (wh *WatchHandler) Watch(ctx context.Context, workerPool *ants.PoolWithFunc
 	go wh.watchRetry(ctx, watchOpts)
 
 	// process events
-	for event := range wh.eventQueue.ResultChan {
-		// skip non-pod objects
-		pod, ok := event.Object.(*corev1.Pod)
-		if !ok {
-			continue
-		}
-		for i := range wh.handlers {
-			switch event.Type {
-			case watch.Added:
-				wh.handlers[i].RuntimeObjAddHandler(pod)
-			case watch.Modified:
-				wh.handlers[i].RuntimeObjUpdateHandler(pod)
-			case watch.Deleted:
-				wh.handlers[i].RuntimeObjDeleteHandler(pod)
+	go func() {
+		for event := range wh.eventQueue.ResultChan {
+			// skip non-pod objects
+			pod, ok := event.Object.(*corev1.Pod)
+			if !ok {
+				continue
+			}
+			for i := range wh.handlers {
+				switch event.Type {
+				case watch.Added:
+					wh.handlers[i].RuntimeObjAddHandler(pod)
+				case watch.Modified:
+					wh.handlers[i].RuntimeObjUpdateHandler(pod)
+				case watch.Deleted:
+					wh.handlers[i].RuntimeObjDeleteHandler(pod)
+				}
 			}
 		}
-
-	}
-	return nil
+		logger.L().Ctx(ctx).Fatal("pod watcher event queue closed")
+	}()
 }
 func (wh *WatchHandler) listPods(ctx context.Context) error {
 	pods, err := wh.k8sClient.GetKubernetesClient().CoreV1().Pods("").List(ctx, v1.ListOptions{

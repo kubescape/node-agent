@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 	"strings"
 
@@ -66,7 +67,7 @@ func (rule *R0003UnexpectedSystemCall) generatePatchCommand(event *tracercapabil
 		event.GetContainer(), syscallList)
 }
 
-func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.SyscallEventType && eventType != utils.CapabilitiesEventType {
 		return nil
 	}
@@ -75,6 +76,8 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 	if !ok {
 		return nil
 	}
+
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEvent.GetNamespace(), syscallEvent.GetPod())
 
 	if ap == nil {
 		return &GenericRuleFailure{

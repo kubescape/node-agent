@@ -20,12 +20,18 @@ import (
 	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
 	rulebindingcache "node-agent/pkg/rulebindingmanager/cache"
 	rulebindinginformer "node-agent/pkg/rulebindingmanager/informer"
+	"node-agent/pkg/ruleengine/objectcache/applicationprofilecache"
+	"node-agent/pkg/ruleengine/objectcache/k8scache"
+	"node-agent/pkg/ruleengine/objectcache/networkneighborscache"
+	"node-agent/pkg/ruleengine/objectcache/v1"
 	"node-agent/pkg/rulemanager"
 	"node-agent/pkg/rulemanager/exporters"
 	rulemanagerv1 "node-agent/pkg/rulemanager/v1"
 	"node-agent/pkg/sbomhandler/syfthandler"
 	"node-agent/pkg/storage/v1"
 	"node-agent/pkg/utils"
+	"node-agent/pkg/watcher"
+	"node-agent/pkg/watcher/podwatcher.go"
 	"os"
 	"os/signal"
 	"syscall"
@@ -133,28 +139,42 @@ func main() {
 	// Create the relevancy manager
 	var ruleManager rulemanager.RuleManagerClient
 	if cfg.EnableRuntimeDetection {
-		// create applicationProfile cache
-		// TODO
 
-		// start applicationProfile handler
-		// TODO
+		// Create watchers
+		podWatcher := podwatcher.NewWatchHandler(os.Getenv(config.NodeNameEnvVar), k8sClient, []watcher.Watcher{})
 
 		// create ruleBinding cache
 		ruleBindingCache := rulebindingcache.NewCache(os.Getenv(config.NodeNameEnvVar), k8sClient)
+		podWatcher.AddHandler(ruleBindingCache)
 
 		// create ruleBinding informer
 		informer, err := rulebindinginformer.NewRuleBindingK8sInformer(k8sClient, ruleBindingCache, "")
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
 		}
-		// start ruleBinding informer
+
+		// create k8sObject cache
+		k8sObjectCache, err := k8scache.NewK8sObjectCache(k8sClient)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
+		}
+		podWatcher.AddHandler(k8sObjectCache)
+
+		// watching
 		informer.StartInformer()
+		podWatcher.Watch(ctx)
 
 		// create exporter
 		ex := exporters.InitExporters(cfg.Exporters)
 
+		apc, _ := applicationprofilecache.NewApplicationProfileCache(k8sClient)
+		nnc, _ := networkneighborscache.NewNetworkNeighborsCache(k8sClient)
+
+		// create object cache
+		objCache := objectcache.NewObjectCache(k8sObjectCache, apc, nnc)
+
 		// create runtimeDetection manager
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, ruleBindingCache, ex, prometheusExporter)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, ruleBindingCache, objCache, ex, prometheusExporter)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
 		}

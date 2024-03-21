@@ -31,8 +31,8 @@ package ruleengine
 // 	return &podSpec, nil
 // }
 
-// func (e *EngineAccessMock) GetApiServerIpAddress() (string, error) {
-// 	return "1.1.1.1", nil
+// func (e *EngineAccessMock) GetApiServerIpAddress() (string ) {
+// 	return "1.1.1.1"
 // }
 
 // type MockAppProfileAccess struct {

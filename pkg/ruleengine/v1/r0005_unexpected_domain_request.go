@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
@@ -48,16 +49,13 @@ func (rule *R0005UnexpectedDomainRequest) ID() string {
 func (rule *R0005UnexpectedDomainRequest) DeleteRule() {
 }
 
-func (rule *R0005UnexpectedDomainRequest) generatePatchCommand(event *tracerdnstype.Event, ap *v1beta1.ApplicationProfile) string {
+func (rule *R0005UnexpectedDomainRequest) generatePatchCommand(event *tracerdnstype.Event, nn *v1beta1.NetworkNeighbors) string {
 	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"dns\": [{\"dnsName\": \"%s\"}]}]}}'"
-	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(),
+	return fmt.Sprintf(baseTemplate, nn.GetName(), nn.GetNamespace(),
 		event.GetContainer(), event.DNSName)
 }
 
-func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
-	// FIXME: Add DNS resolution to the application profile, other option: get the network neighbor
-	// Currently this rule is not supported
-	return nil
+func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 
 	if eventType != utils.DnsEventType {
 		return nil
@@ -68,35 +66,36 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		return nil
 	}
 
-	if ap == nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Create an application profile with the domain %s", domainEvent.DNSName),
-			FailureEvent:     utils.DnsToGeneralEvent(domainEvent),
-			RulePriority:     R0005UnexpectedDomainRequestRuleDescriptor.Priority,
-		}
-	}
-	_, err := getContainerFromApplicationProfile(ap, domainEvent.GetContainer())
-	if err != nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Create an application profile with the domain %s", domainEvent.DNSName),
-			FailureEvent:     utils.DnsToGeneralEvent(domainEvent),
-			RulePriority:     R0005UnexpectedDomainRequestRuleDescriptor.Priority,
-		}
-	}
+	nn := objCache.NetworkNeighborsCache().GetNetworkNeighbors(domainEvent.GetNamespace(), domainEvent.GetPod())
 
-	// FIXME: Add DNS resolution to the application profile, other option: get the network neighbor
-	// // Check that the domain is in the application profile
-	// for _, dns := range appProfileDnsList.DNS {
-	// 	if dns == domainEvent.DNSName {
-	// 		return nil
+	if nn == nil {
+		return &GenericRuleFailure{
+			RuleName:         rule.Name(),
+			RuleID:           rule.ID(),
+			Err:              "Application profile is missing",
+			FixSuggestionMsg: fmt.Sprintf("Create an application profile with the domain %s", domainEvent.DNSName),
+			FailureEvent:     utils.DnsToGeneralEvent(domainEvent),
+			RulePriority:     R0005UnexpectedDomainRequestRuleDescriptor.Priority,
+		}
+	}
+	// _, err := getContainerFromApplicationProfile(nn, domainEvent.GetContainer())
+	// if err != nil {
+	// 	return &GenericRuleFailure{
+	// 		RuleName:         rule.Name(),
+	// 		RuleID:           rule.ID(),
+	// 		Err:              "Application profile is missing",
+	// 		FixSuggestionMsg: fmt.Sprintf("Create an application profile with the domain %s", domainEvent.DNSName),
+	// 		FailureEvent:     utils.DnsToGeneralEvent(domainEvent),
+	// 		RulePriority:     R0005UnexpectedDomainRequestRuleDescriptor.Priority,
 	// 	}
 	// }
+
+	// // Check that the domain is in the application profile
+	for _, dns := range nn.Spec.Egress {
+		if dns.DNS == domainEvent.DNSName {
+			return nil
+		}
+	}
 
 	return &GenericRuleFailure{
 		RuleName: rule.Name(),
@@ -105,7 +104,7 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the domain %s to the whitelist in the application profile for the Pod %s. You can use the following command: %s",
 			domainEvent.DNSName,
 			domainEvent.DNSName,
-			rule.generatePatchCommand(domainEvent, ap)),
+			rule.generatePatchCommand(domainEvent, nn)),
 		FailureEvent: utils.DnsToGeneralEvent(domainEvent),
 		RulePriority: R0005UnexpectedDomainRequestRuleDescriptor.Priority,
 	}
