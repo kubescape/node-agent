@@ -232,11 +232,7 @@ func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectyp
 	// }
 
 	// list exec rules
-	rules, err := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	if err != nil {
-		logger.L().Error("failed to list rules for pod", helpers.Error(err))
-		return
-	}
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
 	// get related application profile
 	// ap := &v1beta1.ApplicationProfile{}
