@@ -2,13 +2,12 @@ package ruleengine
 
 import (
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 	"slices"
 
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 // Current rule:
@@ -174,7 +173,7 @@ func (rule *R1007CryptoMiners) ID() string {
 func (rule *R1007CryptoMiners) DeleteRule() {
 }
 
-func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.NetworkEventType && eventType != utils.DnsEventType && eventType != utils.RandomXEventType {
 		return nil
 	}

@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 	"os"
 	"path/filepath"
@@ -11,8 +12,6 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/prometheus/procfs"
 	log "github.com/sirupsen/logrus"
-
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -55,7 +54,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) ID() string {
 func (rule *R1001ExecBinaryNotInBaseImage) DeleteRule() {
 }
 
-func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}

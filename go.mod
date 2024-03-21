@@ -15,6 +15,7 @@ require (
 	github.com/go-openapi/strfmt v0.23.0
 	github.com/google/uuid v1.6.0
 	github.com/goradd/maps v0.1.5
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/inspektor-gadget/inspektor-gadget v0.24.1-0.20240110102739-7e977db8dc7a
 	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/backend v0.0.16

@@ -20,6 +20,7 @@ import (
 	bindingcache "node-agent/pkg/rulebindingmanager/cache"
 
 	"node-agent/pkg/metricsmanager"
+	"node-agent/pkg/ruleengine/objectcache"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -35,7 +36,6 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 )
 
@@ -49,7 +49,7 @@ type RuleManager struct {
 	k8sClient                k8sclient.K8sClientInterface
 	storageClient            storage.StorageClient
 	ruleBindingCache         *bindingcache.RBCache
-	k8sObjectProvider        ruleengine.K8sObjectProvider
+	objectCache              objectcache.ObjectCache
 	exporter                 exporters.Exporter
 	metrics                  metricsmanager.MetricsManager
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
@@ -57,7 +57,7 @@ type RuleManager struct {
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, ruleBindingCache *bindingcache.RBCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, ruleBindingCache *bindingcache.RBCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		clusterName:       clusterName,
@@ -67,7 +67,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName strin
 		containerMutexes:  storageUtils.NewMapMutex[string](),
 		trackedContainers: mapset.NewSet[string](),
 		ruleBindingCache:  ruleBindingCache,
-		k8sObjectProvider: ruleengine.NewK8sObjectProvider(k8sClient),
+		objectCache:       objectCache,
 		exporter:          exporter,
 		metrics:           metrics,
 	}, nil
@@ -232,16 +232,9 @@ func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectyp
 	// }
 
 	// list exec rules
-	rules, err := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	if err != nil {
-		logger.L().Error("failed to list rules for pod", helpers.Error(err))
-		return
-	}
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
-	// get related application profile
-	// ap := &v1beta1.ApplicationProfile{}
-
-	rm.processEvent(utils.ExecveEventType, &event, rules, nil)
+	rm.processEvent(utils.ExecveEventType, &event, rules)
 }
 
 func (rm *RuleManager) ReportFileOpen(k8sContainerID string, event traceropentype.Event) {
@@ -259,7 +252,7 @@ func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
 	// noop
 }
 
-func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator, ap *v1beta1.ApplicationProfile) {
+func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator) {
 
 	// process file exec
 	for _, rule := range rules {
@@ -270,11 +263,8 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 		if !isRelevant(rule.Requirements(), eventType) {
 			continue
 		}
-		if rule.Requirements().IsApplicationProfileRequired() && ap == nil {
-			continue
-		}
 
-		res := rule.ProcessEvent(eventType, event, ap, rm.k8sObjectProvider)
+		res := rule.ProcessEvent(eventType, event, rm.objectCache)
 		if res != nil {
 			logger.L().Info("RuleManager FAILED - rule alert", helpers.String("rule", rule.Name()))
 			rm.exporter.SendRuleAlert(res)

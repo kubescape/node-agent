@@ -2,13 +2,12 @@ package ruleengine
 
 import (
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 	"strings"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	log "github.com/sirupsen/logrus"
-
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -50,7 +49,7 @@ func (rule *R1004ExecFromMount) ID() string {
 func (rule *R1004ExecFromMount) DeleteRule() {
 }
 
-func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}
@@ -60,7 +59,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 		return nil
 	}
 
-	mounts, err := getContainerMountPaths(execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer(), k8sProvider)
+	mounts, err := getContainerMountPaths(execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer(), objCache.K8sObjectCache())
 	if err != nil {
 		return nil
 	}

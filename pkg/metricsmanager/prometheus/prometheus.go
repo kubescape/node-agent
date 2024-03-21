@@ -1,10 +1,14 @@
 package metricsmanager
 
 import (
+	"net/http"
 	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/utils"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var _ metricsmanager.MetricsManager = (*prometheusMetric)(nil)
@@ -95,6 +99,14 @@ func NewPrometheusMetric() *prometheusMetric {
 		ruleCounter:           ruleCounter,
 		alertCounter:          alertCounter,
 	}
+}
+func (p *prometheusMetric) Start() {
+	// Start prometheus metrics server
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		logger.L().Info("prometheus metrics server started", helpers.Int("port", 8080), helpers.String("path", "/metrics"))
+		logger.L().Fatal(http.ListenAndServe(":8080", nil).Error())
+	}()
 }
 
 func (p *prometheusMetric) Destroy() {

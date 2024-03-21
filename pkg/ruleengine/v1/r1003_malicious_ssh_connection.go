@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 	"slices"
 	"strings"
@@ -13,8 +14,6 @@ import (
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 
 	log "github.com/sirupsen/logrus"
-
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -113,7 +112,7 @@ func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interfa
 func (rule *R1003MaliciousSSHConnection) DeleteRule() {
 }
 
-func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType && eventType != utils.NetworkEventType {
 		return nil
 	}

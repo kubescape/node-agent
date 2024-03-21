@@ -6,6 +6,8 @@ import (
 	"node-agent/pkg/utils"
 	"strings"
 
+	"node-agent/pkg/ruleengine/objectcache"
+
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	log "github.com/sirupsen/logrus"
 
@@ -104,7 +106,7 @@ func (rule *R0002UnexpectedFileAccess) generatePatchCommand(event *traceropentyp
 	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(), event.GetContainer(), event.Path, flagList)
 }
 
-func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType {
 		return nil
 	}
@@ -122,7 +124,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 	}
 
 	if rule.shouldIgnoreMounts {
-		mounts, err := getContainerMountPaths(openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer(), k8sProvider)
+		mounts, err := getContainerMountPaths(openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer(), objCache.K8sObjectCache())
 		if err != nil {
 			log.Errorf("Failed to get container mount paths: %v", err)
 			return nil
@@ -133,6 +135,8 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 			}
 		}
 	}
+
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.GetNamespace(), openEvent.GetPod())
 
 	if ap == nil {
 		return &GenericRuleFailure{

@@ -21,6 +21,10 @@ func NewMetricsMock() *MetricsMock {
 		FailedEventCounter: atomic.Int32{},
 	}
 }
+
+func (m *MetricsMock) Start() {
+}
+
 func (m *MetricsMock) Destroy() {
 	m.FailedEventCounter.Store(0)
 	m.RuleProcessedCounter.Clear()
