@@ -13,6 +13,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"node-agent/pkg/rulebindingmanager"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -24,7 +26,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 )
 
-var _ watcher.Watcher = (*RBCache)(nil)
+var _ rulebindingmanager.RuleBindingCache = (*RBCache)(nil)
 var _ watcher.Adaptor = (*RBCache)(nil)
 
 type RBCache struct {
