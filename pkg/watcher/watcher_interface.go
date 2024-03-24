@@ -1,29 +1,38 @@
 package watcher
 
 import (
-	"k8s.io/apimachinery/pkg/runtime"
+	"context"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
+type Adaptor interface {
+	WatchResources
+	Watcher
+}
+
 type Watcher interface {
-	RuntimeObjAddHandler(obj runtime.Object)
-	RuntimeObjUpdateHandler(obj runtime.Object)
-	RuntimeObjDeleteHandler(obj runtime.Object)
+	AddHandler(ctx context.Context, obj *unstructured.Unstructured)
+	ModifyHandler(ctx context.Context, obj *unstructured.Unstructured)
+	DeleteHandler(ctx context.Context, obj *unstructured.Unstructured)
 }
 
 var _ Watcher = &WatcherMock{}
 
 type WatcherMock struct {
-	AddedPods   []runtime.Object
-	UpdatedPods []runtime.Object
-	DeletedPods []runtime.Object
+	Added   []*unstructured.Unstructured
+	Updated []*unstructured.Unstructured
+	Deleted []*unstructured.Unstructured
 }
 
-func (wm *WatcherMock) RuntimeObjAddHandler(obj runtime.Object) {
-	wm.AddedPods = append(wm.AddedPods, obj)
+func (wm *WatcherMock) AddHandler(_ context.Context, obj *unstructured.Unstructured) {
+	wm.Added = append(wm.Added, obj)
 }
-func (wm *WatcherMock) RuntimeObjUpdateHandler(obj runtime.Object) {
-	wm.UpdatedPods = append(wm.UpdatedPods, obj)
+
+func (wm *WatcherMock) ModifyHandler(_ context.Context, obj *unstructured.Unstructured) {
+	wm.Updated = append(wm.Updated, obj)
 }
-func (wm *WatcherMock) RuntimeObjDeleteHandler(obj runtime.Object) {
-	wm.DeletedPods = append(wm.DeletedPods, obj)
+
+func (wm *WatcherMock) DeleteHandler(_ context.Context, obj *unstructured.Unstructured) {
+	wm.Deleted = append(wm.Deleted, obj)
 }
