@@ -25,6 +25,7 @@ func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Eve
 		return
 	}
 	ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
+	ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
 
 	if ch.kubeIPInstance != nil {
 		ch.kubeIPInstance.EnrichEvent(event)
@@ -48,6 +49,11 @@ func (ch *IGContainerWatcher) startNetworkTracing() error {
 	}
 
 	tracerNetwork.SetEventHandler(ch.networkEventCallback)
+
+	err = tracerNetwork.RunWorkaround()
+	if err != nil {
+		return fmt.Errorf("running workaround: %w", err)
+	}
 
 	ch.networkTracer = tracerNetwork
 

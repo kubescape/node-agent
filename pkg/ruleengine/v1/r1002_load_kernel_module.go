@@ -9,13 +9,13 @@ import (
 )
 
 const (
-	R1002ID                       = "R1002"
-	R1002LoadKernelModuleRuleName = "Kernel Module Load"
+	R1002ID   = "R1002"
+	R1002Name = "Kernel Module Load"
 )
 
 var R1002LoadKernelModuleRuleDescriptor = RuleDescriptor{
 	ID:          R1002ID,
-	Name:        R1002LoadKernelModuleRuleName,
+	Name:        R1002Name,
 	Description: "Detecting Kernel Module Load.",
 	Tags:        []string{"syscall", "kernel", "module", "load"},
 	Priority:    RulePriorityCritical,
@@ -40,7 +40,7 @@ func CreateRuleR1002LoadKernelModule() *R1002LoadKernelModule {
 }
 
 func (rule *R1002LoadKernelModule) Name() string {
-	return R1002LoadKernelModuleRuleName
+	return R1002Name
 }
 func (rule *R1002LoadKernelModule) ID() string {
 	return R1002ID

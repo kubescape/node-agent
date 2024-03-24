@@ -16,8 +16,8 @@ import (
 // Find a reliable way to detect crypto miners.
 
 const (
-	R1007ID                   = "R1007"
-	R1007CryptoMinersRuleName = "Crypto Miner detected"
+	R1007ID   = "R1007"
+	R1007Name = "Crypto Miner detected"
 )
 
 var CommonlyUsedCryptoMinersPorts = []uint16{
@@ -135,7 +135,7 @@ var commonlyUsedCryptoMinersDomains = []string{
 
 var R1007CryptoMinersRuleDescriptor = RuleDescriptor{
 	ID:          R1007ID,
-	Name:        R1007CryptoMinersRuleName,
+	Name:        R1007Name,
 	Description: "Detecting Crypto Miners by port, domain and randomx event.",
 	Tags:        []string{"network", "crypto", "miners", "malicious", "dns"},
 	Priority:    RulePriorityHigh,
@@ -163,7 +163,7 @@ func CreateRuleR1007CryptoMiners() *R1007CryptoMiners {
 }
 
 func (rule *R1007CryptoMiners) Name() string {
-	return R1007CryptoMinersRuleName
+	return R1007Name
 }
 
 func (rule *R1007CryptoMiners) ID() string {

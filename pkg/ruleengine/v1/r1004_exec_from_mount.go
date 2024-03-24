@@ -7,17 +7,18 @@ import (
 	"strings"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	log "github.com/sirupsen/logrus"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 const (
-	R1004ID                    = "R1004"
-	R1004ExecFromMountRuleName = "Exec from mount"
+	R1004ID   = "R1004"
+	R1004Name = "Exec from mount"
 )
 
 var R1004ExecFromMountRuleDescriptor = RuleDescriptor{
 	ID:          R1004ID,
-	Name:        R1004ExecFromMountRuleName,
+	Name:        R1004Name,
 	Description: "Detecting exec calls from mounted paths.",
 	Tags:        []string{"exec", "mount"},
 	Priority:    RulePriorityMed,
@@ -32,14 +33,13 @@ var R1004ExecFromMountRuleDescriptor = RuleDescriptor{
 
 type R1004ExecFromMount struct {
 	BaseRule
-	// Map of container ID to mount paths
 }
 
 func CreateRuleR1004ExecFromMount() *R1004ExecFromMount {
 	return &R1004ExecFromMount{}
 }
 func (rule *R1004ExecFromMount) Name() string {
-	return R1004ExecFromMountRuleName
+	return R1004Name
 }
 
 func (rule *R1004ExecFromMount) ID() string {
@@ -68,7 +68,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 		p := getExecPathFromEvent(execEvent)
 		contained := rule.isPathContained(p, mount)
 		if contained {
-			log.Debugf("Path %s is mounted in pod %s/%s", p, execEvent.GetNamespace(), execEvent.GetPod())
+			logger.L().Debug("Exec from mount", helpers.String("path", p), helpers.String("mount", mount))
 			return &GenericRuleFailure{
 				RuleName:         rule.Name(),
 				RuleID:           rule.ID(),

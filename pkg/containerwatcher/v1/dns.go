@@ -18,6 +18,7 @@ func (ch *IGContainerWatcher) dnsEventCallback(event *tracerdnstype.Event) {
 	}
 
 	ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
+	ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
 
 	_ = ch.dnsWorkerPool.Invoke(*event)
 }

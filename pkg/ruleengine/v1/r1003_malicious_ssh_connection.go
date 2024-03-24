@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"log"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
@@ -13,13 +14,13 @@ import (
 
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/kubescape/go-logger"
 )
 
 const (
-	R1003ID                             = "R1003"
-	R1003MaliciousSSHConnectionRuleName = "Malicious SSH Connection"
-	MaxTimeDiffInSeconds                = 2
+	R1003ID              = "R1003"
+	R1003Name            = "Malicious SSH Connection"
+	MaxTimeDiffInSeconds = 2
 )
 
 var SSHRelatedFiles = []string{
@@ -48,7 +49,7 @@ var SSHRelatedFiles = []string{
 
 var R1003MaliciousSSHConnectionRuleDescriptor = RuleDescriptor{
 	ID:          R1003ID,
-	Name:        R1003MaliciousSSHConnectionRuleName,
+	Name:        R1003Name,
 	Description: "Detecting ssh connection to disallowed port",
 	Tags:        []string{"ssh", "connection", "port", "malicious"},
 	Priority:    RulePriorityHigh,
@@ -79,7 +80,7 @@ func CreateRuleR1003MaliciousSSHConnection() *R1003MaliciousSSHConnection {
 	}
 }
 func (rule *R1003MaliciousSSHConnection) Name() string {
-	return R1003MaliciousSSHConnectionRuleName
+	return R1003Name
 }
 
 func (rule *R1003MaliciousSSHConnection) ID() string {
@@ -89,7 +90,7 @@ func (rule *R1003MaliciousSSHConnection) ID() string {
 func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interface{}) {
 	if allowedPortsInterface, ok := params["allowedPorts"].([]interface{}); ok {
 		if len(allowedPortsInterface) == 0 {
-			log.Printf("No allowed ports were provided for rule %s. Defaulting to port 22\n", rule.Name())
+			logger.L().Error("Allowed ports cannot be empty")
 			return
 		}
 
@@ -98,14 +99,14 @@ func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interfa
 			if convertedPort, ok := port.(float64); ok {
 				allowedPorts = append(allowedPorts, uint16(convertedPort))
 			} else {
-				log.Errorf("Failed to convert port %v to uint16\n", port)
+				logger.L().Error("Failed to convert allowed port to uint16")
+				return
 			}
 		}
-
-		log.Printf("Set parameters for rule %s. Allowed ports: %v\n", rule.Name(), allowedPorts)
 		rule.allowedPorts = allowedPorts
 	} else {
-		log.Errorf("Failed to set parameters for rule %s. Allowed ports: %v\n", rule.Name(), params["allowedPorts"])
+		logger.L().Error("Failed to convert allowed ports to []interface{}")
+		return
 	}
 }
 

@@ -14,13 +14,13 @@ import (
 )
 
 const (
-	R0003ID                           = "R0003"
-	R0003UnexpectedSystemCallRuleName = "Unexpected system call"
+	R0003ID   = "R0003"
+	R0003Name = "Unexpected system call"
 )
 
 var R0003UnexpectedSystemCallRuleDescriptor = RuleDescriptor{
 	ID:          R0003ID,
-	Name:        R0003UnexpectedSystemCallRuleName,
+	Name:        R0003Name,
 	Description: "Detecting unexpected system calls that are not whitelisted by application profile. Every unexpected system call will be alerted only once.",
 	Tags:        []string{"syscall", "whitelisted"},
 	Priority:    RulePriorityMed,
@@ -47,7 +47,7 @@ func CreateRuleR0003UnexpectedSystemCall() *R0003UnexpectedSystemCall {
 }
 
 func (rule *R0003UnexpectedSystemCall) Name() string {
-	return R0003UnexpectedSystemCallRuleName
+	return R0003Name
 }
 
 func (rule *R0003UnexpectedSystemCall) ID() string {
@@ -78,28 +78,13 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 	}
 
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEvent.GetNamespace(), syscallEvent.GetPod())
-
 	if ap == nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", syscallEvent.GetPod()),
-			FailureEvent:     utils.CapabilitiesToGeneralEvent(syscallEvent),
-			RulePriority:     R0003UnexpectedSystemCallRuleDescriptor.Priority,
-		}
+		return nil
 	}
 
 	appProfileSyscallList, err := getContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
 	if err != nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing (missing syscall list))",
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", syscallEvent.GetPod()),
-			FailureEvent:     utils.CapabilitiesToGeneralEvent(syscallEvent),
-			RulePriority:     R0003UnexpectedSystemCallRuleDescriptor.Priority,
-		}
+		return nil
 	}
 
 	unexpectedSyscalls := []string{}

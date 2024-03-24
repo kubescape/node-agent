@@ -9,13 +9,13 @@ import (
 )
 
 const (
-	R1006ID                     = "R1006"
-	R1006UnshareSyscallRuleName = "Unshare System Call usage"
+	R1006ID   = "R1006"
+	R1006Name = "Unshare System Call usage"
 )
 
 var R1006UnshareSyscallRuleDescriptor = RuleDescriptor{
 	ID:          R1006ID,
-	Name:        R1006UnshareSyscallRuleName,
+	Name:        R1006Name,
 	Description: "Detecting Unshare System Call usage, which can be used to escape container.",
 	Tags:        []string{"syscall", "escape", "unshare"},
 	Priority:    RulePriorityHigh,
@@ -42,7 +42,7 @@ func CreateRuleR1006UnshareSyscall() *R1006UnshareSyscall {
 }
 
 func (rule *R1006UnshareSyscall) Name() string {
-	return R1006UnshareSyscallRuleName
+	return R1006Name
 }
 
 func (rule *R1006UnshareSyscall) ID() string {
