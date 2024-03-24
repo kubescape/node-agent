@@ -59,14 +59,22 @@ func (c *RBCache) WatchResources() []watcher.WatchResource {
 // ------------------ rulebindingmanager.RuleBindingCache methods -----------------------
 
 func (c *RBCache) ListRulesForPod(namespace, name string) []ruleengine.RuleEvaluator {
-	podName := fmt.Sprintf("%s/%s", namespace, name)
-	if !c.podToRBNames.Has(podName) {
-		return []ruleengine.RuleEvaluator{}
+	var rulesSlice []ruleengine.RuleEvaluator
+
+	//append global rules
+	for _, v := range c.globalRBNames.ToSlice() {
+		if c.rbNameToRules.Has(v) {
+			rulesSlice = append(rulesSlice, c.rbNameToRules.Get(v)...)
+		}
 	}
 
-	rbNames := c.podToRBNames.Get(podName)
+	podName := fmt.Sprintf("%s/%s", namespace, name)
+	if !c.podToRBNames.Has(podName) {
+		return rulesSlice
+	}
 
-	var rulesSlice []ruleengine.RuleEvaluator
+	//append rules for pod
+	rbNames := c.podToRBNames.Get(podName)
 	for _, i := range rbNames.ToSlice() {
 		if c.rbNameToRules.Has(i) {
 			rulesSlice = append(rulesSlice, c.rbNameToRules.Get(i)...)
