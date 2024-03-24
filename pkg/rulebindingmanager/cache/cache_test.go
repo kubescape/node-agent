@@ -1,4 +1,4 @@
-package rulebindingmanager
+package cache
 
 import (
 	"node-agent/pkg/k8sclient"

@@ -17,7 +17,7 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"go.opentelemetry.io/otel"
 
-	bindingcache "node-agent/pkg/rulebindingmanager/cache"
+	bindingcache "node-agent/pkg/rulebindingmanager"
 
 	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/ruleengine/objectcache"
@@ -48,7 +48,7 @@ type RuleManager struct {
 	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
 	storageClient            storage.StorageClient
-	ruleBindingCache         *bindingcache.RBCache
+	ruleBindingCache         bindingcache.RuleBindingCache
 	objectCache              objectcache.ObjectCache
 	exporter                 exporters.Exporter
 	metrics                  metricsmanager.MetricsManager
@@ -57,7 +57,7 @@ type RuleManager struct {
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, ruleBindingCache *bindingcache.RBCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		clusterName:       clusterName,

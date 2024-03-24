@@ -1,4 +1,4 @@
-package rulebindingmanager
+package rbinformer
 
 import (
 	"encoding/json"
