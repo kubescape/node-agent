@@ -1,9 +1,10 @@
-package rulebindingmanager
+package cache
 
 import (
 	"context"
 	"fmt"
 	"node-agent/pkg/k8sclient"
+	"node-agent/pkg/rulebindingmanager"
 	"node-agent/pkg/rulebindingmanager/types/v1"
 	"node-agent/pkg/ruleengine"
 	ruleenginev1 "node-agent/pkg/ruleengine/v1"
@@ -24,7 +25,8 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 )
 
-var _ watcher.Watcher = &RBCache{}
+var _ watcher.Watcher = (*RBCache)(nil)
+var _ rulebindingmanager.RuleBindingCache = (*RBCache)(nil)
 
 type RBCache struct {
 	nodeName         string
@@ -48,6 +50,27 @@ func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *RBCache 
 	}
 }
 
+func (c *RBCache) ListRulesForPod(namespace, name string) []ruleengine.RuleEvaluator {
+	podName := fmt.Sprintf("%s/%s", namespace, name)
+	if !c.podToRBNames.Has(podName) {
+		return []ruleengine.RuleEvaluator{}
+	}
+
+	rbNames := c.podToRBNames.Get(podName)
+
+	var rulesSlice []ruleengine.RuleEvaluator
+	for _, i := range rbNames.ToSlice() {
+		if c.rbNameToRules.Has(i) {
+			rulesSlice = append(rulesSlice, c.rbNameToRules.Get(i)...)
+		}
+	}
+
+	return rulesSlice
+}
+
+// ----------------- RuleBinding manager methods -----------------
+
+// AddRuleBinding adds a rule binding to the cache
 func (c *RBCache) AddRuleBinding(ruleBinding *types.RuntimeAlertRuleBinding) {
 	rbName := ruleBinding.GetName()
 	logger.L().Info("AddRuleBinding", helpers.String("name", rbName))
@@ -134,6 +157,8 @@ func (c *RBCache) UpdateRuleBinding(ruleBinding *types.RuntimeAlertRuleBinding) 
 	c.AddRuleBinding(ruleBinding)
 }
 
+// ----------------- PodWatch manager methods -----------------
+
 func (c *RBCache) RuntimeObjAddHandler(obj runtime.Object) {
 	switch reflect.TypeOf(obj) {
 	case reflect.TypeOf(&corev1.Pod{}):
@@ -208,28 +233,6 @@ func (c *RBCache) RuntimeObjDeleteHandler(obj runtime.Object) {
 		}
 		c.podToRBNames.Delete(podName(pod))
 	}
-}
-
-func (c *RBCache) ListRuleBindings() []types.RuntimeAlertRuleBinding {
-	return c.rbNameToRB.Values()
-}
-
-func (c *RBCache) ListRulesForPod(namespace, name string) []ruleengine.RuleEvaluator {
-	podName := fmt.Sprintf("%s/%s", namespace, name)
-	if !c.podToRBNames.Has(podName) {
-		return []ruleengine.RuleEvaluator{}
-	}
-
-	rbNames := c.podToRBNames.Get(podName)
-
-	var rulesSlice []ruleengine.RuleEvaluator
-	for _, i := range rbNames.ToSlice() {
-		if c.rbNameToRules.Has(i) {
-			rulesSlice = append(rulesSlice, c.rbNameToRules.Get(i)...)
-		}
-	}
-
-	return rulesSlice
 }
 
 func (c *RBCache) createRules(rulesForPod []types.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {

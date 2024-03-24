@@ -1,4 +1,4 @@
-package rulebindingmanager
+package rbinformer
 
 // func TestNewRuleBindingK8sStore(t *testing.T) {
 // 	// Create a fake dynamic client
