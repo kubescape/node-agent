@@ -12,7 +12,9 @@ import (
 )
 
 func TestCooldownQueue_Stop(t *testing.T) {
-	queue := NewCooldownQueue(1, 1*time.Second)
+	DefaultQueueSize = 1
+	DefaultTTL = 1 * time.Second
+	queue := NewCooldownQueue()
 
 	// Assert that the queue is not closed
 	assert.False(t, queue.Closed(), "expected queue to be open")
@@ -30,7 +32,9 @@ func TestCooldownQueue_Stop(t *testing.T) {
 }
 
 func TestCooldownQueue_Enqueue(t *testing.T) {
-	queue := NewCooldownQueue(1, 1*time.Second)
+	DefaultQueueSize = 1
+	DefaultTTL = 1 * time.Second
+	queue := NewCooldownQueue()
 
 	// Enqueue an event
 	event := watch.Event{Type: watch.Added, Object: &core1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "test", Name: "test", Namespace: "test"}}}

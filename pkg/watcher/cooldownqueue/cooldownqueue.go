@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 )
 
-const (
+var (
 	// Default size for the cooldown queue
 	DefaultQueueSize = 512
 	// Default TTL for events put in the queue
@@ -30,8 +30,8 @@ type CooldownQueue struct {
 }
 
 // NewCooldownQueue returns a new Cooldown Queue
-func NewCooldownQueue(size int, cooldown time.Duration) *CooldownQueue {
-	cache := lru.NewLRU[string, bool](size, nil, cooldown)
+func NewCooldownQueue() *CooldownQueue {
+	cache := lru.NewLRU[string, bool](DefaultQueueSize, nil, DefaultTTL)
 	events := make(chan watch.Event)
 	return &CooldownQueue{
 		seenEvents: cache,

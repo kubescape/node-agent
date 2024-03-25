@@ -170,9 +170,9 @@ func TestRuntimeObjAddHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			for i := range tt.args.rb {
-				tt.args.c.AddRuleBinding(&tt.args.rb[i])
+				tt.args.c.addRuleBinding(&tt.args.rb[i])
 			}
-			tt.args.c.RuntimeObjAddHandler(tt.args.pod)
+			tt.args.c.addPod(tt.args.pod)
 			r := tt.args.c.ListRulesForPod(tt.args.pod.GetNamespace(), tt.args.pod.GetName())
 			assert.Equal(t, len(tt.expectedRules), len(r))
 			for i := range r {
