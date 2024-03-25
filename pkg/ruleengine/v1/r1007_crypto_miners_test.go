@@ -5,8 +5,11 @@ import (
 	"node-agent/pkg/utils"
 	"testing"
 
+	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	"github.com/kubescape/kapprofiler/pkg/tracing"
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 func TestR1007CryptoMiners(t *testing.T) {
@@ -18,20 +21,16 @@ func TestR1007CryptoMiners(t *testing.T) {
 	}
 
 	// Create network event
-	e := &tracing.NetworkEvent{
-		GeneralEvent: tracing.GeneralEvent{
-			ContainerID: "test",
-			PodName:     "test",
-			Namespace:   "test",
-			Timestamp:   0,
+	e := &tracernetworktype.Event{
+		PktType: "OUTGOING",
+		Proto:   "TCP",
+		Port:    2222,
+		DstEndpoint: types.L3Endpoint{
+			Addr: "1.1.1.1",
 		},
-		PacketType:  "OUTGOING",
-		Protocol:    "TCP",
-		Port:        2222,
-		DstEndpoint: "1.1.1.1",
 	}
 
-	ruleResult := r.ProcessEvent(utils.NetworkEventType, e, nil, nil)
+	ruleResult := r.ProcessEvent(utils.NetworkEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since dst port is not in the commonly used crypto miners ports")
@@ -41,7 +40,7 @@ func TestR1007CryptoMiners(t *testing.T) {
 	// Create network event with dst port 3333
 	e.Port = 3333
 
-	ruleResult = r.ProcessEvent(utils.NetworkEventType, e, nil, nil)
+	ruleResult = r.ProcessEvent(utils.NetworkEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of dst port is in the commonly used crypto miners ports")
@@ -50,17 +49,10 @@ func TestR1007CryptoMiners(t *testing.T) {
 
 	// Create dns event
 	e2 := &tracerdnstype.Event{
-		GeneralEvent: tracing.GeneralEvent{
-			ContainerID: "test",
-			PodName:     "test",
-			Namespace:   "test",
-			Timestamp:   0,
-		},
-		DnsName:   "zergpool.com",
-		Addresses: []string{},
+		DNSName: "xmr.gntl.uk",
 	}
 
-	ruleResult = r.ProcessEvent(utils.DnsEventType, e2, nil, nil)
+	ruleResult = r.ProcessEvent(utils.DnsEventType, e2, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of dns name is in the commonly used crypto miners domains")
@@ -68,16 +60,11 @@ func TestR1007CryptoMiners(t *testing.T) {
 	}
 
 	// Test RandomX event
-	e3 := &tracing.RandomXEvent{
-		GeneralEvent: tracing.GeneralEvent{
-			ContainerID: "test",
-			PodName:     "test",
-			Namespace:   "test",
-			Timestamp:   0,
-		},
+	e3 := &tracerrandomxtype.Event{
+		Comm: "test",
 	}
 
-	ruleResult = r.ProcessEvent(utils.RandomXEventType, e3, nil, nil)
+	ruleResult = r.ProcessEvent(utils.RandomXEventType, e3, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of RandomX event")

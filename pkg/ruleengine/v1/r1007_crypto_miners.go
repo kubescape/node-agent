@@ -6,14 +6,11 @@ import (
 	"node-agent/pkg/utils"
 	"slices"
 
+	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 )
-
-// Current rule:
-// Detecting Crypto Miners by looking for outgoing TCP connections to commonly used crypto miners ports and common pools dns names.
-// TODO: Add more crypto miners ports + add more crypto miners detection methods (e.g. by looking for specific processes and domains).
-// Find a reliable way to detect crypto miners.
 
 const (
 	R1007ID   = "R1007"
@@ -178,12 +175,12 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event int
 		return nil
 	}
 
-	if randomXEvent, ok := event.(*utils.GeneralEvent); ok {
+	if randomXEvent, ok := event.(*tracerrandomxtype.Event); ok {
 		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
 			RuleID:           rule.ID(),
 			Err:              "Possible Crypto Miner detected",
-			FailureEvent:     randomXEvent,
+			FailureEvent:     utils.RandomxToGeneralEvent(randomXEvent),
 			FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 			RulePriority:     R1007CryptoMinersRuleDescriptor.Priority,
 		}
@@ -216,7 +213,7 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event int
 
 func (rule *R1007CryptoMiners) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.NetworkEventType, utils.DnsEventType, utils.RandomXEventType},
+		EventTypes:             R1007CryptoMinersRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: false,
 	}
 }
