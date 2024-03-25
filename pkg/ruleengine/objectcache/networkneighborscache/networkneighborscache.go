@@ -35,8 +35,11 @@ type NetworkNeighborsCacheImp struct {
 
 func NewNetworkNeighborsCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *NetworkNeighborsCacheImp {
 	return &NetworkNeighborsCacheImp{
-		nodeName:  nodeName,
-		k8sClient: k8sClient,
+		nodeName:     nodeName,
+		k8sClient:    k8sClient,
+		podToSlug:    maps.SafeMap[string, string]{},
+		slugToPods:   maps.SafeMap[string, mapset.Set[string]]{},
+		allNeighbors: mapset.NewSet[string](),
 	}
 
 }

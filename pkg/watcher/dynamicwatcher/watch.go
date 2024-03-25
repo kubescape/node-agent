@@ -99,7 +99,7 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 	for event := range eventQueue.ResultChan {
 		// skip non-objects
 		obj, ok := event.Object.(*unstructured.Unstructured)
-		if !ok {
+		if !ok || obj == nil {
 			continue
 		}
 		for _, handler := range wh.handlers {
