@@ -120,17 +120,20 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 	}
 	podB, err := podU.MarshalJSON()
 	if err != nil {
+		logger.L().Error("in ApplicationProfileCache, failed to marshal pod", helpers.String("name", podName), helpers.Error(err))
 		return
 	}
 
 	pod, err := workloadinterface.NewWorkload(podB)
 	if err != nil {
+		logger.L().Error("in ApplicationProfileCache,failed to unmarshal pod", helpers.String("name", podName), helpers.Error(err))
 		return
 	}
 
 	// get instanceIDs
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {
+		logger.L().Error("in ApplicationProfileCache,failed to get instanceIDs", helpers.String("name", podName), helpers.Error(err))
 		return
 	}
 	if len(instanceIDs) == 0 {
@@ -186,7 +189,7 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 
 	appProfile, err := unstructuredToApplicationProfile(obj)
 	if err != nil {
-		logger.L().Error("failed to unmarshal application profile", helpers.Error(err))
+		logger.L().Error("failed to unmarshal application profile", helpers.String("name", apName), helpers.Error(err))
 		return
 	}
 
@@ -232,7 +235,7 @@ func unstructuredToApplicationProfile(obj *unstructured.Unstructured) (*v1beta1.
 	}
 
 	var ap *v1beta1.ApplicationProfile
-	err = json.Unmarshal(bytes, ap)
+	err = json.Unmarshal(bytes, &ap)
 	if err != nil {
 		return nil, err
 	}

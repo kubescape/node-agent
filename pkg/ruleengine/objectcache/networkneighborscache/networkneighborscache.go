@@ -223,7 +223,7 @@ func unstructuredToNetworkNeighbors(obj *unstructured.Unstructured) (*v1beta1.Ne
 	}
 
 	var np *v1beta1.NetworkNeighbors
-	err = json.Unmarshal(bytes, np)
+	err = json.Unmarshal(bytes, &np)
 	if err != nil {
 		return nil, err
 	}
