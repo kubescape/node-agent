@@ -148,26 +148,28 @@ func main() {
 		// create k8sObject cache
 		k8sObjectCache, err := k8scache.NewK8sObjectCache(nodeName, k8sClient)
 		if err != nil {
-			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
+			logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
 		}
 		dWatcher.AddAdaptor(k8sObjectCache)
 
-		// watching
-		dWatcher.Start(ctx)
+		apc := applicationprofilecache.NewApplicationProfileCache(nodeName, k8sClient)
+		dWatcher.AddAdaptor(apc)
 
-		// create exporter
-		ex := exporters.InitExporters(cfg.Exporters)
-
-		apc, _ := applicationprofilecache.NewApplicationProfileCache(k8sClient)
 		nnc, _ := networkneighborscache.NewNetworkNeighborsCache(k8sClient)
+
+		// start watching
+		dWatcher.Start(ctx)
 
 		// create object cache
 		objCache := objectcache.NewObjectCache(k8sObjectCache, apc, nnc)
 
+		// create exporter
+		ex := exporters.InitExporters(cfg.Exporters)
+
 		// create runtimeDetection manager
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, ruleBindingCache, objCache, ex, prometheusExporter)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, ex, prometheusExporter)
 		if err != nil {
-			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
+			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
 	} else {
 		ruleManager = rulemanager.CreateRuleManagerMock()

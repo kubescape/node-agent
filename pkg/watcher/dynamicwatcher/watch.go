@@ -160,32 +160,6 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 	}
 }
 
-// // hasParent returns true if workload has a parent
-// // based on https://github.com/kubescape/k8s-interface/blob/2855cc94bd7666b227ad9e5db5ca25cb895e6cee/k8sinterface/k8sdynamic.go#L219
-// func hasParent(workload *unstructured.Unstructured) bool {
-// 	if workload == nil {
-// 		return false
-// 	}
-// 	// filter out non-controller workloads
-// 	if !slices.Contains([]string{"Pod", "Job", "ReplicaSet"}, workload.GetKind()) {
-// 		return false
-// 	}
-// 	// check if workload has owner
-// 	ownerReferences := workload.GetOwnerReferences() // OwnerReferences in workload
-// 	if len(ownerReferences) > 0 {
-// 		return slices.Contains([]string{"apps/v1", "batch/v1", "batch/v1beta1"}, ownerReferences[0].APIVersion)
-// 	}
-// 	// check if workload is Pod with pod-template-hash label
-// 	if workload.GetKind() == "Pod" {
-// 		if podLabels := workload.GetLabels(); podLabels != nil {
-// 			if podHash, ok := podLabels["pod-template-hash"]; ok && podHash != "" {
-// 				return true
-// 			}
-// 		}
-// 	}
-// 	return false
-// }
-
 func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions) (string, error) {
 	logger.L().Debug("getting existing objects from storage", helpers.String("resource", res.Resource))
 	list, err := wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), metav1.ListOptions{})
@@ -201,31 +175,6 @@ func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schem
 	return list.GetResourceVersion(), nil
 }
 
-// func (c *Client) getObjectFromUnstructured(d *unstructured.Unstructured) ([]byte, error) {
-// 	if c.res.Group == kubescapeCustomResourceGroup {
-// 		obj, err := c.getResource(d.GetNamespace(), d.GetName())
-// 		if err != nil {
-// 			return nil, fmt.Errorf("get resource: %w", err)
-// 		}
-// 		return c.filterAndMarshal(obj)
-// 	}
-// 	return c.filterAndMarshal(d)
-// }
-
-// func (c *Client) getResource(namespace string, name string) (*unstructured.Unstructured, error) {
-// 	if c.multiplier > 0 {
-// 		name = stripSuffix(name)
-// 	}
-// 	return c.client.Resource(c.res).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
-// }
-
-//	func stripSuffix(name string) string {
-//		lastHyphen := strings.LastIndex(name, "-")
-//		if lastHyphen != -1 && strings.HasPrefix(name[lastHyphen:], "-") {
-//			return name[:lastHyphen]
-//		}
-//		return name
-//	}
 func newBackOff() backoff.BackOff {
 	b := backoff.NewExponentialBackOff()
 	// never stop retrying (unless PermanentError is returned)
