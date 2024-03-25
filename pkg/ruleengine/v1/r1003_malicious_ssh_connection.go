@@ -178,7 +178,7 @@ func IsSSHConfigFile(path string) bool {
 
 func (rule *R1003MaliciousSSHConnection) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.OpenEventType, utils.NetworkEventType},
+		EventTypes:             R1003MaliciousSSHConnectionRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: false,
 	}
 }

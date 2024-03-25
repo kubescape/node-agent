@@ -178,7 +178,7 @@ func isPathContained(basepath, targetpath string) bool {
 
 func (rule *R0002UnexpectedFileAccess) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.OpenEventType},
+		EventTypes:             R0002UnexpectedFileAccessRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }

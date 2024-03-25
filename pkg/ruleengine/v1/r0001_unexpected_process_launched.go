@@ -100,7 +100,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 
 func (rule *R0001UnexpectedProcessLaunched) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType},
+		EventTypes:             R0001UnexpectedProcessLaunchedRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }

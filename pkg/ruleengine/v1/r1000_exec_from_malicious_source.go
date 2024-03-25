@@ -89,7 +89,7 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 
 func (rule *R1000ExecFromMaliciousSource) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType},
+		EventTypes:             R1000ExecFromMaliciousSourceDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: false,
 	}
 }

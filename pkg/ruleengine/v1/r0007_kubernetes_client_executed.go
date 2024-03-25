@@ -177,7 +177,7 @@ func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventTyp
 
 func (rule *R0007KubernetesClientExecuted) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType, utils.NetworkEventType},
+		EventTypes:             R0007KubernetesClientExecutedDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }

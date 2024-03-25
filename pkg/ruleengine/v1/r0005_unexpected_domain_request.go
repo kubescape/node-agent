@@ -93,7 +93,7 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 
 func (rule *R0005UnexpectedDomainRequest) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.DnsEventType},
+		EventTypes:             R0005UnexpectedDomainRequestRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }

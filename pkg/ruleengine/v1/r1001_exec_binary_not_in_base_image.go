@@ -75,7 +75,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 
 func (rule *R1001ExecBinaryNotInBaseImage) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType},
+		EventTypes:             R1001ExecBinaryNotInBaseImageRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: false,
 	}
 }

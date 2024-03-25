@@ -93,7 +93,7 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 
 func (rule *R0004UnexpectedCapabilityUsed) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.CapabilitiesEventType},
+		EventTypes:             R0004UnexpectedCapabilityUsedRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }

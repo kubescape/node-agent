@@ -126,7 +126,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.OpenEventType},
+		EventTypes:             R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }

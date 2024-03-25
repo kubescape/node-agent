@@ -90,7 +90,7 @@ func (rule *R1004ExecFromMount) isPathContained(targetpath, basepath string) boo
 
 func (rule *R1004ExecFromMount) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType},
+		EventTypes:             R1004ExecFromMountRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: false,
 	}
 }

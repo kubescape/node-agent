@@ -5,7 +5,7 @@ import (
 	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 
-	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
 )
 
 const (
@@ -49,20 +49,20 @@ func (rule *R1002LoadKernelModule) DeleteRule() {
 }
 
 func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if eventType != utils.SyscallEventType && eventType != utils.CapabilitiesEventType {
+	if eventType != utils.SyscallEventType {
 		return nil
 	}
 
-	syscallEvent, ok := event.(*tracercapabilitiestype.Event)
+	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
 		return nil
 	}
 
-	if syscallEvent.Syscall == "init_module" {
+	if syscallEvent.SyscallName == "init_module" {
 		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
 			Err:              "Kernel Module Load",
-			FailureEvent:     utils.CapabilitiesToGeneralEvent(syscallEvent),
+			FailureEvent:     utils.SyscallToGeneralEvent(syscallEvent),
 			FixSuggestionMsg: "If this is a legitimate action, please add consider removing this workload from the binding of this rule",
 			RulePriority:     R1002LoadKernelModuleRuleDescriptor.Priority,
 		}
@@ -73,7 +73,7 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 
 func (rule *R1002LoadKernelModule) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.SyscallEventType},
+		EventTypes:             R1002LoadKernelModuleRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: false,
 	}
 }

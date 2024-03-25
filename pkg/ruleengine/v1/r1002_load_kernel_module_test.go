@@ -5,7 +5,7 @@ import (
 	"node-agent/pkg/utils"
 	"testing"
 
-	"github.com/kubescape/kapprofiler/pkg/tracing"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
 )
 
 func TestR1002LoadKernelModule(t *testing.T) {
@@ -17,37 +17,23 @@ func TestR1002LoadKernelModule(t *testing.T) {
 	}
 
 	// Create a syscall event
-	e := &tracing.SyscallEvent{
-		GeneralEvent: tracing.GeneralEvent{
-			ContainerID: "test",
-			PodName:     "test",
-			Namespace:   "test",
-			Timestamp:   0,
-		},
-		Syscalls: []string{"test"},
+	e := &ruleenginetypes.SyscallEvent{
+		Comm:        "test",
+		SyscallName: "test",
 	}
 
-	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, nil, nil)
+	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since syscall is not init_module")
 	}
 
-	// Create a syscall event
-	e = &tracing.SyscallEvent{
-		GeneralEvent: tracing.GeneralEvent{
-			ContainerID: "test",
-			PodName:     "test",
-			Namespace:   "test",
-			Timestamp:   0,
-		},
-		Syscalls: []string{"init_module"},
-	}
+	// Create a syscall event with init_module syscall
+	e.SyscallName = "init_module"
 
-	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, nil, nil)
+	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of init_module is not allowed")
 	}
-
 }
