@@ -1,6 +1,8 @@
 package utils
 
 import (
+	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -134,7 +136,7 @@ func NetworkToGeneralEvent(event *tracernetworktype.Event) *GeneralEvent {
 	}
 }
 
-func RandomxToGeneralEvent(event *tracernetworktype.Event) *GeneralEvent {
+func RandomxToGeneralEvent(event *tracerrandomxtype.Event) *GeneralEvent {
 	return &GeneralEvent{
 		ProcessDetails: ProcessDetails{
 			Pid:  event.Pid,
