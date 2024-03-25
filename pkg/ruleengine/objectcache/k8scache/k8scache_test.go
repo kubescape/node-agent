@@ -1,10 +1,20 @@
 package k8scache
 
-import "node-agent/pkg/k8sclient"
+import (
+	_ "embed"
+	"testing"
+)
 
-func NewK8sObjectCacheMock(k8sClient k8sclient.K8sClientInterface) *K8sObjectCacheImpl {
-	return &K8sObjectCacheImpl{
-		k8sClient:          k8sClient,
-		apiServerIpAddress: "127.0.0.1",
-	}
+func TestUnstructuredToPod(t *testing.T) {
+
+	/*
+		obj := &unstructured.Unstructured{}
+		err := obj.UnmarshalJSON(podJson)
+		s.Require().NoError(err)
+
+		pod, err := unstructuredToPod(obj)
+		s.Require().NoError(err)
+		s.Require().NotNil(pod)
+		s.Require().Equal("nginx", pod.Name)
+	*/
 }

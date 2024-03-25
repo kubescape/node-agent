@@ -228,6 +228,19 @@ func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj *unstructure
 	ap.slugToPods.Delete(apName)
 }
 
+func (ap *ApplicationProfileCacheImpl) getApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
+	gvr := schema.GroupVersionResource{
+		Group:    "spdx.softwarecomposition.kubescape.io",
+		Version:  "v1beta1",
+		Resource: "applicationprofiles",
+	}
+	u, err := ap.k8sClient.GetDynamicClient().Resource(gvr).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return unstructuredToApplicationProfile(u)
+}
+
 func unstructuredToApplicationProfile(obj *unstructured.Unstructured) (*v1beta1.ApplicationProfile, error) {
 	bytes, err := obj.MarshalJSON()
 	if err != nil {
@@ -240,16 +253,4 @@ func unstructuredToApplicationProfile(obj *unstructured.Unstructured) (*v1beta1.
 		return nil, err
 	}
 	return ap, nil
-}
-func (ap *ApplicationProfileCacheImpl) getApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
-	gvr := schema.GroupVersionResource{
-		Group:    "spdx.softwarecomposition.kubescape.io",
-		Version:  "v1beta1",
-		Resource: "applicationprofiles",
-	}
-	u, err := ap.k8sClient.GetDynamicClient().Resource(gvr).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	return unstructuredToApplicationProfile(u)
 }
