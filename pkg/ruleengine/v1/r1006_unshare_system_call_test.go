@@ -5,7 +5,7 @@ import (
 	"node-agent/pkg/utils"
 	"testing"
 
-	"github.com/kubescape/kapprofiler/pkg/tracing"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
 )
 
 func TestR1006UnshareSyscall(t *testing.T) {
@@ -17,31 +17,25 @@ func TestR1006UnshareSyscall(t *testing.T) {
 	}
 
 	// Create a syscall event
-	e := &tracing.SyscallEvent{
-		GeneralEvent: tracing.GeneralEvent{
-			ContainerID: "test",
-			PodName:     "test",
-			Namespace:   "test",
-			Timestamp:   0,
-		},
-		Syscalls: []string{"test"},
+	e := &ruleenginetypes.SyscallEvent{
+		Comm:        "test",
+		SyscallName: "test",
 	}
 
-	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, nil, nil)
+	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since syscall is not unshare")
 		return
 	}
 
-	// Create a syscall event
-	e.Syscalls = append(e.Syscalls, "unshare")
+	// Create a syscall event with unshare syscall
+	e.SyscallName = "unshare"
 
-	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, nil, nil)
+	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of unshare is used")
 		return
 	}
-
 }
