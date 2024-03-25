@@ -35,8 +35,11 @@ type ApplicationActivityCacheImpl struct {
 
 func NewApplicationActivityCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *ApplicationActivityCacheImpl {
 	return &ApplicationActivityCacheImpl{
-		nodeName:  nodeName,
-		k8sClient: k8sClient,
+		nodeName:    nodeName,
+		k8sClient:   k8sClient,
+		podToSlug:   maps.SafeMap[string, string]{},
+		slugToPods:  maps.SafeMap[string, mapset.Set[string]]{},
+		allProfiles: mapset.NewSet[string](),
 	}
 
 }
