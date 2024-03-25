@@ -166,7 +166,7 @@ func main() {
 		dWatcher.Start(ctx)
 
 		// create object cache
-		objCache := objectcache.NewObjectCache(k8sObjectCache, apc, nnc)
+		objCache := objectcache.NewObjectCache(k8sObjectCache, apc, aac, nnc)
 
 		// create exporter
 		ex := exporters.InitExporters(cfg.Exporters)
