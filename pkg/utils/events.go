@@ -133,3 +133,20 @@ func NetworkToGeneralEvent(event *tracernetworktype.Event) *GeneralEvent {
 		EventType:     NetworkEventType,
 	}
 }
+
+func RandomxToGeneralEvent(event *tracernetworktype.Event) *GeneralEvent {
+	return &GeneralEvent{
+		ProcessDetails: ProcessDetails{
+			Pid:  event.Pid,
+			Comm: event.Comm,
+			Uid:  event.Uid,
+			Gid:  event.Gid,
+		},
+		ContainerName: event.GetContainer(),
+		PodName:       event.GetPod(),
+		Namespace:     event.GetNamespace(),
+		MountNsID:     event.MountNsID,
+		Timestamp:     int64(event.Timestamp),
+		EventType:     RandomXEventType,
+	}
+}
