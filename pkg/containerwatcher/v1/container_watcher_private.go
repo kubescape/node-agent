@@ -168,6 +168,11 @@ func (ch *IGContainerWatcher) stopTracers() error {
 			logger.L().Error("error stopping network tracing", helpers.Error(err))
 			errs = errors.Join(err, ch.stopNetworkTracing())
 		}
+		// Stop dns tracer
+		if err := ch.stopDNSTracing(); err != nil {
+			logger.L().Error("error stopping dns tracing", helpers.Error(err))
+			errs = errors.Join(err, ch.stopDNSTracing())
+		}
 	}
 
 	if ch.cfg.EnableRuntimeDetection {
