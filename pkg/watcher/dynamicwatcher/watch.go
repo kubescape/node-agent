@@ -99,7 +99,7 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 	for event := range eventQueue.ResultChan {
 		// skip non-objects
 		obj, ok := event.Object.(*unstructured.Unstructured)
-		if !ok {
+		if !ok || obj == nil {
 			continue
 		}
 		for _, handler := range wh.handlers {
@@ -116,8 +116,10 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 	return nil
 }
 
-func (wh *WatchHandler) Stop(_ context.Context) error {
-	return nil
+func (wh *WatchHandler) Stop(_ context.Context) {
+	for _, q := range wh.eventQueues {
+		q.Stop()
+	}
 }
 
 func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions, eventQueue *cooldownqueue.CooldownQueue) {
