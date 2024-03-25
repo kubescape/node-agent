@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"node-agent/pkg/utils"
+	"runtime"
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -119,6 +120,18 @@ func (ch *IGContainerWatcher) startTracers() error {
 
 	}
 
+	if ch.cfg.EnableRuntimeDetection {
+		// The randomx tracing is only supported on amd64 architecture.
+		if runtime.GOARCH == "amd64" {
+			if err := ch.startRandomxTracing(); err != nil {
+				logger.L().Error("error starting randomx tracing", helpers.Error(err))
+				return err
+			}
+		} else {
+			logger.L().Warning("randomx tracing is not supported on this architecture", helpers.String("architecture", runtime.GOARCH))
+		}
+	}
+
 	return nil
 }
 
@@ -154,6 +167,16 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		if err := ch.stopNetworkTracing(); err != nil {
 			logger.L().Error("error stopping network tracing", helpers.Error(err))
 			errs = errors.Join(err, ch.stopNetworkTracing())
+		}
+	}
+
+	if ch.cfg.EnableRuntimeDetection {
+		// Stop randomx tracer
+		if runtime.GOARCH == "amd64" && ch.randomxTracer != nil {
+			if err := ch.stopRandomxTracing(); err != nil {
+				logger.L().Error("error stopping randomx tracing", helpers.Error(err))
+				errs = errors.Join(err, ch.stopRandomxTracing())
+			}
 		}
 	}
 

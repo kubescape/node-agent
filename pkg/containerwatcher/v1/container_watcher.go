@@ -14,6 +14,9 @@ import (
 	"node-agent/pkg/utils"
 	"os"
 
+	tracerandomx "node-agent/pkg/ebpf/gadgets/randomx/tracer"
+	tracerandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
@@ -40,6 +43,7 @@ const (
 	networkTraceName           = "trace_network"
 	dnsTraceName               = "trace_dns"
 	openTraceName              = "trace_open"
+	randomxTraceName           = "trace_randomx"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
@@ -71,6 +75,7 @@ type IGContainerWatcher struct {
 	syscallTracer      *tracerseccomp.Tracer
 	networkTracer      *tracernetwork.Tracer
 	dnsTracer          *tracerdns.Tracer
+	randomxTracer      *tracerandomx.Tracer
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
 	// Worker pools
@@ -79,6 +84,7 @@ type IGContainerWatcher struct {
 	openWorkerPool         *ants.PoolWithFunc
 	networkWorkerPool      *ants.PoolWithFunc
 	dnsWorkerPool          *ants.PoolWithFunc
+	randomxWorkerPool      *ants.PoolWithFunc
 
 	metrics metricsmanager.MetricsManager
 }
@@ -179,6 +185,18 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	if err != nil {
 		return nil, fmt.Errorf("creating dns worker pool: %w", err)
 	}
+	// Create a randomx worker pool
+	randomxWorkerPool, err := ants.NewPoolWithFunc(1, func(i interface{}) {
+		event := i.(tracerandomxtype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		metrics.ReportEvent(utils.RandomXEventType)
+		ruleManager.ReportRandomxEvent(event.Runtime.ContainerID, event)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating randomx worker pool: %w", err)
+	}
 
 	return &IGContainerWatcher{
 		// Configuration
@@ -201,6 +219,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		openWorkerPool:         openWorkerPool,
 		networkWorkerPool:      networkWorkerPool,
 		dnsWorkerPool:          dnsWorkerPool,
+		randomxWorkerPool:      randomxWorkerPool,
 		metrics:                metrics,
 	}, nil
 }
