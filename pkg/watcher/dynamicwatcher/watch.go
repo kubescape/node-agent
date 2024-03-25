@@ -116,8 +116,10 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 	return nil
 }
 
-func (wh *WatchHandler) Stop(_ context.Context) error {
-	return nil
+func (wh *WatchHandler) Stop(_ context.Context) {
+	for _, q := range wh.eventQueues {
+		q.Stop()
+	}
 }
 
 func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions, eventQueue *cooldownqueue.CooldownQueue) {

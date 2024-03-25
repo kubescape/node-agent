@@ -19,6 +19,7 @@ import (
 	"node-agent/pkg/relevancymanager"
 	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
 	rulebindingcache "node-agent/pkg/rulebindingmanager/cache"
+	"node-agent/pkg/ruleengine/objectcache/applicationactivitiescache"
 	"node-agent/pkg/ruleengine/objectcache/applicationprofilecache"
 	"node-agent/pkg/ruleengine/objectcache/k8scache"
 	"node-agent/pkg/ruleengine/objectcache/networkneighborscache"
@@ -155,7 +156,11 @@ func main() {
 		apc := applicationprofilecache.NewApplicationProfileCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(apc)
 
-		nnc, _ := networkneighborscache.NewNetworkNeighborsCache(k8sClient)
+		nnc := networkneighborscache.NewNetworkNeighborsCache(nodeName, k8sClient)
+		dWatcher.AddAdaptor(nnc)
+
+		aac := applicationactivitiescache.NewApplicationActivityCache(nodeName, k8sClient)
+		dWatcher.AddAdaptor(aac)
 
 		// start watching
 		dWatcher.Start(ctx)

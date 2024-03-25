@@ -1,4 +1,4 @@
-package applicationprofilecache
+package applicationactivitiescache
 
 import (
 	"context"
@@ -21,29 +21,29 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-var _ objectcache.ApplicationProfileCache = (*ApplicationProfileCacheImpl)(nil)
-var _ watcher.Adaptor = (*ApplicationProfileCacheImpl)(nil)
+var _ objectcache.ApplicationActivityCache = (*ApplicationActivityCacheImpl)(nil)
+var _ watcher.Adaptor = (*ApplicationActivityCacheImpl)(nil)
 
-type ApplicationProfileCacheImpl struct {
+type ApplicationActivityCacheImpl struct {
 	nodeName         string
 	k8sClient        k8sclient.K8sClientInterface
-	podToSlug        maps.SafeMap[string, string]                      // cache the pod to slug mapping, this will enable a quick lookup of the application profile
-	slugToAppProfile maps.SafeMap[string, *v1beta1.ApplicationProfile] // cache the application profile
-	slugToPods       maps.SafeMap[string, mapset.Set[string]]          // cache the pods that belong to the application profile, this will enable removing from cache AP without pods
-	allProfiles      mapset.Set[string]                                // cache all the application profiles that are ready. this will enable removing from cache AP without pods that are running on the same node
+	podToSlug        maps.SafeMap[string, string]                       // cache the pod to slug mapping, this will enable a quick lookup of the application activities
+	slugToAppProfile maps.SafeMap[string, *v1beta1.ApplicationActivity] // cache the application activities
+	slugToPods       maps.SafeMap[string, mapset.Set[string]]           // cache the pods that belong to the application activities, this will enable removing from cache AP without pods
+	allProfiles      mapset.Set[string]                                 // cache all the application activities that are ready. this will enable removing from cache AP without pods that are running on the same node
 }
 
-func NewApplicationProfileCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *ApplicationProfileCacheImpl {
-	return &ApplicationProfileCacheImpl{
+func NewApplicationActivityCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *ApplicationActivityCacheImpl {
+	return &ApplicationActivityCacheImpl{
 		nodeName:  nodeName,
 		k8sClient: k8sClient,
 	}
 
 }
 
-// ------------------ objectcache.ApplicationProfileCache methods -----------------------
+// ------------------ objectcache.ApplicationActivityCache methods -----------------------
 
-func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(namespace, name string) *v1beta1.ApplicationProfile {
+func (ap *ApplicationActivityCacheImpl) GetApplicationActivity(namespace, name string) *v1beta1.ApplicationActivity {
 	uniqueName := objectcache.UniqueName(namespace, name)
 	if ap.slugToAppProfile.Has(uniqueName) {
 		return ap.slugToAppProfile.Get(uniqueName)
@@ -55,7 +55,7 @@ func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(namespace, name str
 
 // ------------------ watcher.WatchResources methods -----------------------
 
-func (ap *ApplicationProfileCacheImpl) WatchResources() []watcher.WatchResource {
+func (ap *ApplicationActivityCacheImpl) WatchResources() []watcher.WatchResource {
 	w := []watcher.WatchResource{}
 
 	// add pod
@@ -70,11 +70,11 @@ func (ap *ApplicationProfileCacheImpl) WatchResources() []watcher.WatchResource 
 	)
 	w = append(w, p)
 
-	// add application profile
+	// add application activities
 	apl := watcher.NewWatchResource(schema.GroupVersionResource{
 		Group:    "spdx.softwarecomposition.kubescape.io",
 		Version:  "v1beta1",
-		Resource: "applicationprofiles",
+		Resource: "applicationactivities",
 	}, metav1.ListOptions{})
 	w = append(w, apl)
 
@@ -82,34 +82,34 @@ func (ap *ApplicationProfileCacheImpl) WatchResources() []watcher.WatchResource 
 }
 
 // ------------------ watcher.Watcher methods -----------------------
-func (ap *ApplicationProfileCacheImpl) AddHandler(ctx context.Context, obj *unstructured.Unstructured) {
+func (ap *ApplicationActivityCacheImpl) AddHandler(ctx context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":
 		ap.addPod(obj)
-	case "ApplicationProfile":
-		ap.addApplicationProfile(ctx, obj)
+	case "ApplicationActivity":
+		ap.addApplicationActivity(ctx, obj)
 	}
 }
-func (ap *ApplicationProfileCacheImpl) ModifyHandler(ctx context.Context, obj *unstructured.Unstructured) {
+func (ap *ApplicationActivityCacheImpl) ModifyHandler(ctx context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":
 		// do nothing
-	case "ApplicationProfile":
-		ap.addApplicationProfile(ctx, obj)
+	case "ApplicationActivity":
+		ap.addApplicationActivity(ctx, obj)
 	}
 }
-func (ap *ApplicationProfileCacheImpl) DeleteHandler(_ context.Context, obj *unstructured.Unstructured) {
+func (ap *ApplicationActivityCacheImpl) DeleteHandler(_ context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":
 		ap.deletePod(obj)
-	case "ApplicationProfile":
-		ap.deleteApplicationProfile(obj)
+	case "ApplicationActivity":
+		ap.deleteApplicationActivity(obj)
 	}
 }
 
 // ------------------ watch pod methods -----------------------
 
-func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
+func (ap *ApplicationActivityCacheImpl) addPod(podU *unstructured.Unstructured) {
 	podName := objectcache.UnstructuredUniqueName(podU)
 
 	if ap.podToSlug.Has(podName) {
@@ -148,57 +148,57 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 	}
 	ap.slugToPods.Get(uniqueSlug).Add(podName)
 
-	// if application profile exists but is not cached
+	// if application activities exists but is not cached
 	if ap.allProfiles.Contains(uniqueSlug) && !ap.slugToAppProfile.Has(uniqueSlug) {
 
-		// get the application profile
-		appProfile, err := ap.getApplicationProfile(pod.GetNamespace(), slug)
+		// get the application activities
+		appProfile, err := ap.getApplicationActivity(pod.GetNamespace(), slug)
 		if err != nil {
-			logger.L().Error("failed to get application profile", helpers.Error(err))
+			logger.L().Error("failed to get application activities", helpers.Error(err))
 			return
 		}
 		ap.slugToAppProfile.Set(uniqueSlug, appProfile)
 	}
 }
 
-func (ap *ApplicationProfileCacheImpl) deletePod(obj *unstructured.Unstructured) {
+func (ap *ApplicationActivityCacheImpl) deletePod(obj *unstructured.Unstructured) {
 	podName := objectcache.UnstructuredUniqueName(obj)
 	uniqueSlug := ap.podToSlug.Get(podName)
 	ap.podToSlug.Delete(podName)
 
-	// remove pod form the application profile mapping
+	// remove pod form the application activities mapping
 	if ap.slugToPods.Has(uniqueSlug) {
 		ap.slugToPods.Get(uniqueSlug).Remove(podName)
 		if ap.slugToPods.Get(uniqueSlug).Cardinality() == 0 {
 			ap.slugToPods.Delete(uniqueSlug)
-			// remove full application profile from cache
+			// remove full application activities from cache
 			ap.slugToAppProfile.Delete(uniqueSlug)
 		}
 	}
 }
 
-// ------------------ watch application profile methods -----------------------
-func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, obj *unstructured.Unstructured) {
+// ------------------ watch application activities methods -----------------------
+func (ap *ApplicationActivityCacheImpl) addApplicationActivity(_ context.Context, obj *unstructured.Unstructured) {
 	apName := objectcache.UnstructuredUniqueName(obj)
 
-	appProfile, err := unstructuredToApplicationProfile(obj)
+	appProfile, err := unstructuredToApplicationActivity(obj)
 	if err != nil {
-		logger.L().Error("failed to unmarshal application profile", helpers.Error(err))
+		logger.L().Error("failed to unmarshal application activities", helpers.Error(err))
 		return
 	}
 
-	// check if the application profile is ready
+	// check if the application activities is ready
 	// TODO: @amir
 	// if was ready and now is not, remove from cache
 	// if ap.slugToAppProfile.Has(apName) {
 	// 	return
 	// }
 
-	// get the full application profile from the storage
+	// get the full application activities from the storage
 	// the watch only returns the metadata
-	fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
+	fullAP, err := ap.getApplicationActivity(appProfile.GetNamespace(), appProfile.GetName())
 	if err != nil {
-		logger.L().Error("failed to get full application profile", helpers.Error(err))
+		logger.L().Error("failed to get full application activities", helpers.Error(err))
 		return
 	}
 
@@ -215,35 +215,35 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 	})
 }
 
-func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj *unstructured.Unstructured) {
+func (ap *ApplicationActivityCacheImpl) deleteApplicationActivity(obj *unstructured.Unstructured) {
 	apName := objectcache.UnstructuredUniqueName(obj)
 	ap.slugToAppProfile.Delete(apName)
 	ap.allProfiles.Remove(apName)
 	ap.slugToPods.Delete(apName)
 }
 
-func unstructuredToApplicationProfile(obj *unstructured.Unstructured) (*v1beta1.ApplicationProfile, error) {
+func unstructuredToApplicationActivity(obj *unstructured.Unstructured) (*v1beta1.ApplicationActivity, error) {
 	bytes, err := obj.MarshalJSON()
 	if err != nil {
 		return nil, err
 	}
 
-	var ap *v1beta1.ApplicationProfile
+	var ap *v1beta1.ApplicationActivity
 	err = json.Unmarshal(bytes, ap)
 	if err != nil {
 		return nil, err
 	}
 	return ap, nil
 }
-func (ap *ApplicationProfileCacheImpl) getApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
+func (ap *ApplicationActivityCacheImpl) getApplicationActivity(namespace, name string) (*v1beta1.ApplicationActivity, error) {
 	gvr := schema.GroupVersionResource{
 		Group:    "spdx.softwarecomposition.kubescape.io",
 		Version:  "v1beta1",
-		Resource: "applicationprofiles",
+		Resource: "applicationactivities",
 	}
 	u, err := ap.k8sClient.GetDynamicClient().Resource(gvr).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
-	return unstructuredToApplicationProfile(u)
+	return unstructuredToApplicationActivity(u)
 }
