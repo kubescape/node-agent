@@ -101,12 +101,33 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 			rules := rm.ruleBindingCache.ListRulesForPod(pod.GetNamespace(), pod.GetName())
 			for _, syscall := range syscalls {
 				event := ruleenginetypes.SyscallEvent{
-					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-						Namespace:     pod.GetNamespace(),
-						PodName:       pod.GetName(),
-						PodLabels:     pod.GetLabels(),
-						ContainerName: container.K8s.ContainerName,
+					Event: eventtypes.Event{
+						Timestamp: eventtypes.Time(time.Now().UnixNano()),
+						Type:      eventtypes.NORMAL,
+						CommonData: eventtypes.CommonData{
+							Runtime: eventtypes.BasicRuntimeMetadata{
+								ContainerID: watchedContainer.ContainerID,
+								RuntimeName: container.Runtime.RuntimeName,
+							},
+							K8s: eventtypes.K8sMetadata{
+								Node: pod.Spec.NodeName,
+								BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+									Namespace:     pod.GetNamespace(),
+									PodName:       pod.GetName(),
+									PodLabels:     pod.GetLabels(),
+									ContainerName: watchedContainer.InstanceID.GetContainerName(),
+								},
+								HostNetwork: pod.Spec.HostNetwork,
+							},
+						},
 					},
+					WithMountNsID: eventtypes.WithMountNsID{
+						MountNsID: watchedContainer.NsMntId,
+					},
+					Pid:         container.Pid,
+					Uid:         container.OciConfig.Process.User.UID,
+					Gid:         container.OciConfig.Process.User.GID,
+					Comm:        container.OciConfig.Process.Args[0],
 					SyscallName: syscall,
 				}
 
