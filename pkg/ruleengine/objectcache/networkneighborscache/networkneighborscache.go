@@ -146,12 +146,12 @@ func (np *NetworkNeighborsCacheImp) addPod(podU *unstructured.Unstructured) {
 	if np.allNeighbors.Contains(uniqueSlug) && !np.slugToNetworkNeighbor.Has(uniqueSlug) {
 
 		// get the network neighbors
-		appProfile, err := np.getNetworkNeighbors(pod.GetNamespace(), slug)
+		netNeighbor, err := np.getNetworkNeighbors(pod.GetNamespace(), slug)
 		if err != nil {
 			logger.L().Error("failed to get network neighbors", helpers.Error(err))
 			return
 		}
-		np.slugToNetworkNeighbor.Set(uniqueSlug, appProfile)
+		np.slugToNetworkNeighbor.Set(uniqueSlug, netNeighbor)
 	}
 }
 
@@ -173,33 +173,33 @@ func (np *NetworkNeighborsCacheImp) deletePod(obj *unstructured.Unstructured) {
 
 // ------------------ watch network neighbors methods -----------------------
 func (np *NetworkNeighborsCacheImp) addNetworkNeighbor(_ context.Context, obj *unstructured.Unstructured) {
-	apName := objectcache.UnstructuredUniqueName(obj)
+	nnName := objectcache.UnstructuredUniqueName(obj)
 
-	appProfile, err := unstructuredToNetworkNeighbors(obj)
+	netNeighbor, err := unstructuredToNetworkNeighbors(obj)
 	if err != nil {
-		logger.L().Error("failed to unmarshal network neighbors", helpers.Error(err))
+		logger.L().Error("failed to unmarshal network neighbors", helpers.String("name", nnName), helpers.Error(err))
 		return
 	}
 
 	// check if the network neighbors is ready
 	// TODO: @amir
 	// if was ready and now is not, remove from cache
-	// if np.slugToNetworkNeighbor.Has(apName) {
+	// if np.slugToNetworkNeighbor.Has(nnName) {
 	// 	return
 	// }
 
 	// get the full network neighbors from the storage
 	// the watch only returns the metadata
-	fullAP, err := np.getNetworkNeighbors(appProfile.GetNamespace(), appProfile.GetName())
+	fullAP, err := np.getNetworkNeighbors(netNeighbor.GetNamespace(), netNeighbor.GetName())
 	if err != nil {
 		logger.L().Error("failed to get full network neighbors", helpers.Error(err))
 		return
 	}
 
-	np.slugToNetworkNeighbor.Set(apName, fullAP)
-	np.allNeighbors.Add(apName)
+	np.slugToNetworkNeighbor.Set(nnName, fullAP)
+	np.allNeighbors.Add(nnName)
 	np.podToSlug.Range(func(podName, uniqueSlug string) bool {
-		if uniqueSlug == apName {
+		if uniqueSlug == nnName {
 			if !np.slugToPods.Has(uniqueSlug) {
 				np.slugToPods.Set(uniqueSlug, mapset.NewSet[string]())
 			}
@@ -210,10 +210,10 @@ func (np *NetworkNeighborsCacheImp) addNetworkNeighbor(_ context.Context, obj *u
 }
 
 func (np *NetworkNeighborsCacheImp) deleteNetworkNeighbor(obj *unstructured.Unstructured) {
-	apName := objectcache.UnstructuredUniqueName(obj)
-	np.slugToNetworkNeighbor.Delete(apName)
-	np.allNeighbors.Remove(apName)
-	np.slugToPods.Delete(apName)
+	nnName := objectcache.UnstructuredUniqueName(obj)
+	np.slugToNetworkNeighbor.Delete(nnName)
+	np.allNeighbors.Remove(nnName)
+	np.slugToPods.Delete(nnName)
 }
 
 func unstructuredToNetworkNeighbors(obj *unstructured.Unstructured) (*v1beta1.NetworkNeighbors, error) {
