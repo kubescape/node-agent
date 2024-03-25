@@ -9,13 +9,12 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/rulemanager"
 	"node-agent/pkg/rulemanager/exporters"
-	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
 	"time"
 
-	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v4"
 	"go.opentelemetry.io/otel"
+	corev1 "k8s.io/api/core/v1"
 
 	bindingcache "node-agent/pkg/rulebindingmanager"
 
@@ -30,24 +29,21 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	"github.com/kubescape/k8s-interface/workloadinterface"
 
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 )
 
 type RuleManager struct {
 	cfg                      config.Config
-	clusterName              string
 	ctx                      context.Context
 	containerMutexes         storageUtils.MapMutex[string]    // key is k8sContainerID
 	trackedContainers        mapset.Set[string]               // key is k8sContainerID
 	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
-	storageClient            storage.StorageClient
 	ruleBindingCache         bindingcache.RuleBindingCache
 	objectCache              objectcache.ObjectCache
 	exporter                 exporters.Exporter
@@ -57,13 +53,11 @@ type RuleManager struct {
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
-		clusterName:       clusterName,
 		ctx:               ctx,
 		k8sClient:         k8sClient,
-		storageClient:     storageClient,
 		containerMutexes:  storageUtils.NewMapMutex[string](),
 		trackedContainers: mapset.NewSet[string](),
 		ruleBindingCache:  ruleBindingCache,
@@ -74,13 +68,34 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, clusterName strin
 }
 
 func (rm *RuleManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	for err := range watchedContainer.SyncChannel {
-		switch {
-		case errors.Is(err, utils.ContainerHasTerminatedError):
-			return nil
+	syscallTicker := time.NewTicker(15 * time.Second)
+	var pod *corev1.Pod
+	if err := backoff.Retry(func() error {
+		p, err := rm.k8sClient.GetKubernetesClient().CoreV1().Pods(container.K8s.Namespace).Get(ctx, container.K8s.PodName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		pod = p
+		return nil
+	}, backoff.NewExponentialBackOff()); err != nil {
+		logger.L().Ctx(ctx).Error("RuleManager - failed to get pod", helpers.Error(err),
+			helpers.String("namespace", container.K8s.Namespace),
+			helpers.String("name", container.K8s.PodName))
+	}
+
+	for {
+		select {
+		case <-syscallTicker.C:
+			// get syscalls
+			// @amit - this is the function that is being called
+			fmt.Printf("pod name", pod.Name)
+		case err := <-watchedContainer.SyncChannel:
+			switch {
+			case errors.Is(err, utils.ContainerHasTerminatedError):
+				return nil
+			}
 		}
 	}
-	return nil
 }
 
 func (rm *RuleManager) startRuleManager(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
@@ -91,22 +106,10 @@ func (rm *RuleManager) startRuleManager(ctx context.Context, container *containe
 	rm.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
 
 	watchedContainer := &utils.WatchedContainerData{
-		ContainerID:      container.Runtime.ContainerID,
-		UpdateDataTicker: time.NewTicker(utils.AddRandomDuration(5, 10, rm.cfg.InitialDelay)), // get out of sync with the relevancy manager
-		SyncChannel:      syncChannel,
-		K8sContainerID:   k8sContainerID,
-		NsMntId:          container.Mntns,
-	}
-
-	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
-	if err := backoff.Retry(func() error {
-		// TODO: I'm not it is needed here
-		return rm.ensureInstanceID(container, watchedContainer)
-	}, backoff.NewExponentialBackOff()); err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to ensure instanceID", helpers.Error(err),
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		ContainerID:    container.Runtime.ContainerID,
+		SyncChannel:    syncChannel,
+		K8sContainerID: k8sContainerID,
+		NsMntId:        container.Mntns,
 	}
 
 	if err := rm.monitorContainer(ctx, container, watchedContainer); err != nil {
@@ -132,54 +135,6 @@ func (rm *RuleManager) deleteResources(watchedContainer *utils.WatchedContainerD
 	// clean cached k8s podSpec
 	// clean cached rules
 }
-func (rm *RuleManager) ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	if watchedContainer.InstanceID != nil {
-		return nil
-	}
-	wl, err := rm.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
-	if err != nil {
-		return fmt.Errorf("failed to get workload: %w", err)
-	}
-	pod := wl.(*workloadinterface.Workload)
-
-	// get pod template hash
-	watchedContainer.TemplateHash, _ = pod.GetLabel("pod-template-hash")
-
-	// find parentWlid
-	kind, name, err := rm.k8sClient.CalculateWorkloadParentRecursive(pod)
-	if err != nil {
-		return fmt.Errorf("failed to calculate workload parent: %w", err)
-	}
-	parentWorkload, err := rm.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
-	if err != nil {
-		return fmt.Errorf("failed to get parent workload: %w", err)
-	}
-	w := parentWorkload.(*workloadinterface.Workload)
-	watchedContainer.Wlid = w.GenerateWlid(rm.clusterName)
-	err = wlid.IsWlidValid(watchedContainer.Wlid)
-	if err != nil {
-		return fmt.Errorf("failed to validate WLID: %w", err)
-	}
-	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
-	// find instanceID
-	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
-	if err != nil {
-		return fmt.Errorf("failed to generate instanceID: %w", err)
-	}
-	watchedContainer.InstanceID = instanceIDs[0]
-	for i := range instanceIDs {
-		if instanceIDs[i].GetContainerName() == container.K8s.ContainerName {
-			watchedContainer.InstanceID = instanceIDs[i]
-		}
-	}
-	// find container type and index
-	if watchedContainer.ContainerType == utils.Unknown {
-		watchedContainer.SetContainerType(pod, container.K8s.ContainerName)
-	}
-
-	// FIXME ephemeralContainers are not supported yet
-	return nil
-}
 
 func (rm *RuleManager) waitForContainer(k8sContainerID string) error {
 	return backoff.Retry(func() error {
@@ -201,8 +156,6 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 				helpers.String("k8s workload", k8sContainerID))
 			return
 		}
-		// container started
-		// TODO:
 		rm.trackedContainers.Add(k8sContainerID)
 		go rm.startRuleManager(rm.ctx, notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:

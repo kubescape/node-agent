@@ -21,7 +21,6 @@ func CreateRuleManagerMock(clusterName string, storageClient storage.StorageClie
 	k8sClient := &k8sclient.K8sClientMock{}
 	return &RuleManager{
 		cfg:               config.Config{},
-		clusterName:       clusterName,
 		ctx:               context.Background(),
 		k8sClient:         k8sClient,
 		containerMutexes:  storageUtils.NewMapMutex[string](),
@@ -30,6 +29,5 @@ func CreateRuleManagerMock(clusterName string, storageClient storage.StorageClie
 		objectCache:       &objectcache.ObjectCacheMock{},
 		exporter:          &exporters.ExporterMock{},
 		metrics:           metricsmanager.NewMetricsMock(),
-		// storageClient:     kssfake.NewSimpleClientset(),
 	}
 }

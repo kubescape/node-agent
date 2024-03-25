@@ -167,7 +167,7 @@ func main() {
 		ex := exporters.InitExporters(cfg.Exporters)
 
 		// create runtimeDetection manager
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, ruleBindingCache, objCache, ex, prometheusExporter)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, ex, prometheusExporter)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
