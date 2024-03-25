@@ -49,6 +49,7 @@ const (
 	openWorkerPoolSize         = 8
 	networkWorkerPoolSize      = 1
 	dnsWorkerPoolSize          = 5
+	randomxWorkerPoolSize      = 1
 )
 
 type IGContainerWatcher struct {
@@ -186,7 +187,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		return nil, fmt.Errorf("creating dns worker pool: %w", err)
 	}
 	// Create a randomx worker pool
-	randomxWorkerPool, err := ants.NewPoolWithFunc(1, func(i interface{}) {
+	randomxWorkerPool, err := ants.NewPoolWithFunc(randomxWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerandomxtype.Event)
 		if event.K8s.ContainerName == "" {
 			return
