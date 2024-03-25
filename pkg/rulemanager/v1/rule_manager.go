@@ -22,6 +22,8 @@ import (
 	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/ruleengine/objectcache"
 
+	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -249,6 +251,10 @@ func (rm *RuleManager) ReportNetworkEvent(k8sContainerID string, event tracernet
 }
 
 func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
+	// noop
+}
+
+func (rm *RuleManager) ReportRandomxEvent(k8sContainerID string, event tracerrandomxtype.Event) {
 	// noop
 }
 

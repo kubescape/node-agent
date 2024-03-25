@@ -1,6 +1,8 @@
 package rulemanager
 
 import (
+	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
@@ -41,5 +43,8 @@ func (r *RuleManagerMock) ReportNetworkEvent(_ string, _ tracernetworktype.Event
 	// noop
 }
 func (r *RuleManagerMock) ReportDNSEvent(event tracerdnstype.Event) {
+	// noop
+}
+func (r *RuleManagerMock) ReportRandomxEvent(_ string, _ tracerrandomxtype.Event) {
 	// noop
 }
