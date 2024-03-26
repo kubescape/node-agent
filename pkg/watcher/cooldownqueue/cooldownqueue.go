@@ -1,6 +1,7 @@
 package cooldownqueue
 
 import (
+	"strings"
 	"time"
 
 	"istio.io/pkg/cache"
@@ -43,8 +44,7 @@ func makeEventKey(e watch.Event) string {
 	if !ok {
 		return ""
 	}
-	eventKey := string(object.GetUID())
-	return eventKey
+	return strings.Join([]string{object.GroupVersionKind().Group, object.GroupVersionKind().Version, object.GetKind(), object.GetNamespace(), object.GetName()}, "/")
 }
 
 func (q *CooldownQueue) Closed() bool {
