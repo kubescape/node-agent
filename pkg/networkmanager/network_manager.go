@@ -337,7 +337,6 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		}
 		return
 	}
-	// TODO: dns enrichment
 
 	// update CRD based on events
 	networkNeighborsSpec := am.generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents, networkNeighbors.Spec)
@@ -471,7 +470,7 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 			if am.dnsResolverClient != nil {
 				domain, ok := am.dnsResolverClient.ResolveIPAddress(networkEvent.Destination.IPAddress)
 				if ok {
-					neighborEntry.DNS = domain
+					neighborEntry.DNS = strings.TrimSuffix(domain, ".")
 				}
 			}
 		}
@@ -613,8 +612,15 @@ func getNamespaceMatchLabels(destinationNamespace, sourceNamespace string) map[s
 }
 
 func generateNeighborsIdentifier(neighborEntry v1beta1.NetworkNeighbor) (string, error) {
+
+	// Add . to the dns name to avoid breaking backward compatibility (https://github.com/kubescape/node-agent/pull/189/commits/40c066b0850a813246e7791dc0484dfbd89f1de4)
+	dnsName := ""
+	if neighborEntry.DNS != "" {
+		dnsName = neighborEntry.DNS + "."
+	}
+
 	// identifier is hash of everything in egress except ports
-	identifier := fmt.Sprintf("%s-%s-%s-%s-%s", neighborEntry.Type, neighborEntry.IPAddress, neighborEntry.DNS, neighborEntry.NamespaceSelector, neighborEntry.PodSelector)
+	identifier := fmt.Sprintf("%s-%s-%s-%s-%s", neighborEntry.Type, neighborEntry.IPAddress, dnsName, neighborEntry.NamespaceSelector, neighborEntry.PodSelector)
 	hash := sha256.New()
 	_, err := hash.Write([]byte(identifier))
 	if err != nil {
