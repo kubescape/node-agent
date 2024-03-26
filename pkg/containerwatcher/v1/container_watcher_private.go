@@ -202,13 +202,16 @@ func (ch *IGContainerWatcher) printNsMap(id string) {
 }
 
 func (ch *IGContainerWatcher) unregisterContainer(container *containercollection.Container) {
-	event := containercollection.PubSubEvent{
-		Timestamp: time.Now().Format(time.RFC3339),
-		Type:      containercollection.EventTypeRemoveContainer,
-		Container: container,
+	if !ch.traceForever() {
+		event := containercollection.PubSubEvent{
+			Timestamp: time.Now().Format(time.RFC3339),
+			Type:      containercollection.EventTypeRemoveContainer,
+			Container: container,
+		}
+		ch.tracerCollection.TracerMapsUpdater()(event)
 	}
-	ch.tracerCollection.TracerMapsUpdater()(event)
-	ch.applicationProfileManager.ContainerCallback(event)
-	ch.relevancyManager.ContainerCallback(event)
-	ch.networkManager.ContainerCallback(event)
+}
+
+func (ch *IGContainerWatcher) traceForever() bool {
+	return ch.cfg.EnableRuntimeDetection
 }

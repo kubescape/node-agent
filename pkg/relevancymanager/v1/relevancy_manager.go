@@ -292,6 +292,16 @@ func (rm *RelevancyManager) ContainerCallback(notif containercollection.PubSubEv
 			return
 		}
 		go rm.startRelevancyProcess(ctx, notif.Container, k8sContainerID)
+
+		// stop monitoring after MaxSniffingTime
+		time.AfterFunc(rm.cfg.MaxSniffingTime, func() {
+			event := containercollection.PubSubEvent{
+				Timestamp: time.Now().Format(time.RFC3339),
+				Type:      containercollection.EventTypeRemoveContainer,
+				Container: notif.Container,
+			}
+			rm.ContainerCallback(event)
+		})
 	case containercollection.EventTypeRemoveContainer:
 		channel := rm.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
 		if channel != nil {

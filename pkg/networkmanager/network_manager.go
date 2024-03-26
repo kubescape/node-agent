@@ -84,6 +84,16 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 		}
 		go am.handleContainerStarted(ctx, notif.Container, k8sContainerID)
 
+		// stop monitoring after MaxSniffingTime
+		time.AfterFunc(am.cfg.MaxSniffingTime, func() {
+			event := containercollection.PubSubEvent{
+				Timestamp: time.Now().Format(time.RFC3339),
+				Type:      containercollection.EventTypeRemoveContainer,
+				Container: notif.Container,
+			}
+			am.ContainerCallback(event)
+		})
+
 	case containercollection.EventTypeRemoveContainer:
 		channel := am.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
 		if channel != nil {
