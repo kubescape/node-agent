@@ -70,7 +70,7 @@ func Test_makeEventKey(t *testing.T) {
 				Type:   watch.Added,
 				Object: &pod,
 			},
-			want: "aa5e3e8f-2da5-4c38-93c0-210d3280d10f",
+			want: "//Pod//",
 		},
 		{
 			name: "delete deployment",
@@ -78,7 +78,7 @@ func Test_makeEventKey(t *testing.T) {
 				Type:   watch.Deleted,
 				Object: &deployment,
 			},
-			want: "6b1a0c50-277f-4aa1-a4f9-9fc278ce4fe2",
+			want: "//Deployment//",
 		},
 		{
 			name: "modify configmap",
@@ -86,7 +86,7 @@ func Test_makeEventKey(t *testing.T) {
 				Type:   watch.Modified,
 				Object: &configmap,
 			},
-			want: "748ad4a8-e5ff-44da-ba94-309992c97820",
+			want: "//ConfigMap//",
 		},
 	}
 	for _, tt := range tests {
