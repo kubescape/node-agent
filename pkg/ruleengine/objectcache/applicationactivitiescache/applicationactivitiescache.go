@@ -120,17 +120,20 @@ func (ap *ApplicationActivityCacheImpl) addPod(podU *unstructured.Unstructured) 
 	}
 	podB, err := podU.MarshalJSON()
 	if err != nil {
+		logger.L().Error("in ApplicationActivityCache, failed to marshal pod", helpers.String("name", podName), helpers.Error(err))
 		return
 	}
 
 	pod, err := workloadinterface.NewWorkload(podB)
 	if err != nil {
+		logger.L().Error("in ApplicationActivityCache, failed to unmarshal pod", helpers.String("name", podName), helpers.Error(err))
 		return
 	}
 
 	// get instanceIDs
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {
+		logger.L().Error("in ApplicationActivityCache, failed to get instanceIDs", helpers.String("name", podName), helpers.Error(err))
 		return
 	}
 	if len(instanceIDs) == 0 {
@@ -141,6 +144,7 @@ func (ap *ApplicationActivityCacheImpl) addPod(podU *unstructured.Unstructured) 
 	instanceID := instanceIDs[0]
 	slug, err := names.InstanceIDToSlug(instanceID.GetName(), instanceID.GetKind(), "", instanceID.GetHashed())
 	if err != nil {
+		logger.L().Error("in ApplicationActivityCache, failed to convert instanceIDs", helpers.String("name", podName), helpers.Error(err))
 		return
 	}
 	uniqueSlug := objectcache.UniqueName(pod.GetNamespace(), slug)
@@ -157,7 +161,7 @@ func (ap *ApplicationActivityCacheImpl) addPod(podU *unstructured.Unstructured) 
 		// get the application activities
 		appProfile, err := ap.getApplicationActivity(pod.GetNamespace(), slug)
 		if err != nil {
-			logger.L().Error("failed to get application activities", helpers.Error(err))
+			logger.L().Error("in ApplicationActivityCache, failed to get application activities", helpers.String("namespace", pod.GetNamespace()), helpers.String("name", slug), helpers.Error(err))
 			return
 		}
 		ap.slugToAppProfile.Set(uniqueSlug, appProfile)
@@ -232,7 +236,7 @@ func unstructuredToApplicationActivity(obj *unstructured.Unstructured) (*v1beta1
 	}
 
 	var ap *v1beta1.ApplicationActivity
-	err = json.Unmarshal(bytes, ap)
+	err = json.Unmarshal(bytes, &ap)
 	if err != nil {
 		return nil, err
 	}

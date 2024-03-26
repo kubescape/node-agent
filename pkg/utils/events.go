@@ -44,7 +44,7 @@ type GeneralEvent struct {
 	MountNsID     uint64
 	Timestamp     int64
 	EventType     EventType
-	ContainerID   string // FIXME: This is not available in the event
+	ContainerID   string
 }
 
 func ExecToGeneralEvent(event *tracerexectype.Event) *GeneralEvent {
@@ -58,6 +58,7 @@ func ExecToGeneralEvent(event *tracerexectype.Event) *GeneralEvent {
 			Uid:  event.Uid,
 			Gid:  event.Gid,
 		},
+		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
 		ContainerName: event.GetContainer(),
 		PodName:       event.GetPod(),
 		Namespace:     event.GetNamespace(),
@@ -75,6 +76,7 @@ func OpenToGeneralEvent(event *traceropentype.Event) *GeneralEvent {
 			Uid:  event.Uid,
 			Gid:  event.Gid,
 		},
+		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
 		ContainerName: event.GetContainer(),
 		PodName:       event.GetPod(),
 		Namespace:     event.GetNamespace(),
@@ -92,6 +94,7 @@ func CapabilitiesToGeneralEvent(event *tracercapabilitiestype.Event) *GeneralEve
 			Uid:  event.Uid,
 			Gid:  event.Gid,
 		},
+		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
 		ContainerName: event.GetContainer(),
 		PodName:       event.GetPod(),
 		Namespace:     event.GetNamespace(),
@@ -109,6 +112,7 @@ func DnsToGeneralEvent(event *tracerdnstype.Event) *GeneralEvent {
 			Uid:  event.Uid,
 			Gid:  event.Gid,
 		},
+		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
 		ContainerName: event.GetContainer(),
 		PodName:       event.GetPod(),
 		Namespace:     event.GetNamespace(),
@@ -125,6 +129,7 @@ func NetworkToGeneralEvent(event *tracernetworktype.Event) *GeneralEvent {
 			Uid:  event.Uid,
 			Gid:  event.Gid,
 		},
+		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
 		ContainerName: event.GetContainer(),
 		PodName:       event.GetPod(),
 		Namespace:     event.GetNamespace(),

@@ -21,6 +21,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+var groupVersionResource = schema.GroupVersionResource{
+	Group:    "spdx.softwarecomposition.kubescape.io",
+	Version:  "v1beta1",
+	Resource: "applicationprofiles",
+}
+
 var _ objectcache.ApplicationProfileCache = (*ApplicationProfileCacheImpl)(nil)
 var _ watcher.Adaptor = (*ApplicationProfileCacheImpl)(nil)
 
@@ -74,11 +80,7 @@ func (ap *ApplicationProfileCacheImpl) WatchResources() []watcher.WatchResource 
 	w = append(w, p)
 
 	// add application profile
-	apl := watcher.NewWatchResource(schema.GroupVersionResource{
-		Group:    "spdx.softwarecomposition.kubescape.io",
-		Version:  "v1beta1",
-		Resource: "applicationprofiles",
-	}, metav1.ListOptions{})
+	apl := watcher.NewWatchResource(groupVersionResource, metav1.ListOptions{})
 	w = append(w, apl)
 
 	return w
@@ -120,17 +122,20 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 	}
 	podB, err := podU.MarshalJSON()
 	if err != nil {
+		logger.L().Error("in ApplicationProfileCache, failed to marshal pod", helpers.String("name", podName), helpers.Error(err))
 		return
 	}
 
 	pod, err := workloadinterface.NewWorkload(podB)
 	if err != nil {
+		logger.L().Error("in ApplicationProfileCache,failed to unmarshal pod", helpers.String("name", podName), helpers.Error(err))
 		return
 	}
 
 	// get instanceIDs
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {
+		logger.L().Error("in ApplicationProfileCache,failed to get instanceIDs", helpers.String("name", podName), helpers.Error(err))
 		return
 	}
 	if len(instanceIDs) == 0 {
@@ -186,7 +191,7 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 
 	appProfile, err := unstructuredToApplicationProfile(obj)
 	if err != nil {
-		logger.L().Error("failed to unmarshal application profile", helpers.Error(err))
+		logger.L().Error("failed to unmarshal application profile", helpers.String("name", apName), helpers.Error(err))
 		return
 	}
 
@@ -225,6 +230,15 @@ func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj *unstructure
 	ap.slugToPods.Delete(apName)
 }
 
+func (ap *ApplicationProfileCacheImpl) getApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
+
+	u, err := ap.k8sClient.GetDynamicClient().Resource(groupVersionResource).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return unstructuredToApplicationProfile(u)
+}
+
 func unstructuredToApplicationProfile(obj *unstructured.Unstructured) (*v1beta1.ApplicationProfile, error) {
 	bytes, err := obj.MarshalJSON()
 	if err != nil {
@@ -232,21 +246,9 @@ func unstructuredToApplicationProfile(obj *unstructured.Unstructured) (*v1beta1.
 	}
 
 	var ap *v1beta1.ApplicationProfile
-	err = json.Unmarshal(bytes, ap)
+	err = json.Unmarshal(bytes, &ap)
 	if err != nil {
 		return nil, err
 	}
 	return ap, nil
-}
-func (ap *ApplicationProfileCacheImpl) getApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
-	gvr := schema.GroupVersionResource{
-		Group:    "spdx.softwarecomposition.kubescape.io",
-		Version:  "v1beta1",
-		Resource: "applicationprofiles",
-	}
-	u, err := ap.k8sClient.GetDynamicClient().Resource(gvr).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	return unstructuredToApplicationProfile(u)
 }
