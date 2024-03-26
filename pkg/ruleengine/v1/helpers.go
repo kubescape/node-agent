@@ -14,6 +14,7 @@ func getExecPathFromEvent(event *tracerexectype.Event) string {
 	}
 	return event.Comm
 }
+
 func getContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containerName string) (v1beta1.ApplicationProfileContainer, error) {
 	for i := range ap.Spec.Containers {
 		if ap.Spec.Containers[i].Name == containerName {
