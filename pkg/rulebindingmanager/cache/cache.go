@@ -108,7 +108,12 @@ func (c *RBCache) AddHandler(_ context.Context, obj *unstructured.Unstructured) 
 func (c *RBCache) ModifyHandler(_ context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":
-		// do nothing
+		pod, err := unstructuredToPod(obj)
+		if err != nil {
+			logger.L().Error("failed to convert unstructured to pod", helpers.Error(err))
+			return
+		}
+		c.addPod(pod)
 	case types.RuntimeRuleBindingAlertKind:
 		ruleBinding, err := unstructuredToRuleBinding(obj)
 		if err != nil {
@@ -191,7 +196,7 @@ func (c *RBCache) addRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) {
 			c.podToRBNames.Get(podName).Add(rbName)
 			c.rbNameToPodNames.Get(rbName).Add(podName)
 
-			logger.L().Debug("AddRuleBinding", helpers.String("ruleBinding", rbName), helpers.String("pod", podName))
+			logger.L().Info("AddRuleBinding", helpers.String("ruleBinding", rbName), helpers.String("pod", podName))
 		}
 	}
 }
@@ -208,6 +213,8 @@ func (c *RBCache) deleteRuleBinding(uniqueName string) {
 	c.rbNameToRules.Delete(uniqueName)
 	c.rbNameToPodNames.Delete(uniqueName)
 	c.globalRBNames.Remove(uniqueName)
+
+	logger.L().Info("DeleteRuleBinding", helpers.String("name", uniqueName))
 }
 
 func (c *RBCache) modifiedRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) {
@@ -263,6 +270,7 @@ func (c *RBCache) addPod(pod *corev1.Pod) {
 		} else {
 			c.rbNameToPodNames.Get(rbName).Add(podName)
 		}
+		logger.L().Info("AddPod", helpers.String("pod", podName), helpers.String("ruleBinding", rbName))
 	}
 
 }
@@ -281,6 +289,7 @@ func (c *RBCache) deletePod(uniqueName string) {
 		}
 	}
 	c.podToRBNames.Delete(uniqueName)
+	logger.L().Info("DeletePod", helpers.String("pod", uniqueName))
 }
 
 func (c *RBCache) createRules(rulesForPod []typesv1.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {

@@ -96,7 +96,7 @@ func (np *NetworkNeighborsCacheImp) AddHandler(ctx context.Context, obj *unstruc
 func (np *NetworkNeighborsCacheImp) ModifyHandler(ctx context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":
-		// do nothing
+		np.addPod(obj)
 	case "NetworkNeighbors":
 		np.addNetworkNeighbor(ctx, obj)
 	}
@@ -152,6 +152,8 @@ func (np *NetworkNeighborsCacheImp) addPod(podU *unstructured.Unstructured) {
 			return
 		}
 		np.slugToNetworkNeighbor.Set(uniqueSlug, netNeighbor)
+
+		logger.L().Info("added pod to network neighbors cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 	}
 }
 
@@ -167,6 +169,7 @@ func (np *NetworkNeighborsCacheImp) deletePod(obj *unstructured.Unstructured) {
 			np.slugToPods.Delete(uniqueSlug)
 			// remove full network neighbors from cache
 			np.slugToNetworkNeighbor.Delete(uniqueSlug)
+			logger.L().Info("deleted pod from network neighbors cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 		}
 	}
 }
@@ -204,6 +207,7 @@ func (np *NetworkNeighborsCacheImp) addNetworkNeighbor(_ context.Context, obj *u
 				np.slugToPods.Set(uniqueSlug, mapset.NewSet[string]())
 			}
 			np.slugToPods.Get(uniqueSlug).Add(podName)
+			logger.L().Info("added pod to network neighbors cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 		}
 		return true
 	})
@@ -214,6 +218,7 @@ func (np *NetworkNeighborsCacheImp) deleteNetworkNeighbor(obj *unstructured.Unst
 	np.slugToNetworkNeighbor.Delete(nnName)
 	np.allNeighbors.Remove(nnName)
 	np.slugToPods.Delete(nnName)
+	logger.L().Info("deleted network neighbors from cache", helpers.String("name", nnName))
 }
 
 func unstructuredToNetworkNeighbors(obj *unstructured.Unstructured) (*v1beta1.NetworkNeighbors, error) {
