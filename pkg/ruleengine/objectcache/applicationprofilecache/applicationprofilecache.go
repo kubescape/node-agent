@@ -98,7 +98,7 @@ func (ap *ApplicationProfileCacheImpl) AddHandler(ctx context.Context, obj *unst
 func (ap *ApplicationProfileCacheImpl) ModifyHandler(ctx context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":
-		// do nothing
+		ap.addPod(obj)
 	case "ApplicationProfile":
 		ap.addApplicationProfile(ctx, obj)
 	}
@@ -166,6 +166,7 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 			return
 		}
 		ap.slugToAppProfile.Set(uniqueSlug, appProfile)
+		logger.L().Info("added pod to application profile cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 	}
 }
 
@@ -181,6 +182,7 @@ func (ap *ApplicationProfileCacheImpl) deletePod(obj *unstructured.Unstructured)
 			ap.slugToPods.Delete(uniqueSlug)
 			// remove full application profile from cache
 			ap.slugToAppProfile.Delete(uniqueSlug)
+			logger.L().Info("deleted pod from application profile cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 		}
 	}
 }
@@ -218,6 +220,7 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 				ap.slugToPods.Set(uniqueSlug, mapset.NewSet[string]())
 			}
 			ap.slugToPods.Get(uniqueSlug).Add(podName)
+			logger.L().Info("added pod to application profile cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 		}
 		return true
 	})
@@ -228,6 +231,7 @@ func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj *unstructure
 	ap.slugToAppProfile.Delete(apName)
 	ap.allProfiles.Remove(apName)
 	ap.slugToPods.Delete(apName)
+	logger.L().Info("deleted application profile from cache", helpers.String("uniqueSlug", apName))
 }
 
 func (ap *ApplicationProfileCacheImpl) getApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
