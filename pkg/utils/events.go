@@ -145,6 +145,7 @@ func RandomxToGeneralEvent(event *tracerrandomxtype.Event) *GeneralEvent {
 	return &GeneralEvent{
 		ProcessDetails: ProcessDetails{
 			Pid:  event.Pid,
+			Ppid: event.PPid,
 			Comm: event.Comm,
 			Uid:  event.Uid,
 			Gid:  event.Gid,

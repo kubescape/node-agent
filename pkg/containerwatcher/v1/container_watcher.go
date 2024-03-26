@@ -17,6 +17,7 @@ import (
 	tracerandomx "node-agent/pkg/ebpf/gadgets/randomx/tracer"
 	tracerandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
@@ -87,12 +88,14 @@ type IGContainerWatcher struct {
 	dnsWorkerPool          *ants.PoolWithFunc
 	randomxWorkerPool      *ants.PoolWithFunc
 
+	preRunningContainers mapset.Set[string]
+
 	metrics metricsmanager.MetricsManager
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, preRunningContainers mapset.Set[string]) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -222,7 +225,33 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		dnsWorkerPool:          dnsWorkerPool,
 		randomxWorkerPool:      randomxWorkerPool,
 		metrics:                metrics,
+		preRunningContainers:   preRunningContainers,
 	}, nil
+}
+
+func (ch *IGContainerWatcher) getPreRunningContainers() []*containercollection.Container {
+	return ch.containerCollection.GetContainersBySelector(&containercollection.ContainerSelector{})
+}
+
+func (ch *IGContainerWatcher) generateContainerEventsOnStart(containers []*containercollection.Container) {
+	for _, container := range containers {
+		ch.applicationProfileManager.ContainerCallback(containercollection.PubSubEvent{
+			Type:      containercollection.EventTypeAddContainer,
+			Container: container,
+		})
+		ch.relevancyManager.ContainerCallback(containercollection.PubSubEvent{
+			Type:      containercollection.EventTypeAddContainer,
+			Container: container,
+		})
+		ch.networkManager.ContainerCallback(containercollection.PubSubEvent{
+			Type:      containercollection.EventTypeAddContainer,
+			Container: container,
+		})
+		ch.ruleManager.ContainerCallback(containercollection.PubSubEvent{
+			Type:      containercollection.EventTypeAddContainer,
+			Container: container,
+		})
+	}
 }
 
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {
@@ -236,9 +265,20 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			ch.stopContainerCollection()
 			return fmt.Errorf("starting app behavior tracing: %w", err)
 		}
+
+		if ch.traceForever() {
+			containers := ch.getPreRunningContainers()
+			for _, container := range containers {
+				ch.preRunningContainers.Add(container.Runtime.ContainerID)
+			}
+
+			ch.generateContainerEventsOnStart(containers)
+		}
+
 		logger.L().Info("main container handler started")
 		ch.running = true
 	}
+
 	return nil
 }
 

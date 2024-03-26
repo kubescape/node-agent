@@ -51,19 +51,21 @@ type ApplicationProfileManager struct {
 	k8sClient                k8sclient.K8sClientInterface
 	storageClient            storage.StorageClient
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
+	preRunningContainerIDs   mapset.Set[string]
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient) (*ApplicationProfileManager, error) {
+func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, preRunningContainerIDs mapset.Set[string]) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
-		cfg:               cfg,
-		clusterName:       clusterName,
-		ctx:               ctx,
-		k8sClient:         k8sClient,
-		storageClient:     storageClient,
-		containerMutexes:  storageUtils.NewMapMutex[string](),
-		trackedContainers: mapset.NewSet[string](),
+		cfg:                    cfg,
+		clusterName:            clusterName,
+		ctx:                    ctx,
+		k8sClient:              k8sClient,
+		storageClient:          storageClient,
+		containerMutexes:       storageUtils.NewMapMutex[string](),
+		trackedContainers:      mapset.NewSet[string](),
+		preRunningContainerIDs: preRunningContainerIDs,
 	}, nil
 }
 

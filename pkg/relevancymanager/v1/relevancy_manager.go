@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/goradd/maps"
@@ -36,18 +37,20 @@ type RelevancyManager struct {
 	k8sClient                k8sclient.K8sClientInterface
 	sbomHandler              sbomhandler.SBOMHandlerClient
 	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
+	preRunningContainersIDs  mapset.Set[string]
 }
 
 var _ relevancymanager.RelevancyManagerClient = (*RelevancyManager)(nil)
 
-func CreateRelevancyManager(ctx context.Context, cfg config.Config, clusterName string, fileHandler filehandler.FileHandler, k8sClient k8sclient.K8sClientInterface, sbomHandler sbomhandler.SBOMHandlerClient) (*RelevancyManager, error) {
+func CreateRelevancyManager(ctx context.Context, cfg config.Config, clusterName string, fileHandler filehandler.FileHandler, k8sClient k8sclient.K8sClientInterface, sbomHandler sbomhandler.SBOMHandlerClient, preRunningContainerIDs mapset.Set[string]) (*RelevancyManager, error) {
 	return &RelevancyManager{
-		cfg:         cfg,
-		clusterName: clusterName,
-		ctx:         ctx,
-		fileHandler: fileHandler,
-		k8sClient:   k8sClient,
-		sbomHandler: sbomHandler,
+		cfg:                     cfg,
+		clusterName:             clusterName,
+		ctx:                     ctx,
+		fileHandler:             fileHandler,
+		k8sClient:               k8sClient,
+		sbomHandler:             sbomHandler,
+		preRunningContainersIDs: preRunningContainerIDs,
 	}, nil
 }
 
