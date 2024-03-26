@@ -21,15 +21,14 @@ const (
 )
 
 type StorageHttpClientMock struct {
-	ApplicationActivities       []*spdxv1beta1.ApplicationActivity
-	ApplicationProfiles         []*spdxv1beta1.ApplicationProfile
-	ApplicationProfileSummaries []*spdxv1beta1.ApplicationProfileSummary
-	FilteredSyftSBOMs           []*spdxv1beta1.SBOMSyftFiltered
-	NetworkNeighborses          []*v1beta1.NetworkNeighbors
-	ImageCounters               map[string]int
-	nginxSBOMSpdxBytes          *spdxv1beta1.SBOMSPDXv2p3
-	mockSBOM                    *v1beta1.SBOMSyft
-	failedOnce                  bool
+	ApplicationActivities []*spdxv1beta1.ApplicationActivity
+	ApplicationProfiles   []*spdxv1beta1.ApplicationProfile
+	FilteredSyftSBOMs     []*spdxv1beta1.SBOMSyftFiltered
+	NetworkNeighborses    []*v1beta1.NetworkNeighbors
+	ImageCounters         map[string]int
+	nginxSBOMSpdxBytes    *spdxv1beta1.SBOMSPDXv2p3
+	mockSBOM              *v1beta1.SBOMSyft
+	failedOnce            bool
 }
 
 func (sc *StorageHttpClientMock) GetApplicationActivity(_, _ string) (*spdxv1beta1.ApplicationActivity, error) {
@@ -117,11 +116,6 @@ func (sc *StorageHttpClientMock) PatchApplicationProfile(name, _ string, patchJS
 		return fmt.Errorf("unmarshal patched profile: %w", err)
 	}
 	sc.ApplicationProfiles = append(sc.ApplicationProfiles, profile)
-	return nil
-}
-
-func (sc *StorageHttpClientMock) CreateApplicationProfileSummary(summary *spdxv1beta1.ApplicationProfileSummary, _ string) error {
-	sc.ApplicationProfileSummaries = append(sc.ApplicationProfileSummaries, summary)
 	return nil
 }
 
