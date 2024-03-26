@@ -61,8 +61,8 @@ func (k *K8sObjectCacheImpl) AddHandler(_ context.Context, obj *unstructured.Uns
 		}
 		k.podSpec.Set(podSpecKey(pod.GetNamespace(), pod.GetName()), &pod.Spec)
 	}
-
 }
+
 func (k *K8sObjectCacheImpl) ModifyHandler(_ context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":
@@ -119,7 +119,7 @@ func unstructuredToPod(obj *unstructured.Unstructured) (*corev1.Pod, error) {
 	}
 
 	var pod *corev1.Pod
-	err = json.Unmarshal(bytes, pod)
+	err = json.Unmarshal(bytes, &pod)
 	if err != nil {
 		return nil, err
 	}
