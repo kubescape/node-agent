@@ -3,7 +3,6 @@ package rulemanager
 import (
 	"context"
 	"errors"
-	"fmt"
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/ruleengine"
@@ -53,21 +52,23 @@ type RuleManager struct {
 	exporter                 exporters.Exporter
 	metrics                  metricsmanager.MetricsManager
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
+	preRunningContainerIDs   mapset.Set[string]
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, preRunningContainersIDs mapset.Set[string]) (*RuleManager, error) {
 	return &RuleManager{
-		cfg:               cfg,
-		ctx:               ctx,
-		k8sClient:         k8sClient,
-		containerMutexes:  storageUtils.NewMapMutex[string](),
-		trackedContainers: mapset.NewSet[string](),
-		ruleBindingCache:  ruleBindingCache,
-		objectCache:       objectCache,
-		exporter:          exporter,
-		metrics:           metrics,
+		cfg:                    cfg,
+		ctx:                    ctx,
+		k8sClient:              k8sClient,
+		containerMutexes:       storageUtils.NewMapMutex[string](),
+		trackedContainers:      mapset.NewSet[string](),
+		ruleBindingCache:       ruleBindingCache,
+		objectCache:            objectCache,
+		exporter:               exporter,
+		metrics:                metrics,
+		preRunningContainerIDs: preRunningContainersIDs,
 	}, nil
 }
 
@@ -180,14 +181,15 @@ func (rm *RuleManager) deleteResources(watchedContainer *utils.WatchedContainerD
 	// clean cached rules
 }
 
-func (rm *RuleManager) waitForContainer(k8sContainerID string) error {
-	return backoff.Retry(func() error {
-		if rm.trackedContainers.Contains(k8sContainerID) {
-			return nil
-		}
-		return fmt.Errorf("container %s not found", k8sContainerID)
-	}, backoff.NewExponentialBackOff())
-}
+// This function is not used in the current implementation (Might be used in the future).
+// func (rm *RuleManager) waitForContainer(k8sContainerID string) error {
+// 	return backoff.Retry(func() error {
+// 		if rm.trackedContainers.Contains(k8sContainerID) {
+// 			return nil
+// 		}
+// 		return fmt.Errorf("container %s not found", k8sContainerID)
+// 	}, backoff.NewExponentialBackOff())
+// }
 
 func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
@@ -216,9 +218,6 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 }
 
 func (rm *RuleManager) ReportCapability(k8sContainerID string, event tracercapabilitiestype.Event) {
-	// if err := rm.waitForContainer(k8sContainerID); err != nil {
-	// 	return
-	// }
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportCapability event")
 		return
@@ -245,9 +244,6 @@ func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectyp
 }
 
 func (rm *RuleManager) ReportFileOpen(k8sContainerID string, event traceropentype.Event) {
-	// if err := rm.waitForContainer(k8sContainerID); err != nil {
-	// 	return
-	// }
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileOpen event")
 		return
@@ -259,9 +255,6 @@ func (rm *RuleManager) ReportFileOpen(k8sContainerID string, event traceropentyp
 
 }
 func (rm *RuleManager) ReportNetworkEvent(k8sContainerID string, event tracernetworktype.Event) {
-	// if err := rm.waitForContainer(k8sContainerID); err != nil {
-	// 	return
-	// }
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportNetworkEvent event")
 		return
@@ -273,9 +266,6 @@ func (rm *RuleManager) ReportNetworkEvent(k8sContainerID string, event tracernet
 }
 
 func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
-	// if err := rm.waitForContainer(event.Runtime.ContainerID); err != nil {
-	// 	return
-	// }
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportDNSEvent event")
 		return
@@ -287,10 +277,6 @@ func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
 }
 
 func (rm *RuleManager) ReportRandomxEvent(k8sContainerID string, event tracerrandomxtype.Event) {
-	// if err := rm.waitForContainer(k8sContainerID); err != nil {
-	// 	return
-	// }
-
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from randomx event")
 		return
