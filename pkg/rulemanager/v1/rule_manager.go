@@ -216,10 +216,13 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 }
 
 func (rm *RuleManager) ReportCapability(k8sContainerID string, event tracercapabilitiestype.Event) {
-	if err := rm.waitForContainer(k8sContainerID); err != nil {
+	// if err := rm.waitForContainer(k8sContainerID); err != nil {
+	// 	return
+	// }
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportCapability event")
 		return
 	}
-
 	// list capability rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
@@ -228,10 +231,13 @@ func (rm *RuleManager) ReportCapability(k8sContainerID string, event tracercapab
 
 func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectype.Event) {
 	// TODO: Do we need to wait for this?
-	if err := rm.waitForContainer(k8sContainerID); err != nil {
+	// if err := rm.waitForContainer(k8sContainerID); err != nil {
+	// 	return
+	// }
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileExec event")
 		return
 	}
-
 	// list exec rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
@@ -239,10 +245,13 @@ func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectyp
 }
 
 func (rm *RuleManager) ReportFileOpen(k8sContainerID string, event traceropentype.Event) {
-	if err := rm.waitForContainer(k8sContainerID); err != nil {
+	// if err := rm.waitForContainer(k8sContainerID); err != nil {
+	// 	return
+	// }
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileOpen event")
 		return
 	}
-
 	// list open rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
@@ -250,10 +259,13 @@ func (rm *RuleManager) ReportFileOpen(k8sContainerID string, event traceropentyp
 
 }
 func (rm *RuleManager) ReportNetworkEvent(k8sContainerID string, event tracernetworktype.Event) {
-	if err := rm.waitForContainer(k8sContainerID); err != nil {
+	// if err := rm.waitForContainer(k8sContainerID); err != nil {
+	// 	return
+	// }
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportNetworkEvent event")
 		return
 	}
-
 	// list network rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
@@ -261,10 +273,13 @@ func (rm *RuleManager) ReportNetworkEvent(k8sContainerID string, event tracernet
 }
 
 func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
-	if err := rm.waitForContainer(event.Runtime.ContainerID); err != nil {
+	// if err := rm.waitForContainer(event.Runtime.ContainerID); err != nil {
+	// 	return
+	// }
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportDNSEvent event")
 		return
 	}
-
 	// list dns rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
@@ -272,7 +287,12 @@ func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
 }
 
 func (rm *RuleManager) ReportRandomxEvent(k8sContainerID string, event tracerrandomxtype.Event) {
-	if err := rm.waitForContainer(k8sContainerID); err != nil {
+	// if err := rm.waitForContainer(k8sContainerID); err != nil {
+	// 	return
+	// }
+
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Error("RuleManager - failed to get namespace and pod name from randomx event")
 		return
 	}
 
@@ -283,6 +303,7 @@ func (rm *RuleManager) ReportRandomxEvent(k8sContainerID string, event tracerran
 }
 
 func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator) {
+
 	for _, rule := range rules {
 		if rule == nil {
 			continue
@@ -297,8 +318,6 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 			logger.L().Info("RuleManager FAILED - rule alert", helpers.String("rule", rule.Name()))
 			rm.exporter.SendRuleAlert(res)
 			rm.metrics.ReportRuleAlert(rule.Name())
-		} else {
-			logger.L().Info("RuleManager PASSED - rule alert", helpers.String("rule", rule.Name()))
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())
 	}

@@ -164,7 +164,7 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 
 func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions) (string, error) {
 	logger.L().Debug("getting existing objects from storage", helpers.String("resource", res.Resource))
-	list, err := wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), metav1.ListOptions{})
+	list, err := wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), watchOpts)
 	if err != nil {
 		return "", fmt.Errorf("list resources: %w", err)
 	}
