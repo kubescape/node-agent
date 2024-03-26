@@ -1,26 +1,25 @@
 package ruleengine
 
 import (
-	"encoding/json"
 	"fmt"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
-	"strings"
+	"slices"
 
-	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
-	R0003ID                           = "R0003"
-	R0003UnexpectedSystemCallRuleName = "Unexpected system call"
+	R0003ID   = "R0003"
+	R0003Name = "Unexpected system call"
 )
 
 var R0003UnexpectedSystemCallRuleDescriptor = RuleDescriptor{
 	ID:          R0003ID,
-	Name:        R0003UnexpectedSystemCallRuleName,
+	Name:        R0003Name,
 	Description: "Detecting unexpected system calls that are not whitelisted by application profile. Every unexpected system call will be alerted only once.",
 	Tags:        []string{"syscall", "whitelisted"},
 	Priority:    RulePriorityMed,
@@ -47,7 +46,7 @@ func CreateRuleR0003UnexpectedSystemCall() *R0003UnexpectedSystemCall {
 }
 
 func (rule *R0003UnexpectedSystemCall) Name() string {
-	return R0003UnexpectedSystemCallRuleName
+	return R0003Name
 }
 
 func (rule *R0003UnexpectedSystemCall) ID() string {
@@ -57,84 +56,51 @@ func (rule *R0003UnexpectedSystemCall) ID() string {
 func (rule *R0003UnexpectedSystemCall) DeleteRule() {
 }
 
-func (rule *R0003UnexpectedSystemCall) generatePatchCommand(event *tracercapabilitiestype.Event, unexpectedSyscalls []string, ap *v1beta1.ApplicationProfile) string {
-	syscallList, err := json.Marshal(unexpectedSyscalls)
-	if err != nil {
-		return ""
-	}
-	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"syscalls\": %s}]}}'"
-	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(),
-		event.GetContainer(), syscallList)
+func (rule *R0003UnexpectedSystemCall) generatePatchCommand(unexpectedSyscall string, aa *v1beta1.ApplicationActivity) string {
+	baseTemplate := "kubectl patch applicationactivity %s -n %s --type merge --patch '{\"spec\":{\"syscalls\":[\"%s\"]}}'"
+	return fmt.Sprintf(baseTemplate, aa.GetName(), aa.GetNamespace(), unexpectedSyscall)
 }
 
 func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if eventType != utils.SyscallEventType && eventType != utils.CapabilitiesEventType {
+	if eventType != utils.SyscallEventType {
 		return nil
 	}
 
-	syscallEvent, ok := event.(*tracercapabilitiestype.Event)
+	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
 		return nil
 	}
 
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEvent.GetNamespace(), syscallEvent.GetPod())
-
-	if ap == nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", syscallEvent.GetPod()),
-			FailureEvent:     utils.CapabilitiesToGeneralEvent(syscallEvent),
-			RulePriority:     R0003UnexpectedSystemCallRuleDescriptor.Priority,
-		}
+	aa := objCache.ApplicationActivityCache().GetApplicationActivity(syscallEvent.GetNamespace(), syscallEvent.GetPod())
+	if aa == nil {
+		return nil
 	}
 
-	appProfileSyscallList, err := getContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
-	if err != nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing (missing syscall list))",
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", syscallEvent.GetPod()),
-			FailureEvent:     utils.CapabilitiesToGeneralEvent(syscallEvent),
-			RulePriority:     R0003UnexpectedSystemCallRuleDescriptor.Priority,
-		}
-	}
-
-	unexpectedSyscalls := []string{}
-	// Check in the appProfileSyscallList if the syscallEventName is there
-	for _, syscall := range appProfileSyscallList.Syscalls {
-		if syscall == syscallEvent.Syscall {
-			// if syscall is already in the application profile, return nil
+	// If the syscall is whitelisted, return nil
+	for _, syscall := range aa.Spec.Syscalls {
+		if syscall == syscallEvent.SyscallName {
 			return nil
 		}
-
-		// Check if the syscallEventName is in the listOfAlertedSyscalls
-		for _, alertedSyscall := range rule.listOfAlertedSyscalls {
-			if alertedSyscall == syscallEvent.Syscall {
-				unexpectedSyscalls = append(unexpectedSyscalls, syscallEvent.Syscall)
-			}
-		}
 	}
 
-	if len(unexpectedSyscalls) > 0 {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Unexpected system calls: " + strings.Join(unexpectedSyscalls, ", "),
-			FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the system call(s) \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", strings.Join(unexpectedSyscalls, ", "), syscallEvent.GetPod(), rule.generatePatchCommand(syscallEvent, unexpectedSyscalls, ap)),
-			FailureEvent:     utils.CapabilitiesToGeneralEvent(syscallEvent),
-			RulePriority:     R0003UnexpectedSystemCallRuleDescriptor.Priority,
-		}
+	// We have already alerted for this syscall
+	if slices.Contains(rule.listOfAlertedSyscalls, syscallEvent.SyscallName) {
+		return nil
 	}
 
-	return nil
+	return &GenericRuleFailure{
+		RuleName:         rule.Name(),
+		RuleID:           rule.ID(),
+		Err:              "Unexpected system call: " + syscallEvent.SyscallName,
+		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the system call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", syscallEvent.SyscallName, syscallEvent.GetPod(), rule.generatePatchCommand(syscallEvent.SyscallName, aa)),
+		FailureEvent:     utils.SyscallToGeneralEvent(syscallEvent),
+		RulePriority:     R0003UnexpectedSystemCallRuleDescriptor.Priority,
+	}
 }
 
 func (rule *R0003UnexpectedSystemCall) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.SyscallEventType},
+		EventTypes:             R0003UnexpectedSystemCallRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }

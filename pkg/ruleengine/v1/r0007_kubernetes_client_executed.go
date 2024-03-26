@@ -10,14 +10,15 @@ import (
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-	log "github.com/sirupsen/logrus"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
-	R0007ID                               = "R0007"
-	R0007KubernetesClientExecutedRuleName = "Kubernetes Client Executed"
+	R0007ID   = "R0007"
+	R0007Name = "Kubernetes Client Executed"
 )
 
 var kubernetesClients = []string{
@@ -42,7 +43,7 @@ var kubernetesClients = []string{
 
 var R0007KubernetesClientExecutedDescriptor = RuleDescriptor{
 	ID:          R0007ID,
-	Name:        R0007KubernetesClientExecutedRuleName,
+	Name:        R0007Name,
 	Description: "Detecting exececution of kubernetes client",
 	Priority:    RulePriorityCritical,
 	Tags:        []string{"exec", "malicious", "whitelisted"},
@@ -65,7 +66,7 @@ func CreateRuleR0007KubernetesClientExecuted() *R0007KubernetesClientExecuted {
 }
 
 func (rule *R0007KubernetesClientExecuted) Name() string {
-	return R0007KubernetesClientExecutedRuleName
+	return R0007Name
 }
 
 func (rule *R0007KubernetesClientExecuted) ID() string {
@@ -105,7 +106,7 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype.Event, ap *v1beta1.ApplicationProfile) *GenericRuleFailure {
 	whitelistedExecs, err := getContainerFromApplicationProfile(ap, event.GetContainer())
 	if err != nil {
-		log.Printf("Failed to get exec list from app profile: %v", err)
+		logger.L().Error("Failed to get container from application profile", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 		return nil
 	}
 
@@ -176,7 +177,7 @@ func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventTyp
 
 func (rule *R0007KubernetesClientExecuted) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType, utils.NetworkEventType},
+		EventTypes:             R0007KubernetesClientExecutedDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }

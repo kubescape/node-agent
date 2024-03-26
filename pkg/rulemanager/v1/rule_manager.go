@@ -21,6 +21,9 @@ import (
 	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/ruleengine/objectcache"
 
+	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
+
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -29,6 +32,7 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kubescape/go-logger"
@@ -68,7 +72,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 }
 
 func (rm *RuleManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	syscallTicker := time.NewTicker(15 * time.Second)
+	syscallTicker := time.NewTicker(5 * time.Second)
 	var pod *corev1.Pod
 	if err := backoff.Retry(func() error {
 		p, err := rm.k8sClient.GetKubernetesClient().CoreV1().Pods(container.K8s.Namespace).Get(ctx, container.K8s.PodName, metav1.GetOptions{})
@@ -86,9 +90,49 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 	for {
 		select {
 		case <-syscallTicker.C:
-			// get syscalls
-			// @amit - this is the function that is being called
-			fmt.Printf("pod name", pod.Name)
+			syscalls, err := rm.syscallPeekFunc(watchedContainer.NsMntId)
+			if err != nil {
+				logger.L().Ctx(ctx).Error("RuleManager - failed to get syscalls", helpers.Error(err),
+					helpers.String("container ID", watchedContainer.ContainerID),
+					helpers.String("k8s workload", watchedContainer.K8sContainerID))
+				return err
+			}
+
+			rules := rm.ruleBindingCache.ListRulesForPod(pod.GetNamespace(), pod.GetName())
+			for _, syscall := range syscalls {
+				event := ruleenginetypes.SyscallEvent{
+					Event: eventtypes.Event{
+						Timestamp: eventtypes.Time(time.Now().UnixNano()),
+						Type:      eventtypes.NORMAL,
+						CommonData: eventtypes.CommonData{
+							Runtime: eventtypes.BasicRuntimeMetadata{
+								ContainerID: watchedContainer.ContainerID,
+								RuntimeName: container.Runtime.RuntimeName,
+							},
+							K8s: eventtypes.K8sMetadata{
+								Node: pod.Spec.NodeName,
+								BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+									Namespace:     pod.GetNamespace(),
+									PodName:       pod.GetName(),
+									PodLabels:     pod.GetLabels(),
+									ContainerName: watchedContainer.InstanceID.GetContainerName(),
+								},
+								HostNetwork: pod.Spec.HostNetwork,
+							},
+						},
+					},
+					WithMountNsID: eventtypes.WithMountNsID{
+						MountNsID: watchedContainer.NsMntId,
+					},
+					Pid:         container.Pid,
+					Uid:         container.OciConfig.Process.User.UID,
+					Gid:         container.OciConfig.Process.User.GID,
+					Comm:        container.OciConfig.Process.Args[0],
+					SyscallName: syscall,
+				}
+
+				rm.processEvent(utils.SyscallEventType, &event, rules)
+			}
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
@@ -175,14 +219,18 @@ func (rm *RuleManager) ReportCapability(k8sContainerID string, event tracercapab
 	if err := rm.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
-	// process capability
+
+	// list capability rules
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
+	rm.processEvent(utils.CapabilitiesEventType, &event, rules)
 }
 
 func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectype.Event) {
 	// TODO: Do we need to wait for this?
-	// if err := rm.waitForContainer(k8sContainerID); err != nil {
-	// 	return
-	// }
+	if err := rm.waitForContainer(k8sContainerID); err != nil {
+		return
+	}
 
 	// list exec rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
@@ -194,26 +242,53 @@ func (rm *RuleManager) ReportFileOpen(k8sContainerID string, event traceropentyp
 	if err := rm.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
-	// process file open
+
+	// list open rules
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
+	rm.processEvent(utils.OpenEventType, &event, rules)
 
 }
 func (rm *RuleManager) ReportNetworkEvent(k8sContainerID string, event tracernetworktype.Event) {
-	// noop
+	if err := rm.waitForContainer(k8sContainerID); err != nil {
+		return
+	}
+
+	// list network rules
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
+	rm.processEvent(utils.NetworkEventType, &event, rules)
 }
 
 func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
-	// noop
+	if err := rm.waitForContainer(event.Runtime.ContainerID); err != nil {
+		return
+	}
+
+	// list dns rules
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
+	rm.processEvent(utils.DnsEventType, &event, rules)
+}
+
+func (rm *RuleManager) ReportRandomxEvent(k8sContainerID string, event tracerrandomxtype.Event) {
+	if err := rm.waitForContainer(k8sContainerID); err != nil {
+		return
+	}
+
+	// list randomx rules
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
+	rm.processEvent(utils.RandomXEventType, &event, rules)
 }
 
 func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator) {
-
-	// process file exec
 	for _, rule := range rules {
 		if rule == nil {
 			continue
 		}
 
-		if !isRelevant(rule.Requirements(), eventType) {
+		if !isEventRelevant(rule.Requirements(), eventType) {
 			continue
 		}
 
@@ -229,8 +304,8 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 	}
 }
 
-// check if the event type is relevant to the rule
-func isRelevant(ruleSpec ruleengine.RuleSpec, eventType utils.EventType) bool {
+// Checks if the event type is relevant to the rule.
+func isEventRelevant(ruleSpec ruleengine.RuleSpec, eventType utils.EventType) bool {
 	for _, i := range ruleSpec.RequiredEventTypes() {
 		if i == eventType {
 			return true

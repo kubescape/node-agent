@@ -12,13 +12,13 @@ import (
 )
 
 const (
-	R0001ID                                = "R0001"
-	R0001UnexpectedProcessLaunchedRuleName = "Unexpected process launched"
+	R0001ID   = "R0001"
+	R0001Name = "Unexpected process launched"
 )
 
 var R0001UnexpectedProcessLaunchedRuleDescriptor = RuleDescriptor{
 	ID:          R0001ID,
-	Name:        R0001UnexpectedProcessLaunchedRuleName,
+	Name:        R0001Name,
 	Description: "Detecting exec calls that are not whitelisted by application profile",
 	Tags:        []string{"exec", "whitelisted"},
 	Priority:    RulePriorityCritical,
@@ -37,7 +37,7 @@ type R0001UnexpectedProcessLaunched struct {
 }
 
 func (rule *R0001UnexpectedProcessLaunched) Name() string {
-	return R0001UnexpectedProcessLaunchedRuleName
+	return R0001Name
 }
 func (rule *R0001UnexpectedProcessLaunched) ID() string {
 	return R0001ID
@@ -71,50 +71,36 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 	if !ok {
 		return nil
 	}
-	p := getExecPathFromEvent(execEvent)
+	execPath := getExecPathFromEvent(execEvent)
 
 	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.GetNamespace(), execEvent.GetPod())
-
 	if ap == nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing",
-			FailureEvent:     utils.ExecToGeneralEvent(execEvent),
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod \"%s\" and add the exec call \"%s\" to the whitelist", execEvent.GetPod(), p),
-			RulePriority:     R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
-		}
+		return nil
 	}
 
 	appProfileExecList, err := getContainerFromApplicationProfile(ap, execEvent.GetContainer())
 	if err != nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			Err:              "Application profile is missing",
-			FailureEvent:     utils.ExecToGeneralEvent(execEvent),
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod \"%s\" and add the exec call \"%s\" to the whitelist", execEvent.GetPod(), p),
-			RulePriority:     R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
-		}
+		return nil
 	}
 
 	for _, execCall := range appProfileExecList.Execs {
-		if execCall.Path == p {
+		if execCall.Path == execPath {
 			return nil
 		}
 	}
 
 	return &GenericRuleFailure{
 		RuleName:         rule.Name(),
-		Err:              fmt.Sprintf("exec call \"%s\" is not whitelisted by application profile", p),
+		Err:              fmt.Sprintf("exec call \"%s\" is not whitelisted by application profile", execPath),
 		FailureEvent:     utils.ExecToGeneralEvent(execEvent),
-		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the exec call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", p, execEvent.GetPod(), rule.generatePatchCommand(execEvent, ap)),
+		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the exec call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", execPath, execEvent.GetPod(), rule.generatePatchCommand(execEvent, ap)),
 		RulePriority:     R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
 	}
 }
 
 func (rule *R0001UnexpectedProcessLaunched) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType},
+		EventTypes:             R0001UnexpectedProcessLaunchedRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }

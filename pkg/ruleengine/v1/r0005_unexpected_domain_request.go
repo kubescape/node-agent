@@ -11,13 +11,13 @@ import (
 )
 
 const (
-	R0005ID                              = "R0005"
-	R0005UnexpectedDomainRequestRuleName = "Unexpected domain request"
+	R0005ID   = "R0005"
+	R0005Name = "Unexpected domain request"
 )
 
 var R0005UnexpectedDomainRequestRuleDescriptor = RuleDescriptor{
 	ID:          R0005ID,
-	Name:        R0005UnexpectedDomainRequestRuleName,
+	Name:        R0005Name,
 	Description: "Detecting unexpected domain requests that are not whitelisted by application profile.",
 	Tags:        []string{"dns", "whitelisted"},
 	Priority:    RulePriorityMed,
@@ -40,7 +40,7 @@ func CreateRuleR0005UnexpectedDomainRequest() *R0005UnexpectedDomainRequest {
 }
 
 func (rule *R0005UnexpectedDomainRequest) Name() string {
-	return R0005UnexpectedDomainRequestRuleName
+	return R0005Name
 }
 func (rule *R0005UnexpectedDomainRequest) ID() string {
 	return R0005ID
@@ -67,28 +67,9 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 	}
 
 	nn := objCache.NetworkNeighborsCache().GetNetworkNeighbors(domainEvent.GetNamespace(), domainEvent.GetPod())
-
 	if nn == nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Create an application profile with the domain %s", domainEvent.DNSName),
-			FailureEvent:     utils.DnsToGeneralEvent(domainEvent),
-			RulePriority:     R0005UnexpectedDomainRequestRuleDescriptor.Priority,
-		}
+		return nil
 	}
-	// _, err := getContainerFromApplicationProfile(nn, domainEvent.GetContainer())
-	// if err != nil {
-	// 	return &GenericRuleFailure{
-	// 		RuleName:         rule.Name(),
-	// 		RuleID:           rule.ID(),
-	// 		Err:              "Application profile is missing",
-	// 		FixSuggestionMsg: fmt.Sprintf("Create an application profile with the domain %s", domainEvent.DNSName),
-	// 		FailureEvent:     utils.DnsToGeneralEvent(domainEvent),
-	// 		RulePriority:     R0005UnexpectedDomainRequestRuleDescriptor.Priority,
-	// 	}
-	// }
 
 	// // Check that the domain is in the application profile
 	for _, dns := range nn.Spec.Egress {
@@ -112,7 +93,7 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 
 func (rule *R0005UnexpectedDomainRequest) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.DnsEventType},
+		EventTypes:             R0005UnexpectedDomainRequestRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }
