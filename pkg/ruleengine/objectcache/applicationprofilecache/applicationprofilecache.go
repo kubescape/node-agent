@@ -120,15 +120,10 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 	if ap.podToSlug.Has(podName) {
 		return
 	}
-	podB, err := podU.MarshalJSON()
-	if err != nil {
-		logger.L().Error("in ApplicationProfileCache, failed to marshal pod", helpers.String("name", podName), helpers.Error(err))
-		return
-	}
 
-	pod, err := workloadinterface.NewWorkload(podB)
-	if err != nil {
-		logger.L().Error("in ApplicationProfileCache,failed to unmarshal pod", helpers.String("name", podName), helpers.Error(err))
+	pod := workloadinterface.NewWorkloadObj(podU.Object)
+	if pod == nil {
+		logger.L().Error("failed to get workload object", helpers.String("name", podName))
 		return
 	}
 
@@ -139,6 +134,7 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 		return
 	}
 	if len(instanceIDs) == 0 {
+		logger.L().Error("in ApplicationProfileCache, instanceIDs is empty", helpers.String("name", podName))
 		return
 	}
 
@@ -146,6 +142,7 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 	instanceID := instanceIDs[0]
 	slug, err := names.InstanceIDToSlug(instanceID.GetName(), instanceID.GetKind(), "", instanceID.GetHashed())
 	if err != nil {
+		logger.L().Error("failed to get slug", helpers.Error(err))
 		return
 	}
 	uniqueSlug := objectcache.UniqueName(pod.GetNamespace(), slug)
@@ -203,6 +200,7 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 	// if ap.slugToAppProfile.Has(apName) {
 	// 	return
 	// }
+	ap.allProfiles.Add(apName)
 
 	// get the full application profile from the storage
 	// the watch only returns the metadata
@@ -213,7 +211,6 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 	}
 
 	ap.slugToAppProfile.Set(apName, fullAP)
-	ap.allProfiles.Add(apName)
 	ap.podToSlug.Range(func(podName, uniqueSlug string) bool {
 		if uniqueSlug == apName {
 			if !ap.slugToPods.Has(uniqueSlug) {

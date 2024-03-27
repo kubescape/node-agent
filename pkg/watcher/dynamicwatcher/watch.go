@@ -168,9 +168,9 @@ func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schem
 	if err != nil {
 		return "", fmt.Errorf("list resources: %w", err)
 	}
-	for _, obj := range list.Items {
+	for i := range list.Items {
 		for _, handler := range wh.handlers {
-			handler.AddHandler(ctx, &obj)
+			handler.AddHandler(ctx, &list.Items[i])
 		}
 	}
 	// set resource version to watch from

@@ -6,6 +6,7 @@ import (
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/watcher"
+	"strings"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -254,5 +255,5 @@ func (np *NetworkNeighborsCacheImp) getNetworkNeighborNameFromPod(pod workloadin
 		return "", err
 	}
 
-	return kind + "/" + name, nil
+	return strings.ToLower(kind) + "-" + name, nil
 }
