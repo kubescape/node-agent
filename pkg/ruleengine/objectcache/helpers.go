@@ -25,7 +25,7 @@ func UnstructuredToPod(obj *unstructured.Unstructured) (*corev1.Pod, error) {
 	}
 
 	var pod *corev1.Pod
-	err = json.Unmarshal(bytes, pod)
+	err = json.Unmarshal(bytes, &pod)
 	if err != nil {
 		return nil, err
 	}
