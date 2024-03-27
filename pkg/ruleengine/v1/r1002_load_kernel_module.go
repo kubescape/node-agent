@@ -23,7 +23,6 @@ var R1002LoadKernelModuleRuleDescriptor = RuleDescriptor{
 		EventTypes: []utils.EventType{
 			utils.SyscallEventType,
 		},
-		NeedApplicationProfile: false,
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1002LoadKernelModule()
@@ -61,6 +60,8 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 	if syscallEvent.SyscallName == "init_module" {
 		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
+			RuleID:           rule.ID(),
+			ContainerId:      syscallEvent.Runtime.ContainerID,
 			Err:              "Kernel Module Load",
 			FailureEvent:     utils.SyscallToGeneralEvent(syscallEvent),
 			FixSuggestionMsg: "If this is a legitimate action, please add consider removing this workload from the binding of this rule",
@@ -73,7 +74,6 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 
 func (rule *R1002LoadKernelModule) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R1002LoadKernelModuleRuleDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: false,
+		EventTypes: R1002LoadKernelModuleRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

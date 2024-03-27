@@ -23,7 +23,6 @@ var R1006UnshareSyscallRuleDescriptor = RuleDescriptor{
 		EventTypes: []utils.EventType{
 			utils.SyscallEventType,
 		},
-		NeedApplicationProfile: false,
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1006UnshareSyscall()
@@ -70,6 +69,7 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event i
 		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
 			RuleID:           rule.ID(),
+			ContainerId:      syscallEvent.Runtime.ContainerID,
 			Err:              "Unshare System Call usage",
 			FailureEvent:     utils.SyscallToGeneralEvent(syscallEvent),
 			FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
@@ -82,7 +82,6 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event i
 
 func (rule *R1006UnshareSyscall) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R1006UnshareSyscallRuleDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: false,
+		EventTypes: R1006UnshareSyscallRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

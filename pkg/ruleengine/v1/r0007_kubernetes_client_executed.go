@@ -48,8 +48,7 @@ var R0007KubernetesClientExecutedDescriptor = RuleDescriptor{
 	Priority:    RulePriorityCritical,
 	Tags:        []string{"exec", "malicious", "whitelisted"},
 	Requirements: &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType, utils.NetworkEventType},
-		NeedApplicationProfile: true,
+		EventTypes: []utils.EventType{utils.ExecveEventType, utils.NetworkEventType},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0007KubernetesClientExecuted()
@@ -93,6 +92,7 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
 			RuleID:           rule.ID(),
+			ContainerId:      event.Runtime.ContainerID,
 			Err:              fmt.Sprintf("Kubernetes client executed: %s", event.Comm),
 			FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 			FailureEvent:     utils.NetworkToGeneralEvent(event),
@@ -121,6 +121,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
 			RuleID:           rule.ID(),
+			ContainerId:      event.Runtime.ContainerID,
 			Err:              fmt.Sprintf("Kubernetes client executed: %s", execPath),
 			FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 			FailureEvent:     utils.ExecToGeneralEvent(event),
@@ -177,7 +178,6 @@ func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventTyp
 
 func (rule *R0007KubernetesClientExecuted) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R0007KubernetesClientExecutedDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: true,
+		EventTypes: R0007KubernetesClientExecutedDescriptor.Requirements.RequiredEventTypes(),
 	}
 }
