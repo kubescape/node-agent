@@ -172,14 +172,6 @@ func (sc StorageNoCache) GetApplicationProfile(namespace, name string) (*v1beta1
 	return sc.StorageClient.ApplicationProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func (sc StorageNoCache) CreateApplicationProfileSummary(profile *v1beta1.ApplicationProfileSummary, namespace string) error {
-	_, err := sc.StorageClient.ApplicationProfileSummaries(namespace).Create(context.Background(), profile, metav1.CreateOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (sc StorageNoCache) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error {
 	_, err := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
 	if err != nil {

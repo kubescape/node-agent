@@ -18,7 +18,7 @@ require (
 	github.com/kubescape/backend v0.0.16
 	github.com/kubescape/go-logger v0.0.22
 	github.com/kubescape/k8s-interface v0.0.162
-	github.com/kubescape/storage v0.0.67
+	github.com/kubescape/storage v0.0.74
 	github.com/panjf2000/ants/v2 v2.9.0
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.8.4
@@ -41,11 +41,11 @@ require (
 	github.com/acobaugh/osrelease v0.1.0 // indirect
 	github.com/adrg/xdg v0.4.0 // indirect
 	github.com/anchore/clio v0.0.0-20231016125544-c98a83e1c7fc // indirect
-	github.com/anchore/fangs v0.0.0-20231103141714-84c94dc43a2e // indirect
+	github.com/anchore/fangs v0.0.0-20231201140849-5075d28d6d8b // indirect
 	github.com/anchore/go-logger v0.0.0-20230725134548-c21dafa1ec5a // indirect
 	github.com/anchore/packageurl-go v0.1.1-0.20230104203445-02e0a6721501 // indirect
-	github.com/anchore/stereoscope v0.0.0-20231117203853-3610f4ef3e83 // indirect
-	github.com/anchore/syft v0.98.0 // indirect
+	github.com/anchore/stereoscope v0.0.0-20240118133533-eb656fc71793 // indirect
+	github.com/anchore/syft v0.101.1 // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
 	github.com/armosec/armoapi-go v0.0.329 // indirect
 	github.com/armosec/gojay v1.2.15 // indirect
@@ -96,7 +96,7 @@ require (
 	github.com/google/btree v1.1.2 // indirect
 	github.com/google/gnostic-models v0.6.9-0.20230804172637-c7be7c783f49 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
-	github.com/google/go-containerregistry v0.16.1 // indirect
+	github.com/google/go-containerregistry v0.18.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/pprof v0.0.0-20221118152302-e6195bd50e26 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
@@ -195,7 +195,7 @@ require (
 	golang.org/x/crypto v0.19.0 // indirect
 	golang.org/x/exp v0.0.0-20231108232855-2478ac86f678 // indirect
 	golang.org/x/mod v0.14.0 // indirect
-	golang.org/x/net v0.19.0 // indirect
+	golang.org/x/net v0.20.0 // indirect
 	golang.org/x/oauth2 v0.15.0 // indirect
 	golang.org/x/sync v0.6.0 // indirect
 	golang.org/x/term v0.17.0 // indirect
