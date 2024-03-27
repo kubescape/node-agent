@@ -24,7 +24,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			ch.unregisterContainer(notif.Container)
 		})
 	case containercollection.EventTypeRemoveContainer:
-		ch.preRunningContainers.Remove(notif.Container.Runtime.ContainerID)
+		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		logger.L().Info("stop monitor on container - container has terminated", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
 }
@@ -118,7 +118,6 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting network tracing", helpers.Error(err))
 			return err
 		}
-
 	}
 
 	if ch.cfg.EnableRuntimeDetection {
