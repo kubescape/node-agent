@@ -7,5 +7,5 @@ import (
 
 type NetworkManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
-	SaveNetworkEvent(containerName, podName string, networkEvent tracernetworktype.Event)
+	ReportNetworkEvent(containerName string, networkEvent tracernetworktype.Event)
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/cenkalti/backoff/v4"
 	"node-agent/pkg/config"
 	"node-agent/pkg/filehandler"
 	"node-agent/pkg/k8sclient"
@@ -12,6 +11,9 @@ import (
 	"node-agent/pkg/sbomhandler"
 	"node-agent/pkg/utils"
 	"time"
+
+	"github.com/cenkalti/backoff/v4"
+	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/goradd/maps"
@@ -35,18 +37,20 @@ type RelevancyManager struct {
 	k8sClient                k8sclient.K8sClientInterface
 	sbomHandler              sbomhandler.SBOMHandlerClient
 	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
+	preRunningContainersIDs  mapset.Set[string]
 }
 
 var _ relevancymanager.RelevancyManagerClient = (*RelevancyManager)(nil)
 
-func CreateRelevancyManager(ctx context.Context, cfg config.Config, clusterName string, fileHandler filehandler.FileHandler, k8sClient k8sclient.K8sClientInterface, sbomHandler sbomhandler.SBOMHandlerClient) (*RelevancyManager, error) {
+func CreateRelevancyManager(ctx context.Context, cfg config.Config, clusterName string, fileHandler filehandler.FileHandler, k8sClient k8sclient.K8sClientInterface, sbomHandler sbomhandler.SBOMHandlerClient, preRunningContainerIDs mapset.Set[string]) (*RelevancyManager, error) {
 	return &RelevancyManager{
-		cfg:         cfg,
-		clusterName: clusterName,
-		ctx:         ctx,
-		fileHandler: fileHandler,
-		k8sClient:   k8sClient,
-		sbomHandler: sbomHandler,
+		cfg:                     cfg,
+		clusterName:             clusterName,
+		ctx:                     ctx,
+		fileHandler:             fileHandler,
+		k8sClient:               k8sClient,
+		sbomHandler:             sbomHandler,
+		preRunningContainersIDs: preRunningContainerIDs,
 	}, nil
 }
 
@@ -291,6 +295,16 @@ func (rm *RelevancyManager) ContainerCallback(notif containercollection.PubSubEv
 			return
 		}
 		go rm.startRelevancyProcess(ctx, notif.Container, k8sContainerID)
+
+		// stop monitoring after MaxSniffingTime
+		time.AfterFunc(rm.cfg.MaxSniffingTime, func() {
+			event := containercollection.PubSubEvent{
+				Timestamp: time.Now().Format(time.RFC3339),
+				Type:      containercollection.EventTypeRemoveContainer,
+				Container: notif.Container,
+			}
+			rm.ContainerCallback(event)
+		})
 	case containercollection.EventTypeRemoveContainer:
 		channel := rm.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
 		if channel != nil {
@@ -300,6 +314,6 @@ func (rm *RelevancyManager) ContainerCallback(notif containercollection.PubSubEv
 	}
 }
 
-func (rm *RelevancyManager) ReportFileAccess(k8sContainerID, file string) {
+func (rm *RelevancyManager) ReportFileExec(k8sContainerID, file string) {
 	rm.fileHandler.AddFile(k8sContainerID, file)
 }

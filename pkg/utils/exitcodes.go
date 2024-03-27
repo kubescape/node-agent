@@ -8,4 +8,5 @@ const (
 	// custom exit codes
 	ExitCodeRuncNotFound       = 100
 	ExitCodeIncompatibleKernel = 101
+	ExitCodeMacOS              = 102
 )

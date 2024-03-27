@@ -162,7 +162,7 @@ import (
 // 	}
 // 	time.Sleep(10 * time.Second)
 // 	for i := range networkEvents {
-// 		am.SaveNetworkEvent(containers[0].Runtime.ContainerID, containers[0].K8s.PodName, *networkEvents[i])
+// 		am.ReportNetworkEvent(containers[0].Runtime.ContainerID, containers[0].K8s.PodName, *networkEvents[i])
 // 	}
 // 	time.Sleep(150 * time.Second)
 // }
@@ -791,7 +791,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 			dnsResolver.addressToDomainMap.Set(k, v)
 		}
 
-		am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "", &dnsResolver)
+		am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "", &dnsResolver, nil)
 		networkEventsSet := mapset.NewSet[NetworkEvent]()
 		for _, ne := range tc.networkEvents {
 			networkEventsSet.Add(ne)
@@ -959,7 +959,7 @@ func TestIsValidEvent(t *testing.T) {
 	}
 
 	dnsResolver := dnsmanager.CreateDNSManagerMock()
-	am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "test", dnsResolver)
+	am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "test", dnsResolver, nil)
 
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("Input: %s", tc.name), func(t *testing.T) {

@@ -3,7 +3,6 @@ package utils
 import (
 	"errors"
 	"fmt"
-	"github.com/deckarep/golang-set/v2"
 	"math/rand"
 	"path/filepath"
 	"runtime"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/goradd/maps"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/containerinstance"

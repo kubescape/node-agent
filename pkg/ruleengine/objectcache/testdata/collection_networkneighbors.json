@@ -1,0 +1,23 @@
+{
+    "apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
+    "kind": "NetworkNeighbors",
+    "metadata": {
+        "annotations": {
+            "kubescape.io/status": "ready"
+        },
+        "labels": {
+            "kubescape.io/workload-api-group": "apps",
+            "kubescape.io/workload-api-version": "v1",
+            "kubescape.io/workload-kind": "Deployment",
+            "kubescape.io/workload-name": "collection"
+        },
+        "name": "deployment-collection"
+    },
+    "spec": {
+        "egress": null,
+        "ingress": null,
+        "matchLabels": {
+            "app": "collection"
+        }
+    }
+}
