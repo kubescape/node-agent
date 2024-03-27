@@ -22,7 +22,6 @@ type RuleCreator interface {
 }
 
 type RuleEvaluator interface {
-
 	// Rule ID - this is the rules unique identifier
 	ID() string
 
@@ -46,20 +45,15 @@ type RuleEvaluator interface {
 type RuleSpec interface {
 	// Event types required for the rule
 	RequiredEventTypes() []utils.EventType
-
-	// Some rules need an application profile
-	IsApplicationProfileRequired() bool
 }
 
 type RuleFailure interface {
 	// Rule Name.
 	Name() string
-
 	// Rule ID.
 	ID() string
-
-	// ContainerID() string
-
+	// Container ID.
+	ContainerID() string
 	// Priority.
 	Priority() int
 	// Error interface.
