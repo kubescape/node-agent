@@ -1,7 +1,7 @@
 package exporters
 
 import (
-	"node-agent/pkg/malwarescanner"
+	"node-agent/pkg/malwaremanager"
 	"node-agent/pkg/ruleengine"
 	"os"
 
@@ -38,19 +38,21 @@ func (exporter *StdoutExporter) SendRuleAlert(failedRule ruleengine.RuleFailure)
 	}).Error(failedRule.Name())
 }
 
-func (exporter *StdoutExporter) SendMalwareAlert(malwareDescription malwarescanner.MalwareDescription) {
+func (exporter *StdoutExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
 	exporter.logger.WithFields(log.Fields{
-		"severity":       10,
-		"description":    malwareDescription.Description,
-		"hash":           malwareDescription.Hash,
-		"path":           malwareDescription.Path,
-		"size":           malwareDescription.Size,
-		"pod":            malwareDescription.PodName,
-		"namespace":      malwareDescription.Namespace,
-		"container":      malwareDescription.ContainerName,
-		"containerID":    malwareDescription.ContainerID,
-		"isPartOfImage":  malwareDescription.IsPartOfImage,
-		"containerImage": malwareDescription.ContainerImage,
-		"resource":       malwareDescription.Resource,
-	}).Error(malwareDescription.Name)
+		"severity":             10,
+		"description":          malwareResult.GetDescription(),
+		"md5hash":              malwareResult.GetMD5Hash(),
+		"sha1hash":             malwareResult.GetSHA1Hash(),
+		"sha256hash":           malwareResult.GetSHA256Hash(),
+		"path":                 malwareResult.GetPath(),
+		"size":                 malwareResult.GetSize(),
+		"pod":                  malwareResult.GetPodName(),
+		"namespace":            malwareResult.GetNamespace(),
+		"container":            malwareResult.GetContainerName(),
+		"containerID":          malwareResult.GetContainerID(),
+		"isPartOfImage":        malwareResult.GetIsPartOfImage(),
+		"containerImage":       malwareResult.GetContainerImage(),
+		"containerImageDigest": malwareResult.GetContainerImageDigest(),
+	}).Error(malwareResult.GetMalwareName())
 }

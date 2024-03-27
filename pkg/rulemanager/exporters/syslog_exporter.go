@@ -3,7 +3,7 @@ package exporters
 import (
 	"fmt"
 	"log/syslog"
-	"node-agent/pkg/malwarescanner"
+	"node-agent/pkg/malwaremanager"
 	"node-agent/pkg/ruleengine"
 	"os"
 	"time"
@@ -120,12 +120,12 @@ func (se *SyslogExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 }
 
 // SendMalwareAlert sends an alert to syslog (RFC 5424) - https://tools.ietf.org/html/rfc5424
-func (se *SyslogExporter) SendMalwareAlert(malwareDescription malwarescanner.MalwareDescription) {
+func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
 	message := rfc5424.Message{
 		Priority:  rfc5424.Error,
 		Timestamp: time.Now(),
-		Hostname:  malwareDescription.PodName,
-		AppName:   malwareDescription.ContainerName,
+		Hostname:  malwareResult.GetPodName(),
+		AppName:   malwareResult.GetContainerName(),
 		ProcessID: fmt.Sprintf("%d", os.Getpid()), // TODO: is this correct?
 		StructuredData: []rfc5424.StructuredData{
 			{
@@ -133,52 +133,64 @@ func (se *SyslogExporter) SendMalwareAlert(malwareDescription malwarescanner.Mal
 				Parameters: []rfc5424.SDParam{
 					{
 						Name:  "malware_name",
-						Value: malwareDescription.Name,
+						Value: malwareResult.GetPodName(),
 					},
 					{
 						Name:  "description",
-						Value: malwareDescription.Description,
+						Value: malwareResult.GetDescription(),
 					},
 					{
 						Name:  "path",
-						Value: malwareDescription.Path,
+						Value: malwareResult.GetPath(),
 					},
 					{
-						Name:  "hash",
-						Value: malwareDescription.Hash,
+						Name:  "md5hash",
+						Value: malwareResult.GetMD5Hash(),
+					},
+					{
+						Name:  "sha1hash",
+						Value: malwareResult.GetSHA1Hash(),
+					},
+					{
+						Name:  "sha256hash",
+						Value: malwareResult.GetSHA256Hash(),
 					},
 					{
 						Name:  "size",
-						Value: malwareDescription.Size,
+						Value: malwareResult.GetSize(),
 					},
 					{
 						Name:  "namespace",
-						Value: malwareDescription.Namespace,
+						Value: malwareResult.GetNamespace(),
 					},
 					{
 						Name:  "pod_name",
-						Value: malwareDescription.PodName,
+						Value: malwareResult.GetPodName(),
 					},
 					{
 						Name:  "container_name",
-						Value: malwareDescription.ContainerName,
+						Value: malwareResult.GetContainerName(),
 					},
 					{
 						Name:  "container_id",
-						Value: malwareDescription.ContainerID,
+						Value: malwareResult.GetContainerID(),
 					},
 					{
 						Name:  "is_part_of_image",
-						Value: fmt.Sprintf("%t", malwareDescription.IsPartOfImage),
+						Value: fmt.Sprintf("%t", malwareResult.GetIsPartOfImage()),
 					},
 					{
 						Name:  "container_image",
-						Value: malwareDescription.ContainerImage,
+						Value: malwareResult.GetContainerImage(),
+					},
+					{
+						Name:  "container_image_id",
+						Value: malwareResult.GetContainerImageDigest(),
 					},
 				},
 			},
 		},
-		Message: []byte(fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s' path '%s'", malwareDescription.Name, malwareDescription.Namespace, malwareDescription.PodName, malwareDescription.Description, malwareDescription.Path)),
+		Message: []byte(fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s' path '%s'", malwareResult.GetMalwareName(), malwareResult.GetNamespace(), malwareResult.GetPodName(), malwareResult.GetDescription(), malwareResult.GetPath())),
 	}
 
 	_, err := message.WriteTo(se.writer)

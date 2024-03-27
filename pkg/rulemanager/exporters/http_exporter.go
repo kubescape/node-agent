@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"node-agent/pkg/malwarescanner"
+	"node-agent/pkg/malwaremanager"
 	"node-agent/pkg/ruleengine"
 	ruleenginev1 "node-agent/pkg/ruleengine/v1"
 	"sync"
@@ -14,7 +14,6 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 type HTTPExporterConfig struct {
@@ -66,16 +65,20 @@ type MalwareAlert struct {
 	MalwareDescription string `json:"malwareDescription,omitempty"`
 	// Path to the file that was infected
 	Path string `json:"path,omitempty"`
-	// Hash of the file that was infected
-	Hash string `json:"hash,omitempty"`
+	// MD5 Hash of the file that was infected
+	MD5Hash string `json:"md5hash,omitempty"`
+	// SHA1 Hash of the file that was infected
+	SHA1Hash string `json:"sha1hash,omitempty"`
+	// SHA256 Hash of the file that was infected
+	SHA256Hash string `json:"sha256hash,omitempty"`
 	// Size of the file that was infected
 	Size string `json:"size,omitempty"`
 	// Is part of the image
 	IsPartOfImage bool `json:"isPartOfImage,omitempty"`
-	// K8s resource that was infected
-	Resource schema.GroupVersionResource `json:"resource,omitempty"`
 	// K8s container image that was infected
 	ContainerImage string `json:"containerImage,omitempty"`
+	// K8s container image digest that was infected
+	ContainerImageDigest string `json:"containerImageDigest,omitempty"`
 }
 
 type HTTPAlert struct {
@@ -221,7 +224,7 @@ func (exporter *HTTPExporter) sendInAlertList(httpAlert HTTPAlert) {
 	}
 }
 
-func (exporter *HTTPExporter) SendMalwareAlert(malwareDescription malwarescanner.MalwareDescription) {
+func (exporter *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
 	isLimitReached := exporter.checkAlertLimit()
 	if isLimitReached {
 		exporter.sendAlertLimitReached()
@@ -231,19 +234,21 @@ func (exporter *HTTPExporter) SendMalwareAlert(malwareDescription malwarescanner
 		RuleName:      "KubescapeMalwareDetected",
 		HostName:      exporter.Host,
 		NodeName:      exporter.NodeName,
-		ContainerID:   malwareDescription.ContainerID,
-		ContainerName: malwareDescription.ContainerName,
-		PodNamespace:  malwareDescription.Namespace,
-		PodName:       malwareDescription.PodName,
+		ContainerID:   malwareResult.GetContainerID(),
+		ContainerName: malwareResult.GetContainerName(),
+		PodNamespace:  malwareResult.GetNamespace(),
+		PodName:       malwareResult.GetPodName(),
 		MalwareAlert: MalwareAlert{
-			MalwareName:        malwareDescription.Name,
-			MalwareDescription: malwareDescription.Description,
-			Path:               malwareDescription.Path,
-			Hash:               malwareDescription.Hash,
-			Size:               malwareDescription.Size,
-			IsPartOfImage:      malwareDescription.IsPartOfImage,
-			Resource:           malwareDescription.Resource,
-			ContainerImage:     malwareDescription.ContainerImage,
+			MalwareName:          malwareResult.GetMalwareName(),
+			MalwareDescription:   malwareResult.GetDescription(),
+			Path:                 malwareResult.GetPath(),
+			MD5Hash:              malwareResult.GetMD5Hash(),
+			SHA256Hash:           malwareResult.GetSHA256Hash(),
+			SHA1Hash:             malwareResult.GetSHA1Hash(),
+			Size:                 malwareResult.GetSize(),
+			IsPartOfImage:        malwareResult.GetIsPartOfImage(),
+			ContainerImage:       malwareResult.GetContainerImage(),
+			ContainerImageDigest: malwareResult.GetContainerImageDigest(),
 		},
 	}
 	exporter.sendInAlertList(httpAlert)
