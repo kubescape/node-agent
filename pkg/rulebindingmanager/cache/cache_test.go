@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/rulebindingmanager/types/v1"
 	ruleenginev1 "node-agent/pkg/ruleengine/v1"
@@ -172,7 +173,7 @@ func TestRuntimeObjAddHandler(t *testing.T) {
 			for i := range tt.args.rb {
 				tt.args.c.addRuleBinding(&tt.args.rb[i])
 			}
-			tt.args.c.addPod(tt.args.pod)
+			tt.args.c.addPod(context.Background(), tt.args.pod)
 			r := tt.args.c.ListRulesForPod(tt.args.pod.GetNamespace(), tt.args.pod.GetName())
 			assert.Equal(t, len(tt.expectedRules), len(r))
 			for i := range r {
