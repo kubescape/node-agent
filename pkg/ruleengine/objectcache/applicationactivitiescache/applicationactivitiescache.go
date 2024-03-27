@@ -118,15 +118,10 @@ func (ap *ApplicationActivityCacheImpl) addPod(podU *unstructured.Unstructured) 
 	if ap.podToSlug.Has(podName) {
 		return
 	}
-	podB, err := podU.MarshalJSON()
-	if err != nil {
-		logger.L().Error("in ApplicationActivityCache, failed to marshal pod", helpers.String("name", podName), helpers.Error(err))
-		return
-	}
 
-	pod, err := workloadinterface.NewWorkload(podB)
-	if err != nil {
-		logger.L().Error("in ApplicationActivityCache, failed to unmarshal pod", helpers.String("name", podName), helpers.Error(err))
+	pod := workloadinterface.NewWorkloadObj(podU.Object)
+	if pod == nil {
+		logger.L().Error("in ApplicationActivityCache, failed to unmarshal pod", helpers.String("name", podName))
 		return
 	}
 

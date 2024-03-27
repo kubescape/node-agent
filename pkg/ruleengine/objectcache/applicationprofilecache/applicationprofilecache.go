@@ -163,7 +163,6 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 			return
 		}
 		ap.slugToAppProfile.Set(uniqueSlug, appProfile)
-		logger.L().Info("added pod to application profile cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 	}
 }
 

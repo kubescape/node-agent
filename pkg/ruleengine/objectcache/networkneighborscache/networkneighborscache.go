@@ -153,8 +153,6 @@ func (np *NetworkNeighborsCacheImp) addPod(podU *unstructured.Unstructured) {
 			return
 		}
 		np.slugToNetworkNeighbor.Set(uniqueSlug, netNeighbor)
-
-		logger.L().Info("added pod to network neighbors cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 	}
 }
 
