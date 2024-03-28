@@ -313,7 +313,23 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		var gotErr error
 		if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
 			if apierrors.IsNotFound(err) {
-				if err := am.createApplicationProfile(namespace, watchedContainer, slug, capabilities, execs, opens); err != nil {
+				// new application profile
+				newProfile := &v1beta1.ApplicationProfile{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:        slug,
+						Annotations: utils.GetAnnotations(watchedContainer),
+						Labels:      utils.GetLabels(watchedContainer, true),
+					},
+				}
+				// new profile container
+				newProfileContainer := &v1beta1.ApplicationProfileContainer{
+					Name: watchedContainer.InstanceID.GetContainerName(),
+				}
+				utils.EnrichProfileContainer(newProfileContainer, capabilities, execs, opens)
+				// insert application profile container
+				utils.InsertApplicationProfileContainer(newProfile, watchedContainer.ContainerType, watchedContainer.ContainerIndex, newProfileContainer)
+				// try to create application profile
+				if err := am.storageClient.CreateApplicationProfile(newProfile, namespace); err != nil {
 					gotErr = err
 					logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to create application profile", helpers.Error(err),
 						helpers.String("slug", slug),
@@ -623,26 +639,6 @@ func (am *ApplicationProfileManager) ReportDroppedEvent(k8sContainerID string) {
 		return
 	}
 	am.droppedEvents.Set(k8sContainerID, true)
-}
-
-func (am *ApplicationProfileManager) createApplicationProfile(namespace string, watchedContainer *utils.WatchedContainerData, slug string, capabilities []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string]) error {
-	// new application profile
-	newProfile := &v1beta1.ApplicationProfile{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        slug,
-			Annotations: utils.GetAnnotations(watchedContainer),
-			Labels:      utils.GetLabels(watchedContainer, true),
-		},
-	}
-	// new profile container
-	newProfileContainer := &v1beta1.ApplicationProfileContainer{
-		Name: watchedContainer.InstanceID.GetContainerName(),
-	}
-	utils.EnrichProfileContainer(newProfileContainer, capabilities, execs, opens)
-	// insert application profile container
-	utils.InsertApplicationProfileContainer(newProfile, watchedContainer.ContainerType, watchedContainer.ContainerIndex, newProfileContainer)
-	// try to create application profile
-	return am.storageClient.CreateApplicationProfile(newProfile, namespace)
 }
 
 func (am *ApplicationProfileManager) getCapabilities(watchedContainer *utils.WatchedContainerData) []string {
