@@ -33,7 +33,6 @@ var R0006UnexpectedServiceAccountTokenAccessRuleDescriptor = RuleDescriptor{
 		EventTypes: []utils.EventType{
 			utils.OpenEventType,
 		},
-		NeedApplicationProfile: true,
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0006UnexpectedServiceAccountTokenAccess()
@@ -117,6 +116,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 	return &GenericRuleFailure{
 		RuleName:         rule.Name(),
 		RuleID:           rule.ID(),
+		ContainerId:      openEvent.Runtime.ContainerID,
 		Err:              fmt.Sprintf("Unexpected access to service account token: %s", openEvent.Path),
 		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
 		FailureEvent:     utils.OpenToGeneralEvent(openEvent),
@@ -126,7 +126,6 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: true,
+		EventTypes: R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

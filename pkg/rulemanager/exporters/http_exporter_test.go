@@ -5,14 +5,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"node-agent/pkg/malwarescanner"
+	mmtypes "node-agent/pkg/malwaremanager/v1/types"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 var _ ruleengine.RuleFailure = (*GenericRuleFailure)(nil)
@@ -20,7 +19,7 @@ var _ ruleengine.RuleFailure = (*GenericRuleFailure)(nil)
 type GenericRuleFailure struct {
 	RuleName         string
 	RuleID           string
-	ContainerID      string
+	ContainerId      string
 	RulePriority     int
 	FixSuggestionMsg string
 	Err              string
@@ -32,6 +31,10 @@ func (rule *GenericRuleFailure) Name() string {
 }
 func (rule *GenericRuleFailure) ID() string {
 	return rule.RuleID
+}
+
+func (rule *GenericRuleFailure) ContainerID() string {
+	return rule.ContainerId
 }
 
 func (rule *GenericRuleFailure) Error() string {
@@ -191,23 +194,25 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create a mock malware description
-	malwareDesc := malwarescanner.MalwareDescription{
-		Name:           "testmalware",
-		Description:    "testmalwaredescription",
-		Path:           "testmalwarepath",
-		Hash:           "testmalwarehash",
-		Size:           "2MiB",
-		Resource:       schema.EmptyObjectKind.GroupVersionKind().GroupVersion().WithResource("testmalwareresource"),
-		Namespace:      "testmalwarenamespace",
-		PodName:        "testmalwarepodname",
-		ContainerName:  "testmalwarecontainername",
-		ContainerID:    "testmalwarecontainerid",
-		IsPartOfImage:  true,
-		ContainerImage: "testmalwarecontainerimage",
+	malwareDesc := mmtypes.GenericMalwareResult{
+		Name:                 "testmalware",
+		Description:          "testmalwaredescription",
+		Path:                 "testmalwarepath",
+		MD5Hash:              "testmalwarehash",
+		SHA1Hash:             "testmalwarehash",
+		SHA256Hash:           "testmalwarehash",
+		Size:                 "2MiB",
+		Namespace:            "testmalwarenamespace",
+		PodName:              "testmalwarepodname",
+		ContainerName:        "testmalwarecontainername",
+		ContainerID:          "testmalwarecontainerid",
+		IsPartOfImage:        true,
+		ContainerImage:       "testmalwarecontainerimage",
+		ContainerImageDigest: "testmalwarecontainerimagedigest",
 	}
 
 	// Call SendMalwareAlert
-	exporter.SendMalwareAlert(malwareDesc)
+	exporter.SendMalwareAlert(&malwareDesc)
 
 	// Assert that the HTTP request was sent correctly
 	alertsList := HTTPAlertsList{}

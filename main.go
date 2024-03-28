@@ -13,6 +13,9 @@ import (
 	"node-agent/pkg/containerwatcher/v1"
 	"node-agent/pkg/dnsmanager"
 	"node-agent/pkg/filehandler/v1"
+	"node-agent/pkg/malwaremanager"
+	malwaremanagerv1 "node-agent/pkg/malwaremanager/v1"
+	clamavv1 "node-agent/pkg/malwaremanager/v1/clamav"
 	metricsmanager "node-agent/pkg/metricsmanager"
 	metricprometheus "node-agent/pkg/metricsmanager/prometheus"
 	"node-agent/pkg/networkmanager"
@@ -139,8 +142,8 @@ func main() {
 		relevancyManager = relevancymanager.CreateRelevancyManagerMock()
 	}
 
-	// Create the relevancy manager
 	var ruleManager rulemanager.RuleManagerClient
+	var malwareManager malwaremanager.MalwareManagerClient
 
 	if cfg.EnableRuntimeDetection {
 		nodeName := os.Getenv(config.NodeNameEnvVar)
@@ -174,15 +177,37 @@ func main() {
 		objCache := objectcache.NewObjectCache(k8sObjectCache, apc, aac, nnc)
 
 		// create exporter
-		ex := exporters.InitExporters(cfg.Exporters)
+		exporter := exporters.InitExporters(cfg.Exporters)
 
-		// create runtimeDetection manager
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, ex, prometheusExporter, preRunningContainersIDs)
+		// create runtimeDetection managers
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, preRunningContainersIDs)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
+
+		// Create malware scanners
+		malwarescanners := []malwaremanagerv1.MalwareScanner{}
+
+		// Create ClamAV scanner
+		// Check if ClamAV is enabled (CLAMAV_ADDRESS env var is set in the format <host>:<port>)
+		if clamavAddress, present := os.LookupEnv("CLAMAV_ADDRESS"); present {
+			clamavConfig := clamavv1.ClamAVConfig{
+				Address: clamavAddress,
+			}
+			if clamavScanner, err := clamavv1.CreateClamAVClient(&clamavConfig); err == nil {
+				malwarescanners = append(malwarescanners, clamavScanner)
+			} else {
+				logger.L().Ctx(ctx).Error("error creating ClamAV client", helpers.Error(err))
+			}
+		}
+
+		malwareManager, err = malwaremanagerv1.CreateMalwareManager(malwarescanners, exporter)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
+		}
 	} else {
 		ruleManager = rulemanager.CreateRuleManagerMock()
+		malwareManager = malwaremanager.CreateMalwareManagerMock()
 	}
 
 	// Create the network and DNS managers
@@ -198,7 +223,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, preRunningContainersIDs)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

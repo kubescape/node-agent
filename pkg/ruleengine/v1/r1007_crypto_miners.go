@@ -142,7 +142,6 @@ var R1007CryptoMinersRuleDescriptor = RuleDescriptor{
 			utils.DnsEventType,
 			utils.RandomXEventType,
 		},
-		NeedApplicationProfile: false,
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1007CryptoMiners()
@@ -179,6 +178,7 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event int
 		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
 			RuleID:           rule.ID(),
+			ContainerId:      randomXEvent.Runtime.ContainerID,
 			Err:              "Possible Crypto Miner detected",
 			FailureEvent:     utils.RandomxToGeneralEvent(randomXEvent),
 			FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
@@ -189,6 +189,7 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event int
 			return &GenericRuleFailure{
 				RuleName:         rule.Name(),
 				RuleID:           rule.ID(),
+				ContainerId:      networkEvent.Runtime.ContainerID,
 				Err:              "Possible Crypto Miner port detected",
 				FailureEvent:     utils.NetworkToGeneralEvent(networkEvent),
 				FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
@@ -200,6 +201,7 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event int
 			return &GenericRuleFailure{
 				RuleName:         rule.Name(),
 				RuleID:           rule.ID(),
+				ContainerId:      dnsEvent.Runtime.ContainerID,
 				Err:              "Possible Crypto Miner domain detected",
 				FailureEvent:     utils.DnsToGeneralEvent(dnsEvent),
 				FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
@@ -213,7 +215,6 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event int
 
 func (rule *R1007CryptoMiners) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R1007CryptoMinersRuleDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: false,
+		EventTypes: R1007CryptoMinersRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

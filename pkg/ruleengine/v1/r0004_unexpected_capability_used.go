@@ -22,8 +22,7 @@ var R0004UnexpectedCapabilityUsedRuleDescriptor = RuleDescriptor{
 	Tags:        []string{"capabilities", "whitelisted"},
 	Priority:    RulePriorityHigh,
 	Requirements: &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.CapabilitiesEventType},
-		NeedApplicationProfile: true,
+		EventTypes: []utils.EventType{utils.CapabilitiesEventType},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0004UnexpectedCapabilityUsed()
@@ -84,6 +83,7 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 	return &GenericRuleFailure{
 		RuleName:         rule.Name(),
 		RuleID:           rule.ID(),
+		ContainerId:      capEvent.Runtime.ContainerID,
 		Err:              fmt.Sprintf("Unexpected capability used (capability %s used in syscall %s)", capEvent.CapName, capEvent.Syscall),
 		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the capability use \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", capEvent.CapName, capEvent.GetPod(), rule.generatePatchCommand(capEvent, ap)),
 		FailureEvent:     utils.CapabilitiesToGeneralEvent(capEvent),
@@ -93,7 +93,6 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 
 func (rule *R0004UnexpectedCapabilityUsed) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R0004UnexpectedCapabilityUsedRuleDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: true,
+		EventTypes: R0004UnexpectedCapabilityUsedRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }
