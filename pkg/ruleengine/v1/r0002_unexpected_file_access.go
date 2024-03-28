@@ -6,7 +6,7 @@ import (
 	"node-agent/pkg/utils"
 	"strings"
 
-	"node-agent/pkg/ruleengine/objectcache"
+	"node-agent/pkg/objectcache"
 
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 

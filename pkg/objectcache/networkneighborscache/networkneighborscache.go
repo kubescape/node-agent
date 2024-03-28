@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/ruleengine/objectcache"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/watcher"
+	"strings"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -152,8 +153,6 @@ func (np *NetworkNeighborsCacheImp) addPod(podU *unstructured.Unstructured) {
 			return
 		}
 		np.slugToNetworkNeighbor.Set(uniqueSlug, netNeighbor)
-
-		logger.L().Info("added pod to network neighbors cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 	}
 }
 
@@ -254,5 +253,5 @@ func (np *NetworkNeighborsCacheImp) getNetworkNeighborNameFromPod(pod workloadin
 		return "", err
 	}
 
-	return kind + "/" + name, nil
+	return strings.ToLower(kind) + "-" + name, nil
 }

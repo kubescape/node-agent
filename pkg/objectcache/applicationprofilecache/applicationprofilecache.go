@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/ruleengine/objectcache"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/watcher"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -120,15 +120,10 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 	if ap.podToSlug.Has(podName) {
 		return
 	}
-	podB, err := podU.MarshalJSON()
-	if err != nil {
-		logger.L().Error("in ApplicationProfileCache, failed to marshal pod", helpers.String("name", podName), helpers.Error(err))
-		return
-	}
 
-	pod, err := workloadinterface.NewWorkload(podB)
-	if err != nil {
-		logger.L().Error("in ApplicationProfileCache,failed to unmarshal pod", helpers.String("name", podName), helpers.Error(err))
+	pod := workloadinterface.NewWorkloadObj(podU.Object)
+	if pod == nil {
+		logger.L().Error("failed to get workload object", helpers.String("name", podName))
 		return
 	}
 
@@ -139,6 +134,7 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 		return
 	}
 	if len(instanceIDs) == 0 {
+		logger.L().Error("in ApplicationProfileCache, instanceIDs is empty", helpers.String("name", podName))
 		return
 	}
 
@@ -146,6 +142,7 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 	instanceID := instanceIDs[0]
 	slug, err := names.InstanceIDToSlug(instanceID.GetName(), instanceID.GetKind(), "", instanceID.GetHashed())
 	if err != nil {
+		logger.L().Error("failed to get slug", helpers.Error(err))
 		return
 	}
 	uniqueSlug := objectcache.UniqueName(pod.GetNamespace(), slug)
@@ -166,7 +163,6 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 			return
 		}
 		ap.slugToAppProfile.Set(uniqueSlug, appProfile)
-		logger.L().Info("added pod to application profile cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 	}
 }
 
@@ -197,12 +193,15 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 		return
 	}
 
-	// check if the application profile is ready
+	// check if the application profile is completed
 	// TODO: @amir
-	// if was ready and now is not, remove from cache
+
+	// if status was complete and now is not (e.g. mode changed from partial to complete), remove from cache
 	// if ap.slugToAppProfile.Has(apName) {
 	// 	return
 	// }
+
+	ap.allProfiles.Add(apName)
 
 	// get the full application profile from the storage
 	// the watch only returns the metadata
@@ -213,7 +212,6 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 	}
 
 	ap.slugToAppProfile.Set(apName, fullAP)
-	ap.allProfiles.Add(apName)
 	ap.podToSlug.Range(func(podName, uniqueSlug string) bool {
 		if uniqueSlug == apName {
 			if !ap.slugToPods.Has(uniqueSlug) {

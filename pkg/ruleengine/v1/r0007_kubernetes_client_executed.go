@@ -2,8 +2,8 @@ package ruleengine
 
 import (
 	"fmt"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 	"path/filepath"
 	"slices"

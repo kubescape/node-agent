@@ -4,7 +4,7 @@ import (
 	"context"
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/ruleengine/objectcache"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/rulemanager/exporters"
 	"node-agent/pkg/storage"
 

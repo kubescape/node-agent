@@ -87,7 +87,7 @@ func (c *RBCache) ListRulesForPod(namespace, name string) []ruleengine.RuleEvalu
 }
 
 // ------------------ watcher.Watcher methods -----------------------
-func (c *RBCache) AddHandler(_ context.Context, obj *unstructured.Unstructured) {
+func (c *RBCache) AddHandler(ctx context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":
 		pod, err := unstructuredToPod(obj)
@@ -95,7 +95,7 @@ func (c *RBCache) AddHandler(_ context.Context, obj *unstructured.Unstructured) 
 			logger.L().Error("failed to convert unstructured to pod", helpers.Error(err))
 			return
 		}
-		c.addPod(pod)
+		c.addPod(ctx, pod)
 	case types.RuntimeRuleBindingAlertKind:
 		ruleBinding, err := unstructuredToRuleBinding(obj)
 		if err != nil {
@@ -105,7 +105,7 @@ func (c *RBCache) AddHandler(_ context.Context, obj *unstructured.Unstructured) 
 		c.addRuleBinding(ruleBinding)
 	}
 }
-func (c *RBCache) ModifyHandler(_ context.Context, obj *unstructured.Unstructured) {
+func (c *RBCache) ModifyHandler(ctx context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":
 		pod, err := unstructuredToPod(obj)
@@ -113,7 +113,7 @@ func (c *RBCache) ModifyHandler(_ context.Context, obj *unstructured.Unstructure
 			logger.L().Error("failed to convert unstructured to pod", helpers.Error(err))
 			return
 		}
-		c.addPod(pod)
+		c.addPod(ctx, pod)
 	case types.RuntimeRuleBindingAlertKind:
 		ruleBinding, err := unstructuredToRuleBinding(obj)
 		if err != nil {
@@ -224,7 +224,7 @@ func (c *RBCache) modifiedRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBindi
 
 // ----------------- Pod manager methods -----------------
 
-func (c *RBCache) addPod(pod *corev1.Pod) {
+func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) {
 	podName := podUniqueName(pod)
 
 	// if pod is already in the cache, ignore
@@ -247,7 +247,7 @@ func (c *RBCache) addPod(pod *corev1.Pod) {
 		nsSelectorStr := nsSelector.String()
 		if len(nsSelectorStr) != 0 {
 			// get related namespaces
-			namespaces, err := c.k8sClient.GetKubernetesClient().CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{LabelSelector: nsSelectorStr})
+			namespaces, err := c.k8sClient.GetKubernetesClient().CoreV1().Namespaces().List(ctx, metav1.ListOptions{LabelSelector: nsSelectorStr})
 			if err != nil {
 				logger.L().Error("failed to list namespaces", helpers.String("ruleBiding", rbUniqueName(&rb)), helpers.String("nsSelector", nsSelectorStr), helpers.Error(err))
 				return

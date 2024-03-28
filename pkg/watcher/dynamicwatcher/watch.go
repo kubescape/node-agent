@@ -7,13 +7,14 @@ import (
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/watcher"
 	"node-agent/pkg/watcher/cooldownqueue"
+	"os"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-
+	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -123,9 +124,14 @@ func (wh *WatchHandler) Stop(_ context.Context) {
 }
 
 func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions, eventQueue *cooldownqueue.CooldownQueue) {
+	exitFatal := true
 	if err := backoff.RetryNotify(func() error {
 		watcher, err := wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), watchOpts)
 		if err != nil {
+			if k8sErrors.ReasonForError(err) == metav1.StatusReasonNotFound {
+				exitFatal = false
+				return backoff.Permanent(err)
+			}
 			return fmt.Errorf("client resource: %w", err)
 		}
 		logger.L().Info("starting watch", helpers.String("resource", res.Resource))
@@ -157,8 +163,11 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 				helpers.String("retry in", d.String()))
 		}
 	}); err != nil {
-		logger.L().Ctx(ctx).Fatal("giving up watch", helpers.Error(err),
-			helpers.String("resource", res.Resource))
+		logger.L().Ctx(ctx).Error("giving up watch", helpers.Error(err),
+			helpers.String("resource", res.String()))
+		if exitFatal {
+			os.Exit(1)
+		}
 	}
 }
 
@@ -168,9 +177,9 @@ func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schem
 	if err != nil {
 		return "", fmt.Errorf("list resources: %w", err)
 	}
-	for _, obj := range list.Items {
+	for i := range list.Items {
 		for _, handler := range wh.handlers {
-			handler.AddHandler(ctx, &obj)
+			handler.AddHandler(ctx, &list.Items[i])
 		}
 	}
 	// set resource version to watch from

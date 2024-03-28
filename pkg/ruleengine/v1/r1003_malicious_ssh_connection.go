@@ -3,8 +3,8 @@ package ruleengine
 import (
 	"fmt"
 	"log"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 	"slices"
 	"strings"

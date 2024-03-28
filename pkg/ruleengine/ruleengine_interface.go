@@ -1,7 +1,7 @@
 package ruleengine
 
 import (
-	"node-agent/pkg/ruleengine/objectcache"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/utils"
 )
 

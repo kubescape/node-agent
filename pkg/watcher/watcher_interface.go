@@ -20,19 +20,41 @@ type Watcher interface {
 var _ Watcher = &WatcherMock{}
 
 type WatcherMock struct {
-	Added   []*unstructured.Unstructured
-	Updated []*unstructured.Unstructured
-	Deleted []*unstructured.Unstructured
+	Added   chan *unstructured.Unstructured
+	Updated chan *unstructured.Unstructured
+	Deleted chan *unstructured.Unstructured
 }
 
+func NewWatcherMock() *WatcherMock {
+	return &WatcherMock{
+		Added:   make(chan *unstructured.Unstructured),
+		Updated: make(chan *unstructured.Unstructured),
+		Deleted: make(chan *unstructured.Unstructured),
+	}
+}
 func (wm *WatcherMock) AddHandler(_ context.Context, obj *unstructured.Unstructured) {
-	wm.Added = append(wm.Added, obj)
+	wm.Added <- obj
 }
 
 func (wm *WatcherMock) ModifyHandler(_ context.Context, obj *unstructured.Unstructured) {
-	wm.Updated = append(wm.Updated, obj)
+	wm.Updated <- obj
 }
 
 func (wm *WatcherMock) DeleteHandler(_ context.Context, obj *unstructured.Unstructured) {
-	wm.Deleted = append(wm.Deleted, obj)
+	wm.Deleted <- obj
+}
+
+var _ Adaptor = &AdaptorMock{}
+
+type AdaptorMock struct {
+	WatcherMock
+	WatchResource []WatchResourceMock
+}
+
+func (am *AdaptorMock) WatchResources() []WatchResource {
+	w := []WatchResource{}
+	for _, wr := range am.WatchResource {
+		w = append(w, &wr)
+	}
+	return w
 }
