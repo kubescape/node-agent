@@ -333,6 +333,10 @@ func (am *NetworkManager) handleNetworkEvents(_ context.Context, container *cont
 		networkNeighborsExists = true
 	}
 
+	if hadDroppedEvents := am.containerAndPodToDroppedEvent.Get(container.Runtime.ContainerID + container.K8s.PodName); hadDroppedEvents {
+		am.status = helpersv1.MissingRuntime
+	}
+
 	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
 	// no events to handle
 	if networkEvents == nil {

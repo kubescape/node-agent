@@ -4,6 +4,7 @@ import (
 	"context"
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/storage"
 	"sort"
 	"testing"
@@ -24,7 +25,8 @@ func TestApplicationProfileManager(t *testing.T) {
 	ctx := context.TODO()
 	k8sClient := &k8sclient.K8sClientMock{}
 	storageClient := &storage.StorageHttpClientMock{}
-	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, nil)
+	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
+	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, nil, k8sObjectCacheMock)
 	assert.NoError(t, err)
 	// prepare container
 	container := &containercollection.Container{

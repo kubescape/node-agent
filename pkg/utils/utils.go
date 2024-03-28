@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"node-agent/pkg/objectcache"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -28,9 +29,9 @@ import (
 )
 
 var (
-	ContainerHasTerminatedError = errors.New("container has terminated")
-	FullApplicationProfileError = errors.New("application profile is full")
-	IncompleteSBOMError         = errors.New("incomplete SBOM")
+	ContainerHasTerminatedError     = errors.New("container has terminated")
+	TooLargeApplicationProfileError = errors.New("application profile is too large")
+	IncompleteSBOMError             = errors.New("incomplete SBOM")
 )
 
 type PackageSourceInfoData struct {
@@ -50,11 +51,10 @@ const (
 type WatchedContainerStatus string
 
 const (
-	WatchedContainerStatusInitializing   WatchedContainerStatus = helpersv1.Initializing
-	WatchedContainerStatusReady          WatchedContainerStatus = helpersv1.Ready
-	WatchedContainerStatusCompleted      WatchedContainerStatus = helpersv1.Completed
-	WatchedContainerStatusIncomplete     WatchedContainerStatus = helpersv1.Complete
-	WatchedContainerStatusUnauthorize    WatchedContainerStatus = helpersv1.Unauthorize
+	WatchedContainerStatusInitializing WatchedContainerStatus = helpersv1.Initializing
+	WatchedContainerStatusReady        WatchedContainerStatus = helpersv1.Ready
+	WatchedContainerStatusCompleted    WatchedContainerStatus = helpersv1.Completed
+
 	WatchedContainerStatusMissingRuntime WatchedContainerStatus = helpersv1.MissingRuntime
 	WatchedContainerStatusTooLarge       WatchedContainerStatus = helpersv1.TooLarge
 )
@@ -90,8 +90,11 @@ type WatchedContainerData struct {
 	ContainerIndex                             int
 	NsMntId                                    uint64
 	InitialDelayExpired                        bool
-	CompletionStatus                           WatchedContainerCompletionStatus
-	Status                                     WatchedContainerStatus
+
+	statusUpdated           bool
+	status                  WatchedContainerStatus
+	completionStatusUpdated bool
+	completionStatus        WatchedContainerCompletionStatus
 }
 
 func Between(value string, a string, b string) string {
@@ -180,10 +183,17 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 		labels[helpersv1.TemplateHashKey] = watchedContainer.TemplateHash
 	}
 
-	labels[helpersv1.CompletionMetadataKey] = string(watchedContainer.CompletionStatus)
-	labels[helpersv1.StatusMetadataKey] = string(watchedContainer.Status)
-
 	return labels
+}
+
+func GetAnnotations(watchedContainer *WatchedContainerData) map[string]string {
+	annotations := map[string]string{
+		helpersv1.WlidMetadataKey:       watchedContainer.Wlid,
+		helpersv1.CompletionMetadataKey: string(watchedContainer.GetCompletionStatus()),
+		helpersv1.StatusMetadataKey:     string(watchedContainer.GetStatus()),
+	}
+
+	return annotations
 }
 
 func GetApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) *v1beta1.ApplicationProfileContainer {
@@ -218,6 +228,44 @@ func InsertApplicationProfileContainer(profile *v1beta1.ApplicationProfile, cont
 	}
 }
 
+func (watchedContainer *WatchedContainerData) GetStatus() WatchedContainerStatus {
+	return watchedContainer.status
+}
+
+func (watchedContainer *WatchedContainerData) GetCompletionStatus() WatchedContainerCompletionStatus {
+	return watchedContainer.completionStatus
+}
+
+func (watchedContainer *WatchedContainerData) SetStatus(newStatus WatchedContainerStatus) {
+	if newStatus != watchedContainer.status {
+		watchedContainer.status = newStatus
+		watchedContainer.statusUpdated = true
+	}
+}
+
+func (watchedContainer *WatchedContainerData) SetCompletionStatus(newStatus WatchedContainerCompletionStatus) {
+	if newStatus != watchedContainer.completionStatus {
+		watchedContainer.completionStatus = newStatus
+		watchedContainer.completionStatusUpdated = true
+	}
+}
+
+func (watchedContainer *WatchedContainerData) ResetStatusUpdatedFlag() {
+	watchedContainer.statusUpdated = false
+}
+
+func (watchedContainer *WatchedContainerData) ResetCompletionStatusUpdatedFlag() {
+	watchedContainer.completionStatusUpdated = false
+}
+
+func (watchedContainer *WatchedContainerData) StatusUpdated() bool {
+	return watchedContainer.statusUpdated
+}
+
+func (watchedContainer *WatchedContainerData) CompletionStatusUpdated() bool {
+	return watchedContainer.completionStatusUpdated
+}
+
 func (watchedContainer *WatchedContainerData) SetContainerType(wl workloadinterface.IWorkload, containerName string) {
 	containers, err := wl.GetContainers()
 	if err != nil {
@@ -242,6 +290,23 @@ func (watchedContainer *WatchedContainerData) SetContainerType(wl workloadinterf
 			break
 		}
 	}
+}
+
+// SetTerminationStatus updates the terminated flag and sets the exit code on the watched container
+func (watchedContainer *WatchedContainerData) GetTerminationExitCode(k8sObjectsCache objectcache.K8sObjectCache, namespace, podName, containerName string) int32 {
+	time.Sleep(3 * time.Second)
+	podStatus := k8sObjectsCache.GetPodStatus(namespace, podName)
+	if podStatus != nil {
+		for i := range podStatus.ContainerStatuses {
+			if podStatus.ContainerStatuses[i].Name == containerName {
+				if podStatus.ContainerStatuses[i].LastTerminationState.Terminated != nil {
+					return podStatus.ContainerStatuses[i].LastTerminationState.Terminated.ExitCode
+
+				}
+			}
+		}
+	}
+	return 0
 }
 
 func EnrichProfileContainer(newProfileContainer *v1beta1.ApplicationProfileContainer, observedCapabilities []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string]) {
@@ -326,6 +391,26 @@ func CreateCapabilitiesPatchOperations(capabilities []string, execs map[string]m
 		})
 	}
 	return profileOperations
+}
+
+func AppendStatusAnnotationPatchOperations(existingPatch []PatchOperation, watchedContainer *WatchedContainerData) []PatchOperation {
+	if watchedContainer.statusUpdated {
+		existingPatch = append(existingPatch, PatchOperation{
+			Op:    "replace",
+			Path:  "/metadata/annotations/" + EscapeJSONPointerElement(helpersv1.StatusMetadataKey),
+			Value: string(watchedContainer.status),
+		})
+	}
+
+	if watchedContainer.completionStatusUpdated {
+		existingPatch = append(existingPatch, PatchOperation{
+			Op:    "replace",
+			Path:  "/metadata/annotations/" + EscapeJSONPointerElement(helpersv1.CompletionMetadataKey),
+			Value: string(watchedContainer.completionStatus),
+		})
+	}
+
+	return existingPatch
 }
 
 func SetInMap(newExecMap *maps.SafeMap[string, mapset.Set[string]]) func(k string, v mapset.Set[string]) bool {
