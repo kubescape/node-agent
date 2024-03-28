@@ -3,6 +3,7 @@ package rulemanager
 import (
 	"context"
 	"errors"
+	"fmt"
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/ruleengine"
@@ -36,6 +37,8 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 )
@@ -125,10 +128,10 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 					WithMountNsID: eventtypes.WithMountNsID{
 						MountNsID: watchedContainer.NsMntId,
 					},
-					Pid:         container.Pid,
-					Uid:         container.OciConfig.Process.User.UID,
-					Gid:         container.OciConfig.Process.User.GID,
-					Comm:        container.OciConfig.Process.Args[0],
+					Pid: container.Pid,
+					// Uid:         container.OciConfig.Process.User.UID, TODO: Figure why OciConfig is nil.
+					// Gid:         container.OciConfig.Process.User.GID, TODO: Figure why OciConfig is nil.
+					// Comm:        container.OciConfig.Process.Args[0], TODO: Figure why OciConfig is nil.
 					SyscallName: syscall,
 				}
 
@@ -143,6 +146,39 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 	}
 }
 
+func (rm *RuleManager) ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+	if watchedContainer.InstanceID != nil {
+		return nil
+	}
+
+	wl, err := rm.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
+	if err != nil {
+		return fmt.Errorf("failed to get workload: %w", err)
+	}
+
+	pod := wl.(*workloadinterface.Workload)
+
+	// find instanceID
+	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
+	if err != nil {
+		return fmt.Errorf("failed to generate instanceID: %w", err)
+	}
+
+	watchedContainer.InstanceID = instanceIDs[0]
+	for i := range instanceIDs {
+		if instanceIDs[i].GetContainerName() == container.K8s.ContainerName {
+			watchedContainer.InstanceID = instanceIDs[i]
+		}
+	}
+	// find container type and index
+	if watchedContainer.ContainerType == utils.Unknown {
+		watchedContainer.SetContainerType(pod, container.K8s.ContainerName)
+	}
+
+	// FIXME ephemeralContainers are not supported yet
+	return nil
+}
+
 func (rm *RuleManager) startRuleManager(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
 	ctx, span := otel.Tracer("").Start(ctx, "RuleManager.startRuleManager")
 	defer span.End()
@@ -151,14 +187,25 @@ func (rm *RuleManager) startRuleManager(ctx context.Context, container *containe
 	rm.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
 
 	watchedContainer := &utils.WatchedContainerData{
-		ContainerID:    container.Runtime.ContainerID,
-		SyncChannel:    syncChannel,
-		K8sContainerID: k8sContainerID,
-		NsMntId:        container.Mntns,
+		ContainerID:      container.Runtime.ContainerID,
+		UpdateDataTicker: time.NewTicker(rm.cfg.InitialDelay),
+		SyncChannel:      syncChannel,
+		K8sContainerID:   k8sContainerID,
+		NsMntId:          container.Mntns,
+	}
+
+	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated.
+	if err := backoff.Retry(func() error {
+		return rm.ensureInstanceID(container, watchedContainer)
+	}, backoff.NewExponentialBackOff()); err != nil {
+		logger.L().Ctx(ctx).Error("RuleManager - failed to ensure instanceID", helpers.Error(err),
+			helpers.Int("container index", watchedContainer.ContainerIndex),
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
 
 	if err := rm.monitorContainer(ctx, container, watchedContainer); err != nil {
-		logger.L().Info("ApplicationProfileManager - stop monitor on container", helpers.String("reason", err.Error()),
+		logger.L().Info("RuleManager - stop monitor on container", helpers.String("reason", err.Error()),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
