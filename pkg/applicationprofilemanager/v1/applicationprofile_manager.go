@@ -264,9 +264,21 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	}
 
 	// application profile
-	capabilities := am.getCapabilities(watchedContainer)
+	var capabilities []string
 	execs := make(map[string]mapset.Set[string])
 	opens := make(map[string]mapset.Set[string])
+	// get capabilities from IG
+	if toSaveCapabilities := am.toSaveCapabilities.Get(watchedContainer.K8sContainerID); toSaveCapabilities.Cardinality() > 0 {
+		// remove capabilities to save in a thread safe way using Pop
+		for {
+			capability, continuePop := toSaveCapabilities.Pop()
+			if continuePop {
+				capabilities = append(capabilities, capability)
+			} else {
+				break
+			}
+		}
+	}
 
 	// get pointer to execs map from IG
 	toSaveExecs := am.toSaveExecs.Get(watchedContainer.K8sContainerID)
@@ -649,21 +661,4 @@ func (am *ApplicationProfileManager) ReportDroppedEvent(k8sContainerID string) {
 		return
 	}
 	am.droppedEvents.Set(k8sContainerID, true)
-}
-
-func (am *ApplicationProfileManager) getCapabilities(watchedContainer *utils.WatchedContainerData) []string {
-	var capabilities []string
-	// get capabilities from IG
-	if toSaveCapabilities := am.toSaveCapabilities.Get(watchedContainer.K8sContainerID); toSaveCapabilities.Cardinality() > 0 {
-		// remove capabilities to save in a thread safe way using Pop
-		for {
-			capability, continuePop := toSaveCapabilities.Pop()
-			if continuePop {
-				capabilities = append(capabilities, capability)
-			} else {
-				break
-			}
-		}
-	}
-	return capabilities
 }
