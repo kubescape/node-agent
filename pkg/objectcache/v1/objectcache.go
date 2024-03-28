@@ -1,7 +1,7 @@
 package objectcache
 
 import (
-	"node-agent/pkg/ruleengine/objectcache"
+	"node-agent/pkg/objectcache"
 )
 
 var _ objectcache.ObjectCache = (*ObjectCacheImpl)(nil)

@@ -18,7 +18,7 @@ import (
 	bindingcache "node-agent/pkg/rulebindingmanager"
 
 	"node-agent/pkg/metricsmanager"
-	"node-agent/pkg/ruleengine/objectcache"
+	"node-agent/pkg/objectcache"
 
 	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
 	ruleenginetypes "node-agent/pkg/ruleengine/types"

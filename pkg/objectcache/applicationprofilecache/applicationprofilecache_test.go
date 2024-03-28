@@ -2,7 +2,7 @@ package applicationprofilecache
 
 import (
 	"context"
-	"node-agent/pkg/ruleengine/objectcache"
+	"node-agent/mocks"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,11 +20,11 @@ func Test_unstructuredToApplicationProfile(t *testing.T) {
 	}{
 		{
 			name: "nginx application profile",
-			obj:  objectcache.GetUnstructured(objectcache.TestKindAP, objectcache.TestNginx),
+			obj:  mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
 		},
 		{
 			name: "collection application profile",
-			obj:  objectcache.GetUnstructured(objectcache.TestKindAP, objectcache.TestCollection),
+			obj:  mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
 		},
 	}
 	for _, tt := range tests {
@@ -50,7 +50,7 @@ func Test_getApplicationProfile(t *testing.T) {
 	}{
 		{
 			name: "nginx application profile",
-			obj:  objectcache.GetUnstructured(objectcache.TestKindAP, objectcache.TestNginx),
+			obj:  mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
 			args: args{
 				name:      "replicaset-nginx-77b4fdf86c",
 				namespace: "default",
@@ -59,7 +59,7 @@ func Test_getApplicationProfile(t *testing.T) {
 		},
 		{
 			name: "collection application profile",
-			obj:  objectcache.GetUnstructured(objectcache.TestKindAP, objectcache.TestCollection),
+			obj:  mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
 			args: args{
 				name:      "replicaset-collection-94c495554",
 				namespace: "collection",
@@ -68,7 +68,7 @@ func Test_getApplicationProfile(t *testing.T) {
 		},
 		{
 			name: "collection application profile",
-			obj:  objectcache.GetUnstructured(objectcache.TestKindAP, objectcache.TestCollection),
+			obj:  mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
 			args: args{
 				name:      "replicaset-nginx-77b4fdf86c",
 				namespace: "collection",
