@@ -186,7 +186,7 @@ func main() {
 		}
 
 		// Create malware scanners
-		malwarescanners := []malwaremanager.MalwareScanner{}
+		malwarescanners := []malwaremanagerv1.MalwareScanner{}
 
 		// Create ClamAV scanner
 		// Check if ClamAV is enabled (CLAMAV_ADDRESS env var is set in the format <host>:<port>)
