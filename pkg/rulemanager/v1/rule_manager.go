@@ -187,11 +187,10 @@ func (rm *RuleManager) startRuleManager(ctx context.Context, container *containe
 	rm.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
 
 	watchedContainer := &utils.WatchedContainerData{
-		ContainerID:      container.Runtime.ContainerID,
-		UpdateDataTicker: time.NewTicker(rm.cfg.InitialDelay),
-		SyncChannel:      syncChannel,
-		K8sContainerID:   k8sContainerID,
-		NsMntId:          container.Mntns,
+		ContainerID:    container.Runtime.ContainerID,
+		SyncChannel:    syncChannel,
+		K8sContainerID: k8sContainerID,
+		NsMntId:        container.Mntns,
 	}
 
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated.
@@ -220,12 +219,8 @@ func (rm *RuleManager) deleteResources(watchedContainer *utils.WatchedContainerD
 	defer rm.containerMutexes.Unlock(watchedContainer.K8sContainerID)
 
 	// delete resources
-	watchedContainer.UpdateDataTicker.Stop()
 	rm.trackedContainers.Remove(watchedContainer.K8sContainerID)
 	rm.watchedContainerChannels.Delete(watchedContainer.ContainerID)
-
-	// clean cached k8s podSpec
-	// clean cached rules
 }
 
 // This function is not used in the current implementation (Might be used in the future).
