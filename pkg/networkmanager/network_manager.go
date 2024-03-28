@@ -46,16 +46,17 @@ const (
 )
 
 type NetworkManager struct {
-	cfg                        config.Config
-	ctx                        context.Context
-	k8sClient                  k8sclient.K8sClientInterface
-	storageClient              storage.StorageClient
-	containerAndPodToWLIDMap   maps.SafeMap[string, string]
-	containerAndPodToEventsMap maps.SafeMap[string, mapset.Set[NetworkEvent]]
-	clusterName                string
-	watchedContainerChannels   maps.SafeMap[string, chan error] // key is ContainerID
-	dnsResolverClient          dnsmanager.DNSResolver
-	status                     string
+	cfg                           config.Config
+	ctx                           context.Context
+	k8sClient                     k8sclient.K8sClientInterface
+	storageClient                 storage.StorageClient
+	containerAndPodToWLIDMap      maps.SafeMap[string, string]
+	containerAndPodToEventsMap    maps.SafeMap[string, mapset.Set[NetworkEvent]]
+	containerAndPodToDroppedEvent maps.SafeMap[string, bool]
+	clusterName                   string
+	watchedContainerChannels      maps.SafeMap[string, chan error] // key is ContainerID
+	dnsResolverClient             dnsmanager.DNSResolver
+	status                        string
 }
 
 var _ NetworkManagerClient = (*NetworkManager)(nil)
@@ -91,6 +92,10 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 		}
 		am.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
 	}
+}
+
+func (am *NetworkManager) ReportDroppedEvent(containerID string, event tracernetworktype.Event) {
+	am.containerAndPodToDroppedEvent.Set(containerID+event.K8s.PodName, true)
 }
 
 func (am *NetworkManager) ReportNetworkEvent(containerID string, event tracernetworktype.Event) {
@@ -268,6 +273,7 @@ func (am *NetworkManager) deleteResources(container *containercollection.Contain
 	// clean up
 	am.containerAndPodToWLIDMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
+	am.containerAndPodToDroppedEvent.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 	am.watchedContainerChannels.Delete(container.Runtime.ContainerID)
 }
 
@@ -293,7 +299,7 @@ func (am *NetworkManager) monitorContainer(ctx context.Context, container *conta
 }
 
 // handleNetworkEvents retrieves network events from map, generate entries for CRD and sends a PATCH command to update them
-func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
+func (am *NetworkManager) handleNetworkEvents(_ context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
 	// retrieve parent WL from internal map
 	parentWlid := am.containerAndPodToWLIDMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
 	if parentWlid == "" {

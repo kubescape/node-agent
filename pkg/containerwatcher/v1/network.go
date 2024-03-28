@@ -22,15 +22,15 @@ func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Eve
 	if event.Type != types.NORMAL {
 		// dropped event
 		logger.L().Ctx(ch.ctx).Warning("network tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-		return
-	}
-	ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
+	} else {
+		ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
 
-	if ch.kubeIPInstance != nil {
-		ch.kubeIPInstance.EnrichEvent(event)
-	}
-	if ch.kubeNameInstance != nil {
-		ch.kubeNameInstance.EnrichEvent(event)
+		if ch.kubeIPInstance != nil {
+			_ = ch.kubeIPInstance.EnrichEvent(event)
+		}
+		if ch.kubeNameInstance != nil {
+			_ = ch.kubeNameInstance.EnrichEvent(event)
+		}
 	}
 
 	_ = ch.networkWorkerPool.Invoke(*event)

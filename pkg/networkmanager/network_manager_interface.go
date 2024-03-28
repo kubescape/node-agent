@@ -8,4 +8,5 @@ import (
 type NetworkManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
 	ReportNetworkEvent(containerName string, networkEvent tracernetworktype.Event)
+	ReportDroppedEvent(containerName string, networkEvent tracernetworktype.Event)
 }

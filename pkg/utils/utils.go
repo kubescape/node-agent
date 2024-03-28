@@ -3,7 +3,6 @@ package utils
 import (
 	"errors"
 	"fmt"
-	"github.com/deckarep/golang-set/v2"
 	"math/rand"
 	"path/filepath"
 	"runtime"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/goradd/maps"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/containerinstance"
@@ -46,6 +47,25 @@ const (
 	EphemeralContainer
 )
 
+type WatchedContainerStatus string
+
+const (
+	WatchedContainerStatusInitializing   WatchedContainerStatus = helpersv1.Initializing
+	WatchedContainerStatusReady          WatchedContainerStatus = helpersv1.Ready
+	WatchedContainerStatusCompleted      WatchedContainerStatus = helpersv1.Completed
+	WatchedContainerStatusIncomplete     WatchedContainerStatus = helpersv1.Complete
+	WatchedContainerStatusUnauthorize    WatchedContainerStatus = helpersv1.Unauthorize
+	WatchedContainerStatusMissingRuntime WatchedContainerStatus = helpersv1.MissingRuntime
+	WatchedContainerStatusTooLarge       WatchedContainerStatus = helpersv1.TooLarge
+)
+
+type WatchedContainerCompletionStatus string
+
+const (
+	WatchedContainerCompletionStatusPartial WatchedContainerCompletionStatus = helpersv1.Partial
+	WatchedContainerCompletionStatusFull    WatchedContainerCompletionStatus = helpersv1.Complete
+)
+
 func (c ContainerType) String() string {
 	return [...]string{"unknown", "containers", "initContainers", "ephemeralContainers"}[c]
 }
@@ -70,6 +90,8 @@ type WatchedContainerData struct {
 	ContainerIndex                             int
 	NsMntId                                    uint64
 	InitialDelayExpired                        bool
+	CompletionStatus                           WatchedContainerCompletionStatus
+	Status                                     WatchedContainerStatus
 }
 
 func Between(value string, a string, b string) string {
@@ -157,6 +179,10 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 	if watchedContainer.TemplateHash != "" {
 		labels[helpersv1.TemplateHashKey] = watchedContainer.TemplateHash
 	}
+
+	labels[helpersv1.CompletionMetadataKey] = string(watchedContainer.CompletionStatus)
+	labels[helpersv1.StatusMetadataKey] = string(watchedContainer.Status)
+
 	return labels
 }
 
