@@ -24,13 +24,16 @@ type WatchResource interface {
 
 var _ WatchResource = &WatchResourceMock{}
 
-type WatchResourceMock struct{}
+type WatchResourceMock struct {
+	ListOpt metav1.ListOptions
+	Schema  schema.GroupVersionResource
+}
 
 func (rm *WatchResourceMock) GroupVersionResource() schema.GroupVersionResource {
-	return schema.GroupVersionResource{}
+	return rm.Schema
 }
 func (rm *WatchResourceMock) ListOptions() metav1.ListOptions {
-	return metav1.ListOptions{}
+	return rm.ListOpt
 }
 
 var _ WatchResource = &WatchResourceImpl{}

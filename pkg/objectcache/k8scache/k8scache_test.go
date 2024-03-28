@@ -2,7 +2,7 @@ package k8scache
 
 import (
 	"context"
-	"node-agent/pkg/ruleengine/objectcache"
+	"node-agent/mocks"
 	"node-agent/pkg/watcher"
 	"testing"
 
@@ -17,16 +17,16 @@ import (
 func TestUnstructuredToPod(t *testing.T) {
 
 	tests := []struct {
-		name string
 		obj  *unstructured.Unstructured
+		name string
 	}{
 		{
 			name: "nginx pod",
-			obj:  objectcache.GetUnstructured(objectcache.TestKindPod, objectcache.TestNginx),
+			obj:  mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx),
 		},
 		{
 			name: "collection pod",
-			obj:  objectcache.GetUnstructured(objectcache.TestKindPod, objectcache.TestCollection),
+			obj:  mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
 		},
 	}
 	for _, tt := range tests {
@@ -73,7 +73,7 @@ func TestPodSpecKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := podSpecKey(tt.namespace, tt.podName)
+			result := podKey(tt.namespace, tt.podName)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -115,8 +115,8 @@ func TestK8sObjectCacheImpl_GetPodSpec(t *testing.T) {
 		{
 			name: "Test with valid namespace and podName",
 			obj: []*unstructured.Unstructured{
-				objectcache.GetUnstructured(objectcache.TestKindPod, objectcache.TestNginx),
-				objectcache.GetUnstructured(objectcache.TestKindPod, objectcache.TestCollection),
+				mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx),
+				mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
 			},
 			args: []args{
 				{
@@ -211,8 +211,8 @@ func TestK8sObjectCacheImpl_setApiServerIpAddress(t *testing.T) {
 
 	tests := []struct {
 		name               string
-		service            corev1.Service
 		apiServerIpAddress string
+		service            corev1.Service
 		wantErr            bool
 	}{
 		{

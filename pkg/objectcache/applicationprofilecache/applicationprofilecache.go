@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/ruleengine/objectcache"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/watcher"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -193,12 +193,14 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 		return
 	}
 
-	// check if the application profile is ready
+	// check if the application profile is completed
 	// TODO: @amir
-	// if was ready and now is not, remove from cache
+
+	// if status was complete and now is not (e.g. mode changed from partial to complete), remove from cache
 	// if ap.slugToAppProfile.Has(apName) {
 	// 	return
 	// }
+
 	ap.allProfiles.Add(apName)
 
 	// get the full application profile from the storage

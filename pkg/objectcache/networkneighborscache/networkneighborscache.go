@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/ruleengine/objectcache"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/watcher"
 	"strings"
 
