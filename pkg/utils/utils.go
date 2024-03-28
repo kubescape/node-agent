@@ -186,16 +186,6 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 	return labels
 }
 
-func GetAnnotations(watchedContainer *WatchedContainerData) map[string]string {
-	annotations := map[string]string{
-		helpersv1.WlidMetadataKey:       watchedContainer.Wlid,
-		helpersv1.CompletionMetadataKey: string(watchedContainer.GetCompletionStatus()),
-		helpersv1.StatusMetadataKey:     string(watchedContainer.GetStatus()),
-	}
-
-	return annotations
-}
-
 func GetApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) *v1beta1.ApplicationProfileContainer {
 	if profile == nil {
 		return nil

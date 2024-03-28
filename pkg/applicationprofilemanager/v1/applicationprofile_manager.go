@@ -17,6 +17,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+
 	"github.com/armosec/utils-k8s-go/wlid"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -231,9 +233,13 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	if !toSaveSyscalls.IsEmpty() {
 		newActivity := &v1beta1.ApplicationActivity{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:        slug,
-				Annotations: utils.GetAnnotations(watchedContainer),
-				Labels:      utils.GetLabels(watchedContainer, true),
+				Name: slug,
+				Annotations: map[string]string{
+					helpersv1.WlidMetadataKey:       watchedContainer.Wlid,
+					helpersv1.CompletionMetadataKey: string(watchedContainer.GetCompletionStatus()),
+					helpersv1.StatusMetadataKey:     string(watchedContainer.GetStatus()),
+				},
+				Labels: utils.GetLabels(watchedContainer, true),
 			},
 		}
 		// add syscalls
@@ -316,9 +322,13 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				// new application profile
 				newProfile := &v1beta1.ApplicationProfile{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:        slug,
-						Annotations: utils.GetAnnotations(watchedContainer),
-						Labels:      utils.GetLabels(watchedContainer, true),
+						Name: slug,
+						Annotations: map[string]string{
+							helpersv1.WlidMetadataKey:       watchedContainer.Wlid,
+							helpersv1.CompletionMetadataKey: string(watchedContainer.GetCompletionStatus()),
+							helpersv1.StatusMetadataKey:     string(watchedContainer.GetStatus()),
+						},
+						Labels: utils.GetLabels(watchedContainer, true),
 					},
 				}
 				// new profile container
