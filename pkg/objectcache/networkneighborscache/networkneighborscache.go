@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/ruleengine/objectcache"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/watcher"
 	"strings"
 
@@ -153,8 +153,6 @@ func (np *NetworkNeighborsCacheImp) addPod(podU *unstructured.Unstructured) {
 			return
 		}
 		np.slugToNetworkNeighbor.Set(uniqueSlug, netNeighbor)
-
-		logger.L().Info("added pod to network neighbors cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 	}
 }
 
