@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 	"strings"
 
@@ -12,8 +13,8 @@ import (
 )
 
 const (
-	R0006ID                                          = "R0006"
-	R0006UnexpectedServiceAccountTokenAccessRuleName = "Unexpected Service Account Token Access"
+	R0006ID   = "R0006"
+	R0006Name = "Unexpected Service Account Token Access"
 )
 
 // ServiceAccountTokenPathsPrefixs is a list because of symlinks.
@@ -24,7 +25,7 @@ var serviceAccountTokenPathsPrefix = []string{
 
 var R0006UnexpectedServiceAccountTokenAccessRuleDescriptor = RuleDescriptor{
 	ID:          R0006ID,
-	Name:        R0006UnexpectedServiceAccountTokenAccessRuleName,
+	Name:        R0006Name,
 	Description: "Detecting unexpected access to service account token.",
 	Tags:        []string{"token", "malicious", "whitelisted"},
 	Priority:    RulePriorityHigh,
@@ -48,7 +49,7 @@ func CreateRuleR0006UnexpectedServiceAccountTokenAccess() *R0006UnexpectedServic
 	return &R0006UnexpectedServiceAccountTokenAccess{}
 }
 func (rule *R0006UnexpectedServiceAccountTokenAccess) Name() string {
-	return R0006UnexpectedServiceAccountTokenAccessRuleName
+	return R0006Name
 }
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) ID() string {
@@ -72,7 +73,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) generatePatchCommand(event
 		event.GetContainer(), event.Path, flagList)
 }
 
-func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType {
 		return nil
 	}
@@ -95,26 +96,14 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		return nil
 	}
 
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.GetNamespace(), openEvent.GetPod())
 	if ap == nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", openEvent.GetPod()),
-			FailureEvent:     utils.OpenToGeneralEvent(openEvent),
-			RulePriority:     R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
-		}
+		return nil
 	}
 
 	appProfileOpenList, err := getContainerFromApplicationProfile(ap, openEvent.GetContainer())
 	if err != nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", openEvent.GetPod()),
-			FailureEvent:     utils.OpenToGeneralEvent(openEvent),
-			RulePriority:     R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
-		}
+		return nil
 	}
 
 	for _, open := range appProfileOpenList.Opens {
@@ -137,7 +126,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.OpenEventType},
+		EventTypes:             R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }

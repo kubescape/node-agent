@@ -2,23 +2,23 @@ package ruleengine
 
 import (
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 	"strings"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	log "github.com/sirupsen/logrus"
-
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 const (
-	R1004ID                    = "R1004"
-	R1004ExecFromMountRuleName = "Exec from mount"
+	R1004ID   = "R1004"
+	R1004Name = "Exec from mount"
 )
 
 var R1004ExecFromMountRuleDescriptor = RuleDescriptor{
 	ID:          R1004ID,
-	Name:        R1004ExecFromMountRuleName,
+	Name:        R1004Name,
 	Description: "Detecting exec calls from mounted paths.",
 	Tags:        []string{"exec", "mount"},
 	Priority:    RulePriorityMed,
@@ -33,14 +33,13 @@ var R1004ExecFromMountRuleDescriptor = RuleDescriptor{
 
 type R1004ExecFromMount struct {
 	BaseRule
-	// Map of container ID to mount paths
 }
 
 func CreateRuleR1004ExecFromMount() *R1004ExecFromMount {
 	return &R1004ExecFromMount{}
 }
 func (rule *R1004ExecFromMount) Name() string {
-	return R1004ExecFromMountRuleName
+	return R1004Name
 }
 
 func (rule *R1004ExecFromMount) ID() string {
@@ -50,7 +49,7 @@ func (rule *R1004ExecFromMount) ID() string {
 func (rule *R1004ExecFromMount) DeleteRule() {
 }
 
-func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}
@@ -60,7 +59,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 		return nil
 	}
 
-	mounts, err := getContainerMountPaths(execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer(), k8sProvider)
+	mounts, err := getContainerMountPaths(execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer(), objCache.K8sObjectCache())
 	if err != nil {
 		return nil
 	}
@@ -69,7 +68,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 		p := getExecPathFromEvent(execEvent)
 		contained := rule.isPathContained(p, mount)
 		if contained {
-			log.Debugf("Path %s is mounted in pod %s/%s", p, execEvent.GetNamespace(), execEvent.GetPod())
+			logger.L().Debug("Exec from mount", helpers.String("path", p), helpers.String("mount", mount))
 			return &GenericRuleFailure{
 				RuleName:         rule.Name(),
 				RuleID:           rule.ID(),
@@ -91,7 +90,7 @@ func (rule *R1004ExecFromMount) isPathContained(targetpath, basepath string) boo
 
 func (rule *R1004ExecFromMount) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType},
+		EventTypes:             R1004ExecFromMountRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: false,
 	}
 }

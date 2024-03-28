@@ -52,19 +52,21 @@ type ApplicationProfileManager struct {
 	k8sClient                k8sclient.K8sClientInterface
 	storageClient            storage.StorageClient
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
+	preRunningContainerIDs   mapset.Set[string]
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient) (*ApplicationProfileManager, error) {
+func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, preRunningContainerIDs mapset.Set[string]) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
-		cfg:               cfg,
-		clusterName:       clusterName,
-		ctx:               ctx,
-		k8sClient:         k8sClient,
-		storageClient:     storageClient,
-		containerMutexes:  storageUtils.NewMapMutex[string](),
-		trackedContainers: mapset.NewSet[string](),
+		cfg:                    cfg,
+		clusterName:            clusterName,
+		ctx:                    ctx,
+		k8sClient:              k8sClient,
+		storageClient:          storageClient,
+		containerMutexes:       storageUtils.NewMapMutex[string](),
+		trackedContainers:      mapset.NewSet[string](),
+		preRunningContainerIDs: preRunningContainerIDs,
 	}, nil
 }
 
@@ -532,6 +534,18 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.toSaveOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		am.trackedContainers.Add(k8sContainerID)
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
+		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+
+		// stop monitoring after MaxSniffingTime
+		time.AfterFunc(am.cfg.MaxSniffingTime, func() {
+			logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+			event := containercollection.PubSubEvent{
+				Timestamp: time.Now().Format(time.RFC3339),
+				Type:      containercollection.EventTypeRemoveContainer,
+				Container: notif.Container,
+			}
+			am.ContainerCallback(event)
+		})
 	case containercollection.EventTypeRemoveContainer:
 		channel := am.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
 		if channel != nil {

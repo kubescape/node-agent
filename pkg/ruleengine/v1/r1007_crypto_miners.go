@@ -2,23 +2,19 @@ package ruleengine
 
 import (
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 	"slices"
 
+	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-// Current rule:
-// Detecting Crypto Miners by looking for outgoing TCP connections to commonly used crypto miners ports and common pools dns names.
-// TODO: Add more crypto miners ports + add more crypto miners detection methods (e.g. by looking for specific processes and domains).
-// Find a reliable way to detect crypto miners.
-
 const (
-	R1007ID                   = "R1007"
-	R1007CryptoMinersRuleName = "Crypto Miner detected"
+	R1007ID   = "R1007"
+	R1007Name = "Crypto Miner detected"
 )
 
 var CommonlyUsedCryptoMinersPorts = []uint16{
@@ -136,7 +132,7 @@ var commonlyUsedCryptoMinersDomains = []string{
 
 var R1007CryptoMinersRuleDescriptor = RuleDescriptor{
 	ID:          R1007ID,
-	Name:        R1007CryptoMinersRuleName,
+	Name:        R1007Name,
 	Description: "Detecting Crypto Miners by port, domain and randomx event.",
 	Tags:        []string{"network", "crypto", "miners", "malicious", "dns"},
 	Priority:    RulePriorityHigh,
@@ -164,7 +160,7 @@ func CreateRuleR1007CryptoMiners() *R1007CryptoMiners {
 }
 
 func (rule *R1007CryptoMiners) Name() string {
-	return R1007CryptoMinersRuleName
+	return R1007Name
 }
 
 func (rule *R1007CryptoMiners) ID() string {
@@ -174,17 +170,17 @@ func (rule *R1007CryptoMiners) ID() string {
 func (rule *R1007CryptoMiners) DeleteRule() {
 }
 
-func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.NetworkEventType && eventType != utils.DnsEventType && eventType != utils.RandomXEventType {
 		return nil
 	}
 
-	if randomXEvent, ok := event.(*utils.GeneralEvent); ok {
+	if randomXEvent, ok := event.(*tracerrandomxtype.Event); ok {
 		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
 			RuleID:           rule.ID(),
 			Err:              "Possible Crypto Miner detected",
-			FailureEvent:     randomXEvent,
+			FailureEvent:     utils.RandomxToGeneralEvent(randomXEvent),
 			FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 			RulePriority:     R1007CryptoMinersRuleDescriptor.Priority,
 		}
@@ -217,7 +213,7 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event int
 
 func (rule *R1007CryptoMiners) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.NetworkEventType, utils.DnsEventType, utils.RandomXEventType},
+		EventTypes:             R1007CryptoMinersRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: false,
 	}
 }

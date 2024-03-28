@@ -3,22 +3,21 @@ package ruleengine
 import (
 	"fmt"
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 	"strings"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
-	R1000ID                              = "R1000"
-	R1000ExecFromMaliciousSourceRuleName = "Exec from malicious source"
+	R1000ID   = "R1000"
+	R1000Name = "Exec from malicious source"
 )
 
 var R1000ExecFromMaliciousSourceDescriptor = RuleDescriptor{
 	ID:          R1000ID,
-	Name:        R1000ExecFromMaliciousSourceRuleName,
+	Name:        R1000Name,
 	Description: "Detecting exec calls that are from malicious source like: /dev/shm, /run, /var/run, /proc/self",
 	Priority:    RulePriorityCritical,
 	Tags:        []string{"exec", "signature"},
@@ -41,14 +40,14 @@ func CreateRuleR1000ExecFromMaliciousSource() *R1000ExecFromMaliciousSource {
 }
 
 func (rule *R1000ExecFromMaliciousSource) Name() string {
-	return R1000ExecFromMaliciousSourceRuleName
+	return R1000Name
 }
 
 func (rule *R1000ExecFromMaliciousSource) ID() string {
 	return R1000ID
 }
 
-func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType, event interface{}, _ *v1beta1.ApplicationProfile, _ ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}
@@ -90,7 +89,7 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 
 func (rule *R1000ExecFromMaliciousSource) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType},
+		EventTypes:             R1000ExecFromMaliciousSourceDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: false,
 	}
 }

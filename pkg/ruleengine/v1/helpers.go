@@ -2,7 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -14,6 +14,7 @@ func getExecPathFromEvent(event *tracerexectype.Event) string {
 	}
 	return event.Comm
 }
+
 func getContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containerName string) (v1beta1.ApplicationProfileContainer, error) {
 	for i := range ap.Spec.Containers {
 		if ap.Spec.Containers[i].Name == containerName {
@@ -28,10 +29,10 @@ func getContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containe
 	return v1beta1.ApplicationProfileContainer{}, fmt.Errorf("container %s not found in application profile", containerName)
 }
 
-func getContainerMountPaths(namespace, podName, containerName string, k8sProvider ruleengine.K8sObjectProvider) ([]string, error) {
-	podSpec, err := k8sProvider.GetPodSpec(namespace, podName)
-	if err != nil {
-		return []string{}, fmt.Errorf("failed to get pod spec: %v", err)
+func getContainerMountPaths(namespace, podName, containerName string, k8sObjCache objectcache.K8sObjectCache) ([]string, error) {
+	podSpec := k8sObjCache.GetPodSpec(namespace, podName)
+	if podSpec == nil {
+		return []string{}, fmt.Errorf("pod spec not available for %s/%s", namespace, podName)
 	}
 
 	mountPaths := []string{}

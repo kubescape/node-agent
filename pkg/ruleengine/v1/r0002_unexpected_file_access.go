@@ -6,8 +6,9 @@ import (
 	"node-agent/pkg/utils"
 	"strings"
 
+	"node-agent/pkg/ruleengine/objectcache"
+
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -15,13 +16,13 @@ import (
 )
 
 const (
-	R0002ID                           = "R0002"
-	R0002UnexpectedFileAccessRuleName = "Unexpected file access"
+	R0002ID   = "R0002"
+	R0002Name = "Unexpected file access"
 )
 
 var R0002UnexpectedFileAccessRuleDescriptor = RuleDescriptor{
 	ID:          R0002ID,
-	Name:        R0002UnexpectedFileAccessRuleName,
+	Name:        R0002Name,
 	Description: "Detecting file access that are not whitelisted by application profile. File access is defined by the combination of path and flags",
 	Tags:        []string{"open", "whitelisted"},
 	Priority:    RulePriorityMed,
@@ -49,7 +50,7 @@ func CreateRuleR0002UnexpectedFileAccess() *R0002UnexpectedFileAccess {
 }
 
 func (rule *R0002UnexpectedFileAccess) Name() string {
-	return R0002UnexpectedFileAccessRuleName
+	return R0002Name
 }
 func (rule *R0002UnexpectedFileAccess) ID() string {
 	return R0002ID
@@ -104,7 +105,7 @@ func (rule *R0002UnexpectedFileAccess) generatePatchCommand(event *traceropentyp
 	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(), event.GetContainer(), event.Path, flagList)
 }
 
-func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType {
 		return nil
 	}
@@ -122,9 +123,9 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 	}
 
 	if rule.shouldIgnoreMounts {
-		mounts, err := getContainerMountPaths(openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer(), k8sProvider)
+		mounts, err := getContainerMountPaths(openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer(), objCache.K8sObjectCache())
 		if err != nil {
-			log.Errorf("Failed to get container mount paths: %v", err)
+			logger.L().Error("Failed to get container mount paths", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 			return nil
 		}
 		for _, mount := range mounts {
@@ -134,27 +135,14 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 		}
 	}
 
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.GetNamespace(), openEvent.GetPod())
 	if ap == nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", openEvent.GetPod()),
-			FailureEvent:     utils.OpenToGeneralEvent(openEvent),
-			RulePriority:     R0002UnexpectedFileAccessRuleDescriptor.Priority,
-		}
+		return nil
 	}
 
 	appProfileOpenList, err := getContainerFromApplicationProfile(ap, openEvent.GetContainer())
 	if err != nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", openEvent.GetPod()),
-			FailureEvent:     utils.OpenToGeneralEvent(openEvent),
-			RulePriority:     R0002UnexpectedFileAccessRuleDescriptor.Priority,
-		}
+		return nil
 	}
 
 	for _, open := range appProfileOpenList.Opens {
@@ -190,7 +178,7 @@ func isPathContained(basepath, targetpath string) bool {
 
 func (rule *R0002UnexpectedFileAccess) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.OpenEventType},
+		EventTypes:             R0002UnexpectedFileAccessRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }

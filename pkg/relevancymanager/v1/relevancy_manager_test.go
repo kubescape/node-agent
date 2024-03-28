@@ -30,7 +30,7 @@ func BenchmarkRelevancyManager_ReportFileExec(b *testing.B) {
 	ctx := context.TODO()
 	fileHandler, err := filehandler.CreateInMemoryFileHandler()
 	assert.NoError(b, err)
-	relevancyManager, err := CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, nil, nil)
+	relevancyManager, err := CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, nil, nil, nil)
 	assert.NoError(b, err)
 	for i := 0; i < b.N; i++ {
 		relevancyManager.ReportFileExec("ns", "file")
@@ -61,7 +61,7 @@ func TestRelevancyManager(t *testing.T) {
 	storageClient := storage.CreateSyftSBOMStorageHttpClientMock(syftDoc)
 	sbomHandler := syfthandler.CreateSyftSBOMHandler(storageClient)
 
-	relevancyManager, err := CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, k8sClient, sbomHandler)
+	relevancyManager, err := CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, k8sClient, sbomHandler, nil)
 	assert.NoError(t, err)
 	// report container started
 	container := &containercollection.Container{
@@ -164,7 +164,7 @@ func TestRelevancyManagerIncompleteSBOM(t *testing.T) {
 
 	storageClient := storage.CreateSyftSBOMStorageHttpClientMock(syftDoc)
 	sbomHandler := syfthandler.CreateSyftSBOMHandler(storageClient)
-	relevancyManager, err := CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, k8sClient, sbomHandler)
+	relevancyManager, err := CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, k8sClient, sbomHandler, nil)
 	assert.NoError(t, err)
 
 	// report container started

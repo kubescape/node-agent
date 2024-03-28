@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/ruleengine/objectcache"
 	"node-agent/pkg/utils"
 
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
@@ -10,13 +11,13 @@ import (
 )
 
 const (
-	R0004ID                               = "R0004"
-	R0004UnexpectedCapabilityUsedRuleName = "Unexpected capability used"
+	R0004ID   = "R0004"
+	R0004Name = "Unexpected capability used"
 )
 
 var R0004UnexpectedCapabilityUsedRuleDescriptor = RuleDescriptor{
 	ID:          R0004ID,
-	Name:        R0004UnexpectedCapabilityUsedRuleName,
+	Name:        R0004Name,
 	Description: "Detecting unexpected capabilities that are not whitelisted by application profile. Every unexpected capability is identified in context of a syscall and will be alerted only once per container.",
 	Tags:        []string{"capabilities", "whitelisted"},
 	Priority:    RulePriorityHigh,
@@ -38,7 +39,7 @@ func CreateRuleR0004UnexpectedCapabilityUsed() *R0004UnexpectedCapabilityUsed {
 	return &R0004UnexpectedCapabilityUsed{}
 }
 func (rule *R0004UnexpectedCapabilityUsed) Name() string {
-	return R0004UnexpectedCapabilityUsedRuleName
+	return R0004Name
 }
 
 func (rule *R0004UnexpectedCapabilityUsed) ID() string {
@@ -54,7 +55,7 @@ func (rule *R0004UnexpectedCapabilityUsed) generatePatchCommand(event *tracercap
 		event.GetContainer(), event.Syscall, event.CapName)
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event interface{}, ap *v1beta1.ApplicationProfile, k8sProvider ruleengine.K8sObjectProvider) ruleengine.RuleFailure {
+func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.CapabilitiesEventType {
 		return nil
 	}
@@ -64,27 +65,14 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(capEvent.GetNamespace(), capEvent.GetPod())
 	if ap == nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", capEvent.GetPod()),
-			FailureEvent:     utils.CapabilitiesToGeneralEvent(capEvent),
-			RulePriority:     R0004UnexpectedCapabilityUsedRuleDescriptor.Priority,
-		}
+		return nil
 	}
 
 	appProfileCapabilitiesList, err := getContainerFromApplicationProfile(ap, capEvent.GetContainer())
 	if err != nil {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			Err:              "Application profile is missing",
-			FixSuggestionMsg: fmt.Sprintf("Please create an application profile for the Pod %s", capEvent.GetPod()),
-			FailureEvent:     utils.CapabilitiesToGeneralEvent(capEvent),
-			RulePriority:     R0004UnexpectedCapabilityUsedRuleDescriptor.Priority,
-		}
+		return nil
 	}
 
 	for _, cap := range appProfileCapabilitiesList.Capabilities {
@@ -105,7 +93,7 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 
 func (rule *R0004UnexpectedCapabilityUsed) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.CapabilitiesEventType},
+		EventTypes:             R0004UnexpectedCapabilityUsedRuleDescriptor.Requirements.RequiredEventTypes(),
 		NeedApplicationProfile: true,
 	}
 }

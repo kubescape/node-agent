@@ -19,18 +19,24 @@ import (
 	"node-agent/pkg/relevancymanager"
 	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
 	rulebindingcache "node-agent/pkg/rulebindingmanager/cache"
-	rulebindinginformer "node-agent/pkg/rulebindingmanager/informer"
+	"node-agent/pkg/ruleengine/objectcache/applicationactivitiescache"
+	"node-agent/pkg/ruleengine/objectcache/applicationprofilecache"
+	"node-agent/pkg/ruleengine/objectcache/k8scache"
+	"node-agent/pkg/ruleengine/objectcache/networkneighborscache"
+	"node-agent/pkg/ruleengine/objectcache/v1"
 	"node-agent/pkg/rulemanager"
 	"node-agent/pkg/rulemanager/exporters"
 	rulemanagerv1 "node-agent/pkg/rulemanager/v1"
 	"node-agent/pkg/sbomhandler/syfthandler"
 	"node-agent/pkg/storage/v1"
 	"node-agent/pkg/utils"
+	"node-agent/pkg/watcher/dynamicwatcher"
 	"os"
 	"os/signal"
 	"syscall"
 
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
+	mapset "github.com/deckarep/golang-set/v2"
 
 	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
@@ -102,10 +108,13 @@ func main() {
 		prometheusExporter = metricsmanager.NewMetricsMock()
 	}
 
+	// Initiate pre-existing containers
+	preRunningContainersIDs := mapset.NewSet[string]() // Set of container IDs
+
 	// Create the application profile manager
 	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	if cfg.EnableApplicationProfile {
-		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient)
+		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, preRunningContainersIDs)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the application profile manager", helpers.Error(err))
 		}
@@ -122,7 +131,7 @@ func main() {
 		}
 
 		sbomHandler := syfthandler.CreateSyftSBOMHandler(storageClient)
-		relevancyManager, err = relevancymanagerv1.CreateRelevancyManager(ctx, cfg, clusterData.ClusterName, fileHandler, k8sClient, sbomHandler)
+		relevancyManager, err = relevancymanagerv1.CreateRelevancyManager(ctx, cfg, clusterData.ClusterName, fileHandler, k8sClient, sbomHandler, preRunningContainersIDs)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
 		}
@@ -132,31 +141,45 @@ func main() {
 
 	// Create the relevancy manager
 	var ruleManager rulemanager.RuleManagerClient
-	if cfg.EnableRuntimeDetection {
-		// create applicationProfile cache
-		// TODO
 
-		// start applicationProfile handler
-		// TODO
+	if cfg.EnableRuntimeDetection {
+		nodeName := os.Getenv(config.NodeNameEnvVar)
+		// Create watchers
+		dWatcher := dynamicwatcher.NewWatchHandler(k8sClient)
 
 		// create ruleBinding cache
-		ruleBindingCache := rulebindingcache.NewCache(os.Getenv(config.NodeNameEnvVar), k8sClient)
+		ruleBindingCache := rulebindingcache.NewCache(nodeName, k8sClient)
+		dWatcher.AddAdaptor(ruleBindingCache)
 
-		// create ruleBinding informer
-		informer, err := rulebindinginformer.NewRuleBindingK8sInformer(k8sClient, ruleBindingCache, "")
+		// create k8sObject cache
+		k8sObjectCache, err := k8scache.NewK8sObjectCache(nodeName, k8sClient)
 		if err != nil {
-			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
+			logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
 		}
-		// start ruleBinding informer
-		informer.StartInformer()
+		dWatcher.AddAdaptor(k8sObjectCache)
+
+		apc := applicationprofilecache.NewApplicationProfileCache(nodeName, k8sClient)
+		dWatcher.AddAdaptor(apc)
+
+		nnc := networkneighborscache.NewNetworkNeighborsCache(nodeName, k8sClient)
+		dWatcher.AddAdaptor(nnc)
+
+		aac := applicationactivitiescache.NewApplicationActivityCache(nodeName, k8sClient)
+		dWatcher.AddAdaptor(aac)
+
+		// start watching
+		dWatcher.Start(ctx)
+
+		// create object cache
+		objCache := objectcache.NewObjectCache(k8sObjectCache, apc, aac, nnc)
 
 		// create exporter
 		ex := exporters.InitExporters(cfg.Exporters)
 
 		// create runtimeDetection manager
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, ruleBindingCache, ex, prometheusExporter)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, ex, prometheusExporter, preRunningContainersIDs)
 		if err != nil {
-			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
+			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
 	} else {
 		ruleManager = rulemanager.CreateRuleManagerMock()
@@ -168,17 +191,20 @@ func main() {
 	if cfg.EnableNetworkTracing {
 		dnsManager := dnsmanager.CreateDNSManager()
 		dnsManagerClient = dnsManager
-		networkManagerClient = networkmanager.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName, dnsManager)
+		networkManagerClient = networkmanager.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName, dnsManager, preRunningContainersIDs)
 	} else {
 		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, preRunningContainersIDs)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
+
+	// Start the prometheusExporter
+	prometheusExporter.Start()
 
 	// Start the container handler
 	err = mainHandler.Start(ctx)

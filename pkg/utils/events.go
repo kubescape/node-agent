@@ -1,11 +1,15 @@
 package utils
 
 import (
+	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
 )
 
 const (
@@ -44,11 +48,10 @@ type GeneralEvent struct {
 	MountNsID     uint64
 	Timestamp     int64
 	EventType     EventType
-	ContainerID   string // FIXME: This is not available in the event
+	ContainerID   string
 }
 
 func ExecToGeneralEvent(event *tracerexectype.Event) *GeneralEvent {
-
 	return &GeneralEvent{
 		ProcessDetails: ProcessDetails{
 			Pid:  event.Pid,
@@ -58,6 +61,7 @@ func ExecToGeneralEvent(event *tracerexectype.Event) *GeneralEvent {
 			Uid:  event.Uid,
 			Gid:  event.Gid,
 		},
+		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
 		ContainerName: event.GetContainer(),
 		PodName:       event.GetPod(),
 		Namespace:     event.GetNamespace(),
@@ -67,7 +71,6 @@ func ExecToGeneralEvent(event *tracerexectype.Event) *GeneralEvent {
 	}
 }
 func OpenToGeneralEvent(event *traceropentype.Event) *GeneralEvent {
-
 	return &GeneralEvent{
 		ProcessDetails: ProcessDetails{
 			Pid:  event.Pid,
@@ -75,6 +78,7 @@ func OpenToGeneralEvent(event *traceropentype.Event) *GeneralEvent {
 			Uid:  event.Uid,
 			Gid:  event.Gid,
 		},
+		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
 		ContainerName: event.GetContainer(),
 		PodName:       event.GetPod(),
 		Namespace:     event.GetNamespace(),
@@ -92,6 +96,7 @@ func CapabilitiesToGeneralEvent(event *tracercapabilitiestype.Event) *GeneralEve
 			Uid:  event.Uid,
 			Gid:  event.Gid,
 		},
+		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
 		ContainerName: event.GetContainer(),
 		PodName:       event.GetPod(),
 		Namespace:     event.GetNamespace(),
@@ -109,6 +114,7 @@ func DnsToGeneralEvent(event *tracerdnstype.Event) *GeneralEvent {
 			Uid:  event.Uid,
 			Gid:  event.Gid,
 		},
+		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
 		ContainerName: event.GetContainer(),
 		PodName:       event.GetPod(),
 		Namespace:     event.GetNamespace(),
@@ -125,11 +131,47 @@ func NetworkToGeneralEvent(event *tracernetworktype.Event) *GeneralEvent {
 			Uid:  event.Uid,
 			Gid:  event.Gid,
 		},
+		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
 		ContainerName: event.GetContainer(),
 		PodName:       event.GetPod(),
 		Namespace:     event.GetNamespace(),
 		MountNsID:     event.MountNsID,
 		Timestamp:     int64(event.Timestamp),
 		EventType:     NetworkEventType,
+	}
+}
+
+func RandomxToGeneralEvent(event *tracerrandomxtype.Event) *GeneralEvent {
+	return &GeneralEvent{
+		ProcessDetails: ProcessDetails{
+			Pid:  event.Pid,
+			Ppid: event.PPid,
+			Comm: event.Comm,
+			Uid:  event.Uid,
+			Gid:  event.Gid,
+		},
+		ContainerName: event.GetContainer(),
+		PodName:       event.GetPod(),
+		Namespace:     event.GetNamespace(),
+		MountNsID:     event.MountNsID,
+		Timestamp:     int64(event.Timestamp),
+		EventType:     RandomXEventType,
+	}
+}
+
+func SyscallToGeneralEvent(event *ruleenginetypes.SyscallEvent) *GeneralEvent {
+	return &GeneralEvent{
+		ProcessDetails: ProcessDetails{
+			Pid:  event.Pid,
+			Comm: event.Comm,
+			Uid:  event.Uid,
+			Gid:  event.Gid,
+		},
+		ContainerName: event.GetContainer(),
+		PodName:       event.GetPod(),
+		Namespace:     event.GetNamespace(),
+		MountNsID:     event.MountNsID,
+		Timestamp:     int64(event.Timestamp),
+		EventType:     SyscallEventType,
 	}
 }

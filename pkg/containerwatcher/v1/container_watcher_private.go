@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"node-agent/pkg/utils"
+	"runtime"
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -23,6 +24,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			ch.unregisterContainer(notif.Container)
 		})
 	case containercollection.EventTypeRemoveContainer:
+		ch.preRunningContainers.Remove(notif.Container.Runtime.ContainerID)
 		logger.L().Info("stop monitor on container - container has terminated", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
 }
@@ -119,6 +121,18 @@ func (ch *IGContainerWatcher) startTracers() error {
 
 	}
 
+	if ch.cfg.EnableRuntimeDetection {
+		// The randomx tracing is only supported on amd64 architecture.
+		if runtime.GOARCH == "amd64" {
+			if err := ch.startRandomxTracing(); err != nil {
+				logger.L().Error("error starting randomx tracing", helpers.Error(err))
+				return err
+			}
+		} else {
+			logger.L().Warning("randomx tracing is not supported on this architecture", helpers.String("architecture", runtime.GOARCH))
+		}
+	}
+
 	return nil
 }
 
@@ -155,6 +169,21 @@ func (ch *IGContainerWatcher) stopTracers() error {
 			logger.L().Error("error stopping network tracing", helpers.Error(err))
 			errs = errors.Join(err, ch.stopNetworkTracing())
 		}
+		// Stop dns tracer
+		if err := ch.stopDNSTracing(); err != nil {
+			logger.L().Error("error stopping dns tracing", helpers.Error(err))
+			errs = errors.Join(err, ch.stopDNSTracing())
+		}
+	}
+
+	if ch.cfg.EnableRuntimeDetection {
+		// Stop randomx tracer
+		if runtime.GOARCH == "amd64" && ch.randomxTracer != nil {
+			if err := ch.stopRandomxTracing(); err != nil {
+				logger.L().Error("error stopping randomx tracing", helpers.Error(err))
+				errs = errors.Join(err, ch.stopRandomxTracing())
+			}
+		}
 	}
 
 	return errs
@@ -174,13 +203,16 @@ func (ch *IGContainerWatcher) printNsMap(id string) {
 }
 
 func (ch *IGContainerWatcher) unregisterContainer(container *containercollection.Container) {
-	event := containercollection.PubSubEvent{
-		Timestamp: time.Now().Format(time.RFC3339),
-		Type:      containercollection.EventTypeRemoveContainer,
-		Container: container,
+	if !ch.traceForever() {
+		event := containercollection.PubSubEvent{
+			Timestamp: time.Now().Format(time.RFC3339),
+			Type:      containercollection.EventTypeRemoveContainer,
+			Container: container,
+		}
+		ch.tracerCollection.TracerMapsUpdater()(event)
 	}
-	ch.tracerCollection.TracerMapsUpdater()(event)
-	ch.applicationProfileManager.ContainerCallback(event)
-	ch.relevancyManager.ContainerCallback(event)
-	ch.networkManager.ContainerCallback(event)
+}
+
+func (ch *IGContainerWatcher) traceForever() bool {
+	return ch.cfg.EnableRuntimeDetection
 }

@@ -57,18 +57,20 @@ type NetworkManager struct {
 	watchedContainerChannels      maps.SafeMap[string, chan error] // key is ContainerID
 	dnsResolverClient             dnsmanager.DNSResolver
 	status                        string
+	preRunningContainerIDs        mapset.Set[string]
 }
 
 var _ NetworkManagerClient = (*NetworkManager)(nil)
 
-func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string, dnsResolverClient dnsmanager.DNSResolver) *NetworkManager {
+func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string, dnsResolverClient dnsmanager.DNSResolver, preRunningContainerIDs mapset.Set[string]) *NetworkManager {
 	return &NetworkManager{
-		cfg:               cfg,
-		ctx:               ctx,
-		k8sClient:         k8sClient,
-		storageClient:     storageClient,
-		clusterName:       clusterName,
-		dnsResolverClient: dnsResolverClient,
+		cfg:                    cfg,
+		ctx:                    ctx,
+		k8sClient:              k8sClient,
+		storageClient:          storageClient,
+		clusterName:            clusterName,
+		dnsResolverClient:      dnsResolverClient,
+		preRunningContainerIDs: preRunningContainerIDs,
 	}
 }
 
@@ -84,6 +86,16 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 			return
 		}
 		go am.handleContainerStarted(ctx, notif.Container, k8sContainerID)
+
+		// stop monitoring after MaxSniffingTime
+		time.AfterFunc(am.cfg.MaxSniffingTime, func() {
+			event := containercollection.PubSubEvent{
+				Timestamp: time.Now().Format(time.RFC3339),
+				Type:      containercollection.EventTypeRemoveContainer,
+				Container: notif.Container,
+			}
+			am.ContainerCallback(event)
+		})
 
 	case containercollection.EventTypeRemoveContainer:
 		channel := am.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
