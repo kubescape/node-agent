@@ -39,8 +39,8 @@ func (rm *WatchResourceMock) ListOptions() metav1.ListOptions {
 var _ WatchResource = &WatchResourceImpl{}
 
 type WatchResourceImpl struct {
-	groupVersionResource schema.GroupVersionResource
 	listOptions          metav1.ListOptions
+	groupVersionResource schema.GroupVersionResource
 }
 
 func NewWatchResource(groupVersionResource schema.GroupVersionResource, listOptions metav1.ListOptions) *WatchResourceImpl {
