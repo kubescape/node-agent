@@ -22,8 +22,7 @@ var R0005UnexpectedDomainRequestRuleDescriptor = RuleDescriptor{
 	Tags:        []string{"dns", "whitelisted"},
 	Priority:    RulePriorityMed,
 	Requirements: &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.DnsEventType},
-		NeedApplicationProfile: true,
+		EventTypes: []utils.EventType{utils.DnsEventType},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0005UnexpectedDomainRequest()
@@ -79,9 +78,10 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 	}
 
 	return &GenericRuleFailure{
-		RuleName: rule.Name(),
-		RuleID:   rule.ID(),
-		Err:      fmt.Sprintf("Unexpected domain request (%s)", domainEvent.DNSName),
+		RuleName:    rule.Name(),
+		RuleID:      rule.ID(),
+		ContainerId: domainEvent.Runtime.ContainerID,
+		Err:         fmt.Sprintf("Unexpected domain request (%s)", domainEvent.DNSName),
 		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the domain %s to the whitelist in the application profile for the Pod %s. You can use the following command: %s",
 			domainEvent.DNSName,
 			domainEvent.DNSName,
@@ -93,7 +93,6 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 
 func (rule *R0005UnexpectedDomainRequest) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R0005UnexpectedDomainRequestRuleDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: true,
+		EventTypes: R0005UnexpectedDomainRequestRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

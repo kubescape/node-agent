@@ -2,7 +2,7 @@ package exporters
 
 import (
 	"log"
-	"node-agent/pkg/malwarescanner"
+	mmtypes "node-agent/pkg/malwaremanager/v1/types"
 	"node-agent/pkg/utils"
 	"os"
 	"testing"
@@ -11,7 +11,6 @@ import (
 	"gopkg.in/mcuadros/go-syslog.v2"
 
 	"github.com/stretchr/testify/assert"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func setupServer() *syslog.Server {
@@ -77,21 +76,20 @@ func TestSyslogExporter(t *testing.T) {
 			ContainerName: "testcontainer", ContainerID: "testcontainerid", Namespace: "testnamespace", PodName: "testpodname"}},
 	)
 
-	syslogExp.SendMalwareAlert(malwarescanner.MalwareDescription{
-		Name:        "testmalware",
-		Hash:        "testhash",
-		Description: "testdescription",
-		Path:        "testpath",
-		Size:        "2MB",
-		Resource: schema.GroupVersionResource{
-			Group:    "testgroup",
-			Version:  "testversion",
-			Resource: "testresource",
-		},
-		Namespace:     "testnamespace",
-		PodName:       "testpodname",
-		ContainerName: "testcontainername",
-		ContainerID:   "testcontainerid",
+	syslogExp.SendMalwareAlert(&mmtypes.GenericMalwareResult{
+		Name:                 "testmalware",
+		MD5Hash:              "testhash",
+		SHA256Hash:           "testhash",
+		SHA1Hash:             "testhash",
+		Description:          "testdescription",
+		Path:                 "testpath",
+		Size:                 "2MB",
+		Namespace:            "testnamespace",
+		PodName:              "testpodname",
+		ContainerName:        "testcontainername",
+		ContainerID:          "testcontainerid",
+		ContainerImage:       "testcontainerimage",
+		ContainerImageDigest: "testcontainerimagedigest",
 	})
 
 	// Allow some time for the message to reach the mock syslog server

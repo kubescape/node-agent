@@ -1,4 +1,5 @@
 
+# DEPRECATED: This script is no longer used. It was used to generate rule files for the rule engine.
 import sys
 import re
 

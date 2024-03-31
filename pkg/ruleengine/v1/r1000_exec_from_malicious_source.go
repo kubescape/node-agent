@@ -22,8 +22,7 @@ var R1000ExecFromMaliciousSourceDescriptor = RuleDescriptor{
 	Priority:    RulePriorityCritical,
 	Tags:        []string{"exec", "signature"},
 	Requirements: &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType},
-		NeedApplicationProfile: false,
+		EventTypes: []utils.EventType{utils.ExecveEventType},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1000ExecFromMaliciousSource()
@@ -76,6 +75,8 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 		if strings.HasPrefix(p, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) {
 			return &GenericRuleFailure{
 				RuleName:         rule.Name(),
+				RuleID:           rule.ID(),
+				ContainerId:      execEvent.Runtime.ContainerID,
 				Err:              fmt.Sprintf("exec call \"%s\" is from a malicious source \"%s\"", p, maliciousExecPathPrefix),
 				FixSuggestionMsg: "If this is a legitimate action, please add consider removing this workload from the binding of this rule.",
 				FailureEvent:     utils.ExecToGeneralEvent(execEvent),
@@ -89,7 +90,6 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 
 func (rule *R1000ExecFromMaliciousSource) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R1000ExecFromMaliciousSourceDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: false,
+		EventTypes: R1000ExecFromMaliciousSourceDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

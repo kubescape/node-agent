@@ -54,8 +54,7 @@ var R1003MaliciousSSHConnectionRuleDescriptor = RuleDescriptor{
 	Tags:        []string{"ssh", "connection", "port", "malicious"},
 	Priority:    RulePriorityHigh,
 	Requirements: &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.OpenEventType, utils.NetworkEventType},
-		NeedApplicationProfile: false,
+		EventTypes: []utils.EventType{utils.OpenEventType, utils.NetworkEventType},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1003MaliciousSSHConnection()
@@ -151,6 +150,7 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 			return &GenericRuleFailure{
 				RuleName:         rule.Name(),
 				RuleID:           rule.ID(),
+				ContainerId:      networkEvent.Runtime.ContainerID,
 				Err:              fmt.Sprintf("ssh connection to port %d is not allowed", networkEvent.Port),
 				FixSuggestionMsg: "If this is a legitimate action, please add the port as a parameter to the binding of this rule",
 				FailureEvent:     utils.NetworkToGeneralEvent(networkEvent),
@@ -178,7 +178,6 @@ func IsSSHConfigFile(path string) bool {
 
 func (rule *R1003MaliciousSSHConnection) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R1003MaliciousSSHConnectionRuleDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: false,
+		EventTypes: R1003MaliciousSSHConnectionRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

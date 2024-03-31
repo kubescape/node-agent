@@ -4,6 +4,8 @@ import (
 	"testing"
 )
 
+// @david - Fix the test cases.
+
 // Test CreateRulesByTags
 func TestCreateRulesByTags(t *testing.T) {
 	// Create a new rule

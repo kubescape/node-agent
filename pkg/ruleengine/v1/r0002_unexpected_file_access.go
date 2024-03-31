@@ -27,8 +27,7 @@ var R0002UnexpectedFileAccessRuleDescriptor = RuleDescriptor{
 	Tags:        []string{"open", "whitelisted"},
 	Priority:    RulePriorityMed,
 	Requirements: &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.OpenEventType},
-		NeedApplicationProfile: true,
+		EventTypes: []utils.EventType{utils.OpenEventType},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0002UnexpectedFileAccess()
@@ -165,6 +164,8 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 
 	return &GenericRuleFailure{
 		RuleName:         rule.Name(),
+		RuleID:           rule.ID(),
+		ContainerId:      openEvent.Runtime.ContainerID,
 		Err:              fmt.Sprintf("Unexpected file access: %s with flags %v", openEvent.Path, openEvent.Flags),
 		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
 		FailureEvent:     utils.OpenToGeneralEvent(openEvent),
@@ -178,7 +179,6 @@ func isPathContained(basepath, targetpath string) bool {
 
 func (rule *R0002UnexpectedFileAccess) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R0002UnexpectedFileAccessRuleDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: true,
+		EventTypes: R0002UnexpectedFileAccessRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

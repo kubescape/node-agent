@@ -6,13 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"node-agent/pkg/malwarescanner"
+	mmtypes "node-agent/pkg/malwaremanager/v1/types"
 	"node-agent/pkg/utils"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestSendAlert(t *testing.T) {
@@ -90,19 +89,21 @@ func TestSendMalwareAlert(t *testing.T) {
 	}
 	// Call SendAlert
 
-	exporter.SendMalwareAlert(malwarescanner.MalwareDescription{
-		Name:           "testmalware",
-		Description:    "testmalwaredescription",
-		Path:           "testmalwarepath",
-		Hash:           "testmalwarehash",
-		Size:           "2MiB",
-		Resource:       schema.EmptyObjectKind.GroupVersionKind().GroupVersion().WithResource("testmalwareresource"),
-		Namespace:      "testmalwarenamespace",
-		PodName:        "testmalwarepodname",
-		ContainerName:  "testmalwarecontainername",
-		ContainerID:    "testmalwarecontainerid",
-		IsPartOfImage:  true,
-		ContainerImage: "testmalwarecontainerimage",
+	exporter.SendMalwareAlert(&mmtypes.GenericMalwareResult{
+		Name:                 "testmalware",
+		Description:          "testmalwaredescription",
+		Path:                 "testmalwarepath",
+		MD5Hash:              "testmalwarehash",
+		SHA1Hash:             "testmalwarehash",
+		SHA256Hash:           "testmalwarehash",
+		Size:                 "2MiB",
+		Namespace:            "testmalwarenamespace",
+		PodName:              "testmalwarepodname",
+		ContainerName:        "testmalwarecontainername",
+		ContainerID:          "testmalwarecontainerid",
+		IsPartOfImage:        true,
+		ContainerImage:       "testmalwarecontainerimage",
+		ContainerImageDigest: "testmalwarecontainerimagedigest",
 	})
 	bytesData := <-recievedData
 

@@ -3,7 +3,7 @@ package exporters
 import (
 	"encoding/csv"
 	"fmt"
-	"node-agent/pkg/malwarescanner"
+	"node-agent/pkg/malwaremanager"
 	"node-agent/pkg/ruleengine"
 	"os"
 
@@ -106,7 +106,7 @@ func writeRuleHeaders(csvPath string) {
 	})
 }
 
-func (ce *CsvExporter) SendMalwareAlert(malwareDescription malwarescanner.MalwareDescription) {
+func (ce *CsvExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
 	csvFile, err := os.OpenFile(ce.CsvMalwarePath, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		logrus.Errorf("failed to initialize csv exporter: %v", err)
@@ -117,18 +117,20 @@ func (ce *CsvExporter) SendMalwareAlert(malwareDescription malwarescanner.Malwar
 	csvWriter := csv.NewWriter(csvFile)
 	defer csvWriter.Flush()
 	csvWriter.Write([]string{
-		malwareDescription.Name,
-		malwareDescription.Description,
-		malwareDescription.Path,
-		malwareDescription.Hash,
-		malwareDescription.Size,
-		malwareDescription.Resource.String(),
-		malwareDescription.Namespace,
-		malwareDescription.PodName,
-		malwareDescription.ContainerName,
-		malwareDescription.ContainerID,
-		fmt.Sprintf("%t", malwareDescription.IsPartOfImage),
-		malwareDescription.ContainerImage,
+		malwareResult.GetMalwareName(),
+		malwareResult.GetDescription(),
+		malwareResult.GetPath(),
+		malwareResult.GetMD5Hash(),
+		malwareResult.GetSHA256Hash(),
+		malwareResult.GetSHA1Hash(),
+		malwareResult.GetSize(),
+		malwareResult.GetNamespace(),
+		malwareResult.GetPodName(),
+		malwareResult.GetContainerName(),
+		malwareResult.GetContainerID(),
+		fmt.Sprintf("%t", malwareResult.GetIsPartOfImage()),
+		malwareResult.GetContainerImage(),
+		malwareResult.GetContainerImageDigest(),
 	})
 }
 
@@ -147,14 +149,16 @@ func writeMalwareHeaders(csvPath string) {
 		"Malware Name",
 		"Description",
 		"Path",
-		"Hash",
+		"MD5 Hash",
+		"SHA256 Hash",
+		"SHA1 Hash",
 		"Size",
-		"Resource",
 		"Namespace",
 		"Pod Name",
 		"Container Name",
 		"Container ID",
 		"Is Part of Image",
 		"Container Image",
+		"Container Image Digest",
 	})
 }

@@ -21,8 +21,7 @@ var R1001ExecBinaryNotInBaseImageRuleDescriptor = RuleDescriptor{
 	Tags:        []string{"exec", "malicious", "binary", "base image"},
 	Priority:    RulePriorityCritical,
 	Requirements: &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType},
-		NeedApplicationProfile: false,
+		EventTypes: []utils.EventType{utils.ExecveEventType},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1001ExecBinaryNotInBaseImage()
@@ -63,6 +62,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 		return &GenericRuleFailure{
 			RuleName:         rule.Name(),
 			RuleID:           rule.ID(),
+			ContainerId:      execEvent.Runtime.ContainerID,
 			Err:              fmt.Sprintf("Process image \"%s\" binary is not from the container image \"%s\"", getExecPathFromEvent(execEvent), "<image name TBA> via PodSpec"),
 			FixSuggestionMsg: "If this is an expected behavior it is strongly suggested to include all executables in the container image. If this is not possible you can remove the rule binding to this workload.",
 			FailureEvent:     utils.ExecToGeneralEvent(execEvent),
@@ -75,7 +75,6 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 
 func (rule *R1001ExecBinaryNotInBaseImage) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R1001ExecBinaryNotInBaseImageRuleDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: false,
+		EventTypes: R1001ExecBinaryNotInBaseImageRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

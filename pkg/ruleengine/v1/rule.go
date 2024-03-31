@@ -47,20 +47,13 @@ func (r *RuleDescriptor) HasTags(tags []string) bool {
 var _ ruleengine.RuleSpec = (*RuleRequirements)(nil)
 
 type RuleRequirements struct {
-
 	// Needed events for the rule.
 	EventTypes []utils.EventType
-
-	// Need application profile.
-	NeedApplicationProfile bool
 }
 
 // Event types required for the rule
 func (r *RuleRequirements) RequiredEventTypes() []utils.EventType {
 	return r.EventTypes
-}
-func (r *RuleRequirements) IsApplicationProfileRequired() bool {
-	return r.NeedApplicationProfile
 }
 
 type BaseRule struct {

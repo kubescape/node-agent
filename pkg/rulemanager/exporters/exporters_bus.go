@@ -1,7 +1,7 @@
 package exporters
 
 import (
-	"node-agent/pkg/malwarescanner"
+	"node-agent/pkg/malwaremanager"
 	"node-agent/pkg/ruleengine"
 	"os"
 
@@ -73,8 +73,8 @@ func (e *ExporterBus) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	}
 }
 
-func (e *ExporterBus) SendMalwareAlert(malwareDescription malwarescanner.MalwareDescription) {
+func (e *ExporterBus) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
 	for _, exporter := range e.exporters {
-		exporter.SendMalwareAlert(malwareDescription)
+		exporter.SendMalwareAlert(malwareResult)
 	}
 }
