@@ -141,7 +141,12 @@ func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.Wat
 }
 
 func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	// we call save profile to create/patch the application profile with status 'initializing'
+	// set completion status & status as soon as we start monitoring the container
+	if am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
+		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
+	} else {
+		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+	}
 	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
 	am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
 
@@ -313,7 +318,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// 3a. the profile is missing Containers or InitContainers - ADD one with the container profile at the right index
 	// 3b. the profile is missing the container profile - ADD the container profile at the right index
 	// 3c. default - patch the container ourselves and REPLACE it at the right index
-	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || watchedContainer.StatusUpdated() || watchedContainer.CompletionStatusUpdated() {
+	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || watchedContainer.StatusUpdated() {
 		// calculate patch
 		profileOperations := utils.CreateCapabilitiesPatchOperations(capabilities, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		profileOperations = utils.AppendStatusAnnotationPatchOperations(profileOperations, watchedContainer)
@@ -456,8 +461,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			// restore opens map entries
 			toSaveOpens.Range(utils.SetInMap(am.toSaveOpens.Get(watchedContainer.K8sContainerID)))
 		} else {
-			// for status updates to be tracked, we reset the update flags
-			watchedContainer.ResetCompletionStatusUpdatedFlag()
+			// for status updates to be tracked, we reset the update flag
 			watchedContainer.ResetStatusUpdatedFlag()
 
 			// record saved capabilities
@@ -511,12 +515,6 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		NsMntId:          container.Mntns,
 	}
 
-	if am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
-		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
-	} else {
-		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
-	}
-
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
 	if err := backoff.Retry(func() error {
 		return am.ensureInstanceID(container, watchedContainer)
@@ -525,18 +523,6 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
-	}
-
-	// We will create an application profile as soon we have the instance ID, before we start monitoring it (initializing/partial)
-	// leave container name empty this way the "slug" will represent a workload
-	slug, err := names.InstanceIDToSlug(watchedContainer.InstanceID.GetName(), watchedContainer.InstanceID.GetKind(), "", watchedContainer.InstanceID.GetHashed())
-	if err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get slug", helpers.Error(err),
-			helpers.String("slug", slug),
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
-		return
 	}
 
 	if err := am.monitorContainer(ctx, container, watchedContainer); err != nil {

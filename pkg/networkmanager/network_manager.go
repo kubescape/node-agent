@@ -57,7 +57,6 @@ type NetworkManager struct {
 	clusterName                   string
 	watchedContainerChannels      maps.SafeMap[string, chan error] // key is ContainerID
 	dnsResolverClient             dnsmanager.DNSResolver
-	status                        string
 	preRunningContainerIDs        mapset.Set[string]
 	k8sObjectCache                objectcache.K8sObjectCache
 }
@@ -174,13 +173,6 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 	}
 	am.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
 
-	// set completion status
-	if am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
-		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
-	} else {
-		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
-	}
-
 	// retrieve parent WL
 	parentWL, err := am.getParentWorkloadFromContainer(container)
 	if err != nil {
@@ -200,32 +192,6 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		logger.L().Warning("NetworkManager - selector is nil", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		return
 	}
-
-	// check if network neighbor CRD exists
-	// networkNeighbors, err := am.storageClient.GetNetworkNeighbors(parentWL.GetNamespace(), generateNetworkNeighborsNameFromWorkload(parentWL))
-	// if err != nil {
-	// 	if !strings.Contains(err.Error(), "not found") {
-	// 		logger.L().Warning("NetworkManager - failed to get network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-	// 	} else {
-	// 		// network neighbor not found, create new one
-	// 		newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector, am.clusterName)
-	// 		if err = am.storageClient.CreateNetworkNeighbors(newNetworkNeighbors, parentWL.GetNamespace()); err != nil {
-	// 			logger.L().Warning("NetworkManager - failed to create network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-	// 		} else {
-	// 			// set to initializing only if create was successful
-	// 			am.status = helpersv1.Initializing
-	// 			logger.L().Debug("NetworkManager - initializing", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-	// 		}
-	// 	}
-	// } else {
-	// 	// CRD found, update labels
-	// 	networkNeighbors.Spec.LabelSelector = *selector
-	// 	am.status = networkNeighbors.GetAnnotations()[helpersv1.StatusMetadataKey]
-	// 	if err = am.storageClient.PatchNetworkNeighborsMatchLabels(networkNeighbors.GetName(), networkNeighbors.GetNamespace(), networkNeighbors); err != nil {
-	// 		logger.L().Warning("NetworkManager - failed to update network neighbor labels", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-	// 	}
-	// 	logger.L().Debug("NetworkManager - updated network neighbor labels", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-	// }
 
 	// save container + pod to wlid map
 	am.containerAndPodToWLIDMap.Set(container.Runtime.ContainerID+container.K8s.PodName, parentWL.GenerateWlid(am.clusterName))
@@ -300,6 +266,12 @@ func (am *NetworkManager) deleteResources(container *containercollection.Contain
 }
 
 func (am *NetworkManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+	// set completion status & status as soon as we start monitoring the container
+	if am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
+		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
+	} else {
+		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+	}
 	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
 	am.saveNetworkEvents(ctx, container, watchedContainer)
 
@@ -366,7 +338,7 @@ func (am *NetworkManager) saveNetworkEvents(_ context.Context, container *contai
 
 	if networkNeighborsExists {
 		// patch only if there are changes
-		if len(networkNeighborsSpec.Egress) > 0 || len(networkNeighborsSpec.Ingress) > 0 || watchedContainer.StatusUpdated() || watchedContainer.CompletionStatusUpdated() {
+		if len(networkNeighborsSpec.Egress) > 0 || len(networkNeighborsSpec.Ingress) > 0 || watchedContainer.StatusUpdated() {
 			// send PATCH command using entries generated from events
 			nn := &v1beta1.NetworkNeighbors{
 				ObjectMeta: metav1.ObjectMeta{
@@ -416,7 +388,6 @@ func (am *NetworkManager) saveNetworkEvents(_ context.Context, container *contai
 	}
 
 	watchedContainer.ResetStatusUpdatedFlag()
-	watchedContainer.ResetCompletionStatusUpdatedFlag()
 
 	// remove events from map
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)

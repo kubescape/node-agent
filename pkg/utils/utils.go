@@ -91,10 +91,9 @@ type WatchedContainerData struct {
 	NsMntId                                    uint64
 	InitialDelayExpired                        bool
 
-	statusUpdated           bool
-	status                  WatchedContainerStatus
-	completionStatusUpdated bool
-	completionStatus        WatchedContainerCompletionStatus
+	statusUpdated    bool
+	status           WatchedContainerStatus
+	completionStatus WatchedContainerCompletionStatus
 }
 
 func Between(value string, a string, b string) string {
@@ -236,7 +235,7 @@ func (watchedContainer *WatchedContainerData) SetStatus(newStatus WatchedContain
 func (watchedContainer *WatchedContainerData) SetCompletionStatus(newStatus WatchedContainerCompletionStatus) {
 	if newStatus != watchedContainer.completionStatus {
 		watchedContainer.completionStatus = newStatus
-		watchedContainer.completionStatusUpdated = true
+		watchedContainer.statusUpdated = true
 	}
 }
 
@@ -244,16 +243,8 @@ func (watchedContainer *WatchedContainerData) ResetStatusUpdatedFlag() {
 	watchedContainer.statusUpdated = false
 }
 
-func (watchedContainer *WatchedContainerData) ResetCompletionStatusUpdatedFlag() {
-	watchedContainer.completionStatusUpdated = false
-}
-
 func (watchedContainer *WatchedContainerData) StatusUpdated() bool {
 	return watchedContainer.statusUpdated
-}
-
-func (watchedContainer *WatchedContainerData) CompletionStatusUpdated() bool {
-	return watchedContainer.completionStatusUpdated
 }
 
 func (watchedContainer *WatchedContainerData) SetContainerType(wl workloadinterface.IWorkload, containerName string) {
@@ -295,7 +286,22 @@ func (watchedContainer *WatchedContainerData) GetTerminationExitCode(k8sObjectsC
 				}
 			}
 		}
+
+		// in case the terminated container is an init or ephemeral container
+		// return -1 to avoid setting the status later to completed
+		for i := range podStatus.InitContainerStatuses {
+			if podStatus.InitContainerStatuses[i].Name == containerName {
+				return -1
+			}
+		}
+
+		for i := range podStatus.EphemeralContainerStatuses {
+			if podStatus.EphemeralContainerStatuses[i].Name == containerName {
+				return -1
+			}
+		}
 	}
+
 	return 0
 }
 
@@ -389,15 +395,13 @@ func AppendStatusAnnotationPatchOperations(existingPatch []PatchOperation, watch
 			Op:    "replace",
 			Path:  "/metadata/annotations/" + EscapeJSONPointerElement(helpersv1.StatusMetadataKey),
 			Value: string(watchedContainer.status),
-		})
-	}
-
-	if watchedContainer.completionStatusUpdated {
-		existingPatch = append(existingPatch, PatchOperation{
-			Op:    "replace",
-			Path:  "/metadata/annotations/" + EscapeJSONPointerElement(helpersv1.CompletionMetadataKey),
-			Value: string(watchedContainer.completionStatus),
-		})
+		},
+			PatchOperation{
+				Op:    "replace",
+				Path:  "/metadata/annotations/" + EscapeJSONPointerElement(helpersv1.CompletionMetadataKey),
+				Value: string(watchedContainer.completionStatus),
+			},
+		)
 	}
 
 	return existingPatch
