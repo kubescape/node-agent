@@ -5,6 +5,7 @@ import (
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/watcher"
+	"time"
 
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
@@ -20,10 +21,11 @@ var _ objectcache.K8sObjectCache = (*K8sObjectCacheImpl)(nil)
 var _ watcher.Adaptor = (*K8sObjectCacheImpl)(nil)
 
 type K8sObjectCacheImpl struct {
-	nodeName           string
-	k8sClient          k8sclient.K8sClientInterface
-	podSpec            maps.SafeMap[string, *corev1.PodSpec]
-	podStatus          maps.SafeMap[string, *corev1.PodStatus]
+	nodeName  string
+	k8sClient k8sclient.K8sClientInterface
+	podSpec   maps.SafeMap[string, *corev1.PodSpec]
+	podStatus maps.SafeMap[string, *corev1.PodStatus]
+
 	apiServerIpAddress string
 }
 
@@ -94,8 +96,13 @@ func (k *K8sObjectCacheImpl) DeleteHandler(_ context.Context, obj *unstructured.
 		if err != nil {
 			return
 		}
-		k.podSpec.Delete(podKey(pod.GetNamespace(), pod.GetName()))
-		k.podStatus.Delete(podKey(pod.GetNamespace(), pod.GetName()))
+
+		// delete the pod spec and status after 1 minute
+		key := podKey(pod.GetNamespace(), pod.GetName())
+		time.AfterFunc(time.Minute*1, func() {
+			k.podSpec.Delete(key)
+			k.podStatus.Delete(key)
+		})
 	}
 }
 
