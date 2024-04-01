@@ -33,6 +33,7 @@ import (
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -127,7 +128,15 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
+		// dropped events
+		if event.Type != types.NORMAL {
+			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
+			return
+		}
+
 		path := event.Comm
 		if len(event.Args) > 0 {
 			path = event.Args[0]
@@ -149,6 +158,13 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
+		// dropped events
+		if event.Type != types.NORMAL {
+			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
+			return
+		}
+
 		path := event.Path
 		if cfg.EnableFullPathTracing {
 			path = event.FullPath
@@ -166,6 +182,12 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		event := i.(tracernetworktype.Event)
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
+			return
+		}
+
+		// dropped events
+		if event.Type != types.NORMAL {
+			networkManagerClient.ReportDroppedEvent(event.Runtime.ContainerID, event)
 			return
 		}
 		metrics.ReportEvent(utils.NetworkEventType)

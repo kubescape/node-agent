@@ -111,13 +111,23 @@ func main() {
 		prometheusExporter = metricsmanager.NewMetricsMock()
 	}
 
+	nodeName := os.Getenv(config.NodeNameEnvVar)
+	// Create watchers
+	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient)
+	// create k8sObject cache
+	k8sObjectCache, err := k8scache.NewK8sObjectCache(nodeName, k8sClient)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
+	}
+	dWatcher.AddAdaptor(k8sObjectCache)
+
 	// Initiate pre-existing containers
 	preRunningContainersIDs := mapset.NewSet[string]() // Set of container IDs
 
 	// Create the application profile manager
 	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	if cfg.EnableApplicationProfile {
-		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, preRunningContainersIDs)
+		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, preRunningContainersIDs, k8sObjectCache)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the application profile manager", helpers.Error(err))
 		}
@@ -146,20 +156,10 @@ func main() {
 	var malwareManager malwaremanager.MalwareManagerClient
 
 	if cfg.EnableRuntimeDetection {
-		nodeName := os.Getenv(config.NodeNameEnvVar)
-		// Create watchers
-		dWatcher := dynamicwatcher.NewWatchHandler(k8sClient)
 
 		// create ruleBinding cache
 		ruleBindingCache := rulebindingcache.NewCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(ruleBindingCache)
-
-		// create k8sObject cache
-		k8sObjectCache, err := k8scache.NewK8sObjectCache(nodeName, k8sClient)
-		if err != nil {
-			logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
-		}
-		dWatcher.AddAdaptor(k8sObjectCache)
 
 		apc := applicationprofilecache.NewApplicationProfileCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(apc)
@@ -169,9 +169,6 @@ func main() {
 
 		aac := applicationactivitiescache.NewApplicationActivityCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(aac)
-
-		// start watching
-		dWatcher.Start(ctx)
 
 		// create object cache
 		objCache := objectcache.NewObjectCache(k8sObjectCache, apc, aac, nnc)
@@ -230,6 +227,9 @@ func main() {
 
 	// Start the prometheusExporter
 	prometheusExporter.Start()
+
+	// start watching
+	dWatcher.Start(ctx)
 
 	// Start the container handler
 	err = mainHandler.Start(ctx)

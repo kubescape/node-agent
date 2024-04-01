@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -193,13 +194,19 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 		return
 	}
 
+	// the cache holds only complete ("full") application profiles.
 	// check if the application profile is completed
-	// TODO: @amir
-
-	// if status was complete and now is not (e.g. mode changed from partial to complete), remove from cache
-	// if ap.slugToAppProfile.Has(apName) {
-	// 	return
-	// }
+	// if status was complete and now is not (e.g. mode changed from complete to partial), remove from cache
+	if completionStatus, ok := appProfile.Annotations[helpersv1.CompletionMetadataKey]; ok {
+		if completionStatus != helpersv1.Complete {
+			if ap.slugToAppProfile.Has(apName) {
+				ap.slugToAppProfile.Delete(apName)
+				ap.allProfiles.Remove(apName)
+				ap.slugToPods.Delete(apName)
+			}
+			return
+		}
+	}
 
 	ap.allProfiles.Add(apName)
 

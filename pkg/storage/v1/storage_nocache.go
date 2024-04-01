@@ -132,7 +132,7 @@ func (sc StorageNoCache) PatchApplicationProfile(name, namespace string, patch [
 	if s, ok := profile.Annotations[iidhelpers.StatusMetadataKey]; ok {
 		if s == iidhelpers.TooLarge {
 			if channel != nil {
-				channel <- utils.FullApplicationProfileError
+				channel <- utils.TooLargeApplicationProfileError
 			}
 		}
 		return nil
@@ -161,7 +161,7 @@ func (sc StorageNoCache) PatchApplicationProfile(name, namespace string, patch [
 				return fmt.Errorf("patch application profile annotations: %w", err)
 			}
 			if channel != nil {
-				channel <- utils.FullApplicationProfileError
+				channel <- utils.TooLargeApplicationProfileError
 			}
 		}
 	}

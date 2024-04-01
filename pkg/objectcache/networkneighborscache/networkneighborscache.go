@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/goradd/maps"
@@ -183,22 +184,26 @@ func (np *NetworkNeighborsCacheImp) addNetworkNeighbor(_ context.Context, obj *u
 		return
 	}
 
-	// check if the network neighbors is ready
-	// TODO: @amir
-	// if was ready and now is not, remove from cache
-	// if np.slugToNetworkNeighbor.Has(nnName) {
-	// 	return
-	// }
+	if completionStatus, ok := netNeighbor.Annotations[helpersv1.CompletionMetadataKey]; ok {
+		if completionStatus != helpersv1.Complete {
+			if np.slugToNetworkNeighbor.Has(nnName) {
+				np.slugToNetworkNeighbor.Delete(nnName)
+				np.allNeighbors.Remove(nnName)
+				np.slugToPods.Delete(nnName)
+			}
+			return
+		}
+	}
 
 	// get the full network neighbors from the storage
 	// the watch only returns the metadata
-	fullAP, err := np.getNetworkNeighbors(netNeighbor.GetNamespace(), netNeighbor.GetName())
+	fullNN, err := np.getNetworkNeighbors(netNeighbor.GetNamespace(), netNeighbor.GetName())
 	if err != nil {
 		logger.L().Error("failed to get full network neighbors", helpers.Error(err))
 		return
 	}
 
-	np.slugToNetworkNeighbor.Set(nnName, fullAP)
+	np.slugToNetworkNeighbor.Set(nnName, fullNN)
 	np.allNeighbors.Add(nnName)
 	np.podToSlug.Range(func(podName, uniqueSlug string) bool {
 		if uniqueSlug == nnName {
