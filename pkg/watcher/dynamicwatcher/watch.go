@@ -32,9 +32,9 @@ type resourceVersionGetter interface {
 
 type WatchHandler struct {
 	k8sClient   k8sclient.K8sClientInterface
-	handlers    []watcher.Watcher
 	resources   map[string]watcher.WatchResource
 	eventQueues map[string]*cooldownqueue.CooldownQueue
+	handlers    []watcher.Watcher
 }
 
 var errWatchClosed = errors.New("watch channel closed")

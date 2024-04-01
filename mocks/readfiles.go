@@ -63,11 +63,9 @@ func readFile(p string) []byte {
 	return f
 }
 
-func GetRuntime(kind TestKinds, name TestName) k8sruntime.Object {
-	u := GetUnstructured(kind, name)
-	// convert unstructured.Unstructured to a Node
+func UnstructuredToRuntime(u *unstructured.Unstructured) k8sruntime.Object {
 
-	switch kind {
+	switch TestKinds(u.GetKind()) {
 	case TestKindPod:
 		pod := &corev1.Pod{}
 		if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(u.Object, pod); err == nil {
@@ -100,6 +98,12 @@ func GetRuntime(kind TestKinds, name TestName) k8sruntime.Object {
 		}
 	}
 	return nil
+}
+func GetRuntime(kind TestKinds, name TestName) k8sruntime.Object {
+	u := GetUnstructured(kind, name)
+
+	// convert unstructured.Unstructured to a Node
+	return UnstructuredToRuntime(u)
 }
 func GetUnstructured(kind TestKinds, name TestName) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{}
