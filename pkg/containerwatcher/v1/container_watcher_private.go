@@ -41,6 +41,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.applicationProfileManager.ContainerCallback,
 		ch.relevancyManager.ContainerCallback,
 		ch.networkManager.ContainerCallback,
+		ch.malwareManager.ContainerCallback,
 	}
 
 	// Get the container runtime configuration

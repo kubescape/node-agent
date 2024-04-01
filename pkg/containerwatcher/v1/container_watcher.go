@@ -256,6 +256,10 @@ func (ch *IGContainerWatcher) generateContainerEventsOnStart(containers []*conta
 			Type:      containercollection.EventTypeAddContainer,
 			Container: container,
 		})
+		ch.malwareManager.ContainerCallback(containercollection.PubSubEvent{
+			Type:      containercollection.EventTypeAddContainer,
+			Container: container,
+		})
 	}
 }
 
