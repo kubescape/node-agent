@@ -50,8 +50,8 @@ func NewNetworkNeighborsCache(nodeName string, k8sClient k8sclient.K8sClientInte
 
 func (np *NetworkNeighborsCacheImp) GetNetworkNeighbors(namespace, name string) *v1beta1.NetworkNeighbors {
 	uniqueName := objectcache.UniqueName(namespace, name)
-	if np.slugToNetworkNeighbor.Has(uniqueName) {
-		return np.slugToNetworkNeighbor.Get(uniqueName)
+	if s := np.podToSlug.Get(uniqueName); s != "" {
+		return np.slugToNetworkNeighbor.Get(s)
 	}
 	return nil
 }
