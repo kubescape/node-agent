@@ -5,7 +5,6 @@ import (
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/watcher"
-	"time"
 
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
@@ -97,12 +96,8 @@ func (k *K8sObjectCacheImpl) DeleteHandler(_ context.Context, obj *unstructured.
 			return
 		}
 
-		// delete the pod spec and status after 1 minute
-		key := podKey(pod.GetNamespace(), pod.GetName())
-		time.AfterFunc(time.Minute*1, func() {
-			k.podSpec.Delete(key)
-			k.podStatus.Delete(key)
-		})
+		k.podSpec.Delete(podKey(pod.GetNamespace(), pod.GetName()))
+		k.podStatus.Delete(podKey(pod.GetNamespace(), pod.GetName()))
 	}
 }
 
