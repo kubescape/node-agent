@@ -13,6 +13,9 @@ import (
 	"node-agent/pkg/containerwatcher/v1"
 	"node-agent/pkg/dnsmanager"
 	"node-agent/pkg/filehandler/v1"
+	"node-agent/pkg/malwaremanager"
+	malwaremanagerv1 "node-agent/pkg/malwaremanager/v1"
+	clamavv1 "node-agent/pkg/malwaremanager/v1/clamav"
 	metricsmanager "node-agent/pkg/metricsmanager"
 	metricprometheus "node-agent/pkg/metricsmanager/prometheus"
 	"node-agent/pkg/networkmanager"
@@ -108,13 +111,23 @@ func main() {
 		prometheusExporter = metricsmanager.NewMetricsMock()
 	}
 
+	nodeName := os.Getenv(config.NodeNameEnvVar)
+	// Create watchers
+	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient)
+	// create k8sObject cache
+	k8sObjectCache, err := k8scache.NewK8sObjectCache(nodeName, k8sClient)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
+	}
+	dWatcher.AddAdaptor(k8sObjectCache)
+
 	// Initiate pre-existing containers
 	preRunningContainersIDs := mapset.NewSet[string]() // Set of container IDs
 
 	// Create the application profile manager
 	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	if cfg.EnableApplicationProfile {
-		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, preRunningContainersIDs)
+		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, preRunningContainersIDs, k8sObjectCache)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the application profile manager", helpers.Error(err))
 		}
@@ -139,24 +152,14 @@ func main() {
 		relevancyManager = relevancymanager.CreateRelevancyManagerMock()
 	}
 
-	// Create the relevancy manager
 	var ruleManager rulemanager.RuleManagerClient
+	var malwareManager malwaremanager.MalwareManagerClient
 
 	if cfg.EnableRuntimeDetection {
-		nodeName := os.Getenv(config.NodeNameEnvVar)
-		// Create watchers
-		dWatcher := dynamicwatcher.NewWatchHandler(k8sClient)
 
 		// create ruleBinding cache
 		ruleBindingCache := rulebindingcache.NewCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(ruleBindingCache)
-
-		// create k8sObject cache
-		k8sObjectCache, err := k8scache.NewK8sObjectCache(nodeName, k8sClient)
-		if err != nil {
-			logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
-		}
-		dWatcher.AddAdaptor(k8sObjectCache)
 
 		apc := applicationprofilecache.NewApplicationProfileCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(apc)
@@ -167,22 +170,41 @@ func main() {
 		aac := applicationactivitiescache.NewApplicationActivityCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(aac)
 
-		// start watching
-		dWatcher.Start(ctx)
-
 		// create object cache
 		objCache := objectcache.NewObjectCache(k8sObjectCache, apc, aac, nnc)
 
 		// create exporter
-		ex := exporters.InitExporters(cfg.Exporters)
+		exporter := exporters.InitExporters(cfg.Exporters)
 
-		// create runtimeDetection manager
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, ex, prometheusExporter, preRunningContainersIDs)
+		// create runtimeDetection managers
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, preRunningContainersIDs)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
+
+		// Create malware scanners
+		malwarescanners := []malwaremanagerv1.MalwareScanner{}
+
+		// Create ClamAV scanner
+		// Check if ClamAV is enabled (CLAMAV_ADDRESS env var is set in the format <host>:<port>)
+		if clamavAddress, present := os.LookupEnv("CLAMAV_ADDRESS"); present {
+			clamavConfig := clamavv1.ClamAVConfig{
+				Address: clamavAddress,
+			}
+			if clamavScanner, err := clamavv1.CreateClamAVClient(&clamavConfig); err == nil {
+				malwarescanners = append(malwarescanners, clamavScanner)
+			} else {
+				logger.L().Ctx(ctx).Error("error creating ClamAV client", helpers.Error(err))
+			}
+		}
+
+		malwareManager, err = malwaremanagerv1.CreateMalwareManager(malwarescanners, exporter)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
+		}
 	} else {
 		ruleManager = rulemanager.CreateRuleManagerMock()
+		malwareManager = malwaremanager.CreateMalwareManagerMock()
 	}
 
 	// Create the network and DNS managers
@@ -198,13 +220,16 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, preRunningContainersIDs)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
 
 	// Start the prometheusExporter
 	prometheusExporter.Start()
+
+	// start watching
+	dWatcher.Start(ctx)
 
 	// Start the container handler
 	err = mainHandler.Start(ctx)

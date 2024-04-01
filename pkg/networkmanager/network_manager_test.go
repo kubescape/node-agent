@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"node-agent/pkg/config"
 	"node-agent/pkg/dnsmanager"
+	"node-agent/pkg/objectcache"
+
 	"testing"
 
 	_ "embed"
@@ -790,8 +792,9 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		for k, v := range tc.addressToDomainMap {
 			dnsResolver.addressToDomainMap.Set(k, v)
 		}
+		k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
 
-		am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "", &dnsResolver, nil)
+		am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "", &dnsResolver, nil, k8sObjectCacheMock)
 		networkEventsSet := mapset.NewSet[NetworkEvent]()
 		for _, ne := range tc.networkEvents {
 			networkEventsSet.Add(ne)
@@ -959,7 +962,9 @@ func TestIsValidEvent(t *testing.T) {
 	}
 
 	dnsResolver := dnsmanager.CreateDNSManagerMock()
-	am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "test", dnsResolver, nil)
+	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
+
+	am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "test", dnsResolver, nil, k8sObjectCacheMock)
 
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("Input: %s", tc.name), func(t *testing.T) {

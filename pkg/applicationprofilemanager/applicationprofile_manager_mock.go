@@ -30,3 +30,7 @@ func (a ApplicationProfileManagerMock) ReportFileExec(_, _ string, _ []string) {
 func (a ApplicationProfileManagerMock) ReportFileOpen(_, _ string, _ []string) {
 	// noop
 }
+
+func (a ApplicationProfileManagerMock) ReportDroppedEvent(_ string) {
+	// noop
+}

@@ -6,7 +6,7 @@ package exporters
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/malwarescanner"
+	"node-agent/pkg/malwaremanager"
 	"node-agent/pkg/ruleengine"
 	"os"
 	"time"
@@ -98,31 +98,33 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 	}
 }
 
-func (ame *AlertManagerExporter) SendMalwareAlert(malwareDescription malwarescanner.MalwareDescription) {
-	summary := fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s' path '%s'", malwareDescription.Name, malwareDescription.Namespace, malwareDescription.PodName, malwareDescription.Description, malwareDescription.Path)
+func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
+	summary := fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s' path '%s'", malwareResult.GetMalwareName(), malwareResult.GetNamespace(), malwareResult.GetPodName(), malwareResult.GetDescription(), malwareResult.GetPath())
 	myAlert := models.PostableAlert{
 		StartsAt: strfmt.DateTime(time.Now()),
 		EndsAt:   strfmt.DateTime(time.Now().Add(time.Hour)),
 		Annotations: map[string]string{
-			"title":       malwareDescription.Name,
+			"title":       malwareResult.GetMalwareName(),
 			"summary":     summary,
 			"message":     summary,
-			"description": malwareDescription.Description,
+			"description": malwareResult.GetDescription(),
 			"fix":         "Remove the malware from the container",
 		},
 		Alert: models.Alert{
 			GeneratorURL: strfmt.URI("https://armosec.github.io/kubecop/alertviewer/"),
 			Labels: map[string]string{
 				"alertname":        "KubescapeMalwareDetected",
-				"malware_name":     malwareDescription.Name,
-				"container_id":     malwareDescription.ContainerID,
-				"container_name":   malwareDescription.ContainerName,
-				"namespace":        malwareDescription.Namespace,
-				"pod_name":         malwareDescription.PodName,
-				"size":             malwareDescription.Size,
-				"hash":             malwareDescription.Hash,
-				"is_part_of_image": fmt.Sprintf("%t", malwareDescription.IsPartOfImage),
-				"container_image":  malwareDescription.ContainerImage,
+				"malware_name":     malwareResult.GetMalwareName(),
+				"container_id":     malwareResult.GetContainerID(),
+				"container_name":   malwareResult.GetContainerName(),
+				"namespace":        malwareResult.GetNamespace(),
+				"pod_name":         malwareResult.GetPodName(),
+				"size":             malwareResult.GetSize(),
+				"md5hash":          malwareResult.GetMD5Hash(),
+				"sha256hash":       malwareResult.GetSHA256Hash(),
+				"sha1hash":         malwareResult.GetSHA1Hash(),
+				"is_part_of_image": fmt.Sprintf("%t", malwareResult.GetIsPartOfImage()),
+				"container_image":  malwareResult.GetContainerImage(),
 				"severity":         "critical",
 				"host":             ame.Host,
 				"node_name":        ame.NodeName,

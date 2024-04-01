@@ -2,12 +2,10 @@ package exporters
 
 import (
 	"encoding/csv"
-	"node-agent/pkg/malwarescanner"
+	mmtypes "node-agent/pkg/malwaremanager/v1/types"
 	"node-agent/pkg/utils"
 	"os"
 	"testing"
-
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestCsvExporter(t *testing.T) {
@@ -23,21 +21,20 @@ func TestCsvExporter(t *testing.T) {
 			ContainerName: "testcontainer", ContainerID: "testcontainerid", Namespace: "testnamespace", PodName: "testpodname"}},
 	)
 
-	csvExporter.SendMalwareAlert(malwarescanner.MalwareDescription{
-		Name:        "testmalware",
-		Hash:        "testhash",
-		Description: "testdescription",
-		Path:        "testpath",
-		Size:        "2MB",
-		Resource: schema.GroupVersionResource{
-			Group:    "testgroup",
-			Version:  "testversion",
-			Resource: "testresource",
-		},
-		Namespace:     "testnamespace",
-		PodName:       "testpodname",
-		ContainerName: "testcontainername",
-		ContainerID:   "testcontainerid",
+	csvExporter.SendMalwareAlert(&mmtypes.GenericMalwareResult{
+		Name:                 "testmalware",
+		MD5Hash:              "testhash",
+		SHA256Hash:           "testhash",
+		SHA1Hash:             "testhash",
+		Description:          "testdescription",
+		Path:                 "testpath",
+		Size:                 "2MB",
+		Namespace:            "testnamespace",
+		PodName:              "testpodname",
+		ContainerName:        "testcontainername",
+		ContainerID:          "testcontainerid",
+		ContainerImage:       "testcontainerimage",
+		ContainerImageDigest: "testcontainerimagedigest",
 	})
 
 	// Check if the csv file exists and contains the expected content (2 rows - header and the alert)

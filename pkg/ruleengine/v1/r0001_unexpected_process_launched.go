@@ -23,8 +23,7 @@ var R0001UnexpectedProcessLaunchedRuleDescriptor = RuleDescriptor{
 	Tags:        []string{"exec", "whitelisted"},
 	Priority:    RulePriorityCritical,
 	Requirements: &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType},
-		NeedApplicationProfile: true,
+		EventTypes: []utils.EventType{utils.ExecveEventType},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0001UnexpectedProcessLaunched()
@@ -91,6 +90,8 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 
 	return &GenericRuleFailure{
 		RuleName:         rule.Name(),
+		RuleID:           rule.ID(),
+		ContainerId:      execEvent.Runtime.ContainerID,
 		Err:              fmt.Sprintf("exec call \"%s\" is not whitelisted by application profile", execPath),
 		FailureEvent:     utils.ExecToGeneralEvent(execEvent),
 		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the exec call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", execPath, execEvent.GetPod(), rule.generatePatchCommand(execEvent, ap)),
@@ -100,7 +101,6 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 
 func (rule *R0001UnexpectedProcessLaunched) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R0001UnexpectedProcessLaunchedRuleDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: true,
+		EventTypes: R0001UnexpectedProcessLaunchedRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

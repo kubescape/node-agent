@@ -27,7 +27,6 @@ var R0003UnexpectedSystemCallRuleDescriptor = RuleDescriptor{
 		EventTypes: []utils.EventType{
 			utils.SyscallEventType,
 		},
-		NeedApplicationProfile: true,
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR0003UnexpectedSystemCall()
@@ -91,6 +90,7 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 	return &GenericRuleFailure{
 		RuleName:         rule.Name(),
 		RuleID:           rule.ID(),
+		ContainerId:      syscallEvent.Runtime.ContainerID,
 		Err:              "Unexpected system call: " + syscallEvent.SyscallName,
 		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the system call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", syscallEvent.SyscallName, syscallEvent.GetPod(), rule.generatePatchCommand(syscallEvent.SyscallName, aa)),
 		FailureEvent:     utils.SyscallToGeneralEvent(syscallEvent),
@@ -100,7 +100,6 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 
 func (rule *R0003UnexpectedSystemCall) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R0003UnexpectedSystemCallRuleDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: true,
+		EventTypes: R0003UnexpectedSystemCallRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

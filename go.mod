@@ -10,6 +10,8 @@ require (
 	github.com/cilium/ebpf v0.13.2
 	github.com/crewjam/rfc5424 v0.1.0
 	github.com/deckarep/golang-set/v2 v2.5.0
+	github.com/dustin/go-humanize v1.0.1
+	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
 	github.com/evanphx/json-patch v5.6.0+incompatible
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/go-openapi/strfmt v0.23.0

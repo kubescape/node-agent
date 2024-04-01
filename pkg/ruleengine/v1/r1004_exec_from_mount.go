@@ -23,8 +23,7 @@ var R1004ExecFromMountRuleDescriptor = RuleDescriptor{
 	Tags:        []string{"exec", "mount"},
 	Priority:    RulePriorityMed,
 	Requirements: &RuleRequirements{
-		EventTypes:             []utils.EventType{utils.ExecveEventType},
-		NeedApplicationProfile: false,
+		EventTypes: []utils.EventType{utils.ExecveEventType},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1004ExecFromMount()
@@ -72,6 +71,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 			return &GenericRuleFailure{
 				RuleName:         rule.Name(),
 				RuleID:           rule.ID(),
+				ContainerId:      execEvent.Runtime.ContainerID,
 				Err:              "Exec from mount",
 				FailureEvent:     utils.ExecToGeneralEvent(execEvent),
 				FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
@@ -90,7 +90,6 @@ func (rule *R1004ExecFromMount) isPathContained(targetpath, basepath string) boo
 
 func (rule *R1004ExecFromMount) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes:             R1004ExecFromMountRuleDescriptor.Requirements.RequiredEventTypes(),
-		NeedApplicationProfile: false,
+		EventTypes: R1004ExecFromMountRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

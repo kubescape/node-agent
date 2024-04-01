@@ -7,6 +7,7 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher"
 	"node-agent/pkg/dnsmanager"
+	"node-agent/pkg/malwaremanager"
 	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/networkmanager"
 	"node-agent/pkg/relevancymanager"
@@ -32,6 +33,7 @@ import (
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -67,6 +69,7 @@ type IGContainerWatcher struct {
 	networkManager            networkmanager.NetworkManagerClient
 	dnsManager                dnsmanager.DNSManagerClient
 	ruleManager               rulemanager.RuleManagerClient
+	malwareManager            malwaremanager.MalwareManagerClient
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
@@ -88,14 +91,14 @@ type IGContainerWatcher struct {
 	dnsWorkerPool          *ants.PoolWithFunc
 	randomxWorkerPool      *ants.PoolWithFunc
 
-	preRunningContainers mapset.Set[string]
+	preRunningContainersIDs mapset.Set[string]
 
 	metrics metricsmanager.MetricsManager
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, preRunningContainers mapset.Set[string]) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string]) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -125,7 +128,15 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
+		// dropped events
+		if event.Type != types.NORMAL {
+			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
+			return
+		}
+
 		path := event.Comm
 		if len(event.Args) > 0 {
 			path = event.Args[0]
@@ -134,6 +145,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileExec(k8sContainerID, path)
 		ruleManager.ReportFileExec(k8sContainerID, event)
+		malwareManager.ReportFileExec(k8sContainerID, event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating exec worker pool: %w", err)
@@ -146,6 +158,13 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
+		// dropped events
+		if event.Type != types.NORMAL {
+			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
+			return
+		}
+
 		path := event.Path
 		if cfg.EnableFullPathTracing {
 			path = event.FullPath
@@ -163,6 +182,12 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		event := i.(tracernetworktype.Event)
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
+			return
+		}
+
+		// dropped events
+		if event.Type != types.NORMAL {
+			networkManagerClient.ReportDroppedEvent(event.Runtime.ContainerID, event)
 			return
 		}
 		metrics.ReportEvent(utils.NetworkEventType)
@@ -214,18 +239,19 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkManager:            networkManagerClient,
 		dnsManager:                dnsManagerClient,
 		ruleManager:               ruleManager,
+		malwareManager:            malwareManager,
 		// IG Collections
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,
 		// Worker pools
-		capabilitiesWorkerPool: capabilitiesWorkerPool,
-		execWorkerPool:         execWorkerPool,
-		openWorkerPool:         openWorkerPool,
-		networkWorkerPool:      networkWorkerPool,
-		dnsWorkerPool:          dnsWorkerPool,
-		randomxWorkerPool:      randomxWorkerPool,
-		metrics:                metrics,
-		preRunningContainers:   preRunningContainers,
+		capabilitiesWorkerPool:  capabilitiesWorkerPool,
+		execWorkerPool:          execWorkerPool,
+		openWorkerPool:          openWorkerPool,
+		networkWorkerPool:       networkWorkerPool,
+		dnsWorkerPool:           dnsWorkerPool,
+		randomxWorkerPool:       randomxWorkerPool,
+		metrics:                 metrics,
+		preRunningContainersIDs: preRunningContainers,
 	}, nil
 }
 
@@ -269,7 +295,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 		if ch.traceForever() {
 			containers := ch.getPreRunningContainers()
 			for _, container := range containers {
-				ch.preRunningContainers.Add(container.Runtime.ContainerID)
+				ch.preRunningContainersIDs.Add(container.Runtime.ContainerID)
 			}
 
 			ch.generateContainerEventsOnStart(containers)
