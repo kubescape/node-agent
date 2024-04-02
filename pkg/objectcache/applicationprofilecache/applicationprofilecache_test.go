@@ -187,19 +187,19 @@ func Test_addApplicationProfile(t *testing.T) {
 			apName := objectcache.UnstructuredUniqueName(tt.obj)
 			if tt.shouldAdd {
 				assert.Equal(t, 1, ap.allProfiles.Cardinality())
-				assert.True(t, ap.slugToAppProfile.Has(apName))
 			} else {
 				assert.Equal(t, 0, ap.allProfiles.Cardinality())
-				assert.False(t, ap.slugToAppProfile.Has(apName))
 			}
 
 			if tt.shouldAddToPod {
 				assert.True(t, ap.slugToPods.Has(apName))
+				assert.True(t, ap.slugToAppProfile.Has(apName))
 				for i := range tt.preCreatedPods {
 					assert.NotNil(t, ap.GetApplicationProfile(namespace, tt.preCreatedPods[i].GetName()))
 				}
 			} else {
 				assert.False(t, ap.slugToPods.Has(apName))
+				assert.False(t, ap.slugToAppProfile.Has(apName))
 				for i := range tt.preCreatedPods {
 					assert.Nil(t, ap.GetApplicationProfile(namespace, tt.preCreatedPods[i].GetName()))
 				}
@@ -484,13 +484,10 @@ func Test_addApplicationProfile_existing(t *testing.T) {
 			ap.addApplicationProfile(context.Background(), tt.obj2)
 
 			// test if the application profile is added to the cache
-			apName := objectcache.UnstructuredUniqueName(tt.obj1)
 			if tt.storeInCache {
 				assert.Equal(t, 1, ap.allProfiles.Cardinality())
-				assert.True(t, ap.slugToAppProfile.Has(apName))
 			} else {
 				assert.Equal(t, 0, ap.allProfiles.Cardinality())
-				assert.False(t, ap.slugToAppProfile.Has(apName))
 			}
 		})
 	}
@@ -597,4 +594,56 @@ func Test_WatchResources(t *testing.T) {
 	assert.Equal(t, 2, len(watchResources))
 	assert.Equal(t, expectedPodWatchResource, watchResources[0])
 	assert.Equal(t, expectedAPWatchResource, watchResources[1])
+}
+func Test_IsCached(t *testing.T) {
+	ap := NewApplicationProfileCache("", nil)
+
+	// Add some test data to the cache
+	ap.podToSlug.Set("namespace1/pod1", "")
+	ap.allProfiles.Add("namespace2/applicationprofile1")
+
+	tests := []struct {
+		kind      string
+		namespace string
+		name      string
+		expected  bool
+	}{
+		{
+			kind:      "Pod",
+			namespace: "namespace1",
+			name:      "pod1",
+			expected:  true,
+		},
+		{
+			kind:      "Pod",
+			namespace: "namespace1",
+			name:      "pod2",
+			expected:  false,
+		},
+		{
+			kind:      "ApplicationProfile",
+			namespace: "namespace2",
+			name:      "applicationprofile1",
+			expected:  true,
+		},
+		{
+			kind:      "ApplicationProfile",
+			namespace: "namespace2",
+			name:      "applicationprofile2",
+			expected:  false,
+		},
+		{
+			kind:      "InvalidKind",
+			namespace: "namespace1",
+			name:      "pod1",
+			expected:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("kind=%s, namespace=%s, name=%s", tt.kind, tt.namespace, tt.name), func(t *testing.T) {
+			actual := ap.IsCached(tt.kind, tt.namespace, tt.name)
+			assert.Equal(t, tt.expected, actual)
+		})
+	}
 }

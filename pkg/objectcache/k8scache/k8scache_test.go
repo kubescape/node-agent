@@ -2,6 +2,7 @@ package k8scache
 
 import (
 	"context"
+	"fmt"
 	"node-agent/mocks"
 	"node-agent/pkg/watcher"
 	"testing"
@@ -254,6 +255,40 @@ func TestK8sObjectCacheImpl_setApiServerIpAddress(t *testing.T) {
 				t.Errorf("K8sObjectCacheImpl.setApiServerIpAddress() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			assert.Equal(t, tt.apiServerIpAddress, k.GetApiServerIpAddress())
+		})
+	}
+}
+
+func Test_IsCached(t *testing.T) {
+	k, _ := NewK8sObjectCache("", k8sinterface.NewKubernetesApiMock())
+
+	// Add some test data to the cache
+	k.podSpec.Set("namespace1/pod1", &corev1.PodSpec{})
+
+	tests := []struct {
+		kind      string
+		namespace string
+		name      string
+		expected  bool
+	}{
+		{
+			kind:      "Pod",
+			namespace: "namespace1",
+			name:      "pod1",
+			expected:  true,
+		},
+		{
+			kind:      "Pod",
+			namespace: "namespace1",
+			name:      "pod2",
+			expected:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("kind=%s, namespace=%s, name=%s", tt.kind, tt.namespace, tt.name), func(t *testing.T) {
+			actual := k.IsCached(tt.kind, tt.namespace, tt.name)
+			assert.Equal(t, tt.expected, actual)
 		})
 	}
 }

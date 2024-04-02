@@ -61,6 +61,17 @@ func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(namespace, name str
 	return nil
 }
 
+func (ap *ApplicationProfileCacheImpl) IsCached(kind, namespace, name string) bool {
+	switch kind {
+	case "Pod":
+		return ap.podToSlug.Has(objectcache.UniqueName(namespace, name))
+	case "ApplicationProfile":
+		return ap.allProfiles.Contains(objectcache.UniqueName(namespace, name))
+	default:
+		return false
+	}
+}
+
 // ------------------ watcher.Adaptor methods -----------------------
 
 // ------------------ watcher.WatchResources methods -----------------------
@@ -147,12 +158,6 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 		return
 	}
 	uniqueSlug := objectcache.UniqueName(pod.GetNamespace(), slug)
-	ap.podToSlug.Set(podName, uniqueSlug)
-
-	if !ap.slugToPods.Has(uniqueSlug) {
-		ap.slugToPods.Set(uniqueSlug, mapset.NewSet[string]())
-	}
-	ap.slugToPods.Get(uniqueSlug).Add(podName)
 
 	// if application profile exists but is not cached
 	if ap.allProfiles.Contains(uniqueSlug) && !ap.slugToAppProfile.Has(uniqueSlug) {
@@ -165,6 +170,14 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 		}
 		ap.slugToAppProfile.Set(uniqueSlug, appProfile)
 	}
+
+	// cache objects
+	if !ap.slugToPods.Has(uniqueSlug) {
+		ap.slugToPods.Set(uniqueSlug, mapset.NewSet[string]())
+	}
+	ap.slugToPods.Get(uniqueSlug).Add(podName)
+	ap.podToSlug.Set(podName, uniqueSlug)
+
 }
 
 func (ap *ApplicationProfileCacheImpl) deletePod(obj *unstructured.Unstructured) {
@@ -208,28 +221,34 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 		}
 	}
 
-	// add to the cache
-	ap.allProfiles.Add(apName)
-
-	// get the full application profile from the storage
-	// the watch only returns the metadata
-	fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
-	if err != nil {
-		logger.L().Error("failed to get full application profile", helpers.Error(err))
-		return
-	}
-
-	ap.slugToAppProfile.Set(apName, fullAP)
+	downloaded := false
 	ap.podToSlug.Range(func(podName, uniqueSlug string) bool {
 		if uniqueSlug == apName {
-			if !ap.slugToPods.Has(uniqueSlug) {
-				ap.slugToPods.Set(uniqueSlug, mapset.NewSet[string]())
+			// get the full application profile from the storage
+			// the watch only returns the metadata
+			if !downloaded { // download only once in an iteration
+				fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
+				if err != nil {
+					logger.L().Error("failed to get full application profile", helpers.Error(err))
+					return false
+				}
+				ap.slugToAppProfile.Set(apName, fullAP)
+
+				// cache pod and application profile
+				if !ap.slugToPods.Has(uniqueSlug) {
+					ap.slugToPods.Set(uniqueSlug, mapset.NewSet[string]())
+				}
+
+				ap.slugToPods.Get(uniqueSlug).Add(podName)
+				downloaded = true
 			}
-			ap.slugToPods.Get(uniqueSlug).Add(podName)
 			logger.L().Info("added pod to application profile cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 		}
 		return true
 	})
+
+	// add to the cache
+	ap.allProfiles.Add(apName)
 }
 
 func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj *unstructured.Unstructured) {

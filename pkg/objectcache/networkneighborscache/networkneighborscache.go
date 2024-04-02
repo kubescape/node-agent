@@ -21,18 +21,24 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+var groupVersionResource = schema.GroupVersionResource{
+	Group:    "spdx.softwarecomposition.kubescape.io",
+	Version:  "v1beta1",
+	Resource: "networkneighborses",
+}
+
 var _ objectcache.NetworkNeighborsCache = (*NetworkNeighborsCacheImp)(nil)
 var _ watcher.Adaptor = (*NetworkNeighborsCacheImp)(nil)
 
 var _ objectcache.NetworkNeighborsCache = (*NetworkNeighborsCacheImp)(nil)
 
 type NetworkNeighborsCacheImp struct {
-	nodeName              string
+	allNeighbors          mapset.Set[string] // cache all the network neighbors that are ready. this will enable removing from cache AP without pods that are running on the same node
 	k8sClient             k8sclient.K8sClientInterface
 	podToSlug             maps.SafeMap[string, string]                    // cache the pod to slug mapping, this will enable a quick lookup of the network neighbors
 	slugToNetworkNeighbor maps.SafeMap[string, *v1beta1.NetworkNeighbors] // cache the network neighbors
 	slugToPods            maps.SafeMap[string, mapset.Set[string]]        // cache the pods that belong to the network neighbors, this will enable removing from cache AP without pods
-	allNeighbors          mapset.Set[string]                              // cache all the network neighbors that are ready. this will enable removing from cache AP without pods that are running on the same node
+	nodeName              string
 }
 
 func NewNetworkNeighborsCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *NetworkNeighborsCacheImp {
@@ -55,6 +61,16 @@ func (np *NetworkNeighborsCacheImp) GetNetworkNeighbors(namespace, name string) 
 	}
 	return nil
 }
+func (np *NetworkNeighborsCacheImp) IsCached(kind, namespace, name string) bool {
+	switch kind {
+	case "Pod":
+		return np.podToSlug.Has(objectcache.UniqueName(namespace, name))
+	case "NetworkNeighbors":
+		return np.allNeighbors.Contains(objectcache.UniqueName(namespace, name))
+	default:
+		return false
+	}
+}
 
 // ------------------ watcher.Adaptor methods -----------------------
 
@@ -76,11 +92,7 @@ func (np *NetworkNeighborsCacheImp) WatchResources() []watcher.WatchResource {
 	w = append(w, p)
 
 	// add network neighbors
-	apl := watcher.NewWatchResource(schema.GroupVersionResource{
-		Group:    "spdx.softwarecomposition.kubescape.io",
-		Version:  "v1beta1",
-		Resource: "networkneighborses",
-	}, metav1.ListOptions{})
+	apl := watcher.NewWatchResource(groupVersionResource, metav1.ListOptions{})
 	w = append(w, apl)
 
 	return w
@@ -137,12 +149,6 @@ func (np *NetworkNeighborsCacheImp) addPod(podU *unstructured.Unstructured) {
 	}
 
 	uniqueSlug := objectcache.UniqueName(pod.GetNamespace(), slug)
-	np.podToSlug.Set(podName, uniqueSlug)
-
-	if !np.slugToPods.Has(uniqueSlug) {
-		np.slugToPods.Set(uniqueSlug, mapset.NewSet[string]())
-	}
-	np.slugToPods.Get(uniqueSlug).Add(podName)
 
 	// if network neighbors exists but is not cached
 	if np.allNeighbors.Contains(uniqueSlug) && !np.slugToNetworkNeighbor.Has(uniqueSlug) {
@@ -155,6 +161,13 @@ func (np *NetworkNeighborsCacheImp) addPod(podU *unstructured.Unstructured) {
 		}
 		np.slugToNetworkNeighbor.Set(uniqueSlug, netNeighbor)
 	}
+
+	np.podToSlug.Set(podName, uniqueSlug)
+
+	if !np.slugToPods.Has(uniqueSlug) {
+		np.slugToPods.Set(uniqueSlug, mapset.NewSet[string]())
+	}
+	np.slugToPods.Get(uniqueSlug).Add(podName)
 }
 
 func (np *NetworkNeighborsCacheImp) deletePod(obj *unstructured.Unstructured) {
@@ -195,18 +208,21 @@ func (np *NetworkNeighborsCacheImp) addNetworkNeighbor(_ context.Context, obj *u
 		}
 	}
 
-	// get the full network neighbors from the storage
-	// the watch only returns the metadata
-	fullNN, err := np.getNetworkNeighbors(netNeighbor.GetNamespace(), netNeighbor.GetName())
-	if err != nil {
-		logger.L().Error("failed to get full network neighbors", helpers.Error(err))
-		return
-	}
-
-	np.slugToNetworkNeighbor.Set(nnName, fullNN)
-	np.allNeighbors.Add(nnName)
+	downloaded := false
 	np.podToSlug.Range(func(podName, uniqueSlug string) bool {
 		if uniqueSlug == nnName {
+			// get the full network neighbors from the storage
+			// the watch only returns the metadata
+			if !downloaded {
+				fullNN, err := np.getNetworkNeighbors(netNeighbor.GetNamespace(), netNeighbor.GetName())
+				if err != nil {
+					logger.L().Error("failed to get full network neighbors", helpers.Error(err))
+					return false
+				}
+				np.slugToNetworkNeighbor.Set(nnName, fullNN)
+				downloaded = true
+			}
+
 			if !np.slugToPods.Has(uniqueSlug) {
 				np.slugToPods.Set(uniqueSlug, mapset.NewSet[string]())
 			}
@@ -215,6 +231,8 @@ func (np *NetworkNeighborsCacheImp) addNetworkNeighbor(_ context.Context, obj *u
 		}
 		return true
 	})
+	np.allNeighbors.Add(nnName)
+
 }
 
 func (np *NetworkNeighborsCacheImp) deleteNetworkNeighbor(obj *unstructured.Unstructured) {
@@ -239,12 +257,8 @@ func unstructuredToNetworkNeighbors(obj *unstructured.Unstructured) (*v1beta1.Ne
 	return np, nil
 }
 func (np *NetworkNeighborsCacheImp) getNetworkNeighbors(namespace, name string) (*v1beta1.NetworkNeighbors, error) {
-	gvr := schema.GroupVersionResource{
-		Group:    "spdx.softwarecomposition.kubescape.io",
-		Version:  "v1beta1",
-		Resource: "networkneighborses",
-	}
-	u, err := np.k8sClient.GetDynamicClient().Resource(gvr).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
+
+	u, err := np.k8sClient.GetDynamicClient().Resource(groupVersionResource).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
