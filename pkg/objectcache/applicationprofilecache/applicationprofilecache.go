@@ -2,18 +2,19 @@ package applicationprofilecache
 
 import (
 	"context"
-	"encoding/json"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/watcher"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -31,12 +32,12 @@ var _ objectcache.ApplicationProfileCache = (*ApplicationProfileCacheImpl)(nil)
 var _ watcher.Adaptor = (*ApplicationProfileCacheImpl)(nil)
 
 type ApplicationProfileCacheImpl struct {
-	nodeName         string
-	k8sClient        k8sclient.K8sClientInterface
 	podToSlug        maps.SafeMap[string, string]                      // cache the pod to slug mapping, this will enable a quick lookup of the application profile
 	slugToAppProfile maps.SafeMap[string, *v1beta1.ApplicationProfile] // cache the application profile
 	slugToPods       maps.SafeMap[string, mapset.Set[string]]          // cache the pods that belong to the application profile, this will enable removing from cache AP without pods
-	allProfiles      mapset.Set[string]                                // cache all the application profiles that are ready. this will enable removing from cache AP without pods that are running on the same node
+	k8sClient        k8sclient.K8sClientInterface
+	allProfiles      mapset.Set[string] // cache all the application profiles that are ready. this will enable removing from cache AP without pods that are running on the same node
+	nodeName         string
 }
 
 func NewApplicationProfileCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *ApplicationProfileCacheImpl {
@@ -54,8 +55,8 @@ func NewApplicationProfileCache(nodeName string, k8sClient k8sclient.K8sClientIn
 
 func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(namespace, name string) *v1beta1.ApplicationProfile {
 	uniqueName := objectcache.UniqueName(namespace, name)
-	if ap.slugToAppProfile.Has(uniqueName) {
-		return ap.slugToAppProfile.Get(uniqueName)
+	if s := ap.podToSlug.Get(uniqueName); s != "" {
+		return ap.slugToAppProfile.Get(s)
 	}
 	return nil
 }
@@ -193,14 +194,21 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 		return
 	}
 
+	// the cache holds only complete ("full") application profiles.
 	// check if the application profile is completed
-	// TODO: @amir
+	// if status was complete and now is not (e.g. mode changed from complete to partial), remove from cache
+	if completionStatus, ok := appProfile.Annotations[helpersv1.CompletionMetadataKey]; ok {
+		if completionStatus != helpersv1.Complete {
+			if ap.slugToAppProfile.Has(apName) {
+				ap.slugToAppProfile.Delete(apName)
+				ap.allProfiles.Remove(apName)
+				ap.slugToPods.Delete(apName)
+			}
+			return
+		}
+	}
 
-	// if status was complete and now is not (e.g. mode changed from partial to complete), remove from cache
-	// if ap.slugToAppProfile.Has(apName) {
-	// 	return
-	// }
-
+	// add to the cache
 	ap.allProfiles.Add(apName)
 
 	// get the full application profile from the storage
@@ -242,15 +250,12 @@ func (ap *ApplicationProfileCacheImpl) getApplicationProfile(namespace, name str
 }
 
 func unstructuredToApplicationProfile(obj *unstructured.Unstructured) (*v1beta1.ApplicationProfile, error) {
-	bytes, err := obj.MarshalJSON()
+
+	ap := &v1beta1.ApplicationProfile{}
+	err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, ap)
 	if err != nil {
 		return nil, err
 	}
 
-	var ap *v1beta1.ApplicationProfile
-	err = json.Unmarshal(bytes, &ap)
-	if err != nil {
-		return nil, err
-	}
 	return ap, nil
 }

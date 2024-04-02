@@ -20,10 +20,11 @@ var _ objectcache.K8sObjectCache = (*K8sObjectCacheImpl)(nil)
 var _ watcher.Adaptor = (*K8sObjectCacheImpl)(nil)
 
 type K8sObjectCacheImpl struct {
-	nodeName           string
-	k8sClient          k8sclient.K8sClientInterface
-	podSpec            maps.SafeMap[string, *corev1.PodSpec]
-	podStatus          maps.SafeMap[string, *corev1.PodStatus]
+	nodeName  string
+	k8sClient k8sclient.K8sClientInterface
+	podSpec   maps.SafeMap[string, *corev1.PodSpec]
+	podStatus maps.SafeMap[string, *corev1.PodStatus]
+
 	apiServerIpAddress string
 }
 
@@ -94,6 +95,7 @@ func (k *K8sObjectCacheImpl) DeleteHandler(_ context.Context, obj *unstructured.
 		if err != nil {
 			return
 		}
+
 		k.podSpec.Delete(podKey(pod.GetNamespace(), pod.GetName()))
 		k.podStatus.Delete(podKey(pod.GetNamespace(), pod.GetName()))
 	}
