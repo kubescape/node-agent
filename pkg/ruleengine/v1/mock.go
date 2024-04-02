@@ -9,12 +9,10 @@ import (
 )
 
 var _ objectcache.ApplicationProfileCache = (*RuleObjectCacheMock)(nil)
-var _ objectcache.ApplicationActivityCache = (*RuleObjectCacheMock)(nil)
 var _ objectcache.K8sObjectCache = (*RuleObjectCacheMock)(nil)
 var _ objectcache.NetworkNeighborsCache = (*RuleObjectCacheMock)(nil)
 
 type RuleObjectCacheMock struct {
-	activity  *v1beta1.ApplicationActivity
 	profile   *v1beta1.ApplicationProfile
 	podSpec   *corev1.PodSpec
 	podStatus *corev1.PodStatus
@@ -30,18 +28,6 @@ func (r *RuleObjectCacheMock) SetApplicationProfile(profile *v1beta1.Application
 }
 
 func (r *RuleObjectCacheMock) ApplicationProfileCache() objectcache.ApplicationProfileCache {
-	return r
-}
-
-func (r *RuleObjectCacheMock) GetApplicationActivity(namespace, name string) *v1beta1.ApplicationActivity {
-	return r.activity
-}
-
-func (r *RuleObjectCacheMock) SetApplicationActivity(activity *v1beta1.ApplicationActivity) {
-	r.activity = activity
-}
-
-func (r *RuleObjectCacheMock) ApplicationActivityCache() objectcache.ApplicationActivityCache {
 	return r
 }
 
@@ -77,4 +63,8 @@ func (r *RuleObjectCacheMock) GetNetworkNeighbors(namespace, name string) *v1bet
 
 func (r *RuleObjectCacheMock) SetNetworkNeighbors(nn *v1beta1.NetworkNeighbors) {
 	r.nn = nn
+}
+
+func (r *RuleObjectCacheMock) IsCached(_, _, _ string) bool {
+	return true
 }
