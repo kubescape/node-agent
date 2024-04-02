@@ -62,6 +62,9 @@ type IGContainerWatcher struct {
 	containerSelector containercollection.ContainerSelector
 	ctx               context.Context
 	nodeName          string
+	podName           string
+	namespace         string
+
 	// Clients
 	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	k8sClient                 *k8sinterface.KubernetesApi
@@ -233,6 +236,9 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		cfg:               cfg,
 		containerSelector: containercollection.ContainerSelector{}, // Empty selector to get all containers
 		nodeName:          os.Getenv(config.NodeNameEnvVar),
+		podName:           os.Getenv(config.PodNameEnvVar),
+		namespace:         os.Getenv(config.NamespaceEnvVar),
+
 		// Clients
 		applicationProfileManager: applicationProfileManager,
 		k8sClient:                 k8sClient,
@@ -256,56 +262,17 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	}, nil
 }
 
-func (ch *IGContainerWatcher) getPreRunningContainers() []*containercollection.Container {
-	return ch.containerCollection.GetContainersBySelector(&containercollection.ContainerSelector{})
-}
-
-func (ch *IGContainerWatcher) generateContainerEventsOnStart(containers []*containercollection.Container) {
-	for _, container := range containers {
-		ch.applicationProfileManager.ContainerCallback(containercollection.PubSubEvent{
-			Type:      containercollection.EventTypeAddContainer,
-			Container: container,
-		})
-		ch.relevancyManager.ContainerCallback(containercollection.PubSubEvent{
-			Type:      containercollection.EventTypeAddContainer,
-			Container: container,
-		})
-		ch.networkManager.ContainerCallback(containercollection.PubSubEvent{
-			Type:      containercollection.EventTypeAddContainer,
-			Container: container,
-		})
-		ch.ruleManager.ContainerCallback(containercollection.PubSubEvent{
-			Type:      containercollection.EventTypeAddContainer,
-			Container: container,
-		})
-		ch.malwareManager.ContainerCallback(containercollection.PubSubEvent{
-			Type:      containercollection.EventTypeAddContainer,
-			Container: container,
-		})
-	}
-}
-
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	if !ch.running {
-		err := ch.startContainerCollection(ctx)
-		if err != nil {
+
+		if err := ch.startContainerCollection(ctx); err != nil {
 			return fmt.Errorf("setting up container collection: %w", err)
 		}
-		err = ch.startTracers()
-		if err != nil {
+
+		if err := ch.startTracers(); err != nil {
 			ch.stopContainerCollection()
 			return fmt.Errorf("starting app behavior tracing: %w", err)
 		}
-
-		if ch.traceForever() {
-			containers := ch.getPreRunningContainers()
-			for _, container := range containers {
-				ch.preRunningContainersIDs.Add(container.Runtime.ContainerID)
-			}
-
-			ch.generateContainerEventsOnStart(containers)
-		}
-
 		logger.L().Info("main container handler started")
 		ch.running = true
 	}

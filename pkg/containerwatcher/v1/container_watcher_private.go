@@ -18,14 +18,22 @@ import (
 )
 
 func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
+
+	// do not trace the node-agent pod
+	if notif.Container.K8s.PodName == ch.podName && notif.Container.K8s.Namespace == ch.namespace {
+		ch.unregisterContainer(notif.Container)
+	}
+
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-		time.AfterFunc(ch.cfg.MaxSniffingTime, func() {
-			logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-			ch.unregisterContainer(notif.Container)
-		})
+		if !ch.traceForever() {
+			time.AfterFunc(ch.cfg.MaxSniffingTime, func() {
+				logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+				ch.unregisterContainer(notif.Container)
+			})
+		}
 	case containercollection.EventTypeRemoveContainer:
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		logger.L().Info("stop monitor on container - container has terminated", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
@@ -111,14 +119,14 @@ func (ch *IGContainerWatcher) stopContainerCollection() {
 
 func (ch *IGContainerWatcher) startTracers() error {
 	if ch.cfg.EnableApplicationProfile {
-		// Start capabilities tracer
-		if err := ch.startCapabilitiesTracing(); err != nil {
-			logger.L().Error("error starting capabilities tracing", helpers.Error(err))
-			return err
-		}
 		// Start syscall tracer
 		if err := ch.startSystemcallTracing(); err != nil {
 			logger.L().Error("error starting seccomp tracing", helpers.Error(err))
+			return err
+		}
+		// Start capabilities tracer
+		if err := ch.startCapabilitiesTracing(); err != nil {
+			logger.L().Error("error starting capabilities tracing", helpers.Error(err))
 			return err
 		}
 	}
@@ -236,14 +244,12 @@ func (ch *IGContainerWatcher) printNsMap(id string) {
 }
 
 func (ch *IGContainerWatcher) unregisterContainer(container *containercollection.Container) {
-	if !ch.traceForever() {
-		event := containercollection.PubSubEvent{
-			Timestamp: time.Now().Format(time.RFC3339),
-			Type:      containercollection.EventTypeRemoveContainer,
-			Container: container,
-		}
-		ch.tracerCollection.TracerMapsUpdater()(event)
+	event := containercollection.PubSubEvent{
+		Timestamp: time.Now().Format(time.RFC3339),
+		Type:      containercollection.EventTypeRemoveContainer,
+		Container: container,
 	}
+	ch.tracerCollection.TracerMapsUpdater()(event)
 }
 
 func (ch *IGContainerWatcher) traceForever() bool {

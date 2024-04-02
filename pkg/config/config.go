@@ -8,6 +8,8 @@ import (
 )
 
 const NodeNameEnvVar = "NODE_NAME"
+const PodNameEnvVar = "POD_NAME"
+const NamespaceEnvVar = "NAMESPACE_NAME"
 
 type Config struct {
 	EnableFullPathTracing    bool                      `mapstructure:"fullPathTracingEnabled"`
