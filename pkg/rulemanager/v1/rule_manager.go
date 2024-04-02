@@ -45,17 +45,18 @@ import (
 
 type RuleManager struct {
 	cfg                      config.Config
-	ctx                      context.Context
-	containerMutexes         storageUtils.MapMutex[string]    // key is k8sContainerID
-	trackedContainers        mapset.Set[string]               // key is k8sContainerID
-	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
-	k8sClient                k8sclient.K8sClientInterface
+	watchedContainerChannels maps.SafeMap[string, chan error] // key is k8sContainerID
 	ruleBindingCache         bindingcache.RuleBindingCache
+	trackedContainers        mapset.Set[string] // key is k8sContainerID
+	k8sClient                k8sclient.K8sClientInterface
+	ctx                      context.Context
 	objectCache              objectcache.ObjectCache
 	exporter                 exporters.Exporter
 	metrics                  metricsmanager.MetricsManager
+	preRunningContainerIDs   mapset.Set[string] // key is k8sContainerID
+	cachedPods               mapset.Set[string] // key is namespace/podName
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
-	preRunningContainerIDs   mapset.Set[string]
+	containerMutexes         storageUtils.MapMutex[string] // key is k8sContainerID
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
@@ -264,6 +265,11 @@ func (rm *RuleManager) ReportCapability(k8sContainerID string, event tracercapab
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportCapability event")
 		return
 	}
+	if !rm.isCached(event.GetNamespace(), event.GetPod()) {
+		logger.L().Error("isCached - failed to get pod from cache", helpers.String("namespace", event.GetNamespace()), helpers.String("name", event.GetPod()))
+		return
+	}
+
 	// list capability rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
@@ -271,14 +277,15 @@ func (rm *RuleManager) ReportCapability(k8sContainerID string, event tracercapab
 }
 
 func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectype.Event) {
-	// TODO: Do we need to wait for this?
-	// if err := rm.waitForContainer(k8sContainerID); err != nil {
-	// 	return
-	// }
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileExec event")
 		return
 	}
+	if !rm.isCached(event.GetNamespace(), event.GetPod()) {
+		logger.L().Error("isCached - failed to get pod from cache", helpers.String("namespace", event.GetNamespace()), helpers.String("name", event.GetPod()))
+		return
+	}
+
 	// list exec rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
@@ -290,6 +297,11 @@ func (rm *RuleManager) ReportFileOpen(k8sContainerID string, event traceropentyp
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileOpen event")
 		return
 	}
+	if !rm.isCached(event.GetNamespace(), event.GetPod()) {
+		logger.L().Error("isCached - failed to get pod from cache", helpers.String("namespace", event.GetNamespace()), helpers.String("name", event.GetPod()))
+		return
+	}
+
 	// list open rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
@@ -301,6 +313,11 @@ func (rm *RuleManager) ReportNetworkEvent(k8sContainerID string, event tracernet
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportNetworkEvent event")
 		return
 	}
+	if !rm.isCached(event.GetNamespace(), event.GetPod()) {
+		logger.L().Error("isCached - failed to get pod from cache", helpers.String("namespace", event.GetNamespace()), helpers.String("name", event.GetPod()))
+		return
+	}
+
 	// list network rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
@@ -312,6 +329,11 @@ func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportDNSEvent event")
 		return
 	}
+	if !rm.isCached(event.GetNamespace(), event.GetPod()) {
+		logger.L().Error("isCached - failed to get pod from cache", helpers.String("namespace", event.GetNamespace()), helpers.String("name", event.GetPod()))
+		return
+	}
+
 	// list dns rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
@@ -321,6 +343,11 @@ func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
 func (rm *RuleManager) ReportRandomxEvent(k8sContainerID string, event tracerrandomxtype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from randomx event")
+		return
+	}
+
+	if !rm.isCached(event.GetNamespace(), event.GetPod()) {
+		logger.L().Error("isCached - failed to get pod from cache", helpers.String("namespace", event.GetNamespace()), helpers.String("name", event.GetPod()))
 		return
 	}
 
@@ -349,6 +376,33 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())
 	}
+}
+
+func (rm *RuleManager) isCached(namespace, name string) bool {
+	podName := fmt.Sprintf("%s/%s", namespace, name)
+	if rm.cachedPods.Contains(podName) {
+		return true
+	}
+
+	// wait for pod to be cached
+	b := &backoff.ExponentialBackOff{
+		MaxElapsedTime: 10 * time.Second, // the default is 60 seconds
+	}
+	b.Reset()
+
+	if err := backoff.Retry(func() error {
+		if rm.objectCache.IsCached("Pod", namespace, name) &&
+			rm.ruleBindingCache.IsCached("Pod", namespace, name) {
+			return nil
+		}
+
+		return fmt.Errorf("object %s/%s not found", namespace, name)
+	}, b); err != nil {
+		return false
+	}
+
+	rm.cachedPods.Add(podName)
+	return true
 }
 
 // Checks if the event type is relevant to the rule.

@@ -13,11 +13,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+func uniqueName(namespace, name string) string {
+	return fmt.Sprintf("%s/%s", namespace, name)
+}
 func podUniqueName(pod *corev1.Pod) string {
-	return fmt.Sprintf("%s/%s", pod.GetNamespace(), pod.GetName())
+	return uniqueName(pod.GetNamespace(), pod.GetName())
 }
 func rbUniqueName(rb *typesv1.RuntimeAlertRuleBinding) string {
-	return fmt.Sprintf("%s/%s", rb.GetNamespace(), rb.GetName())
+	return uniqueName(rb.GetNamespace(), rb.GetName())
 }
 
 func unstructuredUniqueName(obj *unstructured.Unstructured) string {

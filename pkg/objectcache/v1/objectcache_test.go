@@ -9,24 +9,18 @@ import (
 
 func TestK8sObjectCache(t *testing.T) {
 	k := &objectcache.K8sObjectCacheMock{}
-	k8sObjectCache := NewObjectCache(k, nil, nil, nil)
+	k8sObjectCache := NewObjectCache(k, nil, nil)
 	assert.NotNil(t, k8sObjectCache.K8sObjectCache())
 }
 
 func TestApplicationProfileCache(t *testing.T) {
 	ap := &objectcache.ApplicationProfileCacheMock{}
-	k8sObjectCache := NewObjectCache(nil, ap, nil, nil)
+	k8sObjectCache := NewObjectCache(nil, ap, nil)
 	assert.NotNil(t, k8sObjectCache.ApplicationProfileCache())
-}
-
-func TestApplicationActivityCache(t *testing.T) {
-	aa := &objectcache.ApplicationActivityCacheMock{}
-	k8sObjectCache := NewObjectCache(nil, nil, aa, nil)
-	assert.NotNil(t, k8sObjectCache.ApplicationActivityCache())
 }
 
 func TestNetworkNeighborsCache(t *testing.T) {
 	nn := &objectcache.NetworkNeighborsCacheMock{}
-	k8sObjectCache := NewObjectCache(nil, nil, nil, nn)
+	k8sObjectCache := NewObjectCache(nil, nil, nn)
 	assert.NotNil(t, k8sObjectCache.NetworkNeighborsCache())
 }

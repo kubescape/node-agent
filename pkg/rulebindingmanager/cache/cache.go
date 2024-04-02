@@ -86,6 +86,17 @@ func (c *RBCache) ListRulesForPod(namespace, name string) []ruleengine.RuleEvalu
 	return rulesSlice
 }
 
+func (c *RBCache) IsCached(kind, namespace, name string) bool {
+	switch kind {
+	case "Pod":
+		return c.podToRBNames.Has(uniqueName(namespace, name))
+	case "RuntimeRuleAlertBinding":
+		return c.rbNameToRB.Has(uniqueName(namespace, name))
+	default:
+		return false
+	}
+}
+
 // ------------------ watcher.Watcher methods -----------------------
 func (c *RBCache) AddHandler(ctx context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {

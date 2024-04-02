@@ -19,7 +19,6 @@ import (
 	metricsmanager "node-agent/pkg/metricsmanager"
 	metricprometheus "node-agent/pkg/metricsmanager/prometheus"
 	"node-agent/pkg/networkmanager"
-	"node-agent/pkg/objectcache/applicationactivitiescache"
 	"node-agent/pkg/objectcache/applicationprofilecache"
 	"node-agent/pkg/objectcache/k8scache"
 	"node-agent/pkg/objectcache/networkneighborscache"
@@ -167,11 +166,8 @@ func main() {
 		nnc := networkneighborscache.NewNetworkNeighborsCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(nnc)
 
-		aac := applicationactivitiescache.NewApplicationActivityCache(nodeName, k8sClient)
-		dWatcher.AddAdaptor(aac)
-
 		// create object cache
-		objCache := objectcache.NewObjectCache(k8sObjectCache, apc, aac, nnc)
+		objCache := objectcache.NewObjectCache(k8sObjectCache, apc, nnc)
 
 		// create exporter
 		exporter := exporters.InitExporters(cfg.Exporters)

@@ -2,12 +2,8 @@ package objectcache
 
 import "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
-// Path: pkg/ruleengine/objectcache/applicationprofilecache.go
-// Compare this snippet from pkg/ruleengine/objectcache/objectcache_interface.go:
-// package objectcache
-//
-
 type ApplicationProfileCache interface {
+	IsCached(kind, namespace, name string) bool
 	GetApplicationProfile(namespace, name string) *v1beta1.ApplicationProfile
 }
 
@@ -18,4 +14,7 @@ type ApplicationProfileCacheMock struct {
 
 func (ap *ApplicationProfileCacheMock) GetApplicationProfile(namespace, name string) *v1beta1.ApplicationProfile {
 	return nil
+}
+func (ap *ApplicationProfileCacheMock) IsCached(kind, namespace, name string) bool {
+	return true
 }
