@@ -173,6 +173,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
 		relevancyManager.ReportFileExec(k8sContainerID, path)
 		ruleManager.ReportFileOpen(k8sContainerID, event)
+		malwareManager.ReportFileOpen(k8sContainerID, event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating open worker pool: %w", err)
@@ -274,6 +275,10 @@ func (ch *IGContainerWatcher) generateContainerEventsOnStart(containers []*conta
 			Container: container,
 		})
 		ch.ruleManager.ContainerCallback(containercollection.PubSubEvent{
+			Type:      containercollection.EventTypeAddContainer,
+			Container: container,
+		})
+		ch.malwareManager.ContainerCallback(containercollection.PubSubEvent{
 			Type:      containercollection.EventTypeAddContainer,
 			Container: container,
 		})
