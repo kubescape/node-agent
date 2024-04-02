@@ -73,6 +73,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		exporter:               exporter,
 		metrics:                metrics,
 		preRunningContainerIDs: preRunningContainersIDs,
+		cachedPods:             mapset.NewSet[string](),
 	}, nil
 }
 
@@ -385,11 +386,6 @@ func (rm *RuleManager) isCached(namespace, name string) bool {
 	}
 
 	// wait for pod to be cached
-	b := &backoff.ExponentialBackOff{
-		MaxElapsedTime: 10 * time.Second, // the default is 60 seconds
-	}
-	b.Reset()
-
 	if err := backoff.Retry(func() error {
 		if rm.objectCache.IsCached("Pod", namespace, name) &&
 			rm.ruleBindingCache.IsCached("Pod", namespace, name) {
@@ -397,7 +393,7 @@ func (rm *RuleManager) isCached(namespace, name string) bool {
 		}
 
 		return fmt.Errorf("object %s/%s not found", namespace, name)
-	}, b); err != nil {
+	}, backoff.NewExponentialBackOff()); err != nil {
 		return false
 	}
 
