@@ -198,7 +198,7 @@ func main() {
 			}
 		}
 
-		malwareManager, err = malwaremanagerv1.CreateMalwareManager(malwarescanners, exporter)
+		malwareManager, err = malwaremanagerv1.CreateMalwareManager(malwarescanners, exporter, cfg)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
 		}
