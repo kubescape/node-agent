@@ -5,6 +5,7 @@ go 1.21.3
 toolchain go1.21.4
 
 require (
+	github.com/armosec/armoapi-go v0.0.367
 	github.com/armosec/utils-k8s-go v0.0.26
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cilium/ebpf v0.14.0
@@ -26,6 +27,7 @@ require (
 	github.com/panjf2000/ants/v2 v2.9.0
 	github.com/prometheus/alertmanager v0.27.0
 	github.com/prometheus/client_golang v1.19.0
+	github.com/prometheus/procfs v0.12.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.9.0
@@ -49,21 +51,21 @@ require (
 	github.com/Microsoft/hcsshim v0.12.0-rc.3 // indirect
 	github.com/acobaugh/osrelease v0.1.0 // indirect
 	github.com/adrg/xdg v0.4.0 // indirect
-	github.com/anchore/clio v0.0.0-20231016125544-c98a83e1c7fc // indirect
-	github.com/anchore/fangs v0.0.0-20231103141714-84c94dc43a2e // indirect
+	github.com/anchore/clio v0.0.0-20240209204744-cb94e40a4f65 // indirect
+	github.com/anchore/fangs v0.0.0-20231201140849-5075d28d6d8b // indirect
 	github.com/anchore/go-logger v0.0.0-20230725134548-c21dafa1ec5a // indirect
-	github.com/anchore/packageurl-go v0.1.1-0.20230104203445-02e0a6721501 // indirect
-	github.com/anchore/stereoscope v0.0.0-20231117203853-3610f4ef3e83 // indirect
-	github.com/anchore/syft v0.98.0 // indirect
+	github.com/anchore/packageurl-go v0.1.1-0.20240202171727-877e1747d426 // indirect
+	github.com/anchore/stereoscope v0.0.2-0.20240216182029-6171ee21e1d5 // indirect
+	github.com/anchore/syft v0.101.1 // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
-	github.com/armosec/armoapi-go v0.0.329 // indirect
 	github.com/armosec/gojay v1.2.15 // indirect
-	github.com/armosec/utils-go v0.0.56 // indirect
+	github.com/armosec/utils-go v0.0.57 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/becheran/wildmatch-go v1.0.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
 	github.com/briandowns/spinner v1.23.0 // indirect
+	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/containerd/cgroups/v3 v3.0.2 // indirect
 	github.com/containerd/containerd v1.7.14 // indirect
@@ -94,7 +96,7 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
-	github.com/gabriel-vasile/mimetype v1.4.0 // indirect
+	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/github/go-spdx/v2 v2.2.0 // indirect
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
@@ -116,7 +118,7 @@ require (
 	github.com/google/btree v1.1.2 // indirect
 	github.com/google/gnostic-models v0.6.9-0.20230804172637-c7be7c783f49 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
-	github.com/google/go-containerregistry v0.17.0 // indirect
+	github.com/google/go-containerregistry v0.19.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/pprof v0.0.0-20221118152302-e6195bd50e26 // indirect
@@ -176,7 +178,6 @@ require (
 	github.com/pquerna/cachecontrol v0.2.0 // indirect
 	github.com/prometheus/client_model v0.6.0 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
-	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/s3rj1k/go-fanotify/fanotify v0.0.0-20210917134616-9c00a300bb7a // indirect
 	github.com/sagikazarmark/locafero v0.4.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
