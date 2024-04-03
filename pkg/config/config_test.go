@@ -1,7 +1,7 @@
 package config
 
 import (
-	"node-agent/pkg/rulemanager/exporters"
+	"node-agent/pkg/exporters"
 	"testing"
 	"time"
 
