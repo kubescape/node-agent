@@ -20,8 +20,9 @@ import (
 func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
 
 	// do not trace the node-agent pod
-	if notif.Container.K8s.PodName == ch.podName && notif.Container.K8s.Namespace == ch.namespace {
+	if ch.ignoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName) {
 		ch.unregisterContainer(notif.Container)
+		return
 	}
 
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
@@ -86,6 +87,11 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 		containers := ch.containerCollection.GetContainersBySelector(&containercollection.ContainerSelector{})
 		for _, container := range containers {
+			if ch.ignoreContainer(container.K8s.Namespace, container.K8s.PodName) {
+				logger.L().Info("removed container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", utils.CreateK8sContainerID(container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)))
+				ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
+				continue
+			}
 			ch.preRunningContainersIDs.Add(container.Runtime.ContainerID)
 		}
 	}
@@ -248,6 +254,8 @@ func (ch *IGContainerWatcher) printNsMap(id string) {
 }
 
 func (ch *IGContainerWatcher) unregisterContainer(container *containercollection.Container) {
+	// @matthias can we call the RemoveContainer instead?
+	// ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
 	event := containercollection.PubSubEvent{
 		Timestamp: time.Now().Format(time.RFC3339),
 		Type:      containercollection.EventTypeRemoveContainer,
@@ -258,4 +266,8 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 
 func (ch *IGContainerWatcher) traceForever() bool {
 	return ch.cfg.EnableRuntimeDetection
+}
+
+func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {
+	return name == ch.podName && namespace == ch.namespace
 }

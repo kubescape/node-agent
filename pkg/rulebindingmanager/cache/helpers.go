@@ -3,7 +3,6 @@ package cache
 import (
 	"encoding/json"
 	"fmt"
-	"node-agent/pkg/rulebindingmanager/types/v1"
 	typesv1 "node-agent/pkg/rulebindingmanager/types/v1"
 	"node-agent/pkg/watcher"
 
@@ -24,16 +23,16 @@ func rbUniqueName(rb *typesv1.RuntimeAlertRuleBinding) string {
 }
 
 func unstructuredUniqueName(obj *unstructured.Unstructured) string {
-	return fmt.Sprintf("%s/%s", obj.GetNamespace(), obj.GetName())
+	return uniqueName(obj.GetNamespace(), obj.GetName())
 }
 
-func unstructuredToRuleBinding(obj *unstructured.Unstructured) (*types.RuntimeAlertRuleBinding, error) {
+func unstructuredToRuleBinding(obj *unstructured.Unstructured) (*typesv1.RuntimeAlertRuleBinding, error) {
 	bytes, err := obj.MarshalJSON()
 	if err != nil {
 		return nil, err
 	}
 
-	var runtimeAlertRuleBindingObj *types.RuntimeAlertRuleBinding
+	var runtimeAlertRuleBindingObj *typesv1.RuntimeAlertRuleBinding
 	err = json.Unmarshal(bytes, &runtimeAlertRuleBindingObj)
 	if err != nil {
 		return nil, err
