@@ -197,8 +197,8 @@ func (np *NetworkNeighborsCacheImp) addNetworkNeighbor(_ context.Context, obj *u
 		return
 	}
 
-	if completionStatus, ok := netNeighbor.Annotations[helpersv1.CompletionMetadataKey]; ok {
-		if completionStatus != helpersv1.Complete {
+	if status, ok := netNeighbor.Annotations[helpersv1.StatusMetadataKey]; ok {
+		if status != helpersv1.Completed {
 			if np.slugToNetworkNeighbor.Has(nnName) {
 				np.slugToNetworkNeighbor.Delete(nnName)
 				np.allNeighbors.Remove(nnName)
