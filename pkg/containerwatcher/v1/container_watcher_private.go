@@ -52,18 +52,9 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.malwareManager.ContainerCallback,
 	}
 
-	// Get the container runtime configuration
-	runtimeConfig, err := ch.getContainerRuntimeConfig()
-	if err != nil {
-		return fmt.Errorf("getting container runtime configuration: %w", err)
-	}
-
 	// Define the different options for the container collection instance
 	opts := []containercollection.ContainerCollectionOption{
 		containercollection.WithTracerCollection(ch.tracerCollection),
-
-		// Get containers that are already running
-		containercollection.WithContainerRuntimeEnrichment(runtimeConfig),
 
 		// Enrich events with OCI config information
 		containercollection.WithOCIConfigEnrichment(),
@@ -82,6 +73,21 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 		// Get Notifications from the container collection
 		containercollection.WithPubSub(containerEventFuncs...),
+	}
+
+	if ch.traceForever() {
+		// Get the container runtime configuration
+		runtimeConfig, err := ch.getContainerRuntimeConfig()
+		if err != nil {
+			return fmt.Errorf("getting container runtime configuration: %w", err)
+		}
+		// Get containers that are already running.
+		opts = append(opts, containercollection.WithContainerRuntimeEnrichment(runtimeConfig))
+
+		containers := ch.containerCollection.GetContainersBySelector(&containercollection.ContainerSelector{})
+		for _, container := range containers {
+			ch.preRunningContainersIDs.Add(container.Runtime.ContainerID)
+		}
 	}
 
 	// Initialize the container collection
