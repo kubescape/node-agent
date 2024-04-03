@@ -292,10 +292,11 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) {
 }
 
 func (c *RBCache) deletePod(uniqueName string) {
+	c.allPods.Remove(uniqueName)
 
 	// selectors match, add the rule binding to the pod
 	rbNames := []string{}
-	if !c.podToRBNames.Has(uniqueName) {
+	if c.podToRBNames.Has(uniqueName) {
 		rbNames = c.podToRBNames.Get(uniqueName).ToSlice()
 	}
 

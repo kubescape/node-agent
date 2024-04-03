@@ -3,7 +3,6 @@
     "kind": "ApplicationActivity",
     "metadata": {
         "annotations": {
-            "kubescape.io/status": "ready"
         },
         "labels": {
             "kubescape.io/instance-template-hash": "77b4fdf86c",

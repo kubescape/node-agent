@@ -17,7 +17,6 @@ import (
 
 	"k8s.io/client-go/kubernetes/scheme"
 
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -114,7 +113,7 @@ func Test_addApplicationProfile(t *testing.T) {
 			name: "add application profile with complete annotation",
 			obj:  mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
 			annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Complete,
+				"kubescape.io/status": "completed",
 			},
 			shouldAdd: true,
 		},
@@ -122,7 +121,7 @@ func Test_addApplicationProfile(t *testing.T) {
 			name: "ignore single application profile with incomplete annotation",
 			obj:  mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
 			annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Ready,
+				"kubescape.io/status": "ready",
 			},
 			shouldAdd: false,
 		},
@@ -131,7 +130,7 @@ func Test_addApplicationProfile(t *testing.T) {
 			obj:            mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
 			preCreatedPods: []*unstructured.Unstructured{mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection)},
 			annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Complete,
+				"kubescape.io/status": "completed",
 			},
 			shouldAdd:      true,
 			shouldAddToPod: true,
@@ -141,7 +140,7 @@ func Test_addApplicationProfile(t *testing.T) {
 			obj:            mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
 			preCreatedPods: []*unstructured.Unstructured{mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx)},
 			annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Complete,
+				"kubescape.io/status": "completed",
 			},
 			shouldAdd:      true,
 			shouldAddToPod: false,
@@ -436,6 +435,7 @@ func Test_addApplicationProfile_existing(t *testing.T) {
 	tests := []struct {
 		obj1         *unstructured.Unstructured
 		obj2         *unstructured.Unstructured
+		pods         []*unstructured.Unstructured
 		annotations1 map[string]string
 		annotations2 map[string]string
 		name         string
@@ -452,10 +452,10 @@ func Test_addApplicationProfile_existing(t *testing.T) {
 			obj1: mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
 			obj2: mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
 			annotations1: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Complete,
+				"kubescape.io/status": "completed",
 			},
 			annotations2: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Ready,
+				"kubescape.io/status": "ready",
 			},
 			storeInCache: false,
 		},

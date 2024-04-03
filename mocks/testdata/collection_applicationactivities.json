@@ -3,7 +3,6 @@
     "kind": "ApplicationActivity",
     "metadata": {
         "annotations": {
-            "kubescape.io/status": "ready",
             "kubescape.io/wlid": "wlid://cluster-gke_armo-test-clusters_us-central1-c_dwertent-syft/namespace-collection/deployment-collection"
         },
         "creationTimestamp": "2024-03-25T11:25:13Z",

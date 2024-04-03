@@ -98,6 +98,13 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 	for {
 		select {
 		case <-syscallTicker.C:
+			if rm.syscallPeekFunc == nil {
+				logger.L().Error("RuleManager - syscallPeekFunc is not set", helpers.String("container ID", watchedContainer.ContainerID))
+				continue
+			}
+			if watchedContainer.NsMntId == 0 {
+				logger.L().Error("RuleManager - mount namespace ID is not set", helpers.String("container ID", watchedContainer.ContainerID))
+			}
 			syscalls, err := rm.syscallPeekFunc(watchedContainer.NsMntId)
 			if err != nil {
 				logger.L().Ctx(ctx).Error("RuleManager - failed to get syscalls", helpers.Error(err),
@@ -105,7 +112,10 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 					helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				return err
 			}
-
+			if !rm.isCached(pod.GetNamespace(), pod.GetName()) {
+				logger.L().Error("isCached - failed to get pod from cache", helpers.String("namespace", pod.GetNamespace()), helpers.String("name", pod.GetName()))
+				continue
+			}
 			rules := rm.ruleBindingCache.ListRulesForPod(pod.GetNamespace(), pod.GetName())
 			for _, syscall := range syscalls {
 				event := ruleenginetypes.SyscallEvent{

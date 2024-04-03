@@ -207,11 +207,11 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 		return
 	}
 
-	// the cache holds only complete ("full") application profiles.
+	// the cache holds only completed application profiles.
 	// check if the application profile is completed
-	// if status was complete and now is not (e.g. mode changed from complete to partial), remove from cache
-	if completionStatus, ok := appProfile.Annotations[helpersv1.CompletionMetadataKey]; ok {
-		if completionStatus != helpersv1.Complete {
+	// if status was completed and now is not (e.g. mode changed from complete to partial), remove from cache
+	if status, ok := appProfile.Annotations[helpersv1.StatusMetadataKey]; ok {
+		if status != helpersv1.Completed {
 			if ap.slugToAppProfile.Has(apName) {
 				ap.slugToAppProfile.Delete(apName)
 				ap.allProfiles.Remove(apName)

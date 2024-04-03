@@ -2,9 +2,7 @@
     "apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
     "kind": "NetworkNeighbors",
     "metadata": {
-        "annotations": {
-            "kubescape.io/status": "ready"
-        },
+        "annotations": { },
         "labels": {
             "kubescape.io/workload-api-group": "apps",
             "kubescape.io/workload-api-version": "v1",
