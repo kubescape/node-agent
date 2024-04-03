@@ -28,7 +28,6 @@ func isUnixSocket(path string) (bool, error) {
 
 func DetectContainerRuntime(hostMount string) (*containerutilsTypes.RuntimeConfig, error) {
 	runtimes := map[igtypes.RuntimeName]string{
-		igtypes.RuntimeNameDocker:     runtimeclient.DockerDefaultSocketPath,
 		igtypes.RuntimeNameCrio:       runtimeclient.CrioDefaultSocketPath,
 		igtypes.RuntimeNameContainerd: runtimeclient.ContainerdDefaultSocketPath,
 		igtypes.RuntimeNamePodman:     runtimeclient.PodmanDefaultSocketPath,
@@ -42,6 +41,15 @@ func DetectContainerRuntime(hostMount string) (*containerutilsTypes.RuntimeConfi
 				SocketPath: socketPath,
 			}, nil
 		}
+	}
+
+	// Try to detect the Docker socket (After checking the other modern container runtimes).
+	socketPath := hostMount + runtimeclient.DockerDefaultSocketPath
+	if isSocket, err := isUnixSocket(socketPath); err == nil && isSocket {
+		return &containerutilsTypes.RuntimeConfig{
+			Name:       igtypes.RuntimeNameDocker,
+			SocketPath: socketPath,
+		}, nil
 	}
 
 	// If no container runtime is detected, check if the container runtime is provided as an environment variable.
