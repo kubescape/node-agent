@@ -58,8 +58,6 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		return fmt.Errorf("getting container runtime configuration: %w", err)
 	}
 
-	logger.L().Debug("container runtime configuration", helpers.Interface("runtimeConfig", runtimeConfig))
-
 	// Define the different options for the container collection instance
 	opts := []containercollection.ContainerCollectionOption{
 		containercollection.WithTracerCollection(ch.tracerCollection),
