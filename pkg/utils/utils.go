@@ -305,13 +305,13 @@ func (watchedContainer *WatchedContainerData) GetTerminationExitCode(k8sObjectsC
 	return 0
 }
 
-func EnrichProfileContainer(newProfileContainer *v1beta1.ApplicationProfileContainer, observedCapabilities, syscalls []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string]) {
+func EnrichProfileContainer(newProfileContainer *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string]) {
 	// add capabilities
 	sort.Strings(observedCapabilities)
 	newProfileContainer.Capabilities = observedCapabilities
 	// add syscalls
-	sort.Strings(syscalls)
-	newProfileContainer.Syscalls = syscalls
+	sort.Strings(observedSyscalls)
+	newProfileContainer.Syscalls = observedSyscalls
 	// add execs
 	newProfileContainer.Execs = make([]v1beta1.ExecCalls, 0)
 	for path, exec := range execs {
