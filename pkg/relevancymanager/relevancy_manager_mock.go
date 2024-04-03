@@ -15,6 +15,10 @@ func (r RelevancyManagerMock) ContainerCallback(_ containercollection.PubSubEven
 	// noop
 }
 
-func (r RelevancyManagerMock) ReportFileExec(_, _ string) {
+func (r RelevancyManagerMock) ReportFileExec(_, _, _ string) {
+	// noop
+}
+
+func (r RelevancyManagerMock) ReportFileOpen(_, _, _ string) {
 	// noop
 }
