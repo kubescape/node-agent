@@ -18,7 +18,7 @@ func (ch *IGContainerWatcher) randomxEventCallback(event *tracerrandomxtype.Even
 		return
 	}
 
-	_ = ch.randomxWorkerPool.Invoke(*event)
+	ch.randomxWorkerChan <- event
 }
 
 func (ch *IGContainerWatcher) startRandomxTracing() error {
@@ -31,6 +31,12 @@ func (ch *IGContainerWatcher) startRandomxTracing() error {
 	if err != nil {
 		return fmt.Errorf("getting randomxMountnsmap: %w", err)
 	}
+
+	go func() {
+		for event := range ch.randomxWorkerChan {
+			ch.randomxWorkerPool.Invoke(*event)
+		}
+	}()
 
 	tracerrandomx, err := tracerandomx.NewTracer(&tracerandomx.Config{MountnsMap: randomxMountnsmap}, ch.containerCollection, ch.randomxEventCallback)
 	if err != nil {

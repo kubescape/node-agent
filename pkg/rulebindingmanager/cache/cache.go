@@ -32,6 +32,7 @@ var _ watcher.Adaptor = (*RBCache)(nil)
 type RBCache struct {
 	nodeName         string
 	k8sClient        k8sclient.K8sClientInterface
+	allPods          mapset.Set[string]                                    // set of all pods (also pods without rules)
 	globalRBNames    mapset.Set[string]                                    // rules without selectors
 	podToRBNames     maps.SafeMap[string, mapset.Set[string]]              // pod name -> []rule binding names
 	rbNameToRB       maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding] // rule binding name -> rule binding
@@ -47,6 +48,7 @@ func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *RBCache 
 		k8sClient:        k8sClient,
 		ruleCreator:      ruleenginev1.NewRuleCreator(),
 		globalRBNames:    mapset.NewSet[string](),
+		allPods:          mapset.NewSet[string](),
 		podToRBNames:     maps.SafeMap[string, mapset.Set[string]]{},
 		rbNameToPodNames: maps.SafeMap[string, mapset.Set[string]]{},
 		watchResources:   resourcesToWatch(nodeName),
@@ -89,7 +91,7 @@ func (c *RBCache) ListRulesForPod(namespace, name string) []ruleengine.RuleEvalu
 func (c *RBCache) IsCached(kind, namespace, name string) bool {
 	switch kind {
 	case "Pod":
-		return c.podToRBNames.Has(uniqueName(namespace, name))
+		return c.allPods.Contains(uniqueName(namespace, name))
 	case "RuntimeRuleAlertBinding":
 		return c.rbNameToRB.Has(uniqueName(namespace, name))
 	default:
@@ -237,6 +239,9 @@ func (c *RBCache) modifiedRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBindi
 
 func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) {
 	podName := podUniqueName(pod)
+
+	// add the pods to list of all pods only after the pod is processed
+	defer c.allPods.Add(podName)
 
 	// if pod is already in the cache, ignore
 	if c.podToRBNames.Has(podName) {
