@@ -94,6 +94,13 @@ type IGContainerWatcher struct {
 	dnsWorkerPool          *ants.PoolWithFunc
 	randomxWorkerPool      *ants.PoolWithFunc
 
+	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
+	execWorkerChan         chan *tracerexectype.Event
+	openWorkerChan         chan *traceropentype.Event
+	networkWorkerChan      chan *tracernetworktype.Event
+	dnsWorkerChan          chan *tracerdnstype.Event
+	randomxWorkerChan      chan *tracerandomxtype.Event
+
 	preRunningContainersIDs mapset.Set[string]
 
 	metrics metricsmanager.MetricsManager
@@ -259,6 +266,14 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		randomxWorkerPool:       randomxWorkerPool,
 		metrics:                 metrics,
 		preRunningContainersIDs: preRunningContainers,
+
+		// Channels
+		capabilitiesWorkerChan: make(chan *tracercapabilitiestype.Event, 10),
+		execWorkerChan:         make(chan *tracerexectype.Event, 50),
+		openWorkerChan:         make(chan *traceropentype.Event, 500),
+		networkWorkerChan:      make(chan *tracernetworktype.Event, 50),
+		dnsWorkerChan:          make(chan *tracerdnstype.Event, 50),
+		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 10),
 	}, nil
 }
 

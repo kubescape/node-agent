@@ -57,6 +57,7 @@ type RuleManager struct {
 	cachedPods               mapset.Set[string] // key is namespace/podName
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	containerMutexes         storageUtils.MapMutex[string] // key is k8sContainerID
+	podInCacheMutexes        storageUtils.MapMutex[string] // key is namespace+podName
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
@@ -67,6 +68,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		ctx:                    ctx,
 		k8sClient:              k8sClient,
 		containerMutexes:       storageUtils.NewMapMutex[string](),
+		podInCacheMutexes:      storageUtils.NewMapMutex[string](),
 		trackedContainers:      mapset.NewSet[string](),
 		ruleBindingCache:       ruleBindingCache,
 		objectCache:            objectCache,
@@ -381,18 +383,35 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 
 func (rm *RuleManager) isCached(namespace, name string) bool {
 	podName := fmt.Sprintf("%s/%s", namespace, name)
+
+	// this will prevent multiple goroutines from waiting for the same pod to be cached
+	// first, try to read lock the pod
+	rm.podInCacheMutexes.RLock(podName)
+
+	if rm.cachedPods.Contains(podName) {
+		rm.podInCacheMutexes.RUnlock(podName)
+		return true
+	}
+	rm.podInCacheMutexes.RUnlock(podName)
+
+	// if the pod is not cached, lock it for writing
+	rm.podInCacheMutexes.Lock(podName)
+	defer rm.podInCacheMutexes.Unlock(podName)
+
+	// check again (because another goroutine might have cached the pod while we were waiting for the lock)
 	if rm.cachedPods.Contains(podName) {
 		return true
 	}
 
 	// wait for pod to be cached
 	if err := backoff.Retry(func() error {
-		if rm.objectCache.IsCached("Pod", namespace, name) &&
-			rm.ruleBindingCache.IsCached("Pod", namespace, name) {
-			return nil
+		if !rm.objectCache.IsCached("Pod", namespace, name) {
+			return fmt.Errorf("pod %s/%s not found in objectCache", namespace, name)
 		}
-
-		return fmt.Errorf("object %s/%s not found", namespace, name)
+		if !rm.ruleBindingCache.IsCached("Pod", namespace, name) {
+			return fmt.Errorf("pod %s/%s not found in ruleBindingCache", namespace, name)
+		}
+		return nil
 	}, backoff.NewExponentialBackOff()); err != nil {
 		return false
 	}

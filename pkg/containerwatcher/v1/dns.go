@@ -20,7 +20,7 @@ func (ch *IGContainerWatcher) dnsEventCallback(event *tracerdnstype.Event) {
 	ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
 	ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
 
-	_ = ch.dnsWorkerPool.Invoke(*event)
+	ch.dnsWorkerChan <- event
 }
 
 func (ch *IGContainerWatcher) startDNSTracing() error {
@@ -32,6 +32,11 @@ func (ch *IGContainerWatcher) startDNSTracing() error {
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
+	go func() {
+		for event := range ch.dnsWorkerChan {
+			ch.dnsWorkerPool.Invoke(*event)
+		}
+	}()
 
 	tracerDns.SetEventHandler(ch.dnsEventCallback)
 

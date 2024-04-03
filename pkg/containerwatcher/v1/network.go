@@ -35,7 +35,7 @@ func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Eve
 		}
 	}
 
-	_ = ch.networkWorkerPool.Invoke(*event)
+	ch.networkWorkerChan <- event
 }
 
 func (ch *IGContainerWatcher) startNetworkTracing() error {
@@ -48,6 +48,11 @@ func (ch *IGContainerWatcher) startNetworkTracing() error {
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
+	go func() {
+		for event := range ch.networkWorkerChan {
+			ch.networkWorkerPool.Invoke(*event)
+		}
+	}()
 
 	tracerNetwork.SetEventHandler(ch.networkEventCallback)
 
