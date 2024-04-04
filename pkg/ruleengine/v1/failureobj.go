@@ -2,44 +2,37 @@ package ruleengine
 
 import (
 	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 var _ ruleengine.RuleFailure = (*GenericRuleFailure)(nil)
 
 type GenericRuleFailure struct {
-	RuleName         string
-	RuleID           string
-	ContainerId      string
-	RulePriority     int
-	FixSuggestionMsg string
-	Err              string
-	FailureEvent     *utils.GeneralEvent
+	BaseRuntimeAlert       apitypes.BaseRuntimeAlert
+	RuntimeProcessDetails  apitypes.RuntimeAlertProcessDetails
+	TriggerEvent           igtypes.Event
+	RuleAlert              apitypes.RuleAlert
+	RuntimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails
 }
 
-func (rule *GenericRuleFailure) Name() string {
-	return rule.RuleName
-}
-func (rule *GenericRuleFailure) ID() string {
-	return rule.RuleID
+func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {
+	return rule.BaseRuntimeAlert
 }
 
-func (rule *GenericRuleFailure) ContainerID() string {
-	return rule.ContainerId
+func (rule *GenericRuleFailure) GetRuntimeProcessDetails() apitypes.RuntimeAlertProcessDetails {
+	return rule.RuntimeProcessDetails
 }
 
-func (rule *GenericRuleFailure) Error() string {
-	return rule.Err
+func (rule *GenericRuleFailure) GetTriggerEvent() igtypes.Event {
+	return rule.TriggerEvent
 }
 
-func (rule *GenericRuleFailure) Event() *utils.GeneralEvent {
-	return rule.FailureEvent
+func (rule *GenericRuleFailure) GetRuleAlert() apitypes.RuleAlert {
+	return rule.RuleAlert
 }
 
-func (rule *GenericRuleFailure) Priority() int {
-	return rule.RulePriority
-}
-
-func (rule *GenericRuleFailure) FixSuggestion() string {
-	return rule.FixSuggestionMsg
+func (rule *GenericRuleFailure) GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails {
+	return rule.RuntimeAlertK8sDetails
 }

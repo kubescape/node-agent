@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 
@@ -89,15 +90,29 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 	}
 
 	if event.DstEndpoint.Addr == apiServerIP {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			ContainerId:      event.Runtime.ContainerID,
-			Err:              fmt.Sprintf("Kubernetes client executed: %s", event.Comm),
-			FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-			FailureEvent:     utils.NetworkToGeneralEvent(event),
-			RulePriority:     R0007KubernetesClientExecutedDescriptor.Priority,
+		ruleFailure := GenericRuleFailure{
+			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				AlertName:      rule.Name(),
+				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
+				Severity:       R0007KubernetesClientExecutedDescriptor.Priority,
+			},
+			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+				Comm: event.Comm,
+				GID:  event.Gid,
+				PID:  event.Pid,
+				UID:  event.Uid,
+			},
+			TriggerEvent: event.Event,
+			RuleAlert: apitypes.RuleAlert{
+				RuleID:          rule.ID(),
+				RuleDescription: fmt.Sprintf("Kubernetes client executed: %s", event.Comm),
+			},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}
+
+		enrichRuleFailure(event.Event, event.Pid, &ruleFailure)
+
+		return &ruleFailure
 	}
 
 	return nil
@@ -118,15 +133,33 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 	}
 
 	if slices.Contains(kubernetesClients, filepath.Base(execPath)) {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			ContainerId:      event.Runtime.ContainerID,
-			Err:              fmt.Sprintf("Kubernetes client executed: %s", execPath),
-			FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-			FailureEvent:     utils.ExecToGeneralEvent(event),
-			RulePriority:     R0007KubernetesClientExecutedDescriptor.Priority,
+		isPartOfImage := !event.UpperLayer
+		ruleFailure := GenericRuleFailure{
+			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				AlertName:      rule.Name(),
+				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
+				Severity:       R0007KubernetesClientExecutedDescriptor.Priority,
+				IsPartOfImage:  &isPartOfImage,
+				PPID:           &event.Ppid,
+				PPIDComm:       &event.Pcomm,
+			},
+			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+				Comm: event.Comm,
+				GID:  event.Gid,
+				PID:  event.Pid,
+				UID:  event.Uid,
+			},
+			TriggerEvent: event.Event,
+			RuleAlert: apitypes.RuleAlert{
+				RuleID:          rule.ID(),
+				RuleDescription: fmt.Sprintf("Kubernetes client executed: %s", event.Comm),
+			},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}
+
+		enrichRuleFailure(event.Event, event.Pid, &ruleFailure)
+
+		return &ruleFailure
 	}
 
 	return nil

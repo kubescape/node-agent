@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
@@ -147,15 +148,30 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 			rule.accessRelatedFiles = false
 			rule.sshInitiatorPid = 0
 			rule.configFileAccessTimeStamp = 0
-			return &GenericRuleFailure{
-				RuleName:         rule.Name(),
-				RuleID:           rule.ID(),
-				ContainerId:      networkEvent.Runtime.ContainerID,
-				Err:              fmt.Sprintf("ssh connection to port %d is not allowed", networkEvent.Port),
-				FixSuggestionMsg: "If this is a legitimate action, please add the port as a parameter to the binding of this rule",
-				FailureEvent:     utils.NetworkToGeneralEvent(networkEvent),
-				RulePriority:     R1003MaliciousSSHConnectionRuleDescriptor.Priority,
+
+			ruleFailure := GenericRuleFailure{
+				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+					AlertName:      rule.Name(),
+					FixSuggestions: "If this is a legitimate action, please add the port as a parameter to the binding of this rule",
+					Severity:       R1003MaliciousSSHConnectionRuleDescriptor.Priority,
+				},
+				RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+					Comm: networkEvent.Comm,
+					GID:  networkEvent.Gid,
+					PID:  networkEvent.Pid,
+					UID:  networkEvent.Uid,
+				},
+				TriggerEvent: networkEvent.Event,
+				RuleAlert: apitypes.RuleAlert{
+					RuleID:          rule.ID(),
+					RuleDescription: fmt.Sprintf("ssh connection to port %d is not allowed", networkEvent.Port),
+				},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}
+
+			enrichRuleFailure(networkEvent.Event, networkEvent.Pid, &ruleFailure)
+
+			return &ruleFailure
 		}
 	}
 

@@ -9,6 +9,8 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
@@ -88,15 +90,33 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		}
 	}
 
-	return &GenericRuleFailure{
-		RuleName:         rule.Name(),
-		RuleID:           rule.ID(),
-		ContainerId:      execEvent.Runtime.ContainerID,
-		Err:              fmt.Sprintf("exec call \"%s\" is not whitelisted by application profile", execPath),
-		FailureEvent:     utils.ExecToGeneralEvent(execEvent),
-		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the exec call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", execPath, execEvent.GetPod(), rule.generatePatchCommand(execEvent, ap)),
-		RulePriority:     R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
+	isPartOfImage := !execEvent.UpperLayer
+	ruleFailure := GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName:      rule.Name(),
+			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the exec call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", execPath, execEvent.GetPod(), rule.generatePatchCommand(execEvent, ap)),
+			IsPartOfImage:  &isPartOfImage,
+			PPID:           &execEvent.Ppid,
+			PPIDComm:       &execEvent.Pcomm,
+			Severity:       R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+			Comm: execEvent.Comm,
+			GID:  execEvent.Gid,
+			PID:  execEvent.Pid,
+			UID:  execEvent.Uid,
+		},
+		TriggerEvent: execEvent.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleID:          rule.ID(),
+			RuleDescription: fmt.Sprintf("exec call \"%s\" is not whitelisted by application profile", execPath),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 	}
+
+	enrichRuleFailure(execEvent.Event, execEvent.Pid, &ruleFailure)
+
+	return &ruleFailure
 }
 
 func (rule *R0001UnexpectedProcessLaunched) Requirements() ruleengine.RuleSpec {

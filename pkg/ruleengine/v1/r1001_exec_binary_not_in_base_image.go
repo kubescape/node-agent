@@ -6,6 +6,7 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 )
 
@@ -59,15 +60,33 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 	}
 
 	if execEvent.UpperLayer {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			ContainerId:      execEvent.Runtime.ContainerID,
-			Err:              fmt.Sprintf("Process image \"%s\" binary is not from the container image \"%s\"", getExecPathFromEvent(execEvent), "<image name TBA> via PodSpec"),
-			FixSuggestionMsg: "If this is an expected behavior it is strongly suggested to include all executables in the container image. If this is not possible you can remove the rule binding to this workload.",
-			FailureEvent:     utils.ExecToGeneralEvent(execEvent),
-			RulePriority:     R1001ExecBinaryNotInBaseImageRuleDescriptor.Priority,
+		isPartOfImage := !execEvent.UpperLayer
+		ruleFailure := GenericRuleFailure{
+			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				AlertName:      rule.Name(),
+				FixSuggestions: "If this is an expected behavior it is strongly suggested to include all executables in the container image. If this is not possible you can remove the rule binding to this workload.",
+				Severity:       R1001ExecBinaryNotInBaseImageRuleDescriptor.Priority,
+				IsPartOfImage:  &isPartOfImage,
+				PPID:           &execEvent.Ppid,
+				PPIDComm:       &execEvent.Pcomm,
+			},
+			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+				Comm: execEvent.Comm,
+				GID:  execEvent.Gid,
+				PID:  execEvent.Pid,
+				UID:  execEvent.Uid,
+			},
+			TriggerEvent: execEvent.Event,
+			RuleAlert: apitypes.RuleAlert{
+				RuleID:          rule.ID(),
+				RuleDescription: fmt.Sprintf("Process image \"%s\" binary is not from the container image \"%s\"", getExecPathFromEvent(execEvent), execEvent.GetContainerImageName()),
+			},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}
+
+		enrichRuleFailure(execEvent.Event, execEvent.Pid, &ruleFailure)
+
+		return &ruleFailure
 	}
 
 	return nil

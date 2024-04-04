@@ -8,6 +8,7 @@ import (
 
 	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 )
@@ -175,38 +176,81 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event int
 	}
 
 	if randomXEvent, ok := event.(*tracerrandomxtype.Event); ok {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			ContainerId:      randomXEvent.Runtime.ContainerID,
-			Err:              "Possible Crypto Miner detected",
-			FailureEvent:     utils.RandomxToGeneralEvent(randomXEvent),
-			FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-			RulePriority:     R1007CryptoMinersRuleDescriptor.Priority,
+		ruleFailure := GenericRuleFailure{
+			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				AlertName:      rule.Name(),
+				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
+				Severity:       R1007CryptoMinersRuleDescriptor.Priority,
+				PPID:           &randomXEvent.PPid,
+			},
+			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+				Comm: randomXEvent.Comm,
+				GID:  randomXEvent.Gid,
+				PID:  randomXEvent.Pid,
+				UID:  randomXEvent.Uid,
+			},
+			TriggerEvent: randomXEvent.Event,
+			RuleAlert: apitypes.RuleAlert{
+				RuleID:          rule.ID(),
+				RuleDescription: "Possible Crypto Miner detected",
+			},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}
+
+		enrichRuleFailure(randomXEvent.Event, randomXEvent.Pid, &ruleFailure)
+
+		return &ruleFailure
 	} else if networkEvent, ok := event.(*tracernetworktype.Event); ok {
 		if networkEvent.Proto == "TCP" && networkEvent.PktType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
-			return &GenericRuleFailure{
-				RuleName:         rule.Name(),
-				RuleID:           rule.ID(),
-				ContainerId:      networkEvent.Runtime.ContainerID,
-				Err:              "Possible Crypto Miner port detected",
-				FailureEvent:     utils.NetworkToGeneralEvent(networkEvent),
-				FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-				RulePriority:     R1007CryptoMinersRuleDescriptor.Priority,
+			ruleFailure := GenericRuleFailure{
+				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+					AlertName:      rule.Name(),
+					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
+					Severity:       R1007CryptoMinersRuleDescriptor.Priority,
+				},
+				RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+					Comm: networkEvent.Comm,
+					GID:  networkEvent.Gid,
+					PID:  networkEvent.Pid,
+					UID:  networkEvent.Uid,
+				},
+				TriggerEvent: networkEvent.Event,
+				RuleAlert: apitypes.RuleAlert{
+					RuleID:          rule.ID(),
+					RuleDescription: "Possible Crypto Miner communication detected",
+				},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}
+
+			enrichRuleFailure(networkEvent.Event, networkEvent.Pid, &ruleFailure)
+
+			return &ruleFailure
 		}
 	} else if dnsEvent, ok := event.(*tracerdnstype.Event); ok {
 		if slices.Contains(commonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
-			return &GenericRuleFailure{
-				RuleName:         rule.Name(),
-				RuleID:           rule.ID(),
-				ContainerId:      dnsEvent.Runtime.ContainerID,
-				Err:              "Possible Crypto Miner domain detected",
-				FailureEvent:     utils.DnsToGeneralEvent(dnsEvent),
-				FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-				RulePriority:     R1007CryptoMinersRuleDescriptor.Priority,
+			ruleFailure := GenericRuleFailure{
+				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+					AlertName:      rule.Name(),
+					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
+					Severity:       R1007CryptoMinersRuleDescriptor.Priority,
+				},
+				RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+					Comm: dnsEvent.Comm,
+					GID:  dnsEvent.Gid,
+					PID:  dnsEvent.Pid,
+					UID:  dnsEvent.Uid,
+				},
+				TriggerEvent: dnsEvent.Event,
+				RuleAlert: apitypes.RuleAlert{
+					RuleID:          rule.ID(),
+					RuleDescription: "Possible Crypto Miner communication detected",
+				},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}
+
+			enrichRuleFailure(dnsEvent.Event, dnsEvent.Pid, &ruleFailure)
+
+			return &ruleFailure
 		}
 	}
 

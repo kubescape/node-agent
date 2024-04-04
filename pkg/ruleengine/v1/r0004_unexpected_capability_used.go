@@ -6,6 +6,7 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -80,15 +81,29 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		}
 	}
 
-	return &GenericRuleFailure{
-		RuleName:         rule.Name(),
-		RuleID:           rule.ID(),
-		ContainerId:      capEvent.Runtime.ContainerID,
-		Err:              fmt.Sprintf("Unexpected capability used (capability %s used in syscall %s)", capEvent.CapName, capEvent.Syscall),
-		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the capability use \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", capEvent.CapName, capEvent.GetPod(), rule.generatePatchCommand(capEvent, ap)),
-		FailureEvent:     utils.CapabilitiesToGeneralEvent(capEvent),
-		RulePriority:     R0004UnexpectedCapabilityUsedRuleDescriptor.Priority,
+	ruleFailure := GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName:      rule.Name(),
+			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the capability use \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", capEvent.CapName, capEvent.GetPod(), rule.generatePatchCommand(capEvent, ap)),
+			Severity:       R0004UnexpectedCapabilityUsedRuleDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+			Comm: capEvent.Comm,
+			GID:  capEvent.Gid,
+			PID:  capEvent.Pid,
+			UID:  capEvent.Uid,
+		},
+		TriggerEvent: capEvent.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleID:          rule.ID(),
+			RuleDescription: fmt.Sprintf("Unexpected capability used (capability %s used in syscall %s)", capEvent.CapName, capEvent.Syscall),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 	}
+
+	enrichRuleFailure(capEvent.Event, capEvent.Pid, &ruleFailure)
+
+	return &ruleFailure
 }
 
 func (rule *R0004UnexpectedCapabilityUsed) Requirements() ruleengine.RuleSpec {
