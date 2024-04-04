@@ -31,12 +31,22 @@ func TestR0003UnexpectedSystemCall(t *testing.T) {
 	}
 
 	objCache := RuleObjectCacheMock{}
-	objCache.SetApplicationActivity(&v1beta1.ApplicationActivity{
-		Spec: v1beta1.ApplicationActivitySpec{
-			Syscalls: []string{"test"},
-		},
-	})
-
+	profile := objCache.ApplicationProfileCache().GetApplicationProfile("test", "test")
+	if profile == nil {
+		profile = &v1beta1.ApplicationProfile{
+			Spec: v1beta1.ApplicationProfileSpec{
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name: "test",
+						Syscalls: []string{
+							"test",
+						},
+					},
+				},
+			},
+		}
+		objCache.SetApplicationProfile(profile)
+	}
 	// Test with mock application activity and syscall
 	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &objCache)
 	if ruleResult != nil {
@@ -44,9 +54,16 @@ func TestR0003UnexpectedSystemCall(t *testing.T) {
 		t.Errorf("Expected ruleResult to be nil since syscall is whitelisted")
 	}
 
-	objCache.SetApplicationActivity(&v1beta1.ApplicationActivity{
-		Spec: v1beta1.ApplicationActivitySpec{
-			Syscalls: []string{"test1"},
+	objCache.SetApplicationProfile(&v1beta1.ApplicationProfile{
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{
+				{
+					Name: "test",
+					Syscalls: []string{
+						"test1",
+					},
+				},
+			},
 		},
 	})
 
