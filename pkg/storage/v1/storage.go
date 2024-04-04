@@ -25,15 +25,15 @@ const (
 	KubeConfig                       = "KUBECONFIG"
 )
 
-type StorageNoCache struct {
+type Storage struct {
 	StorageClient             spdxv1beta1.SpdxV1beta1Interface
 	maxApplicationProfileSize int
 	namespace                 string
 }
 
-var _ storage.StorageClient = (*StorageNoCache)(nil)
+var _ storage.StorageClient = (*Storage)(nil)
 
-func CreateStorageNoCache(namespace string) (*StorageNoCache, error) {
+func CreateStorage(namespace string) (*Storage, error) {
 	var config *rest.Config
 	kubeconfig := os.Getenv(KubeConfig)
 	// use the current context in kubeconfig
@@ -55,21 +55,21 @@ func CreateStorageNoCache(namespace string) (*StorageNoCache, error) {
 		maxApplicationProfileSize = DefaultMaxApplicationProfileSize
 	}
 
-	return &StorageNoCache{
+	return &Storage{
 		StorageClient:             clientset.SpdxV1beta1(),
 		maxApplicationProfileSize: maxApplicationProfileSize,
 		namespace:                 namespace,
 	}, nil
 }
 
-func CreateFakeStorageNoCache(namespace string) (*StorageNoCache, error) {
-	return &StorageNoCache{
+func CreateFakeStorage(namespace string) (*Storage, error) {
+	return &Storage{
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
 		namespace:     namespace,
 	}, nil
 }
 
-func (sc StorageNoCache) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error {
+func (sc Storage) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error {
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Create(context.Background(), networkNeighbors, metav1.CreateOptions{})
 	if err != nil {
 		return err
@@ -77,11 +77,11 @@ func (sc StorageNoCache) CreateNetworkNeighbors(networkNeighbors *v1beta1.Networ
 	return nil
 }
 
-func (sc StorageNoCache) GetNetworkNeighbors(namespace, name string) (*v1beta1.NetworkNeighbors, error) {
+func (sc Storage) GetNetworkNeighbors(namespace, name string) (*v1beta1.NetworkNeighbors, error) {
 	return sc.StorageClient.NetworkNeighborses(namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func (sc StorageNoCache) PatchNetworkNeighborsIngressAndEgress(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
+func (sc Storage) PatchNetworkNeighborsIngressAndEgress(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
 	bytes, err := json.Marshal(networkNeighbors)
 	if err != nil {
 		return err
@@ -95,13 +95,13 @@ func (sc StorageNoCache) PatchNetworkNeighborsIngressAndEgress(name, namespace s
 	return nil
 }
 
-func (sc StorageNoCache) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
+func (sc Storage) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Update(context.Background(), networkNeighbors, metav1.UpdateOptions{})
 
 	return err
 }
 
-func (sc StorageNoCache) CreateApplicationActivity(activity *v1beta1.ApplicationActivity, namespace string) error {
+func (sc Storage) CreateApplicationActivity(activity *v1beta1.ApplicationActivity, namespace string) error {
 	_, err := sc.StorageClient.ApplicationActivities(namespace).Create(context.Background(), activity, metav1.CreateOptions{})
 	if err != nil {
 		return err
@@ -109,11 +109,11 @@ func (sc StorageNoCache) CreateApplicationActivity(activity *v1beta1.Application
 	return nil
 }
 
-func (sc StorageNoCache) GetApplicationActivity(namespace, name string) (*v1beta1.ApplicationActivity, error) {
+func (sc Storage) GetApplicationActivity(namespace, name string) (*v1beta1.ApplicationActivity, error) {
 	return sc.StorageClient.ApplicationActivities(namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func (sc StorageNoCache) CreateApplicationProfile(profile *v1beta1.ApplicationProfile, namespace string) error {
+func (sc Storage) CreateApplicationProfile(profile *v1beta1.ApplicationProfile, namespace string) error {
 	// unset resourceVersion
 	profile.ResourceVersion = ""
 	_, err := sc.StorageClient.ApplicationProfiles(namespace).Create(context.Background(), profile, metav1.CreateOptions{})
@@ -123,7 +123,7 @@ func (sc StorageNoCache) CreateApplicationProfile(profile *v1beta1.ApplicationPr
 	return nil
 }
 
-func (sc StorageNoCache) PatchApplicationProfile(name, namespace string, patch []byte, channel chan error) error {
+func (sc Storage) PatchApplicationProfile(name, namespace string, patch []byte, channel chan error) error {
 	profile, err := sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), name, types.JSONPatchType, patch, metav1.PatchOptions{})
 	if err != nil {
 		return fmt.Errorf("patch application profile: %w", err)
@@ -168,11 +168,11 @@ func (sc StorageNoCache) PatchApplicationProfile(name, namespace string, patch [
 	return nil
 }
 
-func (sc StorageNoCache) GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
+func (sc Storage) GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
 	return sc.StorageClient.ApplicationProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func (sc StorageNoCache) CreateApplicationProfileSummary(profile *v1beta1.ApplicationProfileSummary, namespace string) error {
+func (sc Storage) CreateApplicationProfileSummary(profile *v1beta1.ApplicationProfileSummary, namespace string) error {
 	_, err := sc.StorageClient.ApplicationProfileSummaries(namespace).Create(context.Background(), profile, metav1.CreateOptions{})
 	if err != nil {
 		return err
@@ -180,7 +180,7 @@ func (sc StorageNoCache) CreateApplicationProfileSummary(profile *v1beta1.Applic
 	return nil
 }
 
-func (sc StorageNoCache) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error {
+func (sc Storage) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error {
 	_, err := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
 	if err != nil {
 		return err
@@ -188,15 +188,15 @@ func (sc StorageNoCache) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) erro
 	return nil
 }
 
-func (sc StorageNoCache) GetFilteredSBOM(name string) (*v1beta1.SBOMSyftFiltered, error) {
+func (sc Storage) GetFilteredSBOM(name string) (*v1beta1.SBOMSyftFiltered, error) {
 	return sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func (sc StorageNoCache) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
+func (sc Storage) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func (sc StorageNoCache) PatchFilteredSBOM(name string, SBOM *v1beta1.SBOMSyftFiltered) error {
+func (sc Storage) PatchFilteredSBOM(name string, SBOM *v1beta1.SBOMSyftFiltered) error {
 	bytes, err := json.Marshal(SBOM)
 	if err != nil {
 		return err
@@ -208,10 +208,10 @@ func (sc StorageNoCache) PatchFilteredSBOM(name string, SBOM *v1beta1.SBOMSyftFi
 	return nil
 }
 
-func (sc StorageNoCache) IncrementImageUse(_ string) {
+func (sc Storage) IncrementImageUse(_ string) {
 	// noop
 }
 
-func (sc StorageNoCache) DecrementImageUse(_ string) {
+func (sc Storage) DecrementImageUse(_ string) {
 	// noop
 }
