@@ -68,6 +68,8 @@ func main() {
 
 		if strings.Contains(err.Error(), utils.ErrKernelVersion) {
 			os.Exit(utils.ExitCodeIncompatibleKernel)
+		} else if strings.Contains(err.Error(), utils.ErrMacOS) {
+			os.Exit(utils.ExitCodeIncompatibleKernel)
 		} else {
 			os.Exit(utils.ExitCodeError)
 		}
@@ -141,6 +143,8 @@ func main() {
 		logger.L().Ctx(ctx).Error("error starting the container watcher", helpers.Error(err))
 		if strings.Contains(err.Error(), utils.ErrRuncNotFound) {
 			os.Exit(utils.ExitCodeRuncNotFound)
+		} else if strings.Contains(err.Error(), utils.ErrMacOS) {
+			os.Exit(utils.ExitCodeIncompatibleKernel)
 		} else {
 			os.Exit(utils.ExitCodeError)
 		}
