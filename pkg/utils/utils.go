@@ -1,10 +1,16 @@
 package utils
 
 import (
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"node-agent/pkg/objectcache"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -26,6 +32,11 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"k8s.io/apimachinery/pkg/util/validation"
+
+	"github.com/prometheus/procfs"
+
+	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
+	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 )
 
 var (
@@ -428,4 +439,140 @@ func ToInstanceType(c ContainerType) helpersv1.InstanceType {
 
 	// FIXME: support EphemeralContainer
 	return containerinstance.InstanceType
+}
+
+func GetCmdlineByPid(pid int) (*string, error) {
+	fs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return nil, err
+	}
+
+	proc, err := fs.Proc(pid)
+	if err != nil {
+		return nil, err
+	}
+
+	cmdline, err := proc.CmdLine()
+	if err != nil {
+		return nil, err
+	}
+
+	cmdlineStr := strings.Join(cmdline, " ")
+
+	return &cmdlineStr, nil
+}
+
+func GetParentByPid(pid int) (*procfs.ProcStat, error) {
+	fs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return nil, err
+	}
+
+	proc, err := fs.Proc(pid)
+	if err != nil {
+		return nil, err
+	}
+
+	parent, err := proc.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	return &parent, nil
+}
+
+// Get the path of the file on the node.
+func GetHostFilePathFromEvent(event interface{}, containerPid uint32) (string, error) {
+	if execEvent, ok := event.(*tracerexectype.Event); ok {
+		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, GetExecPathFromEvent(execEvent)))
+		return realPath, nil
+	}
+
+	if openEvent, ok := event.(*traceropentype.Event); ok {
+		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, openEvent.FullPath))
+		return realPath, nil
+	}
+
+	return "", fmt.Errorf("event is not of type tracerexectype.Event or traceropentype.Event")
+}
+
+// Get the path of the executable from the given event.
+func GetExecPathFromEvent(event *tracerexectype.Event) string {
+	if len(event.Args) > 0 {
+		return event.Args[0]
+	}
+	return event.Comm
+}
+
+// Get the size of the given file.
+func GetFileSize(path string) (int64, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+
+	// Get the file size.
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return 0, err
+	}
+
+	return fileInfo.Size(), nil
+}
+
+// Calculate the SHA256 hash of the given file.
+func CalculateSHA256FileHash(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	hashInBytes := hash.Sum(nil)
+	hashString := hex.EncodeToString(hashInBytes)
+
+	return hashString, nil
+}
+
+// Calculate the SHA1 hash of the given file.
+func CalculateSHA1FileHash(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha1.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	hashInBytes := hash.Sum(nil)
+	hashString := hex.EncodeToString(hashInBytes)
+
+	return hashString, nil
+}
+
+// Calculate the MD5 hash of the given file.
+func CalculateMD5FileHash(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := md5.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	hashInBytes := hash.Sum(nil)
+	hashString := hex.EncodeToString(hashInBytes)
+
+	return hashString, nil
 }
