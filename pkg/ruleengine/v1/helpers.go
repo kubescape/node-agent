@@ -216,4 +216,8 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 	if ruleFailure.RuntimeAlertK8sDetails.ContainerID == "" {
 		ruleFailure.RuntimeAlertK8sDetails.ContainerID = event.Runtime.ContainerID
 	}
+
+	if ruleFailure.RuntimeAlertK8sDetails.HostNetwork == nil {
+		ruleFailure.RuntimeAlertK8sDetails.HostNetwork = &event.K8s.HostNetwork
+	}
 }
