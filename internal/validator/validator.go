@@ -103,6 +103,14 @@ func CheckPrerequisites() error {
 	if nodeName := os.Getenv(config.NodeNameEnvVar); nodeName == "" {
 		return fmt.Errorf("%s environment variable not set", config.NodeNameEnvVar)
 	}
+	logger.L().Debug("checking pod name")
+	if nodeName := os.Getenv(config.PodNameEnvVar); nodeName == "" {
+		return fmt.Errorf("%s environment variable not set", config.NodeNameEnvVar)
+	}
+	logger.L().Debug("checking namespace name")
+	if nodeName := os.Getenv(config.NamespaceEnvVar); nodeName == "" {
+		return fmt.Errorf("%s environment variable not set", config.NodeNameEnvVar)
+	}
 	// Ensure all filesystems are mounted
 	logger.L().Debug("checking mounts")
 	if err := workaroundMounts(); err != nil {

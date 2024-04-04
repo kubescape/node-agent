@@ -430,27 +430,42 @@ func Test_GetApplicationProfile(t *testing.T) {
 	}
 }
 func Test_addApplicationProfile_existing(t *testing.T) {
-
+	type podToSlug struct {
+		podName string
+		slug    string
+	}
 	// add single application profile
 	tests := []struct {
 		obj1         *unstructured.Unstructured
 		obj2         *unstructured.Unstructured
-		pods         []*unstructured.Unstructured
 		annotations1 map[string]string
 		annotations2 map[string]string
 		name         string
+		pods         []podToSlug
 		storeInCache bool
 	}{
 		{
-			name:         "application profile already exists",
-			obj1:         mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
-			obj2:         mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
+			name: "application profile already exists",
+			obj1: mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
+			obj2: mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
+			pods: []podToSlug{
+				{
+					podName: "nginx-77b4fdf86c",
+					slug:    "/replicaset-nginx-77b4fdf86c",
+				},
+			},
 			storeInCache: true,
 		},
 		{
 			name: "remove application profile",
 			obj1: mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
 			obj2: mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
+			pods: []podToSlug{
+				{
+					podName: "nginx-77b4fdf86c",
+					slug:    "/replicaset-nginx-77b4fdf86c",
+				},
+			},
 			annotations1: map[string]string{
 				"kubescape.io/status": "completed",
 			},
@@ -460,7 +475,7 @@ func Test_addApplicationProfile_existing(t *testing.T) {
 			storeInCache: false,
 		},
 	}
-	for i, tt := range tests {
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if len(tt.annotations1) != 0 {
 				tt.obj1.SetAnnotations(tt.annotations1)
@@ -468,17 +483,20 @@ func Test_addApplicationProfile_existing(t *testing.T) {
 			if len(tt.annotations2) != 0 {
 				tt.obj2.SetAnnotations(tt.annotations2)
 			}
-			namespace := fmt.Sprintf("default-%d", i)
 			k8sClient := k8sinterface.NewKubernetesApiMock()
 
 			var runtimeObjs []runtime.Object
-			runtimeObjs = append(runtimeObjs, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}})
 
 			runtimeObjs = append(runtimeObjs, mocks.UnstructuredToRuntime(tt.obj1))
 
 			k8sClient.DynamicClient = dynamicfake.NewSimpleDynamicClient(scheme.Scheme, runtimeObjs...)
 
 			ap := NewApplicationProfileCache("", k8sClient)
+
+			// add pods
+			for i := range tt.pods {
+				ap.podToSlug.Set(tt.pods[i].podName, tt.pods[i].slug)
+			}
 
 			ap.addApplicationProfile(context.Background(), tt.obj1)
 			ap.addApplicationProfile(context.Background(), tt.obj2)
@@ -644,6 +662,62 @@ func Test_IsCached(t *testing.T) {
 		t.Run(fmt.Sprintf("kind=%s, namespace=%s, name=%s", tt.kind, tt.namespace, tt.name), func(t *testing.T) {
 			actual := ap.IsCached(tt.kind, tt.namespace, tt.name)
 			assert.Equal(t, tt.expected, actual)
+		})
+	}
+}
+
+func TestGetSlug(t *testing.T) {
+	tests := []struct {
+		name      string
+		obj       *unstructured.Unstructured
+		expected  string
+		expectErr bool
+	}{
+		{
+			name:      "Test with valid object",
+			obj:       mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
+			expected:  "replicaset-collection-94c495554",
+			expectErr: false,
+		},
+		{
+			name: "Test with invalid object",
+			obj: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"kind": "Unknown",
+					"metadata": map[string]interface{}{
+						"name": "unknown-1",
+					},
+				},
+			},
+			expected:  "",
+			expectErr: true,
+		},
+		{
+			name: "Test with object without instanceIDs",
+			obj: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "v1",
+					"kind":       "Pod",
+					"metadata": map[string]interface{}{
+						"name": "unknown-1",
+					},
+				},
+			},
+			expected:  "",
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.obj.SetNamespace("default")
+			result, err := getSlug(tt.obj)
+			if tt.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
 		})
 	}
 }

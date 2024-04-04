@@ -18,7 +18,8 @@
                 "apiVersion": "apps/v1",
                 "blockOwnerDeletion": true,
                 "controller": true,
-                "kind": "Deployment"
+                "kind": "Deployment",
+                "name": "collection"
             }
         ]
     },

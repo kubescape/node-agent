@@ -87,6 +87,8 @@ func TestCheckPrerequisites(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.setEnv {
 				t.Setenv(config.NodeNameEnvVar, "testNode")
+				t.Setenv(config.NamespaceEnvVar, "namespace")
+				t.Setenv(config.PodNameEnvVar, "pod")
 			}
 			if err := CheckPrerequisites(); (err != nil) != tt.wantErr {
 				t.Errorf("CheckPrerequisites() error = %v, wantErr %v", err, tt.wantErr)

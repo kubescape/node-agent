@@ -548,7 +548,6 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.toSaveOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		am.trackedContainers.Add(k8sContainerID)
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
-		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 
 		// stop monitoring after MaxSniffingTime
 		time.AfterFunc(am.cfg.MaxSniffingTime, func() {

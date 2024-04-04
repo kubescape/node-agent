@@ -249,7 +249,7 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, "POST", exp.config.Method)
-	assert.Equal(t, 1, exp.config.TimeoutSeconds)
+	assert.Equal(t, 5, exp.config.TimeoutSeconds)
 	assert.Equal(t, 10000, exp.config.MaxAlertsPerMinute)
 	assert.Equal(t, map[string]string{}, exp.config.Headers)
 
