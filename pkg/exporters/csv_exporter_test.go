@@ -3,7 +3,7 @@ package exporters
 import (
 	"encoding/csv"
 	mmtypes "node-agent/pkg/malwaremanager/v1/types"
-	"node-agent/pkg/utils"
+	"node-agent/pkg/ruleengine/v1"
 	"os"
 	"testing"
 
@@ -17,12 +17,21 @@ func TestCsvExporter(t *testing.T) {
 		t.Fatalf("Expected csvExporter to not be nil")
 	}
 
-	csvExporter.SendRuleAlert(&GenericRuleFailure{
-		RuleName: "testrule",
-		Err:      "Application profile is missing",
-		FailureEvent: &utils.GeneralEvent{
-			ContainerName: "testcontainer", ContainerID: "testcontainerid", Namespace: "testnamespace", PodName: "testpodname"}},
-	)
+	csvExporter.SendRuleAlert(&ruleengine.GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: "testrule",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			ContainerID:   "testcontainerid",
+			ContainerName: "testcontainer",
+			Namespace:     "testnamespace",
+			PodName:       "testpodname",
+		},
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: "Application profile is missing",
+		},
+	})
 	sizeStr := "2MiB"
 	commandLine := "testmalwarecmdline"
 	csvExporter.SendMalwareAlert(&mmtypes.GenericMalwareResult{

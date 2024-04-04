@@ -47,70 +47,62 @@ func InitSyslogExporter(syslogHost string) *SyslogExporter {
 func (se *SyslogExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	message := rfc5424.Message{
 		Priority:  rfc5424.Error,
-		Timestamp: time.Unix(failedRule.Event().Timestamp, 0),
-		Hostname:  failedRule.Event().PodName,
-		AppName:   failedRule.Event().ContainerName,
-		ProcessID: fmt.Sprintf("%d", failedRule.Event().Pid),
+		Timestamp: failedRule.GetBaseRuntimeAlert().Timestamp,
+		Hostname:  failedRule.GetRuntimeAlertK8sDetails().PodName,
+		AppName:   failedRule.GetRuntimeAlertK8sDetails().ContainerName,
+		ProcessID: fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().PID),
 		StructuredData: []rfc5424.StructuredData{
 			{
-				ID: fmt.Sprintf("kubecop@%d", failedRule.Event().Pid),
+				ID: fmt.Sprintf("kubecop@%d", failedRule.GetRuntimeProcessDetails().PID),
 				Parameters: []rfc5424.SDParam{
 					{
 						Name:  "rule",
-						Value: failedRule.Name(),
+						Value: failedRule.GetBaseRuntimeAlert().AlertName,
 					},
 					{
 						Name:  "priority",
-						Value: fmt.Sprintf("%d", failedRule.Priority()),
+						Value: fmt.Sprintf("%d", failedRule.GetBaseRuntimeAlert().Severity),
 					},
 					{
 						Name:  "error",
-						Value: failedRule.Error(),
+						Value: failedRule.GetRuleAlert().RuleDescription,
 					},
 					{
 						Name:  "fix_suggestion",
-						Value: failedRule.FixSuggestion(),
-					},
-					{
-						Name:  "ppid",
-						Value: fmt.Sprintf("%d", failedRule.Event().Ppid),
+						Value: failedRule.GetBaseRuntimeAlert().FixSuggestions,
 					},
 					{
 						Name:  "comm",
-						Value: failedRule.Event().Comm,
+						Value: failedRule.GetRuntimeProcessDetails().Comm,
 					},
 					{
 						Name:  "uid",
-						Value: fmt.Sprintf("%d", failedRule.Event().Uid),
+						Value: fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().UID),
 					},
 					{
 						Name:  "gid",
-						Value: fmt.Sprintf("%d", failedRule.Event().Gid),
+						Value: fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().GID),
 					},
 					{
 						Name:  "namespace",
-						Value: failedRule.Event().Namespace,
+						Value: failedRule.GetRuntimeAlertK8sDetails().Namespace,
 					},
 					{
 						Name:  "pod_name",
-						Value: failedRule.Event().PodName,
+						Value: failedRule.GetRuntimeAlertK8sDetails().PodName,
 					},
 					{
 						Name:  "container_name",
-						Value: failedRule.Event().ContainerName,
+						Value: failedRule.GetRuntimeAlertK8sDetails().ContainerName,
 					},
 					{
 						Name:  "container_id",
-						Value: failedRule.Event().ContainerID,
-					},
-					{
-						Name:  "cwd",
-						Value: failedRule.Event().Cwd,
+						Value: failedRule.GetRuntimeAlertK8sDetails().ContainerID,
 					},
 				},
 			},
 		},
-		Message: []byte(failedRule.Error()),
+		Message: []byte(failedRule.GetRuleAlert().RuleDescription),
 	}
 
 	_, err := message.WriteTo(se.writer)

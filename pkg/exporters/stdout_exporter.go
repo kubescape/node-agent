@@ -32,10 +32,10 @@ func InitStdoutExporter(useStdout *bool) *StdoutExporter {
 
 func (exporter *StdoutExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	exporter.logger.WithFields(log.Fields{
-		"severity": failedRule.Priority(),
-		"message":  failedRule.Error(),
-		"event":    failedRule.Event(),
-	}).Error(failedRule.Name())
+		"severity": failedRule.GetBaseRuntimeAlert().Severity,
+		"message":  failedRule.GetRuleAlert().RuleDescription,
+		"event":    failedRule.GetTriggerEvent(),
+	}).Error(failedRule.GetBaseRuntimeAlert().AlertName)
 }
 
 func (exporter *StdoutExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {

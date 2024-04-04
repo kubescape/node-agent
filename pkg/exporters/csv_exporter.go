@@ -60,22 +60,29 @@ func (ce *CsvExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 
 	csvWriter := csv.NewWriter(csvFile)
 	defer csvWriter.Flush()
+
+	// TODO: This is ugly, find a better way.
+	var ppid int
+	if failedRule.GetBaseRuntimeAlert().PPID != nil {
+		ppid = int(*failedRule.GetBaseRuntimeAlert().PPID)
+	} else {
+		ppid = -1
+	}
+
 	csvWriter.Write([]string{
-		failedRule.Name(),
-		failedRule.Error(),
-		failedRule.FixSuggestion(),
-		failedRule.Event().PodName,
-		failedRule.Event().ContainerName,
-		failedRule.Event().Namespace,
-		failedRule.Event().ContainerID,
-		fmt.Sprintf("%d", failedRule.Event().Pid),
-		failedRule.Event().Comm,
-		failedRule.Event().Cwd,
-		fmt.Sprintf("%d", failedRule.Event().Uid),
-		fmt.Sprintf("%d", failedRule.Event().Gid),
-		fmt.Sprintf("%d", failedRule.Event().Ppid),
-		fmt.Sprintf("%d", failedRule.Event().MountNsID),
-		fmt.Sprintf("%d", failedRule.Event().Timestamp),
+		failedRule.GetBaseRuntimeAlert().AlertName,
+		failedRule.GetRuleAlert().RuleDescription,
+		failedRule.GetBaseRuntimeAlert().FixSuggestions,
+		failedRule.GetRuntimeAlertK8sDetails().PodName,
+		failedRule.GetRuntimeAlertK8sDetails().ContainerName,
+		failedRule.GetRuntimeAlertK8sDetails().Namespace,
+		failedRule.GetRuntimeAlertK8sDetails().ContainerID,
+		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().PID),
+		failedRule.GetRuntimeProcessDetails().Comm,
+		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().UID),
+		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().GID),
+		fmt.Sprintf("%d", ppid),
+		fmt.Sprintf("%d", failedRule.GetBaseRuntimeAlert().Timestamp),
 	})
 }
 
@@ -99,11 +106,9 @@ func writeRuleHeaders(csvPath string) {
 		"Container ID",
 		"PID",
 		"Comm",
-		"Cwd",
 		"UID",
 		"GID",
 		"PPID",
-		"Mount Namespace ID",
 		"Timestamp",
 	})
 }

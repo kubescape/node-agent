@@ -3,7 +3,7 @@ package exporters
 import (
 	"log"
 	mmtypes "node-agent/pkg/malwaremanager/v1/types"
-	"node-agent/pkg/utils"
+	ruleenginev1 "node-agent/pkg/ruleengine/v1"
 	"os"
 	"testing"
 	"time"
@@ -64,19 +64,37 @@ func TestSyslogExporter(t *testing.T) {
 	}
 
 	// Send an alert
-	syslogExp.SendRuleAlert(&GenericRuleFailure{
-		RuleName: "testrule",
-		Err:      "Application profile is missing",
-		FailureEvent: &utils.GeneralEvent{
-			ContainerName: "testcontainer", ContainerID: "testcontainerid", Namespace: "testnamespace", PodName: "testpodname"}},
-	)
+	syslogExp.SendRuleAlert(&ruleenginev1.GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: "testrule",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			ContainerID:   "testcontainerid",
+			ContainerName: "testcontainer",
+			Namespace:     "testnamespace",
+			PodName:       "testpodname",
+		},
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: "Application profile is missing",
+		},
+	})
 
-	syslogExp.SendRuleAlert(&GenericRuleFailure{
-		RuleName: "testrule",
-		Err:      "Application profile is missing",
-		FailureEvent: &utils.GeneralEvent{
-			ContainerName: "testcontainer", ContainerID: "testcontainerid", Namespace: "testnamespace", PodName: "testpodname"}},
-	)
+	syslogExp.SendRuleAlert(&ruleenginev1.GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: "testrule",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			ContainerID:   "testcontainerid",
+			ContainerName: "testcontainer",
+			Namespace:     "testnamespace",
+			PodName:       "testpodname",
+		},
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: "Application profile is missing",
+		},
+	})
 	sizeStr := "2MiB"
 	commandLineStr := "testmalwarecmdline"
 

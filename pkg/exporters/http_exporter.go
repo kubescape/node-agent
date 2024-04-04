@@ -113,30 +113,16 @@ func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 		return
 	}
 	// populate the RuntimeAlert struct with the data from the failedRule
-	ppid := failedRule.Event().Ppid
-	httpAlert := apitypes.RuntimeAlert{ // TODO: Finish this after refactoring rule type in engine.
-		Message:   failedRule.Error(),
-		HostName:  exporter.Host,
-		AlertType: apitypes.AlertTypeRule,
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName:      failedRule.Name(),
-			Severity:       failedRule.Priority(),
-			FixSuggestions: failedRule.FixSuggestion(),
-			PPID:           &ppid,
-		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			ContainerID:   failedRule.Event().ContainerID,
-			ContainerName: failedRule.Event().ContainerName,
-			PodNamespace:  failedRule.Event().Namespace,
-			PodName:       failedRule.Event().PodName,
-			NodeName:      exporter.NodeName,
-		},
-		RuntimeAlertProcessDetails: apitypes.RuntimeAlertProcessDetails{
-			PID:  failedRule.Event().Pid,
-			Comm: failedRule.Event().Comm,
-			UID:  failedRule.Event().Uid,
-			GID:  failedRule.Event().Gid,
-		},
+	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
+	k8sDetails.NodeName = exporter.NodeName
+	httpAlert := apitypes.RuntimeAlert{
+		Message:                    failedRule.GetRuleAlert().RuleDescription,
+		HostName:                   exporter.Host,
+		AlertType:                  apitypes.AlertTypeRule,
+		BaseRuntimeAlert:           failedRule.GetBaseRuntimeAlert(),
+		RuntimeAlertK8sDetails:     k8sDetails,
+		RuntimeAlertProcessDetails: failedRule.GetRuntimeProcessDetails(),
+		RuleAlert:                  failedRule.GetRuleAlert(),
 	}
 	exporter.sendInAlertList(httpAlert)
 }
@@ -196,22 +182,14 @@ func (exporter *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.Malw
 		exporter.sendAlertLimitReached()
 		return
 	}
+	k8sDetails := malwareResult.GetRuntimeAlertK8sDetails()
+	k8sDetails.NodeName = exporter.NodeName
 	httpAlert := apitypes.RuntimeAlert{
-		Message:          fmt.Sprintf("Malware detected: %s", malwareResult.GetBasicRuntimeAlert().AlertName),
-		HostName:         exporter.Host,
-		AlertType:        apitypes.AlertTypeMalware,
-		BaseRuntimeAlert: malwareResult.GetBasicRuntimeAlert(),
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			NodeName:      exporter.NodeName,
-			ContainerID:   malwareResult.GetTriggerEvent().Runtime.ContainerID,
-			ContainerName: malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
-			PodNamespace:  malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
-			PodName:       malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
-			HostNetwork:   malwareResult.GetRuntimeAlertK8sDetails().HostNetwork,
-			Image:         malwareResult.GetTriggerEvent().Runtime.ContainerImageName,
-			ImageDigest:   malwareResult.GetTriggerEvent().Runtime.ContainerImageDigest,
-			// TODO: Add workload fields.
-		},
+		Message:                    fmt.Sprintf("Malware detected: %s", malwareResult.GetBasicRuntimeAlert().AlertName),
+		HostName:                   exporter.Host,
+		AlertType:                  apitypes.AlertTypeMalware,
+		BaseRuntimeAlert:           malwareResult.GetBasicRuntimeAlert(),
+		RuntimeAlertK8sDetails:     k8sDetails,
 		RuntimeAlertProcessDetails: malwareResult.GetRuntimeProcessDetails(),
 		MalwareAlert:               malwareResult.GetMalwareRuntimeAlert(),
 	}

@@ -45,46 +45,49 @@ func InitAlertManagerExporter(alertManagerURL string) *AlertManagerExporter {
 
 func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	sourceUrl := fmt.Sprintf("https://armosec.github.io/kubecop/alertviewer/?AlertMessage=%s&AlertRuleName=%s&AlertRuleID=%s&AlertFix=%s&AlertNamespace=%s&AlertPod=%s&AlertContainer=%s&AlertProcess=%s",
-		failedRule.Error(),
-		failedRule.Name(),
-		failedRule.ID(),
-		failedRule.FixSuggestion(),
-		failedRule.Event().Namespace,
-		failedRule.Event().PodName,
-		failedRule.Event().ContainerName,
-		fmt.Sprintf("%s (%d)", failedRule.Event().Comm, failedRule.Event().Pid),
+		failedRule.GetRuleAlert().RuleDescription,
+		failedRule.GetBaseRuntimeAlert().AlertName,
+		failedRule.GetRuleAlert().RuleID,
+		failedRule.GetBaseRuntimeAlert().FixSuggestions,
+		failedRule.GetRuntimeAlertK8sDetails().Namespace,
+		failedRule.GetRuntimeAlertK8sDetails().PodName,
+		failedRule.GetRuntimeAlertK8sDetails().ContainerName,
+		fmt.Sprintf("%s (%d)", failedRule.GetRuntimeProcessDetails().Comm, failedRule.GetRuntimeProcessDetails().PID),
 	)
-	summary := fmt.Sprintf("Rule '%s' in '%s' namespace '%s' failed", failedRule.Name(), failedRule.Event().PodName, failedRule.Event().Namespace)
+	summary := fmt.Sprintf("Rule '%s' in '%s' namespace '%s' failed", failedRule.GetBaseRuntimeAlert().AlertName, failedRule.GetRuntimeAlertK8sDetails().PodName, failedRule.GetRuntimeAlertK8sDetails().Namespace)
 	myAlert := models.PostableAlert{
 		StartsAt: strfmt.DateTime(time.Now()),
 		EndsAt:   strfmt.DateTime(time.Now().Add(time.Hour)),
 		Annotations: map[string]string{
 			"title":       summary,
 			"summary":     summary,
-			"message":     failedRule.Error(),
-			"description": failedRule.Error(),
-			"fix":         failedRule.FixSuggestion(),
+			"message":     failedRule.GetRuleAlert().RuleDescription,
+			"description": failedRule.GetRuleAlert().RuleDescription,
+			"fix":         failedRule.GetBaseRuntimeAlert().FixSuggestions,
 		},
 		Alert: models.Alert{
 			GeneratorURL: strfmt.URI(sourceUrl),
 			Labels: map[string]string{
 				"alertname":      "KubescapeRuleViolated",
-				"rule_name":      failedRule.Name(),
-				"rule_id":        failedRule.ID(),
-				"container_id":   failedRule.Event().ContainerID,
-				"container_name": failedRule.Event().ContainerName,
-				"namespace":      failedRule.Event().Namespace,
-				"pod_name":       failedRule.Event().PodName,
-				"severity":       PriorityToStatus(failedRule.Priority()),
+				"rule_name":      failedRule.GetBaseRuntimeAlert().AlertName,
+				"rule_id":        failedRule.GetRuleAlert().RuleID,
+				"container_id":   failedRule.GetRuntimeAlertK8sDetails().ContainerID,
+				"container_name": failedRule.GetRuntimeAlertK8sDetails().ContainerName,
+				"namespace":      failedRule.GetRuntimeAlertK8sDetails().Namespace,
+				"pod_name":       failedRule.GetRuntimeAlertK8sDetails().PodName,
+				"severity":       PriorityToStatus(failedRule.GetBaseRuntimeAlert().Severity),
 				"host":           ame.Host,
 				"node_name":      ame.NodeName,
-				"pid":            fmt.Sprintf("%d", failedRule.Event().Pid),
-				"ppid":           fmt.Sprintf("%d", failedRule.Event().Ppid),
-				"comm":           failedRule.Event().Comm,
-				"uid":            fmt.Sprintf("%d", failedRule.Event().Uid),
-				"gid":            fmt.Sprintf("%d", failedRule.Event().Gid),
+				"pid":            fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().PID),
+				"comm":           failedRule.GetRuntimeProcessDetails().Comm,
+				"uid":            fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().UID),
+				"gid":            fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().GID),
 			},
 		},
+	}
+
+	if failedRule.GetBaseRuntimeAlert().PPID != nil {
+		myAlert.Labels["ppid"] = fmt.Sprintf("%d", *failedRule.GetBaseRuntimeAlert().PPID)
 	}
 
 	// Send the alert

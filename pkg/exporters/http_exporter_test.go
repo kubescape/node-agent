@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	mmtypes "node-agent/pkg/malwaremanager/v1/types"
 	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
+	ruleenginev1 "node-agent/pkg/ruleengine/v1"
 	"testing"
 	"time"
 
@@ -15,45 +15,6 @@ import (
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/stretchr/testify/assert"
 )
-
-var _ ruleengine.RuleFailure = (*GenericRuleFailure)(nil)
-
-type GenericRuleFailure struct {
-	RuleName         string
-	RuleID           string
-	ContainerId      string
-	RulePriority     int
-	FixSuggestionMsg string
-	Err              string
-	FailureEvent     *utils.GeneralEvent
-}
-
-func (rule *GenericRuleFailure) Name() string {
-	return rule.RuleName
-}
-func (rule *GenericRuleFailure) ID() string {
-	return rule.RuleID
-}
-
-func (rule *GenericRuleFailure) ContainerID() string {
-	return rule.ContainerId
-}
-
-func (rule *GenericRuleFailure) Error() string {
-	return rule.Err
-}
-
-func (rule *GenericRuleFailure) Event() *utils.GeneralEvent {
-	return rule.FailureEvent
-}
-
-func (rule *GenericRuleFailure) Priority() int {
-	return rule.RulePriority
-}
-
-func (rule *GenericRuleFailure) FixSuggestion() string {
-	return rule.FixSuggestionMsg
-}
 
 func TestSendRuleAlert(t *testing.T) {
 	bodyChan := make(chan []byte, 1)
@@ -75,15 +36,19 @@ func TestSendRuleAlert(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create a mock rule failure
-	failedRule := &GenericRuleFailure{
-		RulePriority: ruleengine.RulePriorityCritical,
-		RuleName:     "testrule",
-		Err:          "Application profile is missing",
-		FailureEvent: &utils.GeneralEvent{
-			ContainerName: "testcontainer",
+	failedRule := &ruleenginev1.GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: "testrule",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
+			ContainerName: "testcontainer",
 			Namespace:     "testnamespace",
 			PodName:       "testpodname",
+		},
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: "Application profile is missing",
 		},
 	}
 
@@ -133,15 +98,19 @@ func TestSendRuleAlertRateReached(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create a mock rule failure
-	failedRule := &GenericRuleFailure{
-		RulePriority: ruleengine.RulePriorityCritical,
-		RuleName:     "testrule",
-		Err:          "Application profile is missing",
-		FailureEvent: &utils.GeneralEvent{
-			ContainerName: "testcontainer",
+	failedRule := &ruleenginev1.GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: "testrule",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
+			ContainerName: "testcontainer",
 			Namespace:     "testnamespace",
 			PodName:       "testpodname",
+		},
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: "Application profile is missing",
 		},
 	}
 

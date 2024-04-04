@@ -7,11 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	mmtypes "node-agent/pkg/malwaremanager/v1/types"
-	"node-agent/pkg/utils"
 	"strings"
 	"testing"
 
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+
+	"node-agent/pkg/ruleengine/v1"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"
@@ -37,17 +38,21 @@ func TestSendAlert(t *testing.T) {
 	}
 	// Call SendAlert
 
-	exporter.SendRuleAlert(&GenericRuleFailure{
-		RuleName: "testrule",
-		Err:      "Application profile is missing",
-		FailureEvent: &utils.GeneralEvent{
-			ContainerName: "testcontainer",
+	exporter.SendRuleAlert(&ruleengine.GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: "testrule",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
+			ContainerName: "testcontainer",
 			Namespace:     "testnamespace",
 			PodName:       "testpodname",
 		},
-	},
-	)
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: "Application profile is missing",
+		},
+	})
 	bytesData := <-recievedData
 
 	// Assert the request body is correct
