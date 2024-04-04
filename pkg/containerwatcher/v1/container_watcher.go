@@ -153,7 +153,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		metrics.ReportEvent(utils.ExecveEventType)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
-		relevancyManager.ReportFileExec(k8sContainerID, path)
+		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
 		ruleManager.ReportFileExec(k8sContainerID, event)
 		malwareManager.ReportFileExec(k8sContainerID, event)
 	})
@@ -181,7 +181,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
-		relevancyManager.ReportFileExec(k8sContainerID, path)
+		relevancyManager.ReportFileOpen(event.Runtime.ContainerID, k8sContainerID, path)
 		ruleManager.ReportFileOpen(k8sContainerID, event)
 		malwareManager.ReportFileOpen(k8sContainerID, event)
 	})

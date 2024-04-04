@@ -14,6 +14,7 @@ import (
 )
 
 type TestKinds string
+type TestName string
 
 const (
 	TestKindPod    TestKinds = "Pod"
@@ -23,8 +24,6 @@ const (
 	TestKindAA     TestKinds = "ApplicationActivity"
 	TestKindNN     TestKinds = "NetworkNeighbors"
 )
-
-type TestName string
 
 const (
 	TestNginx      TestName = "nginx"
@@ -48,6 +47,8 @@ const (
 	collectionNetworkNeighborsBytes    = "testdata/collection_networkneighbors.json"
 )
 
+var NAMESPACE = ""
+
 func readFile(p string) []byte {
 	_, filename, _, _ := runtime.Caller(0)
 	dir := path.Join(path.Dir(filename), "..")
@@ -64,7 +65,12 @@ func readFile(p string) []byte {
 }
 
 func UnstructuredToRuntime(u *unstructured.Unstructured) k8sruntime.Object {
-
+	if NAMESPACE != "" {
+		u.SetNamespace(NAMESPACE)
+	}
+	if ns := os.Getenv("TEST_NAMESPACE"); ns != "" {
+		u.SetNamespace(ns)
+	}
 	switch TestKinds(u.GetKind()) {
 	case TestKindPod:
 		pod := &corev1.Pod{}
@@ -111,7 +117,12 @@ func GetUnstructured(kind TestKinds, name TestName) *unstructured.Unstructured {
 	if err := u.UnmarshalJSON(b); err != nil {
 		panic(err)
 	}
-
+	if NAMESPACE != "" {
+		u.SetNamespace(NAMESPACE)
+	}
+	if ns := os.Getenv("TEST_NAMESPACE"); ns != "" {
+		u.SetNamespace(ns)
+	}
 	return u
 }
 

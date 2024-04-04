@@ -6,5 +6,6 @@ import (
 
 type RelevancyManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
-	ReportFileExec(k8sContainerID, file string)
+	ReportFileExec(containerID, k8sContainerID, file string)
+	ReportFileOpen(containerID, k8sContainerID, file string)
 }

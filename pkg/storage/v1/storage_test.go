@@ -11,7 +11,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestStorageNoCache_CreateFilteredSBOM(t *testing.T) {
+func TestStorage_CreateFilteredSBOM(t *testing.T) {
 	type args struct {
 		SBOM *v1beta1.SBOMSyftFiltered
 	}
@@ -33,7 +33,7 @@ func TestStorageNoCache_CreateFilteredSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sc, _ := CreateFakeStorageNoCache("kubescape")
+			sc, _ := CreateFakeStorage("kubescape")
 			if err := sc.CreateFilteredSBOM(tt.args.SBOM); (err != nil) != tt.wantErr {
 				t.Errorf("CreateFilteredSBOM() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -41,7 +41,7 @@ func TestStorageNoCache_CreateFilteredSBOM(t *testing.T) {
 	}
 }
 
-func TestStorageNoCache_GetSBOM(t *testing.T) {
+func TestStorage_GetSBOM(t *testing.T) {
 	type args struct {
 		name string
 	}
@@ -75,7 +75,7 @@ func TestStorageNoCache_GetSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sc, _ := CreateFakeStorageNoCache("kubescape")
+			sc, _ := CreateFakeStorage("kubescape")
 			if tt.createSBOM {
 				_, _ = sc.StorageClient.SBOMSyfts("kubescape").Create(context.Background(), tt.want, v1.CreateOptions{})
 			}
@@ -89,7 +89,7 @@ func TestStorageNoCache_GetSBOM(t *testing.T) {
 	}
 }
 
-func TestStorageNoCache_PatchFilteredSBOM(t *testing.T) {
+func TestStorage_PatchFilteredSBOM(t *testing.T) {
 	type args struct {
 		name string
 		SBOM *v1beta1.SBOMSyftFiltered
@@ -126,7 +126,7 @@ func TestStorageNoCache_PatchFilteredSBOM(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sc, _ := CreateFakeStorageNoCache("kubescape")
+			sc, _ := CreateFakeStorage("kubescape")
 			filteredSBOM := &v1beta1.SBOMSyftFiltered{
 				ObjectMeta: v1.ObjectMeta{
 					Name: tt.args.name,
@@ -147,7 +147,7 @@ func TestStorageNoCache_PatchFilteredSBOM(t *testing.T) {
 	}
 }
 
-func TestStorageNoCache_PatchNetworkNeighbors(t *testing.T) {
+func TestStorage_PatchNetworkNeighbors(t *testing.T) {
 	type args struct {
 		name      string
 		neighbors *v1beta1.NetworkNeighbors
@@ -178,7 +178,7 @@ func TestStorageNoCache_PatchNetworkNeighbors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sc, _ := CreateFakeStorageNoCache("kubescape")
+			sc, _ := CreateFakeStorage("kubescape")
 			existingProfile := &v1beta1.NetworkNeighbors{
 				ObjectMeta: v1.ObjectMeta{
 					Name: tt.args.name,
@@ -205,7 +205,7 @@ func TestStorageNoCache_PatchNetworkNeighbors(t *testing.T) {
 	}
 }
 
-func TestStorageNoCache_PatchApplicationProfile(t *testing.T) {
+func TestStorage_PatchApplicationProfile(t *testing.T) {
 	type args struct {
 		name  string
 		patch []byte
@@ -311,7 +311,7 @@ func TestStorageNoCache_PatchApplicationProfile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sc, _ := CreateFakeStorageNoCache("kubescape")
+			sc, _ := CreateFakeStorage("kubescape")
 			existingProfile := &v1beta1.ApplicationProfile{
 				ObjectMeta: v1.ObjectMeta{
 					Name: tt.args.name,
