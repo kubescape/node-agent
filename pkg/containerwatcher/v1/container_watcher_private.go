@@ -92,6 +92,8 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 				ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
 				continue
 			}
+			// TODO: wait for pod to be cached
+
 			ch.preRunningContainersIDs.Add(container.Runtime.ContainerID)
 		}
 	}

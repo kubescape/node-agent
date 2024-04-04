@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -26,7 +27,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	k8sClient := &k8sclient.K8sClientMock{}
 	storageClient := &storage.StorageHttpClientMock{}
 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
-	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, nil, k8sObjectCacheMock)
+	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, mapset.NewSet[string](), k8sObjectCacheMock)
 	assert.NoError(t, err)
 	// prepare container
 	container := &containercollection.Container{
@@ -73,13 +74,10 @@ func TestApplicationProfileManager(t *testing.T) {
 	// let it stop
 	time.Sleep(2 * time.Second)
 	// verify generated CRDs
-	assert.Equal(t, 1, len(storageClient.ApplicationActivities))
-	sort.Strings(storageClient.ApplicationActivities[0].Spec.Syscalls)
-	assert.Equal(t, []string{"dup", "listen"}, storageClient.ApplicationActivities[0].Spec.Syscalls)
 	assert.Equal(t, 2, len(storageClient.ApplicationProfiles))
-	assert.Equal(t, 2, len(storageClient.ApplicationProfileSummaries))
 	// check the first profile
 	sort.Strings(storageClient.ApplicationProfiles[0].Spec.Containers[0].Capabilities)
+	assert.Equal(t, []string{"dup", "listen"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Syscalls)
 	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Capabilities)
 	assert.Equal(t, []v1beta1.ExecCalls{{Path: "/bin/bash", Args: []string{"-c", "ls"}, Envs: []string(nil)}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Execs)
 	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Opens)
