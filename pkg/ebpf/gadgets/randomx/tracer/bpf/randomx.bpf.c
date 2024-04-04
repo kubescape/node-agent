@@ -25,6 +25,32 @@ static __always_inline bool valid_uid(uid_t uid)
 	return uid != INVALID_UID;
 }
 
+static __always_inline bool has_upper_layer()
+{
+	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+	struct inode *inode = BPF_CORE_READ(task, mm, exe_file, f_inode);
+	if (!inode) {
+		return false;
+	}
+	unsigned long sb_magic = BPF_CORE_READ(inode, i_sb, s_magic);
+
+	if (sb_magic != OVERLAYFS_SUPER_MAGIC) {
+		return false;
+	}
+
+	struct dentry *upperdentry;
+
+	// struct ovl_inode defined in fs/overlayfs/ovl_entry.h
+	// Unfortunately, not exported to vmlinux.h
+	// and not available in /sys/kernel/btf/vmlinux
+	// See https://github.com/cilium/ebpf/pull/1300
+	// We only rely on vfs_inode and __upperdentry relative positions
+	bpf_probe_read_kernel(&upperdentry, sizeof(upperdentry),
+			      ((void *)inode) +
+				      bpf_core_type_size(struct inode));
+	return upperdentry != NULL;
+}
+
 SEC("tracepoint/x86_fpu/x86_fpu_regs_deactivated")
 int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx) {
     struct event event = {};
@@ -73,7 +99,8 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx) {
         event.uid = uid;
         event.gid = (u32)(uid_gid >> 32);
         bpf_get_current_comm(&event.comm, sizeof(event.comm));
-        
+        event.upper_layer = has_upper_layer();
+
         /* emit event */
         bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
     }

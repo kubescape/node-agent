@@ -12,13 +12,15 @@ import (
 )
 
 type randomxEvent struct {
-	Timestamp uint64
-	MntnsId   uint64
-	Pid       uint32
-	Ppid      uint32
-	Uid       uint32
-	Gid       uint32
-	Comm      [16]uint8
+	Timestamp  uint64
+	MntnsId    uint64
+	Pid        uint32
+	Ppid       uint32
+	Uid        uint32
+	Gid        uint32
+	UpperLayer bool
+	Comm       [16]uint8
+	_          [7]byte
 }
 
 // loadRandomx returns the embedded CollectionSpec for randomx.
