@@ -4,6 +4,7 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
     branches:
       - 'main'
+      - 'rule-manager'
     paths-ignore:
       - '*.md'
       - '*.yaml'

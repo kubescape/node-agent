@@ -224,8 +224,12 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 
 	// application activity
 	// get syscalls from IG
+
+	var observedSyscalls []string
+	var toSaveSyscalls []string
+
 	if am.syscallPeekFunc != nil {
-		observedSyscalls, err := am.syscallPeekFunc(watchedContainer.NsMntId)
+		observedSyscalls, err = am.syscallPeekFunc(watchedContainer.NsMntId)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get syscalls", helpers.Error(err),
 				helpers.String("slug", slug),
@@ -235,38 +239,9 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		}
 		// check if we have new activities to save
 		savedSyscalls := am.savedSyscalls.Get(watchedContainer.K8sContainerID)
-		toSaveSyscalls := mapset.NewSet[string](observedSyscalls...).Difference(savedSyscalls)
-		if !toSaveSyscalls.IsEmpty() {
-			newActivity := &v1beta1.ApplicationActivity{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: slug,
-					Annotations: map[string]string{
-						helpersv1.WlidMetadataKey:       watchedContainer.Wlid,
-						helpersv1.CompletionMetadataKey: string(watchedContainer.GetCompletionStatus()),
-						helpersv1.StatusMetadataKey:     string(watchedContainer.GetStatus()),
-					},
-					Labels: utils.GetLabels(watchedContainer, true),
-				},
-			}
-			// add syscalls
-			newActivity.Spec.Syscalls = observedSyscalls
-			// save application activity
-			if err := am.storageClient.CreateApplicationActivity(newActivity, namespace); err != nil {
-				logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application activity", helpers.Error(err),
-					helpers.String("slug", slug),
-					helpers.Int("container index", watchedContainer.ContainerIndex),
-					helpers.String("container ID", watchedContainer.ContainerID),
-					helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			} else {
-				// record saved syscalls
-				am.savedSyscalls.Get(watchedContainer.K8sContainerID).Append(toSaveSyscalls.ToSlice()...)
-				logger.L().Debug("ApplicationProfileManager - saved application activity",
-					helpers.Int("syscalls", toSaveSyscalls.Cardinality()),
-					helpers.String("slug", slug),
-					helpers.Int("container index", watchedContainer.ContainerIndex),
-					helpers.String("container ID", watchedContainer.ContainerID),
-					helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			}
+		toSaveSyscallsSet := mapset.NewSet[string](observedSyscalls...).Difference(savedSyscalls)
+		if !toSaveSyscallsSet.IsEmpty() {
+			toSaveSyscalls = toSaveSyscallsSet.ToSlice()
 		}
 	} else {
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - syscall peek function is nil", helpers.String("slug", slug))
@@ -322,9 +297,9 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// 3a. the profile is missing Containers or InitContainers - ADD one with the container profile at the right index
 	// 3b. the profile is missing the container profile - ADD the container profile at the right index
 	// 3c. default - patch the container ourselves and REPLACE it at the right index
-	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || watchedContainer.StatusUpdated() {
+	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || watchedContainer.StatusUpdated() {
 		// calculate patch
-		profileOperations := utils.CreateCapabilitiesPatchOperations(capabilities, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+		profileOperations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		profileOperations = utils.AppendStatusAnnotationPatchOperations(profileOperations, watchedContainer)
 
 		patch, err := json.Marshal(profileOperations)
@@ -356,7 +331,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				newProfileContainer := &v1beta1.ApplicationProfileContainer{
 					Name: watchedContainer.InstanceID.GetContainerName(),
 				}
-				utils.EnrichProfileContainer(newProfileContainer, capabilities, execs, opens)
+				utils.EnrichProfileContainer(newProfileContainer, capabilities, observedSyscalls, execs, opens)
 				// insert application profile container
 				utils.InsertApplicationProfileContainer(newProfile, watchedContainer.ContainerType, watchedContainer.ContainerIndex, newProfileContainer)
 				// try to create application profile
@@ -395,7 +370,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						addProfileContainer = true
 					}
 					// update it
-					utils.EnrichProfileContainer(existingProfileContainer, capabilities, execs, opens)
+					utils.EnrichProfileContainer(existingProfileContainer, capabilities, observedSyscalls, execs, opens)
 					// get existing containers
 					var existingContainers []v1beta1.ApplicationProfileContainer
 					if watchedContainer.ContainerType == utils.Container {
@@ -468,6 +443,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			// for status updates to be tracked, we reset the update flag
 			watchedContainer.ResetStatusUpdatedFlag()
 
+			// record saved syscalls
+			am.savedSyscalls.Get(watchedContainer.K8sContainerID).Append(toSaveSyscalls...)
 			// record saved capabilities
 			am.savedCapabilities.Get(watchedContainer.K8sContainerID).Append(capabilities...)
 			// record saved execs

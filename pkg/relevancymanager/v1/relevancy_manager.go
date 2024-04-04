@@ -37,20 +37,20 @@ type RelevancyManager struct {
 	k8sClient                k8sclient.K8sClientInterface
 	sbomHandler              sbomhandler.SBOMHandlerClient
 	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
-	preRunningContainersIDs  mapset.Set[string]
+	preRunningContainerIDs   mapset.Set[string]
 }
 
 var _ relevancymanager.RelevancyManagerClient = (*RelevancyManager)(nil)
 
 func CreateRelevancyManager(ctx context.Context, cfg config.Config, clusterName string, fileHandler filehandler.FileHandler, k8sClient k8sclient.K8sClientInterface, sbomHandler sbomhandler.SBOMHandlerClient, preRunningContainerIDs mapset.Set[string]) (*RelevancyManager, error) {
 	return &RelevancyManager{
-		cfg:                     cfg,
-		clusterName:             clusterName,
-		ctx:                     ctx,
-		fileHandler:             fileHandler,
-		k8sClient:               k8sClient,
-		sbomHandler:             sbomHandler,
-		preRunningContainersIDs: preRunningContainerIDs,
+		cfg:                    cfg,
+		clusterName:            clusterName,
+		ctx:                    ctx,
+		fileHandler:            fileHandler,
+		k8sClient:              k8sClient,
+		sbomHandler:            sbomHandler,
+		preRunningContainerIDs: preRunningContainerIDs,
 	}, nil
 }
 
@@ -285,6 +285,12 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 
 func (rm *RelevancyManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
+	// ignore pre-running containers
+	if rm.preRunningContainerIDs.Contains(notif.Container.Runtime.ContainerID) {
+		logger.L().Debug("ignoring pre-running container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+		return
+	}
+
 	ctx, span := otel.Tracer("").Start(rm.ctx, "RelevancyManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
 	defer span.End()
 
@@ -314,6 +320,18 @@ func (rm *RelevancyManager) ContainerCallback(notif containercollection.PubSubEv
 	}
 }
 
-func (rm *RelevancyManager) ReportFileExec(k8sContainerID, file string) {
+func (rm *RelevancyManager) ReportFileExec(containerID, k8sContainerID, file string) {
+	if rm.preRunningContainerIDs.Contains(containerID) {
+		return
+	}
+
+	rm.fileHandler.AddFile(k8sContainerID, file)
+}
+
+func (rm *RelevancyManager) ReportFileOpen(containerID, k8sContainerID, file string) {
+	if rm.preRunningContainerIDs.Contains(containerID) {
+		return
+	}
+
 	rm.fileHandler.AddFile(k8sContainerID, file)
 }

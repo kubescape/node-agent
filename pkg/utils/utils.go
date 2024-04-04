@@ -305,10 +305,13 @@ func (watchedContainer *WatchedContainerData) GetTerminationExitCode(k8sObjectsC
 	return 0
 }
 
-func EnrichProfileContainer(newProfileContainer *v1beta1.ApplicationProfileContainer, observedCapabilities []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string]) {
+func EnrichProfileContainer(newProfileContainer *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string]) {
 	// add capabilities
 	sort.Strings(observedCapabilities)
 	newProfileContainer.Capabilities = observedCapabilities
+	// add syscalls
+	sort.Strings(observedSyscalls)
+	newProfileContainer.Syscalls = observedSyscalls
 	// add execs
 	newProfileContainer.Execs = make([]v1beta1.ExecCalls, 0)
 	for path, exec := range execs {
@@ -345,7 +348,7 @@ func EscapeJSONPointerElement(s string) string {
 	return s
 }
 
-func CreateCapabilitiesPatchOperations(capabilities []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string], containerType string, containerIndex int) []PatchOperation {
+func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string], containerType string, containerIndex int) []PatchOperation {
 	var profileOperations []PatchOperation
 	// add capabilities
 	sort.Strings(capabilities)
@@ -357,6 +360,17 @@ func CreateCapabilitiesPatchOperations(capabilities []string, execs map[string]m
 			Value: capability,
 		})
 	}
+	// add syscalls
+	sort.Strings(syscalls)
+	sysCallsPath := fmt.Sprintf("/spec/%s/%d/syscalls/-", containerType, containerIndex)
+	for _, syscall := range syscalls {
+		profileOperations = append(profileOperations, PatchOperation{
+			Op:    "add",
+			Path:  sysCallsPath,
+			Value: syscall,
+		})
+	}
+
 	// add execs
 	execsPath := fmt.Sprintf("/spec/%s/%d/execs/-", containerType, containerIndex)
 	for path, exec := range execs {
