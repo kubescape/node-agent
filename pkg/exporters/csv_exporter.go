@@ -82,7 +82,7 @@ func (ce *CsvExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().UID),
 		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().GID),
 		fmt.Sprintf("%d", ppid),
-		fmt.Sprintf("%s", failedRule.GetBaseRuntimeAlert().Timestamp.String()),
+		failedRule.GetBaseRuntimeAlert().Timestamp.String(),
 	})
 }
 

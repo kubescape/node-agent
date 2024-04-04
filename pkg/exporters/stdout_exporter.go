@@ -32,9 +32,12 @@ func InitStdoutExporter(useStdout *bool) *StdoutExporter {
 
 func (exporter *StdoutExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	exporter.logger.WithFields(log.Fields{
-		"severity": failedRule.GetBaseRuntimeAlert().Severity,
-		"message":  failedRule.GetRuleAlert().RuleDescription,
-		"event":    failedRule.GetTriggerEvent(),
+		"severity":              failedRule.GetBaseRuntimeAlert().Severity,
+		"message":               failedRule.GetRuleAlert().RuleDescription,
+		"event":                 failedRule.GetTriggerEvent(),
+		"BaseRuntimeMetadata":   failedRule.GetBaseRuntimeAlert(),
+		"RuntimeProcessDetails": failedRule.GetRuntimeProcessDetails(),
+		"RuntimeK8sDetails":     failedRule.GetRuntimeAlertK8sDetails(),
 	}).Error(failedRule.GetBaseRuntimeAlert().AlertName)
 }
 
