@@ -113,6 +113,7 @@ func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 		return
 	}
 	// populate the RuntimeAlert struct with the data from the failedRule
+	ppid := failedRule.Event().Ppid
 	httpAlert := apitypes.RuntimeAlert{ // TODO: Finish this after refactoring rule type in engine.
 		Message:   failedRule.Error(),
 		HostName:  exporter.Host,
@@ -121,7 +122,7 @@ func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 			AlertName:      failedRule.Name(),
 			Severity:       failedRule.Priority(),
 			FixSuggestions: failedRule.FixSuggestion(),
-			PPID:           failedRule.Event().Ppid,
+			PPID:           &ppid,
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   failedRule.Event().ContainerID,
@@ -206,7 +207,7 @@ func (exporter *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.Malw
 			ContainerName: malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
 			PodNamespace:  malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
 			PodName:       malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
-			HostNetwork:   malwareResult.GetTriggerEvent().GetBaseEvent().K8s.HostNetwork,
+			HostNetwork:   malwareResult.GetRuntimeAlertK8sDetails().HostNetwork,
 			Image:         malwareResult.GetTriggerEvent().Runtime.ContainerImageName,
 			ImageDigest:   malwareResult.GetTriggerEvent().Runtime.ContainerImageDigest,
 			// TODO: Add workload fields.

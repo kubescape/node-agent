@@ -10,6 +10,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// TODO: Add missing fields.
+
 // CsvExporter is an exporter that sends alerts to csv
 type CsvExporter struct {
 	CsvRulePath    string
@@ -123,7 +125,7 @@ func (ce *CsvExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResu
 		malwareResult.GetBasicRuntimeAlert().MD5Hash,
 		malwareResult.GetBasicRuntimeAlert().SHA256Hash,
 		malwareResult.GetBasicRuntimeAlert().SHA1Hash,
-		malwareResult.GetBasicRuntimeAlert().Size,
+		*malwareResult.GetBasicRuntimeAlert().Size,
 		malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
 		malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
 		malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),

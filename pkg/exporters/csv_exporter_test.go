@@ -23,16 +23,17 @@ func TestCsvExporter(t *testing.T) {
 		FailureEvent: &utils.GeneralEvent{
 			ContainerName: "testcontainer", ContainerID: "testcontainerid", Namespace: "testnamespace", PodName: "testpodname"}},
 	)
-
+	sizeStr := "2MiB"
+	commandLine := "testmalwarecmdline"
 	csvExporter.SendMalwareAlert(&mmtypes.GenericMalwareResult{
 		BasicRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:     "testmalware",
-			Size:          "2MiB",
-			CommandLine:   "testmalwarecmdline",
+			Size:          &sizeStr,
+			CommandLine:   &commandLine,
 			MD5Hash:       "testmalwarehash",
 			SHA1Hash:      "testmalwarehash",
 			SHA256Hash:    "testmalwarehash",
-			IsPartOfImage: true,
+			IsPartOfImage: nil,
 		},
 		TriggerEvent: igtypes.Event{
 			CommonData: igtypes.CommonData{

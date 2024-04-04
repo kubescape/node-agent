@@ -91,15 +91,17 @@ func TestSendMalwareAlert(t *testing.T) {
 		t.Fatalf("Failed to create new Alertmanager exporter")
 	}
 	// Call SendAlert
+	sizeStr := "2MiB"
+	commmandLineStr := "testmalwarecmdline"
 	exporter.SendMalwareAlert(&mmtypes.GenericMalwareResult{
 		BasicRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:     "testmalware",
-			Size:          "2MiB",
-			CommandLine:   "testmalwarecmdline",
+			Size:          &sizeStr,
+			CommandLine:   &commmandLineStr,
 			MD5Hash:       "testmalwarehash",
 			SHA1Hash:      "testmalwarehash",
 			SHA256Hash:    "testmalwarehash",
-			IsPartOfImage: true,
+			IsPartOfImage: nil,
 		},
 		TriggerEvent: igtypes.Event{
 			CommonData: igtypes.CommonData{

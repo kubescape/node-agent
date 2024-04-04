@@ -19,6 +19,8 @@ import (
 	"github.com/prometheus/alertmanager/api/v2/models"
 )
 
+// TODO: Add missing fields.
+
 type AlertManagerExporter struct {
 	Host     string
 	NodeName string
@@ -119,7 +121,7 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 				"container_name":         malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
 				"namespace":              malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
 				"pod_name":               malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
-				"size":                   malwareResult.GetBasicRuntimeAlert().Size,
+				"size":                   *malwareResult.GetBasicRuntimeAlert().Size,
 				"md5hash":                malwareResult.GetBasicRuntimeAlert().MD5Hash,
 				"sha256hash":             malwareResult.GetBasicRuntimeAlert().SHA256Hash,
 				"sha1hash":               malwareResult.GetBasicRuntimeAlert().SHA1Hash,

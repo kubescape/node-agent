@@ -157,7 +157,7 @@ func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareR
 					},
 					{
 						Name:  "size",
-						Value: malwareResult.GetBasicRuntimeAlert().Size,
+						Value: *malwareResult.GetBasicRuntimeAlert().Size,
 					},
 					{
 						Name:  "namespace",
