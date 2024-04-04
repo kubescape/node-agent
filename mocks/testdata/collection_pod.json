@@ -177,6 +177,18 @@
                 ]
             }
         ],
+        "ephemeralContainers": [
+            {
+                "image": "busybox",
+                "imagePullPolicy": "Always",
+                "name": "debugger",
+                "resources": {},
+                "stdin": true,
+                "terminationMessagePath": "/dev/termination-log",
+                "terminationMessagePolicy": "File",
+                "tty": true
+            }
+        ],
         "nodeName": "gke-dwertent-syft-default-pool-d4e9ae18-b0tw",
         "preemptionPolicy": "PreemptLowerPriority",
         "priority": 0,
@@ -361,6 +373,22 @@
                         "finishedAt": "2024-03-25T11:22:54Z",
                         "reason": "Completed",
                         "startedAt": "2024-03-25T11:22:54Z"
+                    }
+                }
+            }
+        ],
+        "ephemeralContainerStatuses": [
+            {
+                "containerID": "containerd://6565eafa8ec13fd5793b0ef8591576f1a3ea9068b6b7a0c45d82829c33779234",
+                "image": "docker.io/library/busybox:latest",
+                "imageID": "docker.io/library/busybox@sha256:e8e5cca392e3cf056fcdb3093e7ac2bf83fcf28b3bcf5818fe8ae71cf360c231",
+                "lastState": {},
+                "name": "debugger",
+                "ready": false,
+                "restartCount": 0,
+                "state": {
+                    "running": {
+                        "startedAt": "2024-03-25T11:22:53Z"
                     }
                 }
             }
