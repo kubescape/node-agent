@@ -340,14 +340,19 @@ func (am *NetworkManager) saveNetworkEvents(_ context.Context, container *contai
 		// patch only if there are changes
 		if len(networkNeighborsSpec.Egress) > 0 || len(networkNeighborsSpec.Ingress) > 0 || watchedContainer.StatusUpdated() {
 			// send PATCH command using entries generated from events
-			nn := &v1beta1.NetworkNeighbors{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						helpersv1.StatusMetadataKey:     string(watchedContainer.GetStatus()),
-						helpersv1.CompletionMetadataKey: string(watchedContainer.GetCompletionStatus()),
-					},
-				},
-				Spec: networkNeighborsSpec,
+			nn := &v1beta1.NetworkNeighbors{ObjectMeta: metav1.ObjectMeta{}}
+
+			if watchedContainer.StatusUpdated() {
+				nn.ObjectMeta.Annotations = map[string]string{
+					helpersv1.StatusMetadataKey:     string(watchedContainer.GetStatus()),
+					helpersv1.CompletionMetadataKey: string(watchedContainer.GetCompletionStatus()),
+				}
+			}
+			if len(networkNeighborsSpec.Egress) > 0 {
+				nn.Spec.Egress = networkNeighborsSpec.Egress
+			}
+			if len(networkNeighborsSpec.Ingress) > 0 {
+				nn.Spec.Ingress = networkNeighborsSpec.Ingress
 			}
 			if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(name, namespace, nn); err != nil {
 				logger.L().Warning("NetworkManager - failed to patch network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
