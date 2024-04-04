@@ -375,8 +375,10 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					var existingContainers []v1beta1.ApplicationProfileContainer
 					if watchedContainer.ContainerType == utils.Container {
 						existingContainers = existingProfile.Spec.Containers
-					} else {
+					} else if watchedContainer.ContainerType == utils.InitContainer {
 						existingContainers = existingProfile.Spec.InitContainers
+					} else {
+						existingContainers = existingProfile.Spec.EphemeralContainers
 					}
 					// replace or add application profile container using patch
 					switch {

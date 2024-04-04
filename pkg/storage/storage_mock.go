@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"node-agent/pkg/utils"
 	"os"
 	"path"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -23,7 +24,6 @@ const (
 type StorageHttpClientMock struct {
 	ApplicationActivities       []*spdxv1beta1.ApplicationActivity
 	ApplicationProfiles         []*spdxv1beta1.ApplicationProfile
-	ApplicationProfileSummaries []*spdxv1beta1.ApplicationProfileSummary
 	FilteredSyftSBOMs           []*spdxv1beta1.SBOMSyftFiltered
 	NetworkNeighborses          []*v1beta1.NetworkNeighbors
 	ImageCounters               map[string]int
@@ -117,11 +117,6 @@ func (sc *StorageHttpClientMock) PatchApplicationProfile(name, _ string, patchJS
 		return fmt.Errorf("unmarshal patched profile: %w", err)
 	}
 	sc.ApplicationProfiles = append(sc.ApplicationProfiles, profile)
-	return nil
-}
-
-func (sc *StorageHttpClientMock) CreateApplicationProfileSummary(summary *spdxv1beta1.ApplicationProfileSummary, _ string) error {
-	sc.ApplicationProfileSummaries = append(sc.ApplicationProfileSummaries, summary)
 	return nil
 }
 

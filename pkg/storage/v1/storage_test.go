@@ -308,6 +308,35 @@ func TestStorage_PatchApplicationProfile(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "test",
+			args: args{
+				name:  storage.NginxKey,
+				patch: []byte(`[{"op":"add","path":"/spec/ephemeralContainers","value":[{},{},{"name":"abc"}]}]`),
+			},
+			want: &v1beta1.ApplicationProfile{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      storage.NginxKey,
+					Namespace: "default",
+				},
+				Spec: v1beta1.ApplicationProfileSpec{
+					Containers: []v1beta1.ApplicationProfileContainer{{
+						Name:         "test",
+						Capabilities: []string{"NET_ADMIN"},
+						Execs: []v1beta1.ExecCalls{
+							{Path: "/usr/bin/test"},
+							{Path: "/usr/bin/test1"},
+						},
+						Opens: []v1beta1.OpenCalls{
+							{Path: "/usr/bin/test"},
+							{Path: "/usr/bin/test1"},
+						},
+						Syscalls: []string{"execve"},
+					}},
+					EphemeralContainers: []v1beta1.ApplicationProfileContainer{{}, {}, {Name: "abc"}},
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -188,6 +188,8 @@ func findImageID(pod workloadinterface.IWorkload, containerName string, containe
 		containerStatuses = podStatus.ContainerStatuses
 	case utils.InitContainer:
 		containerStatuses = podStatus.InitContainerStatuses
+	case utils.EphemeralContainer:
+		containerStatuses = podStatus.EphemeralContainerStatuses
 	}
 
 	for i := range containerStatuses {
@@ -200,6 +202,7 @@ func findImageID(pod workloadinterface.IWorkload, containerName string, containe
 }
 func findImageTag(pod workloadinterface.IWorkload, containerName string, containerType utils.ContainerType) (string, error) {
 	var containers []v1.Container
+	var ephemeralContainers []v1.EphemeralContainer
 	var err error
 
 	switch containerType {
@@ -213,11 +216,21 @@ func findImageTag(pod workloadinterface.IWorkload, containerName string, contain
 		if err != nil {
 			return "", err
 		}
+	case utils.EphemeralContainer:
+		ephemeralContainers, err = pod.GetEphemeralContainers()
+		if err != nil {
+			return "", err
+		}
 
 	}
 	for i := range containers {
 		if containers[i].Name == containerName {
 			return containers[i].Image, nil
+		}
+	}
+	for i := range ephemeralContainers {
+		if ephemeralContainers[i].Name == containerName {
+			return ephemeralContainers[i].Image, nil
 		}
 	}
 

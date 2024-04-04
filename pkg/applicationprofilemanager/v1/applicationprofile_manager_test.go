@@ -77,7 +77,6 @@ func TestApplicationProfileManager(t *testing.T) {
 	sort.Strings(storageClient.ApplicationActivities[0].Spec.Syscalls)
 	assert.Equal(t, []string{"dup", "listen"}, storageClient.ApplicationActivities[0].Spec.Syscalls)
 	assert.Equal(t, 2, len(storageClient.ApplicationProfiles))
-	assert.Equal(t, 2, len(storageClient.ApplicationProfileSummaries))
 	// check the first profile
 	sort.Strings(storageClient.ApplicationProfiles[0].Spec.Containers[0].Capabilities)
 	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Capabilities)
