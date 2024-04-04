@@ -31,13 +31,14 @@ import (
 
 type RelevancyManager struct {
 	cfg                      config.Config
-	clusterName              string
+	watchedContainerChannels maps.SafeMap[string, chan error]
 	ctx                      context.Context
 	fileHandler              filehandler.FileHandler
 	k8sClient                k8sclient.K8sClientInterface
 	sbomHandler              sbomhandler.SBOMHandlerClient
-	watchedContainerChannels maps.SafeMap[string, chan error] // key is ContainerID
 	preRunningContainerIDs   mapset.Set[string]
+	removedContainers        mapset.Set[string]
+	clusterName              string
 }
 
 var _ relevancymanager.RelevancyManagerClient = (*RelevancyManager)(nil)
@@ -51,6 +52,7 @@ func CreateRelevancyManager(ctx context.Context, cfg config.Config, clusterName 
 		k8sClient:              k8sClient,
 		sbomHandler:            sbomHandler,
 		preRunningContainerIDs: preRunningContainerIDs,
+		removedContainers:      mapset.NewSet[string](),
 	}, nil
 }
 
@@ -58,6 +60,7 @@ func (rm *RelevancyManager) deleteResources(watchedContainer *utils.WatchedConta
 	watchedContainer.UpdateDataTicker.Stop()
 	rm.sbomHandler.DecrementImageUse(watchedContainer.ImageID)
 	rm.watchedContainerChannels.Delete(watchedContainer.ContainerID)
+	rm.removedContainers.Add(watchedContainer.ContainerID)
 
 	// Remove container from the file DB
 	_ = rm.fileHandler.RemoveBucket(watchedContainer.ContainerID)
@@ -270,7 +273,7 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
-
+	rm.removedContainers.Remove(watchedContainer.ContainerID)
 	rm.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
 	if err := rm.monitorContainer(ctx, container, watchedContainer); err != nil {
 		logger.L().Info("RelevancyManager - stop monitor on container", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
@@ -317,11 +320,15 @@ func (rm *RelevancyManager) ContainerCallback(notif containercollection.PubSubEv
 			channel <- utils.ContainerHasTerminatedError
 		}
 		rm.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
+		rm.removedContainers.Add(notif.Container.Runtime.ContainerID)
 	}
 }
 
 func (rm *RelevancyManager) ReportFileExec(containerID, k8sContainerID, file string) {
 	if rm.preRunningContainerIDs.Contains(containerID) {
+		return
+	}
+	if rm.removedContainers.Contains(containerID) {
 		return
 	}
 
@@ -332,6 +339,8 @@ func (rm *RelevancyManager) ReportFileOpen(containerID, k8sContainerID, file str
 	if rm.preRunningContainerIDs.Contains(containerID) {
 		return
 	}
-
+	if rm.removedContainers.Contains(containerID) {
+		return
+	}
 	rm.fileHandler.AddFile(k8sContainerID, file)
 }

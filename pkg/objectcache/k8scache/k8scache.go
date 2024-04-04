@@ -32,6 +32,7 @@ func NewK8sObjectCache(nodeName string, k8sClient k8sclient.K8sClientInterface) 
 	k := &K8sObjectCacheImpl{
 		k8sClient: k8sClient,
 		nodeName:  nodeName,
+		podSpec:   maps.SafeMap[string, *corev1.PodSpec]{},
 	}
 
 	if err := k.setApiServerIpAddress(); err != nil {
