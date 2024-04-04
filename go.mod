@@ -256,4 +256,6 @@ require (
 
 replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6
 
+replace github.com/anchore/packageurl-go => github.com/anchore/packageurl-go v0.1.1-0.20230104203445-02e0a6721501
+
 replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspektor-gadget v0.0.0-20240402111502-dab008c7ec02

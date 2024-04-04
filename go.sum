@@ -84,8 +84,8 @@ github.com/anchore/go-logger v0.0.0-20230725134548-c21dafa1ec5a h1:nJ2G8zWKASyVC
 github.com/anchore/go-logger v0.0.0-20230725134548-c21dafa1ec5a/go.mod h1:ubLFmlsv8/DFUQrZwY5syT5/8Er3ugSr4rDFwHsE3hg=
 github.com/anchore/go-testutils v0.0.0-20200925183923-d5f45b0d3c04 h1:VzprUTpc0vW0nnNKJfJieyH/TZ9UYAnTZs5/gHTdAe8=
 github.com/anchore/go-testutils v0.0.0-20200925183923-d5f45b0d3c04/go.mod h1:6dK64g27Qi1qGQZ67gFmBFvEHScy0/C8qhQhNe5B5pQ=
-github.com/anchore/packageurl-go v0.1.1-0.20240202171727-877e1747d426 h1:agoiZchSf1Nnnos1azwIg5hk5Ao9TzZNBD9++AChGEg=
-github.com/anchore/packageurl-go v0.1.1-0.20240202171727-877e1747d426/go.mod h1:Blo6OgJNiYF41ufcgHKkbCKF2MDOMlrqhXv/ij6ocR4=
+github.com/anchore/packageurl-go v0.1.1-0.20230104203445-02e0a6721501 h1:AV7qjwMcM4r8wFhJq3jLRztew3ywIyPTRapl2T1s9o8=
+github.com/anchore/packageurl-go v0.1.1-0.20230104203445-02e0a6721501/go.mod h1:Blo6OgJNiYF41ufcgHKkbCKF2MDOMlrqhXv/ij6ocR4=
 github.com/anchore/stereoscope v0.0.2-0.20240216182029-6171ee21e1d5 h1:o//fhRcSpOYHC/xG/HiI6ddtSMiRgHlB96xJQXZawZM=
 github.com/anchore/stereoscope v0.0.2-0.20240216182029-6171ee21e1d5/go.mod h1:o0TqYkefad6kIPtmbigFKss7P48z4bjd8Vp5Wklbf3Y=
 github.com/anchore/syft v0.101.1 h1:PTh7XBdtXq3BYhuPz67rrC6AFPZxC1Rt8jgqv7Z75rA=
