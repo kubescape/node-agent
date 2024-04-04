@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/utils"
+	"path/filepath"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -94,14 +95,17 @@ func getCommFromPid(pid uint32) (string, error) {
 
 func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRuleFailure) {
 	path, err := getPathFromPid(pid)
+	hostPath := ""
 	if err != nil {
 		logger.L().Error("Failed to get path from event", helpers.Error(err))
 		path = ""
+	} else {
+		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", pid, path))
 	}
 
 	// Enrich BaseRuntimeAlert
-	if ruleFailure.BaseRuntimeAlert.MD5Hash == "" {
-		md5hash, err := utils.CalculateMD5FileHash(path)
+	if ruleFailure.BaseRuntimeAlert.MD5Hash == "" && hostPath != "" {
+		md5hash, err := utils.CalculateMD5FileHash(hostPath)
 		if err != nil {
 			logger.L().Error("Failed to calculate md5 hash for file", helpers.Error(err))
 			md5hash = ""
@@ -109,8 +113,8 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 		ruleFailure.BaseRuntimeAlert.MD5Hash = md5hash
 	}
 
-	if ruleFailure.BaseRuntimeAlert.SHA1Hash == "" {
-		sha1hash, err := utils.CalculateSHA1FileHash(path)
+	if ruleFailure.BaseRuntimeAlert.SHA1Hash == "" && hostPath != "" {
+		sha1hash, err := utils.CalculateSHA1FileHash(hostPath)
 		if err != nil {
 			logger.L().Error("Failed to calculate sha1 hash for file", helpers.Error(err))
 			sha1hash = ""
@@ -119,8 +123,8 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 		ruleFailure.BaseRuntimeAlert.SHA1Hash = sha1hash
 	}
 
-	if ruleFailure.BaseRuntimeAlert.SHA256Hash == "" {
-		sha256hash, err := utils.CalculateSHA256FileHash(path)
+	if ruleFailure.BaseRuntimeAlert.SHA256Hash == "" && hostPath != "" {
+		sha256hash, err := utils.CalculateSHA256FileHash(hostPath)
 		if err != nil {
 			logger.L().Error("Failed to calculate sha256 hash for file", helpers.Error(err))
 			sha256hash = ""
@@ -129,8 +133,8 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 		ruleFailure.BaseRuntimeAlert.SHA256Hash = sha256hash
 	}
 
-	if ruleFailure.BaseRuntimeAlert.Size == nil {
-		size, err := utils.GetFileSize(path)
+	if ruleFailure.BaseRuntimeAlert.Size == nil && hostPath != "" {
+		size, err := utils.GetFileSize(hostPath)
 		if err != nil {
 			logger.L().Error("Failed to get file size", helpers.Error(err))
 			sizeStr := ""
@@ -161,14 +165,16 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 		}
 
 		if ruleFailure.BaseRuntimeAlert.PPIDComm == nil {
-			pcomm := parent.Comm
-			ruleFailure.BaseRuntimeAlert.PPIDComm = &pcomm
+			if err == nil {
+				pcomm := parent.Comm
+				ruleFailure.BaseRuntimeAlert.PPIDComm = &pcomm
+			} else {
+				ruleFailure.BaseRuntimeAlert.PPIDComm = nil
+			}
 		}
 	}
 
-	if ruleFailure.BaseRuntimeAlert.Timestamp.IsZero() {
-		ruleFailure.BaseRuntimeAlert.Timestamp = time.Unix(int64(event.Timestamp), 0)
-	}
+	ruleFailure.BaseRuntimeAlert.Timestamp = time.Unix(int64(event.Timestamp)/1e9, 0)
 
 	// Enrich RuntimeProcessDetails
 	if ruleFailure.RuntimeProcessDetails.PID == 0 {
