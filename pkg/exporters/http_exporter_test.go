@@ -39,12 +39,14 @@ func TestSendRuleAlert(t *testing.T) {
 	failedRule := &ruleenginev1.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
+			Severity:  ruleengine.RulePriorityCritical,
 		},
 		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
 			ContainerName: "testcontainer",
 			Namespace:     "testnamespace",
+			PodNamespace:  "testnamespace",
 			PodName:       "testpodname",
 		},
 		RuleAlert: apitypes.RuleAlert{
@@ -206,6 +208,13 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 			UID:  456,
 			GID:  789,
 		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			ContainerID:   "testmalwarecontainerid",
+			Namespace:     "testmalwarenamespace",
+			PodName:       "testmalwarepodname",
+			PodNamespace:  "testmalwarenamespace",
+			ContainerName: "testmalwarecontainername",
+		},
 	}
 
 	// Call SendMalwareAlert
@@ -272,5 +281,4 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 		Method: "DELETE",
 	})
 	assert.Error(t, err)
-
 }

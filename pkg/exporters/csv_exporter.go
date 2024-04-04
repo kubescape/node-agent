@@ -82,7 +82,7 @@ func (ce *CsvExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().UID),
 		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().GID),
 		fmt.Sprintf("%d", ppid),
-		fmt.Sprintf("%d", failedRule.GetBaseRuntimeAlert().Timestamp),
+		fmt.Sprintf("%s", failedRule.GetBaseRuntimeAlert().Timestamp.String()),
 	})
 }
 
@@ -135,7 +135,6 @@ func (ce *CsvExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResu
 		malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
 		malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
 		malwareResult.GetTriggerEvent().Runtime.ContainerID,
-		fmt.Sprintf("%t", malwareResult.GetBasicRuntimeAlert().IsPartOfImage),
 		malwareResult.GetTriggerEvent().Runtime.ContainerImageName,
 		malwareResult.GetTriggerEvent().Runtime.ContainerImageDigest,
 	})
@@ -164,7 +163,6 @@ func writeMalwareHeaders(csvPath string) {
 		"Pod Name",
 		"Container Name",
 		"Container ID",
-		"Is Part of Image",
 		"Container Image",
 		"Container Image Digest",
 	})

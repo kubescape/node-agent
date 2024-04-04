@@ -168,10 +168,6 @@ func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareR
 						Value: malwareResult.GetTriggerEvent().Runtime.ContainerID,
 					},
 					{
-						Name:  "is_part_of_image",
-						Value: fmt.Sprintf("%t", malwareResult.GetBasicRuntimeAlert().IsPartOfImage),
-					},
-					{
 						Name:  "container_image",
 						Value: malwareResult.GetTriggerEvent().Runtime.ContainerImageName,
 					},
@@ -183,6 +179,13 @@ func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareR
 			},
 		},
 		Message: []byte(fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s' path '%s'", malwareResult.GetBasicRuntimeAlert().AlertName, malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(), malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(), malwareResult.GetMalwareRuntimeAlert().MalwareDescription, malwareResult.GetRuntimeProcessDetails().Path)),
+	}
+
+	if malwareResult.GetBasicRuntimeAlert().IsPartOfImage != nil {
+		message.StructuredData[0].Parameters = append(message.StructuredData[0].Parameters, rfc5424.SDParam{
+			Name:  "is_part_of_image",
+			Value: fmt.Sprintf("%t", *malwareResult.GetBasicRuntimeAlert().IsPartOfImage),
+		})
 	}
 
 	_, err := message.WriteTo(se.writer)

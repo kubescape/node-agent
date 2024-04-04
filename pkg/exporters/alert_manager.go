@@ -128,7 +128,6 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 				"md5hash":                malwareResult.GetBasicRuntimeAlert().MD5Hash,
 				"sha256hash":             malwareResult.GetBasicRuntimeAlert().SHA256Hash,
 				"sha1hash":               malwareResult.GetBasicRuntimeAlert().SHA1Hash,
-				"is_part_of_image":       fmt.Sprintf("%t", malwareResult.GetBasicRuntimeAlert().IsPartOfImage),
 				"container_image":        malwareResult.GetTriggerEvent().Runtime.ContainerImageName,
 				"container_image_digest": malwareResult.GetTriggerEvent().Runtime.ContainerImageDigest,
 				"severity":               "critical",
@@ -136,6 +135,10 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 				"node_name":              ame.NodeName,
 			},
 		},
+	}
+
+	if malwareResult.GetBasicRuntimeAlert().IsPartOfImage != nil {
+		myAlert.Labels["is_part_of_image"] = fmt.Sprintf("%t", *malwareResult.GetBasicRuntimeAlert().IsPartOfImage)
 	}
 
 	// Send the alert
