@@ -2,6 +2,7 @@ package applicationprofilecache
 
 import (
 	"context"
+	"fmt"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/watcher"
@@ -133,37 +134,18 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 		return
 	}
 
-	pod := workloadinterface.NewWorkloadObj(podU.Object)
-	if pod == nil {
-		logger.L().Error("failed to get workload object", helpers.String("name", podName))
-		return
-	}
-
-	// get instanceIDs
-	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
+	slug, err := getSlug(podU)
 	if err != nil {
-		logger.L().Error("in ApplicationProfileCache,failed to get instanceIDs", helpers.String("name", podName), helpers.Error(err))
+		logger.L().Error("failed to get slug", helpers.String("pod", podName), helpers.Error(err))
 		return
 	}
-	if len(instanceIDs) == 0 {
-		logger.L().Error("in ApplicationProfileCache, instanceIDs is empty", helpers.String("name", podName))
-		return
-	}
-
-	// a single pod can have multiple instanceIDs (because of the containers), but we only need one
-	instanceID := instanceIDs[0]
-	slug, err := names.InstanceIDToSlug(instanceID.GetName(), instanceID.GetKind(), "", instanceID.GetHashed())
-	if err != nil {
-		logger.L().Error("failed to get slug", helpers.Error(err))
-		return
-	}
-	uniqueSlug := objectcache.UniqueName(pod.GetNamespace(), slug)
+	uniqueSlug := objectcache.UniqueName(podU.GetNamespace(), slug)
 
 	// if application profile exists but is not cached
 	if ap.allProfiles.Contains(uniqueSlug) && !ap.slugToAppProfile.Has(uniqueSlug) {
 
 		// get the application profile
-		appProfile, err := ap.getApplicationProfile(pod.GetNamespace(), slug)
+		appProfile, err := ap.getApplicationProfile(podU.GetNamespace(), slug)
 		if err != nil {
 			logger.L().Error("failed to get application profile", helpers.Error(err))
 			return
@@ -277,4 +259,29 @@ func unstructuredToApplicationProfile(obj *unstructured.Unstructured) (*v1beta1.
 	}
 
 	return ap, nil
+}
+
+func getSlug(p *unstructured.Unstructured) (string, error) {
+	pod := workloadinterface.NewWorkloadObj(p.Object)
+	if pod == nil {
+		return "", fmt.Errorf("failed to get workload object")
+	}
+
+	// get instanceIDs
+	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
+	if err != nil {
+		return "", err
+	}
+	if len(instanceIDs) == 0 {
+		return "", fmt.Errorf("instanceIDs is empty")
+	}
+
+	// a single pod can have multiple instanceIDs (because of the containers), but we only need one
+	instanceID := instanceIDs[0]
+	slug, err := names.InstanceIDToSlug(instanceID.GetName(), instanceID.GetKind(), "", instanceID.GetHashed())
+	if err != nil {
+		return "", fmt.Errorf("failed to get slug")
+	}
+	return slug, nil
+
 }

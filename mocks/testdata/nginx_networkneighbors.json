@@ -3,7 +3,6 @@
     "kind": "NetworkNeighbors",
     "metadata": {
         "annotations": {
-            "kubescape.io/status": "complete"
         },
         "creationTimestamp": "2024-03-19T09:24:57Z",
         "labels": {
