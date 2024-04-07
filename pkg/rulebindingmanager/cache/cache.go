@@ -33,7 +33,6 @@ type RBCache struct {
 	nodeName         string
 	k8sClient        k8sclient.K8sClientInterface
 	allPods          mapset.Set[string]                                    // set of all pods (also pods without rules)
-	globalRBNames    mapset.Set[string]                                    // rules without selectors
 	podToRBNames     maps.SafeMap[string, mapset.Set[string]]              // pod name -> []rule binding names
 	rbNameToRB       maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding] // rule binding name -> rule binding
 	rbNameToRules    maps.SafeMap[string, []ruleengine.RuleEvaluator]      // rule binding name -> []created rules
@@ -48,7 +47,6 @@ func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *RBCache 
 		nodeName:         nodeName,
 		k8sClient:        k8sClient,
 		ruleCreator:      ruleenginev1.NewRuleCreator(),
-		globalRBNames:    mapset.NewSet[string](),
 		allPods:          mapset.NewSet[string](),
 		rbNameToRB:       maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding]{},
 		podToRBNames:     maps.SafeMap[string, mapset.Set[string]]{},
@@ -66,13 +64,6 @@ func (c *RBCache) WatchResources() []watcher.WatchResource {
 
 func (c *RBCache) ListRulesForPod(namespace, name string) []ruleengine.RuleEvaluator {
 	var rulesSlice []ruleengine.RuleEvaluator
-
-	//append global rules
-	for _, v := range c.globalRBNames.ToSlice() {
-		if c.rbNameToRules.Has(v) {
-			rulesSlice = append(rulesSlice, c.rbNameToRules.Get(v)...)
-		}
-	}
 
 	podName := fmt.Sprintf("%s/%s", namespace, name)
 	if !c.podToRBNames.Has(podName) {
@@ -179,13 +170,6 @@ func (c *RBCache) addRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) {
 	c.rbNameToPodNames.Set(rbName, mapset.NewSet[string]())
 	c.rbNameToRules.Set(rbName, c.createRules(ruleBinding.Spec.Rules))
 
-	// if the rule binding is global, add it to the global rules
-	if len(nsSelectorStr) == 0 && len(podSelectorStr) == 0 {
-		c.globalRBNames.Add(rbUniqueName(ruleBinding))
-		logger.L().Debug("AddRuleBinding", helpers.String("ruleBinding", rbName), helpers.String("global", "true"))
-		return
-	}
-
 	// get related namespaces
 	namespaces, err := c.k8sClient.GetKubernetesClient().CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{LabelSelector: nsSelectorStr})
 	if err != nil {
@@ -239,6 +223,7 @@ func (c *RBCache) deleteRuleBinding(uniqueName string) {
 			continue
 		}
 		if c.podToRBNames.Get(podName).Cardinality() != 0 {
+			// if this pod is still bound to other rule bindings, continue
 			continue
 		}
 
@@ -257,7 +242,6 @@ func (c *RBCache) deleteRuleBinding(uniqueName string) {
 	c.rbNameToRB.Delete(uniqueName)
 	c.rbNameToRules.Delete(uniqueName)
 	c.rbNameToPodNames.Delete(uniqueName)
-	c.globalRBNames.Remove(uniqueName)
 
 	logger.L().Info("DeleteRuleBinding", helpers.String("name", uniqueName))
 }
