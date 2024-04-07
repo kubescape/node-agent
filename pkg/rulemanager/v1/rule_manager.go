@@ -415,12 +415,12 @@ func (rm *RuleManager) isCached(namespace, name string) bool {
 
 	// wait for pod to be cached
 	if err := backoff.Retry(func() error {
-		if !rm.objectCache.IsCached("Pod", namespace, name) {
-			return fmt.Errorf("pod %s/%s not found in objectCache", namespace, name)
+		if !rm.objectCache.K8sObjectCache().IsCached("Pod", namespace, name) {
+			return fmt.Errorf("pod %s/%s not found in K8sObjectCache", namespace, name)
 		}
-		if !rm.ruleBindingCache.IsCached("Pod", namespace, name) {
-			return fmt.Errorf("pod %s/%s not found in ruleBindingCache", namespace, name)
-		}
+		// if !rm.ruleBindingCache.IsCached("Pod", namespace, name) {
+		// 	return fmt.Errorf("pod %s/%s not found in ruleBindingCache", namespace, name)
+		// }
 		return nil
 	}, backoff.NewExponentialBackOff()); err != nil {
 		return false

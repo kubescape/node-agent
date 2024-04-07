@@ -11,6 +11,7 @@ import (
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -41,6 +42,7 @@ type ApplicationProfileManager struct {
 	ctx                      context.Context
 	containerMutexes         storageUtils.MapMutex[string]                                   // key is k8sContainerID
 	trackedContainers        mapset.Set[string]                                              // key is k8sContainerID
+	removedContainers        mapset.Set[string]                                              // key is k8sContainerID
 	savedCapabilities        maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
 	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
 	droppedEvents            maps.SafeMap[string, bool]                                      // key is k8sContainerID
@@ -69,6 +71,7 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		storageClient:          storageClient,
 		containerMutexes:       storageUtils.NewMapMutex[string](),
 		trackedContainers:      mapset.NewSet[string](),
+		removedContainers:      mapset.NewSet[string](),
 		preRunningContainerIDs: preRunningContainerIDs,
 	}, nil
 }
@@ -126,6 +129,7 @@ func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.Wat
 	// make sure we don't run deleteResources and saveProfile at the same time
 	am.containerMutexes.Lock(watchedContainer.K8sContainerID)
 	defer am.containerMutexes.Unlock(watchedContainer.K8sContainerID)
+	am.removedContainers.Add(watchedContainer.K8sContainerID)
 	// delete resources
 	watchedContainer.UpdateDataTicker.Stop()
 	am.trackedContainers.Remove(watchedContainer.K8sContainerID)
@@ -230,7 +234,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 
 	if am.syscallPeekFunc != nil {
 		observedSyscalls, err = am.syscallPeekFunc(watchedContainer.NsMntId)
-		if err != nil {
+		if err != nil && !strings.Contains(err.Error(), "no syscall found") {
 			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get syscalls", helpers.Error(err),
 				helpers.String("slug", slug),
 				helpers.Int("container index", watchedContainer.ContainerIndex),
@@ -243,8 +247,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		if !toSaveSyscallsSet.IsEmpty() {
 			toSaveSyscalls = toSaveSyscallsSet.ToSlice()
 		}
-	} else {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - syscall peek function is nil", helpers.String("slug", slug))
 	}
 
 	// application profile
@@ -375,8 +377,10 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					var existingContainers []v1beta1.ApplicationProfileContainer
 					if watchedContainer.ContainerType == utils.Container {
 						existingContainers = existingProfile.Spec.Containers
-					} else {
+					} else if watchedContainer.ContainerType == utils.InitContainer {
 						existingContainers = existingProfile.Spec.InitContainers
+					} else {
+						existingContainers = existingProfile.Spec.EphemeralContainers
 					}
 					// replace or add application profile container using patch
 					switch {
@@ -517,6 +521,9 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 }
 
 func (am *ApplicationProfileManager) waitForContainer(k8sContainerID string) error {
+	if am.removedContainers.Contains(k8sContainerID) {
+		return fmt.Errorf("container %s has been removed", k8sContainerID)
+	}
 	return backoff.Retry(func() error {
 		if am.trackedContainers.Contains(k8sContainerID) {
 			return nil
@@ -546,6 +553,7 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.toSaveCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
 		am.toSaveExecs.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		am.toSaveOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
+		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		am.trackedContainers.Add(k8sContainerID)
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
 

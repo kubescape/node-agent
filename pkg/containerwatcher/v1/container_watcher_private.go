@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"node-agent/pkg/containerwatcher"
+	"node-agent/pkg/rulebindingmanager"
 	"node-agent/pkg/utils"
 	"os"
 	"runtime"
@@ -26,21 +27,26 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 	}
 
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
+
+	if !ch.preRunningContainersIDs.Contains(notif.Container.Runtime.ContainerID) {
+		// container is not in preRunningContainersIDs, it is a new container
+		ch.timeBasedContainers.Add(notif.Container.Runtime.ContainerID)
+	}
+
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-		if !ch.traceForever() {
-			time.AfterFunc(ch.cfg.MaxSniffingTime, func() {
-				logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-				ch.unregisterContainer(notif.Container)
-			})
-		}
+		time.AfterFunc(ch.cfg.MaxSniffingTime, func() {
+			ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
+			ch.unregisterContainer(notif.Container)
+		})
 	case containercollection.EventTypeRemoveContainer:
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
+		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
+		ch.ruleManagedContainers.Remove(notif.Container.Runtime.ContainerID)
 		logger.L().Info("stop monitor on container - container has terminated", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
 }
-
 func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) error {
 	ch.ctx = ctx
 
@@ -76,33 +82,58 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		containercollection.WithPubSub(containerEventFuncs...),
 	}
 
-	if ch.traceForever() {
-		// Get the container runtime configuration
-		runtimeConfig, err := ch.getContainerRuntimeConfig()
-		if err != nil {
-			return fmt.Errorf("getting container runtime configuration: %w", err)
-		}
-		// Get containers that are already running.
-		opts = append(opts, containercollection.WithContainerRuntimeEnrichment(runtimeConfig))
-
-		containers := ch.containerCollection.GetContainersBySelector(&containercollection.ContainerSelector{})
-		for _, container := range containers {
-			if ch.ignoreContainer(container.K8s.Namespace, container.K8s.PodName) {
-				logger.L().Info("removed container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", utils.CreateK8sContainerID(container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)))
-				ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
-				continue
-			}
-			// TODO: wait for pod to be cached
-
-			ch.preRunningContainersIDs.Add(container.Runtime.ContainerID)
-		}
-	}
-
 	// Initialize the container collection
 	if err := ch.containerCollection.Initialize(opts...); err != nil {
 		return fmt.Errorf("initializing container collection: %w", err)
 	}
 
+	// add containers that are already running
+	go ch.addRunningContainers()
+
+	return nil
+}
+
+func (ch *IGContainerWatcher) addRunningContainers() error {
+	k8sClient, err := containercollection.NewK8sClient(ch.nodeName)
+	if err != nil {
+		return fmt.Errorf("creating Kubernetes client: %w", err)
+	}
+	defer k8sClient.Close()
+
+	for n := range *ch.ruleBindingPodNotify {
+
+		pod := n.GetPod()
+
+		// skip containers that should be ignored
+		if ch.ignoreContainer(pod.GetNamespace(), pod.GetName()) {
+			logger.L().Info("skipping pod", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod name", pod.GetName()))
+			continue
+		}
+
+		containers := k8sClient.GetRunningContainers(pod)
+		for _, container := range containers {
+			switch n.GetAction() {
+			case rulebindingmanager.Removed:
+				ch.ruleManagedContainers.Remove(container.Runtime.ContainerID)
+				ch.unregisterContainer(&container)
+
+			case rulebindingmanager.Added:
+				if ch.timeBasedContainers.Contains(container.Runtime.ContainerID) || ch.ruleManagedContainers.Contains(container.Runtime.ContainerID) {
+					// the container is already being monitored
+					continue
+				}
+
+				// Make a copy instead of passing the same pointer at
+				// each iteration of the loop
+				newContainer := containercollection.Container{}
+				newContainer = container
+				ch.preRunningContainersIDs.Add(container.Runtime.ContainerID)
+				ch.ruleManagedContainers.Add(container.Runtime.ContainerID)
+				ch.containerCollection.AddContainer(&newContainer)
+			}
+		}
+
+	}
 	return nil
 }
 
@@ -256,8 +287,16 @@ func (ch *IGContainerWatcher) printNsMap(id string) {
 }
 
 func (ch *IGContainerWatcher) unregisterContainer(container *containercollection.Container) {
-	// @matthias can we call the RemoveContainer instead?
-	// ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
+	if ch.timeBasedContainers.Contains(container.Runtime.ContainerID) || ch.ruleManagedContainers.Contains(container.Runtime.ContainerID) {
+		// the container should still be monitored
+		return
+	}
+
+	logger.L().Info("stop monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
+
+	ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
+
+	// TODO: I dont think we need the following code ->
 	event := containercollection.PubSubEvent{
 		Timestamp: time.Now().Format(time.RFC3339),
 		Type:      containercollection.EventTypeRemoveContainer,

@@ -11,7 +11,9 @@ import (
 	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/networkmanager"
 	"node-agent/pkg/relevancymanager"
+	rulebinding "node-agent/pkg/rulebindingmanager"
 	"node-agent/pkg/rulemanager"
+
 	"node-agent/pkg/utils"
 	"os"
 
@@ -103,12 +105,18 @@ type IGContainerWatcher struct {
 
 	preRunningContainersIDs mapset.Set[string]
 
+	timeBasedContainers   mapset.Set[string] // list of containers to track based on ticker
+	ruleManagedContainers mapset.Set[string] // list of containers to track based on rules
+
 	metrics metricsmanager.MetricsManager
+
+	// cache
+	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string]) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -179,6 +187,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if cfg.EnableFullPathTracing {
 			path = event.FullPath
 		}
+
 		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
 		relevancyManager.ReportFileOpen(event.Runtime.ContainerID, k8sContainerID, path)
@@ -274,6 +283,12 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkWorkerChan:      make(chan *tracernetworktype.Event, 50000),
 		dnsWorkerChan:          make(chan *tracerdnstype.Event, 10000),
 		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 500),
+
+		// cache
+		ruleBindingPodNotify: ruleBindingPodNotify,
+
+		timeBasedContainers:   mapset.NewSet[string](),
+		ruleManagedContainers: mapset.NewSet[string](),
 	}, nil
 }
 

@@ -61,7 +61,7 @@ func (wh *WatchHandler) AddAdaptor(adaptor watcher.Adaptor) {
 	}
 }
 
-func (wh *WatchHandler) Start(ctx context.Context) error {
+func (wh *WatchHandler) Start(ctx context.Context) {
 
 	for k, v := range wh.resources {
 		go func(r string, w watcher.WatchResource) {
@@ -70,7 +70,6 @@ func (wh *WatchHandler) Start(ctx context.Context) error {
 			}
 		}(k, v)
 	}
-	return nil
 }
 
 func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResource, eventQueue *cooldownqueue.CooldownQueue) error {
@@ -177,9 +176,12 @@ func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schem
 	if err != nil {
 		return "", fmt.Errorf("list resources: %w", err)
 	}
+	logger.L().Info("got existing objects from storage", helpers.String("resource", res.Resource), helpers.Int("count", len(list.Items)))
 	for i := range list.Items {
 		for _, handler := range wh.handlers {
-			handler.AddHandler(ctx, &list.Items[i])
+			var l unstructured.Unstructured
+			l = list.Items[i]
+			handler.AddHandler(ctx, &l)
 		}
 	}
 	// set resource version to watch from

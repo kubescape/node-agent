@@ -22,6 +22,7 @@ import (
 
 	"github.com/goradd/maps"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/containerinstance"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1/ephemeralcontainerinstance"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/initcontainerinstance"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -209,6 +210,10 @@ func GetApplicationProfileContainer(profile *v1beta1.ApplicationProfile, contain
 		if len(profile.Spec.InitContainers) > containerIndex {
 			return &profile.Spec.InitContainers[containerIndex]
 		}
+	case EphemeralContainer:
+		if len(profile.Spec.EphemeralContainers) > containerIndex {
+			return &profile.Spec.EphemeralContainers[containerIndex]
+		}
 	}
 	return nil
 }
@@ -225,6 +230,11 @@ func InsertApplicationProfileContainer(profile *v1beta1.ApplicationProfile, cont
 			profile.Spec.InitContainers = append(profile.Spec.InitContainers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.InitContainers)+1)...)
 		}
 		profile.Spec.InitContainers[containerIndex] = *profileContainer
+	case EphemeralContainer:
+		if len(profile.Spec.EphemeralContainers) <= containerIndex {
+			profile.Spec.EphemeralContainers = append(profile.Spec.EphemeralContainers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.EphemeralContainers)+1)...)
+		}
+		profile.Spec.EphemeralContainers[containerIndex] = *profileContainer
 	}
 }
 
@@ -279,6 +289,18 @@ func (watchedContainer *WatchedContainerData) SetContainerType(wl workloadinterf
 		if c.Name == containerName {
 			watchedContainer.ContainerIndex = i
 			watchedContainer.ContainerType = InitContainer
+			break
+		}
+	}
+	// ephemeralContainers
+	ephemeralContainers, err := wl.GetEphemeralContainers()
+	if err != nil {
+		return
+	}
+	for i, c := range ephemeralContainers {
+		if c.Name == containerName {
+			watchedContainer.ContainerIndex = i
+			watchedContainer.ContainerType = EphemeralContainer
 			break
 		}
 	}
@@ -449,9 +471,10 @@ func ToInstanceType(c ContainerType) helpersv1.InstanceType {
 		return containerinstance.InstanceType
 	case InitContainer:
 		return initcontainerinstance.InstanceType
+	case EphemeralContainer:
+		return ephemeralcontainerinstance.InstanceType
 	}
 
-	// FIXME: support EphemeralContainer
 	return containerinstance.InstanceType
 }
 

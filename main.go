@@ -20,13 +20,15 @@ import (
 	metricsmanager "node-agent/pkg/metricsmanager"
 	metricprometheus "node-agent/pkg/metricsmanager/prometheus"
 	"node-agent/pkg/networkmanager"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/objectcache/applicationprofilecache"
 	"node-agent/pkg/objectcache/k8scache"
 	"node-agent/pkg/objectcache/networkneighborscache"
-	"node-agent/pkg/objectcache/v1"
+	objectcachev1 "node-agent/pkg/objectcache/v1"
 	"node-agent/pkg/relevancymanager"
 	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
-	rulebindingcache "node-agent/pkg/rulebindingmanager/cache"
+	rulebinding "node-agent/pkg/rulebindingmanager"
+	rulebindingcachev1 "node-agent/pkg/rulebindingmanager/cache"
 	"node-agent/pkg/rulemanager"
 	rulemanagerv1 "node-agent/pkg/rulemanager/v1"
 	"node-agent/pkg/sbomhandler/syfthandler"
@@ -153,12 +155,17 @@ func main() {
 
 	var ruleManager rulemanager.RuleManagerClient
 	var malwareManager malwaremanager.MalwareManagerClient
+	var objCache objectcache.ObjectCache
+	var ruleBindingNotify chan rulebinding.RuleBindingNotify
 
 	if cfg.EnableRuntimeDetection {
 
 		// create ruleBinding cache
-		ruleBindingCache := rulebindingcache.NewCache(nodeName, k8sClient)
+		ruleBindingCache := rulebindingcachev1.NewCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(ruleBindingCache)
+
+		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
+		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
 		apc := applicationprofilecache.NewApplicationProfileCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(apc)
@@ -167,7 +174,7 @@ func main() {
 		dWatcher.AddAdaptor(nnc)
 
 		// create object cache
-		objCache := objectcache.NewObjectCache(k8sObjectCache, apc, nnc)
+		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc)
 
 		// create exporter
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName, k8sClient)
@@ -201,6 +208,8 @@ func main() {
 	} else {
 		ruleManager = rulemanager.CreateRuleManagerMock()
 		malwareManager = malwaremanager.CreateMalwareManagerMock()
+		objCache = objectcache.NewObjectCacheMock()
+		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
 	}
 
 	// Create the network and DNS managers
@@ -216,16 +225,13 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
 
 	// Start the prometheusExporter
 	prometheusExporter.Start()
-
-	// start watching
-	dWatcher.Start(ctx)
 
 	// Start the container handler
 	err = mainHandler.Start(ctx)
@@ -241,6 +247,10 @@ func main() {
 		}
 	}
 	defer mainHandler.Stop()
+
+	// start watching
+	dWatcher.Start(ctx)
+	defer dWatcher.Stop(ctx)
 
 	// Wait for shutdown signal
 	shutdown := make(chan os.Signal, 1)

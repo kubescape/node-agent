@@ -252,7 +252,7 @@ func Test_deleteApplicationProfile(t *testing.T) {
 			if tt.shouldDelete {
 				assert.Equal(t, len(tt.slugs)-1, ap.allProfiles.Cardinality())
 				assert.False(t, ap.slugToAppProfile.Has(tt.slug))
-				assert.False(t, ap.slugToPods.Has(tt.slug))
+				assert.True(t, ap.slugToPods.Has(tt.slug)) // this field should not be deleted
 			} else {
 				assert.Equal(t, len(tt.slugs), ap.allProfiles.Cardinality())
 				assert.True(t, ap.slugToAppProfile.Has(tt.slug))
@@ -496,6 +496,7 @@ func Test_addApplicationProfile_existing(t *testing.T) {
 			// add pods
 			for i := range tt.pods {
 				ap.podToSlug.Set(tt.pods[i].podName, tt.pods[i].slug)
+				ap.slugToPods.Set(tt.pods[i].slug, mapset.NewSet(tt.pods[i].podName))
 			}
 
 			ap.addApplicationProfile(context.Background(), tt.obj1)

@@ -179,9 +179,10 @@ func (np *NetworkNeighborsCacheImp) deletePod(obj *unstructured.Unstructured) {
 	if np.slugToPods.Has(uniqueSlug) {
 		np.slugToPods.Get(uniqueSlug).Remove(podName)
 		if np.slugToPods.Get(uniqueSlug).Cardinality() == 0 {
-			np.slugToPods.Delete(uniqueSlug)
 			// remove full network neighbors from cache
+			np.slugToPods.Delete(uniqueSlug)
 			np.slugToNetworkNeighbor.Delete(uniqueSlug)
+			np.allNeighbors.Remove(uniqueSlug)
 			logger.L().Info("deleted pod from network neighbors cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 		}
 	}
@@ -202,36 +203,25 @@ func (np *NetworkNeighborsCacheImp) addNetworkNeighbor(_ context.Context, obj *u
 			if np.slugToNetworkNeighbor.Has(nnName) {
 				np.slugToNetworkNeighbor.Delete(nnName)
 				np.allNeighbors.Remove(nnName)
-				np.slugToPods.Delete(nnName)
 			}
 			return
 		}
 	}
-
-	downloaded := false
-	np.podToSlug.Range(func(podName, uniqueSlug string) bool {
-		if uniqueSlug == nnName {
-			// get the full network neighbors from the storage
-			// the watch only returns the metadata
-			if !downloaded {
-				fullNN, err := np.getNetworkNeighbors(netNeighbor.GetNamespace(), netNeighbor.GetName())
-				if err != nil {
-					logger.L().Error("failed to get full network neighbors", helpers.Error(err))
-					return false
-				}
-				np.slugToNetworkNeighbor.Set(nnName, fullNN)
-				downloaded = true
-			}
-
-			if !np.slugToPods.Has(uniqueSlug) {
-				np.slugToPods.Set(uniqueSlug, mapset.NewSet[string]())
-			}
-			np.slugToPods.Get(uniqueSlug).Add(podName)
-			logger.L().Info("added pod to network neighbors cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
-		}
-		return true
-	})
 	np.allNeighbors.Add(nnName)
+
+	if np.slugToPods.Has(nnName) {
+
+		// get the full network neighbors from the storage
+		// the watch only returns the metadata
+		fullNN, err := np.getNetworkNeighbors(netNeighbor.GetNamespace(), netNeighbor.GetName())
+		if err != nil {
+			logger.L().Error("failed to get full network neighbors", helpers.Error(err))
+			return
+		}
+		np.slugToNetworkNeighbor.Set(nnName, fullNN)
+		logger.L().Info("added pod to network neighbors cache", helpers.String("uniqueSlug", nnName))
+
+	}
 
 }
 
@@ -239,7 +229,6 @@ func (np *NetworkNeighborsCacheImp) deleteNetworkNeighbor(obj *unstructured.Unst
 	nnName := objectcache.UnstructuredUniqueName(obj)
 	np.slugToNetworkNeighbor.Delete(nnName)
 	np.allNeighbors.Remove(nnName)
-	np.slugToPods.Delete(nnName)
 	logger.L().Info("deleted network neighbors from cache", helpers.String("name", nnName))
 }
 

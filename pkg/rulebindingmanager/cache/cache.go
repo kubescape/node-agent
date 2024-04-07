@@ -40,6 +40,7 @@ type RBCache struct {
 	rbNameToPodNames maps.SafeMap[string, mapset.Set[string]]              // rule binding name -> []pod names
 	ruleCreator      ruleengine.RuleCreator
 	watchResources   []watcher.WatchResource
+	notifiers        []*chan rulebindingmanager.RuleBindingNotify
 }
 
 func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *RBCache {
@@ -49,6 +50,7 @@ func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *RBCache 
 		ruleCreator:      ruleenginev1.NewRuleCreator(),
 		globalRBNames:    mapset.NewSet[string](),
 		allPods:          mapset.NewSet[string](),
+		rbNameToRB:       maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding]{},
 		podToRBNames:     maps.SafeMap[string, mapset.Set[string]]{},
 		rbNameToPodNames: maps.SafeMap[string, mapset.Set[string]]{},
 		watchResources:   resourcesToWatch(nodeName),
@@ -97,6 +99,9 @@ func (c *RBCache) IsCached(kind, namespace, name string) bool {
 	default:
 		return false
 	}
+}
+func (c *RBCache) AddNotifier(n *chan rulebindingmanager.RuleBindingNotify) {
+	c.notifiers = append(c.notifiers, n)
 }
 
 // ------------------ watcher.Watcher methods -----------------------
@@ -209,6 +214,17 @@ func (c *RBCache) addRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) {
 			c.podToRBNames.Get(podName).Add(rbName)
 			c.rbNameToPodNames.Get(rbName).Add(podName)
 
+			if len(c.notifiers) == 0 {
+				continue
+			}
+			n, err := rulebindingmanager.RuleBindingNotifierImplWithK8s(c.k8sClient, rulebindingmanager.Added, pod.GetNamespace(), pod.GetName())
+			if err != nil {
+				logger.L().Error("failed to create notifier", helpers.String("namespace", pod.GetNamespace()), helpers.String("name", pod.GetName()), helpers.Error(err))
+				continue
+			}
+			for i := range c.notifiers {
+				*c.notifiers[i] <- n
+			}
 			logger.L().Info("AddRuleBinding", helpers.String("ruleBinding", rbName), helpers.String("pod", podName))
 		}
 	}
@@ -219,6 +235,18 @@ func (c *RBCache) deleteRuleBinding(uniqueName string) {
 	// remove the rule binding from the pods
 	for _, podName := range c.podToRBNames.Keys() {
 		c.podToRBNames.Get(podName).Remove(uniqueName)
+		if len(c.notifiers) == 0 {
+			continue
+		}
+		namespace, name := uniqueNameToName(podName)
+		n, err := rulebindingmanager.RuleBindingNotifierImplWithK8s(c.k8sClient, rulebindingmanager.Removed, namespace, name)
+		if err != nil {
+			logger.L().Error("failed to create notifier", helpers.String("namespace", namespace), helpers.String("name", name), helpers.Error(err))
+			continue
+		}
+		for i := range c.notifiers {
+			*c.notifiers[i] <- n
+		}
 	}
 
 	// remove the rule binding from the cache
@@ -289,6 +317,10 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) {
 		logger.L().Info("AddPod", helpers.String("pod", podName), helpers.String("ruleBinding", rbName))
 	}
 
+	n := rulebindingmanager.NewRuleBindingNotifierImpl(rulebindingmanager.Added, *pod)
+	for i := range c.notifiers {
+		*c.notifiers[i] <- n
+	}
 }
 
 func (c *RBCache) deletePod(uniqueName string) {

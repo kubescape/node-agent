@@ -277,7 +277,7 @@ func Test_deleteNetworkNeighbors(t *testing.T) {
 			if tt.shouldDelete {
 				assert.Equal(t, len(tt.slugs)-1, nn.allNeighbors.Cardinality())
 				assert.False(t, nn.slugToNetworkNeighbor.Has(tt.slug))
-				assert.False(t, nn.slugToPods.Has(tt.slug))
+				assert.True(t, nn.slugToPods.Has(tt.slug))
 			} else {
 				assert.Equal(t, len(tt.slugs), nn.allNeighbors.Cardinality())
 				assert.True(t, nn.slugToNetworkNeighbor.Has(tt.slug))
@@ -522,6 +522,7 @@ func Test_addNetworkNeighbor_existing(t *testing.T) {
 			// add pods
 			for i := range tt.pods {
 				nn.podToSlug.Set(tt.pods[i].podName, tt.pods[i].slug)
+				nn.slugToPods.Set(tt.pods[i].slug, mapset.NewSet(tt.pods[i].podName))
 			}
 
 			nn.addNetworkNeighbor(context.Background(), tt.obj1)
