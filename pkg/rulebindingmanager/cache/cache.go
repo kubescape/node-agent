@@ -201,11 +201,7 @@ func (c *RBCache) addRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) {
 			if len(c.notifiers) == 0 {
 				continue
 			}
-			n, err := rulebindingmanager.RuleBindingNotifierImplWithK8s(c.k8sClient, rulebindingmanager.Added, pod.GetNamespace(), pod.GetName())
-			if err != nil {
-				logger.L().Error("failed to create notifier", helpers.String("namespace", pod.GetNamespace()), helpers.String("name", pod.GetName()), helpers.Error(err))
-				continue
-			}
+			n := rulebindingmanager.NewRuleBindingNotifierImpl(rulebindingmanager.Added, pod)
 			for i := range c.notifiers {
 				*c.notifiers[i] <- n
 			}
@@ -219,18 +215,20 @@ func (c *RBCache) deleteRuleBinding(uniqueName string) {
 	// remove the rule binding from the pods
 	for _, podName := range c.podToRBNames.Keys() {
 		c.podToRBNames.Get(podName).Remove(uniqueName)
-		if len(c.notifiers) == 0 {
-			continue
-		}
+
 		if c.podToRBNames.Get(podName).Cardinality() != 0 {
 			// if this pod is still bound to other rule bindings, continue
 			continue
 		}
+		c.podToRBNames.Delete(podName)
 
+		if len(c.notifiers) == 0 {
+			continue
+		}
 		namespace, name := uniqueNameToName(podName)
 		n, err := rulebindingmanager.RuleBindingNotifierImplWithK8s(c.k8sClient, rulebindingmanager.Removed, namespace, name)
 		if err != nil {
-			logger.L().Error("failed to create notifier", helpers.String("namespace", namespace), helpers.String("name", name), helpers.Error(err))
+			logger.L().Warning("failed to create notifier", helpers.String("namespace", namespace), helpers.String("name", name), helpers.Error(err))
 			continue
 		}
 		for i := range c.notifiers {
