@@ -57,7 +57,7 @@ type RuleFailure interface {
 	GetRuntimeProcessDetails() apitypes.RuntimeAlertProcessDetails
 	// Get Trigger Event
 	GetTriggerEvent() igtypes.Event
-	// Get Malware Description
+	// Get Rule Description
 	GetRuleAlert() apitypes.RuleAlert
 	// Get K8s Runtime Details
 	GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails
