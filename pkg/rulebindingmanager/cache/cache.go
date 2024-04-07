@@ -238,6 +238,10 @@ func (c *RBCache) deleteRuleBinding(uniqueName string) {
 		if len(c.notifiers) == 0 {
 			continue
 		}
+		if c.podToRBNames.Get(podName).Cardinality() != 0 {
+			continue
+		}
+
 		namespace, name := uniqueNameToName(podName)
 		n, err := rulebindingmanager.RuleBindingNotifierImplWithK8s(c.k8sClient, rulebindingmanager.Removed, namespace, name)
 		if err != nil {
@@ -282,8 +286,8 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) {
 		// check pod selectors
 		podSelector, _ := metav1.LabelSelectorAsSelector(&rb.Spec.PodSelector)
 		if !podSelector.Matches(labels.Set(pod.GetLabels())) {
-			// pod selectors dont match
-			return
+			// pod selectors doesnt match
+			continue
 		}
 
 		// check namespace selectors
@@ -294,11 +298,11 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) {
 			namespaces, err := c.k8sClient.GetKubernetesClient().CoreV1().Namespaces().List(ctx, metav1.ListOptions{LabelSelector: nsSelectorStr})
 			if err != nil {
 				logger.L().Error("failed to list namespaces", helpers.String("ruleBiding", rbUniqueName(&rb)), helpers.String("nsSelector", nsSelectorStr), helpers.Error(err))
-				return
+				continue
 			}
 			if !strings.Contains(namespaces.String(), pod.GetNamespace()) {
 				// namespace selectors dont match
-				return
+				continue
 			}
 		}
 
@@ -315,12 +319,13 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) {
 			c.rbNameToPodNames.Get(rbName).Add(podName)
 		}
 		logger.L().Info("AddPod", helpers.String("pod", podName), helpers.String("ruleBinding", rbName))
+
+		n := rulebindingmanager.NewRuleBindingNotifierImpl(rulebindingmanager.Added, *pod)
+		for i := range c.notifiers {
+			*c.notifiers[i] <- n
+		}
 	}
 
-	n := rulebindingmanager.NewRuleBindingNotifierImpl(rulebindingmanager.Added, *pod)
-	for i := range c.notifiers {
-		*c.notifiers[i] <- n
-	}
 }
 
 func (c *RBCache) deletePod(uniqueName string) {

@@ -243,16 +243,6 @@ func (rm *RuleManager) deleteResources(watchedContainer *utils.WatchedContainerD
 	rm.watchedContainerChannels.Delete(watchedContainer.ContainerID)
 }
 
-// This function is not used in the current implementation (Might be used in the future).
-// func (rm *RuleManager) waitForContainer(k8sContainerID string) error {
-// 	return backoff.Retry(func() error {
-// 		if rm.trackedContainers.Contains(k8sContainerID) {
-// 			return nil
-// 		}
-// 		return fmt.Errorf("container %s not found", k8sContainerID)
-// 	}, backoff.NewExponentialBackOff())
-// }
-
 func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 
@@ -433,6 +423,8 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 }
 
 func (rm *RuleManager) isCached(namespace, name string) bool {
+	return true
+
 	podName := fmt.Sprintf("%s/%s", namespace, name)
 
 	// this will prevent multiple goroutines from waiting for the same pod to be cached
