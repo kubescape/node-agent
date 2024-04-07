@@ -1,0 +1,251 @@
+{
+    "apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
+    "kind": "ApplicationProfile",
+    "metadata": {
+        "annotations": {
+            "kubescape.io/resource-size": "24"
+        },
+        "labels": {
+            "kubescape.io/instance-template-hash": "94c495554",
+            "kubescape.io/workload-api-group": "apps",
+            "kubescape.io/workload-api-version": "v1",
+            "kubescape.io/workload-init-container-name": "busybox",
+            "kubescape.io/workload-kind": "Deployment",
+            "kubescape.io/workload-name": "collection"
+        },
+        "name": "replicaset-collection-94c495554"
+    },
+    "spec": {
+        "containers": [
+            {
+                "execs": [
+                    {
+                        "args": [
+                            "-c",
+                            "/bin/sh",
+                            "nc -lnvp 8080"
+                        ],
+                        "path": "/bin/sh"
+                    },
+                    {
+                        "args": [
+                            "-lnvp",
+                            "/usr/bin/nc",
+                            "8080"
+                        ],
+                        "path": "/usr/bin/nc"
+                    }
+                ],
+                "name": "alpine-container"
+            },
+            {
+                "execs": [
+                    {
+                        "args": [
+                            "-c",
+                            "/bin/sh",
+                            "wget https://kubernetes.io/ --background; sleep 1; wget https://cloud.armosec.io/ --background; wget https://console.cloud.goog"
+                        ],
+                        "path": "/bin/sh"
+                    },
+                    {
+                        "args": [
+                            "--background",
+                            "/usr/bin/wget",
+                            "https://cloud.armosec.io/",
+                            "https://console.cloud.google.com/",
+                            "https://kubernetes.io/"
+                        ],
+                        "path": "/usr/bin/wget"
+                    },
+                    {
+                        "args": [
+                            "/bin/sleep",
+                            "1"
+                        ],
+                        "path": "/bin/sleep"
+                    },
+                    {
+                        "args": [
+                            "/usr/local/bin/redis-server"
+                        ],
+                        "path": "/usr/local/bin/redis-server"
+                    }
+                ],
+                "name": "redis"
+            },
+            {
+                "execs": [
+                    {
+                        "args": [
+                            "-d ",
+                            "-f1",
+                            "/usr/bin/cut"
+                        ],
+                        "path": "/usr/bin/cut"
+                    },
+                    {
+                        "args": [
+                            "%u:%g",
+                            "-c",
+                            ".",
+                            "/usr/bin/stat"
+                        ],
+                        "path": "/usr/bin/stat"
+                    },
+                    {
+                        "args": [
+                            "-",
+                            "--create",
+                            "--directory",
+                            "--extract",
+                            "--file",
+                            "--group",
+                            "--owner",
+                            ".",
+                            "/bin/tar",
+                            "/usr/src/wordpress",
+                            "www-data"
+                        ],
+                        "path": "/bin/tar"
+                    },
+                    {
+                        "args": [
+                            "/usr/bin/sha1sum"
+                        ],
+                        "path": "/usr/bin/sha1sum"
+                    },
+                    {
+                        "args": [
+                            "-f",
+                            "/bin/rm",
+                            "/var/run/apache2/apache2.pid"
+                        ],
+                        "path": "/bin/rm"
+                    },
+                    {
+                        "args": [
+                            "\n\t\t\t\t\t/put your unique phrase here/ {\n\t\t\t\t\t\tcmd = \"head -c1m /dev/urandom | sha1sum | cut -d\\\\  -f1\"\n\t\t\t\t\t\tcmd | getline str\n\t\t",
+                            "/usr/bin/awk",
+                            "wp-config-docker.php"
+                        ],
+                        "path": "/usr/bin/awk"
+                    },
+                    {
+                        "args": [
+                            "/bin/bash",
+                            "/usr/local/bin/docker-entrypoint.sh",
+                            "apache2-foreground"
+                        ],
+                        "path": "/bin/bash"
+                    },
+                    {
+                        "args": [
+                            "/usr/local/bin/docker-entrypoint.sh",
+                            "apache2-foreground"
+                        ],
+                        "path": "/usr/local/bin/docker-entrypoint.sh"
+                    },
+                    {
+                        "args": [
+                            "-g",
+                            "-u",
+                            "/usr/bin/id"
+                        ],
+                        "path": "/usr/bin/id"
+                    },
+                    {
+                        "args": [
+                            "-c1m",
+                            "/dev/urandom",
+                            "/usr/bin/head"
+                        ],
+                        "path": "/usr/bin/head"
+                    },
+                    {
+                        "args": [
+                            "-p",
+                            "/bin/mkdir",
+                            "/var/lock/apache2",
+                            "/var/log/apache2",
+                            "/var/run/apache2"
+                        ],
+                        "path": "/bin/mkdir"
+                    },
+                    {
+                        "args": [
+                            "/usr/bin/dirname",
+                            "/var/lock/apache2",
+                            "/var/log/apache2",
+                            "/var/run/apache2"
+                        ],
+                        "path": "/usr/bin/dirname"
+                    },
+                    {
+                        "args": [
+                            "-maxdepth",
+                            "-mindepth",
+                            "-name",
+                            "-not",
+                            "/usr/bin/find",
+                            "1",
+                            "wp-content"
+                        ],
+                        "path": "/usr/bin/find"
+                    },
+                    {
+                        "args": [
+                            "/bin/chown",
+                            "wp-config.php",
+                            "www-data:www-data"
+                        ],
+                        "path": "/bin/chown"
+                    },
+                    {
+                        "args": [
+                            "-DFOREGROUND",
+                            "/usr/sbin/apache2"
+                        ],
+                        "path": "/usr/sbin/apache2"
+                    },
+                    {
+                        "args": [
+                            "/usr/local/bin/apache2-foreground"
+                        ],
+                        "path": "/usr/local/bin/apache2-foreground"
+                    }
+                ],
+                "name": "wordpress"
+            }
+        ],
+        "initContainers": [
+            {
+                "execs": [
+                    {
+                        "args": [
+                            "-c",
+                            "/bin/sh",
+                            "echo \"Initialization complete.\""
+                        ],
+                        "path": "/bin/sh"
+                    }
+                ],
+                "name": "busybox"
+            },
+            {
+                "execs": [
+                    {
+                        "args": [
+                            "-c",
+                            "/bin/sh",
+                            "echo \"Performing initialization tasks...\"\\napk add --no-cache curl\\n# Add more initialization tasks as needed\\n"
+                        ],
+                        "path": "/bin/sh"
+                    }
+                ],
+                "name": "alpine"
+            }
+        ]
+    },
+    "status": {}
+}

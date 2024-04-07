@@ -1,0 +1,23 @@
+apiVersion: kubescape.io/v1
+kind: RuntimeRuleAlertBinding
+metadata:
+  name: all-rules-for-default-ns
+spec:
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: default
+  rules:
+    - ruleName: "Unexpected process launched"
+    - ruleName: "Unexpected file access"
+    - ruleName: "Unexpected system call"
+    - ruleName: "Unexpected capability used"
+    - ruleName: "Unexpected domain request"
+    - ruleName: "Unexpected Service Account Token Access"
+    - ruleName: "Exec from malicious source"
+    - ruleName: "Kernel Module Load"
+    - ruleName: "Exec Binary Not In Base Image"
+    - ruleName: "Malicious SSH Connection"
+    - ruleName: "Kubernetes Client Executed"
+    - ruleName: "Exec from mount"
+    - ruleName: "Unshare System Call usage"
+    - ruleName: "Crypto Miner detected"

@@ -8,8 +8,10 @@ import (
 	"node-agent/pkg/applicationprofilemanager"
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -40,8 +42,10 @@ type ApplicationProfileManager struct {
 	ctx                      context.Context
 	containerMutexes         storageUtils.MapMutex[string]                                   // key is k8sContainerID
 	trackedContainers        mapset.Set[string]                                              // key is k8sContainerID
+	removedContainers        mapset.Set[string]                                              // key is k8sContainerID
 	savedCapabilities        maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
 	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
+	droppedEvents            maps.SafeMap[string, bool]                                      // key is k8sContainerID
 	savedOpens               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
 	savedSyscalls            maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
 	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
@@ -49,21 +53,26 @@ type ApplicationProfileManager struct {
 	toSaveOpens              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
 	watchedContainerChannels maps.SafeMap[string, chan error]                                // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
+	k8sObjectCache           objectcache.K8sObjectCache
 	storageClient            storage.StorageClient
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
+	preRunningContainerIDs   mapset.Set[string]
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient) (*ApplicationProfileManager, error) {
+func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
-		cfg:               cfg,
-		clusterName:       clusterName,
-		ctx:               ctx,
-		k8sClient:         k8sClient,
-		storageClient:     storageClient,
-		containerMutexes:  storageUtils.NewMapMutex[string](),
-		trackedContainers: mapset.NewSet[string](),
+		cfg:                    cfg,
+		clusterName:            clusterName,
+		ctx:                    ctx,
+		k8sClient:              k8sClient,
+		k8sObjectCache:         k8sObjectCache,
+		storageClient:          storageClient,
+		containerMutexes:       storageUtils.NewMapMutex[string](),
+		trackedContainers:      mapset.NewSet[string](),
+		removedContainers:      mapset.NewSet[string](),
+		preRunningContainerIDs: preRunningContainerIDs,
 	}, nil
 }
 
@@ -120,11 +129,13 @@ func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.Wat
 	// make sure we don't run deleteResources and saveProfile at the same time
 	am.containerMutexes.Lock(watchedContainer.K8sContainerID)
 	defer am.containerMutexes.Unlock(watchedContainer.K8sContainerID)
+	am.removedContainers.Add(watchedContainer.K8sContainerID)
 	// delete resources
 	watchedContainer.UpdateDataTicker.Stop()
 	am.trackedContainers.Remove(watchedContainer.K8sContainerID)
 	am.savedCapabilities.Delete(watchedContainer.K8sContainerID)
 	am.savedExecs.Delete(watchedContainer.K8sContainerID)
+	am.droppedEvents.Delete(watchedContainer.K8sContainerID)
 	am.savedOpens.Delete(watchedContainer.K8sContainerID)
 	am.savedSyscalls.Delete(watchedContainer.K8sContainerID)
 	am.toSaveCapabilities.Delete(watchedContainer.K8sContainerID)
@@ -134,6 +145,15 @@ func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.Wat
 }
 
 func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+	// set completion status & status as soon as we start monitoring the container
+	if am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
+		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
+	} else {
+		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+	}
+	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
+	am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
+
 	for {
 		select {
 		case <-watchedContainer.UpdateDataTicker.C:
@@ -142,13 +162,21 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 				watchedContainer.InitialDelayExpired = true
 				watchedContainer.UpdateDataTicker.Reset(am.cfg.UpdateDataPeriod)
 			}
+			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
 			am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
+				// if exit code is 0 we set the status to completed
+				// TODO: Should we split ContainerHasTerminatedError to indicate if we reached the maxSniffingTime?
+				if watchedContainer.GetTerminationExitCode(am.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName) == 0 {
+					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+				}
+
 				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
 				return nil
-			case errors.Is(err, utils.FullApplicationProfileError):
+			case errors.Is(err, utils.TooLargeApplicationProfileError):
+				watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
 				return nil
 			}
 		}
@@ -194,48 +222,30 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// sleep for container index second to desynchronize the profiles saving
 	time.Sleep(time.Duration(watchedContainer.ContainerIndex) * time.Second)
 
+	if droppedEvents := am.droppedEvents.Get(watchedContainer.K8sContainerID); droppedEvents {
+		watchedContainer.SetStatus(utils.WatchedContainerStatusMissingRuntime)
+	}
+
 	// application activity
 	// get syscalls from IG
-	observedSyscalls, err := am.syscallPeekFunc(watchedContainer.NsMntId)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get syscalls", helpers.Error(err),
-			helpers.String("slug", slug),
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
-	}
-	// check if we have new activities to save
-	savedSyscalls := am.savedSyscalls.Get(watchedContainer.K8sContainerID)
-	toSaveSyscalls := mapset.NewSet[string](observedSyscalls...).Difference(savedSyscalls)
-	if !toSaveSyscalls.IsEmpty() {
-		newActivity := &v1beta1.ApplicationActivity{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: slug,
-				Annotations: map[string]string{
-					helpersv1.WlidMetadataKey:   watchedContainer.Wlid,
-					helpersv1.StatusMetadataKey: helpersv1.Ready,
-				},
-				Labels: utils.GetLabels(watchedContainer, true),
-			},
+
+	var observedSyscalls []string
+	var toSaveSyscalls []string
+
+	if am.syscallPeekFunc != nil {
+		observedSyscalls, err = am.syscallPeekFunc(watchedContainer.NsMntId)
+		if err != nil && !strings.Contains(err.Error(), "no syscall found") {
+			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get syscalls", helpers.Error(err),
+				helpers.String("slug", slug),
+				helpers.Int("container index", watchedContainer.ContainerIndex),
+				helpers.String("container ID", watchedContainer.ContainerID),
+				helpers.String("k8s workload", watchedContainer.K8sContainerID))
 		}
-		// add syscalls
-		newActivity.Spec.Syscalls = observedSyscalls
-		// save application activity
-		if err := am.storageClient.CreateApplicationActivity(newActivity, namespace); err != nil {
-			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application activity", helpers.Error(err),
-				helpers.String("slug", slug),
-				helpers.Int("container index", watchedContainer.ContainerIndex),
-				helpers.String("container ID", watchedContainer.ContainerID),
-				helpers.String("k8s workload", watchedContainer.K8sContainerID))
-		} else {
-			// record saved syscalls
-			am.savedSyscalls.Get(watchedContainer.K8sContainerID).Append(toSaveSyscalls.ToSlice()...)
-			logger.L().Debug("ApplicationProfileManager - saved application activity",
-				helpers.Int("syscalls", toSaveSyscalls.Cardinality()),
-				helpers.String("slug", slug),
-				helpers.Int("container index", watchedContainer.ContainerIndex),
-				helpers.String("container ID", watchedContainer.ContainerID),
-				helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		// check if we have new activities to save
+		savedSyscalls := am.savedSyscalls.Get(watchedContainer.K8sContainerID)
+		toSaveSyscallsSet := mapset.NewSet[string](observedSyscalls...).Difference(savedSyscalls)
+		if !toSaveSyscallsSet.IsEmpty() {
+			toSaveSyscalls = toSaveSyscallsSet.ToSlice()
 		}
 	}
 
@@ -255,6 +265,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			}
 		}
 	}
+
 	// get pointer to execs map from IG
 	toSaveExecs := am.toSaveExecs.Get(watchedContainer.K8sContainerID)
 	// point IG to a new exec map
@@ -288,9 +299,11 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// 3a. the profile is missing Containers or InitContainers - ADD one with the container profile at the right index
 	// 3b. the profile is missing the container profile - ADD the container profile at the right index
 	// 3c. default - patch the container ourselves and REPLACE it at the right index
-	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 {
+	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || watchedContainer.StatusUpdated() {
 		// 0. calculate patch
-		profileOperations := utils.CreateCapabilitiesPatchOperations(capabilities, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+		profileOperations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+		profileOperations = utils.AppendStatusAnnotationPatchOperations(profileOperations, watchedContainer)
+
 		patch, err := json.Marshal(profileOperations)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to marshal patch", helpers.Error(err),
@@ -309,8 +322,9 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					ObjectMeta: metav1.ObjectMeta{
 						Name: slug,
 						Annotations: map[string]string{
-							helpersv1.WlidMetadataKey:   watchedContainer.Wlid,
-							helpersv1.StatusMetadataKey: helpersv1.Ready,
+							helpersv1.WlidMetadataKey:       watchedContainer.Wlid,
+							helpersv1.CompletionMetadataKey: string(watchedContainer.GetCompletionStatus()),
+							helpersv1.StatusMetadataKey:     string(watchedContainer.GetStatus()),
 						},
 						Labels: utils.GetLabels(watchedContainer, true),
 					},
@@ -319,7 +333,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				newProfileContainer := &v1beta1.ApplicationProfileContainer{
 					Name: watchedContainer.InstanceID.GetContainerName(),
 				}
-				utils.EnrichProfileContainer(newProfileContainer, capabilities, execs, opens)
+				utils.EnrichProfileContainer(newProfileContainer, capabilities, observedSyscalls, execs, opens)
 				// insert application profile container
 				utils.InsertApplicationProfileContainer(newProfile, watchedContainer.ContainerType, watchedContainer.ContainerIndex, newProfileContainer)
 				// try to create application profile
@@ -358,13 +372,15 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						addProfileContainer = true
 					}
 					// update it
-					utils.EnrichProfileContainer(existingProfileContainer, capabilities, execs, opens)
+					utils.EnrichProfileContainer(existingProfileContainer, capabilities, observedSyscalls, execs, opens)
 					// get existing containers
 					var existingContainers []v1beta1.ApplicationProfileContainer
 					if watchedContainer.ContainerType == utils.Container {
 						existingContainers = existingProfile.Spec.Containers
-					} else {
+					} else if watchedContainer.ContainerType == utils.InitContainer {
 						existingContainers = existingProfile.Spec.InitContainers
+					} else {
+						existingContainers = existingProfile.Spec.EphemeralContainers
 					}
 					// replace or add application profile container using patch
 					switch {
@@ -401,6 +417,9 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							Value: existingProfileContainer,
 						})
 					}
+
+					replaceOperations = utils.AppendStatusAnnotationPatchOperations(replaceOperations, watchedContainer)
+
 					patch, err := json.Marshal(replaceOperations)
 					if err != nil {
 						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to marshal patch", helpers.Error(err),
@@ -429,6 +448,11 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			// restore opens map entries
 			toSaveOpens.Range(utils.SetInMap(am.toSaveOpens.Get(watchedContainer.K8sContainerID)))
 		} else {
+			// for status updates to be tracked, we reset the update flag
+			watchedContainer.ResetStatusUpdatedFlag()
+
+			// record saved syscalls
+			am.savedSyscalls.Get(watchedContainer.K8sContainerID).Append(toSaveSyscalls...)
 			// record saved capabilities
 			am.savedCapabilities.Get(watchedContainer.K8sContainerID).Append(capabilities...)
 			// record saved execs
@@ -483,6 +507,9 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 }
 
 func (am *ApplicationProfileManager) waitForContainer(k8sContainerID string) error {
+	if am.removedContainers.Contains(k8sContainerID) {
+		return fmt.Errorf("container %s has been removed", k8sContainerID)
+	}
 	return backoff.Retry(func() error {
 		if am.trackedContainers.Contains(k8sContainerID) {
 			return nil
@@ -505,14 +532,27 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 			return
 		}
 		am.savedCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
+		am.droppedEvents.Set(k8sContainerID, false)
 		am.savedExecs.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		am.savedOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		am.savedSyscalls.Set(k8sContainerID, mapset.NewSet[string]())
 		am.toSaveCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
 		am.toSaveExecs.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		am.toSaveOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
+		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		am.trackedContainers.Add(k8sContainerID)
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
+
+		// stop monitoring after MaxSniffingTime
+		time.AfterFunc(am.cfg.MaxSniffingTime, func() {
+			logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+			event := containercollection.PubSubEvent{
+				Timestamp: time.Now().Format(time.RFC3339),
+				Type:      containercollection.EventTypeRemoveContainer,
+				Container: notif.Container,
+			}
+			am.ContainerCallback(event)
+		})
 	case containercollection.EventTypeRemoveContainer:
 		channel := am.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
 		if channel != nil {
@@ -574,4 +614,11 @@ func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID, path string,
 	} else {
 		openMap.Set(path, mapset.NewSet[string](flags...))
 	}
+}
+
+func (am *ApplicationProfileManager) ReportDroppedEvent(k8sContainerID string) {
+	if err := am.waitForContainer(k8sContainerID); err != nil {
+		return
+	}
+	am.droppedEvents.Set(k8sContainerID, true)
 }

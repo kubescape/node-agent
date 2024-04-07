@@ -14,10 +14,9 @@ func (ch *IGContainerWatcher) execEventCallback(event *tracerexectype.Event) {
 	if event.Type != types.NORMAL {
 		// dropped event
 		logger.L().Ctx(ch.ctx).Warning("exec tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-		return
 	}
 	if event.Retval > -1 && event.Comm != "" {
-		_ = ch.execWorkerPool.Invoke(*event)
+		ch.execWorkerChan <- event
 	}
 }
 
@@ -31,6 +30,12 @@ func (ch *IGContainerWatcher) startExecTracing() error {
 	if err != nil {
 		return fmt.Errorf("getting execMountnsmap: %w", err)
 	}
+
+	go func() {
+		for event := range ch.execWorkerChan {
+			ch.execWorkerPool.Invoke(*event)
+		}
+	}()
 
 	tracerExec, err := tracerexec.NewTracer(&tracerexec.Config{MountnsMap: execMountnsmap}, ch.containerCollection, ch.execEventCallback)
 	if err != nil {

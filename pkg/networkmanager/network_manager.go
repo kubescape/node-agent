@@ -9,12 +9,14 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/dnsmanager"
 	"node-agent/pkg/k8sclient"
+	"node-agent/pkg/objectcache"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
 	"strings"
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/cenkalti/backoff/v4"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/google/uuid"
 	"github.com/goradd/maps"
@@ -46,28 +48,36 @@ const (
 )
 
 type NetworkManager struct {
-	cfg                        config.Config
-	ctx                        context.Context
-	k8sClient                  k8sclient.K8sClientInterface
-	storageClient              storage.StorageClient
-	containerAndPodToWLIDMap   maps.SafeMap[string, string]
-	containerAndPodToEventsMap maps.SafeMap[string, mapset.Set[NetworkEvent]]
-	clusterName                string
-	watchedContainerChannels   maps.SafeMap[string, chan error] // key is ContainerID
-	dnsResolverClient          dnsmanager.DNSResolver
-	status                     string
+	cfg                           config.Config
+	containerAndPodToWLIDMap      maps.SafeMap[string, string]
+	watchedContainerChannels      maps.SafeMap[string, chan error]
+	containerAndPodToDroppedEvent maps.SafeMap[string, bool]
+	containerAndPodToEventsMap    maps.SafeMap[string, mapset.Set[NetworkEvent]]
+	storageClient                 storage.StorageClient
+	removedContainers             mapset.Set[string]
+	trackedContainers             mapset.Set[string]
+	k8sClient                     k8sclient.K8sClientInterface
+	ctx                           context.Context
+	dnsResolverClient             dnsmanager.DNSResolver
+	preRunningContainerIDs        mapset.Set[string]
+	k8sObjectCache                objectcache.K8sObjectCache
+	clusterName                   string
 }
 
 var _ NetworkManagerClient = (*NetworkManager)(nil)
 
-func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string, dnsResolverClient dnsmanager.DNSResolver) *NetworkManager {
+func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, clusterName string, dnsResolverClient dnsmanager.DNSResolver, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache) *NetworkManager {
 	return &NetworkManager{
-		cfg:               cfg,
-		ctx:               ctx,
-		k8sClient:         k8sClient,
-		storageClient:     storageClient,
-		clusterName:       clusterName,
-		dnsResolverClient: dnsResolverClient,
+		cfg:                    cfg,
+		ctx:                    ctx,
+		k8sClient:              k8sClient,
+		k8sObjectCache:         k8sObjectCache,
+		storageClient:          storageClient,
+		clusterName:            clusterName,
+		dnsResolverClient:      dnsResolverClient,
+		preRunningContainerIDs: preRunningContainerIDs,
+		trackedContainers:      mapset.NewSet[string](),
+		removedContainers:      mapset.NewSet[string](),
 	}
 }
 
@@ -84,17 +94,35 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 		}
 		go am.handleContainerStarted(ctx, notif.Container, k8sContainerID)
 
+		// stop monitoring after MaxSniffingTime
+		time.AfterFunc(am.cfg.MaxSniffingTime, func() {
+			event := containercollection.PubSubEvent{
+				Timestamp: time.Now().Format(time.RFC3339),
+				Type:      containercollection.EventTypeRemoveContainer,
+				Container: notif.Container,
+			}
+			am.ContainerCallback(event)
+		})
+
 	case containercollection.EventTypeRemoveContainer:
 		channel := am.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
 		if channel != nil {
 			channel <- utils.ContainerHasTerminatedError
 		}
 		am.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
+		am.removedContainers.Add(notif.Container.Runtime.ContainerID)
+		am.trackedContainers.Remove(notif.Container.Runtime.ContainerID)
 	}
 }
 
-func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, event tracernetworktype.Event) {
+func (am *NetworkManager) ReportDroppedEvent(containerID string, event tracernetworktype.Event) {
+	am.containerAndPodToDroppedEvent.Set(containerID+event.K8s.PodName, true)
+}
 
+func (am *NetworkManager) ReportNetworkEvent(containerID string, event tracernetworktype.Event) {
+	if err := am.waitForContainer(containerID); err != nil {
+		return
+	}
 	if !am.isValidEvent(event) {
 		return
 	}
@@ -113,12 +141,12 @@ func (am *NetworkManager) SaveNetworkEvent(containerID, podName string, event tr
 	networkEvent.SetPodLabels(event.PodLabels)
 	networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
 
-	networkEventsSet := am.containerAndPodToEventsMap.Get(containerID + podName)
-	if am.containerAndPodToEventsMap.Get(containerID+podName) == nil {
+	networkEventsSet := am.containerAndPodToEventsMap.Get(containerID + event.K8s.PodName)
+	if am.containerAndPodToEventsMap.Get(containerID+event.K8s.PodName) == nil {
 		networkEventsSet = mapset.NewSet[NetworkEvent]()
 	}
 	networkEventsSet.Add(*networkEvent)
-	am.containerAndPodToEventsMap.Set(containerID+podName, networkEventsSet)
+	am.containerAndPodToEventsMap.Set(containerID+event.K8s.PodName, networkEventsSet)
 }
 
 // isValidEvent checks if the event is a valid event that should be saved
@@ -153,7 +181,8 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		K8sContainerID:   k8sContainerID,
 	}
 	am.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
-
+	am.removedContainers.Remove(container.Runtime.ContainerID)
+	am.trackedContainers.Add(container.Runtime.ContainerID)
 	// retrieve parent WL
 	parentWL, err := am.getParentWorkloadFromContainer(container)
 	if err != nil {
@@ -172,32 +201,6 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		// if we get not selector, we can't create/update network neighbor
 		logger.L().Warning("NetworkManager - selector is nil", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		return
-	}
-
-	// check if network neighbor CRD exists
-	networkNeighbors, err := am.storageClient.GetNetworkNeighbors(parentWL.GetNamespace(), generateNetworkNeighborsNameFromWorkload(parentWL))
-	if err != nil {
-		if !strings.Contains(err.Error(), "not found") {
-			logger.L().Warning("NetworkManager - failed to get network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-		} else {
-			// network neighbor not found, create new one
-			newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector, am.clusterName)
-			if err = am.storageClient.CreateNetworkNeighbors(newNetworkNeighbors, parentWL.GetNamespace()); err != nil {
-				logger.L().Warning("NetworkManager - failed to create network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-			} else {
-				// set to initializing only if create was successful
-				am.status = helpersv1.Initializing
-				logger.L().Debug("NetworkManager - initializing", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-			}
-		}
-	} else {
-		// CRD found, update labels
-		networkNeighbors.Spec.LabelSelector = *selector
-		am.status = networkNeighbors.GetAnnotations()[helpersv1.StatusMetadataKey]
-		if err = am.storageClient.PatchNetworkNeighborsMatchLabels(networkNeighbors.GetName(), networkNeighbors.GetNamespace(), networkNeighbors); err != nil {
-			logger.L().Warning("NetworkManager - failed to update network neighbor labels", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-		}
-		logger.L().Debug("NetworkManager - updated network neighbor labels", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
 
 	// save container + pod to wlid map
@@ -268,10 +271,20 @@ func (am *NetworkManager) deleteResources(container *containercollection.Contain
 	// clean up
 	am.containerAndPodToWLIDMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
+	am.containerAndPodToDroppedEvent.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 	am.watchedContainerChannels.Delete(container.Runtime.ContainerID)
 }
 
 func (am *NetworkManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+	// set completion status & status as soon as we start monitoring the container
+	if am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
+		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
+	} else {
+		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+	}
+	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
+	am.saveNetworkEvents(ctx, container, watchedContainer)
+
 	for {
 		select {
 		case <-watchedContainer.UpdateDataTicker.C:
@@ -281,19 +294,27 @@ func (am *NetworkManager) monitorContainer(ctx context.Context, container *conta
 				watchedContainer.UpdateDataTicker.Reset(am.cfg.UpdateDataPeriod)
 			}
 
-			am.handleNetworkEvents(ctx, container, watchedContainer)
+			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
+			am.saveNetworkEvents(ctx, container, watchedContainer)
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
-				am.handleNetworkEvents(ctx, container, watchedContainer)
+				// if exit code is 0 we set the status to completed
+				// TODO: Should we split ContainerHasTerminatedError to indicate if we reached the maxSniffingTime?
+				if watchedContainer.GetTerminationExitCode(am.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName) == 0 {
+					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+				}
+				am.saveNetworkEvents(ctx, container, watchedContainer)
 				return nil
 			}
+
+			// TODO: @Amir should we handle too large?
 		}
 	}
 }
 
 // handleNetworkEvents retrieves network events from map, generate entries for CRD and sends a PATCH command to update them
-func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
+func (am *NetworkManager) saveNetworkEvents(_ context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) {
 	// retrieve parent WL from internal map
 	parentWlid := am.containerAndPodToWLIDMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
 	if parentWlid == "" {
@@ -315,28 +336,11 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		networkNeighborsExists = true
 	}
 
-	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
-	// no events to handle
-	if networkEvents == nil {
-		if networkNeighborsExists {
-			// update status to ready
-			if networkNeighbors.GetAnnotations()[helpersv1.StatusMetadataKey] == helpersv1.Initializing {
-				// if we are in initializing state, we need to update the CRD to ready
-				if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(name, namespace, &v1beta1.NetworkNeighbors{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							helpersv1.StatusMetadataKey: helpersv1.Ready,
-						},
-					},
-				}); err != nil {
-					logger.L().Warning("NetworkManager - failed to patch network neighbor status", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
-				} else {
-					logger.L().Debug("NetworkManager - status updated to ready", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
-				}
-			}
-		}
-		return
+	if droppedEvents := am.containerAndPodToDroppedEvent.Get(container.Runtime.ContainerID + container.K8s.PodName); droppedEvents {
+		watchedContainer.SetStatus(helpersv1.MissingRuntime)
 	}
+
+	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
 	// TODO: dns enrichment
 
 	// update CRD based on events
@@ -344,15 +348,26 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 
 	if networkNeighborsExists {
 		// patch only if there are changes
-		if len(networkNeighborsSpec.Egress) > 0 || len(networkNeighborsSpec.Ingress) > 0 {
+		if len(networkNeighborsSpec.Egress) > 0 || len(networkNeighborsSpec.Ingress) > 0 || watchedContainer.StatusUpdated() {
 			// send PATCH command using entries generated from events
 			nn := &v1beta1.NetworkNeighbors{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						helpersv1.StatusMetadataKey: helpersv1.Ready,
-					},
+				ObjectMeta: networkNeighbors.ObjectMeta,
+				Spec: v1beta1.NetworkNeighborsSpec{
+					Egress:  []v1beta1.NetworkNeighbor{},
+					Ingress: []v1beta1.NetworkNeighbor{},
 				},
-				Spec: networkNeighborsSpec,
+			}
+			if watchedContainer.StatusUpdated() {
+				nn.ObjectMeta.Annotations = map[string]string{
+					helpersv1.StatusMetadataKey:     string(watchedContainer.GetStatus()),
+					helpersv1.CompletionMetadataKey: string(watchedContainer.GetCompletionStatus()),
+				}
+			}
+			if len(networkNeighborsSpec.Egress) > 0 {
+				nn.Spec.Egress = networkNeighborsSpec.Egress
+			}
+			if len(networkNeighborsSpec.Ingress) > 0 {
+				nn.Spec.Ingress = networkNeighborsSpec.Ingress
 			}
 			if err := am.storageClient.PatchNetworkNeighborsIngressAndEgress(name, namespace, nn); err != nil {
 				logger.L().Warning("NetworkManager - failed to patch network neighbor", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -380,7 +395,8 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		// update spec and annotations
 		networkNeighborsSpec.LabelSelector = *selector
 		newNetworkNeighbors.Spec = networkNeighborsSpec
-		newNetworkNeighbors.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Ready
+		newNetworkNeighbors.Annotations[helpersv1.StatusMetadataKey] = string(watchedContainer.GetStatus())
+		newNetworkNeighbors.Annotations[helpersv1.CompletionMetadataKey] = string(watchedContainer.GetCompletionStatus())
 
 		logger.L().Debug("NetworkManager - creating network neighbor", helpers.Interface("labels", selector), helpers.String("container ID", container.Runtime.ContainerID), helpers.Interface("labels", newNetworkNeighbors.Spec.LabelSelector))
 
@@ -390,6 +406,8 @@ func (am *NetworkManager) handleNetworkEvents(ctx context.Context, container *co
 		}
 		logger.L().Debug("NetworkManager - created network neighbor", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
+
+	watchedContainer.ResetStatusUpdatedFlag()
 
 	// remove events from map
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
@@ -414,6 +432,10 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 		if identifier, err := generateNeighborsIdentifier(currSpec.Ingress[i]); err == nil {
 			currIngressIdentifiersMap[identifier] = true
 		}
+	}
+
+	if networkEvents == nil {
+		return networkNeighborsSpec
 	}
 
 	networkEventsIterator := networkEvents.Iterator()
@@ -600,6 +622,17 @@ func (am *NetworkManager) handleServiceWithNoSelectors(svc workloadinterface.IWo
 	}
 
 	return nil
+}
+func (am *NetworkManager) waitForContainer(k8sContainerID string) error {
+	if am.removedContainers.Contains(k8sContainerID) {
+		return fmt.Errorf("container %s has been removed", k8sContainerID)
+	}
+	return backoff.Retry(func() error {
+		if am.trackedContainers.Contains(k8sContainerID) {
+			return nil
+		}
+		return fmt.Errorf("container %s not found", k8sContainerID)
+	}, backoff.NewExponentialBackOff())
 }
 
 func getNamespaceMatchLabels(destinationNamespace, sourceNamespace string) map[string]string {

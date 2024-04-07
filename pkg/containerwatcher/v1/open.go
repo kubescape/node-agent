@@ -14,10 +14,9 @@ func (ch *IGContainerWatcher) openEventCallback(event *traceropentype.Event) {
 	if event.Type != types.NORMAL {
 		// dropped event
 		logger.L().Ctx(ch.ctx).Warning("open tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-		return
 	}
 	if event.Ret > -1 && event.Path != "" {
-		_ = ch.openWorkerPool.Invoke(*event)
+		ch.openWorkerChan <- event
 	}
 }
 
@@ -25,6 +24,12 @@ func (ch *IGContainerWatcher) startOpenTracing() error {
 	if err := ch.tracerCollection.AddTracer(openTraceName, ch.containerSelector); err != nil {
 		return fmt.Errorf("adding tracer: %w", err)
 	}
+
+	go func() {
+		for c := range ch.openWorkerChan {
+			_ = ch.openWorkerPool.Invoke(*c)
+		}
+	}()
 
 	// Get mount namespace map to filter by containers
 	openMountnsmap, err := ch.tracerCollection.TracerMountNsMap(openTraceName)

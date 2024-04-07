@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"node-agent/pkg/utils"
 	"os"
 	"path"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"

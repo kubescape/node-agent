@@ -1,0 +1,124 @@
+{
+    "apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
+    "kind": "ApplicationProfile",
+    "metadata": {
+        "annotations": {
+            "kubescape.io/resource-size": "85"
+        },
+        "creationTimestamp": "2024-03-19T09:27:05Z",
+        "labels": {
+            "kubescape.io/instance-template-hash": "77b4fdf86c",
+            "kubescape.io/workload-api-group": "apps",
+            "kubescape.io/workload-api-version": "v1",
+            "kubescape.io/workload-kind": "Deployment",
+            "kubescape.io/workload-name": "nginx"
+        },
+        "name": "replicaset-nginx-77b4fdf86c"
+    },
+    "spec": {
+        "containers": [
+            {
+                "capabilities": [
+                    "NET_BIND_SERVICE",
+                    "DAC_OVERRIDE",
+                    "CHOWN",
+                    "SETGID",
+                    "SETUID"
+                ],
+                "execs": [
+                    {
+                        "args": [
+                            "--show",
+                            "--showformat=${Conffiles}\\n",
+                            "/usr/bin/dpkg-query",
+                            "nginx"
+                        ],
+                        "path": "/usr/bin/dpkg-query"
+                    },
+                    {
+                        "args": [
+                            "-g",
+                            "/docker-entrypoint.sh",
+                            "daemon off;",
+                            "nginx"
+                        ],
+                        "path": "/docker-entrypoint.sh"
+                    },
+                    {
+                        "args": [
+                            "-d ",
+                            "-f",
+                            "/usr/bin/cut",
+                            "3"
+                        ],
+                        "path": "/usr/bin/cut"
+                    },
+                    {
+                        "args": [
+                            "/docker-entrypoint.d/30-tune-worker-processes.sh"
+                        ],
+                        "path": "/docker-entrypoint.d/30-tune-worker-processes.sh"
+                    },
+                    {
+                        "args": [
+                            "/docker-entrypoint.d/10-listen-on-ipv6-by-default.sh"
+                        ],
+                        "path": "/docker-entrypoint.d/10-listen-on-ipv6-by-default.sh"
+                    },
+                    {
+                        "args": [
+                            "/etc/nginx/conf.d/default.conf",
+                            "/usr/bin/touch"
+                        ],
+                        "path": "/usr/bin/touch"
+                    },
+                    {
+                        "args": [
+                            "-g",
+                            "/usr/sbin/nginx",
+                            "daemon off;"
+                        ],
+                        "path": "/usr/sbin/nginx"
+                    },
+                    {
+                        "args": [
+                            "-",
+                            "-c",
+                            "/usr/bin/md5sum"
+                        ],
+                        "path": "/usr/bin/md5sum"
+                    },
+                    {
+                        "args": [
+                            "-E",
+                            "-i",
+                            "/etc/nginx/conf.d/default.conf",
+                            "/usr/bin/sed",
+                            "s,listen       80;,listen       80;\\n    listen  [::]:80;,"
+                        ],
+                        "path": "/usr/bin/sed"
+                    },
+                    {
+                        "args": [
+                            "-q",
+                            "/etc/nginx/conf.d/default.conf",
+                            "/usr/bin/grep",
+                            "etc/nginx/conf.d/default.conf",
+                            "listen  \\[::]\\:80;"
+                        ],
+                        "path": "/usr/bin/grep"
+                    },
+                    {
+                        "flags": [
+                            "O_CREAT",
+                            "O_EXCL",
+                            "O_RDWR"
+                        ],
+                        "path": "/etc/nginx/conf.d/sedzJNyeW"
+                    }
+                ]
+            }
+        ]
+    },
+    "status": {}
+}

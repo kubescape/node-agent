@@ -22,18 +22,20 @@ func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Eve
 	if event.Type != types.NORMAL {
 		// dropped event
 		logger.L().Ctx(ch.ctx).Warning("network tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-		return
-	}
-	ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
+	} else {
 
-	if ch.kubeIPInstance != nil {
-		ch.kubeIPInstance.EnrichEvent(event)
-	}
-	if ch.kubeNameInstance != nil {
-		ch.kubeNameInstance.EnrichEvent(event)
+		ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
+		ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
+
+		if ch.kubeIPInstance != nil {
+			_ = ch.kubeIPInstance.EnrichEvent(event)
+		}
+		if ch.kubeNameInstance != nil {
+			_ = ch.kubeNameInstance.EnrichEvent(event)
+		}
 	}
 
-	_ = ch.networkWorkerPool.Invoke(*event)
+	ch.networkWorkerChan <- event
 }
 
 func (ch *IGContainerWatcher) startNetworkTracing() error {
@@ -46,8 +48,18 @@ func (ch *IGContainerWatcher) startNetworkTracing() error {
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
+	go func() {
+		for event := range ch.networkWorkerChan {
+			ch.networkWorkerPool.Invoke(*event)
+		}
+	}()
 
 	tracerNetwork.SetEventHandler(ch.networkEventCallback)
+
+	err = tracerNetwork.RunWorkaround()
+	if err != nil {
+		return fmt.Errorf("running workaround: %w", err)
+	}
 
 	ch.networkTracer = tracerNetwork
 

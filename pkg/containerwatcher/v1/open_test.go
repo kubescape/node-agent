@@ -4,6 +4,7 @@ import (
 	"context"
 	"node-agent/pkg/config"
 	"node-agent/pkg/filehandler/v1"
+	metricsmanager "node-agent/pkg/metricsmanager"
 	"node-agent/pkg/relevancymanager/v1"
 	"testing"
 
@@ -17,9 +18,11 @@ func BenchmarkIGContainerWatcher_openEventCallback(b *testing.B) {
 	ctx := context.TODO()
 	fileHandler, err := filehandler.CreateInMemoryFileHandler()
 	assert.NoError(b, err)
-	relevancyManager, err := relevancymanager.CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, nil, nil)
+	relevancyManager, err := relevancymanager.CreateRelevancyManager(ctx, cfg, "cluster", fileHandler, nil, nil, nil)
 	assert.NoError(b, err)
-	mainHandler, err := CreateIGContainerWatcher(cfg, nil, nil, relevancyManager, nil, nil)
+	mockExporter := metricsmanager.NewMetricsMock()
+
+	mainHandler, err := CreateIGContainerWatcher(cfg, nil, nil, relevancyManager, nil, nil, mockExporter, nil, nil, nil, nil)
 	assert.NoError(b, err)
 	event := &traceropentype.Event{
 		Event: types.Event{

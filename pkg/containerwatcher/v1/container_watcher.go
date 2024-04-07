@@ -7,10 +7,20 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher"
 	"node-agent/pkg/dnsmanager"
+	"node-agent/pkg/malwaremanager"
+	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/networkmanager"
 	"node-agent/pkg/relevancymanager"
-	"node-agent/pkg/utils"
+	rulebinding "node-agent/pkg/rulebindingmanager"
+	"node-agent/pkg/rulemanager"
 
+	"node-agent/pkg/utils"
+	"os"
+
+	tracerandomx "node-agent/pkg/ebpf/gadgets/randomx/tracer"
+	tracerandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+
+	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
@@ -25,6 +35,7 @@ import (
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -37,11 +48,13 @@ const (
 	networkTraceName           = "trace_network"
 	dnsTraceName               = "trace_dns"
 	openTraceName              = "trace_open"
+	randomxTraceName           = "trace_randomx"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
 	networkWorkerPoolSize      = 1
 	dnsWorkerPoolSize          = 5
+	randomxWorkerPoolSize      = 1
 )
 
 type IGContainerWatcher struct {
@@ -50,12 +63,18 @@ type IGContainerWatcher struct {
 	cfg               config.Config
 	containerSelector containercollection.ContainerSelector
 	ctx               context.Context
+	nodeName          string
+	podName           string
+	namespace         string
+
 	// Clients
 	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	k8sClient                 *k8sinterface.KubernetesApi
 	relevancyManager          relevancymanager.RelevancyManagerClient
 	networkManager            networkmanager.NetworkManagerClient
 	dnsManager                dnsmanager.DNSManagerClient
+	ruleManager               rulemanager.RuleManagerClient
+	malwareManager            malwaremanager.MalwareManagerClient
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
@@ -66,6 +85,7 @@ type IGContainerWatcher struct {
 	syscallTracer      *tracerseccomp.Tracer
 	networkTracer      *tracernetwork.Tracer
 	dnsTracer          *tracerdns.Tracer
+	randomxTracer      *tracerandomx.Tracer
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
 	// Worker pools
@@ -74,11 +94,29 @@ type IGContainerWatcher struct {
 	openWorkerPool         *ants.PoolWithFunc
 	networkWorkerPool      *ants.PoolWithFunc
 	dnsWorkerPool          *ants.PoolWithFunc
+	randomxWorkerPool      *ants.PoolWithFunc
+
+	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
+	execWorkerChan         chan *tracerexectype.Event
+	openWorkerChan         chan *traceropentype.Event
+	networkWorkerChan      chan *tracernetworktype.Event
+	dnsWorkerChan          chan *tracerdnstype.Event
+	randomxWorkerChan      chan *tracerandomxtype.Event
+
+	preRunningContainersIDs mapset.Set[string]
+
+	timeBasedContainers   mapset.Set[string] // list of containers to track based on ticker
+	ruleManagedContainers mapset.Set[string] // list of containers to track based on rules
+
+	metrics metricsmanager.MetricsManager
+
+	// cache
+	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -93,8 +131,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+		metrics.ReportEvent(utils.CapabilitiesEventType)
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
+		ruleManager.ReportCapability(k8sContainerID, event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating capabilities worker pool: %w", err)
@@ -106,13 +146,24 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
+		// dropped events
+		if event.Type != types.NORMAL {
+			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
+			return
+		}
+
 		path := event.Comm
 		if len(event.Args) > 0 {
 			path = event.Args[0]
 		}
+		metrics.ReportEvent(utils.ExecveEventType)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
-		relevancyManager.ReportFileAccess(k8sContainerID, path)
+		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
+		ruleManager.ReportFileExec(k8sContainerID, event)
+		malwareManager.ReportFileExec(k8sContainerID, event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating exec worker pool: %w", err)
@@ -125,12 +176,23 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
+		// dropped events
+		if event.Type != types.NORMAL {
+			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
+			return
+		}
+
 		path := event.Path
 		if cfg.EnableFullPathTracing {
 			path = event.FullPath
 		}
+
+		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
-		relevancyManager.ReportFileAccess(k8sContainerID, path)
+		relevancyManager.ReportFileOpen(event.Runtime.ContainerID, k8sContainerID, path)
+		ruleManager.ReportFileOpen(k8sContainerID, event)
+		malwareManager.ReportFileOpen(k8sContainerID, event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating open worker pool: %w", err)
@@ -142,7 +204,15 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
-		networkManagerClient.SaveNetworkEvent(event.Runtime.ContainerID, event.K8s.PodName, event)
+
+		// dropped events
+		if event.Type != types.NORMAL {
+			networkManagerClient.ReportDroppedEvent(event.Runtime.ContainerID, event)
+			return
+		}
+		metrics.ReportEvent(utils.NetworkEventType)
+		networkManagerClient.ReportNetworkEvent(event.Runtime.ContainerID, event)
+		ruleManager.ReportNetworkEvent(event.Runtime.ContainerID, event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating network worker pool: %w", err)
@@ -157,48 +227,86 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.Qr != tracerdnstype.DNSPktTypeResponse {
 			return
 		}
-		dnsManagerClient.ProcessDNSEvent(event)
+		metrics.ReportEvent(utils.DnsEventType)
+		dnsManagerClient.ReportDNSEvent(event)
+		ruleManager.ReportDNSEvent(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating dns worker pool: %w", err)
+	}
+	// Create a randomx worker pool
+	randomxWorkerPool, err := ants.NewPoolWithFunc(randomxWorkerPoolSize, func(i interface{}) {
+		event := i.(tracerandomxtype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		metrics.ReportEvent(utils.RandomXEventType)
+		ruleManager.ReportRandomxEvent(event.Runtime.ContainerID, event)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating randomx worker pool: %w", err)
 	}
 
 	return &IGContainerWatcher{
 		// Configuration
 		cfg:               cfg,
 		containerSelector: containercollection.ContainerSelector{}, // Empty selector to get all containers
+		nodeName:          os.Getenv(config.NodeNameEnvVar),
+		podName:           os.Getenv(config.PodNameEnvVar),
+		namespace:         os.Getenv(config.NamespaceEnvVar),
+
 		// Clients
 		applicationProfileManager: applicationProfileManager,
 		k8sClient:                 k8sClient,
 		relevancyManager:          relevancyManager,
 		networkManager:            networkManagerClient,
 		dnsManager:                dnsManagerClient,
+		ruleManager:               ruleManager,
+		malwareManager:            malwareManager,
 		// IG Collections
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,
 		// Worker pools
-		capabilitiesWorkerPool: capabilitiesWorkerPool,
-		execWorkerPool:         execWorkerPool,
-		openWorkerPool:         openWorkerPool,
-		networkWorkerPool:      networkWorkerPool,
-		dnsWorkerPool:          dnsWorkerPool,
+		capabilitiesWorkerPool:  capabilitiesWorkerPool,
+		execWorkerPool:          execWorkerPool,
+		openWorkerPool:          openWorkerPool,
+		networkWorkerPool:       networkWorkerPool,
+		dnsWorkerPool:           dnsWorkerPool,
+		randomxWorkerPool:       randomxWorkerPool,
+		metrics:                 metrics,
+		preRunningContainersIDs: preRunningContainers,
+
+		// Channels
+		capabilitiesWorkerChan: make(chan *tracercapabilitiestype.Event, 1000),
+		execWorkerChan:         make(chan *tracerexectype.Event, 1000),
+		openWorkerChan:         make(chan *traceropentype.Event, 50000),
+		networkWorkerChan:      make(chan *tracernetworktype.Event, 50000),
+		dnsWorkerChan:          make(chan *tracerdnstype.Event, 10000),
+		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 500),
+
+		// cache
+		ruleBindingPodNotify: ruleBindingPodNotify,
+
+		timeBasedContainers:   mapset.NewSet[string](),
+		ruleManagedContainers: mapset.NewSet[string](),
 	}, nil
 }
 
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	if !ch.running {
-		err := ch.startContainerCollection(ctx)
-		if err != nil {
+
+		if err := ch.startContainerCollection(ctx); err != nil {
 			return fmt.Errorf("setting up container collection: %w", err)
 		}
-		err = ch.startTracers()
-		if err != nil {
+
+		if err := ch.startTracers(); err != nil {
 			ch.stopContainerCollection()
 			return fmt.Errorf("starting app behavior tracing: %w", err)
 		}
 		logger.L().Info("main container handler started")
 		ch.running = true
 	}
+
 	return nil
 }
 

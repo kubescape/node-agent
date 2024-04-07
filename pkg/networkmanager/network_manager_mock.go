@@ -18,5 +18,10 @@ func (am *NetworkManagerMock) ContainerCallback(notif containercollection.PubSub
 
 }
 
-func (am *NetworkManagerMock) SaveNetworkEvent(containerID, podName string, event tracernetworktype.Event) {
+func (am *NetworkManagerMock) ReportNetworkEvent(_ string, _ tracernetworktype.Event) {
+	// noop
+}
+
+func (am *NetworkManagerMock) ReportDroppedEvent(_ string, _ tracernetworktype.Event) {
+	// noop
 }

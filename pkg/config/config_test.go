@@ -1,6 +1,7 @@
 package config
 
 import (
+	"node-agent/pkg/exporters"
 	"testing"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 )
 
 func TestLoadConfig(t *testing.T) {
+	b := false
 	tests := []struct {
 		name    string
 		path    string
@@ -25,7 +27,23 @@ func TestLoadConfig(t *testing.T) {
 				InitialDelay:             2 * time.Minute,
 				MaxSniffingTime:          6 * time.Hour,
 				UpdateDataPeriod:         1 * time.Minute,
+				EnablePrometheusExporter: true,
+				EnableRuntimeDetection:   true,
+				Exporters: exporters.ExportersConfig{
+					SyslogExporter: "http://syslog.kubescape.svc.cluster.local:514",
+					StdoutExporter: &b,
+					AlertManagerExporterUrls: []string{
+						"http://alertmanager.kubescape.svc.cluster.local:9093",
+						"http://alertmanager.kubescape.svc.cluster.local:9095",
+					},
+					CsvRuleExporterPath:    "/rules",
+					CsvMalwareExporterPath: "/malware",
+					HTTPExporterConfig: &exporters.HTTPExporterConfig{
+						URL: "http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io/v1/runtimealerts",
+					},
+				},
 			},
+			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
