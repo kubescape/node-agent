@@ -350,8 +350,13 @@ func (am *NetworkManager) saveNetworkEvents(_ context.Context, container *contai
 		// patch only if there are changes
 		if len(networkNeighborsSpec.Egress) > 0 || len(networkNeighborsSpec.Ingress) > 0 || watchedContainer.StatusUpdated() {
 			// send PATCH command using entries generated from events
-			nn := &v1beta1.NetworkNeighbors{ObjectMeta: metav1.ObjectMeta{}}
-
+			nn := &v1beta1.NetworkNeighbors{
+				ObjectMeta: networkNeighbors.ObjectMeta,
+				Spec: v1beta1.NetworkNeighborsSpec{
+					Egress:  []v1beta1.NetworkNeighbor{},
+					Ingress: []v1beta1.NetworkNeighbor{},
+				},
+			}
 			if watchedContainer.StatusUpdated() {
 				nn.ObjectMeta.Annotations = map[string]string{
 					helpersv1.StatusMetadataKey:     string(watchedContainer.GetStatus()),
