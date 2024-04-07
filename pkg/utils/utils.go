@@ -270,14 +270,25 @@ func (watchedContainer *WatchedContainerData) StatusUpdated() bool {
 }
 
 func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterface.IWorkload, containerName string) {
-	checkContainers := func(containers []v1.Container, containerType ContainerType) {
+	checkContainers := func(containers []v1.Container, ephemeralContainers []v1.EphemeralContainer, containerType ContainerType) {
 		var containerNames []string
-		for i, c := range containers {
-			containerNames = append(containerNames, c.Name)
-			if c.Name == containerName {
-				watchedContainer.ContainerIndex = i
-				watchedContainer.ContainerType = containerType
-				watchedContainer.ContainerNames = containerNames
+		if containerType == EphemeralContainer {
+			for i, c := range ephemeralContainers {
+				containerNames = append(containerNames, c.Name)
+				if c.Name == containerName {
+					watchedContainer.ContainerIndex = i
+					watchedContainer.ContainerType = containerType
+					watchedContainer.ContainerNames = containerNames
+				}
+			}
+		} else {
+			for i, c := range containers {
+				containerNames = append(containerNames, c.Name)
+				if c.Name == containerName {
+					watchedContainer.ContainerIndex = i
+					watchedContainer.ContainerType = containerType
+					watchedContainer.ContainerNames = containerNames
+				}
 			}
 		}
 	}
@@ -286,27 +297,19 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 	if err != nil {
 		return
 	}
-	checkContainers(containers, Container)
+	checkContainers(containers, nil, Container)
 	// initContainers
 	initContainers, err := wl.GetInitContainers()
 	if err != nil {
 		return
 	}
-	checkContainers(initContainers, InitContainer)
+	checkContainers(initContainers, nil, InitContainer)
 	// ephemeralContainers
 	ephemeralContainers, err := wl.GetEphemeralContainers()
 	if err != nil {
 		return
 	}
-	var containerNames []string
-	for i, c := range ephemeralContainers {
-		containerNames = append(containerNames, c.Name)
-		if c.Name == containerName {
-			watchedContainer.ContainerIndex = i
-			watchedContainer.ContainerType = EphemeralContainer
-			watchedContainer.ContainerNames = containerNames
-		}
-	}
+	checkContainers(nil, ephemeralContainers, EphemeralContainer)
 }
 
 // SetTerminationStatus updates the terminated flag and sets the exit code on the watched container
