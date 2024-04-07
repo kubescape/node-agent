@@ -71,10 +71,10 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 	// is memory mapped file
 
 	// The assumption here is that the event path is absolute!
-	p := filepath.Dir(getExecPathFromEvent(execEvent))
+	execPath := filepath.Dir(getExecPathFromEvent(execEvent))
 	for _, maliciousExecPathPrefix := range maliciousExecPathPrefixes {
 		// if the exec path or the current dir is from a malicious source
-		if strings.HasPrefix(p, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) {
+		if strings.HasPrefix(execPath, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) {
 			isPartOfImage := !execEvent.UpperLayer
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
@@ -94,7 +94,7 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 				TriggerEvent: execEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
 					RuleID:          rule.ID(),
-					RuleDescription: fmt.Sprintf("exec call \"%s\" is from a malicious source \"%s\"", p, maliciousExecPathPrefix),
+					RuleDescription: fmt.Sprintf("exec call \"%s\" is from a malicious source \"%s\"", execPath, maliciousExecPathPrefix),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}
