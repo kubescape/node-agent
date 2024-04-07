@@ -11,7 +11,8 @@ import (
 	"os"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 
 	"github.com/go-openapi/strfmt"
 	"github.com/prometheus/alertmanager/api/v2/client"
@@ -94,11 +95,11 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 	params := alert.NewPostAlertsParams().WithContext(context.Background()).WithAlerts(models.PostableAlerts{&myAlert})
 	isOK, err := ame.client.Alert.PostAlerts(params)
 	if err != nil {
-		log.Errorf("Error sending alert: %v\n", err)
+		logger.L().Error("Error sending alert", helpers.Error(err))
 		return
 	}
 	if isOK == nil {
-		log.Errorln("Alert was not sent successfully")
+		logger.L().Error("Alert was not sent successfully")
 		return
 	}
 }
@@ -145,11 +146,11 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 	params := alert.NewPostAlertsParams().WithContext(context.Background()).WithAlerts(models.PostableAlerts{&myAlert})
 	isOK, err := ame.client.Alert.PostAlerts(params)
 	if err != nil {
-		log.Errorf("Error sending alert: %v\n", err)
+		logger.L().Error("Error sending alert", helpers.Error(err))
 		return
 	}
 	if isOK == nil {
-		log.Errorln("Alert was not sent successfully")
+		logger.L().Error("Alert was not sent successfully")
 		return
 	}
 }

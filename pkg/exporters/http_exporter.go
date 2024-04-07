@@ -14,8 +14,6 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/k8s-interface/workloadinterface"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
@@ -38,7 +36,6 @@ type HTTPExporter struct {
 	Host        string `json:"host"`
 	NodeName    string `json:"nodeName"`
 	ClusterName string `json:"clusterName"`
-	k8sClient   *k8sinterface.KubernetesApi
 	httpClient  *http.Client
 	// alertCount is the number of alerts sent in the last minute, used to limit the number of alerts sent so we don't overload the system or reach the rate limit
 	alertCount      int
@@ -78,7 +75,7 @@ func (config *HTTPExporterConfig) Validate() error {
 }
 
 // InitHTTPExporter initializes an HTTPExporter with the given URL, headers, timeout, and method
-func InitHTTPExporter(config HTTPExporterConfig, clusterName string, nodeName string, k8sClient *k8sinterface.KubernetesApi) (*HTTPExporter, error) {
+func InitHTTPExporter(config HTTPExporterConfig, clusterName string, nodeName string) (*HTTPExporter, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
@@ -121,14 +118,7 @@ func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = exporter.NodeName
 	k8sDetails.ClusterName = &exporter.ClusterName
-	wname, wkind, wns, err := exporter.getWorkloadIdentifiers(failedRule.GetRuntimeAlertK8sDetails().PodNamespace, failedRule.GetRuntimeAlertK8sDetails().PodName)
-	if err != nil {
-		logger.L().Error("failed to get workload identifiers", helpers.Error(err))
-		wname, wkind, wns = "", "", ""
-	}
-	k8sDetails.WorkloadName = wname
-	k8sDetails.WorkloadKind = wkind
-	k8sDetails.WorkloadNamespace = wns
+
 	httpAlert := apitypes.RuntimeAlert{
 		Message:                    failedRule.GetRuleAlert().RuleDescription,
 		HostName:                   exporter.Host,
@@ -199,14 +189,7 @@ func (exporter *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.Malw
 	k8sDetails := malwareResult.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = exporter.NodeName
 	k8sDetails.ClusterName = &exporter.ClusterName
-	wname, wkind, wns, err := exporter.getWorkloadIdentifiers(malwareResult.GetRuntimeAlertK8sDetails().PodNamespace, malwareResult.GetRuntimeAlertK8sDetails().PodName)
-	if err != nil {
-		logger.L().Error("failed to get workload identifiers", helpers.Error(err))
-		wname, wkind, wns = "", "", ""
-	}
-	k8sDetails.WorkloadName = wname
-	k8sDetails.WorkloadKind = wkind
-	k8sDetails.WorkloadNamespace = wns
+
 	httpAlert := apitypes.RuntimeAlert{
 		Message:                    fmt.Sprintf("Malware detected: %s", malwareResult.GetBasicRuntimeAlert().AlertName),
 		HostName:                   exporter.Host,
@@ -234,26 +217,4 @@ func (exporter *HTTPExporter) checkAlertLimit() bool {
 
 	exporter.alertCount++
 	return exporter.alertCount > exporter.config.MaxAlertsPerMinute
-}
-
-// Returns (name, kind, namespace) of the workload.
-func (exporter *HTTPExporter) getWorkloadIdentifiers(podNamespace, podName string) (string, string, string, error) {
-	wl, err := exporter.k8sClient.GetWorkload(podNamespace, "Pod", podName)
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to get workload: %w", err)
-	}
-	pod := wl.(*workloadinterface.Workload)
-
-	// find parentWlid
-	kind, name, err := exporter.k8sClient.CalculateWorkloadParentRecursive(pod)
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to calculate workload parent: %w", err)
-	}
-	parentWorkload, err := exporter.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to get parent workload: %w", err)
-	}
-	w := parentWorkload.(*workloadinterface.Workload)
-
-	return w.GetName(), w.GetKind(), w.GetNamespace(), nil
 }
