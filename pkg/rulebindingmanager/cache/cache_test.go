@@ -714,7 +714,10 @@ func TestDeleteRuleBinding(t *testing.T) {
 			assert.False(t, c.rbNameToRB.Has(tt.uniqueName))
 			assert.False(t, c.rbNameToRules.Has(tt.uniqueName))
 			for k, v := range tt.expectedPodToRBNames {
-				assert.Equal(t, 0, slices.Compare(v, c.podToRBNames.Get(k).ToSlice()))
+				slices.Sort(v)
+				tmp := c.podToRBNames.Get(k).ToSlice()
+				slices.Sort(tmp)
+				assert.Equal(t, v, tmp)
 			}
 		})
 	}
