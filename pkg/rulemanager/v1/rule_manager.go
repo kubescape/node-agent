@@ -192,7 +192,7 @@ func (rm *RuleManager) ensureInstanceID(container *containercollection.Container
 	}
 	// find container type and index
 	if watchedContainer.ContainerType == utils.Unknown {
-		watchedContainer.SetContainerType(pod, container.K8s.ContainerName)
+		watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName)
 	}
 
 	// FIXME ephemeralContainers are not supported yet
