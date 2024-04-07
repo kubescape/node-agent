@@ -94,10 +94,10 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 			Severity:       R0003UnexpectedSystemCallRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-			Comm: syscallEvent.Comm,
-			GID:  syscallEvent.Gid,
+			Comm: syscallEvent.Comm, // TODO: This will always be empty, as we are not capturing Comm in the syscall event.
+			GID:  syscallEvent.Gid,  // TODO: This will always be 0, as we are not capturing GID in the syscall event.
 			PID:  syscallEvent.Pid,
-			UID:  syscallEvent.Uid,
+			UID:  syscallEvent.Uid, // TODO: This will always be 0, as we are not capturing UID in the syscall event.
 		},
 		TriggerEvent: syscallEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
