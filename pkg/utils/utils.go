@@ -20,18 +20,18 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
+	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/goradd/maps"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/instanceidhandler"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/containerinstance"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/ephemeralcontainerinstance"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/initcontainerinstance"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-
-	"github.com/armosec/utils-k8s-go/wlid"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/prometheus/procfs"
@@ -100,6 +100,7 @@ type WatchedContainerData struct {
 	SBOMResourceVersion                        int
 	ContainerType                              ContainerType
 	ContainerIndex                             int
+	ContainerNames                             []string // depends on the container type
 	NsMntId                                    uint64
 	InitialDelayExpired                        bool
 
@@ -268,40 +269,42 @@ func (watchedContainer *WatchedContainerData) StatusUpdated() bool {
 	return watchedContainer.statusUpdated
 }
 
-func (watchedContainer *WatchedContainerData) SetContainerType(wl workloadinterface.IWorkload, containerName string) {
+func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterface.IWorkload, containerName string) {
+	checkContainers := func(containers []v1.Container, containerType ContainerType) {
+		var containerNames []string
+		for i, c := range containers {
+			containerNames = append(containerNames, c.Name)
+			if c.Name == containerName {
+				watchedContainer.ContainerIndex = i
+				watchedContainer.ContainerType = containerType
+				watchedContainer.ContainerNames = containerNames
+			}
+		}
+	}
+	// containers
 	containers, err := wl.GetContainers()
 	if err != nil {
 		return
 	}
-	for i, c := range containers {
-		if c.Name == containerName {
-			watchedContainer.ContainerIndex = i
-			watchedContainer.ContainerType = Container
-			break
-		}
-	}
+	checkContainers(containers, Container)
 	// initContainers
 	initContainers, err := wl.GetInitContainers()
 	if err != nil {
 		return
 	}
-	for i, c := range initContainers {
-		if c.Name == containerName {
-			watchedContainer.ContainerIndex = i
-			watchedContainer.ContainerType = InitContainer
-			break
-		}
-	}
+	checkContainers(initContainers, InitContainer)
 	// ephemeralContainers
 	ephemeralContainers, err := wl.GetEphemeralContainers()
 	if err != nil {
 		return
 	}
+	var containerNames []string
 	for i, c := range ephemeralContainers {
+		containerNames = append(containerNames, c.Name)
 		if c.Name == containerName {
 			watchedContainer.ContainerIndex = i
 			watchedContainer.ContainerType = EphemeralContainer
-			break
+			watchedContainer.ContainerNames = containerNames
 		}
 	}
 }

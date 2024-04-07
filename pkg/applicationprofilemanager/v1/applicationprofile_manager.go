@@ -116,9 +116,9 @@ func (am *ApplicationProfileManager) ensureInstanceID(container *containercollec
 			watchedContainer.InstanceID = instanceIDs[i]
 		}
 	}
-	// find container type and index
+	// fill container type, index and names
 	if watchedContainer.ContainerType == utils.Unknown {
-		watchedContainer.SetContainerType(pod, container.K8s.ContainerName)
+		watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName)
 	}
 
 	// FIXME ephemeralContainers are not supported yet
@@ -300,7 +300,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// 3b. the profile is missing the container profile - ADD the container profile at the right index
 	// 3c. default - patch the container ourselves and REPLACE it at the right index
 	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || watchedContainer.StatusUpdated() {
-		// calculate patch
+		// 0. calculate patch
 		profileOperations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		profileOperations = utils.AppendStatusAnnotationPatchOperations(profileOperations, watchedContainer)
 
@@ -313,11 +313,11 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				helpers.String("k8s workload", watchedContainer.K8sContainerID))
 			return
 		}
-		// try to patch application profile
+		// 1. try to patch application profile
 		var gotErr error
 		if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
 			if apierrors.IsNotFound(err) {
-				// new application profile
+				// 2a. new application profile
 				newProfile := &v1beta1.ApplicationProfile{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: slug,
@@ -351,7 +351,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					helpers.Int("container index", watchedContainer.ContainerIndex),
 					helpers.String("container ID", watchedContainer.ContainerID),
 					helpers.String("k8s workload", watchedContainer.K8sContainerID))
-				// get existing profile
+				// 2b. get existing profile
 				existingProfile, err := am.storageClient.GetApplicationProfile(namespace, slug)
 				if err != nil {
 					gotErr = err
@@ -367,7 +367,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					var addProfileContainer bool
 					if existingProfileContainer == nil {
 						existingProfileContainer = &v1beta1.ApplicationProfileContainer{
-							Name: watchedContainer.InstanceID.GetContainerName(),
+							Name: watchedContainer.ContainerNames[watchedContainer.ContainerIndex],
 						}
 						addProfileContainer = true
 					}
@@ -385,7 +385,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					// replace or add application profile container using patch
 					switch {
 					case existingContainers == nil:
-						// insert a new container slice, with the new container at the right index
+						// 3a. insert a new container slice, with the new container at the right index
 						containers := make([]v1beta1.ApplicationProfileContainer, watchedContainer.ContainerIndex+1)
 						containers[watchedContainer.ContainerIndex] = *existingProfileContainer
 						replaceOperations = append(replaceOperations, utils.PatchOperation{
@@ -394,11 +394,14 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							Value: containers,
 						})
 					case addProfileContainer:
+						// 3b. insert a new container at the right index
 						for i := len(existingContainers); i < watchedContainer.ContainerIndex; i++ {
 							replaceOperations = append(replaceOperations, utils.PatchOperation{
-								Op:    "add",
-								Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
-								Value: v1beta1.ApplicationProfileContainer{},
+								Op:   "add",
+								Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
+								Value: v1beta1.ApplicationProfileContainer{
+									Name: watchedContainer.ContainerNames[i],
+								},
 							})
 						}
 						replaceOperations = append(replaceOperations, utils.PatchOperation{
@@ -407,6 +410,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							Value: existingProfileContainer,
 						})
 					default:
+						// 3c. replace the existing container at the right index
 						replaceOperations = append(replaceOperations, utils.PatchOperation{
 							Op:    "replace",
 							Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
@@ -463,24 +467,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				helpers.Int("container index", watchedContainer.ContainerIndex),
 				helpers.String("container ID", watchedContainer.ContainerID),
 				helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			// profile summary
-			// summary := &v1beta1.ApplicationProfileSummary{
-			// 	ObjectMeta: metav1.ObjectMeta{
-			// 		Name: slug,
-			// 		Annotations: map[string]string{
-			// 			helpersv1.WlidMetadataKey:   watchedContainer.Wlid,
-			// 			helpersv1.StatusMetadataKey: helpersv1.Ready,
-			// 		},
-			// 		Labels: utils.GetLabels(watchedContainer, true),
-			// 	},
-			// }
-			// if err := am.storageClient.CreateApplicationProfileSummary(summary, namespace); err != nil {
-			// 	logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to save application profile summary", helpers.Error(err),
-			// 		helpers.String("slug", slug),
-			// 		helpers.Int("container index", watchedContainer.ContainerIndex),
-			// 		helpers.String("container ID", watchedContainer.ContainerID),
-			// 		helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			// }
 		}
 	}
 }

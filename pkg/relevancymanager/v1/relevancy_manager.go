@@ -98,7 +98,7 @@ func (rm *RelevancyManager) getContainerInfo(watchedContainer *utils.WatchedCont
 	}
 	pod := wl.(*workloadinterface.Workload)
 
-	watchedContainer.SetContainerType(pod, containerName)
+	watchedContainer.SetContainerInfo(pod, containerName)
 
 	// get pod template hash
 	podTemplateHash, _ = pod.GetLabel("pod-template-hash")
