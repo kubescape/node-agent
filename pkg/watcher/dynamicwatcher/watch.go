@@ -85,9 +85,7 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 			opt.ResourceVersion, err = wh.getExistingStorageObjects(ctx, res, opt)
 			return err
 		}, newBackOff(), func(err error, d time.Duration) {
-			logger.L().Ctx(ctx).Warning("get existing storage objects", helpers.Error(err),
-				helpers.String("resource", res.Resource),
-				helpers.String("retry in", d.String()))
+			// filed to list resources, will retry
 		}); err != nil {
 			return fmt.Errorf("giving up get existing storage objects: %w", err)
 		}

@@ -5,6 +5,7 @@ import (
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
+	"path/filepath"
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -70,7 +71,7 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 	// is memory mapped file
 
 	// The assumption here is that the event path is absolute!
-	p := getExecPathFromEvent(execEvent)
+	p := filepath.Dir(getExecPathFromEvent(execEvent))
 	for _, maliciousExecPathPrefix := range maliciousExecPathPrefixes {
 		// if the exec path or the current dir is from a malicious source
 		if strings.HasPrefix(p, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) {
