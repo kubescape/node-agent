@@ -5,6 +5,7 @@ import (
 	"node-agent/pkg/ruleengine"
 	"os"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -25,7 +26,7 @@ type ExporterBus struct {
 }
 
 // InitExporters initializes all exporters.
-func InitExporters(exportersConfig ExportersConfig) *ExporterBus {
+func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName string, k8sClient *k8sinterface.KubernetesApi) *ExporterBus {
 	exporters := []Exporter{}
 	for _, url := range exportersConfig.AlertManagerExporterUrls {
 		alertMan := InitAlertManagerExporter(url)
@@ -52,7 +53,7 @@ func InitExporters(exportersConfig ExportersConfig) *ExporterBus {
 		}
 	}
 	if exportersConfig.HTTPExporterConfig != nil {
-		httpExp, err := InitHTTPExporter(*exportersConfig.HTTPExporterConfig)
+		httpExp, err := InitHTTPExporter(*exportersConfig.HTTPExporterConfig, clusterName, nodeName, k8sClient)
 		if err != nil {
 			log.WithError(err).Error("failed to initialize HTTP exporter")
 		}
