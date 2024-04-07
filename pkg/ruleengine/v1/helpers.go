@@ -118,7 +118,7 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 	path, err := getPathFromPid(pid)
 	hostPath := ""
 	if err != nil {
-		logger.L().Error("Failed to get path from event", helpers.Error(err))
+		logger.L().Debug("Failed to get path from event", helpers.Error(err))
 		path = ""
 	} else {
 		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", pid, path))
@@ -128,7 +128,7 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 	if ruleFailure.BaseRuntimeAlert.MD5Hash == "" && hostPath != "" {
 		md5hash, err := utils.CalculateMD5FileHash(hostPath)
 		if err != nil {
-			logger.L().Error("Failed to calculate md5 hash for file", helpers.Error(err))
+			logger.L().Debug("Failed to calculate md5 hash for file", helpers.Error(err))
 			md5hash = ""
 		}
 		ruleFailure.BaseRuntimeAlert.MD5Hash = md5hash
@@ -137,7 +137,7 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 	if ruleFailure.BaseRuntimeAlert.SHA1Hash == "" && hostPath != "" {
 		sha1hash, err := utils.CalculateSHA1FileHash(hostPath)
 		if err != nil {
-			logger.L().Error("Failed to calculate sha1 hash for file", helpers.Error(err))
+			logger.L().Debug("Failed to calculate sha1 hash for file", helpers.Error(err))
 			sha1hash = ""
 		}
 
@@ -147,7 +147,7 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 	if ruleFailure.BaseRuntimeAlert.SHA256Hash == "" && hostPath != "" {
 		sha256hash, err := utils.CalculateSHA256FileHash(hostPath)
 		if err != nil {
-			logger.L().Error("Failed to calculate sha256 hash for file", helpers.Error(err))
+			logger.L().Debug("Failed to calculate sha256 hash for file", helpers.Error(err))
 			sha256hash = ""
 		}
 
@@ -157,7 +157,7 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 	if ruleFailure.BaseRuntimeAlert.Size == nil && hostPath != "" {
 		size, err := utils.GetFileSize(hostPath)
 		if err != nil {
-			logger.L().Error("Failed to get file size", helpers.Error(err))
+			logger.L().Debug("Failed to get file size", helpers.Error(err))
 			sizeStr := ""
 			ruleFailure.BaseRuntimeAlert.Size = &sizeStr
 		} else {
@@ -169,7 +169,7 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 	if ruleFailure.BaseRuntimeAlert.CommandLine == nil {
 		commandLine, err := utils.GetCmdlineByPid(int(pid))
 		if err != nil {
-			logger.L().Info("Failed to get command line by pid", helpers.Error(err))
+			logger.L().Debug("Failed to get command line by pid", helpers.Error(err))
 			commandLine = nil
 		}
 		ruleFailure.BaseRuntimeAlert.CommandLine = commandLine
@@ -178,7 +178,7 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 	if ruleFailure.BaseRuntimeAlert.PPID == nil {
 		parent, err := utils.GetParentByPid(int(pid))
 		if err != nil {
-			logger.L().Info("Failed to get ppid by pid", helpers.Error(err))
+			logger.L().Debug("Failed to get ppid by pid", helpers.Error(err))
 			ruleFailure.BaseRuntimeAlert.PPID = nil
 		} else {
 			ppidInt := uint32(parent.PPID)
@@ -209,7 +209,7 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 	if ruleFailure.RuntimeProcessDetails.Comm == "" {
 		comm, err := getCommFromPid(pid)
 		if err != nil {
-			logger.L().Error("Failed to get comm from pid", helpers.Error(err))
+			logger.L().Debug("Failed to get comm from pid", helpers.Error(err))
 			comm = ""
 		}
 		ruleFailure.RuntimeProcessDetails.Comm = comm
