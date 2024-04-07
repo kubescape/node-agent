@@ -81,6 +81,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		preRunningContainerIDs: preRunningContainersIDs,
 		cachedPods:             mapset.NewSet[string](),
 		nodeName:               nodeName,
+		clusterName:            clusterName,
 	}, nil
 }
 
