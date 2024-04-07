@@ -26,6 +26,11 @@ func getContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containe
 			return ap.Spec.InitContainers[i], nil
 		}
 	}
+	for i := range ap.Spec.EphemeralContainers {
+		if ap.Spec.EphemeralContainers[i].Name == containerName {
+			return ap.Spec.EphemeralContainers[i], nil
+		}
+	}
 	return v1beta1.ApplicationProfileContainer{}, fmt.Errorf("container %s not found in application profile", containerName)
 }
 
@@ -37,6 +42,22 @@ func getContainerMountPaths(namespace, podName, containerName string, k8sObjCach
 
 	mountPaths := []string{}
 	for _, container := range podSpec.Containers {
+		if container.Name == containerName {
+			for _, volumeMount := range container.VolumeMounts {
+				mountPaths = append(mountPaths, volumeMount.MountPath)
+			}
+		}
+	}
+
+	for _, container := range podSpec.InitContainers {
+		if container.Name == containerName {
+			for _, volumeMount := range container.VolumeMounts {
+				mountPaths = append(mountPaths, volumeMount.MountPath)
+			}
+		}
+	}
+
+	for _, container := range podSpec.EphemeralContainers {
 		if container.Name == containerName {
 			for _, volumeMount := range container.VolumeMounts {
 				mountPaths = append(mountPaths, volumeMount.MountPath)
