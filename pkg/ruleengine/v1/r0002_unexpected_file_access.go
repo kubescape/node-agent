@@ -26,7 +26,7 @@ var R0002UnexpectedFileAccessRuleDescriptor = RuleDescriptor{
 	Name:        R0002Name,
 	Description: "Detecting file access that are not whitelisted by application profile. File access is defined by the combination of path and flags",
 	Tags:        []string{"open", "whitelisted"},
-	Priority:    RulePriorityMed,
+	Priority:    RulePriorityLow,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{utils.OpenEventType},
 	},

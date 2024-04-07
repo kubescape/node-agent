@@ -23,7 +23,7 @@ var R0003UnexpectedSystemCallRuleDescriptor = RuleDescriptor{
 	Name:        R0003Name,
 	Description: "Detecting unexpected system calls that are not whitelisted by application profile. Every unexpected system call will be alerted only once.",
 	Tags:        []string{"syscall", "whitelisted"},
-	Priority:    RulePriorityMed,
+	Priority:    RulePriorityLow,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{
 			utils.SyscallEventType,

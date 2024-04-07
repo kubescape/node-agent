@@ -20,7 +20,7 @@ var R1006UnshareSyscallRuleDescriptor = RuleDescriptor{
 	Name:        R1006Name,
 	Description: "Detecting Unshare System Call usage, which can be used to escape container.",
 	Tags:        []string{"syscall", "escape", "unshare"},
-	Priority:    RulePriorityHigh,
+	Priority:    RulePriorityMed,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{
 			utils.SyscallEventType,

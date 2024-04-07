@@ -21,7 +21,7 @@ var R0004UnexpectedCapabilityUsedRuleDescriptor = RuleDescriptor{
 	Name:        R0004Name,
 	Description: "Detecting unexpected capabilities that are not whitelisted by application profile. Every unexpected capability is identified in context of a syscall and will be alerted only once per container.",
 	Tags:        []string{"capabilities", "whitelisted"},
-	Priority:    RulePriorityHigh,
+	Priority:    RulePriorityMed,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{utils.CapabilitiesEventType},
 	},

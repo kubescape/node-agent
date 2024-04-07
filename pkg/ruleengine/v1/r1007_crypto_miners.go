@@ -136,7 +136,7 @@ var R1007CryptoMinersRuleDescriptor = RuleDescriptor{
 	Name:        R1007Name,
 	Description: "Detecting Crypto Miners by port, domain and randomx event.",
 	Tags:        []string{"network", "crypto", "miners", "malicious", "dns"},
-	Priority:    RulePriorityHigh,
+	Priority:    RulePriorityCritical,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{
 			utils.NetworkEventType,

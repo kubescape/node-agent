@@ -23,7 +23,7 @@ var R0001UnexpectedProcessLaunchedRuleDescriptor = RuleDescriptor{
 	Name:        R0001Name,
 	Description: "Detecting exec calls that are not whitelisted by application profile",
 	Tags:        []string{"exec", "whitelisted"},
-	Priority:    RulePriorityCritical,
+	Priority:    RulePriorityMed,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{utils.ExecveEventType},
 	},

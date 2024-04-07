@@ -20,7 +20,7 @@ var R1001ExecBinaryNotInBaseImageRuleDescriptor = RuleDescriptor{
 	Name:        R1001Name,
 	Description: "Detecting exec calls of binaries that are not included in the base image",
 	Tags:        []string{"exec", "malicious", "binary", "base image"},
-	Priority:    RulePriorityCritical,
+	Priority:    RulePriorityHigh,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{utils.ExecveEventType},
 	},
