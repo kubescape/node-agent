@@ -170,7 +170,7 @@ func main() {
 		objCache := objectcache.NewObjectCache(k8sObjectCache, apc, nnc)
 
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName, k8sClient)
 
 		// create runtimeDetection managers
 		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, preRunningContainersIDs)
