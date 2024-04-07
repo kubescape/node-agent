@@ -182,7 +182,7 @@ func (c *RBCache) addRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) {
 	// if the rule binding is global, add it to the global rules
 	if len(nsSelectorStr) == 0 && len(podSelectorStr) == 0 {
 		c.globalRBNames.Add(rbUniqueName(ruleBinding))
-		logger.L().Debug("AddRuleBinding", helpers.String("ruleBinding", rbName), helpers.String("global", "true"))
+		logger.L().Info("AddRuleBinding", helpers.String("ruleBinding", rbName), helpers.String("global", "true"))
 		return
 	}
 
