@@ -7,6 +7,7 @@ import (
 
 	ruleenginetypes "node-agent/pkg/ruleengine/types"
 
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -20,11 +21,20 @@ func TestR0003UnexpectedSystemCall(t *testing.T) {
 
 	// Create a syscall event
 	e := &ruleenginetypes.SyscallEvent{
+		Event: eventtypes.Event{
+			CommonData: eventtypes.CommonData{
+				K8s: eventtypes.K8sMetadata{
+					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+						ContainerName: "test",
+					},
+				},
+			},
+		},
 		Comm:        "test",
 		SyscallName: "test",
 	}
 
-	// Test with nil application activity
+	// Test with nil application profile
 	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since no syscall event")
