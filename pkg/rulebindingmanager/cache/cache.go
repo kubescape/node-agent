@@ -33,7 +33,6 @@ type RBCache struct {
 	nodeName         string
 	k8sClient        k8sclient.K8sClientInterface
 	allPods          mapset.Set[string]                                    // set of all pods (also pods without rules)
-	globalRBNames    mapset.Set[string]                                    // rules without selectors
 	podToRBNames     maps.SafeMap[string, mapset.Set[string]]              // pod name -> []rule binding names
 	rbNameToRB       maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding] // rule binding name -> rule binding
 	rbNameToRules    maps.SafeMap[string, []ruleengine.RuleEvaluator]      // rule binding name -> []created rules
@@ -48,7 +47,6 @@ func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *RBCache 
 		nodeName:         nodeName,
 		k8sClient:        k8sClient,
 		ruleCreator:      ruleenginev1.NewRuleCreator(),
-		globalRBNames:    mapset.NewSet[string](),
 		allPods:          mapset.NewSet[string](),
 		rbNameToRB:       maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding]{},
 		podToRBNames:     maps.SafeMap[string, mapset.Set[string]]{},
@@ -66,13 +64,6 @@ func (c *RBCache) WatchResources() []watcher.WatchResource {
 
 func (c *RBCache) ListRulesForPod(namespace, name string) []ruleengine.RuleEvaluator {
 	var rulesSlice []ruleengine.RuleEvaluator
-
-	//append global rules
-	for _, v := range c.globalRBNames.ToSlice() {
-		if c.rbNameToRules.Has(v) {
-			rulesSlice = append(rulesSlice, c.rbNameToRules.Get(v)...)
-		}
-	}
 
 	podName := fmt.Sprintf("%s/%s", namespace, name)
 	if !c.podToRBNames.Has(podName) {
@@ -179,13 +170,6 @@ func (c *RBCache) addRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) {
 	c.rbNameToPodNames.Set(rbName, mapset.NewSet[string]())
 	c.rbNameToRules.Set(rbName, c.createRules(ruleBinding.Spec.Rules))
 
-	// if the rule binding is global, add it to the global rules
-	if len(nsSelectorStr) == 0 && len(podSelectorStr) == 0 {
-		c.globalRBNames.Add(rbUniqueName(ruleBinding))
-		logger.L().Info("AddRuleBinding", helpers.String("ruleBinding", rbName), helpers.String("global", "true"))
-		return
-	}
-
 	// get related namespaces
 	namespaces, err := c.k8sClient.GetKubernetesClient().CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{LabelSelector: nsSelectorStr})
 	if err != nil {
@@ -238,6 +222,11 @@ func (c *RBCache) deleteRuleBinding(uniqueName string) {
 		if len(c.notifiers) == 0 {
 			continue
 		}
+		if c.podToRBNames.Get(podName).Cardinality() != 0 {
+			// if this pod is still bound to other rule bindings, continue
+			continue
+		}
+
 		namespace, name := uniqueNameToName(podName)
 		n, err := rulebindingmanager.RuleBindingNotifierImplWithK8s(c.k8sClient, rulebindingmanager.Removed, namespace, name)
 		if err != nil {
@@ -253,7 +242,6 @@ func (c *RBCache) deleteRuleBinding(uniqueName string) {
 	c.rbNameToRB.Delete(uniqueName)
 	c.rbNameToRules.Delete(uniqueName)
 	c.rbNameToPodNames.Delete(uniqueName)
-	c.globalRBNames.Remove(uniqueName)
 
 	logger.L().Info("DeleteRuleBinding", helpers.String("name", uniqueName))
 }
@@ -282,8 +270,8 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) {
 		// check pod selectors
 		podSelector, _ := metav1.LabelSelectorAsSelector(&rb.Spec.PodSelector)
 		if !podSelector.Matches(labels.Set(pod.GetLabels())) {
-			// pod selectors dont match
-			return
+			// pod selectors doesnt match
+			continue
 		}
 
 		// check namespace selectors
@@ -294,11 +282,11 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) {
 			namespaces, err := c.k8sClient.GetKubernetesClient().CoreV1().Namespaces().List(ctx, metav1.ListOptions{LabelSelector: nsSelectorStr})
 			if err != nil {
 				logger.L().Error("failed to list namespaces", helpers.String("ruleBiding", rbUniqueName(&rb)), helpers.String("nsSelector", nsSelectorStr), helpers.Error(err))
-				return
+				continue
 			}
 			if !strings.Contains(namespaces.String(), pod.GetNamespace()) {
 				// namespace selectors dont match
-				return
+				continue
 			}
 		}
 
@@ -315,12 +303,13 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) {
 			c.rbNameToPodNames.Get(rbName).Add(podName)
 		}
 		logger.L().Info("AddPod", helpers.String("pod", podName), helpers.String("ruleBinding", rbName))
+
+		n := rulebindingmanager.NewRuleBindingNotifierImpl(rulebindingmanager.Added, *pod)
+		for i := range c.notifiers {
+			*c.notifiers[i] <- n
+		}
 	}
 
-	n := rulebindingmanager.NewRuleBindingNotifierImpl(rulebindingmanager.Added, *pod)
-	for i := range c.notifiers {
-		*c.notifiers[i] <- n
-	}
 }
 
 func (c *RBCache) deletePod(uniqueName string) {

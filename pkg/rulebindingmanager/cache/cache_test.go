@@ -22,7 +22,6 @@ func NewCacheMock(nodeName string) *RBCache {
 		allPods:          mapset.NewSet[string](),
 		k8sClient:        &k8sclient.K8sClientMock{},
 		ruleCreator:      &ruleengine.RuleCreatorMock{},
-		globalRBNames:    mapset.NewSet[string](),
 		podToRBNames:     maps.SafeMap[string, mapset.Set[string]]{},
 		rbNameToPodNames: maps.SafeMap[string, mapset.Set[string]]{},
 	}
@@ -384,19 +383,15 @@ func TestDeleteHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &RBCache{
-				allPods:       mapset.NewSet[string](tt.expected.pod),
-				globalRBNames: mapset.NewSet[string](tt.expected.rule),
+				allPods: mapset.NewSet[string](tt.expected.pod),
 			}
 			c.DeleteHandler(context.Background(), tt.obj)
 			if tt.obj.GetKind() == "Pod" {
 				assert.False(t, c.allPods.Contains(tt.expected.pod))
-				assert.True(t, c.globalRBNames.Contains(tt.expected.rule))
 			} else if tt.obj.GetKind() == "RuntimeRuleAlertBinding" {
 				assert.True(t, c.allPods.Contains(tt.expected.pod))
-				assert.False(t, c.globalRBNames.Contains(tt.expected.rule))
 			} else {
 				assert.True(t, c.allPods.Contains(tt.expected.pod))
-				assert.True(t, c.globalRBNames.Contains(tt.expected.rule))
 			}
 		})
 	}
@@ -503,15 +498,12 @@ func TestModifyHandler(t *testing.T) {
 
 			if tt.addedPod {
 				assert.True(t, c.allPods.Contains(tt.expected.pod))
-				assert.False(t, c.globalRBNames.Contains(tt.expected.rule))
 			}
 			if tt.addedRB {
 				assert.False(t, c.allPods.Contains(tt.expected.pod))
-				assert.True(t, c.globalRBNames.Contains(tt.expected.rule))
 			}
 			if !tt.addedPod && !tt.addedRB {
 				assert.False(t, c.allPods.Contains(tt.expected.pod))
-				assert.False(t, c.globalRBNames.Contains(tt.expected.rule))
 			}
 		})
 	}
@@ -618,15 +610,12 @@ func TestAddHandler(t *testing.T) {
 
 			if tt.addedPod {
 				assert.True(t, c.allPods.Contains(tt.expected.pod))
-				assert.False(t, c.globalRBNames.Contains(tt.expected.rule))
 			}
 			if tt.addedRB {
 				assert.False(t, c.allPods.Contains(tt.expected.pod))
-				assert.True(t, c.globalRBNames.Contains(tt.expected.rule))
 			}
 			if !tt.addedPod && !tt.addedRB {
 				assert.False(t, c.allPods.Contains(tt.expected.pod))
-				assert.False(t, c.globalRBNames.Contains(tt.expected.rule))
 			}
 		})
 	}

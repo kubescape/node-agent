@@ -4,15 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"node-agent/pkg/containerwatcher"
 	"node-agent/pkg/rulebindingmanager"
 	"node-agent/pkg/utils"
-	"os"
 	"runtime"
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -57,6 +54,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.relevancyManager.ContainerCallback,
 		ch.networkManager.ContainerCallback,
 		ch.malwareManager.ContainerCallback,
+		ch.ruleManager.ContainerCallback,
 	}
 
 	// Define the different options for the container collection instance
@@ -135,22 +133,6 @@ func (ch *IGContainerWatcher) addRunningContainers() error {
 
 	}
 	return nil
-}
-
-func (ch *IGContainerWatcher) getContainerRuntimeConfig() (*types.RuntimeConfig, error) {
-	// Read the HOST_ROOT environment variable
-	hostRootMount, present := os.LookupEnv("HOST_ROOT")
-	if !present {
-		return nil, fmt.Errorf("HOST_ROOT environment variable not set")
-	}
-
-	// Detect the container runtime
-	runtimeConfig, err := containerwatcher.DetectContainerRuntime(hostRootMount)
-	if err != nil {
-		return nil, fmt.Errorf("detecting container runtime: %w", err)
-	}
-
-	return runtimeConfig, nil
 }
 
 func (ch *IGContainerWatcher) stopContainerCollection() {
@@ -303,10 +285,6 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 		Container: container,
 	}
 	ch.tracerCollection.TracerMapsUpdater()(event)
-}
-
-func (ch *IGContainerWatcher) traceForever() bool {
-	return ch.cfg.EnableRuntimeDetection
 }
 
 func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {
