@@ -34,6 +34,7 @@ var _ ruleengine.RuleEvaluator = (*R1002LoadKernelModule)(nil)
 
 type R1002LoadKernelModule struct {
 	BaseRule
+	alerted bool
 }
 
 func CreateRuleR1002LoadKernelModule() *R1002LoadKernelModule {
@@ -50,6 +51,10 @@ func (rule *R1002LoadKernelModule) DeleteRule() {
 }
 
 func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	if rule.alerted {
+		return nil
+	}
+
 	if eventType != utils.SyscallEventType {
 		return nil
 	}
@@ -60,6 +65,7 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 	}
 
 	if syscallEvent.SyscallName == "init_module" {
+		rule.alerted = true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),

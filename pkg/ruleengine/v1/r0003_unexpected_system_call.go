@@ -10,7 +10,6 @@ import (
 	ruleenginetypes "node-agent/pkg/ruleengine/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -56,11 +55,6 @@ func (rule *R0003UnexpectedSystemCall) ID() string {
 func (rule *R0003UnexpectedSystemCall) DeleteRule() {
 }
 
-func (rule *R0003UnexpectedSystemCall) generatePatchCommand(unexpectedSyscall string, ap *v1beta1.ApplicationProfile) string {
-	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"syscalls\": [\"%s\"]}]}}'"
-	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(), unexpectedSyscall)
-}
-
 func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.SyscallEventType {
 		return nil
@@ -96,7 +90,7 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:      rule.Name(),
-			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the system call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", syscallEvent.SyscallName, syscallEvent.GetPod(), rule.generatePatchCommand(syscallEvent.SyscallName, ap)),
+			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the system call \"%s\" to the whitelist in the application profile for the Pod \"%s\".", syscallEvent.SyscallName, syscallEvent.GetPod()),
 			Severity:       R0003UnexpectedSystemCallRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
