@@ -12,6 +12,9 @@ var _ ObjectCache = (*ObjectCacheMock)(nil)
 type ObjectCacheMock struct {
 }
 
+func NewObjectCacheMock() *ObjectCacheMock {
+	return &ObjectCacheMock{}
+}
 func (om *ObjectCacheMock) K8sObjectCache() K8sObjectCache {
 	return &K8sObjectCacheMock{}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	typesv1 "node-agent/pkg/rulebindingmanager/types/v1"
 	"node-agent/pkg/watcher"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,6 +13,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+func uniqueNameToName(n string) (string, string) {
+	if str := strings.Split(n, "/"); len(str) == 2 {
+		return str[0], str[1]
+	}
+	return "", ""
+}
 func uniqueName(namespace, name string) string {
 	return fmt.Sprintf("%s/%s", namespace, name)
 }

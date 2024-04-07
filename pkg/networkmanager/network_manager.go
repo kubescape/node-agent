@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/cenkalti/backoff/v4"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/google/uuid"
 	"github.com/goradd/maps"
@@ -48,17 +49,19 @@ const (
 
 type NetworkManager struct {
 	cfg                           config.Config
-	ctx                           context.Context
-	k8sClient                     k8sclient.K8sClientInterface
-	storageClient                 storage.StorageClient
 	containerAndPodToWLIDMap      maps.SafeMap[string, string]
-	containerAndPodToEventsMap    maps.SafeMap[string, mapset.Set[NetworkEvent]]
+	watchedContainerChannels      maps.SafeMap[string, chan error]
 	containerAndPodToDroppedEvent maps.SafeMap[string, bool]
-	clusterName                   string
-	watchedContainerChannels      maps.SafeMap[string, chan error] // key is ContainerID
+	containerAndPodToEventsMap    maps.SafeMap[string, mapset.Set[NetworkEvent]]
+	storageClient                 storage.StorageClient
+	removedContainers             mapset.Set[string]
+	trackedContainers             mapset.Set[string]
+	k8sClient                     k8sclient.K8sClientInterface
+	ctx                           context.Context
 	dnsResolverClient             dnsmanager.DNSResolver
 	preRunningContainerIDs        mapset.Set[string]
 	k8sObjectCache                objectcache.K8sObjectCache
+	clusterName                   string
 }
 
 var _ NetworkManagerClient = (*NetworkManager)(nil)
@@ -73,6 +76,8 @@ func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sc
 		clusterName:            clusterName,
 		dnsResolverClient:      dnsResolverClient,
 		preRunningContainerIDs: preRunningContainerIDs,
+		trackedContainers:      mapset.NewSet[string](),
+		removedContainers:      mapset.NewSet[string](),
 	}
 }
 
@@ -105,6 +110,8 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 			channel <- utils.ContainerHasTerminatedError
 		}
 		am.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
+		am.removedContainers.Add(notif.Container.Runtime.ContainerID)
+		am.trackedContainers.Remove(notif.Container.Runtime.ContainerID)
 	}
 }
 
@@ -113,7 +120,9 @@ func (am *NetworkManager) ReportDroppedEvent(containerID string, event tracernet
 }
 
 func (am *NetworkManager) ReportNetworkEvent(containerID string, event tracernetworktype.Event) {
-
+	if err := am.waitForContainer(containerID); err != nil {
+		return
+	}
 	if !am.isValidEvent(event) {
 		return
 	}
@@ -172,7 +181,8 @@ func (am *NetworkManager) handleContainerStarted(ctx context.Context, container 
 		K8sContainerID:   k8sContainerID,
 	}
 	am.watchedContainerChannels.Set(watchedContainer.ContainerID, watchedContainer.SyncChannel)
-
+	am.removedContainers.Remove(container.Runtime.ContainerID)
+	am.trackedContainers.Add(container.Runtime.ContainerID)
 	// retrieve parent WL
 	parentWL, err := am.getParentWorkloadFromContainer(container)
 	if err != nil {
@@ -607,6 +617,17 @@ func (am *NetworkManager) handleServiceWithNoSelectors(svc workloadinterface.IWo
 	}
 
 	return nil
+}
+func (am *NetworkManager) waitForContainer(k8sContainerID string) error {
+	if am.removedContainers.Contains(k8sContainerID) {
+		return fmt.Errorf("container %s has been removed", k8sContainerID)
+	}
+	return backoff.Retry(func() error {
+		if am.trackedContainers.Contains(k8sContainerID) {
+			return nil
+		}
+		return fmt.Errorf("container %s not found", k8sContainerID)
+	}, backoff.NewExponentialBackOff())
 }
 
 func getNamespaceMatchLabels(destinationNamespace, sourceNamespace string) map[string]string {
