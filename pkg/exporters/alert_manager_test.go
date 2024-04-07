@@ -7,10 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	mmtypes "node-agent/pkg/malwaremanager/v1/types"
-	"node-agent/pkg/utils"
 	"strings"
 	"testing"
 
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+
+	"node-agent/pkg/ruleengine/v1"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -34,17 +38,21 @@ func TestSendAlert(t *testing.T) {
 	}
 	// Call SendAlert
 
-	exporter.SendRuleAlert(&GenericRuleFailure{
-		RuleName: "testrule",
-		Err:      "Application profile is missing",
-		FailureEvent: &utils.GeneralEvent{
-			ContainerName: "testcontainer",
+	exporter.SendRuleAlert(&ruleengine.GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: "testrule",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
+			ContainerName: "testcontainer",
 			Namespace:     "testnamespace",
 			PodName:       "testpodname",
 		},
-	},
-	)
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: "Application profile is missing",
+		},
+	})
 	bytesData := <-recievedData
 
 	// Assert the request body is correct
@@ -88,22 +96,47 @@ func TestSendMalwareAlert(t *testing.T) {
 		t.Fatalf("Failed to create new Alertmanager exporter")
 	}
 	// Call SendAlert
-
+	sizeStr := "2MiB"
+	commmandLineStr := "testmalwarecmdline"
 	exporter.SendMalwareAlert(&mmtypes.GenericMalwareResult{
-		Name:                 "testmalware",
-		Description:          "testmalwaredescription",
-		Path:                 "testmalwarepath",
-		MD5Hash:              "testmalwarehash",
-		SHA1Hash:             "testmalwarehash",
-		SHA256Hash:           "testmalwarehash",
-		Size:                 "2MiB",
-		Namespace:            "testmalwarenamespace",
-		PodName:              "testmalwarepodname",
-		ContainerName:        "testmalwarecontainername",
-		ContainerID:          "testmalwarecontainerid",
-		IsPartOfImage:        true,
-		ContainerImage:       "testmalwarecontainerimage",
-		ContainerImageDigest: "testmalwarecontainerimagedigest",
+		BasicRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName:     "testmalware",
+			Size:          &sizeStr,
+			CommandLine:   &commmandLineStr,
+			MD5Hash:       "testmalwarehash",
+			SHA1Hash:      "testmalwarehash",
+			SHA256Hash:    "testmalwarehash",
+			IsPartOfImage: nil,
+		},
+		TriggerEvent: igtypes.Event{
+			CommonData: igtypes.CommonData{
+				Runtime: igtypes.BasicRuntimeMetadata{
+					ContainerID:          "testmalwarecontainerid",
+					ContainerName:        "testmalwarecontainername",
+					ContainerImageName:   "testmalwarecontainerimage",
+					ContainerImageDigest: "testmalwarecontainerimagedigest",
+				},
+				K8s: igtypes.K8sMetadata{
+					Node:        "testmalwarenode",
+					HostNetwork: false,
+					BasicK8sMetadata: igtypes.BasicK8sMetadata{
+						Namespace:     "testmalwarenamespace",
+						PodName:       "testmalwarepodname",
+						ContainerName: "testmalwarecontainername",
+					},
+				},
+			},
+		},
+		MalwareRuntimeAlert: apitypes.MalwareAlert{
+			MalwareDescription: "testmalwaredescription",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+			Path: "testmalwarepath",
+			Comm: "testmalwarecomm",
+			PID:  123,
+			UID:  456,
+			GID:  789,
+		},
 	})
 	bytesData := <-recievedData
 

@@ -8,6 +8,7 @@ import (
 
 	"node-agent/pkg/objectcache"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 
 	"github.com/kubescape/go-logger"
@@ -25,7 +26,7 @@ var R0002UnexpectedFileAccessRuleDescriptor = RuleDescriptor{
 	Name:        R0002Name,
 	Description: "Detecting file access that are not whitelisted by application profile. File access is defined by the combination of path and flags",
 	Tags:        []string{"open", "whitelisted"},
-	Priority:    RulePriorityMed,
+	Priority:    RulePriorityLow,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{utils.OpenEventType},
 	},
@@ -162,15 +163,32 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 		}
 	}
 
-	return &GenericRuleFailure{
-		RuleName:         rule.Name(),
-		RuleID:           rule.ID(),
-		ContainerId:      openEvent.Runtime.ContainerID,
-		Err:              fmt.Sprintf("Unexpected file access: %s with flags %v", openEvent.Path, openEvent.Flags),
-		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
-		FailureEvent:     utils.OpenToGeneralEvent(openEvent),
-		RulePriority:     R0002UnexpectedFileAccessRuleDescriptor.Priority,
+	ruleFailure := GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: rule.Name(),
+			Arguments: map[string]interface{}{
+				"flags": openEvent.Flags,
+			},
+			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
+			Severity:       R0002UnexpectedFileAccessRuleDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+			Comm: openEvent.Comm,
+			GID:  openEvent.Gid,
+			PID:  openEvent.Pid,
+			UID:  openEvent.Uid,
+		},
+		TriggerEvent: openEvent.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleID:          rule.ID(),
+			RuleDescription: fmt.Sprintf("Unexpected file access: %s with flags %v", openEvent.Path, openEvent.Flags),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 	}
+
+	enrichRuleFailure(openEvent.Event, openEvent.Pid, &ruleFailure)
+
+	return &ruleFailure
 }
 
 func isPathContained(basepath, targetpath string) bool {

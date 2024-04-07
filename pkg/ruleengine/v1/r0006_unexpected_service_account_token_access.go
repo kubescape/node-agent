@@ -7,6 +7,7 @@ import (
 	"node-agent/pkg/utils"
 	"strings"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -113,15 +114,29 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		}
 	}
 
-	return &GenericRuleFailure{
-		RuleName:         rule.Name(),
-		RuleID:           rule.ID(),
-		ContainerId:      openEvent.Runtime.ContainerID,
-		Err:              fmt.Sprintf("Unexpected access to service account token: %s", openEvent.Path),
-		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
-		FailureEvent:     utils.OpenToGeneralEvent(openEvent),
-		RulePriority:     R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
+	ruleFailure := GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName:      rule.Name(),
+			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
+			Severity:       R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+			Comm: openEvent.Comm,
+			GID:  openEvent.Gid,
+			PID:  openEvent.Pid,
+			UID:  openEvent.Uid,
+		},
+		TriggerEvent: openEvent.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleID:          rule.ID(),
+			RuleDescription: fmt.Sprintf("Unexpected access to service account token: %s", openEvent.Path),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 	}
+
+	enrichRuleFailure(openEvent.Event, openEvent.Pid, &ruleFailure)
+
+	return &ruleFailure
 }
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) Requirements() ruleengine.RuleSpec {

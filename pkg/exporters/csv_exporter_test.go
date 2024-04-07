@@ -3,9 +3,12 @@ package exporters
 import (
 	"encoding/csv"
 	mmtypes "node-agent/pkg/malwaremanager/v1/types"
-	"node-agent/pkg/utils"
+	"node-agent/pkg/ruleengine/v1"
 	"os"
 	"testing"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 func TestCsvExporter(t *testing.T) {
@@ -14,27 +17,62 @@ func TestCsvExporter(t *testing.T) {
 		t.Fatalf("Expected csvExporter to not be nil")
 	}
 
-	csvExporter.SendRuleAlert(&GenericRuleFailure{
-		RuleName: "testrule",
-		Err:      "Application profile is missing",
-		FailureEvent: &utils.GeneralEvent{
-			ContainerName: "testcontainer", ContainerID: "testcontainerid", Namespace: "testnamespace", PodName: "testpodname"}},
-	)
-
+	csvExporter.SendRuleAlert(&ruleengine.GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: "testrule",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			ContainerID:   "testcontainerid",
+			ContainerName: "testcontainer",
+			Namespace:     "testnamespace",
+			PodName:       "testpodname",
+		},
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: "Application profile is missing",
+		},
+	})
+	sizeStr := "2MiB"
+	commandLine := "testmalwarecmdline"
 	csvExporter.SendMalwareAlert(&mmtypes.GenericMalwareResult{
-		Name:                 "testmalware",
-		MD5Hash:              "testhash",
-		SHA256Hash:           "testhash",
-		SHA1Hash:             "testhash",
-		Description:          "testdescription",
-		Path:                 "testpath",
-		Size:                 "2MB",
-		Namespace:            "testnamespace",
-		PodName:              "testpodname",
-		ContainerName:        "testcontainername",
-		ContainerID:          "testcontainerid",
-		ContainerImage:       "testcontainerimage",
-		ContainerImageDigest: "testcontainerimagedigest",
+		BasicRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName:     "testmalware",
+			Size:          &sizeStr,
+			CommandLine:   &commandLine,
+			MD5Hash:       "testmalwarehash",
+			SHA1Hash:      "testmalwarehash",
+			SHA256Hash:    "testmalwarehash",
+			IsPartOfImage: nil,
+		},
+		TriggerEvent: igtypes.Event{
+			CommonData: igtypes.CommonData{
+				Runtime: igtypes.BasicRuntimeMetadata{
+					ContainerID:          "testmalwarecontainerid",
+					ContainerName:        "testmalwarecontainername",
+					ContainerImageName:   "testmalwarecontainerimage",
+					ContainerImageDigest: "testmalwarecontainerimagedigest",
+				},
+				K8s: igtypes.K8sMetadata{
+					Node:        "testmalwarenode",
+					HostNetwork: false,
+					BasicK8sMetadata: igtypes.BasicK8sMetadata{
+						Namespace:     "testmalwarenamespace",
+						PodName:       "testmalwarepodname",
+						ContainerName: "testmalwarecontainername",
+					},
+				},
+			},
+		},
+		MalwareRuntimeAlert: apitypes.MalwareAlert{
+			MalwareDescription: "testmalwaredescription",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+			Path: "testmalwarepath",
+			Comm: "testmalwarecomm",
+			PID:  123,
+			UID:  456,
+			GID:  789,
+		},
 	})
 
 	// Check if the csv file exists and contains the expected content (2 rows - header and the alert)

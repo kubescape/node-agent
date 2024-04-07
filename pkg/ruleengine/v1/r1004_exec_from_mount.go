@@ -6,6 +6,7 @@ import (
 	"node-agent/pkg/utils"
 	"strings"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -68,20 +69,37 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 		contained := rule.isPathContained(p, mount)
 		if contained {
 			logger.L().Debug("Exec from mount", helpers.String("path", p), helpers.String("mount", mount))
-			return &GenericRuleFailure{
-				RuleName:         rule.Name(),
-				RuleID:           rule.ID(),
-				ContainerId:      execEvent.Runtime.ContainerID,
-				Err:              "Exec from mount",
-				FailureEvent:     utils.ExecToGeneralEvent(execEvent),
-				FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
-				RulePriority:     R1004ExecFromMountRuleDescriptor.Priority,
+			isPartOfImage := !execEvent.UpperLayer
+			ruleFailure := GenericRuleFailure{
+				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+					AlertName:      rule.Name(),
+					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
+					Severity:       R1004ExecFromMountRuleDescriptor.Priority,
+					IsPartOfImage:  &isPartOfImage,
+					PPID:           &execEvent.Ppid,
+					PPIDComm:       &execEvent.Pcomm,
+				},
+				RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+					Comm: execEvent.Comm,
+					GID:  execEvent.Gid,
+					PID:  execEvent.Pid,
+					UID:  execEvent.Uid,
+				},
+				TriggerEvent: execEvent.Event,
+				RuleAlert: apitypes.RuleAlert{
+					RuleID:          rule.ID(),
+					RuleDescription: "Exec from mount",
+				},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}
+
+			enrichRuleFailure(execEvent.Event, execEvent.Pid, &ruleFailure)
+
+			return &ruleFailure
 		}
 	}
 
 	return nil
-
 }
 
 func (rule *R1004ExecFromMount) isPathContained(targetpath, basepath string) bool {

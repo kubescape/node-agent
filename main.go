@@ -12,6 +12,7 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/containerwatcher/v1"
 	"node-agent/pkg/dnsmanager"
+	"node-agent/pkg/exporters"
 	"node-agent/pkg/filehandler/v1"
 	"node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "node-agent/pkg/malwaremanager/v1"
@@ -29,7 +30,6 @@ import (
 	rulebinding "node-agent/pkg/rulebindingmanager"
 	rulebindingcachev1 "node-agent/pkg/rulebindingmanager/cache"
 	"node-agent/pkg/rulemanager"
-	"node-agent/pkg/rulemanager/exporters"
 	rulemanagerv1 "node-agent/pkg/rulemanager/v1"
 	"node-agent/pkg/sbomhandler/syfthandler"
 	"node-agent/pkg/storage/v1"
@@ -177,10 +177,10 @@ func main() {
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc)
 
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
 
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, preRunningContainersIDs)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, preRunningContainersIDs, nodeName, clusterData.ClusterName)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
@@ -201,7 +201,7 @@ func main() {
 			}
 		}
 
-		malwareManager, err = malwaremanagerv1.CreateMalwareManager(malwarescanners, exporter, cfg)
+		malwareManager, err = malwaremanagerv1.CreateMalwareManager(malwarescanners, exporter, cfg, k8sClient, nodeName, clusterData.ClusterName)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
 		}

@@ -6,6 +6,7 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -77,18 +78,32 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		}
 	}
 
-	return &GenericRuleFailure{
-		RuleName:    rule.Name(),
-		RuleID:      rule.ID(),
-		ContainerId: domainEvent.Runtime.ContainerID,
-		Err:         fmt.Sprintf("Unexpected domain request (%s)", domainEvent.DNSName),
-		FixSuggestionMsg: fmt.Sprintf("If this is a valid behavior, please add the domain %s to the whitelist in the application profile for the Pod %s. You can use the following command: %s",
-			domainEvent.DNSName,
-			domainEvent.DNSName,
-			rule.generatePatchCommand(domainEvent, nn)),
-		FailureEvent: utils.DnsToGeneralEvent(domainEvent),
-		RulePriority: R0005UnexpectedDomainRequestRuleDescriptor.Priority,
+	ruleFailure := GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: rule.Name(),
+			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the domain %s to the whitelist in the application profile for the Pod %s. You can use the following command: %s",
+				domainEvent.DNSName,
+				domainEvent.DNSName,
+				rule.generatePatchCommand(domainEvent, nn)),
+			Severity: R0005UnexpectedDomainRequestRuleDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+			Comm: domainEvent.Comm,
+			GID:  domainEvent.Gid,
+			PID:  domainEvent.Pid,
+			UID:  domainEvent.Uid,
+		},
+		TriggerEvent: domainEvent.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleID:          rule.ID(),
+			RuleDescription: fmt.Sprintf("Unexpected domain request (%s)", domainEvent.DNSName),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 	}
+
+	enrichRuleFailure(domainEvent.Event, domainEvent.Pid, &ruleFailure)
+
+	return &ruleFailure
 }
 
 func (rule *R0005UnexpectedDomainRequest) Requirements() ruleengine.RuleSpec {

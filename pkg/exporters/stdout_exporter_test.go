@@ -1,10 +1,11 @@
 package exporters
 
 import (
-	"node-agent/pkg/utils"
+	"node-agent/pkg/ruleengine/v1"
 	"os"
 	"testing"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -49,10 +50,19 @@ func TestStdoutExporter_SendAlert(t *testing.T) {
 	exporter := InitStdoutExporter(nil)
 	assert.NotNil(t, exporter)
 
-	exporter.SendRuleAlert(&GenericRuleFailure{
-		RuleName: "testrule",
-		Err:      "Application profile is missing",
-		FailureEvent: &utils.GeneralEvent{
-			ContainerName: "testcontainer", ContainerID: "testcontainerid", Namespace: "testnamespace", PodName: "testpodname"}},
-	)
+	exporter.SendRuleAlert(&ruleengine.GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: "testrule",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			ContainerID:   "testcontainerid",
+			ContainerName: "testcontainer",
+			Namespace:     "testnamespace",
+			PodName:       "testpodname",
+		},
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: "Application profile is missing",
+		},
+	})
 }

@@ -14,6 +14,8 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 type HTTPExporterConfig struct {
@@ -30,10 +32,11 @@ type HTTPExporterConfig struct {
 
 // we will have a CRD-like json struct to send in the HTTP request
 type HTTPExporter struct {
-	Host       string
-	NodeName   string
-	config     HTTPExporterConfig
-	httpClient *http.Client
+	config      HTTPExporterConfig
+	Host        string `json:"host"`
+	NodeName    string `json:"nodeName"`
+	ClusterName string `json:"clusterName"`
+	httpClient  *http.Client
 	// alertCount is the number of alerts sent in the last minute, used to limit the number of alerts sent so we don't overload the system or reach the rate limit
 	alertCount      int
 	alertCountLock  sync.Mutex
@@ -47,52 +50,7 @@ type HTTPAlertsList struct {
 }
 
 type HTTPAlertsListSpec struct {
-	Alerts []HTTPAlert `json:"alerts"`
-}
-
-type RuleAlert struct {
-	Severity       int    `json:"severity,omitempty"`    // PriorityToStatus(failedRule.Priority()),
-	ProcessName    string `json:"processName,omitempty"` // failedRule.Event().Comm,
-	FixSuggestions string `json:"fixSuggestions,omitempty"`
-	PID            uint32 `json:"pid,omitempty"`
-	PPID           uint32 `json:"ppid,omitempty"` //  Parent Process ID
-	UID            uint32 `json:"uid,omitempty"`  // User ID of the process
-	GID            uint32 `json:"gid,omitempty"`  // Group ID of the process
-}
-
-type MalwareAlert struct {
-	MalwareName        string `json:"malwareName,omitempty"`
-	MalwareDescription string `json:"malwareDescription,omitempty"`
-	// Path to the file that was infected
-	Path string `json:"path,omitempty"`
-	// MD5 Hash of the file that was infected
-	MD5Hash string `json:"md5hash,omitempty"`
-	// SHA1 Hash of the file that was infected
-	SHA1Hash string `json:"sha1hash,omitempty"`
-	// SHA256 Hash of the file that was infected
-	SHA256Hash string `json:"sha256hash,omitempty"`
-	// Size of the file that was infected
-	Size string `json:"size,omitempty"`
-	// Is part of the image
-	IsPartOfImage bool `json:"isPartOfImage,omitempty"`
-	// K8s container image that was infected
-	ContainerImage string `json:"containerImage,omitempty"`
-	// K8s container image digest that was infected
-	ContainerImageDigest string `json:"containerImageDigest,omitempty"`
-}
-
-type HTTPAlert struct {
-	RuleAlert     `json:",inline"`
-	MalwareAlert  `json:",inline"`
-	RuleName      string `json:"ruleName"`
-	RuleID        string `json:"ruleID"`
-	Message       string `json:"message"`
-	ContainerID   string `json:"containerID,omitempty"`
-	ContainerName string `json:"containerName,omitempty"`
-	PodNamespace  string `json:"podNamespace,omitempty"`
-	PodName       string `json:"podName,omitempty"`
-	HostName      string `json:"hostName"`
-	NodeName      string `json:"nodeName"`
+	Alerts []apitypes.RuntimeAlert `json:"alerts"`
 }
 
 func (config *HTTPExporterConfig) Validate() error {
@@ -117,7 +75,7 @@ func (config *HTTPExporterConfig) Validate() error {
 }
 
 // InitHTTPExporter initializes an HTTPExporter with the given URL, headers, timeout, and method
-func InitHTTPExporter(config HTTPExporterConfig) (*HTTPExporter, error) {
+func InitHTTPExporter(config HTTPExporterConfig, clusterName string, nodeName string) (*HTTPExporter, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
@@ -131,16 +89,21 @@ func InitHTTPExporter(config HTTPExporterConfig) (*HTTPExporter, error) {
 }
 
 func (exporter *HTTPExporter) sendAlertLimitReached() {
-	httpAlert := HTTPAlert{
-		Message:  "Alert limit reached",
-		RuleName: "AlertLimitReached",
-		HostName: exporter.Host,
-		NodeName: exporter.NodeName,
-		RuleAlert: RuleAlert{
+	httpAlert := apitypes.RuntimeAlert{
+		Message:   "Alert limit reached",
+		HostName:  exporter.Host,
+		AlertType: apitypes.AlertTypeRule, // TODO: change this to a new alert type. @bez
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName:      "AlertLimitReached",
 			Severity:       ruleenginev1.RulePrioritySystemIssue,
 			FixSuggestions: "Check logs for more information",
 		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			NodeName:    exporter.NodeName,
+			ClusterName: &exporter.ClusterName,
+		},
 	}
+
 	logger.L().Error("Alert limit reached", helpers.Int("alerts", exporter.alertCount), helpers.String("since", exporter.alertCountStart.Format(time.RFC3339)))
 	exporter.sendInAlertList(httpAlert)
 }
@@ -151,35 +114,28 @@ func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 		exporter.sendAlertLimitReached()
 		return
 	}
-	// populate the HTTPAlert struct with the data from the failedRule
-	httpAlert := HTTPAlert{
-		Message:       failedRule.Error(),
-		RuleName:      failedRule.Name(),
-		RuleID:        failedRule.ID(),
-		ContainerID:   failedRule.Event().ContainerID,
-		ContainerName: failedRule.Event().ContainerName,
-		PodNamespace:  failedRule.Event().Namespace,
-		PodName:       failedRule.Event().PodName,
-		HostName:      exporter.Host,
-		NodeName:      exporter.NodeName,
-		RuleAlert: RuleAlert{
-			Severity:       failedRule.Priority(),
-			FixSuggestions: failedRule.FixSuggestion(),
-			PID:            failedRule.Event().Pid,
-			PPID:           failedRule.Event().Ppid,
-			ProcessName:    failedRule.Event().Comm,
-			UID:            failedRule.Event().Uid,
-			GID:            failedRule.Event().Gid,
-		},
+	// populate the RuntimeAlert struct with the data from the failedRule
+	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
+	k8sDetails.NodeName = exporter.NodeName
+	k8sDetails.ClusterName = &exporter.ClusterName
+
+	httpAlert := apitypes.RuntimeAlert{
+		Message:                    failedRule.GetRuleAlert().RuleDescription,
+		HostName:                   exporter.Host,
+		AlertType:                  apitypes.AlertTypeRule,
+		BaseRuntimeAlert:           failedRule.GetBaseRuntimeAlert(),
+		RuntimeAlertK8sDetails:     k8sDetails,
+		RuntimeAlertProcessDetails: failedRule.GetRuntimeProcessDetails(),
+		RuleAlert:                  failedRule.GetRuleAlert(),
 	}
 	exporter.sendInAlertList(httpAlert)
 }
 
-func (exporter *HTTPExporter) sendInAlertList(httpAlert HTTPAlert) {
+func (exporter *HTTPExporter) sendInAlertList(httpAlert apitypes.RuntimeAlert) {
 	// create the HTTPAlertsListSpec struct
 	// TODO: accumulate alerts and send them in a batch
 	httpAlertsListSpec := HTTPAlertsListSpec{
-		Alerts: []HTTPAlert{httpAlert},
+		Alerts: []apitypes.RuntimeAlert{httpAlert},
 	}
 	// create the HTTPAlertsList struct
 	httpAlertsList := HTTPAlertsList{
@@ -230,26 +186,18 @@ func (exporter *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.Malw
 		exporter.sendAlertLimitReached()
 		return
 	}
-	httpAlert := HTTPAlert{
-		RuleName:      "KubescapeMalwareDetected",
-		HostName:      exporter.Host,
-		NodeName:      exporter.NodeName,
-		ContainerID:   malwareResult.GetContainerID(),
-		ContainerName: malwareResult.GetContainerName(),
-		PodNamespace:  malwareResult.GetNamespace(),
-		PodName:       malwareResult.GetPodName(),
-		MalwareAlert: MalwareAlert{
-			MalwareName:          malwareResult.GetMalwareName(),
-			MalwareDescription:   malwareResult.GetDescription(),
-			Path:                 malwareResult.GetPath(),
-			MD5Hash:              malwareResult.GetMD5Hash(),
-			SHA256Hash:           malwareResult.GetSHA256Hash(),
-			SHA1Hash:             malwareResult.GetSHA1Hash(),
-			Size:                 malwareResult.GetSize(),
-			IsPartOfImage:        malwareResult.GetIsPartOfImage(),
-			ContainerImage:       malwareResult.GetContainerImage(),
-			ContainerImageDigest: malwareResult.GetContainerImageDigest(),
-		},
+	k8sDetails := malwareResult.GetRuntimeAlertK8sDetails()
+	k8sDetails.NodeName = exporter.NodeName
+	k8sDetails.ClusterName = &exporter.ClusterName
+
+	httpAlert := apitypes.RuntimeAlert{
+		Message:                    fmt.Sprintf("Malware detected: %s", malwareResult.GetBasicRuntimeAlert().AlertName),
+		HostName:                   exporter.Host,
+		AlertType:                  apitypes.AlertTypeMalware,
+		BaseRuntimeAlert:           malwareResult.GetBasicRuntimeAlert(),
+		RuntimeAlertK8sDetails:     k8sDetails,
+		RuntimeAlertProcessDetails: malwareResult.GetRuntimeProcessDetails(),
+		MalwareAlert:               malwareResult.GetMalwareRuntimeAlert(),
 	}
 	exporter.sendInAlertList(httpAlert)
 }

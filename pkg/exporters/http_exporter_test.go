@@ -7,51 +7,14 @@ import (
 	"net/http/httptest"
 	mmtypes "node-agent/pkg/malwaremanager/v1/types"
 	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
+	ruleenginev1 "node-agent/pkg/ruleengine/v1"
 	"testing"
 	"time"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/stretchr/testify/assert"
 )
-
-var _ ruleengine.RuleFailure = (*GenericRuleFailure)(nil)
-
-type GenericRuleFailure struct {
-	RuleName         string
-	RuleID           string
-	ContainerId      string
-	RulePriority     int
-	FixSuggestionMsg string
-	Err              string
-	FailureEvent     *utils.GeneralEvent
-}
-
-func (rule *GenericRuleFailure) Name() string {
-	return rule.RuleName
-}
-func (rule *GenericRuleFailure) ID() string {
-	return rule.RuleID
-}
-
-func (rule *GenericRuleFailure) ContainerID() string {
-	return rule.ContainerId
-}
-
-func (rule *GenericRuleFailure) Error() string {
-	return rule.Err
-}
-
-func (rule *GenericRuleFailure) Event() *utils.GeneralEvent {
-	return rule.FailureEvent
-}
-
-func (rule *GenericRuleFailure) Priority() int {
-	return rule.RulePriority
-}
-
-func (rule *GenericRuleFailure) FixSuggestion() string {
-	return rule.FixSuggestionMsg
-}
 
 func TestSendRuleAlert(t *testing.T) {
 	bodyChan := make(chan []byte, 1)
@@ -69,19 +32,25 @@ func TestSendRuleAlert(t *testing.T) {
 	// Create an HTTPExporter with the mock server URL
 	exporter, err := InitHTTPExporter(HTTPExporterConfig{
 		URL: server.URL,
-	})
+	}, "", "")
 	assert.NoError(t, err)
 
 	// Create a mock rule failure
-	failedRule := &GenericRuleFailure{
-		RulePriority: ruleengine.RulePriorityCritical,
-		RuleName:     "testrule",
-		Err:          "Application profile is missing",
-		FailureEvent: &utils.GeneralEvent{
-			ContainerName: "testcontainer",
+	failedRule := &ruleenginev1.GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: "testrule",
+			Severity:  ruleengine.RulePriorityCritical,
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
+			ContainerName: "testcontainer",
 			Namespace:     "testnamespace",
+			PodNamespace:  "testnamespace",
 			PodName:       "testpodname",
+		},
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: "Application profile is missing",
 		},
 	}
 
@@ -104,7 +73,7 @@ func TestSendRuleAlert(t *testing.T) {
 	assert.Equal(t, 1, len(alertsList.Spec.Alerts))
 	alert := alertsList.Spec.Alerts[0]
 	assert.Equal(t, ruleengine.RulePriorityCritical, alert.Severity)
-	assert.Equal(t, "testrule", alert.RuleName)
+	assert.Equal(t, "testrule", alert.AlertName)
 	assert.Equal(t, "testcontainerid", alert.ContainerID)
 	assert.Equal(t, "testcontainer", alert.ContainerName)
 	assert.Equal(t, "testnamespace", alert.PodNamespace)
@@ -127,19 +96,23 @@ func TestSendRuleAlertRateReached(t *testing.T) {
 	exporter, err := InitHTTPExporter(HTTPExporterConfig{
 		URL:                server.URL,
 		MaxAlertsPerMinute: 1,
-	})
+	}, "", "")
 	assert.NoError(t, err)
 
 	// Create a mock rule failure
-	failedRule := &GenericRuleFailure{
-		RulePriority: ruleengine.RulePriorityCritical,
-		RuleName:     "testrule",
-		Err:          "Application profile is missing",
-		FailureEvent: &utils.GeneralEvent{
-			ContainerName: "testcontainer",
+	failedRule := &ruleenginev1.GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: "testrule",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
+			ContainerName: "testcontainer",
 			Namespace:     "testnamespace",
 			PodName:       "testpodname",
+		},
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: "Application profile is missing",
 		},
 	}
 
@@ -169,7 +142,7 @@ func TestSendRuleAlertRateReached(t *testing.T) {
 	}
 	// Assert that the HTTP request contains the alert limit reached alert
 	alert := alertsList.Spec.Alerts[0]
-	assert.Equal(t, "AlertLimitReached", alert.RuleName)
+	assert.Equal(t, "AlertLimitReached", alert.AlertName)
 	assert.Equal(t, "Alert limit reached", alert.Message)
 
 }
@@ -190,29 +163,62 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 	// Create an HTTPExporter with the mock server URL
 	exporter, err := InitHTTPExporter(HTTPExporterConfig{
 		URL: server.URL,
-	})
+	}, "", "")
 	assert.NoError(t, err)
 
 	// Create a mock malware description
-	malwareDesc := mmtypes.GenericMalwareResult{
-		Name:                 "testmalware",
-		Description:          "testmalwaredescription",
-		Path:                 "testmalwarepath",
-		MD5Hash:              "testmalwarehash",
-		SHA1Hash:             "testmalwarehash",
-		SHA256Hash:           "testmalwarehash",
-		Size:                 "2MiB",
-		Namespace:            "testmalwarenamespace",
-		PodName:              "testmalwarepodname",
-		ContainerName:        "testmalwarecontainername",
-		ContainerID:          "testmalwarecontainerid",
-		IsPartOfImage:        true,
-		ContainerImage:       "testmalwarecontainerimage",
-		ContainerImageDigest: "testmalwarecontainerimagedigest",
+	sizeStr := "2MiB"
+	commandLine := "testmalwarecmdline"
+	malwareDesc := &mmtypes.GenericMalwareResult{
+		BasicRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName:     "testmalware",
+			Size:          &sizeStr,
+			CommandLine:   &commandLine,
+			MD5Hash:       "testmalwarehash",
+			SHA1Hash:      "testmalwarehash",
+			SHA256Hash:    "testmalwarehash",
+			IsPartOfImage: nil,
+		},
+		TriggerEvent: igtypes.Event{
+			CommonData: igtypes.CommonData{
+				Runtime: igtypes.BasicRuntimeMetadata{
+					ContainerID:          "testmalwarecontainerid",
+					ContainerName:        "testmalwarecontainername",
+					ContainerImageName:   "testmalwarecontainerimage",
+					ContainerImageDigest: "testmalwarecontainerimagedigest",
+				},
+				K8s: igtypes.K8sMetadata{
+					Node:        "testmalwarenode",
+					HostNetwork: false,
+					BasicK8sMetadata: igtypes.BasicK8sMetadata{
+						Namespace:     "testmalwarenamespace",
+						PodName:       "testmalwarepodname",
+						ContainerName: "testmalwarecontainername",
+					},
+				},
+			},
+		},
+		MalwareRuntimeAlert: apitypes.MalwareAlert{
+			MalwareDescription: "testmalwaredescription",
+		},
+		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+			Path: "testmalwarepath",
+			Comm: "testmalwarecomm",
+			PID:  123,
+			UID:  456,
+			GID:  789,
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			ContainerID:   "testmalwarecontainerid",
+			Namespace:     "testmalwarenamespace",
+			PodName:       "testmalwarepodname",
+			PodNamespace:  "testmalwarenamespace",
+			ContainerName: "testmalwarecontainername",
+		},
 	}
 
 	// Call SendMalwareAlert
-	exporter.SendMalwareAlert(&malwareDesc)
+	exporter.SendMalwareAlert(malwareDesc)
 
 	// Assert that the HTTP request was sent correctly
 	alertsList := HTTPAlertsList{}
@@ -231,7 +237,7 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 	assert.Equal(t, "kubescape.io/v1", alertsList.ApiVersion)
 	assert.Equal(t, 1, len(alertsList.Spec.Alerts))
 	alert := alertsList.Spec.Alerts[0]
-	assert.Equal(t, "KubescapeMalwareDetected", alert.RuleName)
+	assert.Equal(t, "testmalware", alert.AlertName)
 	assert.Equal(t, "testmalwarecontainerid", alert.ContainerID)
 	assert.Equal(t, "testmalwarecontainername", alert.ContainerName)
 	assert.Equal(t, "testmalwarenamespace", alert.PodNamespace)
@@ -240,13 +246,13 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 
 func TestValidateHTTPExporterConfig(t *testing.T) {
 	// Test case: URL is empty
-	_, err := InitHTTPExporter(HTTPExporterConfig{})
+	_, err := InitHTTPExporter(HTTPExporterConfig{}, "", "")
 	assert.Error(t, err)
 
 	// Test case: URL is not empty
 	exp, err := InitHTTPExporter(HTTPExporterConfig{
 		URL: "http://localhost:9093",
-	})
+	}, "", "")
 	assert.NoError(t, err)
 	assert.Equal(t, "POST", exp.config.Method)
 	assert.Equal(t, 5, exp.config.TimeoutSeconds)
@@ -262,7 +268,7 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 		Headers: map[string]string{
 			"Authorization": "Bearer token",
 		},
-	})
+	}, "", "")
 	assert.NoError(t, err)
 	assert.Equal(t, "PUT", exp.config.Method)
 	assert.Equal(t, 2, exp.config.TimeoutSeconds)
@@ -273,7 +279,6 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 	_, err = InitHTTPExporter(HTTPExporterConfig{
 		URL:    "http://localhost:9093",
 		Method: "DELETE",
-	})
+	}, "", "")
 	assert.Error(t, err)
-
 }

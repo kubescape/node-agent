@@ -5,7 +5,8 @@ import (
 	"node-agent/pkg/ruleengine"
 	"os"
 
-	log "github.com/sirupsen/logrus"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 type ExportersConfig struct {
@@ -25,7 +26,7 @@ type ExporterBus struct {
 }
 
 // InitExporters initializes all exporters.
-func InitExporters(exportersConfig ExportersConfig) *ExporterBus {
+func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName string) *ExporterBus {
 	exporters := []Exporter{}
 	for _, url := range exportersConfig.AlertManagerExporterUrls {
 		alertMan := InitAlertManagerExporter(url)
@@ -52,9 +53,9 @@ func InitExporters(exportersConfig ExportersConfig) *ExporterBus {
 		}
 	}
 	if exportersConfig.HTTPExporterConfig != nil {
-		httpExp, err := InitHTTPExporter(*exportersConfig.HTTPExporterConfig)
+		httpExp, err := InitHTTPExporter(*exportersConfig.HTTPExporterConfig, clusterName, nodeName)
 		if err != nil {
-			log.WithError(err).Error("failed to initialize HTTP exporter")
+			logger.L().Error("failed to initialize http exporter", helpers.Error(err))
 		}
 		exporters = append(exporters, httpExp)
 	}
@@ -62,7 +63,7 @@ func InitExporters(exportersConfig ExportersConfig) *ExporterBus {
 	if len(exporters) == 0 {
 		panic("no exporters were initialized")
 	}
-	log.Info("exporters initialized")
+	logger.L().Info("exporters initialized")
 
 	return &ExporterBus{exporters: exporters}
 }

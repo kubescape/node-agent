@@ -3,9 +3,9 @@ package rulemanager
 import (
 	"context"
 	"node-agent/pkg/config"
+	"node-agent/pkg/exporters"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/objectcache"
-	"node-agent/pkg/rulemanager/exporters"
 	"node-agent/pkg/storage"
 
 	bindingcache "node-agent/pkg/rulebindingmanager/cache"

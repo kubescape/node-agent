@@ -3,6 +3,9 @@ package ruleengine
 import (
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/utils"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 const (
@@ -48,18 +51,17 @@ type RuleSpec interface {
 }
 
 type RuleFailure interface {
-	// Rule Name.
-	Name() string
-	// Rule ID.
-	ID() string
-	// Container ID.
-	ContainerID() string
-	// Priority.
-	Priority() int
-	// Error interface.
-	Error() string
-	// Fix suggestion.
-	FixSuggestion() string
-	// Generic event
-	Event() *utils.GeneralEvent
+	// Get Base Runtime Alert
+	GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert
+	// Get Runtime Process Details
+	GetRuntimeProcessDetails() apitypes.RuntimeAlertProcessDetails
+	// Get Trigger Event
+	GetTriggerEvent() igtypes.Event
+	// Get Rule Description
+	GetRuleAlert() apitypes.RuleAlert
+	// Get K8s Runtime Details
+	GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails
+
+	// Set Workload Details
+	SetWorkloadDetails(workloadDetails string)
 }

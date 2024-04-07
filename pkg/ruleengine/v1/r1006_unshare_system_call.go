@@ -6,6 +6,8 @@ import (
 	"node-agent/pkg/utils"
 
 	ruleenginetypes "node-agent/pkg/ruleengine/types"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
@@ -18,7 +20,7 @@ var R1006UnshareSyscallRuleDescriptor = RuleDescriptor{
 	Name:        R1006Name,
 	Description: "Detecting Unshare System Call usage, which can be used to escape container.",
 	Tags:        []string{"syscall", "escape", "unshare"},
-	Priority:    RulePriorityHigh,
+	Priority:    RulePriorityMed,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{
 			utils.SyscallEventType,
@@ -66,15 +68,29 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event i
 
 	if syscallEvent.SyscallName == "unshare" {
 		rule.alreadyNotified = true
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			ContainerId:      syscallEvent.Runtime.ContainerID,
-			Err:              "Unshare System Call usage",
-			FailureEvent:     utils.SyscallToGeneralEvent(syscallEvent),
-			FixSuggestionMsg: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
-			RulePriority:     R1006UnshareSyscallRuleDescriptor.Priority,
+		ruleFailure := GenericRuleFailure{
+			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				AlertName:      rule.Name(),
+				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
+				Severity:       R1006UnshareSyscallRuleDescriptor.Priority,
+			},
+			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+				Comm: syscallEvent.Comm,
+				GID:  syscallEvent.Gid,
+				PID:  syscallEvent.Pid,
+				UID:  syscallEvent.Uid,
+			},
+			TriggerEvent: syscallEvent.Event,
+			RuleAlert: apitypes.RuleAlert{
+				RuleID:          rule.ID(),
+				RuleDescription: "Unshare System Call usage",
+			},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}
+
+		enrichRuleFailure(syscallEvent.Event, syscallEvent.Pid, &ruleFailure)
+
+		return &ruleFailure
 	}
 
 	return nil

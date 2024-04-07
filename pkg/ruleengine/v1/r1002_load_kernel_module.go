@@ -6,6 +6,8 @@ import (
 	"node-agent/pkg/utils"
 
 	ruleenginetypes "node-agent/pkg/ruleengine/types"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
@@ -32,6 +34,7 @@ var _ ruleengine.RuleEvaluator = (*R1002LoadKernelModule)(nil)
 
 type R1002LoadKernelModule struct {
 	BaseRule
+	alerted bool
 }
 
 func CreateRuleR1002LoadKernelModule() *R1002LoadKernelModule {
@@ -48,6 +51,10 @@ func (rule *R1002LoadKernelModule) DeleteRule() {
 }
 
 func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	if rule.alerted {
+		return nil
+	}
+
 	if eventType != utils.SyscallEventType {
 		return nil
 	}
@@ -58,15 +65,30 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 	}
 
 	if syscallEvent.SyscallName == "init_module" {
-		return &GenericRuleFailure{
-			RuleName:         rule.Name(),
-			RuleID:           rule.ID(),
-			ContainerId:      syscallEvent.Runtime.ContainerID,
-			Err:              "Kernel Module Load",
-			FailureEvent:     utils.SyscallToGeneralEvent(syscallEvent),
-			FixSuggestionMsg: "If this is a legitimate action, please add consider removing this workload from the binding of this rule",
-			RulePriority:     R1002LoadKernelModuleRuleDescriptor.Priority,
+		rule.alerted = true
+		ruleFailure := GenericRuleFailure{
+			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				AlertName:      rule.Name(),
+				FixSuggestions: "If this is a legitimate action, please add consider removing this workload from the binding of this rule",
+				Severity:       R1002LoadKernelModuleRuleDescriptor.Priority,
+			},
+			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
+				Comm: syscallEvent.Comm,
+				GID:  syscallEvent.Gid,
+				PID:  syscallEvent.Pid,
+				UID:  syscallEvent.Uid,
+			},
+			TriggerEvent: syscallEvent.Event,
+			RuleAlert: apitypes.RuleAlert{
+				RuleID:          rule.ID(),
+				RuleDescription: "Kernel Module Load",
+			},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}
+
+		enrichRuleFailure(syscallEvent.Event, syscallEvent.Pid, &ruleFailure)
+
+		return &ruleFailure
 	}
 
 	return nil

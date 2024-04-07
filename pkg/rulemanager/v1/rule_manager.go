@@ -5,13 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"node-agent/pkg/config"
+	"node-agent/pkg/exporters"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/rulemanager"
-	"node-agent/pkg/rulemanager/exporters"
 	"node-agent/pkg/utils"
 	"time"
 
+	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v4"
 	"go.opentelemetry.io/otel"
 	corev1 "k8s.io/api/core/v1"
@@ -58,11 +59,14 @@ type RuleManager struct {
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	containerMutexes         storageUtils.MapMutex[string] // key is k8sContainerID
 	podInCacheMutexes        storageUtils.MapMutex[string] // key is namespace+podName
+	podToWlid                maps.SafeMap[string, string]
+	nodeName                 string
+	clusterName              string
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, preRunningContainersIDs mapset.Set[string]) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, preRunningContainersIDs mapset.Set[string], nodeName string, clusterName string) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:                    cfg,
 		ctx:                    ctx,
@@ -76,6 +80,8 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		metrics:                metrics,
 		preRunningContainerIDs: preRunningContainersIDs,
 		cachedPods:             mapset.NewSet[string](),
+		nodeName:               nodeName,
+		clusterName:            clusterName,
 	}, nil
 }
 
@@ -258,6 +264,14 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 				helpers.String("k8s workload", k8sContainerID))
 			return
 		}
+		if !rm.podToWlid.Has(notif.Container.K8s.PodName) {
+			wlid, err := rm.getWorkloadIdentifier(notif.Container.K8s.Namespace, notif.Container.K8s.PodName)
+			if err != nil {
+				logger.L().Debug("RuleManager - failed to get workload identifier", helpers.Error(err), helpers.String("k8s workload", notif.Container.K8s.PodName))
+			} else {
+				rm.podToWlid.Set(notif.Container.K8s.PodName, wlid)
+			}
+		}
 		rm.trackedContainers.Add(k8sContainerID)
 		go rm.startRuleManager(rm.ctx, notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:
@@ -266,7 +280,34 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			channel <- utils.ContainerHasTerminatedError
 		}
 		rm.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
+		rm.podToWlid.Delete(notif.Container.K8s.PodName)
 	}
+}
+
+func (rm *RuleManager) getWorkloadIdentifier(podNamespace, podName string) (string, error) {
+	wl, err := rm.k8sClient.GetWorkload(podNamespace, "Pod", podName)
+	if err != nil {
+		return "", fmt.Errorf("failed to get workload: %w", err)
+	}
+	pod := wl.(*workloadinterface.Workload)
+
+	// find parentWlid
+	kind, name, err := rm.k8sClient.CalculateWorkloadParentRecursive(pod)
+	if err != nil {
+		return "", fmt.Errorf("failed to calculate workload parent: %w", err)
+	}
+	parentWorkload, err := rm.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
+	if err != nil {
+		return "", fmt.Errorf("failed to get parent workload: %w", err)
+	}
+	w := parentWorkload.(*workloadinterface.Workload)
+	generatedWlid := w.GenerateWlid(rm.clusterName)
+	err = wlid.IsWlidValid(generatedWlid)
+	if err != nil {
+		return "", fmt.Errorf("failed to validate WLID: %w", err)
+	}
+
+	return generatedWlid, nil
 }
 
 func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error)) {
@@ -371,7 +412,6 @@ func (rm *RuleManager) ReportRandomxEvent(k8sContainerID string, event tracerran
 }
 
 func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator) {
-
 	for _, rule := range rules {
 		if rule == nil {
 			continue
@@ -384,6 +424,7 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 		res := rule.ProcessEvent(eventType, event, rm.objectCache)
 		if res != nil {
 			logger.L().Info("RuleManager FAILED - rule alert", helpers.String("rule", rule.Name()))
+			res.SetWorkloadDetails(rm.podToWlid.Get(res.GetRuntimeAlertK8sDetails().PodName))
 			rm.exporter.SendRuleAlert(res)
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}

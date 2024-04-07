@@ -10,6 +10,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// TODO: Add missing fields.
+
 // CsvExporter is an exporter that sends alerts to csv
 type CsvExporter struct {
 	CsvRulePath    string
@@ -58,22 +60,29 @@ func (ce *CsvExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 
 	csvWriter := csv.NewWriter(csvFile)
 	defer csvWriter.Flush()
+
+	// TODO: This is ugly, find a better way.
+	var ppid int
+	if failedRule.GetBaseRuntimeAlert().PPID != nil {
+		ppid = int(*failedRule.GetBaseRuntimeAlert().PPID)
+	} else {
+		ppid = -1
+	}
+
 	csvWriter.Write([]string{
-		failedRule.Name(),
-		failedRule.Error(),
-		failedRule.FixSuggestion(),
-		failedRule.Event().PodName,
-		failedRule.Event().ContainerName,
-		failedRule.Event().Namespace,
-		failedRule.Event().ContainerID,
-		fmt.Sprintf("%d", failedRule.Event().Pid),
-		failedRule.Event().Comm,
-		failedRule.Event().Cwd,
-		fmt.Sprintf("%d", failedRule.Event().Uid),
-		fmt.Sprintf("%d", failedRule.Event().Gid),
-		fmt.Sprintf("%d", failedRule.Event().Ppid),
-		fmt.Sprintf("%d", failedRule.Event().MountNsID),
-		fmt.Sprintf("%d", failedRule.Event().Timestamp),
+		failedRule.GetBaseRuntimeAlert().AlertName,
+		failedRule.GetRuleAlert().RuleDescription,
+		failedRule.GetBaseRuntimeAlert().FixSuggestions,
+		failedRule.GetRuntimeAlertK8sDetails().PodName,
+		failedRule.GetRuntimeAlertK8sDetails().ContainerName,
+		failedRule.GetRuntimeAlertK8sDetails().Namespace,
+		failedRule.GetRuntimeAlertK8sDetails().ContainerID,
+		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().PID),
+		failedRule.GetRuntimeProcessDetails().Comm,
+		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().UID),
+		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().GID),
+		fmt.Sprintf("%d", ppid),
+		failedRule.GetBaseRuntimeAlert().Timestamp.String(),
 	})
 }
 
@@ -97,11 +106,9 @@ func writeRuleHeaders(csvPath string) {
 		"Container ID",
 		"PID",
 		"Comm",
-		"Cwd",
 		"UID",
 		"GID",
 		"PPID",
-		"Mount Namespace ID",
 		"Timestamp",
 	})
 }
@@ -117,20 +124,19 @@ func (ce *CsvExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResu
 	csvWriter := csv.NewWriter(csvFile)
 	defer csvWriter.Flush()
 	csvWriter.Write([]string{
-		malwareResult.GetMalwareName(),
-		malwareResult.GetDescription(),
-		malwareResult.GetPath(),
-		malwareResult.GetMD5Hash(),
-		malwareResult.GetSHA256Hash(),
-		malwareResult.GetSHA1Hash(),
-		malwareResult.GetSize(),
-		malwareResult.GetNamespace(),
-		malwareResult.GetPodName(),
-		malwareResult.GetContainerName(),
-		malwareResult.GetContainerID(),
-		fmt.Sprintf("%t", malwareResult.GetIsPartOfImage()),
-		malwareResult.GetContainerImage(),
-		malwareResult.GetContainerImageDigest(),
+		malwareResult.GetBasicRuntimeAlert().AlertName,
+		malwareResult.GetMalwareRuntimeAlert().MalwareDescription,
+		malwareResult.GetRuntimeProcessDetails().Path,
+		malwareResult.GetBasicRuntimeAlert().MD5Hash,
+		malwareResult.GetBasicRuntimeAlert().SHA256Hash,
+		malwareResult.GetBasicRuntimeAlert().SHA1Hash,
+		*malwareResult.GetBasicRuntimeAlert().Size,
+		malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
+		malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
+		malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
+		malwareResult.GetTriggerEvent().Runtime.ContainerID,
+		malwareResult.GetTriggerEvent().Runtime.ContainerImageName,
+		malwareResult.GetTriggerEvent().Runtime.ContainerImageDigest,
 	})
 }
 
@@ -157,7 +163,6 @@ func writeMalwareHeaders(csvPath string) {
 		"Pod Name",
 		"Container Name",
 		"Container ID",
-		"Is Part of Image",
 		"Container Image",
 		"Container Image Digest",
 	})

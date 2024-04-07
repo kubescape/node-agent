@@ -9,6 +9,8 @@ extern int LINUX_KERNEL_VERSION __kconfig;
 #define TASK_COMM_LEN 16
 #endif
 #define INVALID_UID ((uid_t)-1)
+// Defined in include/uapi/linux/magic.h
+#define OVERLAYFS_SUPER_MAGIC 0x794c7630
 
 #if LINUX_KERNEL_VERSION <= KERNEL_VERSION(5, 15, 0)
 struct old_fpu {
@@ -33,5 +35,6 @@ struct event {
     __u32 ppid;
     __u32 uid;
     __u32 gid;
+	bool upper_layer;
     __u8 comm[TASK_COMM_LEN];
 };
