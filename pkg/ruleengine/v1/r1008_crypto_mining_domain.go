@@ -6,22 +6,14 @@ import (
 	"node-agent/pkg/utils"
 	"slices"
 
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 )
 
 const (
-	R1007ID   = "R1007"
-	R1007Name = "Crypto Miner detected"
+	R1008ID   = "R1008"
+	R1008Name = "Crypto Mining Domain Communication"
 )
-
-var CommonlyUsedCryptoMinersPorts = []uint16{
-	3333,  // Monero (XMR) - Stratum mining protocol (TCP).
-	45700, // Monero (XMR) - Stratum mining protocol (TCP). (stratum+tcp://xmr.pool.minergate.com)
-}
 
 var commonlyUsedCryptoMinersDomains = []string{
 	"2cryptocalc.com",
@@ -131,110 +123,55 @@ var commonlyUsedCryptoMinersDomains = []string{
 	"zergpool.com",
 }
 
-var R1007CryptoMinersRuleDescriptor = RuleDescriptor{
-	ID:          R1007ID,
-	Name:        R1007Name,
-	Description: "Detecting Crypto Miners by port, domain and randomx event.",
+var R1008CryptoMiningDomainCommunicationRuleDescriptor = RuleDescriptor{
+	ID:          R1008ID,
+	Name:        R1008Name,
+	Description: "Detecting Crypto miners communication by domain",
 	Tags:        []string{"network", "crypto", "miners", "malicious", "dns"},
 	Priority:    RulePriorityCritical,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{
-			utils.NetworkEventType,
 			utils.DnsEventType,
-			utils.RandomXEventType,
 		},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
-		return CreateRuleR1007CryptoMiners()
+		return CreateRuleR1008CryptoMiningDomainCommunication()
 	},
 }
 
-var _ ruleengine.RuleEvaluator = (*R1007CryptoMiners)(nil)
+var _ ruleengine.RuleEvaluator = (*R1008CryptoMiningDomainCommunication)(nil)
 
-type R1007CryptoMiners struct {
+type R1008CryptoMiningDomainCommunication struct {
 	BaseRule
 }
 
-func CreateRuleR1007CryptoMiners() *R1007CryptoMiners {
-	return &R1007CryptoMiners{}
+func CreateRuleR1008CryptoMiningDomainCommunication() *R1008CryptoMiningDomainCommunication {
+	return &R1008CryptoMiningDomainCommunication{}
 }
 
-func (rule *R1007CryptoMiners) Name() string {
-	return R1007Name
+func (rule *R1008CryptoMiningDomainCommunication) Name() string {
+	return R1008Name
 }
 
-func (rule *R1007CryptoMiners) ID() string {
-	return R1007ID
+func (rule *R1008CryptoMiningDomainCommunication) ID() string {
+	return R1008ID
 }
 
-func (rule *R1007CryptoMiners) DeleteRule() {
+func (rule *R1008CryptoMiningDomainCommunication) DeleteRule() {
 }
 
-func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if eventType != utils.NetworkEventType && eventType != utils.DnsEventType && eventType != utils.RandomXEventType {
+func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	if eventType != utils.DnsEventType {
 		return nil
 	}
 
-	if randomXEvent, ok := event.(*tracerrandomxtype.Event); ok {
-		isPartOfImage := !randomXEvent.UpperLayer
-		ruleFailure := GenericRuleFailure{
-			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
-				IsPartOfImage:  &isPartOfImage,
-				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-				Severity:       R1007CryptoMinersRuleDescriptor.Priority,
-				PPID:           &randomXEvent.PPid,
-			},
-			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-				Comm: randomXEvent.Comm,
-				GID:  randomXEvent.Gid,
-				PID:  randomXEvent.Pid,
-				UID:  randomXEvent.Uid,
-			},
-			TriggerEvent: randomXEvent.Event,
-			RuleAlert: apitypes.RuleAlert{
-				RuleID:          rule.ID(),
-				RuleDescription: "Possible Crypto Miner detected",
-			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
-		}
-
-		enrichRuleFailure(randomXEvent.Event, randomXEvent.Pid, &ruleFailure)
-
-		return &ruleFailure
-	} else if networkEvent, ok := event.(*tracernetworktype.Event); ok {
-		if networkEvent.Proto == "TCP" && networkEvent.PktType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
-			ruleFailure := GenericRuleFailure{
-				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName:      rule.Name(),
-					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-					Severity:       R1007CryptoMinersRuleDescriptor.Priority,
-				},
-				RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-					Comm: networkEvent.Comm,
-					GID:  networkEvent.Gid,
-					PID:  networkEvent.Pid,
-					UID:  networkEvent.Uid,
-				},
-				TriggerEvent: networkEvent.Event,
-				RuleAlert: apitypes.RuleAlert{
-					RuleID:          rule.ID(),
-					RuleDescription: "Possible Crypto Miner communication detected",
-				},
-				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
-			}
-
-			enrichRuleFailure(networkEvent.Event, networkEvent.Pid, &ruleFailure)
-
-			return &ruleFailure
-		}
-	} else if dnsEvent, ok := event.(*tracerdnstype.Event); ok {
+	if dnsEvent, ok := event.(*tracerdnstype.Event); ok {
 		if slices.Contains(commonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:      rule.Name(),
 					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-					Severity:       R1007CryptoMinersRuleDescriptor.Priority,
+					Severity:       R1008CryptoMiningDomainCommunicationRuleDescriptor.Priority,
 				},
 				RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
 					Comm: dnsEvent.Comm,
@@ -245,7 +182,7 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event int
 				TriggerEvent: dnsEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
 					RuleID:          rule.ID(),
-					RuleDescription: "Possible Crypto Miner communication detected",
+					RuleDescription: "Crypto mining domain communication",
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}
@@ -259,8 +196,8 @@ func (rule *R1007CryptoMiners) ProcessEvent(eventType utils.EventType, event int
 	return nil
 }
 
-func (rule *R1007CryptoMiners) Requirements() ruleengine.RuleSpec {
+func (rule *R1008CryptoMiningDomainCommunication) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes: R1007CryptoMinersRuleDescriptor.Requirements.RequiredEventTypes(),
+		EventTypes: R1008CryptoMiningDomainCommunicationRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }

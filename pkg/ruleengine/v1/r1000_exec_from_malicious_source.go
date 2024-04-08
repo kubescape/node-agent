@@ -71,7 +71,13 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 	// is memory mapped file
 
 	// The assumption here is that the event path is absolute!
-	execPath := filepath.Dir(getExecPathFromEvent(execEvent))
+	execPath := getExecPathFromEvent(execEvent)
+	if strings.HasPrefix(execPath, "./") || strings.HasPrefix(execPath, "../") {
+		execPath = filepath.Join(execEvent.Cwd, execPath)
+	} else if !strings.HasPrefix(execPath, "/") {
+		execPath = "/" + execPath
+	}
+	execPath = filepath.Dir(execPath)
 	for _, maliciousExecPathPrefix := range maliciousExecPathPrefixes {
 		// if the exec path or the current dir is from a malicious source
 		if strings.HasPrefix(execPath, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) {

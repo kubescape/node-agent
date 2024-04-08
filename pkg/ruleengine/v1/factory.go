@@ -13,7 +13,7 @@ func NewRuleCreator() *RuleCreatorImpl {
 		ruleDescriptions: []RuleDescriptor{
 			R0001UnexpectedProcessLaunchedRuleDescriptor,
 			R0002UnexpectedFileAccessRuleDescriptor,
-			// R0003UnexpectedSystemCallRuleDescriptor,
+			R0003UnexpectedSystemCallRuleDescriptor,
 			R0004UnexpectedCapabilityUsedRuleDescriptor,
 			R0005UnexpectedDomainRequestRuleDescriptor,
 			R0006UnexpectedServiceAccountTokenAccessRuleDescriptor,
@@ -23,11 +23,15 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R1002LoadKernelModuleRuleDescriptor,
 			R1003MaliciousSSHConnectionRuleDescriptor,
 			R1004ExecFromMountRuleDescriptor,
+			R1005FilelessExecutionRuleDescriptor,
 			R1006UnshareSyscallRuleDescriptor,
-			R1007CryptoMinersRuleDescriptor,
+			R1007XMRCryptoMiningRuleDescriptor,
+			R1008CryptoMiningDomainCommunicationRuleDescriptor,
+			R1009CryptoMiningRelatedPortRuleDescriptor,
 		},
 	}
 }
+
 func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []ruleengine.RuleEvaluator {
 	var rules []ruleengine.RuleEvaluator
 	for _, rule := range r.ruleDescriptions {
@@ -37,6 +41,7 @@ func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []ruleengine.RuleEval
 	}
 	return rules
 }
+
 func (r *RuleCreatorImpl) CreateRuleByID(id string) ruleengine.RuleEvaluator {
 	for _, rule := range r.ruleDescriptions {
 		if rule.ID == id {
