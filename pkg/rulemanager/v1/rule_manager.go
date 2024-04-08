@@ -148,10 +148,11 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 					WithMountNsID: eventtypes.WithMountNsID{
 						MountNsID: watchedContainer.NsMntId,
 					},
-					Pid:         container.Pid,
-					Uid:         container.OciConfig.Process.User.UID,
-					Gid:         container.OciConfig.Process.User.GID,
-					Comm:        container.OciConfig.Process.Args[0],
+					Pid: container.Pid,
+					// TODO: Figure out how to get UID, GID and comm from the syscall.
+					// Uid:         container.OciConfig.Process.User.UID,
+					// Gid:         container.OciConfig.Process.User.GID,
+					// Comm:        container.OciConfig.Process.Args[0],
 					SyscallName: syscall,
 				}
 
