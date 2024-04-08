@@ -148,10 +148,10 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 					WithMountNsID: eventtypes.WithMountNsID{
 						MountNsID: watchedContainer.NsMntId,
 					},
-					Pid: container.Pid,
-					// Uid:         container.OciConfig.Process.User.UID, TODO: Figure why OciConfig is nil.
-					// Gid:         container.OciConfig.Process.User.GID, TODO: Figure why OciConfig is nil.
-					// Comm:        container.OciConfig.Process.Args[0], TODO: Figure why OciConfig is nil.
+					Pid:         container.Pid,
+					Uid:         container.OciConfig.Process.User.UID,
+					Gid:         container.OciConfig.Process.User.GID,
+					Comm:        container.OciConfig.Process.Args[0],
 					SyscallName: syscall,
 				}
 
