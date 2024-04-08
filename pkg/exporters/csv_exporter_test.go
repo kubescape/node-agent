@@ -2,8 +2,8 @@ package exporters
 
 import (
 	"encoding/csv"
-	mmtypes "node-agent/pkg/malwaremanager/v1/types"
-	"node-agent/pkg/ruleengine/v1"
+	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
+	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"os"
 	"testing"
 

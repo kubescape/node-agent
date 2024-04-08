@@ -3,8 +3,8 @@ package cache
 import (
 	"encoding/json"
 	"fmt"
-	typesv1 "node-agent/pkg/rulebindingmanager/types/v1"
-	"node-agent/pkg/watcher"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/watcher"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"

@@ -1,7 +1,7 @@
 package ruleengine
 
 import (
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"testing"
 
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"

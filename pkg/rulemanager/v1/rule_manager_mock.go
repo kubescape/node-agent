@@ -2,15 +2,15 @@ package rulemanager
 
 import (
 	"context"
-	"node-agent/pkg/config"
-	"node-agent/pkg/exporters"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/storage"
 
-	bindingcache "node-agent/pkg/rulebindingmanager/cache"
+	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 
-	"node-agent/pkg/metricsmanager"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
 
 	mapset "github.com/deckarep/golang-set/v2"
 

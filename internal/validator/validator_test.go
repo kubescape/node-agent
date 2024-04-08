@@ -1,7 +1,7 @@
 package validator
 
 import (
-	"node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/config"
 	"testing"
 )
 

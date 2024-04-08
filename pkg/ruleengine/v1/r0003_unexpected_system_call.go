@@ -2,12 +2,12 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"slices"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )

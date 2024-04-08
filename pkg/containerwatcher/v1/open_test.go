@@ -2,10 +2,10 @@ package containerwatcher
 
 import (
 	"context"
-	"node-agent/pkg/config"
-	"node-agent/pkg/filehandler/v1"
-	metricsmanager "node-agent/pkg/metricsmanager"
-	"node-agent/pkg/relevancymanager/v1"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/filehandler/v1"
+	metricsmanager "github.com/kubescape/node-agent/pkg/metricsmanager"
+	"github.com/kubescape/node-agent/pkg/relevancymanager/v1"
 	"testing"
 
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"

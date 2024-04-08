@@ -3,16 +3,16 @@ package exporters
 import (
 	"encoding/json"
 	"fmt"
+	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	mmtypes "node-agent/pkg/malwaremanager/v1/types"
 	"strings"
 	"testing"
 
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 
-	"node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"

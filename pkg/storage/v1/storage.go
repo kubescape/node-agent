@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"node-agent/pkg/storage"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"os"
 	"strconv"
 

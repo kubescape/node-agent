@@ -2,8 +2,8 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"path/filepath"
 	"time"
 

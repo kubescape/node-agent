@@ -2,10 +2,10 @@ package cache
 
 import (
 	"context"
-	"node-agent/mocks"
-	"node-agent/pkg/rulebindingmanager"
-	typesv1 "node-agent/pkg/rulebindingmanager/types/v1"
-	"node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/mocks"
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"slices"
 	"sync"
 	"testing"

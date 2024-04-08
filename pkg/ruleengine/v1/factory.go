@@ -1,6 +1,6 @@
 package ruleengine
 
-import "node-agent/pkg/ruleengine"
+import "github.com/kubescape/node-agent/pkg/ruleengine"
 
 var _ ruleengine.RuleCreator = (*RuleCreatorImpl)(nil)
 

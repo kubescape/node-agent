@@ -2,10 +2,10 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"testing"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 )
 
 func TestR1002LoadKernelModule(t *testing.T) {

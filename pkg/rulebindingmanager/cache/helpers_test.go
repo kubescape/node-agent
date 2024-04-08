@@ -1,7 +1,7 @@
 package cache
 
 import (
-	typesv1 "node-agent/pkg/rulebindingmanager/types/v1"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

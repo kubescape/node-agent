@@ -2,9 +2,9 @@ package exporters
 
 import (
 	"fmt"
+	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"log/syslog"
-	"node-agent/pkg/malwaremanager"
-	"node-agent/pkg/ruleengine"
 	"os"
 	"time"
 

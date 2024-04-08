@@ -3,7 +3,7 @@ package filehandler
 import (
 	"errors"
 	"fmt"
-	"node-agent/pkg/filehandler"
+	"github.com/kubescape/node-agent/pkg/filehandler"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"

@@ -2,10 +2,10 @@ package applicationprofilemanager
 
 import (
 	"context"
-	"node-agent/pkg/config"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/storage"
 	"sort"
 	"testing"
 	"time"

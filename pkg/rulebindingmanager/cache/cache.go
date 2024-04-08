@@ -3,17 +3,17 @@ package cache
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/rulebindingmanager/types"
-	typesv1 "node-agent/pkg/rulebindingmanager/types/v1"
-	"node-agent/pkg/ruleengine"
-	ruleenginev1 "node-agent/pkg/ruleengine/v1"
-	"node-agent/pkg/watcher"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager/types"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/watcher"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
-	"node-agent/pkg/rulebindingmanager"
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"

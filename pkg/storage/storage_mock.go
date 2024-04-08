@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"os"
 	"path"
 

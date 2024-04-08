@@ -1,9 +1,9 @@
 package ruleengine
 
 import (
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"

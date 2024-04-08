@@ -3,9 +3,9 @@ package applicationprofilecache
 import (
 	"context"
 	"fmt"
-	"node-agent/mocks"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/watcher"
+	"github.com/kubescape/node-agent/mocks"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/watcher"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"

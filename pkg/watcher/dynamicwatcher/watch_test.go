@@ -2,8 +2,8 @@ package dynamicwatcher
 
 import (
 	"context"
-	"node-agent/mocks"
-	"node-agent/pkg/watcher"
+	"github.com/kubescape/node-agent/mocks"
+	"github.com/kubescape/node-agent/pkg/watcher"
 	"sync"
 	"testing"
 	"time"

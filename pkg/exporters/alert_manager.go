@@ -6,8 +6,8 @@ package exporters
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/malwaremanager"
-	"node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"os"
 	"time"
 

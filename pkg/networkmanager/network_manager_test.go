@@ -3,9 +3,9 @@ package networkmanager
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/config"
-	"node-agent/pkg/dnsmanager"
-	"node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	"testing"
 

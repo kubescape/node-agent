@@ -2,7 +2,7 @@ package filehandler
 
 import (
 	"fmt"
-	"node-agent/pkg/filehandler"
+	"github.com/kubescape/node-agent/pkg/filehandler"
 	"sync"
 )
 

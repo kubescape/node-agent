@@ -1,7 +1,7 @@
 package exporters
 
 import (
-	"node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"testing"
 )
 

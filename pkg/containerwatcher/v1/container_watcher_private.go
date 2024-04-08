@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"node-agent/pkg/rulebindingmanager"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"runtime"
 	"time"
 

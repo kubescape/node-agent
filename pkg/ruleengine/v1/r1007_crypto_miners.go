@@ -1,12 +1,12 @@
 package ruleengine
 
 import (
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"slices"
 
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"

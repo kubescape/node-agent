@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/storage"
 	"testing"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"

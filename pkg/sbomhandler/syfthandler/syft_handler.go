@@ -2,9 +2,9 @@ package syfthandler
 
 import (
 	"fmt"
-	"node-agent/pkg/sbomhandler"
-	"node-agent/pkg/storage"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/sbomhandler"
+	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 

@@ -1,7 +1,7 @@
 package k8sclient
 
 import (
-	"node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/storage"
 
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"

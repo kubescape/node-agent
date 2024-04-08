@@ -3,9 +3,9 @@ package networkneighborscache
 import (
 	"context"
 	"encoding/json"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/watcher"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/watcher"
 	"strings"
 
 	mapset "github.com/deckarep/golang-set/v2"

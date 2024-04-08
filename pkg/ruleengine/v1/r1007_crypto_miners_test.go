@@ -2,10 +2,10 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"testing"
 
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"

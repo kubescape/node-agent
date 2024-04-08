@@ -1,7 +1,7 @@
 package rulemanager
 
 import (
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
