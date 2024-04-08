@@ -16,7 +16,6 @@ import (
 	"node-agent/pkg/filehandler/v1"
 	"node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "node-agent/pkg/malwaremanager/v1"
-	clamavv1 "node-agent/pkg/malwaremanager/v1/clamav"
 	metricsmanager "node-agent/pkg/metricsmanager"
 	metricprometheus "node-agent/pkg/metricsmanager/prometheus"
 	"node-agent/pkg/networkmanager"
@@ -154,7 +153,6 @@ func main() {
 	}
 
 	var ruleManager rulemanager.RuleManagerClient
-	var malwareManager malwaremanager.MalwareManagerClient
 	var objCache objectcache.ObjectCache
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
 
@@ -185,31 +183,22 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
 
-		// Create malware scanners
-		malwarescanners := []malwaremanagerv1.MalwareScanner{}
+	} else {
+		ruleManager = rulemanager.CreateRuleManagerMock()
+		objCache = objectcache.NewObjectCacheMock()
+		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
+	}
 
-		// Create ClamAV scanner
-		// Check if ClamAV is enabled (CLAMAV_ADDRESS env var is set in the format <host>:<port>)
-		if clamavAddress, present := os.LookupEnv("CLAMAV_ADDRESS"); present {
-			clamavConfig := clamavv1.ClamAVConfig{
-				Address: clamavAddress,
-			}
-			if clamavScanner, err := clamavv1.CreateClamAVClient(&clamavConfig); err == nil {
-				malwarescanners = append(malwarescanners, clamavScanner)
-			} else {
-				logger.L().Ctx(ctx).Error("error creating ClamAV client", helpers.Error(err))
-			}
-		}
-
-		malwareManager, err = malwaremanagerv1.CreateMalwareManager(malwarescanners, exporter, cfg, k8sClient, nodeName, clusterData.ClusterName)
+	var malwareManager malwaremanager.MalwareManagerClient
+	if cfg.EnableMalwareDetection {
+		// create exporter
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
+		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, nodeName, clusterData.ClusterName, exporter, prometheusExporter)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
 		}
 	} else {
-		ruleManager = rulemanager.CreateRuleManagerMock()
 		malwareManager = malwaremanager.CreateMalwareManagerMock()
-		objCache = objectcache.NewObjectCacheMock()
-		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
 	}
 
 	// Create the network and DNS managers

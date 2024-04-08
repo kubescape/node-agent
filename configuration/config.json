@@ -1,5 +1,6 @@
 {
   "applicationProfileServiceEnabled": true,
+  "malwareDetectionEnabled": true,
   "fullPathTracingEnabled": true,
   "networkServiceEnabled": true,
   "relevantCVEServiceEnabled": true,

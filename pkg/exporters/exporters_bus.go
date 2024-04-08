@@ -11,11 +11,11 @@ import (
 
 type ExportersConfig struct {
 	StdoutExporter           *bool               `mapstructure:"stdoutExporter"`
-	AlertManagerExporterUrls []string            `mapstructure:"alertManagerExporterUrls"`
+	HTTPExporterConfig       *HTTPExporterConfig `mapstructure:"httpExporterConfig"`
 	SyslogExporter           string              `mapstructure:"syslogExporterURL"`
 	CsvRuleExporterPath      string              `mapstructure:"CsvRuleExporterPath"`
 	CsvMalwareExporterPath   string              `mapstructure:"CsvMalwareExporterPath"`
-	HTTPExporterConfig       *HTTPExporterConfig `mapstructure:"httpExporterConfig"`
+	AlertManagerExporterUrls []string            `mapstructure:"alertManagerExporterUrls"`
 }
 
 // This file will contain the single point of contact for all exporters,

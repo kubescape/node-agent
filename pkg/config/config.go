@@ -12,16 +12,17 @@ const PodNameEnvVar = "POD_NAME"
 const NamespaceEnvVar = "NAMESPACE_NAME"
 
 type Config struct {
+	Exporters                exporters.ExportersConfig `mapstructure:"exporters"`
+	InitialDelay             time.Duration             `mapstructure:"initialDelay"`
+	MaxSniffingTime          time.Duration             `mapstructure:"maxSniffingTimePerContainer"`
+	UpdateDataPeriod         time.Duration             `mapstructure:"updateDataPeriod"`
 	EnableFullPathTracing    bool                      `mapstructure:"fullPathTracingEnabled"`
 	EnableApplicationProfile bool                      `mapstructure:"applicationProfileServiceEnabled"`
+	EnableMalwareDetection   bool                      `mapstructure:"malwareDetectionEnabled"`
 	EnablePrometheusExporter bool                      `mapstructure:"prometheusExporterEnabled"`
 	EnableRuntimeDetection   bool                      `mapstructure:"runtimeDetectionEnabled"`
 	EnableNetworkTracing     bool                      `mapstructure:"networkServiceEnabled"`
 	EnableRelevancy          bool                      `mapstructure:"relevantCVEServiceEnabled"`
-	InitialDelay             time.Duration             `mapstructure:"initialDelay"`
-	MaxSniffingTime          time.Duration             `mapstructure:"maxSniffingTimePerContainer"`
-	UpdateDataPeriod         time.Duration             `mapstructure:"updateDataPeriod"`
-	Exporters                exporters.ExportersConfig `mapstructure:"exporters"`
 }
 
 // LoadConfig reads configuration from file or environment variables.

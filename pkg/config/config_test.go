@@ -22,6 +22,7 @@ func TestLoadConfig(t *testing.T) {
 			want: Config{
 				EnableFullPathTracing:    true,
 				EnableApplicationProfile: true,
+				EnableMalwareDetection:   true,
 				EnableRelevancy:          true,
 				EnableNetworkTracing:     true,
 				InitialDelay:             2 * time.Minute,
