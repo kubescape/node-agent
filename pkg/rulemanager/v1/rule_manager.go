@@ -452,9 +452,7 @@ func (rm *RuleManager) isCached(namespace, name string) bool {
 		if !rm.objectCache.K8sObjectCache().IsCached("Pod", namespace, name) {
 			return fmt.Errorf("pod %s/%s not found in K8sObjectCache", namespace, name)
 		}
-		// if !rm.ruleBindingCache.IsCached("Pod", namespace, name) {
-		// 	return fmt.Errorf("pod %s/%s not found in ruleBindingCache", namespace, name)
-		// }
+
 		return nil
 	}, backoff.NewExponentialBackOff()); err != nil {
 		return false
