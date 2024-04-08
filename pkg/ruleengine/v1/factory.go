@@ -25,10 +25,13 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R1004ExecFromMountRuleDescriptor,
 			R1005FilelessExecutionRuleDescriptor,
 			R1006UnshareSyscallRuleDescriptor,
-			R1007CryptoMinersRuleDescriptor,
+			R1007XMRCryptoMiningRuleDescriptor,
+			R1008CryptoMiningDomainCommunicationRuleDescriptor,
+			R1009CryptoMiningRelatedPortRuleDescriptor,
 		},
 	}
 }
+
 func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []ruleengine.RuleEvaluator {
 	var rules []ruleengine.RuleEvaluator
 	for _, rule := range r.ruleDescriptions {
@@ -38,6 +41,7 @@ func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []ruleengine.RuleEval
 	}
 	return rules
 }
+
 func (r *RuleCreatorImpl) CreateRuleByID(id string) ruleengine.RuleEvaluator {
 	for _, rule := range r.ruleDescriptions {
 		if rule.ID == id {
