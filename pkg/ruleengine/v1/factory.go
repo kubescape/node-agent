@@ -23,6 +23,7 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R1002LoadKernelModuleRuleDescriptor,
 			R1003MaliciousSSHConnectionRuleDescriptor,
 			R1004ExecFromMountRuleDescriptor,
+			R1005FilelessExecutionRuleDescriptor,
 			R1006UnshareSyscallRuleDescriptor,
 			R1007CryptoMinersRuleDescriptor,
 		},
