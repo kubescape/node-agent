@@ -26,7 +26,7 @@ var R1009CryptoMiningRelatedPortRuleDescriptor = RuleDescriptor{
 	Name:        R1009Name,
 	Description: "Detecting Crypto Miners by suspicious port usage.",
 	Tags:        []string{"network", "crypto", "miners", "malicious"},
-	Priority:    RulePriorityCritical,
+	Priority:    RulePriorityLow,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{
 			utils.NetworkEventType,
