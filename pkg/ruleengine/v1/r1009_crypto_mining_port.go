@@ -13,7 +13,7 @@ import (
 
 const (
 	R1009ID   = "R1009"
-	R1009Name = "Crypto Mining Related Port"
+	R1009Name = "Crypto Mining Related Port Communication"
 )
 
 var CommonlyUsedCryptoMinersPorts = []uint16{
