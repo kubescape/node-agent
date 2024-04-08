@@ -8,7 +8,12 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+const (
+	prometheusRuleIdLabel = "rule_id"
 )
 
 var _ metricsmanager.MetricsManager = (*prometheusMetric)(nil)
@@ -22,82 +27,52 @@ type prometheusMetric struct {
 	ebpfCapabilityCounter prometheus.Counter
 	ebpfRandomXCounter    prometheus.Counter
 	ebpfFailedCounter     prometheus.Counter
-	ruleCounter           prometheus.Counter
-	alertCounter          prometheus.Counter
+	ruleCounter           *prometheus.CounterVec
+	alertCounter          *prometheus.CounterVec
 }
 
 func NewPrometheusMetric() *prometheusMetric {
-	ebpfExecCounter := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "kubescape_exec_counter",
-		Help: "The total number of exec events received from the eBPF probe",
-	})
-	prometheus.MustRegister(ebpfExecCounter)
-
-	ebpfOpenCounter := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "kubescape_open_counter",
-		Help: "The total number of open events received from the eBPF probe",
-	})
-	prometheus.MustRegister(ebpfOpenCounter)
-
-	ebpfNetworkCounter := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "kubescape_network_counter",
-		Help: "The total number of network events received from the eBPF probe",
-	})
-	prometheus.MustRegister(ebpfNetworkCounter)
-
-	ebpfDNSCounter := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "kubescape_dns_counter",
-		Help: "The total number of DNS events received from the eBPF probe",
-	})
-	prometheus.MustRegister(ebpfDNSCounter)
-
-	ebpfSyscallCounter := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "kubescape_syscall_counter",
-		Help: "The total number of syscall events received from the eBPF probe",
-	})
-	prometheus.MustRegister(ebpfSyscallCounter)
-
-	ebpfCapabilityCounter := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "kubescape_capability_counter",
-		Help: "The total number of capability events received from the eBPF probe",
-	})
-	prometheus.MustRegister(ebpfCapabilityCounter)
-
-	ebpfRandomXCounter := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "kubescape_randomx_counter",
-		Help: "The total number of randomx events received from the eBPF probe",
-	})
-	prometheus.MustRegister(ebpfRandomXCounter)
-
-	ruleCounter := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "kubescape_rule_counter",
-		Help: "The total number of rules processed by the engine",
-	})
-	prometheus.MustRegister(ruleCounter)
-
-	alertCounter := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "kubescape_alert_counter",
-		Help: "The total number of alerts sent by the engine",
-	})
-	prometheus.MustRegister(alertCounter)
-
-	ebpfFailedCounter := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "kubescape_ebpf_event_failure_counter",
-		Help: "The total number of failed events received from the eBPF probe",
-	})
-	prometheus.MustRegister(ebpfFailedCounter)
-
 	return &prometheusMetric{
-		ebpfExecCounter:       ebpfExecCounter,
-		ebpfOpenCounter:       ebpfOpenCounter,
-		ebpfNetworkCounter:    ebpfNetworkCounter,
-		ebpfDNSCounter:        ebpfDNSCounter,
-		ebpfSyscallCounter:    ebpfSyscallCounter,
-		ebpfCapabilityCounter: ebpfCapabilityCounter,
-		ebpfRandomXCounter:    ebpfRandomXCounter,
-		ebpfFailedCounter:     ebpfFailedCounter,
-		ruleCounter:           ruleCounter,
-		alertCounter:          alertCounter,
+		ebpfExecCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_exec_counter",
+			Help: "The total number of exec events received from the eBPF probe",
+		}),
+		ebpfOpenCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_open_counter",
+			Help: "The total number of open events received from the eBPF probe",
+		}),
+		ebpfNetworkCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_network_counter",
+			Help: "The total number of network events received from the eBPF probe",
+		}),
+		ebpfDNSCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_dns_counter",
+			Help: "The total number of DNS events received from the eBPF probe",
+		}),
+		ebpfSyscallCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_syscall_counter",
+			Help: "The total number of syscall events received from the eBPF probe",
+		}),
+		ebpfCapabilityCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_capability_counter",
+			Help: "The total number of capability events received from the eBPF probe",
+		}),
+		ebpfRandomXCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_randomx_counter",
+			Help: "The total number of randomx events received from the eBPF probe",
+		}),
+		ebpfFailedCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_ebpf_event_failure_counter",
+			Help: "The total number of failed events received from the eBPF probe",
+		}),
+		ruleCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "node_agent_rule_counter",
+			Help: "The total number of rules processed by the engine",
+		}, []string{prometheusRuleIdLabel}),
+		alertCounter: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "node_agent_alert_counter",
+			Help: "The total number of alerts sent by the engine",
+		}, []string{prometheusRuleIdLabel}),
 	}
 }
 func (p *prometheusMetric) Start() {
@@ -146,9 +121,9 @@ func (p *prometheusMetric) ReportFailedEvent() {
 }
 
 func (p *prometheusMetric) ReportRuleProcessed(ruleID string) {
-	p.ruleCounter.Inc()
+	p.ruleCounter.With(prometheus.Labels{prometheusRuleIdLabel: ruleID}).Inc()
 }
 
 func (p *prometheusMetric) ReportRuleAlert(ruleID string) {
-	p.alertCounter.Inc()
+	p.alertCounter.With(prometheus.Labels{prometheusRuleIdLabel: ruleID}).Inc()
 }
