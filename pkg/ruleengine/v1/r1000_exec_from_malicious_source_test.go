@@ -71,4 +71,12 @@ func TestR1000ExecFromMaliciousSource(t *testing.T) {
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult since exec is malicious")
 	}
+
+	e.Cwd = "/run"
+	e.Comm = "./run.sh"
+
+	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	if ruleResult == nil {
+		t.Errorf("Expected ruleResult since exec is malicious")
+	}
 }
