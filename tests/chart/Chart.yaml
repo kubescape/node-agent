@@ -1,0 +1,6 @@
+apiVersion: v2
+name: node-agent
+description: A Helm chart for testing purposes of the Node Agent component
+type: application
+version: 1.0.0
+appVersion: 1.0.0

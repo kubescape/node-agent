@@ -54,12 +54,11 @@ helm install prometheus prometheus-community/kube-prometheus-stack \
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=prometheus -n monitoring --timeout=300s || error_exit "Prometheus did not start."
 
 # Install kubescape app profile
-helm install kubecop chart/kubecop --set kubecop.prometheusExporter.enabled=true --set kubecop.pprofserver.enabled=true --set clamAV.enabled=true \
-    -f resources/system-tests/kubecop-values.yaml \
-    -n kubescape --create-namespace --wait --timeout 5m || error_exit "Failed to install kubecop."
+helm upgrade --install kubescape ../chart --set clusterName=`kubectl config current-context` \
+    -n kubescape --create-namespace --wait --timeout 5m || error_exit "Failed to install node-agent chart."
 
-# Check that the kubecop pod is running
-kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=kubecop -n kubescape --timeout=300s || error_exit "Kubecop did not start."
+# Check that the node-agent pod is running
+kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=node-agent -n kubescape --timeout=300s || error_exit "Node Agent did not start."
 
 echo "System test cluster setup complete."
 

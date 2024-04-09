@@ -58,7 +58,7 @@ test_cases = [
 class TestFramework:
     def __init__(self):
         toplevel = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], universal_newlines=True).strip()
-        self.root_directory = os.path.join(toplevel, "system-tests")
+        self.root_directory = os.path.join(toplevel, "tests", "component-tests")
         print("Root directory: %s" % self.root_directory)
 
     def get_root_directoty(self):

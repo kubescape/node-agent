@@ -1,4 +1,4 @@
-name: KubeCop System Test
+name: Node Agent Component Test
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ env:
   GKE_TEST_PROJECT: ${{ vars.GKE_TEST_PROJECT }}
 
 jobs:
-  system-tests:
+  component-tests:
     runs-on: ubuntu-latest
     # Run on specific label or if running under act
     if: github.event.label.name == 'requires-system-test' || contains(github.event.pull_request.labels.*.name, 'requires-system-test')|| github.actor == 'nektos/act'
@@ -26,7 +26,7 @@ jobs:
     - name: Login to Quay.io
       uses: docker/login-action@v3
       with:
-        registry: quay.io/armosec
+        registry: quay.io/kubescape
         username: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
         password: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
 
@@ -34,9 +34,9 @@ jobs:
       run: |
         COMMIT_HASH=$(git rev-parse --short HEAD)
         export IMAGE_TAG=test-${COMMIT_HASH}
-        export IMAGE_REPO=quay.io/armosec/kubecop
+        export IMAGE_REPO=quay.io/kubescape/node-agent
         echo ${IMAGE_REPO} > test-image-repo.txt
-        export IMAGE_NAME=quay.io/armosec/kubecop:${IMAGE_TAG}
+        export IMAGE_NAME=quay.io/kubescape/node-agent:${IMAGE_TAG}
         echo "${IMAGE_TAG}" > test-image-tag.txt
         make build-image-and-push
 
@@ -86,24 +86,21 @@ jobs:
         helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --set grafana.enabled=false --namespace monitoring --create-namespace --wait --timeout 5m
         # Check that the prometheus pod is running
         kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=prometheus -n monitoring --timeout=300s
-        echo "prometheus" >> cleanup.txt
 
-    - name: Install KubeCop
+    - name: Install Node Agent Chart
       run: |
-        echo "crd" >> cleanup.txt
-        helm upgrade --install kubecop chart/kubecop --set image.tag=$(cat test-image-tag.txt) --set image.repository=$(cat test-image-repo.txt) --set kubecop.recording.finalizationDuration=120s -f resources/system-tests/kubecop-values.yaml -n kubescape --create-namespace --wait --timeout 5m --debug
-        # Check that the kubecop pod is running
-        kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=kubecop -n kubescape --timeout=300s
+        helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=$(cat test-image-tag.txt) --set nodeAgent.image.repository=$(cat test-image-repo.txt) -n kubescape --create-namespace --wait --timeout 5m --debug
+        # Check that the node-agent pod is running
+        kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=node-agent -n kubescape --timeout=300s
         sleep 5
-        echo "kubecop" >> cleanup.txt
 
     - name: Install python dependencies
       run: |
-        pip install -r system-tests/requirements.txt
+        pip install -r tests/component-tests/requirements.txt
 
-    - name: Run System Tests
+    - name: Run Component Tests
       run: |
-        ./scripts/run-system-tests.sh
+        ./tests/scripts/run-component-tests.sh
 
     - name: Upload plot images
       if: always()
@@ -134,16 +131,16 @@ jobs:
             body: comment
           });
 
-    - name: Cleanup
-      if: always()
-      run: |
-        # If it is a kind cluster, delete it
-        if [ -f kind ]; then
-          ./kind delete cluster
-        else
-          helm uninstall kubecop -n kubescape || echo "Failed to uninstall kubecop"
-          kubectl delete ns kubescape || echo "Failed to delete namespace kubescape"
-          kubectl delete -f ./chart/kubecop/crds/app-profile.crd.yaml -f ./chart/kubecop/charts/clustered-crds/crds/runtime-rule-binding.crd.yaml || echo "Failed to delete crd"
-          helm uninstall prometheus -n monitoring || echo "Failed to uninstall prometheus"
-          kubectl delete ns monitoring || echo "Failed to delete namespace monitoring"
-        fi
+    # - name: Cleanup
+    #   if: always()
+    #   run: |
+    #     # If it is a kind cluster, delete it
+    #     if [ -f kind ]; then
+    #       ./kind delete cluster
+    #     else
+    #       helm uninstall kubescape -n kubescape || echo "Failed to uninstall kubecop"
+    #       kubectl delete ns kubescape || echo "Failed to delete namespace kubescape"
+    #       kubectl delete -f ./chart/kubecop/crds/app-profile.crd.yaml -f ./chart/kubecop/charts/clustered-crds/crds/runtime-rule-binding.crd.yaml || echo "Failed to delete crd"
+    #       helm uninstall prometheus -n monitoring || echo "Failed to uninstall prometheus"
+    #       kubectl delete ns monitoring || echo "Failed to delete namespace monitoring"
+    #     fi

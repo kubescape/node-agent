@@ -21,7 +21,7 @@ if ! curl -s http://localhost:9090/api/v1/query?query=up  > /dev/null; then
   exit 1
 fi
 
-python3 system-tests/run.py
+python3 tests/component-tests/run.py
 test_result=$?
 
 kill $ALERT_MANAGER_PORT_PID

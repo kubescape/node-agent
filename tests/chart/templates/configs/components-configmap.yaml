@@ -1,0 +1,16 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ks-capabilities
+  namespace: {{ .Values.ksNamespace }}
+  labels:
+    app: ks-capabilities
+    tier: {{ .Values.global.namespaceTier }}
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  capabilities: |
+    {
+      "capabilities": {{- .Values.capabilities | toJson }},
+      "configurations": {{- .Values.configurations | toJson }}
+    }
