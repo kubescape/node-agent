@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"fmt"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
@@ -182,7 +183,7 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 				TriggerEvent: dnsEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
 					RuleID:          rule.ID(),
-					RuleDescription: "Crypto mining domain communication",
+					RuleDescription: fmt.Sprintf("Communication with a known crypto mining domain: %s in: %s", dnsEvent.DNSName, dnsEvent.GetContainer()),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}

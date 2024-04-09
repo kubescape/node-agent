@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"fmt"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
@@ -81,7 +82,7 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 			TriggerEvent: syscallEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleID:          rule.ID(),
-				RuleDescription: "Kernel Module Load",
+				RuleDescription: fmt.Sprintf("Kernel module load syscall (init_module) was called in: %s", syscallEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}

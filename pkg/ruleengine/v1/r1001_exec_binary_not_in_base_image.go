@@ -79,7 +79,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 			TriggerEvent: execEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleID:          rule.ID(),
-				RuleDescription: fmt.Sprintf("Process image \"%s\" binary is not from the container image \"%s\"", getExecPathFromEvent(execEvent), execEvent.GetContainerImageName()),
+				RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is not part of the image", execEvent.Comm, execEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}

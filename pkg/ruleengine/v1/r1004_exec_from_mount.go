@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"fmt"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
@@ -88,7 +89,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 				TriggerEvent: execEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
 					RuleID:          rule.ID(),
-					RuleDescription: "Exec from mount",
+					RuleDescription: fmt.Sprintf("Process (%s) was executed from a mounted path (%s) in: %s", p, mount, execEvent.GetContainer()),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}
