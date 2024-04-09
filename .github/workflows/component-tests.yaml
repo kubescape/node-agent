@@ -38,7 +38,7 @@ jobs:
         echo ${IMAGE_REPO} > test-image-repo.txt
         export IMAGE_NAME=quay.io/kubescape/node-agent:${IMAGE_TAG}
         echo "${IMAGE_TAG}" > test-image-tag.txt
-        make build-image-and-push
+        make docker-build TAG=${IMAGE_TAG} IMAGE=${IMAGE_REPO} && make docker-push TAG=${IMAGE_TAG} IMAGE=${IMAGE_REPO}
 
     - name: Check what K8s cluster to use
       id: check-act
