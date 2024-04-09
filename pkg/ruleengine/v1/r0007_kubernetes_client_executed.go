@@ -132,11 +132,14 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 		}
 	}
 
-	if slices.Contains(kubernetesClients, filepath.Base(execPath)) {
+	if slices.Contains(kubernetesClients, filepath.Base(execPath)) || slices.Contains(kubernetesClients, event.ExePath) {
 		isPartOfImage := !event.UpperLayer
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
+				AlertName: rule.Name(),
+				Arguments: map[string]interface{}{
+					"hardlink": event.ExePath,
+				},
 				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 				Severity:       R0007KubernetesClientExecutedDescriptor.Priority,
 				IsPartOfImage:  &isPartOfImage,

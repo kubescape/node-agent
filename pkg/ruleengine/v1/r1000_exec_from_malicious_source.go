@@ -65,11 +65,6 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 		"/proc/self",
 	}
 
-	// /proc/self/fd/<n> is classic way to hide malicious execs
-	// (see ezuri packer for example)
-	// Here it would be even more interesting to check if the fd
-	// is memory mapped file
-
 	// The assumption here is that the event path is absolute!
 	execPath := getExecPathFromEvent(execEvent)
 	if strings.HasPrefix(execPath, "./") || strings.HasPrefix(execPath, "../") {
@@ -80,11 +75,14 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 	execPath = filepath.Dir(execPath)
 	for _, maliciousExecPathPrefix := range maliciousExecPathPrefixes {
 		// if the exec path or the current dir is from a malicious source
-		if strings.HasPrefix(execPath, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) {
+		if strings.HasPrefix(execPath, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.ExePath, maliciousExecPathPrefix) {
 			isPartOfImage := !execEvent.UpperLayer
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName:      rule.Name(),
+					AlertName: rule.Name(),
+					Arguments: map[string]interface{}{
+						"hardlink": execEvent.ExePath,
+					},
 					FixSuggestions: "If this is a legitimate action, please add consider removing this workload from the binding of this rule.",
 					Severity:       R1000ExecFromMaliciousSourceDescriptor.Priority,
 					IsPartOfImage:  &isPartOfImage,

@@ -67,13 +67,15 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 
 	for _, mount := range mounts {
 		p := getExecPathFromEvent(execEvent)
-		contained := rule.isPathContained(p, mount)
-		if contained {
+		if rule.isPathContained(p, mount) || rule.isPathContained(execEvent.ExePath, p) {
 			logger.L().Debug("Exec from mount", helpers.String("path", p), helpers.String("mount", mount))
 			isPartOfImage := !execEvent.UpperLayer
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName:      rule.Name(),
+					AlertName: rule.Name(),
+					Arguments: map[string]interface{}{
+						"hardlink": execEvent.ExePath,
+					},
 					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
 					Severity:       R1004ExecFromMountRuleDescriptor.Priority,
 					IsPartOfImage:  &isPartOfImage,

@@ -37,7 +37,7 @@ func (ch *IGContainerWatcher) startExecTracing() error {
 		}
 	}()
 
-	tracerExec, err := tracerexec.NewTracer(&tracerexec.Config{MountnsMap: execMountnsmap}, ch.containerCollection, ch.execEventCallback)
+	tracerExec, err := tracerexec.NewTracer(&tracerexec.Config{MountnsMap: execMountnsmap, GetPaths: true}, ch.containerCollection, ch.execEventCallback)
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
