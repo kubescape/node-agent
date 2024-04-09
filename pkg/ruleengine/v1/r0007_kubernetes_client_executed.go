@@ -152,7 +152,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 			TriggerEvent: event.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleID:          rule.ID(),
-				RuleDescription: fmt.Sprintf("Kubernetes client executed: %s", event.Comm),
+				RuleDescription: fmt.Sprintf("Kubernetes client %s was executed in: %s", execPath, event.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}

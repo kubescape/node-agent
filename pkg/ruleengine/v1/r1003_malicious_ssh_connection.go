@@ -2,7 +2,6 @@ package ruleengine
 
 import (
 	"fmt"
-	"log"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
@@ -164,7 +163,7 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 				TriggerEvent: networkEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
 					RuleID:          rule.ID(),
-					RuleDescription: fmt.Sprintf("ssh connection to port %d is not allowed", networkEvent.Port),
+					RuleDescription: fmt.Sprintf("SSH connection to disallowed port %d", networkEvent.Port),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}
@@ -185,7 +184,6 @@ func calculateTimestampDiffInSeconds(timestamp1 int64, timestamp2 int64) int64 {
 func IsSSHConfigFile(path string) bool {
 	for _, sshFile := range SSHRelatedFiles {
 		if strings.Contains(path, sshFile) {
-			log.Printf("Found SSH related file: %s\n", path)
 			return true
 		}
 	}

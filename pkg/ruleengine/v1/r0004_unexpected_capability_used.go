@@ -96,7 +96,7 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		TriggerEvent: capEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
 			RuleID:          rule.ID(),
-			RuleDescription: fmt.Sprintf("Unexpected capability used (capability %s used in syscall %s)", capEvent.CapName, capEvent.Syscall),
+			RuleDescription: fmt.Sprintf("Unexpected capability used (capability %s used in syscall %s) in: %s", capEvent.CapName, capEvent.Syscall, capEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 	}

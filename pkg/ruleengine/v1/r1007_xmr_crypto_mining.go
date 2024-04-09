@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"fmt"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
@@ -76,7 +77,7 @@ func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event 
 			TriggerEvent: randomXEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleID:          rule.ID(),
-				RuleDescription: "XMR Crypto Mining detected by randomx algorithm usage.",
+				RuleDescription: fmt.Sprintf("XMR Crypto Miner process: (%s) executed in: %s", randomXEvent.Comm, randomXEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}

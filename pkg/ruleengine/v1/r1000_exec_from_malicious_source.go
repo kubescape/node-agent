@@ -100,7 +100,7 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 				TriggerEvent: execEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
 					RuleID:          rule.ID(),
-					RuleDescription: fmt.Sprintf("exec call \"%s\" is from a malicious source \"%s\"", execPath, maliciousExecPathPrefix),
+					RuleDescription: fmt.Sprintf("Execution from malicious source: %s in: %s", execPath, execEvent.GetContainer()),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}

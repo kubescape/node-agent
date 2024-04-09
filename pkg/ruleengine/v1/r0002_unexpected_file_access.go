@@ -181,7 +181,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 		TriggerEvent: openEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
 			RuleID:          rule.ID(),
-			RuleDescription: fmt.Sprintf("Unexpected file access: %s with flags %v", openEvent.Path, openEvent.Flags),
+			RuleDescription: fmt.Sprintf("Unexpected file access: %s with flags %s in: %s", openEvent.Path, strings.Join(openEvent.Flags, ","), openEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 	}

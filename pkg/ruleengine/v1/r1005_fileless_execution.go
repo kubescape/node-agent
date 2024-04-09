@@ -89,7 +89,7 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 			TriggerEvent: syscallEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleID:          rule.ID(),
-				RuleDescription: "memfd_create syscall detected",
+				RuleDescription: fmt.Sprintf("Fileless execution detected: syscall memfd_create executed in: %s", syscallEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}

@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"fmt"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
@@ -83,7 +84,7 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event i
 			TriggerEvent: syscallEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleID:          rule.ID(),
-				RuleDescription: "Unshare System Call usage",
+				RuleDescription: fmt.Sprintf("unshare system call executed in %s", syscallEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}

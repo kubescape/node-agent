@@ -102,7 +102,7 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 		TriggerEvent: syscallEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
 			RuleID:          rule.ID(),
-			RuleDescription: "Unexpected system call: " + syscallEvent.SyscallName,
+			RuleDescription: fmt.Sprintf("Unexpected system call: %s in: %s", syscallEvent.SyscallName, syscallEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 	}
