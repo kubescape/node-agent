@@ -6,20 +6,10 @@ on:
       - '**/*.md'
     types: [labeled, synchronize, ready_for_review, opened, reopened]
 
-env:
-  GKE_TEST_CLUSTER: ${{ vars.GKE_TEST_CLUSTER }}
-  GKE_TEST_ZONE: ${{ vars.GKE_TEST_ZONE }}
-  GKE_TEST_PROJECT: ${{ vars.GKE_TEST_PROJECT }}
-
 jobs:
   component-tests:
     runs-on: ubuntu-latest
-    # Run on specific label or if running under act
-    if: github.event.label.name == 'requires-system-test' || contains(github.event.pull_request.labels.*.name, 'requires-system-test')|| github.actor == 'nektos/act'
-    environment: gke-cluster-env
-    concurrency:
-      group: gke-cluster-lock
-      cancel-in-progress: false
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -40,31 +30,7 @@ jobs:
         echo "${IMAGE_TAG}" > test-image-tag.txt
         make docker-build TAG=${IMAGE_TAG} IMAGE=${IMAGE_REPO} && make docker-push TAG=${IMAGE_TAG} IMAGE=${IMAGE_REPO}
 
-    - name: Check what K8s cluster to use
-      id: check-act
-      run: |
-        if [ -z $ACT ]; then
-        echo 'K8S_TYPE=GKE' >> $GITHUB_OUTPUT
-        else
-          echo $ACT
-          echo 'K8S_TYPE=kind'  >> $GITHUB_OUTPUT
-        fi
-
-    - name: Set up Google Cloud
-      if: ${{ steps.check-act.outputs.K8S_TYPE == 'GKE' }}
-      uses: google-github-actions/setup-gcloud@v0.2.0
-      with:
-        service_account_key: ${{ secrets.GKE_SA_KEY }}
-        project_id: ${{ vars.GKE_TEST_PROJECT }}
-
-    - name: Connect to GKE cluster
-      if: ${{ steps.check-act.outputs.K8S_TYPE == 'GKE' }}
-      run: |
-        gcloud components install --quiet kubectl
-        gcloud container clusters get-credentials ${{ vars.GKE_TEST_CLUSTER }} --zone ${{ vars.GKE_TEST_ZONE }} --project ${{ vars.GKE_TEST_PROJECT }} || echo "Failed to connect to GKE cluster"
-
     - name: Set up Kind
-      if: ${{ steps.check-act.outputs.K8S_TYPE == 'kind' }}
       run: |
         curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-$(uname)-amd64
         chmod +x ./kind
@@ -131,15 +97,8 @@ jobs:
             body: comment
           });
 
-    - name: Cleanup
-      if: always()
-      run: |
-        # If it is a kind cluster, delete it
-        if [ -f kind ]; then
-          ./kind delete cluster
-        else
-          helm uninstall kubescape -n kubescape || echo "Failed to uninstall node agent"
-          kubectl delete ns kubescape || echo "Failed to delete namespace kubescape"
-          helm uninstall prometheus -n monitoring || echo "Failed to uninstall prometheus"
-          kubectl delete ns monitoring || echo "Failed to delete namespace monitoring"
-        fi
+    # - name: Cleanup
+    #   if: always()
+    #   run: |
+    #     # If it is a kind cluster, delete it
+    #     ./kind delete cluster
