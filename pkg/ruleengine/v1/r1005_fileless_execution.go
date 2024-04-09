@@ -111,11 +111,19 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 	}
 	execPath = filepath.Dir(execPath)
 
-	if strings.HasPrefix(execPath, "/proc/self/fd") || strings.HasPrefix(execEvent.Cwd, "/proc/self/fd") {
+	// /proc/self/fd/<n> is classic way to hide malicious execs
+	// (see ezuri packer for example)
+	// Here it would be even more interesting to check if the fd
+	// is memory mapped file
+
+	if strings.HasPrefix(execPath, "/proc/self/fd") || strings.HasPrefix(execEvent.Cwd, "/proc/self/fd") || strings.HasPrefix(execEvent.ExePath, "/proc/self/fd") {
 		isPartOfImage := !execEvent.UpperLayer
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
+				AlertName: rule.Name(),
+				Arguments: map[string]interface{}{
+					"hardlink": execEvent.ExePath,
+				},
 				FixSuggestions: "If this is a legitimate action, please add consider removing this workload from the binding of this rule.",
 				Severity:       R1005FilelessExecutionRuleDescriptor.Priority,
 				IsPartOfImage:  &isPartOfImage,
