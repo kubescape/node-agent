@@ -86,7 +86,6 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 }
 
 func (rm *RuleManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	syscallTicker := time.NewTicker(5 * time.Second)
 	var pod *corev1.Pod
 	if err := backoff.Retry(func() error {
 		p, err := rm.k8sClient.GetKubernetesClient().CoreV1().Pods(container.K8s.Namespace).Get(ctx, container.K8s.PodName, metav1.GetOptions{})
@@ -99,7 +98,10 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 		logger.L().Ctx(ctx).Error("RuleManager - failed to get pod", helpers.Error(err),
 			helpers.String("namespace", container.K8s.Namespace),
 			helpers.String("name", container.K8s.PodName))
+		// failed to get pod
+		return err
 	}
+	syscallTicker := time.NewTicker(5 * time.Second)
 
 	for {
 		select {
@@ -108,20 +110,21 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 				logger.L().Error("RuleManager - syscallPeekFunc is not set", helpers.String("container ID", watchedContainer.ContainerID))
 				continue
 			}
+
 			if watchedContainer.NsMntId == 0 {
 				logger.L().Error("RuleManager - mount namespace ID is not set", helpers.String("container ID", watchedContainer.ContainerID))
 			}
-			syscalls, err := rm.syscallPeekFunc(watchedContainer.NsMntId)
-			if err != nil {
-				logger.L().Ctx(ctx).Error("RuleManager - failed to get syscalls", helpers.Error(err),
-					helpers.String("container ID", watchedContainer.ContainerID),
-					helpers.String("k8s workload", watchedContainer.K8sContainerID))
-				return err
+
+			var syscalls []string
+			if syscallsFromFunc, err := rm.syscallPeekFunc(watchedContainer.NsMntId); err == nil {
+				syscalls = syscallsFromFunc
 			}
+
 			if !rm.isCached(pod.GetNamespace(), pod.GetName()) {
 				logger.L().Error("isCached - failed to get pod from cache", helpers.String("namespace", pod.GetNamespace()), helpers.String("name", pod.GetName()))
 				continue
 			}
+
 			rules := rm.ruleBindingCache.ListRulesForPod(pod.GetNamespace(), pod.GetName())
 			for _, syscall := range syscalls {
 				event := ruleenginetypes.SyscallEvent{

@@ -11,7 +11,6 @@ import (
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
-	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -233,19 +232,13 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	var toSaveSyscalls []string
 
 	if am.syscallPeekFunc != nil {
-		observedSyscalls, err = am.syscallPeekFunc(watchedContainer.NsMntId)
-		if err != nil && !strings.Contains(err.Error(), "no syscall found") {
-			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get syscalls", helpers.Error(err),
-				helpers.String("slug", slug),
-				helpers.Int("container index", watchedContainer.ContainerIndex),
-				helpers.String("container ID", watchedContainer.ContainerID),
-				helpers.String("k8s workload", watchedContainer.K8sContainerID))
-		}
-		// check if we have new activities to save
-		savedSyscalls := am.savedSyscalls.Get(watchedContainer.K8sContainerID)
-		toSaveSyscallsSet := mapset.NewSet[string](observedSyscalls...).Difference(savedSyscalls)
-		if !toSaveSyscallsSet.IsEmpty() {
-			toSaveSyscalls = toSaveSyscallsSet.ToSlice()
+		if observedSyscalls, err = am.syscallPeekFunc(watchedContainer.NsMntId); err == nil {
+			// check if we have new activities to save
+			savedSyscalls := am.savedSyscalls.Get(watchedContainer.K8sContainerID)
+			toSaveSyscallsSet := mapset.NewSet[string](observedSyscalls...).Difference(savedSyscalls)
+			if !toSaveSyscallsSet.IsEmpty() {
+				toSaveSyscalls = toSaveSyscallsSet.ToSlice()
+			}
 		}
 	}
 
