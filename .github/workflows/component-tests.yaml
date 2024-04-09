@@ -56,7 +56,6 @@ jobs:
     - name: Install Node Agent Chart
       run: |
         helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=$(cat test-image-tag.txt) --set nodeAgent.image.repository=$(cat test-image-repo.txt) -n kubescape --create-namespace --wait --timeout 5m --debug
-        sleep 5
         # Check that the node-agent pod is running
         kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=node-agent -n kubescape --timeout=300s
         sleep 5
