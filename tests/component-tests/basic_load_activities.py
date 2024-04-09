@@ -40,7 +40,7 @@ def basic_load_activities(test_framework):
 
         time_end= time.time()
 
-        # Get the average CPU usage of KubeCop
-        cpu_usage = test_framework.get_average_cpu_usage(namespace='kubescape', workload="kubecop", time_start=time_start, time_end=time_end)
+        # Get the average CPU usage of Node Agent
+        cpu_usage = test_framework.get_average_cpu_usage(namespace='kubescape', workload="node-agent", time_start=time_start, time_end=time_end)
 
-        assert cpu_usage < 0.1, f"CPU usage of KubeCop is too high. CPU usage is {cpu_usage}"
+        assert cpu_usage < 0.1, f"CPU usage of Node Agent is too high. CPU usage is {cpu_usage}"

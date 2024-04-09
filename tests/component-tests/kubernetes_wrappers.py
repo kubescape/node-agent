@@ -7,7 +7,7 @@ class Namespace:
     def __init__(self, name):
         if name == None:
             # Generate a random namespace name
-            self.ns_name = "kubecop-test-" + ''.join(random.choice(string.ascii_lowercase) for i in range(4))
+            self.ns_name = "node-agent-test-" + ''.join(random.choice(string.ascii_lowercase) for i in range(4))
         else:
             self.ns_name = name
         # Create namespace

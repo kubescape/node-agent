@@ -25,10 +25,10 @@ def plotprom_cpu_usage(test_case_name,time_start, time_end, steps = '1s'):
     print("Ploting test %s from %s to %s" % (test_case_name, time_start, time_end))
 
     try:
-        # Get kubecop pod name
-        pod_name = subprocess.check_output(["kubectl", "-n", "kubescape", "get", "pods", "-l", "app.kubernetes.io/name=kubecop", "-o", "jsonpath='{.items[0].metadata.name}'"], universal_newlines=True).strip("'")
+        # Get node-agent pod name
+        pod_name = subprocess.check_output(["kubectl", "-n", "kubescape", "get", "pods", "-l", "app.kubernetes.io/name=node-agent", "-o", "jsonpath='{.items[0].metadata.name}'"], universal_newlines=True).strip("'")
         # Build query
-        query = 'sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{namespace="kubescape", pod="%s",container="kubecop"}) by (container)'%pod_name
+        query = 'sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{namespace="kubescape", pod="%s",container="node-agent"}) by (container)'%pod_name
 
         timestamps, values = send_promql_query_to_prom(test_case_name, query, time_start, time_end, steps)
         values = [float(item) for item in values]
@@ -49,10 +49,10 @@ def plotprom_mem(test_case_name,time_start, time_end, steps = '1s'):
     print("Ploting test %s from %s to %s" % (test_case_name, time_start, time_end))
 
     try:
-        # Get kubecop pod name
-        pod_name = subprocess.check_output(["kubectl", "-n", "kubescape", "get", "pods", "-l", "app.kubernetes.io/name=kubecop", "-o", "jsonpath='{.items[0].metadata.name}'"], universal_newlines=True).strip("'")
+        # Get node-agent pod name
+        pod_name = subprocess.check_output(["kubectl", "-n", "kubescape", "get", "pods", "-l", "app.kubernetes.io/name=node-agent", "-o", "jsonpath='{.items[0].metadata.name}'"], universal_newlines=True).strip("'")
         # Build query
-        query = 'sum(container_memory_working_set_bytes{pod="%s", container="kubecop"}) by (container)'%pod_name
+        query = 'sum(container_memory_working_set_bytes{pod="%s", container="node-agent"}) by (container)'%pod_name
         timestamps, values = send_promql_query_to_prom(test_case_name, query, time_start, time_end, steps)
         # values = [int(item) for item in values]
         return save_plot_png(test_case_name+"_mem", timestamps, values, metric_name='Memory Usage (bytes)')
@@ -62,7 +62,7 @@ def plotprom_mem(test_case_name,time_start, time_end, steps = '1s'):
 
 def save_plot_png(test_case_name, timestamps, values, metric_name):
     plt.plot(timestamps, values)
-    plt.title(f'KubeCop {metric_name} - {test_case_name}')
+    plt.title(f'Node Agent {metric_name} - {test_case_name}')
     plt.xlabel('Time (epoch)')
     plt.ylabel(metric_name)
 

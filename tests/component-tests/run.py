@@ -71,13 +71,13 @@ class TestFramework:
             print("Could not get alerts")
             return 1
 
-        alerts = filter_alerts_by_label(alerts, "alertname", "KubeCopRuleViolated")
+        alerts = filter_alerts_by_label(alerts, "alertname", "KubescapeRuleViolated")
         alerts = filter_alerts_by_label(alerts, "namespace", namespace.name())
 
         return alerts
 
     def get_average_cpu_usage(self, namespace, workload, time_start, time_end):
-        # Get kubecop pod name
+        # Get node-agent pod name
         pod_name = subprocess.check_output(["kubectl", "-n", namespace, "get", "pods", "-l", "app.kubernetes.io/name=%s"%workload, "-o", "jsonpath='{.items[0].metadata.name}'"], universal_newlines=True).strip("'")
         return get_average_cpu_usage(pod_name, time_start, time_end)
 

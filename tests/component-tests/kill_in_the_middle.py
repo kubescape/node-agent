@@ -49,7 +49,7 @@ def kill_process_in_the_middle(test_framework):
     return 0
 
 
-def kill_pod_in_the_middle(namespace="kubecop-test"):
+def kill_pod_in_the_middle(namespace="node-agent-test"):
     print("Running kill pod in the middle test")
     # we want to kill the application before the kaprofile creation is complete
     # we expect to get no applicationprofile created after any period of time
