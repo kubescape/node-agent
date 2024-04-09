@@ -1,14 +1,14 @@
-package networkmanager
+package v1
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"node-agent/pkg/config"
 	"node-agent/pkg/dnsmanager"
 	"node-agent/pkg/k8sclient"
+	"node-agent/pkg/networkmanager"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
@@ -40,19 +40,12 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-const (
-	internalTrafficType = "internal"
-	externalTrafficType = "external"
-	hostPktType         = "HOST"
-	outgoingPktType     = "OUTGOING"
-)
-
 type NetworkManager struct {
 	cfg                           config.Config
 	containerAndPodToWLIDMap      maps.SafeMap[string, string]
 	watchedContainerChannels      maps.SafeMap[string, chan error]
 	containerAndPodToDroppedEvent maps.SafeMap[string, bool]
-	containerAndPodToEventsMap    maps.SafeMap[string, mapset.Set[NetworkEvent]]
+	containerAndPodToEventsMap    maps.SafeMap[string, mapset.Set[networkmanager.NetworkEvent]]
 	storageClient                 storage.StorageClient
 	removedContainers             mapset.Set[string]
 	trackedContainers             mapset.Set[string]
@@ -127,14 +120,14 @@ func (am *NetworkManager) ReportNetworkEvent(containerID string, event tracernet
 		return
 	}
 
-	networkEvent := &NetworkEvent{
+	networkEvent := &networkmanager.NetworkEvent{
 		Port:     event.Port,
 		Protocol: event.Proto,
 		PktType:  event.PktType,
-		Destination: Destination{
+		Destination: networkmanager.Destination{
 			Namespace: event.DstEndpoint.Namespace,
 			Name:      event.DstEndpoint.Name,
-			Kind:      EndpointKind(event.DstEndpoint.Kind),
+			Kind:      networkmanager.EndpointKind(event.DstEndpoint.Kind),
 			IPAddress: event.DstEndpoint.Addr,
 		},
 	}
@@ -143,7 +136,7 @@ func (am *NetworkManager) ReportNetworkEvent(containerID string, event tracernet
 
 	networkEventsSet := am.containerAndPodToEventsMap.Get(containerID + event.K8s.PodName)
 	if am.containerAndPodToEventsMap.Get(containerID+event.K8s.PodName) == nil {
-		networkEventsSet = mapset.NewSet[NetworkEvent]()
+		networkEventsSet = mapset.NewSet[networkmanager.NetworkEvent]()
 	}
 	networkEventsSet.Add(*networkEvent)
 	am.containerAndPodToEventsMap.Set(containerID+event.K8s.PodName, networkEventsSet)
@@ -152,13 +145,13 @@ func (am *NetworkManager) ReportNetworkEvent(containerID string, event tracernet
 // isValidEvent checks if the event is a valid event that should be saved
 func (am *NetworkManager) isValidEvent(event tracernetworktype.Event) bool {
 	// unknown type, shouldn't happen
-	if event.PktType != hostPktType && event.PktType != outgoingPktType {
+	if event.PktType != networkmanager.HostPktType && event.PktType != networkmanager.OutgoingPktType {
 		logger.L().Debug("NetworkManager - pktType is not HOST or OUTGOING", helpers.Interface("event", event))
 		return false
 	}
 
 	// ignore localhost
-	if event.PktType == hostPktType && event.PodHostIP == event.DstEndpoint.Addr {
+	if event.PktType == networkmanager.HostPktType && event.PodHostIP == event.DstEndpoint.Addr {
 		return false
 	}
 
@@ -322,7 +315,7 @@ func (am *NetworkManager) saveNetworkEvents(_ context.Context, container *contai
 		return
 	}
 
-	name := generateNetworkNeighborsNameFromWlid(parentWlid)
+	name := networkmanager.GenerateNetworkNeighborsNameFromWlid(parentWlid)
 	namespace := wlid.GetNamespaceFromWlid(parentWlid)
 	networkNeighborsExists := false
 	networkNeighbors, err := am.storageClient.GetNetworkNeighbors(namespace, name)
@@ -389,7 +382,7 @@ func (am *NetworkManager) saveNetworkEvents(_ context.Context, container *contai
 			logger.L().Warning("NetworkManager - failed to get selector", helpers.String("reason", err.Error()), helpers.String("container ID", container.Runtime.ContainerID), helpers.String("parent wlid", parentWlid))
 			return
 		}
-		newNetworkNeighbors := generateNetworkNeighborsCRD(parentWL, selector, am.clusterName)
+		newNetworkNeighbors := networkmanager.GenerateNetworkNeighborsCRD(parentWL, selector, am.clusterName)
 
 		// update spec and annotations
 		networkNeighborsSpec.LabelSelector = *selector
@@ -411,7 +404,7 @@ func (am *NetworkManager) saveNetworkEvents(_ context.Context, container *contai
 	// remove events from map
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 }
-func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[NetworkEvent], currSpec v1beta1.NetworkNeighborsSpec) v1beta1.NetworkNeighborsSpec {
+func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, networkEvents mapset.Set[networkmanager.NetworkEvent], currSpec v1beta1.NetworkNeighborsSpec) v1beta1.NetworkNeighborsSpec {
 	var networkNeighborsSpec v1beta1.NetworkNeighborsSpec
 
 	// auxiliary maps to avoid duplicates
@@ -423,12 +416,12 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 	currEgressIdentifiersMap := make(map[string]bool)
 
 	for i := range currSpec.Egress {
-		if identifier, err := generateNeighborsIdentifier(currSpec.Egress[i]); err == nil {
+		if identifier, err := utils.GenerateNeighborsIdentifier(currSpec.Egress[i]); err == nil {
 			currEgressIdentifiersMap[identifier] = true
 		}
 	}
 	for i := range currSpec.Ingress {
-		if identifier, err := generateNeighborsIdentifier(currSpec.Ingress[i]); err == nil {
+		if identifier, err := utils.GenerateNeighborsIdentifier(currSpec.Ingress[i]); err == nil {
 			currIngressIdentifiersMap[identifier] = true
 		}
 	}
@@ -445,19 +438,19 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 	for networkEvent := range networkEventsIterator.C {
 		var neighborEntry v1beta1.NetworkNeighbor
 
-		if networkEvent.Destination.Kind == EndpointKindPod {
+		if networkEvent.Destination.Kind == networkmanager.EndpointKindPod {
 			// for Pods we need to remove the default labels
 			neighborEntry.PodSelector = &metav1.LabelSelector{
-				MatchLabels: filterLabels(networkEvent.GetDestinationPodLabels()),
+				MatchLabels: networkmanager.FilterLabels(networkEvent.GetDestinationPodLabels()),
 			}
 
-			if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
+			if namespaceLabels := utils.GetNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
 				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
 					MatchLabels: namespaceLabels,
 				}
 			}
 
-		} else if networkEvent.Destination.Kind == EndpointKindService {
+		} else if networkEvent.Destination.Kind == networkmanager.EndpointKindService {
 			// for service, we need to retrieve it and use its selector
 			svc, err := am.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
 			if err != nil {
@@ -475,7 +468,7 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 				neighborEntry.PodSelector = &metav1.LabelSelector{
 					MatchLabels: selector,
 				}
-				if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
+				if namespaceLabels := utils.GetNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
 					neighborEntry.NamespaceSelector = &metav1.LabelSelector{
 						MatchLabels: namespaceLabels,
 					}
@@ -515,9 +508,9 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 }
 
 // saveNeighborEntry encapsulates the logic of generating identifiers and adding the neighborEntry to the map
-func saveNeighborEntry(networkEvent NetworkEvent, neighborEntry v1beta1.NetworkNeighbor, egressIdentifiersMap, ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor, currEgressIdentifiersMap, currIngressIdentifiersMap map[string]bool) {
+func saveNeighborEntry(networkEvent networkmanager.NetworkEvent, neighborEntry v1beta1.NetworkNeighbor, egressIdentifiersMap, ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor, currEgressIdentifiersMap, currIngressIdentifiersMap map[string]bool) {
 
-	portIdentifier := generatePortIdentifierFromEvent(networkEvent)
+	portIdentifier := networkmanager.GeneratePortIdentifierFromEvent(networkEvent)
 
 	neighborEntry.Ports = []v1beta1.NetworkPort{
 		{
@@ -526,20 +519,20 @@ func saveNeighborEntry(networkEvent NetworkEvent, neighborEntry v1beta1.NetworkN
 			Name:     portIdentifier,
 		}}
 
-	neighborEntry.Type = internalTrafficType
+	neighborEntry.Type = networkmanager.InternalTrafficType
 	if neighborEntry.NamespaceSelector == nil && neighborEntry.PodSelector == nil {
-		neighborEntry.Type = externalTrafficType
+		neighborEntry.Type = networkmanager.ExternalTrafficType
 	}
 
 	// generate identifier for this neighborEntry
-	identifier, err := generateNeighborsIdentifier(neighborEntry)
+	identifier, err := utils.GenerateNeighborsIdentifier(neighborEntry)
 	if err != nil {
 		// if we fail to hash, use a random identifier so at least we have the data on the crd
 		logger.L().Debug("failed to hash identifier", helpers.String("identifier", identifier), helpers.String("error", err.Error()))
 		identifier = uuid.New().String()
 	}
 
-	if networkEvent.PktType == outgoingPktType {
+	if networkEvent.PktType == networkmanager.OutgoingPktType {
 		if ok := currEgressIdentifiersMap[identifier]; !ok {
 			addToMap(egressIdentifiersMap, identifier, portIdentifier, neighborEntry)
 		}
@@ -569,7 +562,7 @@ func addToMap(identifiersMap map[string]v1beta1.NetworkNeighbor, identifier stri
 	identifiersMap[identifier] = neighborEntry
 }
 
-func (am *NetworkManager) handleServiceWithNoSelectors(svc workloadinterface.IWorkload, networkEvent NetworkEvent, egressIdentifiersMap map[string]v1beta1.NetworkNeighbor, ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor) error {
+func (am *NetworkManager) handleServiceWithNoSelectors(svc workloadinterface.IWorkload, networkEvent networkmanager.NetworkEvent, egressIdentifiersMap map[string]v1beta1.NetworkNeighbor, ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor) error {
 
 	// retrieve endpoint
 	endpoints, err := am.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Endpoint", networkEvent.Destination.Name)
@@ -596,23 +589,23 @@ func (am *NetworkManager) handleServiceWithNoSelectors(svc workloadinterface.IWo
 		for _, address := range subset.Addresses {
 			neighborEntry := v1beta1.NetworkNeighbor{
 				IPAddress: address.IP,
-				Type:      internalTrafficType,
+				Type:      networkmanager.InternalTrafficType,
 			}
 			for _, ports := range subset.Ports {
 				neighborEntry.Ports = append(neighborEntry.Ports, v1beta1.NetworkPort{
 					Protocol: v1beta1.Protocol(ports.Protocol),
-					Port:     ptr.To(int32(ports.Port)),
-					Name:     generatePortIdentifier(string(ports.Protocol), ports.Port),
+					Port:     ptr.To(ports.Port),
+					Name:     networkmanager.GeneratePortIdentifier(string(ports.Protocol), ports.Port),
 				})
 			}
 
-			identifier, err := generateNeighborsIdentifier(neighborEntry)
+			identifier, err := utils.GenerateNeighborsIdentifier(neighborEntry)
 			if err != nil {
 				identifier = uuid.New().String()
 			}
 			neighborEntry.Identifier = identifier
 
-			if networkEvent.PktType == outgoingPktType {
+			if networkEvent.PktType == networkmanager.OutgoingPktType {
 				egressIdentifiersMap[identifier] = neighborEntry
 			} else {
 				ingressIdentifiersMap[identifier] = neighborEntry
@@ -632,33 +625,4 @@ func (am *NetworkManager) waitForContainer(k8sContainerID string) error {
 		}
 		return fmt.Errorf("container %s not found", k8sContainerID)
 	}, backoff.NewExponentialBackOff())
-}
-
-func getNamespaceMatchLabels(destinationNamespace, sourceNamespace string) map[string]string {
-	if destinationNamespace != sourceNamespace {
-		// from version 1.22, all namespace have the kubernetes.io/metadata.name label
-		return map[string]string{
-			"kubernetes.io/metadata.name": destinationNamespace,
-		}
-	}
-	return nil
-}
-
-func generateNeighborsIdentifier(neighborEntry v1beta1.NetworkNeighbor) (string, error) {
-	// identifier is hash of everything in egress except ports
-	identifier := fmt.Sprintf("%s-%s-%s-%s-%s", neighborEntry.Type, neighborEntry.IPAddress, neighborEntry.DNS, neighborEntry.NamespaceSelector, neighborEntry.PodSelector)
-	hash := sha256.New()
-	_, err := hash.Write([]byte(identifier))
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%x", hash.Sum(nil)), nil
-}
-
-func generatePortIdentifierFromEvent(networkEvent NetworkEvent) string {
-	return generatePortIdentifier(networkEvent.Protocol, int32(networkEvent.Port))
-}
-
-func generatePortIdentifier(protocol string, port int32) string {
-	return fmt.Sprintf("%s-%d", protocol, port)
 }

@@ -1,13 +1,15 @@
-package applicationprofilemanager
+package v2
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"node-agent/pkg/applicationprofilemanager"
+	"k8s.io/utils/ptr"
 	"node-agent/pkg/config"
+	"node-agent/pkg/dnsmanager"
 	"node-agent/pkg/k8sclient"
+	"node-agent/pkg/networkmanager"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
@@ -21,8 +23,10 @@ import (
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/google/uuid"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
@@ -35,36 +39,32 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type ApplicationProfileManager struct {
+type NetworkManager struct {
 	cfg                      config.Config
 	clusterName              string
 	ctx                      context.Context
-	containerMutexes         storageUtils.MapMutex[string]                                   // key is k8sContainerID
-	trackedContainers        mapset.Set[string]                                              // key is k8sContainerID
-	removedContainers        mapset.Set[string]                                              // key is k8sContainerID
-	savedCapabilities        maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
-	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
-	droppedEvents            maps.SafeMap[string, bool]                                      // key is k8sContainerID
-	savedOpens               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
-	savedSyscalls            maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
-	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
-	toSaveExecs              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
-	toSaveOpens              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
-	watchedContainerChannels maps.SafeMap[string, chan error]                                // key is ContainerID
+	containerMutexes         storageUtils.MapMutex[string]                                 // key is k8sContainerID
+	trackedContainers        mapset.Set[string]                                            // key is k8sContainerID
+	removedContainers        mapset.Set[string]                                            // key is k8sContainerID
+	droppedEvents            maps.SafeMap[string, bool]                                    // key is k8sContainerID
+	savedEvents              maps.SafeMap[string, mapset.Set[networkmanager.NetworkEvent]] // key is k8sContainerID
+	toSaveEvents             maps.SafeMap[string, mapset.Set[networkmanager.NetworkEvent]] // key is k8sContainerID
+	watchedContainerChannels maps.SafeMap[string, chan error]                              // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
 	k8sObjectCache           objectcache.K8sObjectCache
 	storageClient            storage.StorageClient
-	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	preRunningContainerIDs   mapset.Set[string]
+	dnsResolverClient        dnsmanager.DNSResolver
 }
 
-var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
+var _ networkmanager.NetworkManagerClient = (*NetworkManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache) (*ApplicationProfileManager, error) {
-	return &ApplicationProfileManager{
+func CreateNetworkManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, dnsResolverClient dnsmanager.DNSResolver, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache) *NetworkManager {
+	return &NetworkManager{
 		cfg:                    cfg,
 		clusterName:            clusterName,
 		ctx:                    ctx,
+		dnsResolverClient:      dnsResolverClient,
 		k8sClient:              k8sClient,
 		k8sObjectCache:         k8sObjectCache,
 		storageClient:          storageClient,
@@ -72,10 +72,10 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		trackedContainers:      mapset.NewSet[string](),
 		removedContainers:      mapset.NewSet[string](),
 		preRunningContainerIDs: preRunningContainerIDs,
-	}, nil
+	}
 }
 
-func (am *ApplicationProfileManager) ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+func (am *NetworkManager) ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	if watchedContainer.InstanceID != nil {
 		return nil
 	}
@@ -104,6 +104,11 @@ func (am *ApplicationProfileManager) ensureInstanceID(container *containercollec
 		return fmt.Errorf("failed to validate WLID: %w", err)
 	}
 	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
+	selector, err := w.GetSelector()
+	if err != nil {
+		return fmt.Errorf("failed to get parentWL selector: %w", err)
+	}
+	watchedContainer.ParentWorkloadSelector = selector
 	// find instanceID
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {
@@ -122,7 +127,7 @@ func (am *ApplicationProfileManager) ensureInstanceID(container *containercollec
 	return nil
 }
 
-func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
+func (am *NetworkManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
 	// make sure we don't run deleteResources and saveProfile at the same time
 	am.containerMutexes.Lock(watchedContainer.K8sContainerID)
 	defer am.containerMutexes.Unlock(watchedContainer.K8sContainerID)
@@ -130,18 +135,34 @@ func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.Wat
 	// delete resources
 	watchedContainer.UpdateDataTicker.Stop()
 	am.trackedContainers.Remove(watchedContainer.K8sContainerID)
-	am.savedCapabilities.Delete(watchedContainer.K8sContainerID)
-	am.savedExecs.Delete(watchedContainer.K8sContainerID)
 	am.droppedEvents.Delete(watchedContainer.K8sContainerID)
-	am.savedOpens.Delete(watchedContainer.K8sContainerID)
-	am.savedSyscalls.Delete(watchedContainer.K8sContainerID)
-	am.toSaveCapabilities.Delete(watchedContainer.K8sContainerID)
-	am.toSaveExecs.Delete(watchedContainer.K8sContainerID)
-	am.toSaveOpens.Delete(watchedContainer.K8sContainerID)
+	am.savedEvents.Delete(watchedContainer.K8sContainerID)
+	am.toSaveEvents.Delete(watchedContainer.K8sContainerID)
 	am.watchedContainerChannels.Delete(watchedContainer.ContainerID)
 }
 
-func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+// isValidEvent checks if the event is a valid event that should be saved
+func (am *NetworkManager) isValidEvent(event tracernetworktype.Event) bool {
+	// unknown type, shouldn't happen
+	if event.PktType != networkmanager.HostPktType && event.PktType != networkmanager.OutgoingPktType {
+		logger.L().Debug("NetworkManager - pktType is not HOST or OUTGOING", helpers.Interface("event", event))
+		return false
+	}
+
+	// ignore localhost
+	if event.PktType == networkmanager.HostPktType && event.PodHostIP == event.DstEndpoint.Addr {
+		return false
+	}
+
+	// ignore host netns
+	if event.K8s.HostNetwork {
+		return false
+	}
+
+	return true
+}
+
+func (am *NetworkManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	// set completion status & status as soon as we start monitoring the container
 	if am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
 		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
@@ -180,8 +201,8 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 	}
 }
 
-func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedContainer *utils.WatchedContainerData, namespace string) {
-	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.saveProfile")
+func (am *NetworkManager) saveProfile(ctx context.Context, watchedContainer *utils.WatchedContainerData, namespace string) {
+	ctx, span := otel.Tracer("").Start(ctx, "NetworkManager.saveProfile")
 	defer span.End()
 
 	// make sure we don't run deleteResources and saveProfile at the same time
@@ -190,7 +211,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 
 	// verify the container hasn't already been deleted
 	if !am.trackedContainers.Contains(watchedContainer.K8sContainerID) {
-		logger.L().Ctx(ctx).Debug("ApplicationProfileManager - container isn't tracked, not saving profile",
+		logger.L().Ctx(ctx).Debug("NetworkManager - container isn't tracked, not saving profile",
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -198,7 +219,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	}
 
 	if watchedContainer.InstanceID == nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - instanceID is nil",
+		logger.L().Ctx(ctx).Error("NetworkManager - instanceID is nil",
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -208,7 +229,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// leave container name empty this way the "slug" will represent a workload
 	slug, err := names.InstanceIDToSlug(watchedContainer.InstanceID.GetName(), watchedContainer.InstanceID.GetKind(), "", watchedContainer.InstanceID.GetHashed())
 	if err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get slug", helpers.Error(err),
+		logger.L().Ctx(ctx).Error("NetworkManager - failed to get slug", helpers.Error(err),
 			helpers.String("slug", slug),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
@@ -223,63 +244,25 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		watchedContainer.SetStatus(utils.WatchedContainerStatusMissingRuntime)
 	}
 
-	// application activity is deprecated
-	// syscalls now reside in the application profile
-
-	// get syscalls from IG
-	var observedSyscalls []string
-	var toSaveSyscalls []string
-	if am.syscallPeekFunc != nil {
-		if observedSyscalls, err = am.syscallPeekFunc(watchedContainer.NsMntId); err == nil {
-			// check if we have new activities to save
-			savedSyscalls := am.savedSyscalls.Get(watchedContainer.K8sContainerID)
-			toSaveSyscallsSet := mapset.NewSet[string](observedSyscalls...).Difference(savedSyscalls)
-			if !toSaveSyscallsSet.IsEmpty() {
-				toSaveSyscalls = toSaveSyscallsSet.ToSlice()
-			}
+	// get pointer to events map from IG
+	toSaveEvents := am.toSaveEvents.Get(watchedContainer.K8sContainerID)
+	// point IG to a new events map
+	am.toSaveEvents.Set(watchedContainer.K8sContainerID, mapset.NewSet[networkmanager.NetworkEvent]())
+	// add to ingress and egress
+	var ingress []v1beta1.NetworkNeighbor
+	var egress []v1beta1.NetworkNeighbor
+	for _, event := range toSaveEvents.ToSlice() {
+		neighbor := am.createNetworkNeighbor(event, namespace)
+		if neighbor == nil {
+			continue
+		}
+		if event.PktType == networkmanager.HostPktType {
+			ingress = append(ingress, *neighbor)
+		} else {
+			egress = append(egress, *neighbor)
 		}
 	}
 
-	// get capabilities from IG
-	var capabilities []string
-	execs := make(map[string]mapset.Set[string])
-	opens := make(map[string]mapset.Set[string])
-	if toSaveCapabilities := am.toSaveCapabilities.Get(watchedContainer.K8sContainerID); toSaveCapabilities.Cardinality() > 0 {
-		// remove capabilities to save in a thread safe way using Pop
-		for {
-			capability, continuePop := toSaveCapabilities.Pop()
-			if continuePop {
-				capabilities = append(capabilities, capability)
-			} else {
-				break
-			}
-		}
-	}
-
-	// get pointer to execs map from IG
-	toSaveExecs := am.toSaveExecs.Get(watchedContainer.K8sContainerID)
-	// point IG to a new exec map
-	am.toSaveExecs.Set(watchedContainer.K8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
-	// prepare execs map
-	toSaveExecs.Range(func(path string, exec mapset.Set[string]) bool {
-		if _, exist := execs[path]; !exist {
-			execs[path] = mapset.NewSet[string]()
-		}
-		execs[path].Append(exec.ToSlice()...)
-		return true
-	})
-	// get pointer to opens map from IG
-	toSaveOpens := am.toSaveOpens.Get(watchedContainer.K8sContainerID)
-	// point IG to a new opens map
-	am.toSaveOpens.Set(watchedContainer.K8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
-	// prepare opens map
-	toSaveOpens.Range(func(path string, open mapset.Set[string]) bool {
-		if _, exist := opens[path]; !exist {
-			opens[path] = mapset.NewSet[string]()
-		}
-		opens[path].Append(open.ToSlice()...)
-		return true
-	})
 	// new activity
 	// the process tries to use JSON patching to avoid conflicts between updates on the same object from different containers
 	// 0. create both a patch and a new object
@@ -289,14 +272,14 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// 3a. the object is missing its container slice - ADD one with the container profile at the right index
 	// 3b. the object is missing the container profile - ADD the container profile at the right index
 	// 3c. default - patch the container ourselves and REPLACE it at the right index
-	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || watchedContainer.StatusUpdated() {
+	if len(ingress) > 0 || len(egress) > 0 || watchedContainer.StatusUpdated() {
 		// 0. calculate patch
-		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+		operations := utils.CreateNetworkPatchOperations(ingress, egress, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
 
 		patch, err := json.Marshal(operations)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to marshal patch", helpers.Error(err),
+			logger.L().Ctx(ctx).Error("NetworkManager - failed to marshal patch", helpers.Error(err),
 				helpers.String("slug", slug),
 				helpers.Int("container index", watchedContainer.ContainerIndex),
 				helpers.String("container ID", watchedContainer.ContainerID),
@@ -305,10 +288,10 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		}
 		// 1. try to patch object
 		var gotErr error
-		if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
+		if err := am.storageClient.PatchNetworkNeighborhood(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
 			if apierrors.IsNotFound(err) {
 				// 2a. new object
-				newObject := &v1beta1.ApplicationProfile{
+				newObject := &v1beta1.NetworkNeighborhood{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: slug,
 						Annotations: map[string]string{
@@ -318,10 +301,16 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						},
 						Labels: utils.GetLabels(watchedContainer, true),
 					},
+					Spec: v1beta1.NetworkNeighborhoodSpec{
+						LabelSelector: metav1.LabelSelector{
+							MatchLabels:      watchedContainer.ParentWorkloadSelector.MatchLabels,
+							MatchExpressions: watchedContainer.ParentWorkloadSelector.MatchExpressions,
+						},
+					},
 				}
-				addContainers := func(containers []v1beta1.ApplicationProfileContainer, containerNames []string) []v1beta1.ApplicationProfileContainer {
+				addContainers := func(containers []v1beta1.NetworkNeighborhoodContainer, containerNames []string) []v1beta1.NetworkNeighborhoodContainer {
 					for _, name := range containerNames {
-						containers = append(containers, v1beta1.ApplicationProfileContainer{Name: name})
+						containers = append(containers, v1beta1.NetworkNeighborhoodContainer{Name: name})
 					}
 					return containers
 				}
@@ -329,28 +318,28 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				newObject.Spec.InitContainers = addContainers(newObject.Spec.InitContainers, watchedContainer.ContainerNames[utils.InitContainer])
 				newObject.Spec.EphemeralContainers = addContainers(newObject.Spec.EphemeralContainers, watchedContainer.ContainerNames[utils.EphemeralContainer])
 				// enrich container
-				newContainer := utils.GetApplicationProfileContainer(newObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
-				utils.EnrichApplicationProfileContainer(newContainer, capabilities, observedSyscalls, execs, opens)
+				newContainer := utils.GetNetworkNeighborhoodContainer(newObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
+				utils.EnrichNeighborhoodContainer(newContainer, ingress, egress)
 				// try to create object
-				if err := am.storageClient.CreateApplicationProfile(newObject, namespace); err != nil {
+				if err := am.storageClient.CreateNetworkNeighborhood(newObject, namespace); err != nil {
 					gotErr = err
-					logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to create application profile", helpers.Error(err),
+					logger.L().Ctx(ctx).Error("NetworkManager - failed to create network neighborhood", helpers.Error(err),
 						helpers.String("slug", slug),
 						helpers.Int("container index", watchedContainer.ContainerIndex),
 						helpers.String("container ID", watchedContainer.ContainerID),
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				}
 			} else {
-				logger.L().Ctx(ctx).Warning("ApplicationProfileManager - failed to patch application profile, will get existing one and adjust patch", helpers.Error(err),
+				logger.L().Ctx(ctx).Warning("NetworkManager - failed to patch network neighborhood, will get existing one and adjust patch", helpers.Error(err),
 					helpers.String("slug", slug),
 					helpers.Int("container index", watchedContainer.ContainerIndex),
 					helpers.String("container ID", watchedContainer.ContainerID),
 					helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				// 2b. get existing object
-				existingObject, err := am.storageClient.GetApplicationProfile(namespace, slug)
+				existingObject, err := am.storageClient.GetNetworkNeighborhood(namespace, slug)
 				if err != nil {
 					gotErr = err
-					logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get existing application profile", helpers.Error(err),
+					logger.L().Ctx(ctx).Error("NetworkManager - failed to get existing network neighborhood", helpers.Error(err),
 						helpers.String("slug", slug),
 						helpers.Int("container index", watchedContainer.ContainerIndex),
 						helpers.String("container ID", watchedContainer.ContainerID),
@@ -358,18 +347,18 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				} else {
 					var replaceOperations []utils.PatchOperation
 					// check existing container
-					existingContainer := utils.GetApplicationProfileContainer(existingObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
+					existingContainer := utils.GetNetworkNeighborhoodContainer(existingObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
 					var addContainer bool
 					if existingContainer == nil {
-						existingContainer = &v1beta1.ApplicationProfileContainer{
+						existingContainer = &v1beta1.NetworkNeighborhoodContainer{
 							Name: watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex],
 						}
 						addContainer = true
 					}
 					// update it
-					utils.EnrichApplicationProfileContainer(existingContainer, capabilities, observedSyscalls, execs, opens)
+					utils.EnrichNeighborhoodContainer(existingContainer, ingress, egress)
 					// get existing containers
-					var existingContainers []v1beta1.ApplicationProfileContainer
+					var existingContainers []v1beta1.NetworkNeighborhoodContainer
 					if watchedContainer.ContainerType == utils.Container {
 						existingContainers = existingObject.Spec.Containers
 					} else if watchedContainer.ContainerType == utils.InitContainer {
@@ -381,7 +370,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					switch {
 					case existingContainers == nil:
 						// 3a. insert a new container slice, with the new container at the right index
-						containers := make([]v1beta1.ApplicationProfileContainer, watchedContainer.ContainerIndex+1)
+						containers := make([]v1beta1.NetworkNeighborhoodContainer, watchedContainer.ContainerIndex+1)
 						containers[watchedContainer.ContainerIndex] = *existingContainer
 						replaceOperations = append(replaceOperations, utils.PatchOperation{
 							Op:    "add",
@@ -394,7 +383,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							replaceOperations = append(replaceOperations, utils.PatchOperation{
 								Op:   "add",
 								Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
-								Value: v1beta1.ApplicationProfileContainer{
+								Value: v1beta1.NetworkNeighborhoodContainer{
 									Name: watchedContainer.ContainerNames[watchedContainer.ContainerType][i],
 								},
 							})
@@ -417,16 +406,16 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 
 					patch, err := json.Marshal(replaceOperations)
 					if err != nil {
-						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to marshal patch", helpers.Error(err),
+						logger.L().Ctx(ctx).Error("NetworkManager - failed to marshal patch", helpers.Error(err),
 							helpers.String("slug", slug),
 							helpers.Int("container index", watchedContainer.ContainerIndex),
 							helpers.String("container ID", watchedContainer.ContainerID),
 							helpers.String("k8s workload", watchedContainer.K8sContainerID))
 						return
 					}
-					if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
+					if err := am.storageClient.PatchNetworkNeighborhood(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
 						gotErr = err
-						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to patch application profile", helpers.Error(err),
+						logger.L().Ctx(ctx).Error("NetworkManager - failed to patch network neighborhood", helpers.Error(err),
 							helpers.String("slug", slug),
 							helpers.Int("container index", watchedContainer.ContainerIndex),
 							helpers.String("container ID", watchedContainer.ContainerID),
@@ -436,28 +425,16 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			}
 		}
 		if gotErr != nil {
-			// restore capabilities set
-			am.toSaveCapabilities.Get(watchedContainer.K8sContainerID).Append(capabilities...)
-			// restore execs map entries
-			toSaveExecs.Range(utils.SetInMap(am.toSaveExecs.Get(watchedContainer.K8sContainerID)))
-			// restore opens map entries
-			toSaveOpens.Range(utils.SetInMap(am.toSaveOpens.Get(watchedContainer.K8sContainerID)))
+			// restore events
+			am.toSaveEvents.Get(watchedContainer.K8sContainerID).Append(toSaveEvents.ToSlice()...)
 		} else {
 			// for status updates to be tracked, we reset the update flag
 			watchedContainer.ResetStatusUpdatedFlag()
 
-			// record saved syscalls
-			am.savedSyscalls.Get(watchedContainer.K8sContainerID).Append(toSaveSyscalls...)
-			// record saved capabilities
-			am.savedCapabilities.Get(watchedContainer.K8sContainerID).Append(capabilities...)
-			// record saved execs
-			toSaveExecs.Range(utils.SetInMap(am.savedExecs.Get(watchedContainer.K8sContainerID)))
-			// record saved opens
-			toSaveOpens.Range(utils.SetInMap(am.savedOpens.Get(watchedContainer.K8sContainerID)))
-			logger.L().Debug("ApplicationProfileManager - saved application profile",
-				helpers.Int("capabilities", len(capabilities)),
-				helpers.Int("execs", toSaveExecs.Len()),
-				helpers.Int("opens", toSaveOpens.Len()),
+			// record saved events
+			am.savedEvents.Get(watchedContainer.K8sContainerID).Append(toSaveEvents.ToSlice()...)
+			logger.L().Debug("NetworkManager - saved neighborhood",
+				helpers.Int("events", toSaveEvents.Cardinality()),
 				helpers.String("slug", slug),
 				helpers.Int("container index", watchedContainer.ContainerIndex),
 				helpers.String("container ID", watchedContainer.ContainerID),
@@ -466,8 +443,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	}
 }
 
-func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
-	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.startApplicationProfiling")
+func (am *NetworkManager) startNetworkMonitoring(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
+	ctx, span := otel.Tracer("").Start(ctx, "NetworkManager.startNetworkMonitoring")
 	defer span.End()
 
 	syncChannel := make(chan error, 10)
@@ -485,14 +462,14 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 	if err := backoff.Retry(func() error {
 		return am.ensureInstanceID(container, watchedContainer)
 	}, backoff.NewExponentialBackOff()); err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to ensure instanceID", helpers.Error(err),
+		logger.L().Ctx(ctx).Error("NetworkManager - failed to ensure instanceID", helpers.Error(err),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
 
 	if err := am.monitorContainer(ctx, container, watchedContainer); err != nil {
-		logger.L().Info("ApplicationProfileManager - stop monitor on container", helpers.String("reason", err.Error()),
+		logger.L().Info("NetworkManager - stop monitor on container", helpers.String("reason", err.Error()),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -501,7 +478,7 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 	am.deleteResources(watchedContainer)
 }
 
-func (am *ApplicationProfileManager) waitForContainer(k8sContainerID string) error {
+func (am *NetworkManager) waitForContainer(k8sContainerID string) error {
 	if am.removedContainers.Contains(k8sContainerID) {
 		return fmt.Errorf("container %s has been removed", k8sContainerID)
 	}
@@ -513,9 +490,9 @@ func (am *ApplicationProfileManager) waitForContainer(k8sContainerID string) err
 	}, backoff.NewExponentialBackOff())
 }
 
-func (am *ApplicationProfileManager) ContainerCallback(notif containercollection.PubSubEvent) {
+func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
-	ctx, span := otel.Tracer("").Start(am.ctx, "ApplicationProfileManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
+	ctx, span := otel.Tracer("").Start(am.ctx, "NetworkManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
 	defer span.End()
 
 	switch notif.Type {
@@ -526,17 +503,12 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 				helpers.String("k8s workload", k8sContainerID))
 			return
 		}
-		am.savedCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
 		am.droppedEvents.Set(k8sContainerID, false)
-		am.savedExecs.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
-		am.savedOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
-		am.savedSyscalls.Set(k8sContainerID, mapset.NewSet[string]())
-		am.toSaveCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
-		am.toSaveExecs.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
-		am.toSaveOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
+		am.savedEvents.Set(k8sContainerID, mapset.NewSet[networkmanager.NetworkEvent]())
+		am.toSaveEvents.Set(k8sContainerID, mapset.NewSet[networkmanager.NetworkEvent]())
 		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		am.trackedContainers.Add(k8sContainerID)
-		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
+		go am.startNetworkMonitoring(ctx, notif.Container, k8sContainerID)
 
 		// stop monitoring after MaxSniffingTime
 		time.AfterFunc(am.cfg.MaxSniffingTime, func() {
@@ -557,63 +529,114 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 	}
 }
 
-func (am *ApplicationProfileManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error)) {
-	am.syscallPeekFunc = peek
-}
-
-func (am *ApplicationProfileManager) ReportCapability(k8sContainerID, capability string) {
+func (am *NetworkManager) ReportNetworkEvent(k8sContainerID string, event tracernetworktype.Event) {
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
-	if am.savedCapabilities.Has(capability) {
+	if !am.isValidEvent(event) {
 		return
 	}
-	am.toSaveCapabilities.Get(k8sContainerID).Add(capability)
+
+	networkEvent := networkmanager.NetworkEvent{
+		Port:     event.Port,
+		Protocol: event.Proto,
+		PktType:  event.PktType,
+		Destination: networkmanager.Destination{
+			Namespace: event.DstEndpoint.Namespace,
+			Name:      event.DstEndpoint.Name,
+			Kind:      networkmanager.EndpointKind(event.DstEndpoint.Kind),
+			IPAddress: event.DstEndpoint.Addr,
+		},
+	}
+	networkEvent.SetPodLabels(event.PodLabels)
+	networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
+
+	// skip if we already saved this event
+	savedEvents := am.savedEvents.Get(k8sContainerID)
+	if savedEvents.Contains(networkEvent) {
+		return
+	}
+	am.toSaveEvents.Get(k8sContainerID).Add(networkEvent)
 }
 
-func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string, args []string) {
-	// skip empty path
-	if path == "" {
-		return
-	}
-	if err := am.waitForContainer(k8sContainerID); err != nil {
-		return
-	}
-	// check if we already have this exec
-	savedExecs := am.savedExecs.Get(k8sContainerID)
-	if savedExecs.Has(path) && savedExecs.Get(path).Contains(args...) {
-		return
-	}
-	// add to exec map
-	execMap := am.toSaveExecs.Get(k8sContainerID)
-	if execMap.Has(path) {
-		execMap.Get(path).Append(args...)
-	} else {
-		execMap.Set(path, mapset.NewSet[string](args...))
-	}
-}
-
-func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID, path string, flags []string) {
-	if err := am.waitForContainer(k8sContainerID); err != nil {
-		return
-	}
-	// check if we already have this open
-	savedOpens := am.savedOpens.Get(k8sContainerID)
-	if savedOpens.Has(path) && savedOpens.Get(path).Contains(flags...) {
-		return
-	}
-	// add to open map
-	openMap := am.toSaveOpens.Get(k8sContainerID)
-	if openMap.Has(path) {
-		openMap.Get(path).Append(flags...)
-	} else {
-		openMap.Set(path, mapset.NewSet[string](flags...))
-	}
-}
-
-func (am *ApplicationProfileManager) ReportDroppedEvent(k8sContainerID string) {
+func (am *NetworkManager) ReportDroppedEvent(k8sContainerID string) {
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
 	am.droppedEvents.Set(k8sContainerID, true)
+}
+
+func (am *NetworkManager) createNetworkNeighbor(networkEvent networkmanager.NetworkEvent, namespace string) *v1beta1.NetworkNeighbor {
+	var neighborEntry v1beta1.NetworkNeighbor
+
+	portIdentifier := networkmanager.GeneratePortIdentifierFromEvent(networkEvent)
+	neighborEntry.Ports = []v1beta1.NetworkPort{{
+		Protocol: v1beta1.Protocol(networkEvent.Protocol),
+		Port:     ptr.To(int32(networkEvent.Port)),
+		Name:     portIdentifier,
+	}}
+
+	if networkEvent.Destination.Kind == networkmanager.EndpointKindPod {
+		// for Pods we need to remove the default labels
+		neighborEntry.PodSelector = &metav1.LabelSelector{
+			MatchLabels: networkmanager.FilterLabels(networkEvent.GetDestinationPodLabels()),
+		}
+
+		if namespaceLabels := utils.GetNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
+			neighborEntry.NamespaceSelector = &metav1.LabelSelector{
+				MatchLabels: namespaceLabels,
+			}
+		}
+
+	} else if networkEvent.Destination.Kind == networkmanager.EndpointKindService {
+		// for service, we need to retrieve it and use its selector
+		svc, err := am.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
+		if err != nil {
+			logger.L().Warning("failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
+			return nil
+		}
+
+		selector := svc.GetServiceSelector()
+		if len(selector) == 0 {
+			// FIXME check if we need to handle services with no selectors
+			return nil
+		} else {
+			neighborEntry.PodSelector = &metav1.LabelSelector{
+				MatchLabels: selector,
+			}
+			if namespaceLabels := utils.GetNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
+				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
+					MatchLabels: namespaceLabels,
+				}
+			}
+		}
+
+	} else {
+		if networkEvent.Destination.IPAddress == "127.0.0.1" {
+			// No need to generate for localhost
+			return nil
+		}
+		neighborEntry.IPAddress = networkEvent.Destination.IPAddress
+
+		if am.dnsResolverClient != nil {
+			domain, ok := am.dnsResolverClient.ResolveIPAddress(networkEvent.Destination.IPAddress)
+			if ok {
+				neighborEntry.DNS = domain
+				neighborEntry.DNSNames = []string{domain}
+			}
+		}
+	}
+
+	neighborEntry.Type = networkmanager.InternalTrafficType
+	if neighborEntry.NamespaceSelector == nil && neighborEntry.PodSelector == nil {
+		neighborEntry.Type = networkmanager.ExternalTrafficType
+	}
+
+	identifier, err := utils.GenerateNeighborsIdentifier(neighborEntry)
+	if err != nil {
+		identifier = uuid.New().String()
+	}
+	neighborEntry.Identifier = identifier
+
+	return &neighborEntry
 }

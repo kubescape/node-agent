@@ -19,4 +19,7 @@ type StorageClient interface {
 	CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error
 	PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error
 	PatchNetworkNeighborsIngressAndEgress(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error
+	GetNetworkNeighborhood(namespace, name string) (*v1beta1.NetworkNeighborhood, error)
+	CreateNetworkNeighborhood(neighborhood *v1beta1.NetworkNeighborhood, namespace string) error
+	PatchNetworkNeighborhood(name, namespace string, patch []byte, channel chan error) error
 }
