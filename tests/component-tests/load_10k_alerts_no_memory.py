@@ -13,22 +13,12 @@ def load_10k_alerts_no_memory_leak(test_framework):
     ns = Namespace(name=None)
 
     namespace = ns.name()
-    
-    profiles_namespace_name = os.environ.get("STORE_NAMESPACE")
-    profiles_namespace = None
-    if profiles_namespace_name:
-        profiles_namespace = Namespace(name=profiles_namespace_name)
-        ns = Namespace(name='test-namespace')
-        namespace = ns.name()
 
     try:
         #  Install nginx profile in kubernetes by applying the nginx profile yaml
-        if profiles_namespace_name:
-            subprocess.check_call(["kubectl", "-n", profiles_namespace_name , "apply", "-f", os.path.join(test_framework.get_root_directoty(),"resources/nginx-app-profile-namespaced.yaml")])
-        else:
-            subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "dev/nginx/nginx-app-profile.yaml"])
+        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx/nginx-app-profile.yaml"])
         # Install nginx in kubernetes by applying the nginx deployment yaml with pre-creating profile for the nginx pod
-        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "dev/nginx/nginx-deployment.yaml"])
+        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx/nginx-deployment.yaml"])
         # Wait for nginx to be ready
         subprocess.check_call(["kubectl", "-n", namespace , "wait", "--for=condition=ready", "pod", "-l", "app=nginx", "--timeout=120s"])
         # Get the pod name of the nginx pod
@@ -78,17 +68,10 @@ def load_10k_alerts_no_memory_leak(test_framework):
         print("Exception: ", e)
         # Delete the namespace
         subprocess.check_call(["kubectl", "delete", "namespace", namespace])
-        # Delete the profiles if they were created
-        if profiles_namespace:
-            subprocess.run(["kubectl", "delete", "applicationprofile", f"pod-{nginx_pod_name}-test-namespace", "-n", profiles_namespace_name])
-            subprocess.run(["kubectl", "delete", "applicationprofile", f"deployment-nginx-deployment-test-namespace", "-n", profiles_namespace_name])
         return 1
 
     # Delete the namespace
     subprocess.check_call(["kubectl", "delete", "namespace", namespace])
-    if profiles_namespace:
-        subprocess.run(["kubectl", "delete", "applicationprofile", f"pod-{nginx_pod_name}-test-namespace", "-n", profiles_namespace_name])
-        subprocess.run(["kubectl", "delete", "applicationprofile", f"deployment-nginx-deployment-test-namespace", "-n", profiles_namespace_name])
     return 0
 
 

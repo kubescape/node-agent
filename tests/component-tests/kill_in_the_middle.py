@@ -15,7 +15,7 @@ def kill_process_in_the_middle(test_framework):
     try:
         subprocess.check_call(["kubectl", "create", "namespace", namespace])
         # Install nginx in kubernetes by applying the nginx deployment yaml without pre-creating the profile
-        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "dev/nginx/nginx-deployment.yaml"])
+        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx/nginx-deployment.yaml"])
 
         # Wait for nginx to be ready
         subprocess.check_call(["kubectl", "-n", namespace , "wait", "--for=condition=ready", "pod", "-l", "app=nginx", "--timeout=120s"])
@@ -58,7 +58,7 @@ def kill_pod_in_the_middle(namespace="node-agent-test"):
         # create the namespace
         subprocess.check_call(["kubectl", "create", "namespace", namespace])
         # Install nginx in kubernetes by applying the nginx deployment yaml without pre-creating the profile
-        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "dev/nginx/nginx-deployment.yaml"])
+        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx/nginx-deployment.yaml"])
 
         # Wait for nginx to be ready
         subprocess.check_call(["kubectl", "-n", namespace , "wait", "--for=condition=ready", "pod", "-l", "app=nginx", "--timeout=120s"])

@@ -3,9 +3,7 @@ kind: ApplicationProfile
 metadata:
   labels:
     kapprofiler.kubescape.io/final: "true"
-    kapprofiler.kubescape.io/namespace: "test-namespace"
-  name: deployment-nginx-deployment-test-namespace
-  namespace: kubescape
+  name: deployment-nginx-deployment
 spec:
   containers:
   - capabilities:
@@ -234,4 +232,3 @@ spec:
     - writev
     - wait4
     - event
-

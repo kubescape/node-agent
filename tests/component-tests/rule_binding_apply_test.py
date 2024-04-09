@@ -39,7 +39,7 @@ def rule_binding_apply_test(test_framework):
             return 1
 
     except Exception as e:
-        print("Exception occured: %s" % e)
+        print("Exception occurred: %s" % e)
         return 1
 
     return 0

@@ -1,4 +1,4 @@
-apiVersion: kubescape.io/v1
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
 kind: ApplicationProfile
 metadata:
   labels:
