@@ -20,19 +20,18 @@ func CreateDNSManager() *DNSManager {
 }
 
 func (dm *DNSManager) ReportDNSEvent(dnsEvent tracerdnstype.Event) {
-	if dnsEvent.NumAnswers > 0 {
-		if len(dnsEvent.Addresses) > 0 {
-			for _, address := range dnsEvent.Addresses {
-				dm.addressToDomainMap.Set(address, dnsEvent.DNSName)
-			}
-		} else {
-			addresses, err := net.LookupIP(dnsEvent.DNSName)
-			if err != nil {
-				return
-			}
-			for _, address := range addresses {
-				dm.addressToDomainMap.Set(address.String(), dnsEvent.DNSName)
-			}
+
+	if len(dnsEvent.Addresses) > 0 {
+		for _, address := range dnsEvent.Addresses {
+			dm.addressToDomainMap.Set(address, dnsEvent.DNSName)
+		}
+	} else {
+		addresses, err := net.LookupIP(dnsEvent.DNSName)
+		if err != nil {
+			return
+		}
+		for _, address := range addresses {
+			dm.addressToDomainMap.Set(address.String(), dnsEvent.DNSName)
 		}
 	}
 }

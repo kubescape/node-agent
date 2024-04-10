@@ -224,9 +224,17 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+
+		// ignore DNS events that are not responses
 		if event.Qr != tracerdnstype.DNSPktTypeResponse {
 			return
 		}
+
+		// ignore DNS events that do not have address resolution
+		if event.NumAnswers == 0 {
+			return
+		}
+
 		metrics.ReportEvent(utils.DnsEventType)
 		dnsManagerClient.ReportDNSEvent(event)
 		ruleManager.ReportDNSEvent(event)
