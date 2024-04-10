@@ -14,6 +14,7 @@ import (
 )
 
 var _ processtreemanager.ProcessTreeManagerClient = (*ProcessTreeManager)(nil)
+var _ processtreemanager.ProcessTreeManager = (*ProcessTreeManager)(nil)
 
 type ProcessTreeManager struct {
 	Trees        maps.SafeMap[string, apitypes.Process]                // Map of container ID to the root process of the tree.
@@ -41,33 +42,43 @@ func (ptm *ProcessTreeManager) ContainerCallback(notif containercollection.PubSu
 	}
 }
 
-func (ptm *ProcessTreeManager) GetProcessTreeByContainerId(containerID string) (apitypes.Process, error) {
+func (ptm *ProcessTreeManager) GetProcessTreeByContainerId(containerID string) *apitypes.Process {
 	if !ptm.Trees.Has(containerID) {
-		return apitypes.Process{}, fmt.Errorf("container id not found in process tree map")
-	}
-
-	return ptm.Trees.Get(containerID), nil
-}
-
-func (ptm *ProcessTreeManager) GetTreeTrackingByContainerId(containerID string) (processtreemanager.TreeTracking, error) {
-	if !ptm.TreeTracking.Has(containerID) {
-		return processtreemanager.TreeTracking{}, fmt.Errorf("container id not found in tree tracking map")
-	}
-
-	return ptm.TreeTracking.Get(containerID), nil
-}
-
-func (ptm *ProcessTreeManager) GetProcessByPid(proc *apitypes.Process, pid uint32) *apitypes.Process {
-	if proc == nil {
 		return nil
 	}
 
-	if proc.PID == pid {
-		return proc
+	tree := ptm.Trees.Get(containerID)
+
+	return &tree
+}
+
+func (ptm *ProcessTreeManager) GetTreeTrackingByContainerId(containerID string) *processtreemanager.TreeTracking {
+	if !ptm.TreeTracking.Has(containerID) {
+		return nil
 	}
 
-	for _, p := range proc.Children {
-		if found := ptm.GetProcessByPid(&p, pid); found != nil {
+	treeTracking := ptm.TreeTracking.Get(containerID)
+
+	return &treeTracking
+}
+
+func (ptm *ProcessTreeManager) GetProcessByPid(containerID string, pid uint32) *apitypes.Process {
+	if !ptm.Trees.Has(containerID) {
+		logger.L().Error("Container id not found in process tree map")
+		return &apitypes.Process{}
+	}
+
+	root := ptm.Trees.Get(containerID)
+	return ptm.getProcessByPid(&root, pid)
+}
+
+func (ptm *ProcessTreeManager) getProcessByPid(root *apitypes.Process, pid uint32) *apitypes.Process {
+	if root.PID == pid {
+		return root
+	}
+
+	for _, p := range root.Children {
+		if found := ptm.getProcessByPid(&p, pid); found != nil {
 			return found
 		}
 	}

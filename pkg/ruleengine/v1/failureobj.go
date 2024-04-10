@@ -12,7 +12,7 @@ var _ ruleengine.RuleFailure = (*GenericRuleFailure)(nil)
 
 type GenericRuleFailure struct {
 	BaseRuntimeAlert       apitypes.BaseRuntimeAlert
-	RuntimeProcessDetails  apitypes.RuntimeAlertProcessDetails
+	RuntimeProcessDetails  apitypes.ProcessTree
 	TriggerEvent           igtypes.Event
 	RuleAlert              apitypes.RuleAlert
 	RuntimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails
@@ -22,7 +22,7 @@ func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert 
 	return rule.BaseRuntimeAlert
 }
 
-func (rule *GenericRuleFailure) GetRuntimeProcessDetails() apitypes.RuntimeAlertProcessDetails {
+func (rule *GenericRuleFailure) GetRuntimeProcessDetails() apitypes.ProcessTree {
 	return rule.RuntimeProcessDetails
 }
 
@@ -43,9 +43,7 @@ func (rule *GenericRuleFailure) SetWorkloadDetails(workloadDetails string) {
 		return
 	}
 
-	cluster := wlid.GetClusterFromWlid(workloadDetails)
-
-	rule.RuntimeAlertK8sDetails.ClusterName = &cluster
+	rule.RuntimeAlertK8sDetails.ClusterName = wlid.GetClusterFromWlid(workloadDetails)
 	rule.RuntimeAlertK8sDetails.WorkloadKind = wlid.GetKindFromWlid(workloadDetails)
 	rule.RuntimeAlertK8sDetails.WorkloadNamespace = wlid.GetNamespaceFromWlid(workloadDetails)
 	rule.RuntimeAlertK8sDetails.WorkloadName = wlid.GetNameFromWlid(workloadDetails)

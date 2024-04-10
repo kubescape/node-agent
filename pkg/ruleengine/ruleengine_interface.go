@@ -54,7 +54,7 @@ type RuleFailure interface {
 	// Get Base Runtime Alert
 	GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert
 	// Get Runtime Process Details
-	GetRuntimeProcessDetails() apitypes.RuntimeAlertProcessDetails
+	GetRuntimeProcessDetails() apitypes.ProcessTree
 	// Get Trigger Event
 	GetTriggerEvent() igtypes.Event
 	// Get Rule Description

@@ -18,6 +18,7 @@ type ProcessTreeManagerClient interface {
 }
 
 type ProcessTreeManager interface {
-	GetProcessTreeByContainerId(containerID string) apitypes.Process
-	GetTreeTrackingByContainerId(containerID string) TreeTracking
+	GetProcessTreeByContainerId(containerID string) *apitypes.Process
+	GetTreeTrackingByContainerId(containerID string) *TreeTracking
+	GetProcessByPid(containerID string, pid uint32) *apitypes.Process
 }
