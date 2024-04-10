@@ -55,6 +55,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.networkManager.ContainerCallback,
 		ch.malwareManager.ContainerCallback,
 		ch.ruleManager.ContainerCallback,
+		ch.processTreeManager.ContainerCallback,
 	}
 
 	// Define the different options for the container collection instance

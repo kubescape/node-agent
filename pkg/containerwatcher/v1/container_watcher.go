@@ -10,6 +10,7 @@ import (
 	"node-agent/pkg/malwaremanager"
 	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/networkmanager"
+	"node-agent/pkg/processtreemanager"
 	"node-agent/pkg/relevancymanager"
 	rulebinding "node-agent/pkg/rulebindingmanager"
 	"node-agent/pkg/rulemanager"
@@ -75,6 +76,7 @@ type IGContainerWatcher struct {
 	dnsManager                dnsmanager.DNSManagerClient
 	ruleManager               rulemanager.RuleManagerClient
 	malwareManager            malwaremanager.MalwareManagerClient
+	processTreeManager        processtreemanager.ProcessTreeManagerClient
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
@@ -116,7 +118,7 @@ type IGContainerWatcher struct {
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, processTreeManager processtreemanager.ProcessTreeManagerClient) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -164,6 +166,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
 		ruleManager.ReportFileExec(k8sContainerID, event)
 		malwareManager.ReportFileExec(k8sContainerID, event)
+		processTreeManager.ReportFileExec(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating exec worker pool: %w", err)
@@ -263,6 +266,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		dnsManager:                dnsManagerClient,
 		ruleManager:               ruleManager,
 		malwareManager:            malwareManager,
+		processTreeManager:        processTreeManager,
 		// IG Collections
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,

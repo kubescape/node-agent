@@ -22,7 +22,7 @@ func BenchmarkIGContainerWatcher_openEventCallback(b *testing.B) {
 	assert.NoError(b, err)
 	mockExporter := metricsmanager.NewMetricsMock()
 
-	mainHandler, err := CreateIGContainerWatcher(cfg, nil, nil, relevancyManager, nil, nil, mockExporter, nil, nil, nil, nil)
+	mainHandler, err := CreateIGContainerWatcher(cfg, nil, nil, relevancyManager, nil, nil, mockExporter, nil, nil, nil, nil, nil)
 	assert.NoError(b, err)
 	event := &traceropentype.Event{
 		Event: types.Event{
