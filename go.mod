@@ -5,7 +5,7 @@ go 1.21.3
 toolchain go1.21.4
 
 require (
-	github.com/armosec/armoapi-go v0.0.370
+	github.com/armosec/armoapi-go v0.0.377
 	github.com/armosec/utils-k8s-go v0.0.26
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cilium/ebpf v0.14.0
