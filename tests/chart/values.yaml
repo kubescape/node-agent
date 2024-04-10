@@ -58,11 +58,15 @@ nodeAgent:
     learningPeriod: 1m
     updatePeriod: 30s 
     prometheusExporter: enable
-    httpExporterConfig: 
-      url: http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io/v1/runtimealerts
+    httpExporterConfig: {}
+    alertManagerExporterUrls: [
+      "alertmanager-operated.monitoring.svc.cluster.local:9093"
+    ]
+    stdoutExporter: false
+    syslogExporterURL: ""
 
   serviceMonitor:
-    enabled: false
+    enabled: true
     interval: 30s
     scrapeTimeout: 15s
 

@@ -1,235 +1,190 @@
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
 kind: ApplicationProfile
 metadata:
+  annotations:
+    kubescape.io/completion: complete
+    kubescape.io/resource-size: "25"
+    kubescape.io/status: completed
+    kubescape.io/wlid: wlid://cluster-gke_elated-pottery-310110_us-central1-c_cluster-amirm/namespace-default/deployment-nginx-deployment
   labels:
-    kapprofiler.kubescape.io/final: "true"
-  name: deployment-nginx-deployment
+    kubescape.io/instance-template-hash: cbdccf466
+    kubescape.io/workload-api-group: apps
+    kubescape.io/workload-api-version: v1
+    kubescape.io/workload-kind: Deployment
+    kubescape.io/workload-name: nginx-deployment
+    kubescape.io/workload-namespace: default
+    kubescape.io/workload-resource-version: "280103"
+  name: replicaset-nginx-deployment-cbdccf466
 spec:
   containers:
   - capabilities:
-    - caps:
-      - NET_BIND_SERVICE
-      syscall: bind
-    - caps:
-      - CHOWN
-      syscall: chown
-    - caps:
-      - SETGID
-      syscall: setgid
-    - caps:
-      - SETUID
-      syscall: setuid
-    - caps:
-      - SETGID
-      syscall: setgroups
+    - SETUID
+    - CHOWN
+    - NET_BIND_SERVICE
+    - SETGID
     execs:
     - args:
       - -g
+      - /usr/sbin/nginx
       - daemon off;
       path: /usr/sbin/nginx
     name: nginx
-    networkActivity: {}
     opens:
     - flags:
-      - O_RDONLY
       - O_CLOEXEC
-      - O_NONBLOCK
-      path: /usr/share/nginx/html/index.html
-    - flags:
-      - O_WRONLY
-      - O_CREAT
-      - O_APPEND
-      path: ""
-    - flags:
       - O_RDONLY
-      - O_CLOEXEC
-      path: /etc/group
-    - flags:
-      - O_RDONLY
-      - O_CLOEXEC
       path: /etc/passwd
     - flags:
-      - O_RDWR
       - O_CREAT
+      - O_RDWR
       - O_TRUNC
       path: /run/nginx.pid
     - flags:
-      - O_RDONLY
       - O_CLOEXEC
+      - O_RDONLY
+      path: /lib/x86_64-linux-gnu/libnss_files-2.24.so
+    - flags:
+      - O_CLOEXEC
+      - O_RDONLY
       path: /etc/ld.so.cache
     - flags:
-      - O_RDONLY
-      - O_NONBLOCK
-      - O_DIRECTORY
       - O_CLOEXEC
-      path: /etc/nginx/conf.d
+      - O_RDONLY
+      path: /lib/x86_64-linux-gnu/libc-2.24.so
     - flags:
-      - O_RDONLY
       - O_CLOEXEC
-      path: /etc/nsswitch.conf
+      - O_RDONLY
+      path: /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1
+    - flags:
+      - O_CLOEXEC
+      - O_RDONLY
+      path: /sys/devices/system/cpu/online
+    - flags:
+      - O_CLOEXEC
+      - O_RDONLY
+      path: /usr/share/zoneinfo/UTC
+    - flags:
+      - O_CLOEXEC
+      - O_RDONLY
+      path: /lib/x86_64-linux-gnu/libnss_compat-2.24.so
+    - flags:
+      - O_CLOEXEC
+      - O_RDONLY
+      path: /lib/x86_64-linux-gnu/libpthread-2.24.so
+    - flags:
+      - O_CLOEXEC
+      - O_RDONLY
+      path: /lib/x86_64-linux-gnu/libdl-2.24.so
+    - flags:
+      - O_CLOEXEC
+      - O_RDONLY
+      path: /lib/x86_64-linux-gnu/libpcre.so.3.13.3
+    - flags:
+      - O_CLOEXEC
+      - O_RDONLY
+      path: /lib/x86_64-linux-gnu/libz.so.1.2.8
+    - flags:
+      - O_CLOEXEC
+      - O_RDONLY
+      path: /lib/x86_64-linux-gnu/libcrypt-2.24.so
     - flags:
       - O_RDONLY
       path: /etc/nginx/mime.types
     - flags:
-      - O_RDONLY
-      path: /etc/nginx/nginx.conf
-    - flags:
-      - O_RDONLY
       - O_CLOEXEC
-      path: /usr/share/zoneinfo/UTC
-    - flags:
       - O_RDONLY
-      path: /proc/sys/kernel/ngroups_max
+      path: /lib/x86_64-linux-gnu/libnsl-2.24.so
+    - flags:
+      - O_CLOEXEC
+      - O_DIRECTORY
+      - O_NONBLOCK
+      - O_RDONLY
+      path: /etc/nginx/conf.d
+    - flags:
+      - O_CLOEXEC
+      - O_RDONLY
+      path: /etc/group
+    - flags:
+      - O_CLOEXEC
+      - O_RDONLY
+      path: /etc/nsswitch.conf
+    - flags:
+      - O_CLOEXEC
+      - O_RDONLY
+      path: /lib/x86_64-linux-gnu/libnss_nis-2.24.so
+    - flags:
+      - O_APPEND
+      - O_CREAT
+      - O_WRONLY
+      path: ""
     - flags:
       - O_RDONLY
       path: /etc/nginx/conf.d/default.conf
     - flags:
-      - O_RDONLY
       - O_CLOEXEC
-      path: /sys/devices/system/cpu/online
-    - flags:
       - O_RDONLY
-      - O_CLOEXEC
-      path: /lib/x86_64-linux-gnu/libc-2.24.so
-    - flags:
-      - O_RDONLY
-      - O_CLOEXEC
-      path: /lib/x86_64-linux-gnu/libdl-2.24.so
-    - flags:
-      - O_RDONLY
-      - O_CLOEXEC
-      path: /lib/x86_64-linux-gnu/libz.so.1.2.8
-    - flags:
-      - O_RDONLY
-      - O_CLOEXEC
-      path: /lib/x86_64-linux-gnu/libnsl-2.24.so
-    - flags:
-      - O_RDONLY
-      - O_CLOEXEC
-      path: /lib/x86_64-linux-gnu/libcrypt-2.24.so
-    - flags:
-      - O_RDONLY
-      - O_CLOEXEC
-      path: /lib/x86_64-linux-gnu/libpcre.so.3.13.3
-    - flags:
-      - O_RDONLY
-      - O_CLOEXEC
       path: /usr/lib/x86_64-linux-gnu/libssl.so.1.1
     - flags:
       - O_RDONLY
-      - O_CLOEXEC
-      path: /lib/x86_64-linux-gnu/libnss_nis-2.24.so
-    - flags:
-      - O_RDONLY
-      - O_CLOEXEC
-      path: /lib/x86_64-linux-gnu/libpthread-2.24.so
-    - flags:
-      - O_RDONLY
-      - O_CLOEXEC
-      path: /lib/x86_64-linux-gnu/libnss_files-2.24.so
-    - flags:
-      - O_RDONLY
-      - O_CLOEXEC
-      path: /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1
-    - flags:
-      - O_RDONLY
-      - O_CLOEXEC
-      path: /lib/x86_64-linux-gnu/libnss_compat-2.24.so
+      path: /etc/nginx/nginx.conf
     syscalls:
-    - access
-    - arch_prctl
-    - bind
-    - brk
-    - capget
-    - capset
-    - chdir
     - chown
-    - clone
-    - close
-    - connect
-    - dup2
-    - epoll_create
-    - epoll_ctl
-    - epoll_pwait
-    - epoll_wait
-    - eventfd2
-    - execve
-    - exit
-    - faccessat2
-    - fchmodat
-    - fchownat
-    - fcntl
-    - fstat
-    - fstatfs
-    - futex
-    - getdents
-    - getdents64
-    - geteuid
-    - getpid
-    - getppid
     - getrlimit
-    - io_setup
-    - ioctl
-    - linkat
-    - listen
-    - lseek
-    - madvise
-    - mkdir
-    - mkdirat
-    - mmap
-    - mount
-    - mprotect
-    - munmap
-    - nanosleep
-    - newfstatat
-    - open
-    - openat
-    - openat2
-    - pivot_root
-    - prctl
-    - pread64
-    - pwrite64
-    - read
-    - rt_sigaction
-    - rt_sigprocmask
-    - rt_sigreturn
-    - rt_sigsuspend
-    - sched_yield
+    - epoll_create
     - set_robust_list
-    - set_tid_address
-    - setgid
-    - setgroups
-    - setsockopt
-    - setuid
-    - sigaltstack
-    - socket
-    - socketpair
-    - stat
-    - symlinkat
+    - nanosleep
     - sysinfo
-    - tgkill
-    - umount2
+    - mmap
+    - connect
+    - close
+    - getdents
+    - capset
+    - openat
+    - stat
+    - rt_sigprocmask
+    - getpid
+    - setgid
+    - execve
+    - epoll_wait
+    - prctl
+    - brk
+    - newfstatat
+    - set_tid_address
+    - clone
+    - ioctl
+    - getppid
+    - bind
+    - setgroups
+    - fstat
+    - io_setup
+    - listen
+    - socket
+    - eventfd2
+    - lseek
+    - mprotect
+    - arch_prctl
+    - dup2
+    - setsockopt
+    - faccessat2
+    - fcntl
+    - socketpair
+    - mkdir
+    - chdir
+    - setuid
     - uname
-    - unlinkat
-    - utimensat
+    - geteuid
+    - rt_sigsuspend
+    - capget
+    - pwrite64
+    - rt_sigaction
+    - open
+    - access
+    - futex
+    - fstatfs
+    - sched_yield
+    - getdents64
+    - munmap
+    - epoll_ctl
+    - read
+    - pread64
     - write
-    - dup
-    - exit_group
-    - fadvise64
-    - getcwd
-    - getegid
-    - getgid
-    - getpgrp
-    - getuid
-    - lstat
-    - pipe
-    - prlimit64
-    - readlink
-    - statfs
-    - accept4
-    - recvfrom
-    - sendfile
-    - writev
-    - wait4
-    - event
-

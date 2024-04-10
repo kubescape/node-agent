@@ -16,9 +16,10 @@ def load_10k_alerts_no_memory_leak(test_framework):
 
     try:
         #  Install nginx profile in kubernetes by applying the nginx profile yaml
-        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx/nginx-app-profile.yaml"])
+        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx-app-profile.yaml"])
         # Install nginx in kubernetes by applying the nginx deployment yaml with pre-creating profile for the nginx pod
-        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx/nginx-deployment.yaml"])
+        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx-deployment.yaml"])
+        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx-service.yaml"])
         # Wait for nginx to be ready
         subprocess.check_call(["kubectl", "-n", namespace , "wait", "--for=condition=ready", "pod", "-l", "app=nginx", "--timeout=120s"])
         # Get the pod name of the nginx pod

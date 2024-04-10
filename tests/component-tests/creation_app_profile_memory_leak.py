@@ -16,7 +16,8 @@ def install_app_no_application_profile_no_leak(test_framework):
         time_start = time.time()
 
         # Install nginx in kubernetes by applying the nginx deployment yaml without pre-creating the profile
-        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx/nginx-deployment.yaml"])
+        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx-deployment.yaml"])
+        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx-service.yaml"])
 
         # Wait for nginx to be ready
         subprocess.check_call(["kubectl", "-n", namespace , "wait", "--for=condition=ready", "pod", "-l", "app=nginx", "--timeout=120s"])
