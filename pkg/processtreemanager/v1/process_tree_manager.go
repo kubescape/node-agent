@@ -14,7 +14,6 @@ import (
 )
 
 var _ processtreemanager.ProcessTreeManagerClient = (*ProcessTreeManager)(nil)
-var _ processtreemanager.ProcessTreeManager = (*ProcessTreeManager)(nil)
 
 type ProcessTreeManager struct {
 	Trees        maps.SafeMap[string, apitypes.Process]                // Map of container ID to the root process of the tree.

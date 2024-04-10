@@ -15,9 +15,6 @@ type TreeTracking struct {
 type ProcessTreeManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
 	ReportFileExec(event tracerexectype.Event)
-}
-
-type ProcessTreeManager interface {
 	GetProcessTreeByContainerId(containerID string) *apitypes.Process
 	GetTreeTrackingByContainerId(containerID string) *TreeTracking
 	GetProcessByPid(containerID string, pid uint32) *apitypes.Process

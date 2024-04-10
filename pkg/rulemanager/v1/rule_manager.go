@@ -64,12 +64,12 @@ type RuleManager struct {
 	podToWlid                maps.SafeMap[string, string]
 	nodeName                 string
 	clusterName              string
-	ptm                      processtreemanager.ProcessTreeManager
+	ptm                      processtreemanager.ProcessTreeManagerClient
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, preRunningContainersIDs mapset.Set[string], nodeName string, clusterName string, ptm processtreemanager.ProcessTreeManager) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, preRunningContainersIDs mapset.Set[string], nodeName string, clusterName string, ptm processtreemanager.ProcessTreeManagerClient) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:                    cfg,
 		ctx:                    ctx,
