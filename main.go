@@ -24,6 +24,8 @@ import (
 	"node-agent/pkg/objectcache/k8scache"
 	"node-agent/pkg/objectcache/networkneighborscache"
 	objectcachev1 "node-agent/pkg/objectcache/v1"
+	"node-agent/pkg/processtreemanager"
+	processtreemanagerv1 "node-agent/pkg/processtreemanager/v1"
 	"node-agent/pkg/relevancymanager"
 	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
 	rulebinding "node-agent/pkg/rulebindingmanager"
@@ -155,6 +157,12 @@ func main() {
 	var ruleManager rulemanager.RuleManagerClient
 	var objCache objectcache.ObjectCache
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
+	var processTreeManager processtreemanager.ProcessTreeManagerClient
+
+	if cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
+		// Process tree manager
+		processTreeManager = processtreemanagerv1.NewProcessTreeManager()
+	}
 
 	if cfg.EnableRuntimeDetection {
 
@@ -178,7 +186,7 @@ func main() {
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
 
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, preRunningContainersIDs, nodeName, clusterData.ClusterName)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, preRunningContainersIDs, nodeName, clusterData.ClusterName, processTreeManager)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
@@ -193,7 +201,7 @@ func main() {
 	if cfg.EnableMalwareDetection {
 		// create exporter
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
-		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, nodeName, clusterData.ClusterName, exporter, prometheusExporter)
+		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, nodeName, clusterData.ClusterName, exporter, prometheusExporter, processTreeManager)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
 		}
@@ -214,7 +222,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify, processTreeManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
