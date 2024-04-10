@@ -151,14 +151,9 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:      rule.Name(),
+					InfectedPID:    networkEvent.Pid,
 					FixSuggestions: "If this is a legitimate action, please add the port as a parameter to the binding of this rule",
 					Severity:       R1003MaliciousSSHConnectionRuleDescriptor.Priority,
-				},
-				RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-					Comm: networkEvent.Comm,
-					GID:  networkEvent.Gid,
-					PID:  networkEvent.Pid,
-					UID:  networkEvent.Uid,
 				},
 				TriggerEvent: networkEvent.Event,
 				RuleAlert: apitypes.RuleAlert{

@@ -64,4 +64,8 @@ type RuleFailure interface {
 
 	// Set Workload Details
 	SetWorkloadDetails(workloadDetails string)
+	// Set process details
+	SetProcessDetails(processDetails apitypes.ProcessTree)
+	// Set unique ID
+	SetUniqueID(uniqueID uint32)
 }

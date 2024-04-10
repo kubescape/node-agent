@@ -48,3 +48,11 @@ func (rule *GenericRuleFailure) SetWorkloadDetails(workloadDetails string) {
 	rule.RuntimeAlertK8sDetails.WorkloadNamespace = wlid.GetNamespaceFromWlid(workloadDetails)
 	rule.RuntimeAlertK8sDetails.WorkloadName = wlid.GetNameFromWlid(workloadDetails)
 }
+
+func (rule *GenericRuleFailure) SetProcessDetails(processDetails apitypes.ProcessTree) {
+	rule.RuntimeProcessDetails = processDetails
+}
+
+func (rule *GenericRuleFailure) SetUniqueID(uniqueID uint32) {
+	rule.BaseRuntimeAlert.ProcessTreeUniqueID = uniqueID
+}

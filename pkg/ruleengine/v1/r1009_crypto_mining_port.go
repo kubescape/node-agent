@@ -68,14 +68,9 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:      rule.Name(),
+					InfectedPID:    networkEvent.Pid,
 					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 					Severity:       R1009CryptoMiningRelatedPortRuleDescriptor.Priority,
-				},
-				RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-					Comm: networkEvent.Comm,
-					GID:  networkEvent.Gid,
-					PID:  networkEvent.Pid,
-					UID:  networkEvent.Uid,
 				},
 				TriggerEvent: networkEvent.Event,
 				RuleAlert: apitypes.RuleAlert{

@@ -70,14 +70,9 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
+				InfectedPID:    syscallEvent.Pid,
 				FixSuggestions: "If this is a legitimate action, please add consider removing this workload from the binding of this rule",
 				Severity:       R1002LoadKernelModuleRuleDescriptor.Priority,
-			},
-			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-				Comm: syscallEvent.Comm,
-				GID:  syscallEvent.Gid,
-				PID:  syscallEvent.Pid,
-				UID:  syscallEvent.Uid,
 			},
 			TriggerEvent: syscallEvent.Event,
 			RuleAlert: apitypes.RuleAlert{

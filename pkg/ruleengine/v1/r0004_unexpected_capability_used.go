@@ -84,14 +84,9 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:      rule.Name(),
+			InfectedPID:    capEvent.Pid,
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the capability use \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", capEvent.CapName, capEvent.GetPod(), rule.generatePatchCommand(capEvent, ap)),
 			Severity:       R0004UnexpectedCapabilityUsedRuleDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-			Comm: capEvent.Comm,
-			GID:  capEvent.Gid,
-			PID:  capEvent.Pid,
-			UID:  capEvent.Uid,
 		},
 		TriggerEvent: capEvent.Event,
 		RuleAlert: apitypes.RuleAlert{

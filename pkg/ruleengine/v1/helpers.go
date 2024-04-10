@@ -166,54 +166,7 @@ func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRule
 		}
 	}
 
-	if ruleFailure.BaseRuntimeAlert.CommandLine == nil {
-		commandLine, err := utils.GetCmdlineByPid(int(pid))
-		if err != nil {
-			logger.L().Debug("Failed to get command line by pid", helpers.Error(err))
-			commandLine = nil
-		}
-		ruleFailure.BaseRuntimeAlert.CommandLine = commandLine
-	}
-
-	if ruleFailure.BaseRuntimeAlert.PPID == nil {
-		parent, err := utils.GetParentByPid(int(pid))
-		if err != nil {
-			logger.L().Debug("Failed to get ppid by pid", helpers.Error(err))
-			ruleFailure.BaseRuntimeAlert.PPID = nil
-		} else {
-			ppidInt := uint32(parent.PPID)
-			ruleFailure.BaseRuntimeAlert.PPID = &ppidInt
-		}
-
-		if ruleFailure.BaseRuntimeAlert.PPIDComm == nil {
-			if err == nil {
-				pcomm := parent.Comm
-				ruleFailure.BaseRuntimeAlert.PPIDComm = &pcomm
-			} else {
-				ruleFailure.BaseRuntimeAlert.PPIDComm = nil
-			}
-		}
-	}
-
 	ruleFailure.BaseRuntimeAlert.Timestamp = time.Unix(int64(event.Timestamp)/1e9, 0)
-
-	// Enrich RuntimeProcessDetails
-	if ruleFailure.RuntimeProcessDetails.PID == 0 {
-		ruleFailure.RuntimeProcessDetails.PID = pid
-	}
-
-	if ruleFailure.RuntimeProcessDetails.Path == "" {
-		ruleFailure.RuntimeProcessDetails.Path = path
-	}
-
-	if ruleFailure.RuntimeProcessDetails.Comm == "" {
-		comm, err := getCommFromPid(pid)
-		if err != nil {
-			logger.L().Debug("Failed to get comm from pid", helpers.Error(err))
-			comm = ""
-		}
-		ruleFailure.RuntimeProcessDetails.Comm = comm
-	}
 
 	// Enrich RuntimeAlertK8sDetails
 	if ruleFailure.RuntimeAlertK8sDetails.Image == "" {

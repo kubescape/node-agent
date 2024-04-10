@@ -90,14 +90,9 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:      rule.Name(),
+			InfectedPID:    syscallEvent.Pid,
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the system call \"%s\" to the whitelist in the application profile for the Pod \"%s\".", syscallEvent.SyscallName, syscallEvent.GetPod()),
 			Severity:       R0003UnexpectedSystemCallRuleDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-			Comm: syscallEvent.Comm, // TODO: This will always be empty, as we are not capturing Comm in the syscall event.
-			GID:  syscallEvent.Gid,  // TODO: This will always be 0, as we are not capturing GID in the syscall event.
-			PID:  syscallEvent.Pid,
-			UID:  syscallEvent.Uid, // TODO: This will always be 0, as we are not capturing UID in the syscall event.
 		},
 		TriggerEvent: syscallEvent.Event,
 		RuleAlert: apitypes.RuleAlert{

@@ -165,18 +165,13 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName: rule.Name(),
+			AlertName:   rule.Name(),
+			InfectedPID: openEvent.Pid,
 			Arguments: map[string]interface{}{
 				"flags": openEvent.Flags,
 			},
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
 			Severity:       R0002UnexpectedFileAccessRuleDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-			Comm: openEvent.Comm,
-			GID:  openEvent.Gid,
-			PID:  openEvent.Pid,
-			UID:  openEvent.Uid,
 		},
 		TriggerEvent: openEvent.Event,
 		RuleAlert: apitypes.RuleAlert{

@@ -77,14 +77,9 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
+				InfectedPID:    syscallEvent.Pid,
 				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
 				Severity:       R1005FilelessExecutionRuleDescriptor.Priority,
-			},
-			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-				Comm: syscallEvent.Comm,
-				GID:  syscallEvent.Gid,
-				PID:  syscallEvent.Pid,
-				UID:  syscallEvent.Uid,
 			},
 			TriggerEvent: syscallEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
@@ -117,24 +112,15 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 	// is memory mapped file
 
 	if strings.HasPrefix(execPath, "/proc/self/fd") || strings.HasPrefix(execEvent.Cwd, "/proc/self/fd") || strings.HasPrefix(execEvent.ExePath, "/proc/self/fd") {
-		isPartOfImage := !execEvent.UpperLayer
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName: rule.Name(),
+				AlertName:   rule.Name(),
+				InfectedPID: execEvent.Pid,
 				Arguments: map[string]interface{}{
 					"hardlink": execEvent.ExePath,
 				},
 				FixSuggestions: "If this is a legitimate action, please add consider removing this workload from the binding of this rule.",
 				Severity:       R1005FilelessExecutionRuleDescriptor.Priority,
-				IsPartOfImage:  &isPartOfImage,
-				PPID:           &execEvent.Ppid,
-				PPIDComm:       &execEvent.Pcomm,
-			},
-			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-				Comm: execEvent.Comm,
-				GID:  execEvent.Gid,
-				PID:  execEvent.Pid,
-				UID:  execEvent.Uid,
 			},
 			TriggerEvent: execEvent.Event,
 			RuleAlert: apitypes.RuleAlert{

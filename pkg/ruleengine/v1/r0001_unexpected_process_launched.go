@@ -90,7 +90,6 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		}
 	}
 
-	isPartOfImage := !execEvent.UpperLayer
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: rule.Name(),
@@ -98,16 +97,8 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 				"hardlink": execEvent.ExePath,
 			},
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the exec call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", execPath, execEvent.GetPod(), rule.generatePatchCommand(execEvent, ap)),
-			IsPartOfImage:  &isPartOfImage,
-			PPID:           &execEvent.Ppid,
-			PPIDComm:       &execEvent.Pcomm,
+			InfectedPID:    execEvent.Pid,
 			Severity:       R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-			Comm: execEvent.Comm,
-			GID:  execEvent.Gid,
-			PID:  execEvent.Pid,
-			UID:  execEvent.Uid,
 		},
 		TriggerEvent: execEvent.Event,
 		RuleAlert: apitypes.RuleAlert{

@@ -7,6 +7,7 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/exporters"
 	"node-agent/pkg/k8sclient"
+	"node-agent/pkg/processtreemanager"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/rulemanager"
 	"node-agent/pkg/utils"
@@ -41,6 +42,7 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 )
 
@@ -62,11 +64,12 @@ type RuleManager struct {
 	podToWlid                maps.SafeMap[string, string]
 	nodeName                 string
 	clusterName              string
+	ptm                      processtreemanager.ProcessTreeManager
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, preRunningContainersIDs mapset.Set[string], nodeName string, clusterName string) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, preRunningContainersIDs mapset.Set[string], nodeName string, clusterName string, ptm processtreemanager.ProcessTreeManager) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:                    cfg,
 		ctx:                    ctx,
@@ -82,6 +85,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		cachedPods:             mapset.NewSet[string](),
 		nodeName:               nodeName,
 		clusterName:            clusterName,
+		ptm:                    ptm,
 	}, nil
 }
 
@@ -419,6 +423,18 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 		if res != nil {
 			logger.L().Info("RuleManager FAILED - rule alert", helpers.String("rule", rule.Name()))
 			res.SetWorkloadDetails(rm.podToWlid.Get(res.GetRuntimeAlertK8sDetails().PodName))
+			process := rm.ptm.GetProcessTreeByContainerId(res.GetRuntimeAlertK8sDetails().ContainerID)
+			if process != nil {
+				processTracking := rm.ptm.GetTreeTrackingByContainerId(res.GetRuntimeAlertK8sDetails().ContainerID)
+				if processTracking != nil {
+					res.SetProcessDetails(apitypes.ProcessTree{
+						ProcessTree: *process,
+						UniqueID:    processTracking.UniqueID,
+						ContainerID: res.GetRuntimeAlertK8sDetails().ContainerID,
+					})
+					res.SetUniqueID(processTracking.UniqueID)
+				}
+			}
 			rm.exporter.SendRuleAlert(res)
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}
