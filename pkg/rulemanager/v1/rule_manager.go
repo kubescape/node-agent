@@ -43,7 +43,6 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
-	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 )
 
@@ -430,7 +429,7 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 		if res != nil {
 			logger.L().Info("RuleManager FAILED - rule alert", helpers.String("rule", rule.Name()))
 			res.SetWorkloadDetails(rm.podToWlid.Get(res.GetRuntimeAlertK8sDetails().PodName))
-			res = rm.enrichRuleFailure(res.GetTriggerEvent(), res.GetRuntimeProcessDetails().ProcessTree.PID, res)
+			res = rm.enrichRuleFailure(res)
 			rm.exporter.SendRuleAlert(res)
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}
@@ -438,20 +437,20 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 	}
 }
 
-func (rm *RuleManager) enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
-	path, err := utils.GetPathFromPid(pid)
+func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
+	path, err := utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
 	hostPath := ""
 	if err != nil {
 		logger.L().Debug("Failed to get path from event", helpers.Error(err))
 		path = ""
 	} else {
-		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", pid, path))
+		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID, path))
 	}
 
 	// Enrich BaseRuntimeAlert
 	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
 
-	baseRuntimeAlert.Timestamp = time.Unix(int64(event.Timestamp)/1e9, 0)
+	baseRuntimeAlert.Timestamp = time.Unix(int64(ruleFailure.GetTriggerEvent().Timestamp)/1e9, 0)
 
 	if baseRuntimeAlert.MD5Hash == "" && hostPath != "" {
 		md5hash, err := utils.CalculateMD5FileHash(hostPath)
@@ -498,7 +497,7 @@ func (rm *RuleManager) enrichRuleFailure(event igtypes.Event, pid uint32, ruleFa
 
 	runtimeProcessDetails := ruleFailure.GetRuntimeProcessDetails()
 	if runtimeProcessDetails.ProcessTree.Cmdline == "" {
-		commandLine, err := utils.GetCmdlineByPid(int(pid))
+		commandLine, err := utils.GetCmdlineByPid(int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID))
 		if err != nil {
 			logger.L().Debug("Failed to get command line by pid", helpers.Error(err))
 			commandLine = nil
@@ -507,7 +506,7 @@ func (rm *RuleManager) enrichRuleFailure(event igtypes.Event, pid uint32, ruleFa
 	}
 
 	if runtimeProcessDetails.ProcessTree.PPID == 0 {
-		parent, err := utils.GetParentByPid(int(pid))
+		parent, err := utils.GetParentByPid(int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID))
 		if err != nil {
 			logger.L().Debug("Failed to get ppid by pid", helpers.Error(err))
 			runtimeProcessDetails.ProcessTree.PPID = 0
@@ -525,11 +524,11 @@ func (rm *RuleManager) enrichRuleFailure(event igtypes.Event, pid uint32, ruleFa
 	}
 
 	if runtimeProcessDetails.ProcessTree.PID == 0 {
-		runtimeProcessDetails.ProcessTree.PID = pid
+		runtimeProcessDetails.ProcessTree.PID = ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID
 	}
 
 	if runtimeProcessDetails.ProcessTree.Comm == "" {
-		comm, err := utils.GetCommFromPid(pid)
+		comm, err := utils.GetCommFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
 		if err != nil {
 			logger.L().Debug("Failed to get comm from pid", helpers.Error(err))
 			comm = ""
@@ -552,35 +551,36 @@ func (rm *RuleManager) enrichRuleFailure(event igtypes.Event, pid uint32, ruleFa
 	// Enrich RuntimeAlertK8sDetails
 	runtimek8sdetails := ruleFailure.GetRuntimeAlertK8sDetails()
 	if runtimek8sdetails.Image == "" {
-		runtimek8sdetails.Image = event.GetContainerImageName()
+		runtimek8sdetails.Image = ruleFailure.GetTriggerEvent().Runtime.ContainerImageName
 	}
 
 	if runtimek8sdetails.ImageDigest == "" {
-		runtimek8sdetails.ImageDigest = event.Runtime.ContainerImageDigest
+		runtimek8sdetails.ImageDigest = ruleFailure.GetTriggerEvent().Runtime.ContainerImageDigest
 	}
 
 	if runtimek8sdetails.Namespace == "" {
-		runtimek8sdetails.Namespace = event.GetNamespace()
+		runtimek8sdetails.Namespace = ruleFailure.GetTriggerEvent().K8s.Namespace
 	}
 
 	if runtimek8sdetails.PodName == "" {
-		runtimek8sdetails.PodName = event.GetPod()
+		runtimek8sdetails.PodName = ruleFailure.GetTriggerEvent().K8s.PodName
 	}
 
 	if runtimek8sdetails.PodNamespace == "" {
-		runtimek8sdetails.PodNamespace = event.GetNamespace()
+		runtimek8sdetails.PodNamespace = ruleFailure.GetTriggerEvent().K8s.Namespace
 	}
 
 	if runtimek8sdetails.ContainerName == "" {
-		runtimek8sdetails.ContainerName = event.GetContainer()
+		runtimek8sdetails.ContainerName = ruleFailure.GetTriggerEvent().Runtime.ContainerName
 	}
 
 	if runtimek8sdetails.ContainerID == "" {
-		runtimek8sdetails.ContainerID = event.Runtime.ContainerID
+		runtimek8sdetails.ContainerID = ruleFailure.GetTriggerEvent().Runtime.ContainerID
 	}
 
 	if runtimek8sdetails.HostNetwork == nil {
-		runtimek8sdetails.HostNetwork = &event.K8s.HostNetwork
+		hostNetwork := ruleFailure.GetTriggerEvent().K8s.HostNetwork
+		runtimek8sdetails.HostNetwork = &hostNetwork
 	}
 
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
