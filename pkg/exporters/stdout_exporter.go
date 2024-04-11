@@ -32,7 +32,6 @@ func InitStdoutExporter(useStdout *bool) *StdoutExporter {
 
 func (exporter *StdoutExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	exporter.logger.WithFields(log.Fields{
-		"severity":              failedRule.GetBaseRuntimeAlert().Severity,
 		"message":               failedRule.GetRuleAlert().RuleDescription,
 		"event":                 failedRule.GetTriggerEvent(),
 		"BaseRuntimeMetadata":   failedRule.GetBaseRuntimeAlert(),
@@ -43,19 +42,10 @@ func (exporter *StdoutExporter) SendRuleAlert(failedRule ruleengine.RuleFailure)
 
 func (exporter *StdoutExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
 	exporter.logger.WithFields(log.Fields{
-		"severity":             10,
-		"description":          malwareResult.GetMalwareRuntimeAlert().MalwareDescription,
-		"md5hash":              malwareResult.GetBasicRuntimeAlert().MD5Hash,
-		"sha1hash":             malwareResult.GetBasicRuntimeAlert().SHA1Hash,
-		"sha256hash":           malwareResult.GetBasicRuntimeAlert().SHA256Hash,
-		"path":                 malwareResult.GetRuntimeProcessDetails().Path,
-		"size":                 malwareResult.GetBasicRuntimeAlert().Size,
-		"pod":                  malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
-		"namespace":            malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
-		"container":            malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
-		"containerID":          malwareResult.GetTriggerEvent().Runtime.ContainerID,
-		"isPartOfImage":        malwareResult.GetBasicRuntimeAlert().IsPartOfImage,
-		"containerImage":       malwareResult.GetTriggerEvent().Runtime.ContainerImageName,
-		"containerImageDigest": malwareResult.GetTriggerEvent().Runtime.ContainerImageDigest,
+		"message":               malwareResult.GetMalwareRuntimeAlert().MalwareDescription,
+		"event":                 malwareResult.GetTriggerEvent(),
+		"BaseRuntimeMetadata":   malwareResult.GetBasicRuntimeAlert(),
+		"RuntimeProcessDetails": malwareResult.GetRuntimeProcessDetails(),
+		"RuntimeK8sDetails":     malwareResult.GetRuntimeAlertK8sDetails(),
 	}).Error(malwareResult.GetBasicRuntimeAlert().AlertName)
 }

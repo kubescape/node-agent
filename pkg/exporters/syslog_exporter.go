@@ -51,10 +51,10 @@ func (se *SyslogExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 		Timestamp: failedRule.GetBaseRuntimeAlert().Timestamp,
 		Hostname:  failedRule.GetRuntimeAlertK8sDetails().PodName,
 		AppName:   failedRule.GetRuntimeAlertK8sDetails().ContainerName,
-		ProcessID: fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().PID),
+		ProcessID: fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.PID),
 		StructuredData: []rfc5424.StructuredData{
 			{
-				ID: fmt.Sprintf("kubecop@%d", failedRule.GetRuntimeProcessDetails().PID),
+				ID: fmt.Sprintf("kubecop@%d", failedRule.GetRuntimeProcessDetails().ProcessTree.PID),
 				Parameters: []rfc5424.SDParam{
 					{
 						Name:  "rule",
@@ -74,15 +74,15 @@ func (se *SyslogExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 					},
 					{
 						Name:  "comm",
-						Value: failedRule.GetRuntimeProcessDetails().Comm,
+						Value: failedRule.GetRuntimeProcessDetails().ProcessTree.Comm,
 					},
 					{
 						Name:  "uid",
-						Value: fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().UID),
+						Value: fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.Uid),
 					},
 					{
 						Name:  "gid",
-						Value: fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().GID),
+						Value: fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.Gid),
 					},
 					{
 						Name:  "namespace",
@@ -133,10 +133,6 @@ func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareR
 						Value: malwareResult.GetMalwareRuntimeAlert().MalwareDescription,
 					},
 					{
-						Name:  "path",
-						Value: malwareResult.GetRuntimeProcessDetails().Path,
-					},
-					{
 						Name:  "md5hash",
 						Value: malwareResult.GetBasicRuntimeAlert().MD5Hash,
 					},
@@ -179,14 +175,7 @@ func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareR
 				},
 			},
 		},
-		Message: []byte(fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s' path '%s'", malwareResult.GetBasicRuntimeAlert().AlertName, malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(), malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(), malwareResult.GetMalwareRuntimeAlert().MalwareDescription, malwareResult.GetRuntimeProcessDetails().Path)),
-	}
-
-	if malwareResult.GetBasicRuntimeAlert().IsPartOfImage != nil {
-		message.StructuredData[0].Parameters = append(message.StructuredData[0].Parameters, rfc5424.SDParam{
-			Name:  "is_part_of_image",
-			Value: fmt.Sprintf("%t", *malwareResult.GetBasicRuntimeAlert().IsPartOfImage),
-		})
+		Message: []byte(fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s'", malwareResult.GetBasicRuntimeAlert().AlertName, malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(), malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(), malwareResult.GetMalwareRuntimeAlert().MalwareDescription)),
 	}
 
 	_, err := message.WriteTo(se.writer)

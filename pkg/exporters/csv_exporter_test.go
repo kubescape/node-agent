@@ -21,7 +21,6 @@ func TestCsvExporter(t *testing.T) {
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
-		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
 			ContainerName: "testcontainer",
@@ -33,16 +32,13 @@ func TestCsvExporter(t *testing.T) {
 		},
 	})
 	sizeStr := "2MiB"
-	commandLine := "testmalwarecmdline"
 	csvExporter.SendMalwareAlert(&mmtypes.GenericMalwareResult{
 		BasicRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName:     "testmalware",
-			Size:          &sizeStr,
-			CommandLine:   &commandLine,
-			MD5Hash:       "testmalwarehash",
-			SHA1Hash:      "testmalwarehash",
-			SHA256Hash:    "testmalwarehash",
-			IsPartOfImage: nil,
+			AlertName:  "testmalware",
+			Size:       &sizeStr,
+			MD5Hash:    "testmalwarehash",
+			SHA1Hash:   "testmalwarehash",
+			SHA256Hash: "testmalwarehash",
 		},
 		TriggerEvent: igtypes.Event{
 			CommonData: igtypes.CommonData{
@@ -65,13 +61,6 @@ func TestCsvExporter(t *testing.T) {
 		},
 		MalwareRuntimeAlert: apitypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",
-		},
-		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-			Path: "testmalwarepath",
-			Comm: "testmalwarecomm",
-			PID:  123,
-			UID:  456,
-			GID:  789,
 		},
 	})
 
