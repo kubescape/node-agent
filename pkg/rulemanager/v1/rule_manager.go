@@ -10,10 +10,12 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/rulemanager"
 	"node-agent/pkg/utils"
+	"path/filepath"
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v4"
+	"github.com/dustin/go-humanize"
 	"go.opentelemetry.io/otel"
 	corev1 "k8s.io/api/core/v1"
 
@@ -41,6 +43,7 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 )
 
@@ -62,6 +65,7 @@ type RuleManager struct {
 	podToWlid                maps.SafeMap[string, string]
 	nodeName                 string
 	clusterName              string
+	containerIdToShimPid     maps.SafeMap[string, uint32]
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
@@ -267,6 +271,12 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			}
 		}
 		rm.trackedContainers.Add(k8sContainerID)
+		shim, err := utils.GetParentByPid(int(notif.Container.Pid))
+		if err != nil {
+			logger.L().Error("RuleManager - failed to get shim process", helpers.Error(err))
+		} else {
+			rm.containerIdToShimPid.Set(notif.Container.Runtime.ContainerID, uint32(shim.PPID))
+		}
 		go rm.startRuleManager(rm.ctx, notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:
 		channel := rm.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
@@ -275,6 +285,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		}
 		rm.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
 		rm.podToWlid.Delete(notif.Container.K8s.PodName)
+		rm.containerIdToShimPid.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 
@@ -419,11 +430,162 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 		if res != nil {
 			logger.L().Info("RuleManager FAILED - rule alert", helpers.String("rule", rule.Name()))
 			res.SetWorkloadDetails(rm.podToWlid.Get(res.GetRuntimeAlertK8sDetails().PodName))
+			res = rm.enrichRuleFailure(res.GetTriggerEvent(), res.GetRuntimeProcessDetails().ProcessTree.PID, res)
 			rm.exporter.SendRuleAlert(res)
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())
 	}
+}
+
+func (rm *RuleManager) enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
+	path, err := utils.GetPathFromPid(pid)
+	hostPath := ""
+	if err != nil {
+		logger.L().Debug("Failed to get path from event", helpers.Error(err))
+		path = ""
+	} else {
+		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", pid, path))
+	}
+
+	// Enrich BaseRuntimeAlert
+	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
+
+	baseRuntimeAlert.Timestamp = time.Unix(int64(event.Timestamp)/1e9, 0)
+
+	if baseRuntimeAlert.MD5Hash == "" && hostPath != "" {
+		md5hash, err := utils.CalculateMD5FileHash(hostPath)
+		if err != nil {
+			logger.L().Debug("Failed to calculate md5 hash for file", helpers.Error(err))
+			md5hash = ""
+		}
+		baseRuntimeAlert.MD5Hash = md5hash
+	}
+
+	if baseRuntimeAlert.SHA1Hash == "" && hostPath != "" {
+		sha1hash, err := utils.CalculateSHA1FileHash(hostPath)
+		if err != nil {
+			logger.L().Debug("Failed to calculate sha1 hash for file", helpers.Error(err))
+			sha1hash = ""
+		}
+
+		baseRuntimeAlert.SHA1Hash = sha1hash
+	}
+
+	if baseRuntimeAlert.SHA256Hash == "" && hostPath != "" {
+		sha256hash, err := utils.CalculateSHA256FileHash(hostPath)
+		if err != nil {
+			logger.L().Debug("Failed to calculate sha256 hash for file", helpers.Error(err))
+			sha256hash = ""
+		}
+
+		baseRuntimeAlert.SHA256Hash = sha256hash
+	}
+
+	if baseRuntimeAlert.Size == nil && hostPath != "" {
+		size, err := utils.GetFileSize(hostPath)
+		if err != nil {
+			logger.L().Debug("Failed to get file size", helpers.Error(err))
+			sizeStr := ""
+			baseRuntimeAlert.Size = &sizeStr
+		} else {
+			size := humanize.Bytes(uint64(size))
+			baseRuntimeAlert.Size = &size
+		}
+	}
+
+	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
+
+	runtimeProcessDetails := ruleFailure.GetRuntimeProcessDetails()
+	if runtimeProcessDetails.ProcessTree.Cmdline == "" {
+		commandLine, err := utils.GetCmdlineByPid(int(pid))
+		if err != nil {
+			logger.L().Debug("Failed to get command line by pid", helpers.Error(err))
+			commandLine = nil
+		}
+		runtimeProcessDetails.ProcessTree.Cmdline = *commandLine
+	}
+
+	if runtimeProcessDetails.ProcessTree.PPID == 0 {
+		parent, err := utils.GetParentByPid(int(pid))
+		if err != nil {
+			logger.L().Debug("Failed to get ppid by pid", helpers.Error(err))
+			runtimeProcessDetails.ProcessTree.PPID = 0
+		} else {
+			runtimeProcessDetails.ProcessTree.PPID = uint32(parent.PPID)
+		}
+
+		if runtimeProcessDetails.ProcessTree.Pcomm == "" {
+			if err == nil {
+				runtimeProcessDetails.ProcessTree.Pcomm = parent.Comm
+			} else {
+				runtimeProcessDetails.ProcessTree.Pcomm = ""
+			}
+		}
+	}
+
+	if runtimeProcessDetails.ProcessTree.PID == 0 {
+		runtimeProcessDetails.ProcessTree.PID = pid
+	}
+
+	if runtimeProcessDetails.ProcessTree.Comm == "" {
+		comm, err := utils.GetCommFromPid(pid)
+		if err != nil {
+			logger.L().Debug("Failed to get comm from pid", helpers.Error(err))
+			comm = ""
+		}
+		runtimeProcessDetails.ProcessTree.Comm = comm
+	}
+
+	if rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeAlertK8sDetails().ContainerID) {
+		shimPid := rm.containerIdToShimPid.Get(ruleFailure.GetRuntimeAlertK8sDetails().ContainerID)
+		tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree, shimPid)
+		if err != nil {
+			logger.L().Debug("Failed to create process tree", helpers.Error(err))
+		} else {
+			runtimeProcessDetails.ProcessTree = *tree
+		}
+	}
+
+	ruleFailure.SetRuntimeProcessDetails(runtimeProcessDetails)
+
+	// Enrich RuntimeAlertK8sDetails
+	runtimek8sdetails := ruleFailure.GetRuntimeAlertK8sDetails()
+	if runtimek8sdetails.Image == "" {
+		runtimek8sdetails.Image = event.GetContainerImageName()
+	}
+
+	if runtimek8sdetails.ImageDigest == "" {
+		runtimek8sdetails.ImageDigest = event.Runtime.ContainerImageDigest
+	}
+
+	if runtimek8sdetails.Namespace == "" {
+		runtimek8sdetails.Namespace = event.GetNamespace()
+	}
+
+	if runtimek8sdetails.PodName == "" {
+		runtimek8sdetails.PodName = event.GetPod()
+	}
+
+	if runtimek8sdetails.PodNamespace == "" {
+		runtimek8sdetails.PodNamespace = event.GetNamespace()
+	}
+
+	if runtimek8sdetails.ContainerName == "" {
+		runtimek8sdetails.ContainerName = event.GetContainer()
+	}
+
+	if runtimek8sdetails.ContainerID == "" {
+		runtimek8sdetails.ContainerID = event.Runtime.ContainerID
+	}
+
+	if runtimek8sdetails.HostNetwork == nil {
+		runtimek8sdetails.HostNetwork = &event.K8s.HostNetwork
+	}
+
+	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
+
+	return ruleFailure
 }
 
 func (rm *RuleManager) isCached(namespace, name string) bool {

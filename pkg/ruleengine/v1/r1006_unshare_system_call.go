@@ -72,14 +72,18 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event i
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
+				InfectedPID:    syscallEvent.Pid,
 				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
 				Severity:       R1006UnshareSyscallRuleDescriptor.Priority,
 			},
-			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-				Comm: syscallEvent.Comm,
-				GID:  syscallEvent.Gid,
-				PID:  syscallEvent.Pid,
-				UID:  syscallEvent.Uid,
+			RuntimeProcessDetails: apitypes.ProcessTree{
+				ProcessTree: apitypes.Process{
+					Comm: syscallEvent.Comm,
+					Gid:  syscallEvent.Gid,
+					PID:  syscallEvent.Pid,
+					Uid:  syscallEvent.Uid,
+				},
+				ContainerID: syscallEvent.Runtime.ContainerID,
 			},
 			TriggerEvent: syscallEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
@@ -88,8 +92,6 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event i
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}
-
-		enrichRuleFailure(syscallEvent.Event, syscallEvent.Pid, &ruleFailure)
 
 		return &ruleFailure
 	}

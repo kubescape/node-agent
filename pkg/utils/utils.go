@@ -38,6 +38,8 @@ import (
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 var (
@@ -618,4 +620,113 @@ func CalculateMD5FileHash(path string) (string, error) {
 	hashString := hex.EncodeToString(hashInBytes)
 
 	return hashString, nil
+}
+
+// Creates a process tree from a process.
+// The process tree will be built from scanning the /proc filesystem.
+func CreateProcessTree(process *apitypes.Process, shimPid uint32) (*apitypes.Process, error) {
+	procfs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return nil, err
+	}
+
+	proc, err := procfs.Proc(int(process.PID))
+	if err != nil {
+		return nil, err
+	}
+
+	// build the process tree
+	treeRoot, err := buildProcessTree(proc, &procfs, shimPid, *process)
+	if err != nil {
+		return nil, err
+	}
+
+	return treeRoot, nil
+}
+
+// Recursively build the process tree.
+func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, processTree apitypes.Process) (*apitypes.Process, error) {
+	// if the process parent is the shim process, return the process.
+	stat, err := proc.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	if stat.PPID == int(shimPid) {
+		return &processTree, nil
+	}
+
+	parent, err := procfs.Proc(stat.PPID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Make the parent process the parent of the current process (move the current process to the parent's children).
+	currentProcess := apitypes.Process{
+		Cmdline: func() string {
+			cmdline, err := proc.CmdLine()
+			if err != nil {
+				return ""
+			}
+			return strings.Join(cmdline, " ")
+		}(),
+		Pcomm: func() string {
+			pcomm, err := parent.Comm()
+			if err != nil {
+				return ""
+			}
+			return pcomm
+		}(),
+		Gid: uint32(stat.PGRP),
+		// TODO: Complete uid.
+		Cwd: func() string {
+			cwd, err := proc.Cwd()
+			if err != nil {
+				return ""
+			}
+			return cwd
+		}(),
+	}
+
+	currentProcess.Children = append(currentProcess.Children, processTree)
+
+	return buildProcessTree(parent, procfs, shimPid, currentProcess)
+}
+
+func GetPathFromPid(pid uint32) (string, error) {
+	fs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return "", err
+	}
+
+	proc, err := fs.Proc(int(pid))
+	if err != nil {
+		return "", err
+	}
+
+	path, err := proc.Executable()
+	if err != nil {
+		return "", err
+	}
+
+	return path, nil
+}
+
+func GetCommFromPid(pid uint32) (string, error) {
+	fs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return "", err
+	}
+
+	proc, err := fs.Proc(int(pid))
+	if err != nil {
+		return "", err
+	}
+
+	comm, err := proc.Comm()
+	if err != nil {
+		return "", err
+	}
+
+	return comm, nil
 }

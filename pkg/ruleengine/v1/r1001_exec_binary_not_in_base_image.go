@@ -5,6 +5,7 @@ import (
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
+	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -60,21 +61,27 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 	}
 
 	if execEvent.UpperLayer {
-		isPartOfImage := !execEvent.UpperLayer
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
+				InfectedPID:    execEvent.Pid,
 				FixSuggestions: "If this is an expected behavior it is strongly suggested to include all executables in the container image. If this is not possible you can remove the rule binding to this workload.",
 				Severity:       R1001ExecBinaryNotInBaseImageRuleDescriptor.Priority,
-				IsPartOfImage:  &isPartOfImage,
-				PPID:           &execEvent.Ppid,
-				PPIDComm:       &execEvent.Pcomm,
 			},
-			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-				Comm: execEvent.Comm,
-				GID:  execEvent.Gid,
-				PID:  execEvent.Pid,
-				UID:  execEvent.Uid,
+			RuntimeProcessDetails: apitypes.ProcessTree{
+				ProcessTree: apitypes.Process{
+					Comm:       execEvent.Comm,
+					Gid:        execEvent.Gid,
+					PID:        execEvent.Pid,
+					Uid:        execEvent.Uid,
+					UpperLayer: execEvent.UpperLayer,
+					PPID:       execEvent.Ppid,
+					Pcomm:      execEvent.Pcomm,
+					Cwd:        execEvent.Cwd,
+					Hardlink:   execEvent.ExePath,
+					Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(execEvent.Args, " ")),
+				},
+				ContainerID: execEvent.Runtime.ContainerID,
 			},
 			TriggerEvent: execEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
@@ -83,8 +90,6 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}
-
-		enrichRuleFailure(execEvent.Event, execEvent.Pid, &ruleFailure)
 
 		return &ruleFailure
 	}

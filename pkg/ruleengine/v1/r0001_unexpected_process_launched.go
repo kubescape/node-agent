@@ -5,6 +5,7 @@ import (
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
+	"strings"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 
@@ -90,34 +91,37 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		}
 	}
 
-	isPartOfImage := !execEvent.UpperLayer
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName: rule.Name(),
+			AlertName:   rule.Name(),
+			InfectedPID: execEvent.Pid,
 			Arguments: map[string]interface{}{
-				"hardlink": execEvent.ExePath,
+				"retval": execEvent.Retval,
 			},
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the exec call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", execPath, execEvent.GetPod(), rule.generatePatchCommand(execEvent, ap)),
-			IsPartOfImage:  &isPartOfImage,
-			PPID:           &execEvent.Ppid,
-			PPIDComm:       &execEvent.Pcomm,
 			Severity:       R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
 		},
-		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-			Comm: execEvent.Comm,
-			GID:  execEvent.Gid,
-			PID:  execEvent.Pid,
-			UID:  execEvent.Uid,
+		RuntimeProcessDetails: apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				Comm:       execEvent.Comm,
+				Gid:        execEvent.Gid,
+				PID:        execEvent.Pid,
+				Uid:        execEvent.Uid,
+				UpperLayer: execEvent.UpperLayer,
+				PPID:       execEvent.Ppid,
+				Pcomm:      execEvent.Pcomm,
+				Cwd:        execEvent.Cwd,
+				Hardlink:   execEvent.ExePath,
+				Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(execEvent.Args, " ")),
+			},
+			ContainerID: execEvent.Runtime.ContainerID,
 		},
 		TriggerEvent: execEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
 			RuleID:          rule.ID(),
 			RuleDescription: fmt.Sprintf("Unexpected process launched: %s in: %s", execPath, execEvent.GetContainer()),
 		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 	}
-
-	enrichRuleFailure(execEvent.Event, execEvent.Pid, &ruleFailure)
 
 	return &ruleFailure
 }
