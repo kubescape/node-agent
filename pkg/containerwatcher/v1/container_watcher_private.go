@@ -86,55 +86,62 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 	}
 
 	// add containers that are already running
-	go ch.addRunningContainers()
+	go ch.startRunningContainers()
 
 	return nil
 }
 
-func (ch *IGContainerWatcher) addRunningContainers() error {
+func (ch *IGContainerWatcher) startRunningContainers() error {
 	k8sClient, err := containercollection.NewK8sClient(ch.nodeName)
 	if err != nil {
-		return fmt.Errorf("creating Kubernetes client: %w", err)
+		logger.L().Fatal("creating IG Kubernetes client", helpers.Error(err))
 	}
 	defer k8sClient.Close()
-
 	for n := range *ch.ruleBindingPodNotify {
-
-		pod := n.GetPod()
-
-		// skip containers that should be ignored
-		if ch.ignoreContainer(pod.GetNamespace(), pod.GetName()) {
-			logger.L().Info("skipping pod", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod name", pod.GetName()))
-			continue
-		}
-
-		containers := k8sClient.GetRunningContainers(pod)
-		for _, container := range containers {
-			switch n.GetAction() {
-			case rulebindingmanager.Removed:
-				ch.ruleManagedContainers.Remove(container.Runtime.ContainerID)
-				ch.unregisterContainer(&container)
-
-			case rulebindingmanager.Added:
-				if ch.timeBasedContainers.Contains(container.Runtime.ContainerID) || ch.ruleManagedContainers.Contains(container.Runtime.ContainerID) {
-					// the container is already being monitored
-					continue
-				}
-
-				// Make a copy instead of passing the same pointer at
-				// each iteration of the loop
-				newContainer := containercollection.Container{}
-				newContainer = container
-				ch.preRunningContainersIDs.Add(container.Runtime.ContainerID)
-				ch.ruleManagedContainers.Add(container.Runtime.ContainerID)
-				ch.containerCollection.AddContainer(&newContainer)
-			}
-		}
-
+		ch.addRunningContainers(k8sClient, &n)
 	}
 	return nil
 }
 
+func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *rulebindingmanager.RuleBindingNotify) {
+	pod := notf.GetPod()
+
+	// skip containers that should be ignored
+	if ch.ignoreContainer(pod.GetNamespace(), pod.GetName()) {
+		logger.L().Info("skipping pod", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod name", pod.GetName()))
+		return
+	}
+
+	containers := k8sClient.GetRunningContainers(pod)
+	for _, container := range containers {
+		switch notf.GetAction() {
+		case rulebindingmanager.Removed:
+			ch.ruleManagedContainers.Remove(container.Runtime.ContainerID)
+			ch.unregisterContainer(&container)
+
+		case rulebindingmanager.Added:
+			if ch.ruleManagedContainers.Contains(container.Runtime.ContainerID) {
+				// the container is already being monitored
+				continue
+			}
+
+			// add to the list of containers that are being monitored because of ruless
+			ch.ruleManagedContainers.Add(container.Runtime.ContainerID)
+
+			if ch.timeBasedContainers.Contains(container.Runtime.ContainerID) {
+				// the container is already being monitored
+				continue
+			}
+
+			// Make a copy instead of passing the same pointer at
+			// each iteration of the loop
+			newContainer := containercollection.Container{}
+			newContainer = container
+			ch.preRunningContainersIDs.Add(container.Runtime.ContainerID)
+			ch.containerCollection.AddContainer(&newContainer)
+		}
+	}
+}
 func (ch *IGContainerWatcher) stopContainerCollection() {
 	if ch.containerCollection != nil {
 		ch.tracerCollection.Close()

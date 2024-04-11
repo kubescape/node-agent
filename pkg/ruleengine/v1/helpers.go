@@ -1,9 +1,11 @@
 package ruleengine
 
 import (
+	"errors"
 	"fmt"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/utils"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -92,7 +94,7 @@ func getPathFromPid(pid uint32) (string, error) {
 		return "", err
 	}
 
-	return path, nil
+	return filepath.Join("/proc", fmt.Sprintf("%d", pid), "root", path), nil
 }
 
 func getCommFromPid(pid uint32) (string, error) {
@@ -115,55 +117,59 @@ func getCommFromPid(pid uint32) (string, error) {
 }
 
 func enrichRuleFailure(event igtypes.Event, pid uint32, ruleFailure *GenericRuleFailure) {
-	path, err := getPathFromPid(pid)
-	hostPath := ""
-	if err != nil {
-		logger.L().Debug("Failed to get path from event", helpers.Error(err))
-		path = ""
-	} else {
-		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", pid, path))
+	var hostPath string
+	var path string
+
+	if p, err := getPathFromPid(pid); err == nil {
+		path = p
+		hostPath = filepath.Join("/proc", fmt.Sprintf("%d", pid), "root", p)
 	}
 
 	// Enrich BaseRuntimeAlert
-	if ruleFailure.BaseRuntimeAlert.MD5Hash == "" && hostPath != "" {
-		md5hash, err := utils.CalculateMD5FileHash(hostPath)
-		if err != nil {
-			logger.L().Debug("Failed to calculate md5 hash for file", helpers.Error(err))
-			md5hash = ""
-		}
-		ruleFailure.BaseRuntimeAlert.MD5Hash = md5hash
-	}
-
-	if ruleFailure.BaseRuntimeAlert.SHA1Hash == "" && hostPath != "" {
-		sha1hash, err := utils.CalculateSHA1FileHash(hostPath)
-		if err != nil {
-			logger.L().Debug("Failed to calculate sha1 hash for file", helpers.Error(err))
-			sha1hash = ""
+	if _, err := os.Stat(hostPath); err == nil {
+		// file does not exist
+		if ruleFailure.BaseRuntimeAlert.MD5Hash == "" {
+			md5hash, err := utils.CalculateMD5FileHash(hostPath)
+			if err != nil {
+				logger.L().Debug("failed to calculate md5 hash for file", helpers.Error(err))
+				md5hash = ""
+			}
+			ruleFailure.BaseRuntimeAlert.MD5Hash = md5hash
 		}
 
-		ruleFailure.BaseRuntimeAlert.SHA1Hash = sha1hash
-	}
+		if ruleFailure.BaseRuntimeAlert.SHA1Hash == "" {
+			sha1hash, err := utils.CalculateSHA1FileHash(hostPath)
+			if err != nil {
+				logger.L().Debug("failed to calculate sha1 hash for file", helpers.Error(err))
+				sha1hash = ""
+			}
 
-	if ruleFailure.BaseRuntimeAlert.SHA256Hash == "" && hostPath != "" {
-		sha256hash, err := utils.CalculateSHA256FileHash(hostPath)
-		if err != nil {
-			logger.L().Debug("Failed to calculate sha256 hash for file", helpers.Error(err))
-			sha256hash = ""
+			ruleFailure.BaseRuntimeAlert.SHA1Hash = sha1hash
 		}
 
-		ruleFailure.BaseRuntimeAlert.SHA256Hash = sha256hash
-	}
+		if ruleFailure.BaseRuntimeAlert.SHA256Hash == "" {
+			sha256hash, err := utils.CalculateSHA256FileHash(hostPath)
+			if err != nil {
+				logger.L().Debug("failed to calculate sha256 hash for file", helpers.Error(err))
+				sha256hash = ""
+			}
 
-	if ruleFailure.BaseRuntimeAlert.Size == nil && hostPath != "" {
-		size, err := utils.GetFileSize(hostPath)
-		if err != nil {
-			logger.L().Debug("Failed to get file size", helpers.Error(err))
-			sizeStr := ""
-			ruleFailure.BaseRuntimeAlert.Size = &sizeStr
-		} else {
-			size := humanize.Bytes(uint64(size))
-			ruleFailure.BaseRuntimeAlert.Size = &size
+			ruleFailure.BaseRuntimeAlert.SHA256Hash = sha256hash
 		}
+
+		if ruleFailure.BaseRuntimeAlert.Size == nil {
+			size, err := utils.GetFileSize(hostPath)
+			if err != nil {
+				logger.L().Debug("failed to get file size", helpers.Error(err))
+				sizeStr := ""
+				ruleFailure.BaseRuntimeAlert.Size = &sizeStr
+			} else {
+				size := humanize.Bytes(uint64(size))
+				ruleFailure.BaseRuntimeAlert.Size = &size
+			}
+		}
+	} else if hostPath != "" && !errors.Is(err, os.ErrNotExist) {
+		logger.L().Warning("failed to get file info", helpers.String("file name", hostPath), helpers.Error(err))
 	}
 
 	if ruleFailure.BaseRuntimeAlert.CommandLine == nil {
