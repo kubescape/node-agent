@@ -103,13 +103,14 @@
             "cpe:2.3:a:adduser:adduser:3.134:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/adduser@3.134?arch=all&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "adduser",
             "source": "",
             "version": "3.134",
             "sourceVersion": "",
             "architecture": "all",
-           "maintainer": "Debian Adduser Developers <adduser@packages.debian.org>",
+            "maintainer": "Debian Adduser Developers <adduser@packages.debian.org>",
             "installedSize": 686,
             "depends": [
               "passwd"
@@ -706,13 +707,14 @@
             "cpe:2.3:a:debconf:debconf:1.5.82:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/debconf@1.5.82?arch=all&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "debconf",
             "source": "",
             "version": "1.5.82",
             "sourceVersion": "",
             "architecture": "all",
-           "maintainer": "Debconf Developers <debconf-devel@lists.alioth.debian.org>",
+            "maintainer": "Debconf Developers <debconf-devel@lists.alioth.debian.org>",
             "installedSize": 491,
             "provides": [
               "debconf-2.0"
@@ -1884,13 +1886,14 @@
             "cpe:2.3:a:libaudit:libaudit_common:1\\:3.0.9-1:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/libaudit-common@1:3.0.9-1?arch=all&upstream=audit&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "libaudit-common",
             "source": "audit",
             "version": "1:3.0.9-1",
             "sourceVersion": "",
             "architecture": "all",
-           "maintainer": "Laurent Bigonville <bigon@debian.org>",
+            "maintainer": "Laurent Bigonville <bigon@debian.org>",
             "installedSize": 22,
             "files": [
               {
@@ -2014,18 +2017,19 @@
             "cpe:2.3:a:libaudit1:libaudit1:1\\:3.0.9-1:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/libaudit1@1:3.0.9-1?arch=arm64&upstream=audit&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "libaudit1",
             "source": "audit",
             "version": "1:3.0.9-1",
             "sourceVersion": "",
             "architecture": "arm64",
-           "maintainer": "Laurent Bigonville <bigon@debian.org>",
+            "maintainer": "Laurent Bigonville <bigon@debian.org>",
             "installedSize": 154,
             "depends": [
-            "libaudit-common (>= 1:3.0.9-1)",
-            "libc6 (>= 2.33)",
-            "libcap-ng0 (>= 0.7.9)"
+              "libaudit-common (>= 1:3.0.9-1)",
+              "libc6 (>= 2.33)",
+              "libcap-ng0 (>= 0.7.9)"
             ],
             "files": [
               {
@@ -2133,16 +2137,17 @@
             "cpe:2.3:a:libbz2:libbz2_1.0:1.0.8-5\\+b1:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/libbz2-1.0@1.0.8-5+b1?arch=arm64&upstream=bzip2@1.0.8-5&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "libbz2-1.0",
             "source": "bzip2",
             "version": "1.0.8-5+b1",
             "sourceVersion": "1.0.8-5",
             "architecture": "arm64",
-           "maintainer": "Anibal Monsalve Salazar <anibal@debian.org>",
+            "maintainer": "Anibal Monsalve Salazar <anibal@debian.org>",
             "installedSize": 102,
             "depends": [
-            "libc6 (>= 2.17)"
+              "libc6 (>= 2.17)"
             ],
             "files": [
               {
@@ -2261,13 +2266,14 @@
             "cpe:2.3:a:libc6:libc6:2.36-9\\+deb12u1:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/libc6@2.36-9+deb12u1?arch=arm64&upstream=glibc&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "libc6",
             "source": "glibc",
             "version": "2.36-9+deb12u1",
             "sourceVersion": "",
             "architecture": "arm64",
-           "maintainer": "GNU Libc Maintainers <debian-glibc@lists.debian.org>",
+            "maintainer": "GNU Libc Maintainers <debian-glibc@lists.debian.org>",
             "installedSize": 23127,
             "depends": [
               "libgcc-s1"
@@ -4586,16 +4592,17 @@
             "cpe:2.3:a:libcrypt1:libcrypt1:1\\:4.4.33-2:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/libcrypt1@1:4.4.33-2?arch=arm64&upstream=libxcrypt&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "libcrypt1",
             "source": "libxcrypt",
             "version": "1:4.4.33-2",
             "sourceVersion": "",
             "architecture": "arm64",
-           "maintainer": "Marco d'Itri <md@linux.it>",
+            "maintainer": "Marco d'Itri <md@linux.it>",
             "installedSize": 225,
             "depends": [
-            "libc6 (>= 2.36)"
+              "libc6 (>= 2.36)"
             ],
             "files": [
               {
@@ -4815,16 +4822,17 @@
             "cpe:2.3:a:libdb5.3:libdb5.3:5.3.28\\+dfsg2-1:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/libdb5.3@5.3.28+dfsg2-1?arch=arm64&upstream=db5.3&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "libdb5.3",
             "source": "db5.3",
             "version": "5.3.28+dfsg2-1",
             "sourceVersion": "",
             "architecture": "arm64",
-           "maintainer": "Bastian Germann <bage@debian.org>",
+            "maintainer": "Bastian Germann <bage@debian.org>",
             "installedSize": 1710,
             "depends": [
-            "libc6 (>= 2.34)"
+              "libc6 (>= 2.34)"
             ],
             "files": [
               {
@@ -5065,13 +5073,14 @@
             "cpe:2.3:a:libpam:libpam_modules:1.5.2-6:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/libpam-modules@1.5.2-6?arch=arm64&upstream=pam&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "libpam-modules",
             "source": "pam",
             "version": "1.5.2-6",
             "sourceVersion": "",
             "architecture": "arm64",
-           "maintainer": "Steve Langasek <vorlon@debian.org>",
+            "maintainer": "Steve Langasek <vorlon@debian.org>",
             "installedSize": 3153,
             "provides": [
               "libpam-mkhomedir",
@@ -5079,13 +5088,13 @@
               "libpam-umask"
             ],
             "preDepends": [
-            "libaudit1 (>= 1:2.2.1)",
-            "libc6 (>= 2.34)",
-            "libcrypt1 (>= 1:4.3.0)",
+              "libaudit1 (>= 1:2.2.1)",
+              "libc6 (>= 2.34)",
+              "libcrypt1 (>= 1:4.3.0)",
               "libdb5.3",
-            "libpam0g (>= 1.4.1)",
-            "libselinux1 (>= 3.1~)",
-            "debconf (>= 0.5) | debconf-2.0",
+              "libpam0g (>= 1.4.1)",
+              "libselinux1 (>= 3.1~)",
+              "debconf (>= 0.5) | debconf-2.0",
               "libpam-modules-bin (= 1.5.2-6)"
             ],
             "files": [
@@ -6179,20 +6188,21 @@
             "cpe:2.3:a:libpam:libpam_modules_bin:1.5.2-6:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/libpam-modules-bin@1.5.2-6?arch=arm64&upstream=pam&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "libpam-modules-bin",
             "source": "pam",
             "version": "1.5.2-6",
             "sourceVersion": "",
             "architecture": "arm64",
-           "maintainer": "Steve Langasek <vorlon@debian.org>",
+            "maintainer": "Steve Langasek <vorlon@debian.org>",
             "installedSize": 487,
             "depends": [
-            "libaudit1 (>= 1:2.2.1)",
-            "libc6 (>= 2.34)",
-            "libcrypt1 (>= 1:4.3.0)",
-            "libpam0g (>= 0.99.7.1)",
-            "libselinux1 (>= 3.1~)"
+              "libaudit1 (>= 1:2.2.1)",
+              "libc6 (>= 2.34)",
+              "libcrypt1 (>= 1:4.3.0)",
+              "libpam0g (>= 0.99.7.1)",
+              "libselinux1 (>= 3.1~)"
             ],
             "files": [
               {
@@ -6548,18 +6558,19 @@
             "cpe:2.3:a:libpam0g:libpam0g:1.5.2-6:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/libpam0g@1.5.2-6?arch=arm64&upstream=pam&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "libpam0g",
             "source": "pam",
             "version": "1.5.2-6",
             "sourceVersion": "",
             "architecture": "arm64",
-           "maintainer": "Steve Langasek <vorlon@debian.org>",
+            "maintainer": "Steve Langasek <vorlon@debian.org>",
             "installedSize": 315,
             "depends": [
-            "libaudit1 (>= 1:2.2.1)",
-            "libc6 (>= 2.34)",
-            "debconf (>= 0.5) | debconf-2.0"
+              "libaudit1 (>= 1:2.2.1)",
+              "libc6 (>= 2.34)",
+              "debconf (>= 0.5) | debconf-2.0"
             ],
             "files": [
               {
@@ -6726,17 +6737,18 @@
             "cpe:2.3:a:libselinux1:libselinux1:3.4-1\\+b6:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/libselinux1@3.4-1+b6?arch=arm64&upstream=libselinux@3.4-1&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "libselinux1",
             "source": "libselinux",
             "version": "3.4-1+b6",
             "sourceVersion": "3.4-1",
             "architecture": "arm64",
-           "maintainer": "Debian SELinux maintainers <selinux-devel@lists.alioth.debian.org>",
+            "maintainer": "Debian SELinux maintainers <selinux-devel@lists.alioth.debian.org>",
             "installedSize": 223,
             "depends": [
-            "libc6 (>= 2.34)",
-            "libpcre2-8-0 (>= 10.22)"
+              "libc6 (>= 2.34)",
+              "libpcre2-8-0 (>= 10.22)"
             ],
             "files": [
               {
@@ -6839,21 +6851,22 @@
             "cpe:2.3:a:libsemanage2:libsemanage2:3.4-1\\+b5:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/libsemanage2@3.4-1+b5?arch=arm64&upstream=libsemanage@3.4-1&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "libsemanage2",
             "source": "libsemanage",
             "version": "3.4-1+b5",
             "sourceVersion": "3.4-1",
             "architecture": "arm64",
-           "maintainer": "Debian SELinux maintainers <selinux-devel@lists.alioth.debian.org>",
+            "maintainer": "Debian SELinux maintainers <selinux-devel@lists.alioth.debian.org>",
             "installedSize": 292,
             "depends": [
-            "libsemanage-common (>= 3.4-1)",
-            "libaudit1 (>= 1:2.2.1)",
+              "libsemanage-common (>= 3.4-1)",
+              "libaudit1 (>= 1:2.2.1)",
               "libbz2-1.0",
-            "libc6 (>= 2.34)",
-            "libselinux1 (>= 3.4)",
-            "libsepol2 (>= 3.4)"
+              "libc6 (>= 2.34)",
+              "libselinux1 (>= 3.4)",
+              "libsepol2 (>= 3.4)"
             ],
             "files": [
               {
@@ -6995,6 +7008,7 @@
             "cpe:2.3:a:libsepol2:libsepol2:3.4-2.1:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/libsepol2@3.4-2.1?arch=arm64&upstream=libsepol&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "libsepol2",
             "source": "libsepol",
@@ -7146,6 +7160,7 @@
             "cpe:2.3:a:passwd:passwd:1\\:4.13\\+dfsg1-1\\+b1:*:*:*:*:*:*:*"
           ],
           "purl": "pkg:deb/debian/passwd@1:4.13+dfsg1-1+b1?arch=arm64&upstream=shadow@1:4.13+dfsg1-1&distro=debian-12",
+          "metadataType": "DpkgMetadata",
           "metadata": {
             "package": "passwd",
             "source": "shadow",
