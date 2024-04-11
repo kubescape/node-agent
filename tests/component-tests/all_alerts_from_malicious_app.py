@@ -7,16 +7,16 @@ def all_alerts_from_malicious_app(test_framework):
     ns = Namespace(name=None)
 
     if ns:
-        # Create application profile
-        app_profile = KubernetesObjects(namespace=ns,object_file=os.path.join(test_framework.get_root_directoty(),"resources/malicious-job-app-profile.yaml"))
-
         # Create a workload
-        workload = Workload(namespace=ns,workload_file=os.path.join(test_framework.get_root_directoty(),"resources/malicious-job.yaml"))
+        workload = Workload(namespace=ns,workload_file=os.path.join(test_framework.get_root_directory(),"resources/malicious-job.yaml"))
 
         # Wait for the workload to be ready
         workload.wait_for_ready(timeout=120)
 
-        # Wait 125 seconds for the alerts to be generated
+        # Wait for the application profile to be created and completed
+        workload.wait_for_application_profile(timeout=400)
+
+        # Wait for the alerts to be generated
         print("Waiting 20 seconds for the alerts to be generated")
         time.sleep(20)
 

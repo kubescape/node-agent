@@ -2,6 +2,8 @@ import subprocess
 import random
 import string
 import yaml
+import json
+import time
 
 class Namespace:
     def __init__(self, name):
@@ -82,6 +84,37 @@ class Workload:
         pod_name = subprocess.check_output(["kubectl", "-n", self.namespace.name(), "get", "pod", "-l", "app="+app_label, "-o", "jsonpath='{.items[0].metadata.name}'"]).decode("utf-8").strip("'")
         # Exec into the pod
         subprocess.check_call(["kubectl", "-n", self.namespace.name(), "exec", pod_name, "--"] + command)
+    
+    def get_application_profile(self):
+        def get_application_profiles_in_namespace(namespace: Namespace): 
+            output = subprocess.check_output(["kubectl", "get", "applicationprofiles", "-n", namespace.name(), "-ojson"]).decode("utf-8").strip("'")
+            app_profiles = json.loads(output)
+            return app_profiles["items"]
+
+        app_profiles = get_application_profiles_in_namespace(self.namespace)
+        for app_profile in app_profiles:
+            labels = app_profile['metadata']['labels']
+            wl_kind = labels.get('kubescape.io/workload-kind', '')
+            wl_name = labels.get('kubescape.io/workload-name', '')
+            wl_ns = labels.get('kubescape.io/workload-namespace', '')
+            
+            if wl_kind == self.workload_kind and wl_name == self.workload_name and wl_ns == self.namespace.name():
+                return app_profile        
+        return None
+
+    def wait_for_application_profile(self, timeout, interval=5):
+        def is_application_profile_complete(app_profile):
+            return app_profile['metadata']['annotations'].get('kubescape.io/status', '') == 'completed'
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            app_profile = self.get_application_profile()
+            if app_profile is not None and is_application_profile_complete(app_profile):
+                return app_profile
+
+            time.sleep(interval)
+        return None
+
 
 class KubernetesObjects:
     def __init__(self, namespace, object_file):

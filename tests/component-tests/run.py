@@ -61,7 +61,7 @@ class TestFramework:
         self.root_directory = os.path.join(toplevel, "tests", "component-tests")
         print("Root directory: %s" % self.root_directory)
 
-    def get_root_directoty(self):
+    def get_root_directory(self):
         return self.root_directory
 
     def get_alerts(self, namespace):

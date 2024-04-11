@@ -10,7 +10,7 @@ def finalization_alert_test(test_framework):
 
     if ns:
         # Create a workload
-        workload = Workload(namespace=ns,workload_file=os.path.join(test_framework.get_root_directoty(),"resources/nginx-deployment.yaml"))
+        workload = Workload(namespace=ns,workload_file=os.path.join(test_framework.get_root_directory(),"resources/nginx-deployment.yaml"))
 
         # Wait for the workload to be ready
         workload.wait_for_ready(timeout=120)

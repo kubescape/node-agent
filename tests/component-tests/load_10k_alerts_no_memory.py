@@ -4,7 +4,8 @@ import os
 
 from promtopic import save_plot_png, send_promql_query_to_prom
 from pprof import pprof_recorder
-from kubernetes_wrappers import Namespace
+from kubernetes_wrappers import Namespace, Workload
+
 
 def load_10k_alerts_no_memory_leak(test_framework):
     print("Running load 10k alerts no memory leak test")
@@ -15,13 +16,16 @@ def load_10k_alerts_no_memory_leak(test_framework):
     namespace = ns.name()
 
     try:
-        #  Install nginx profile in kubernetes by applying the nginx profile yaml
-        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx-app-profile.yaml"])
-        # Install nginx in kubernetes by applying the nginx deployment yaml with pre-creating profile for the nginx pod
-        subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx-deployment.yaml"])
+        # Install nginx in kubernetes by applying the nginx deployment yaml
+        workload = Workload(namespace=ns,workload_file=os.path.join(test_framework.get_root_directory(),"resources/nginx-deployment.yaml"))
         subprocess.check_call(["kubectl", "-n", namespace , "apply", "-f", "tests/component-tests/resources/nginx-service.yaml"])
+
         # Wait for nginx to be ready
-        subprocess.check_call(["kubectl", "-n", namespace , "wait", "--for=condition=ready", "pod", "-l", "app=nginx", "--timeout=120s"])
+        workload.wait_for_ready(timeout=120)
+
+        # Wait for the application profile to be created and completed
+        workload.wait_for_application_profile(timeout=400)
+
         # Get the pod name of the nginx pod
         nginx_pod_name = subprocess.check_output(["kubectl", "-n", namespace , "get", "pod", "-l", "app=nginx", "-o", "jsonpath='{.items[0].metadata.name}'"]).decode("utf-8").strip("'")
 

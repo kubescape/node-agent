@@ -9,17 +9,17 @@ def basic_load_activities(test_framework):
     ns = Namespace(name=None)
 
     if ns:
-        # Create application profile
-        app_profile = KubernetesObjects(namespace=ns,object_file=os.path.join(test_framework.get_root_directoty(),"resources/nginx-app-profile.yaml"))
-
         # Create a workload
-        nginx = Workload(namespace=ns,workload_file=os.path.join(test_framework.get_root_directoty(),"resources/nginx-deployment.yaml"))
+        nginx = Workload(namespace=ns,workload_file=os.path.join(test_framework.get_root_directory(),"resources/nginx-deployment.yaml"))
 
         # Wait for the workload to be ready
         nginx.wait_for_ready(timeout=120)
 
+        # Wait for the application profile to be created and completed
+        nginx.wait_for_application_profile(timeout=400)
+
         # Create loader
-        loader = Workload(namespace=ns,workload_file=os.path.join(test_framework.get_root_directoty(),"resources/locust-deployment.yaml"))
+        loader = Workload(namespace=ns,workload_file=os.path.join(test_framework.get_root_directory(),"resources/locust-deployment.yaml"))
 
         # Wait for the workload to be ready
         loader.wait_for_ready(timeout=120)

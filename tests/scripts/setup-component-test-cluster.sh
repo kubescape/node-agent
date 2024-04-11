@@ -46,9 +46,10 @@ fi
 # Add prometheus helm repo and install prometheus.
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || error_exit "Failed to add prometheus helm repo."
 helm repo update || error_exit "Failed to update helm repos."
-helm install prometheus prometheus-community/kube-prometheus-stack \
+helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
     --namespace monitoring --create-namespace --wait --timeout 5m \
-    --set grafana.enabled=true || error_exit "Failed to install prometheus."
+    --set grafana.enabled=true \
+    --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false,prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false || error_exit "Failed to install prometheus."
 
 # Check that the prometheus pod is running
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=prometheus -n monitoring --timeout=300s || error_exit "Prometheus did not start."
