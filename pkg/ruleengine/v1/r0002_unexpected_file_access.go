@@ -125,7 +125,6 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 	if rule.shouldIgnoreMounts {
 		mounts, err := getContainerMountPaths(openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer(), objCache.K8sObjectCache())
 		if err != nil {
-			logger.L().Error("Failed to get container mount paths", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 			return nil
 		}
 		for _, mount := range mounts {
