@@ -427,11 +427,20 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 			if process != nil {
 				processTracking := rm.ptm.GetTreeTrackingByContainerId(res.GetRuntimeAlertK8sDetails().ContainerID)
 				if processTracking != nil {
-					res.SetProcessDetails(apitypes.ProcessTree{
+					processTree := apitypes.ProcessTree{
 						ProcessTree: *process,
 						UniqueID:    processTracking.UniqueID,
 						ContainerID: res.GetRuntimeAlertK8sDetails().ContainerID,
-					})
+					}
+					if !processTracking.Sent {
+						processTracking.Sent = true
+						rm.ptm.SetTreeTrackingByContainerId(res.GetRuntimeAlertK8sDetails().ContainerID, processTracking)
+						res.SetProcessDetails(processTree)
+					} else {
+						processTree.UniqueID = 0
+						res.SetProcessDetails(processTree)
+					}
+
 					res.SetUniqueID(processTracking.UniqueID)
 				}
 			}

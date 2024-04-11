@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"node-agent/pkg/malwaremanager"
+	"node-agent/pkg/processtreemanager"
 	"node-agent/pkg/ruleengine"
 	ruleenginev1 "node-agent/pkg/ruleengine/v1"
 	"sync"
@@ -41,6 +42,7 @@ type HTTPExporter struct {
 	alertCount      int
 	alertCountLock  sync.Mutex
 	alertCountStart time.Time
+	ptm             processtreemanager.ProcessTreeManagerClient
 }
 
 type HTTPAlertsList struct {
@@ -50,7 +52,8 @@ type HTTPAlertsList struct {
 }
 
 type HTTPAlertsListSpec struct {
-	Alerts []apitypes.RuntimeAlert `json:"alerts"`
+	Alerts      []apitypes.RuntimeAlert `json:"alerts"`
+	ProcessTree apitypes.ProcessTree    `json:"processTree"`
 }
 
 func (config *HTTPExporterConfig) Validate() error {
@@ -75,7 +78,7 @@ func (config *HTTPExporterConfig) Validate() error {
 }
 
 // InitHTTPExporter initializes an HTTPExporter with the given URL, headers, timeout, and method
-func InitHTTPExporter(config HTTPExporterConfig, clusterName string, nodeName string) (*HTTPExporter, error) {
+func InitHTTPExporter(config HTTPExporterConfig, clusterName string, nodeName string, ptm processtreemanager.ProcessTreeManagerClient) (*HTTPExporter, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
@@ -85,6 +88,9 @@ func InitHTTPExporter(config HTTPExporterConfig, clusterName string, nodeName st
 		httpClient: &http.Client{
 			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
 		},
+		ClusterName: clusterName,
+		NodeName:    nodeName,
+		ptm:         ptm,
 	}, nil
 }
 
@@ -100,12 +106,12 @@ func (exporter *HTTPExporter) sendAlertLimitReached() {
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			NodeName:    exporter.NodeName,
-			ClusterName: &exporter.ClusterName,
+			ClusterName: exporter.ClusterName,
 		},
 	}
 
 	logger.L().Error("Alert limit reached", helpers.Int("alerts", exporter.alertCount), helpers.String("since", exporter.alertCountStart.Format(time.RFC3339)))
-	exporter.sendInAlertList(httpAlert)
+	exporter.sendInAlertList(httpAlert, nil)
 }
 
 func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
@@ -117,25 +123,32 @@ func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	// populate the RuntimeAlert struct with the data from the failedRule
 	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = exporter.NodeName
-	k8sDetails.ClusterName = &exporter.ClusterName
+	k8sDetails.ClusterName = exporter.ClusterName
 
 	httpAlert := apitypes.RuntimeAlert{
-		Message:                    failedRule.GetRuleAlert().RuleDescription,
-		HostName:                   exporter.Host,
-		AlertType:                  apitypes.AlertTypeRule,
-		BaseRuntimeAlert:           failedRule.GetBaseRuntimeAlert(),
-		RuntimeAlertK8sDetails:     k8sDetails,
-		RuntimeAlertProcessDetails: failedRule.GetRuntimeProcessDetails(),
-		RuleAlert:                  failedRule.GetRuleAlert(),
+		Message:                failedRule.GetRuleAlert().RuleDescription,
+		HostName:               exporter.Host,
+		AlertType:              apitypes.AlertTypeRule,
+		BaseRuntimeAlert:       failedRule.GetBaseRuntimeAlert(),
+		RuntimeAlertK8sDetails: k8sDetails,
+		RuleAlert:              failedRule.GetRuleAlert(),
 	}
-	exporter.sendInAlertList(httpAlert)
+	processTree := failedRule.GetRuntimeProcessDetails()
+	if processTree.UniqueID == 0 {
+		exporter.sendInAlertList(httpAlert, nil)
+	} else {
+		exporter.sendInAlertList(httpAlert, &processTree)
+	}
 }
 
-func (exporter *HTTPExporter) sendInAlertList(httpAlert apitypes.RuntimeAlert) {
+func (exporter *HTTPExporter) sendInAlertList(httpAlert apitypes.RuntimeAlert, processTree *apitypes.ProcessTree) {
 	// create the HTTPAlertsListSpec struct
 	// TODO: accumulate alerts and send them in a batch
 	httpAlertsListSpec := HTTPAlertsListSpec{
 		Alerts: []apitypes.RuntimeAlert{httpAlert},
+	}
+	if processTree != nil {
+		httpAlertsListSpec.ProcessTree = *processTree
 	}
 	// create the HTTPAlertsList struct
 	httpAlertsList := HTTPAlertsList{
@@ -188,18 +201,23 @@ func (exporter *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.Malw
 	}
 	k8sDetails := malwareResult.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = exporter.NodeName
-	k8sDetails.ClusterName = &exporter.ClusterName
+	k8sDetails.ClusterName = exporter.ClusterName
 
 	httpAlert := apitypes.RuntimeAlert{
-		Message:                    fmt.Sprintf("Malware detected: %s", malwareResult.GetBasicRuntimeAlert().AlertName),
-		HostName:                   exporter.Host,
-		AlertType:                  apitypes.AlertTypeMalware,
-		BaseRuntimeAlert:           malwareResult.GetBasicRuntimeAlert(),
-		RuntimeAlertK8sDetails:     k8sDetails,
-		RuntimeAlertProcessDetails: malwareResult.GetRuntimeProcessDetails(),
-		MalwareAlert:               malwareResult.GetMalwareRuntimeAlert(),
+		Message:                fmt.Sprintf("Malware detected: %s", malwareResult.GetBasicRuntimeAlert().AlertName),
+		HostName:               exporter.Host,
+		AlertType:              apitypes.AlertTypeMalware,
+		BaseRuntimeAlert:       malwareResult.GetBasicRuntimeAlert(),
+		RuntimeAlertK8sDetails: k8sDetails,
+		MalwareAlert:           malwareResult.GetMalwareRuntimeAlert(),
 	}
-	exporter.sendInAlertList(httpAlert)
+	processTree := malwareResult.GetRuntimeProcessDetails()
+	if processTree.UniqueID == 0 {
+		exporter.sendInAlertList(httpAlert, nil)
+	} else {
+		exporter.sendInAlertList(httpAlert, &processTree)
+	}
+	exporter.sendInAlertList(httpAlert, &processTree)
 }
 
 func (exporter *HTTPExporter) checkAlertLimit() bool {

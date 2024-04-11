@@ -68,7 +68,7 @@ func TestSyslogExporter(t *testing.T) {
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
-		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeProcessDetails: apitypes.ProcessTree{},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
 			ContainerName: "testcontainer",
@@ -84,7 +84,7 @@ func TestSyslogExporter(t *testing.T) {
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
-		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
+		RuntimeProcessDetails: apitypes.ProcessTree{},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
 			ContainerName: "testcontainer",
@@ -96,17 +96,14 @@ func TestSyslogExporter(t *testing.T) {
 		},
 	})
 	sizeStr := "2MiB"
-	commandLineStr := "testmalwarecmdline"
 
 	syslogExp.SendMalwareAlert(&mmtypes.GenericMalwareResult{
 		BasicRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName:     "testmalware",
-			Size:          &sizeStr,
-			CommandLine:   &commandLineStr,
-			MD5Hash:       "testmalwarehash",
-			SHA1Hash:      "testmalwarehash",
-			SHA256Hash:    "testmalwarehash",
-			IsPartOfImage: nil,
+			AlertName:  "testmalware",
+			Size:       &sizeStr,
+			MD5Hash:    "testmalwarehash",
+			SHA1Hash:   "testmalwarehash",
+			SHA256Hash: "testmalwarehash",
 		},
 		TriggerEvent: igtypes.Event{
 			CommonData: igtypes.CommonData{
@@ -130,13 +127,7 @@ func TestSyslogExporter(t *testing.T) {
 		MalwareRuntimeAlert: apitypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",
 		},
-		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-			Path: "testmalwarepath",
-			Comm: "testmalwarecomm",
-			PID:  123,
-			UID:  456,
-			GID:  789,
-		},
+		RuntimeProcessDetails: apitypes.ProcessTree{},
 	})
 
 	// Allow some time for the message to reach the mock syslog server

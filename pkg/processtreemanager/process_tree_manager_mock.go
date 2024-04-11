@@ -35,3 +35,7 @@ func (r ProcessTreeManagerMock) GetTreeTrackingByContainerId(containerID string)
 func (r ProcessTreeManagerMock) GetProcessByPid(containerID string, pid uint32) *apitypes.Process {
 	return nil
 }
+
+func (r ProcessTreeManagerMock) SetTreeTrackingByContainerId(containerID string, treeTracking *TreeTracking) {
+	// noop
+}

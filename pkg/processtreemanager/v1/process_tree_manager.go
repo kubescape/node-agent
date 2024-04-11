@@ -32,13 +32,17 @@ func (ptm *ProcessTreeManager) ContainerCallback(notif containercollection.PubSu
 			PID: 0,
 		})
 		ptm.TreeTracking.Set(notif.Container.Runtime.ContainerID, processtreemanager.TreeTracking{
-			UniqueID: 0,
+			UniqueID: 1,
 			Sent:     false,
 		})
 	case containercollection.EventTypeRemoveContainer:
 		ptm.Trees.Delete(notif.Container.Runtime.ContainerID)
 		ptm.TreeTracking.Delete(notif.Container.Runtime.ContainerID)
 	}
+}
+
+func (ptm *ProcessTreeManager) SetTreeTrackingByContainerId(containerID string, treeTracking *processtreemanager.TreeTracking) {
+	ptm.TreeTracking.Set(containerID, *treeTracking)
 }
 
 func (ptm *ProcessTreeManager) GetProcessTreeByContainerId(containerID string) *apitypes.Process {

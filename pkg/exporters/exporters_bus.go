@@ -2,6 +2,7 @@ package exporters
 
 import (
 	"node-agent/pkg/malwaremanager"
+	"node-agent/pkg/processtreemanager"
 	"node-agent/pkg/ruleengine"
 	"os"
 
@@ -26,7 +27,7 @@ type ExporterBus struct {
 }
 
 // InitExporters initializes all exporters.
-func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName string) *ExporterBus {
+func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName string, ptm processtreemanager.ProcessTreeManagerClient) *ExporterBus {
 	exporters := []Exporter{}
 	for _, url := range exportersConfig.AlertManagerExporterUrls {
 		alertMan := InitAlertManagerExporter(url)
@@ -53,7 +54,7 @@ func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName
 		}
 	}
 	if exportersConfig.HTTPExporterConfig != nil {
-		httpExp, err := InitHTTPExporter(*exportersConfig.HTTPExporterConfig, clusterName, nodeName)
+		httpExp, err := InitHTTPExporter(*exportersConfig.HTTPExporterConfig, clusterName, nodeName, ptm)
 		if err != nil {
 			logger.L().Error("failed to initialize http exporter", helpers.Error(err))
 		}
