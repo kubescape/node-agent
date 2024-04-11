@@ -183,7 +183,7 @@ func main() {
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc)
 
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName, processTreeManager)
 
 		// create runtimeDetection managers
 		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, preRunningContainersIDs, nodeName, clusterData.ClusterName, processTreeManager)
@@ -200,7 +200,7 @@ func main() {
 	var malwareManager malwaremanager.MalwareManagerClient
 	if cfg.EnableMalwareDetection {
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName, processTreeManager)
 		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, nodeName, clusterData.ClusterName, exporter, prometheusExporter, processTreeManager)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
