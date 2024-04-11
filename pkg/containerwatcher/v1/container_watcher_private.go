@@ -120,6 +120,12 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 			ch.unregisterContainer(&container)
 
 		case rulebindingmanager.Added:
+			if ch.ruleManagedContainers.Contains(container.Runtime.ContainerID) {
+				// the container is already being monitored
+				continue
+			}
+
+			// add to the list of containers that are being monitored because of ruless
 			ch.ruleManagedContainers.Add(container.Runtime.ContainerID)
 
 			if ch.timeBasedContainers.Contains(container.Runtime.ContainerID) {

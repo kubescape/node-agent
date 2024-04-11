@@ -109,6 +109,9 @@ func TestAddRunningContainers(t *testing.T) {
 				"initContainer1",
 				"initContainer2",
 			},
+			preRuleManagedContainers: []string{
+				"container1",
+			},
 			preTimeBasedContainers: []string{
 				"container1",
 				"initContainer1",
