@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: locust
-        image: quay.io/armosec/kubecop:test-loader-v1
+        image: quay.io/kubescape/node-agent:locust
         env:
           - name: TARGET_URL
             value: "http://nginx-service"

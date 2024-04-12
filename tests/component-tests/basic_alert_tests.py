@@ -21,8 +21,8 @@ def basic_alert_test(test_framework):
 
         time.sleep(10)
 
-        # Exec into the nginx pod and create a file in the /tmp directory
-        workload.exec_into_pod(command=["touch", "/tmp/nginx-test"])
+        # Exec into the nginx pod and run "ls" command
+        workload.exec_into_pod(command=["ls", "-l"])
 
         # Wait for the alert to be signaled
         time.sleep(5)
@@ -31,14 +31,15 @@ def basic_alert_test(test_framework):
         alerts = test_framework.get_alerts(namespace=ns)
 
         # Validate that all alerts are signaled
-        expected_alerts = [
-            "Unexpected process launched"
-        ]
+        expected_alert = "Unexpected process launched"
+        expected_command = "ls"
 
         for alert in alerts:
-            rule_name = alert['labels']['rule_name']
-            if rule_name in expected_alerts:
-                expected_alerts.remove(rule_name)
+            rule_name = alert['labels'].get('rule_name', '')
+            command = alert['labels'].get('comm', '')
 
-        assert len(expected_alerts) == 0, f"Expected alerts {expected_alerts} were not signaled"
+            if rule_name == expected_alert and command == expected_command:
+                return 
+
+        raise AssertionError(f"Expected alert '{expected_alert}' was not signaled")
 

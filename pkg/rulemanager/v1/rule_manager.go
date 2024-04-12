@@ -86,6 +86,11 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 }
 
 func (rm *RuleManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+	logger.L().Info("RuleManager - start monitor on container",
+		helpers.Int("container index", watchedContainer.ContainerIndex),
+		helpers.String("container ID", watchedContainer.ContainerID),
+		helpers.String("k8s workload", watchedContainer.K8sContainerID))
+
 	var pod *corev1.Pod
 	if err := backoff.Retry(func() error {
 		p, err := rm.k8sClient.GetKubernetesClient().CoreV1().Pods(container.K8s.Namespace).Get(ctx, container.K8s.PodName, metav1.GetOptions{})
@@ -336,7 +341,7 @@ func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectyp
 
 	// list exec rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
+	logger.L().Info("RuleManager - ReportFileExec", helpers.String("namespace", event.GetNamespace()), helpers.String("name", event.GetPod()))
 	rm.processEvent(utils.ExecveEventType, &event, rules)
 }
 
@@ -417,8 +422,9 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 
 		res := rule.ProcessEvent(eventType, event, rm.objectCache)
 		if res != nil {
-			logger.L().Info("RuleManager FAILED - rule alert", helpers.String("rule", rule.Name()))
 			res.SetWorkloadDetails(rm.podToWlid.Get(res.GetRuntimeAlertK8sDetails().PodName))
+
+			logger.L().Info("RuleManager FAILED - rule alert", helpers.String("rule", rule.Name()))
 			rm.exporter.SendRuleAlert(res)
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}

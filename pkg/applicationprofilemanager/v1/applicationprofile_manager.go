@@ -144,6 +144,12 @@ func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.Wat
 }
 
 func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+	logger.L().Info("ApplicationProfileManager - start monitor on container",
+		helpers.Interface("preRunning", am.preRunningContainerIDs.Contains(container.Runtime.ContainerID)),
+		helpers.Int("container index", watchedContainer.ContainerIndex),
+		helpers.String("container ID", watchedContainer.ContainerID),
+		helpers.String("k8s workload", watchedContainer.K8sContainerID))
+
 	// set completion status & status as soon as we start monitoring the container
 	if am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
 		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)

@@ -6,17 +6,17 @@ spec:
   template:
     metadata:
       labels:
-        app: kubecop-malicious-app
+        app: malicious-app
     spec:
       containers:
-      - name: kubecop-malicious-app
-        image: quay.io/armosec/kubecop:malicious-app-v1
+      - name: malicious-app
+        image: quay.io/kubescape/node-agent:maliciousapp
         imagePullPolicy: Always
         env:
           - name: WAIT_FOR_SIGTERM
             value: "true"
           - name: WAIT_BEFORE_START
-            value: "2s"
+            value: "3m"
         volumeMounts:
           - mountPath: /podmount
             name: mount-for-alert

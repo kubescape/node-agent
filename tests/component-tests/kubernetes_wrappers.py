@@ -113,7 +113,7 @@ class Workload:
                 return app_profile
 
             time.sleep(interval)
-        return None
+        raise AssertionError(f"Application profile for workload {self.workload_name} in namespace {self.namespace.name()} was not created within {timeout} seconds")
 
 
 class KubernetesObjects:

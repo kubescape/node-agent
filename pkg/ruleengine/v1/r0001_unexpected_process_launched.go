@@ -8,6 +8,8 @@ import (
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -72,15 +74,20 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 	if !ok {
 		return nil
 	}
+
 	execPath := getExecPathFromEvent(execEvent)
+	logger.L().Info("R0001UnexpectedProcessLaunched::ProcessEvent", helpers.String("execPath", execPath), helpers.String("namespace", execEvent.GetNamespace()), helpers.String("name", execEvent.GetPod()))
 
 	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.GetNamespace(), execEvent.GetPod())
 	if ap == nil {
+		logger.L().Error("R0001UnexpectedProcessLaunched::ProcessEvent - AP is nil", helpers.String("execPath", execPath), helpers.String("namespace", execEvent.GetNamespace()), helpers.String("name", execEvent.GetPod()))
 		return nil
 	}
 
 	appProfileExecList, err := getContainerFromApplicationProfile(ap, execEvent.GetContainer())
 	if err != nil {
+		logger.L().Error("R0001UnexpectedProcessLaunched::ProcessEvent - failed to getContainerFromApplicationProfile", helpers.Error(err), helpers.String("execPath", execPath), helpers.String("namespace", execEvent.GetNamespace()), helpers.String("name", execEvent.GetPod()))
+
 		return nil
 	}
 
@@ -89,6 +96,8 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 			return nil
 		}
 	}
+
+	logger.L().Info("R0001UnexpectedProcessLaunched::ProcessEvent - going to create alert", helpers.String("execPath", execPath), helpers.String("namespace", execEvent.GetNamespace()), helpers.String("name", execEvent.GetPod()))
 
 	isPartOfImage := !execEvent.UpperLayer
 	ruleFailure := GenericRuleFailure{
