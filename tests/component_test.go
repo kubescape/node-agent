@@ -205,25 +205,36 @@ func TestBasicLoadActivities(t *testing.T) {
 	}
 }
 
-func TestInstallAppNoApplicationProfileNoLeak(t *testing.T) {
+func TestMemoryLeak(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
 	// Create a random namespace
 	ns := utils.NewRandomNamespace()
 
-	// Install nginx in kubernetes by applying the nginx deployment yaml without pre-creating the profile
-	nginxDeployment, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/nginx-deployment.yaml"))
-	if err != nil {
-		t.Errorf("Error creating deployment: %v", err)
+	// Create 2 workloads
+	wlPaths := []string{
+		"component-tests/resources/locust-deployment.yaml",
+		"component-tests/resources/nginx-deployment.yaml",
 	}
-	_, err = utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/nginx-service.yaml"))
-	if err != nil {
-		t.Errorf("Error creating service: %v", err)
+	workloads := []utils.TestWorkload{}
+	for _, p := range wlPaths {
+		wl, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), p))
+		if err != nil {
+			t.Errorf("Error creating deployment: %v", err)
+		}
+		workloads = append(workloads, *wl)
 	}
-
-	// Wait for nginx to be ready
-	err = nginxDeployment.WaitForReady(80)
+	for _, wl := range workloads {
+		err := wl.WaitForReady(80)
+		if err != nil {
+			t.Errorf("Error waiting for workload to be ready: %v", err)
+		}
+		err = wl.WaitForApplicationProfile(80)
+		if err != nil {
+			t.Errorf("Error waiting for application profile to be completed: %v", err)
+		}
+	}
 
 	// Wait for 60 seconds for the GC to run, so the memory leak can be detected
 	time.Sleep(60 * time.Second)

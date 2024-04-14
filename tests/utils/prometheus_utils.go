@@ -214,6 +214,7 @@ func sendPromQLQueryToProm(query string, timeStart, timeEnd time.Time, steps str
 func savePlotPNG(name string, timestamps []float64, values []float64, metricName string) error {
 	// Create a new plot, set the title and labels
 	p := plot.New()
+
 	p.Title.Text = fmt.Sprintf("Node Agent %s - %s", metricName, name)
 	p.X.Label.Text = "Time (epoch)"
 	p.Y.Label.Text = metricName
