@@ -44,6 +44,7 @@ jobs:
           "TestAllAlertsFromMaliciousApp",
           "TestBasicLoadActivities",
           "TestMemoryLeak",
+          "TestMemoryLeak_10K_Alerts",
         ]
     steps:
       - name: Checkout code

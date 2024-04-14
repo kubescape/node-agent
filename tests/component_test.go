@@ -182,6 +182,9 @@ func TestBasicLoadActivities(t *testing.T) {
 	// Create loader
 	loader, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/locust-deployment.yaml"))
 	err = loader.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
 
 	loadStart := time.Now()
 
@@ -239,7 +242,7 @@ func TestMemoryLeak(t *testing.T) {
 	// Wait for 60 seconds for the GC to run, so the memory leak can be detected
 	time.Sleep(60 * time.Second)
 
-	metrics, err := utils.PlotNodeAgentPrometheusMemoryUsage("install_app_no_application_profile_no_leak_mem", start, time.Now())
+	metrics, err := utils.PlotNodeAgentPrometheusMemoryUsage("memleak_basic", start, time.Now())
 	if err != nil {
 		t.Errorf("Error plotting memory usage: %v", err)
 	}
@@ -255,5 +258,66 @@ func TestMemoryLeak(t *testing.T) {
 
 		// Validate that there is no memory leak, but tolerate 35mb memory leak
 		assert.LessOrEqual(t, lastValue, firstValue+35000000, "Memory leak detected in node-agent pod (%s). Memory usage at the end of the test is %f and at the beginning of the test is %f", podName, lastValue, firstValue)
+	}
+}
+
+func TestMemoryLeak_10K_Alerts(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	// Create a random namespace
+	ns := utils.NewRandomNamespace()
+
+	// Create nginx workload
+	nginx, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/nginx-deployment.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+	err = nginx.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
+
+	err = nginx.WaitForApplicationProfile(80)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+
+	// wait for 300 seconds for the GC to run, so the memory leak can be detected
+	t.Log("Waiting 300 seconds to have a baseline memory usage")
+	time.Sleep(300 * time.Second)
+
+	//Exec into the nginx pod and create a file in the /tmp directory in a loop
+	startLoad := time.Now()
+	for i := 0; i < 100; i++ {
+		_, _, err := nginx.ExecIntoPod([]string{"bash", "-c", "for i in {1..100}; do touch /tmp/nginx-test-$i; done"})
+		if err != nil {
+			t.Errorf("Error executing remote command: %v", err)
+		}
+		if i%5 == 0 {
+			t.Logf("Created file %d times", (i+1)*100)
+		}
+	}
+
+	// wait for 300 seconds for the GC to run, so the memory leak can be detected
+	t.Log("Waiting 300 seconds to GC to run")
+	time.Sleep(300 * time.Second)
+
+	metrics, err := utils.PlotNodeAgentPrometheusMemoryUsage("memleak_10k_alerts", startLoad, time.Now())
+	if err != nil {
+		t.Errorf("Error plotting memory usage: %v", err)
+	}
+
+	if len(metrics) == 0 {
+		t.Errorf("No memory usage data found")
+	}
+
+	for _, metric := range metrics {
+		podName := metric.Name
+		firstValue := metric.Values[0]
+		lastValue := metric.Values[len(metric.Values)-1]
+
+		// Validate that there is no memory leak, but tolerate 6mb memory leak
+		assert.LessOrEqual(t, lastValue, firstValue+6000000, "Memory leak detected in node-agent pod (%s). Memory usage at the end of the test is %f and at the beginning of the test is %f", podName, lastValue, firstValue)
 	}
 }

@@ -47,7 +47,7 @@ func GetNodeAgentAverageCPUUsage(start, end time.Time) (map[string]float64, erro
 
 	nodeAgentPods := getNodeAgentPods()
 	for _, podName := range nodeAgentPods {
-		query := fmt.Sprintf(`'avg by(cpu, instance) (irate(container_cpu_usage_seconds_total{pod="%s"}[5m]))`, podName)
+		query := fmt.Sprintf(`avg by(cpu, instance) (irate(container_cpu_usage_seconds_total{pod="%s"}[5m]))`, podName)
 		_, values, err := sendPromQLQueryToProm(query, start, end, "")
 		if err != nil {
 			return response, err
