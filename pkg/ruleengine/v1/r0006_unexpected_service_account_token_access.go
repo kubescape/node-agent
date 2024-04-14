@@ -115,6 +115,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 	}
 
 	ruleFailure := GenericRuleFailure{
+		Unique: fmt.Sprintf("%s-%s-%s-%d-%s", rule.ID(), openEvent.GetPod(), openEvent.GetContainer(), openEvent.Pid, openEvent.Path),
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:      rule.Name(),
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),

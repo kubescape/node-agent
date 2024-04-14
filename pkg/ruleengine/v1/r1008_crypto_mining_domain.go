@@ -169,6 +169,7 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 	if dnsEvent, ok := event.(*tracerdnstype.Event); ok {
 		if slices.Contains(commonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
 			ruleFailure := GenericRuleFailure{
+				Unique: fmt.Sprintf("%s-%s-%s-%d-%s", rule.ID(), dnsEvent.GetPod(), dnsEvent.GetContainer(), dnsEvent.Pid, dnsEvent.DNSName),
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:      rule.Name(),
 					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",

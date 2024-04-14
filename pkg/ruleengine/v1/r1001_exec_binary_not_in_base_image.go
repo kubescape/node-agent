@@ -62,6 +62,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 	if execEvent.UpperLayer {
 		isPartOfImage := !execEvent.UpperLayer
 		ruleFailure := GenericRuleFailure{
+			Unique: fmt.Sprintf("%s-%s-%s-%d-%s", rule.ID(), execEvent.GetPod(), execEvent.GetContainer(), execEvent.Pid, execEvent.ExePath),
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
 				FixSuggestions: "If this is an expected behavior it is strongly suggested to include all executables in the container image. If this is not possible you can remove the rule binding to this workload.",

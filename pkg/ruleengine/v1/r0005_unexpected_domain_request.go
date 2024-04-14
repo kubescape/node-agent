@@ -79,6 +79,7 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 	}
 
 	ruleFailure := GenericRuleFailure{
+		Unique: fmt.Sprintf("%s-%s-%s-%d-%s", rule.ID(), domainEvent.GetPod(), domainEvent.GetContainer(), domainEvent.Pid, domainEvent.DNSName),
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: rule.Name(),
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the domain %s to the whitelist in the application profile for the Pod %s. You can use the following command: %s",

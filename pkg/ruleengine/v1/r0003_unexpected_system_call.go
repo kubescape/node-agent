@@ -88,6 +88,7 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 	}
 
 	ruleFailure := GenericRuleFailure{
+		Unique: fmt.Sprintf("%s-%s-%s-%d-%s", rule.ID(), syscallEvent.GetPod(), syscallEvent.GetContainer(), syscallEvent.Pid, syscallEvent.SyscallName),
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:      rule.Name(),
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the system call \"%s\" to the whitelist in the application profile for the Pod \"%s\".", syscallEvent.SyscallName, syscallEvent.GetPod()),

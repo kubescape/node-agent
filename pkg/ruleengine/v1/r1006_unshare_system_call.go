@@ -70,6 +70,7 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event i
 	if syscallEvent.SyscallName == "unshare" {
 		rule.alreadyNotified = true
 		ruleFailure := GenericRuleFailure{
+			Unique: fmt.Sprintf("%s-%s-%s-%d-%s", rule.ID(), syscallEvent.GetPod(), syscallEvent.GetContainer(), syscallEvent.Pid, syscallEvent.SyscallName),
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
 				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",

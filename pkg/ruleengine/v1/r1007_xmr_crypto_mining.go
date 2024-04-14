@@ -61,6 +61,7 @@ func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event 
 	if randomXEvent, ok := event.(*tracerrandomxtype.Event); ok {
 		isPartOfImage := !randomXEvent.UpperLayer
 		ruleFailure := GenericRuleFailure{
+			Unique: fmt.Sprintf("%s-%s-%s-%d-%s", rule.ID(), randomXEvent.GetPod(), randomXEvent.GetContainer(), randomXEvent.Pid, randomXEvent.Comm),
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
 				IsPartOfImage:  &isPartOfImage,

@@ -91,6 +91,7 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 
 	if event.DstEndpoint.Addr == apiServerIP {
 		ruleFailure := GenericRuleFailure{
+			Unique: fmt.Sprintf("%s-%s-%s-%d-%s", rule.ID(), event.GetPod(), event.GetContainer(), event.Pid, event.DstEndpoint.Addr),
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
 				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
