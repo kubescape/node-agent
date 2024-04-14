@@ -66,6 +66,7 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 	if networkEvent, ok := event.(*tracernetworktype.Event); ok {
 		if networkEvent.Proto == "TCP" && networkEvent.PktType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
 			ruleFailure := GenericRuleFailure{
+				Unique: fmt.Sprintf("%s-%s-%s-%d-%d", rule.ID(), networkEvent.GetPod(), networkEvent.GetContainer(), networkEvent.Pid, networkEvent.Port),
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:      rule.Name(),
 					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",

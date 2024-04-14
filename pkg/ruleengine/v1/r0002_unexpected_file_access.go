@@ -163,6 +163,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 	}
 
 	ruleFailure := GenericRuleFailure{
+		Unique: fmt.Sprintf("%s-%s-%s-%d-%s", rule.ID(), openEvent.GetPod(), openEvent.GetContainer(), openEvent.Pid, strings.Join(openEvent.Flags, ";")),
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{

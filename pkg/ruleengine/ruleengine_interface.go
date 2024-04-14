@@ -51,6 +51,8 @@ type RuleSpec interface {
 }
 
 type RuleFailure interface {
+	// GetUnique returns the unique identifier of the alert
+	GetUnique() string
 	// Get Base Runtime Alert
 	GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert
 	// Get Runtime Process Details

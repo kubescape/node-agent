@@ -71,6 +71,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 			logger.L().Debug("Exec from mount", helpers.String("path", p), helpers.String("mount", mount))
 			isPartOfImage := !execEvent.UpperLayer
 			ruleFailure := GenericRuleFailure{
+				Unique: fmt.Sprintf("%s-%s-%s-%d-%s", rule.ID(), execEvent.GetPod(), execEvent.GetContainer(), execEvent.Pid, execEvent.ExePath),
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName: rule.Name(),
 					Arguments: map[string]interface{}{

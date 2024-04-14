@@ -11,11 +11,17 @@ import (
 var _ ruleengine.RuleFailure = (*GenericRuleFailure)(nil)
 
 type GenericRuleFailure struct {
+	Unique                 string // alert identification for deduplication, should be unique per alert (I did not use "ID" so it wont be confused with ruleID)
 	BaseRuntimeAlert       apitypes.BaseRuntimeAlert
 	RuntimeProcessDetails  apitypes.RuntimeAlertProcessDetails
 	TriggerEvent           igtypes.Event
 	RuleAlert              apitypes.RuleAlert
 	RuntimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails
+}
+
+// GetUnique returns the unique identifier of the alert
+func (rule *GenericRuleFailure) GetUnique() string {
+	return rule.Unique
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {

@@ -68,6 +68,7 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 	if syscallEvent.SyscallName == "init_module" {
 		rule.alerted = true
 		ruleFailure := GenericRuleFailure{
+			Unique: fmt.Sprintf("%s-%s-%s-%d-%s", rule.ID(), syscallEvent.GetPod(), syscallEvent.GetContainer(), syscallEvent.Pid, syscallEvent.SyscallName),
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
 				FixSuggestions: "If this is a legitimate action, please add consider removing this workload from the binding of this rule",

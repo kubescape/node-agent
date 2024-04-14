@@ -92,6 +92,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 
 	isPartOfImage := !execEvent.UpperLayer
 	ruleFailure := GenericRuleFailure{
+		Unique: fmt.Sprintf("%s-%s-%s-%d-%s", rule.ID(), execEvent.GetPod(), execEvent.GetContainer(), execEvent.Pid, execEvent.ExePath),
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
