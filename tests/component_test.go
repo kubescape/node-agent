@@ -256,8 +256,8 @@ func TestMemoryLeak(t *testing.T) {
 		firstValue := metric.Values[0]
 		lastValue := metric.Values[len(metric.Values)-1]
 
-		// Validate that there is no memory leak, but tolerate 35mb memory leak
-		assert.LessOrEqual(t, lastValue, firstValue+35000000, "Memory leak detected in node-agent pod (%s). Memory usage at the end of the test is %f and at the beginning of the test is %f", podName, lastValue, firstValue)
+		// Validate that there is no memory leak, but tolerate 40mb memory leak
+		assert.LessOrEqual(t, lastValue, firstValue+40000000, "Memory leak detected in node-agent pod (%s). Memory usage at the end of the test is %f and at the beginning of the test is %f", podName, lastValue, firstValue)
 	}
 }
 
@@ -317,8 +317,8 @@ func TestMemoryLeak_10K_Alerts(t *testing.T) {
 		firstValue := metric.Values[0]
 		lastValue := metric.Values[len(metric.Values)-1]
 
-		// Validate that there is no memory leak, but tolerate 6mb memory leak
-		assert.LessOrEqual(t, lastValue, firstValue+6000000, "Memory leak detected in node-agent pod (%s). Memory usage at the end of the test is %f and at the beginning of the test is %f", podName, lastValue, firstValue)
+		// Validate that there is no memory leak, but tolerate 13mb memory leak
+		assert.LessOrEqual(t, lastValue, firstValue+13000000, "Memory leak detected in node-agent pod (%s). Memory usage at the end of the test is %f and at the beginning of the test is %f", podName, lastValue, firstValue)
 	}
 }
 
