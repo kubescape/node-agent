@@ -1,12 +1,13 @@
-package networkmanager
+package v1
 
 import (
 	"context"
 	"fmt"
 	"node-agent/pkg/config"
 	"node-agent/pkg/dnsmanager"
+	"node-agent/pkg/networkmanager"
+	"node-agent/pkg/networkmanager/testdata"
 	"node-agent/pkg/objectcache"
-
 	"testing"
 
 	_ "embed"
@@ -169,158 +170,6 @@ import (
 // 	time.Sleep(150 * time.Second)
 // }
 
-func TestGenerateNeighborsIdentifier(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    v1beta1.NetworkNeighbor
-		expected string
-	}{
-		{
-			name: "external",
-			input: v1beta1.NetworkNeighbor{
-				Type:              "external",
-				DNS:               "example.com",
-				Ports:             []v1beta1.NetworkPort{{Name: "port1", Protocol: "TCP"}},
-				PodSelector:       nil,
-				NamespaceSelector: nil,
-				IPAddress:         "192.168.1.1",
-			},
-			expected: "a13ce4ca8de4083d05986cdc9874c5bc75870f93a89363acc36e12511ceae5d8",
-		},
-		{
-			name: "external - different IP has different identifier",
-			input: v1beta1.NetworkNeighbor{
-				Type:              "external",
-				DNS:               "example.com",
-				Ports:             []v1beta1.NetworkPort{{Name: "port1", Protocol: "TCP"}},
-				PodSelector:       nil,
-				NamespaceSelector: nil,
-				IPAddress:         "192.168.1.3",
-			},
-			expected: "5e620390e1aa074ccca30576eb9e09db9254a07b1d6cef9b45d7f98a1f72c863",
-		},
-		{
-			name: "internal",
-			input: v1beta1.NetworkNeighbor{
-				Type:              "internal",
-				DNS:               "example.com",
-				Ports:             []v1beta1.NetworkPort{{Name: "port1", Protocol: "TCP"}},
-				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "nginx"}},
-				NamespaceSelector: nil,
-				IPAddress:         "192.168.1.1",
-			},
-			expected: "fd41d439d5de80f684d53dc9682ca335f93f6f754031d6e3624a9772b8010680",
-		},
-		{
-			name: "internal - different ports has same identifier",
-			input: v1beta1.NetworkNeighbor{
-				Type:              "internal",
-				DNS:               "example.com",
-				Ports:             []v1beta1.NetworkPort{{Name: "port2", Protocol: "udp"}},
-				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "nginx"}},
-				NamespaceSelector: nil,
-				IPAddress:         "192.168.1.1",
-			},
-			expected: "fd41d439d5de80f684d53dc9682ca335f93f6f754031d6e3624a9772b8010680",
-		},
-		{
-			name: "internal - different pod labels has different identifier",
-			input: v1beta1.NetworkNeighbor{
-				Type:              "internal",
-				DNS:               "example.com",
-				Ports:             []v1beta1.NetworkPort{{Name: "port2", Protocol: "udp"}},
-				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app2": "nginx"}},
-				NamespaceSelector: nil,
-				IPAddress:         "192.168.1.1",
-			},
-			expected: "0848cb483e73375684bbc7333f64d74dfa13260fc9d9ff178cdead9b1f695944",
-		},
-		{
-			name: "internal - different namespace labels has different identifier",
-			input: v1beta1.NetworkNeighbor{
-				Type:              "internal",
-				DNS:               "example.com",
-				Ports:             []v1beta1.NetworkPort{{Name: "port2", Protocol: "udp"}},
-				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app2": "nginx"}},
-				NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app2": "nginx"}},
-				IPAddress:         "192.168.1.1",
-			},
-			expected: "d4e9bce7335a0eee24b725edb9de785fecfebad7bfc4f2ea4a49830925b745da",
-		},
-		{
-			name: "internal - different dns has different identifier",
-			input: v1beta1.NetworkNeighbor{
-				Type:              "internal",
-				DNS:               "another.co m",
-				Ports:             []v1beta1.NetworkPort{{Name: "port2", Protocol: "udp"}},
-				PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app2": "nginx"}},
-				NamespaceSelector: nil,
-				IPAddress:         "192.168.1.1",
-			},
-			expected: "f3dd4abe5311abc6ab3768182af5a15cb96746dd82573a744e2132d9ac90f52d",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(fmt.Sprintf("Input: %+v", tc.input), func(t *testing.T) {
-			result, err := generateNeighborsIdentifier(tc.input)
-			if err != nil {
-				t.Fatalf("Error: %v", err)
-			}
-			if result != tc.expected {
-				t.Errorf("in test: %s, Expected: %s, Got: %s", tc.name, tc.expected, result)
-			}
-		})
-	}
-}
-
-func TestGeneratePortIdentifierFromEvent(t *testing.T) {
-	testCases := []struct {
-		input    NetworkEvent
-		expected string
-	}{
-		{
-			input: NetworkEvent{
-				Port:     80,
-				PktType:  "TCP",
-				Protocol: "HTTP",
-				Destination: Destination{
-					Namespace: "namespace1",
-					Name:      "name1",
-					Kind:      EndpointKindPod,
-					PodLabels: "label1=labelValue1,label2=labelValue2",
-					IPAddress: "192.168.1.1",
-				},
-			},
-			expected: "HTTP-80",
-		},
-		{
-			input: NetworkEvent{
-				Port:     333,
-				PktType:  "TCP",
-				Protocol: "UDP",
-				Destination: Destination{
-					Namespace: "namespace1",
-					Name:      "name1",
-					Kind:      EndpointKindPod,
-					PodLabels: "label1=labelValue1,label2=labelValue2",
-					IPAddress: "192.168.1.1",
-				},
-			},
-			expected: "UDP-333",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(fmt.Sprintf("Input: %+v", tc.input), func(t *testing.T) {
-			result := generatePortIdentifierFromEvent(tc.input)
-			if result != tc.expected {
-				t.Errorf("Expected: %s, Got: %s", tc.expected, result)
-			}
-		})
-	}
-}
-
 type dnsResolverMock struct {
 	addressToDomainMap *maps.SafeMap[string, string]
 }
@@ -334,7 +183,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 	tests := []struct {
 		name               string
 		namespace          string
-		networkEvents      []NetworkEvent
+		networkEvents      []networkmanager.NetworkEvent
 		expectedSpec       v1beta1.NetworkNeighborsSpec
 		addressToDomainMap map[string]string
 	}{
@@ -349,16 +198,16 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		{
 			name:      "pod from same namespace ingress - should not have namespace selector",
 			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
+			networkEvents: []networkmanager.NetworkEvent{
 				{
 					Port:      80,
 					PktType:   "HOST",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
+					Destination: networkmanager.Destination{
 						Namespace: "kubescape",
 						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
+						Kind:      networkmanager.EndpointKindPod,
 						PodLabels: "app=destination",
 						IPAddress: "",
 					},
@@ -382,16 +231,16 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		{
 			name:      "pod from same namespace egress - should not have namespace selector",
 			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
+			networkEvents: []networkmanager.NetworkEvent{
 				{
 					Port:      80,
 					PktType:   "OUTGOING",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
+					Destination: networkmanager.Destination{
 						Namespace: "kubescape",
 						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
+						Kind:      networkmanager.EndpointKindPod,
 						PodLabels: "app=destination,controller-revision-hash=hash",
 						IPAddress: "",
 					},
@@ -415,16 +264,16 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		{
 			name:      "pod from another namespace - should have namespace selector",
 			namespace: "default",
-			networkEvents: []NetworkEvent{
+			networkEvents: []networkmanager.NetworkEvent{
 				{
 					Port:      80,
 					PktType:   "OUTGOING",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
+					Destination: networkmanager.Destination{
 						Namespace: "kubescape",
 						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
+						Kind:      networkmanager.EndpointKindPod,
 						PodLabels: "app=destination,pod-template-hash=test",
 						IPAddress: "",
 					},
@@ -448,13 +297,13 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		{
 			name:      "raw IP",
 			namespace: "default",
-			networkEvents: []NetworkEvent{
+			networkEvents: []networkmanager.NetworkEvent{
 				{
 					Port:     80,
 					PktType:  "OUTGOING",
 					Protocol: "UDP",
-					Destination: Destination{
-						Kind:      EndpointKindRaw,
+					Destination: networkmanager.Destination{
+						Kind:      networkmanager.EndpointKindRaw,
 						IPAddress: "143.54.53.21",
 					},
 				},
@@ -475,13 +324,13 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		{
 			name:      "raw IP localhost - should be ignored",
 			namespace: "default",
-			networkEvents: []NetworkEvent{
+			networkEvents: []networkmanager.NetworkEvent{
 				{
 					Port:     80,
 					PktType:  "OUTGOING",
 					Protocol: "TCP",
-					Destination: Destination{
-						Kind:      EndpointKindRaw,
+					Destination: networkmanager.Destination{
+						Kind:      networkmanager.EndpointKindRaw,
 						IPAddress: "127.0.0.1",
 					},
 				},
@@ -494,16 +343,16 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		{
 			name:      "multiple events with different ports - ports are merged",
 			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
+			networkEvents: []networkmanager.NetworkEvent{
 				{
 					Port:      1,
 					PktType:   "HOST",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
+					Destination: networkmanager.Destination{
 						Namespace: "kubescape",
 						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
+						Kind:      networkmanager.EndpointKindPod,
 						PodLabels: "app=destination,controller-revision-hash=hash",
 						IPAddress: "",
 					},
@@ -513,10 +362,10 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 					PktType:   "HOST",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
+					Destination: networkmanager.Destination{
 						Namespace: "kubescape",
 						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
+						Kind:      networkmanager.EndpointKindPod,
 						PodLabels: "app=destination,controller-revision-hash=hash",
 						IPAddress: "",
 					},
@@ -526,10 +375,10 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 					PktType:   "HOST",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
+					Destination: networkmanager.Destination{
 						Namespace: "kubescape",
 						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
+						Kind:      networkmanager.EndpointKindPod,
 						PodLabels: "app=destination,controller-revision-hash=hash",
 						IPAddress: "",
 					},
@@ -539,10 +388,10 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 					PktType:   "OUTGOING",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
+					Destination: networkmanager.Destination{
 						Namespace: "kubescape",
 						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
+						Kind:      networkmanager.EndpointKindPod,
 						PodLabels: "app=destination,controller-revision-hash=hash",
 						IPAddress: "",
 					},
@@ -575,14 +424,14 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		{
 			name:      "multiple events - different ip labels are saved separately",
 			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
+			networkEvents: []networkmanager.NetworkEvent{
 				{
 					Port:      1,
 					PktType:   "HOST",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
-						Kind:      EndpointKindRaw,
+					Destination: networkmanager.Destination{
+						Kind:      networkmanager.EndpointKindRaw,
 						IPAddress: "1.2.3.4",
 					},
 				},
@@ -591,8 +440,8 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 					PktType:   "HOST",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
-						Kind:      EndpointKindRaw,
+					Destination: networkmanager.Destination{
+						Kind:      networkmanager.EndpointKindRaw,
 						IPAddress: "4.3.2.1",
 					},
 				},
@@ -632,16 +481,16 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		{
 			name:      "multiple events - different pod labels are saved separately",
 			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
+			networkEvents: []networkmanager.NetworkEvent{
 				{
 					Port:      1,
 					PktType:   "HOST",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
+					Destination: networkmanager.Destination{
 						Namespace: "kubescape",
 						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
+						Kind:      networkmanager.EndpointKindPod,
 						PodLabels: "app=destination,controller-revision-hash=hash",
 						IPAddress: "",
 					},
@@ -651,10 +500,10 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 					PktType:   "HOST",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
+					Destination: networkmanager.Destination{
 						Namespace: "kubescape",
 						Name:      "nginx-deployment-cbdccf466-csh9c",
-						Kind:      EndpointKindPod,
+						Kind:      networkmanager.EndpointKindPod,
 						PodLabels: "app=destination2,controller-revision-hash=hash",
 						IPAddress: "",
 					},
@@ -699,14 +548,14 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		{
 			name:      "multiple events - different name are saved together",
 			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
+			networkEvents: []networkmanager.NetworkEvent{
 				{
 					Port:      1,
 					PktType:   "HOST",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
-						Kind:      EndpointKindPod,
+					Destination: networkmanager.Destination{
+						Kind:      networkmanager.EndpointKindPod,
 						PodLabels: "app=destination,controller-revision-hash=hash",
 						Namespace: "kubescape",
 						Name:      "one",
@@ -718,8 +567,8 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 					PktType:   "HOST",
 					Protocol:  "TCP",
 					PodLabels: "app=nginx",
-					Destination: Destination{
-						Kind:      EndpointKindPod,
+					Destination: networkmanager.Destination{
+						Kind:      networkmanager.EndpointKindPod,
 						PodLabels: "app=destination,controller-revision-hash=hash",
 						Namespace: "kubescape",
 						Name:      "two",
@@ -750,13 +599,13 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		{
 			name:      "IP is resolved - DNS is enriched",
 			namespace: "kubescape",
-			networkEvents: []NetworkEvent{
+			networkEvents: []networkmanager.NetworkEvent{
 				{
 					Port:     1,
 					PktType:  "HOST",
 					Protocol: "TCP",
-					Destination: Destination{
-						Kind:      EndpointKindRaw,
+					Destination: networkmanager.Destination{
+						Kind:      networkmanager.EndpointKindRaw,
 						IPAddress: "1.2.3.4",
 					},
 				},
@@ -795,7 +644,7 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 		k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
 
 		am := CreateNetworkManager(context.TODO(), config.Config{}, nil, nil, "", &dnsResolver, nil, k8sObjectCacheMock)
-		networkEventsSet := mapset.NewSet[NetworkEvent]()
+		networkEventsSet := mapset.NewSet[networkmanager.NetworkEvent]()
 		for _, ne := range tc.networkEvents {
 			networkEventsSet.Add(ne)
 		}
@@ -863,35 +712,6 @@ func TestGenerateNetworkNeighborsEntries(t *testing.T) {
 			}
 			assert.Equal(t, found, len(tc.expectedSpec.Egress), "Egress IP address is not equal in test %s", tc.name)
 
-		})
-	}
-}
-
-func TestGetNamespaceMatchLabels(t *testing.T) {
-	tests := []struct {
-		name                 string
-		destinationNamespace string
-		sourceNamespace      string
-		expected             map[string]string
-	}{
-		{
-			name:                 "same namespace - should not have namespace selector",
-			destinationNamespace: "default",
-			sourceNamespace:      "default",
-			expected:             nil,
-		},
-		{
-			name:                 "different namespace - should have the destination namespace as selector",
-			sourceNamespace:      "default",
-			destinationNamespace: "kubescape",
-			expected:             map[string]string{"kubernetes.io/metadata.name": "kubescape"},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(fmt.Sprintf("Input: %s", tc.name), func(t *testing.T) {
-			result := getNamespaceMatchLabels(tc.destinationNamespace, tc.sourceNamespace)
-			assert.Equal(t, tc.expected, result)
 		})
 	}
 }
@@ -974,40 +794,11 @@ func TestIsValidEvent(t *testing.T) {
 	}
 }
 
-func TestGeneratePortIdentifier(t *testing.T) {
-	tests := []struct {
-		name     string
-		port     int32
-		protocol string
-		expected string
-	}{
-		{
-			name:     "http",
-			port:     80,
-			protocol: "TCP",
-			expected: "TCP-80",
-		},
-		{
-			name:     "udp",
-			port:     333,
-			protocol: "UDP",
-			expected: "UDP-333",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(fmt.Sprintf("Input: %s", tc.name), func(t *testing.T) {
-			result := generatePortIdentifier(tc.protocol, tc.port)
-			assert.Equal(t, tc.expected, result)
-		})
-	}
-}
-
 // saveNeighborEntry(networkEvent NetworkEvent, neighborEntry v1beta1.NetworkNeighbor, egressIdentifiersMap map[string]v1beta1.NetworkNeighbor, ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor)
 func TestSaveNeighborEntry(t *testing.T) {
 	tests := []struct {
 		name                  string
-		networkEvent          NetworkEvent
+		networkEvent          networkmanager.NetworkEvent
 		neighborEntry         v1beta1.NetworkNeighbor
 		egressIdentifiersMap  map[string]v1beta1.NetworkNeighbor
 		ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor
@@ -1016,7 +807,7 @@ func TestSaveNeighborEntry(t *testing.T) {
 	}{
 		{
 			name: "egress event is saved",
-			networkEvent: NetworkEvent{
+			networkEvent: networkmanager.NetworkEvent{
 				Port:     80,
 				PktType:  "OUTGOING",
 				Protocol: "TCP",
@@ -1050,7 +841,7 @@ func TestSaveNeighborEntry(t *testing.T) {
 		},
 		{
 			name: "ingress event is saved",
-			networkEvent: NetworkEvent{
+			networkEvent: networkmanager.NetworkEvent{
 				Port:     80,
 				PktType:  "HOST",
 				Protocol: "TCP",
@@ -1084,7 +875,7 @@ func TestSaveNeighborEntry(t *testing.T) {
 		},
 		{
 			name: "existing data in map - map is updated",
-			networkEvent: NetworkEvent{
+			networkEvent: networkmanager.NetworkEvent{
 				Port:     80,
 				PktType:  "HOST",
 				Protocol: "TCP",
@@ -1147,7 +938,7 @@ func TestSaveNeighborEntry(t *testing.T) {
 		},
 		{
 			name: "external event is saved",
-			networkEvent: NetworkEvent{
+			networkEvent: networkmanager.NetworkEvent{
 				Port:     80,
 				PktType:  "OUTGOING",
 				Protocol: "TCP",
@@ -1350,21 +1141,21 @@ func TestGetSelectorFromWorkload(t *testing.T) {
 	}{
 		{
 			name:     "deployment",
-			parentWL: deploymentJson,
+			parentWL: testdata.DeploymentJson,
 			expectedSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{"app": "nginx"},
 			},
 		},
 		{
 			name:     "daemonset",
-			parentWL: daemonsetJson,
+			parentWL: testdata.DaemonsetJson,
 			expectedSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{"match": "fluentd-elasticsearch"},
 			},
 		},
 		{
 			name:     "cronjob",
-			parentWL: cronjobJson,
+			parentWL: testdata.CronjobJson,
 			expectedSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"app":                    "kubescape-scheduler",

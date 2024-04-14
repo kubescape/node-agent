@@ -1,4 +1,4 @@
-package networkmanager
+package v1
 
 import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -7,6 +7,6 @@ import (
 
 type NetworkManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
-	ReportNetworkEvent(k8sContainerID string, event tracernetworktype.Event)
-	ReportDroppedEvent(k8sContainerID string)
+	ReportNetworkEvent(containerID string, event tracernetworktype.Event)
+	ReportDroppedEvent(containerID string, event tracernetworktype.Event)
 }

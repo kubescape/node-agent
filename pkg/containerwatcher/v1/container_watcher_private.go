@@ -52,6 +52,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.containerCallback,
 		ch.applicationProfileManager.ContainerCallback,
 		ch.relevancyManager.ContainerCallback,
+		ch.networkManagerv1.ContainerCallback,
 		ch.networkManager.ContainerCallback,
 		ch.malwareManager.ContainerCallback,
 		ch.ruleManager.ContainerCallback,

@@ -24,11 +24,18 @@ type Destination struct {
 
 type EndpointKind string
 
-var defaultLabelsToIgnore = map[string]struct{}{
+var DefaultLabelsToIgnore = map[string]struct{}{
 	"controller-revision-hash": {},
 	"pod-template-generation":  {},
 	"pod-template-hash":        {},
 }
+
+const (
+	InternalTrafficType = "internal"
+	ExternalTrafficType = "external"
+	HostPktType         = "HOST"
+	OutgoingPktType     = "OUTGOING"
+)
 
 const (
 	EndpointKindPod     EndpointKind = "pod"
@@ -86,4 +93,12 @@ func generatePodLabels(podLabels map[string]string) string {
 	}
 
 	return podLabelsString
+}
+
+func GeneratePortIdentifierFromEvent(networkEvent NetworkEvent) string {
+	return GeneratePortIdentifier(networkEvent.Protocol, int32(networkEvent.Port))
+}
+
+func GeneratePortIdentifier(protocol string, port int32) string {
+	return fmt.Sprintf("%s-%d", protocol, port)
 }

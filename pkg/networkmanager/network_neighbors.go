@@ -12,7 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func generateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWorkloadSelector *metav1.LabelSelector, clusterName string) *v1beta1.NetworkNeighbors {
+func GenerateNetworkNeighborsCRD(parentWorkload k8sinterface.IWorkload, parentWorkloadSelector *metav1.LabelSelector, clusterName string) *v1beta1.NetworkNeighbors {
 	if parentWorkloadSelector.MatchLabels == nil && parentWorkloadSelector.MatchExpressions == nil {
 		parentWorkloadSelector.MatchLabels = parentWorkload.GetLabels()
 	}
@@ -44,7 +44,7 @@ func generateNetworkNeighborsNameFromWorkload(workload k8sinterface.IWorkload) s
 	return fmt.Sprintf("%s-%s", strings.ToLower(workload.GetKind()), workload.GetName())
 }
 
-func generateNetworkNeighborsNameFromWlid(parentWlid string) string {
+func GenerateNetworkNeighborsNameFromWlid(parentWlid string) string {
 	return fmt.Sprintf("%s-%s", strings.ToLower(wlid.GetKindFromWlid(parentWlid)), wlid.GetNameFromWlid(parentWlid))
 }
 
@@ -68,12 +68,12 @@ func generateNetworkNeighborsLabels(workload k8sinterface.IWorkload) map[string]
 	}
 }
 
-// filterLabels filters out labels that are not relevant for the network neighbor
-func filterLabels(labels map[string]string) map[string]string {
+// FilterLabels filters out labels that are not relevant for the network neighbor
+func FilterLabels(labels map[string]string) map[string]string {
 	filteredLabels := make(map[string]string)
 
 	for i := range labels {
-		if _, ok := defaultLabelsToIgnore[i]; ok {
+		if _, ok := DefaultLabelsToIgnore[i]; ok {
 			continue
 		}
 		filteredLabels[i] = labels[i]

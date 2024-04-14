@@ -1,4 +1,4 @@
-package networkmanager
+package v1
 
 import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -22,6 +22,6 @@ func (am *NetworkManagerMock) ReportNetworkEvent(_ string, _ tracernetworktype.E
 	// noop
 }
 
-func (am *NetworkManagerMock) ReportDroppedEvent(_ string) {
+func (am *NetworkManagerMock) ReportDroppedEvent(_ string, _ tracernetworktype.Event) {
 	// noop
 }
