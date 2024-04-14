@@ -43,6 +43,7 @@ jobs:
           "TestBasicAlertTest",
           "TestAllAlertsFromMaliciousApp",
           "TestBasicLoadActivities",
+          "TestInstallAppNoApplicationProfileNoLeak",
         ]
     steps:
       - name: Checkout code

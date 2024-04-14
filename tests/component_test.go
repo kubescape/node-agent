@@ -30,7 +30,7 @@ func tearDownTest(t *testing.T, startTime time.Time) {
 		t.Errorf("Error plotting CPU usage: %v", err)
 	}
 
-	err = utils.PlotNodeAgentPrometheusMemoryUsage(t.Name(), startTime, end)
+	_, err = utils.PlotNodeAgentPrometheusMemoryUsage(t.Name(), startTime, end)
 	if err != nil {
 		t.Errorf("Error plotting memory usage: %v", err)
 	}
@@ -97,14 +97,14 @@ func TestAllAlertsFromMaliciousApp(t *testing.T) {
 		t.Errorf("Error creating workload: %v", err)
 	}
 
-	// Malicious activity will be detected in 3 minutes + 20 seconds to wait for the alerts to be generated
-	timer := time.NewTimer(time.Second * 200)
-
 	// Wait for the workload to be ready
 	err = wl.WaitForReady(80)
 	if err != nil {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
 	}
+
+	// Malicious activity will be detected in 3 minutes + 40 seconds to wait for the alerts to be generated
+	timer := time.NewTimer(time.Second * 220)
 
 	// Wait for the application profile to be created and completed
 	err = wl.WaitForApplicationProfile(80)
@@ -202,5 +202,47 @@ func TestBasicLoadActivities(t *testing.T) {
 
 	for pod, cpuUsage := range podToCpuUsage {
 		assert.LessOrEqual(t, cpuUsage, 0.1, "CPU usage of Node Agent is too high. CPU usage is %f, Pod: %s", cpuUsage, pod)
+	}
+}
+
+func TestInstallAppNoApplicationProfileNoLeak(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	// Create a random namespace
+	ns := utils.NewRandomNamespace()
+
+	// Install nginx in kubernetes by applying the nginx deployment yaml without pre-creating the profile
+	nginxDeployment, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/nginx-deployment.yaml"))
+	if err != nil {
+		t.Errorf("Error creating deployment: %v", err)
+	}
+	_, err = utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/nginx-service.yaml"))
+	if err != nil {
+		t.Errorf("Error creating service: %v", err)
+	}
+
+	// Wait for nginx to be ready
+	err = nginxDeployment.WaitForReady(80)
+
+	// Wait for 60 seconds for the GC to run, so the memory leak can be detected
+	time.Sleep(60 * time.Second)
+
+	metrics, err := utils.PlotNodeAgentPrometheusMemoryUsage("install_app_no_application_profile_no_leak_mem", start, time.Now())
+	if err != nil {
+		t.Errorf("Error plotting memory usage: %v", err)
+	}
+
+	if len(metrics) == 0 {
+		t.Errorf("No memory usage data found")
+	}
+
+	for _, metric := range metrics {
+		podName := metric.Name
+		firstValue := metric.Values[0]
+		lastValue := metric.Values[len(metric.Values)-1]
+
+		// Validate that there is no memory leak, but tolerate 20mb memory leak
+		assert.LessOrEqual(t, lastValue, firstValue+20000000, "Memory leak detected in node-agent pod (%s). Memory usage at the end of the test is %f and at the beginning of the test is %f", podName, lastValue, firstValue)
 	}
 }

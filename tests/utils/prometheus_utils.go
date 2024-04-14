@@ -83,21 +83,48 @@ func PlotNodeAgentPrometheusCPUUsage(testcase string, startTime, endTime time.Ti
 	return nil
 }
 
-func PlotNodeAgentPrometheusMemoryUsage(testcase string, startTime, endTime time.Time) error {
+func GetNodeAgentMemoryUsage(start, end time.Time) (map[string]float64, error) {
+	response := map[string]float64{}
+
 	nodeAgentPods := getNodeAgentPods()
+	for _, podName := range nodeAgentPods {
+		query := fmt.Sprintf(`'avg by(cpu, instance) (irate(container_cpu_usage_seconds_total{pod="%s"}[5m]))`, podName)
+		_, values, err := sendPromQLQueryToProm(query, start, end, "")
+		if err != nil {
+			return response, err
+		}
+		// Calculate average
+		response[podName] = sum(values) / float64(len(values))
+
+	}
+	return response, nil
+}
+
+type WorkloadMetrics struct {
+	Name       string
+	Timestamps []float64
+	Values     []float64
+}
+
+func PlotNodeAgentPrometheusMemoryUsage(testcase string, startTime, endTime time.Time) ([]WorkloadMetrics, error) {
+	nodeAgentPods := getNodeAgentPods()
+	workloadMetrics := []WorkloadMetrics{}
+
 	for _, podName := range nodeAgentPods {
 		query := fmt.Sprintf(`sum(container_memory_working_set_bytes{pod="%s", container="node-agent"}) by (container)`, podName)
 
 		timestamps, values, err := sendPromQLQueryToProm(query, startTime, endTime, "")
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		if err := savePlotPNG(testcase+"_"+podName+"_mem", timestamps, values, "Memory Usage (bytes)"); err != nil {
-			return err
+			return nil, err
+		} else {
+			workloadMetrics = append(workloadMetrics, WorkloadMetrics{Name: podName, Timestamps: timestamps, Values: values})
 		}
 	}
-	return nil
+	return workloadMetrics, nil
 }
 
 // Function to execute PromQL query
