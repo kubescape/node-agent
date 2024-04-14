@@ -1,6 +1,7 @@
 package networkmanager
 
 import (
+	"node-agent/pkg/networkmanager/testdata"
 	"testing"
 
 	_ "embed"
@@ -12,18 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-//go:embed testdata/cronjob.json
-var cronjobJson []byte
-
-//go:embed testdata/deployment.json
-var deploymentJson []byte
-
-//go:embed testdata/daemonset.json
-var daemonsetJson []byte
-
-//go:embed testdata/pod.json
-var podJson []byte
-
 func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 	tests := []struct {
 		name                     string
@@ -33,7 +22,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 	}{
 		{
 			name:           "deployment",
-			parentWorkload: deploymentJson,
+			parentWorkload: testdata.DeploymentJson,
 			parentWorkloadLabels: map[string]string{
 				"app": "nginx",
 			},
@@ -69,7 +58,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 		},
 		{
 			name:           "daemonset",
-			parentWorkload: daemonsetJson,
+			parentWorkload: testdata.DaemonsetJson,
 			parentWorkloadLabels: map[string]string{
 				"match": "fluentd-elasticsearch",
 			},
@@ -105,7 +94,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 		},
 		{
 			name:           "pod",
-			parentWorkload: podJson,
+			parentWorkload: testdata.PodJson,
 			parentWorkloadLabels: map[string]string{
 				"match": "test",
 			},
@@ -149,7 +138,7 @@ func TestGenerateNetworkNeighborsCRD(t *testing.T) {
 			selector, err := wl.GetSelector()
 			assert.Nil(t, err)
 
-			actualNetworkNeighbors := generateNetworkNeighborsCRD(wl, selector, "minikube")
+			actualNetworkNeighbors := GenerateNetworkNeighborsCRD(wl, selector, "minikube")
 			assert.Equal(t, test.expectedNetworkNeighbors, actualNetworkNeighbors)
 		})
 	}
@@ -163,17 +152,17 @@ func TestGenerateNetworkNeighborsNameFromWorkload(t *testing.T) {
 	}{
 		{
 			name:         "deployment",
-			workload:     deploymentJson,
+			workload:     testdata.DeploymentJson,
 			expectedName: "deployment-nginx-deployment",
 		},
 		{
 			name:         "daemonset",
-			workload:     daemonsetJson,
+			workload:     testdata.DaemonsetJson,
 			expectedName: "daemonset-fluentd-elasticsearch",
 		},
 		{
 			name:         "pod",
-			workload:     podJson,
+			workload:     testdata.PodJson,
 			expectedName: "pod-nginx-deployment-fcc867f7-dgjrg",
 		},
 	}
@@ -216,7 +205,7 @@ func TestGenerateNetworkNeighborsNameFromWlid(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			actualName := generateNetworkNeighborsNameFromWlid(test.parentWlid)
+			actualName := GenerateNetworkNeighborsNameFromWlid(test.parentWlid)
 			if actualName != test.expectedName {
 				t.Errorf("expected name %s, got %s", test.expectedName, actualName)
 			}
@@ -232,7 +221,7 @@ func TestGenerateNetworkNeighborsLabels(t *testing.T) {
 	}{
 		{
 			name:     "deployment",
-			workload: deploymentJson,
+			workload: testdata.DeploymentJson,
 			expectedLabels: map[string]string{
 				"kubescape.io/workload-api-group":        "apps",
 				"kubescape.io/workload-api-version":      "v1",
@@ -245,7 +234,7 @@ func TestGenerateNetworkNeighborsLabels(t *testing.T) {
 
 		{
 			name:     "daemonset",
-			workload: daemonsetJson,
+			workload: testdata.DaemonsetJson,
 			expectedLabels: map[string]string{
 				"kubescape.io/workload-api-group":        "apps",
 				"kubescape.io/workload-api-version":      "v1",
@@ -258,7 +247,7 @@ func TestGenerateNetworkNeighborsLabels(t *testing.T) {
 
 		{
 			name:     "pod",
-			workload: podJson,
+			workload: testdata.PodJson,
 			expectedLabels: map[string]string{
 				"kubescape.io/workload-api-group":        "",
 				"kubescape.io/workload-api-version":      "v1",
@@ -349,7 +338,7 @@ func TestFilterLabels(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			actualLabels := filterLabels(test.labels)
+			actualLabels := FilterLabels(test.labels)
 			if len(actualLabels) != len(test.expectedLabels) {
 				t.Errorf("expected %d labels, got %d", len(test.expectedLabels), len(actualLabels))
 			}

@@ -8,12 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"math/rand"
 	"node-agent/pkg/objectcache"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -43,9 +43,9 @@ import (
 )
 
 var (
-	ContainerHasTerminatedError     = errors.New("container has terminated")
-	TooLargeApplicationProfileError = errors.New("application profile is too large")
-	IncompleteSBOMError             = errors.New("incomplete SBOM")
+	ContainerHasTerminatedError = errors.New("container has terminated")
+	TooLargeObjectError         = errors.New("object is too large")
+	IncompleteSBOMError         = errors.New("incomplete SBOM")
 )
 
 type PackageSourceInfoData struct {
@@ -102,13 +102,13 @@ type WatchedContainerData struct {
 	SBOMResourceVersion                        int
 	ContainerType                              ContainerType
 	ContainerIndex                             int
-	ContainerNames                             []string // depends on the container type
+	ContainerNames                             map[ContainerType][]string
 	NsMntId                                    uint64
 	InitialDelayExpired                        bool
-
-	statusUpdated    bool
-	status           WatchedContainerStatus
-	completionStatus WatchedContainerCompletionStatus
+	statusUpdated                              bool
+	status                                     WatchedContainerStatus
+	completionStatus                           WatchedContainerCompletionStatus
+	ParentWorkloadSelector                     *metav1.LabelSelector
 }
 
 func Between(value string, a string, b string) string {
@@ -200,47 +200,6 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 	return labels
 }
 
-func GetApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) *v1beta1.ApplicationProfileContainer {
-	if profile == nil {
-		return nil
-	}
-	switch containerType {
-	case Container:
-		if len(profile.Spec.Containers) > containerIndex {
-			return &profile.Spec.Containers[containerIndex]
-		}
-	case InitContainer:
-		if len(profile.Spec.InitContainers) > containerIndex {
-			return &profile.Spec.InitContainers[containerIndex]
-		}
-	case EphemeralContainer:
-		if len(profile.Spec.EphemeralContainers) > containerIndex {
-			return &profile.Spec.EphemeralContainers[containerIndex]
-		}
-	}
-	return nil
-}
-
-func InsertApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int, profileContainer *v1beta1.ApplicationProfileContainer) {
-	switch containerType {
-	case Container:
-		if len(profile.Spec.Containers) <= containerIndex {
-			profile.Spec.Containers = append(profile.Spec.Containers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.Containers)+1)...)
-		}
-		profile.Spec.Containers[containerIndex] = *profileContainer
-	case InitContainer:
-		if len(profile.Spec.InitContainers) <= containerIndex {
-			profile.Spec.InitContainers = append(profile.Spec.InitContainers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.InitContainers)+1)...)
-		}
-		profile.Spec.InitContainers[containerIndex] = *profileContainer
-	case EphemeralContainer:
-		if len(profile.Spec.EphemeralContainers) <= containerIndex {
-			profile.Spec.EphemeralContainers = append(profile.Spec.EphemeralContainers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.EphemeralContainers)+1)...)
-		}
-		profile.Spec.EphemeralContainers[containerIndex] = *profileContainer
-	}
-}
-
 func (watchedContainer *WatchedContainerData) GetStatus() WatchedContainerStatus {
 	return watchedContainer.status
 }
@@ -272,6 +231,9 @@ func (watchedContainer *WatchedContainerData) StatusUpdated() bool {
 }
 
 func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterface.IWorkload, containerName string) {
+	if watchedContainer.ContainerNames == nil {
+		watchedContainer.ContainerNames = make(map[ContainerType][]string)
+	}
 	checkContainers := func(containers []v1.Container, ephemeralContainers []v1.EphemeralContainer, containerType ContainerType) {
 		var containerNames []string
 		if containerType == EphemeralContainer {
@@ -280,7 +242,6 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 				if c.Name == containerName {
 					watchedContainer.ContainerIndex = i
 					watchedContainer.ContainerType = containerType
-					watchedContainer.ContainerNames = containerNames
 				}
 			}
 		} else {
@@ -289,10 +250,10 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 				if c.Name == containerName {
 					watchedContainer.ContainerIndex = i
 					watchedContainer.ContainerType = containerType
-					watchedContainer.ContainerNames = containerNames
 				}
 			}
 		}
+		watchedContainer.ContainerNames[containerType] = containerNames
 	}
 	// containers
 	containers, err := wl.GetContainers()
@@ -346,35 +307,6 @@ func (watchedContainer *WatchedContainerData) GetTerminationExitCode(k8sObjectsC
 	return 0
 }
 
-func EnrichProfileContainer(newProfileContainer *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string]) {
-	// add capabilities
-	sort.Strings(observedCapabilities)
-	newProfileContainer.Capabilities = observedCapabilities
-	// add syscalls
-	sort.Strings(observedSyscalls)
-	newProfileContainer.Syscalls = observedSyscalls
-	// add execs
-	newProfileContainer.Execs = make([]v1beta1.ExecCalls, 0)
-	for path, exec := range execs {
-		args := exec.ToSlice()
-		sort.Strings(args)
-		newProfileContainer.Execs = append(newProfileContainer.Execs, v1beta1.ExecCalls{
-			Path: path,
-			Args: args,
-		})
-	}
-	// add opens
-	newProfileContainer.Opens = make([]v1beta1.OpenCalls, 0)
-	for path, open := range opens {
-		flags := open.ToSlice()
-		sort.Strings(flags)
-		newProfileContainer.Opens = append(newProfileContainer.Opens, v1beta1.OpenCalls{
-			Path:  path,
-			Flags: flags,
-		})
-	}
-}
-
 type PatchOperation struct {
 	Op    string      `json:"op"`
 	Path  string      `json:"path"`
@@ -387,61 +319,6 @@ func EscapeJSONPointerElement(s string) string {
 	s = strings.ReplaceAll(s, "~", "~0")
 	s = strings.ReplaceAll(s, "/", "~1")
 	return s
-}
-
-func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string], containerType string, containerIndex int) []PatchOperation {
-	var profileOperations []PatchOperation
-	// add capabilities
-	sort.Strings(capabilities)
-	capabilitiesPath := fmt.Sprintf("/spec/%s/%d/capabilities/-", containerType, containerIndex)
-	for _, capability := range capabilities {
-		profileOperations = append(profileOperations, PatchOperation{
-			Op:    "add",
-			Path:  capabilitiesPath,
-			Value: capability,
-		})
-	}
-	// add syscalls
-	sort.Strings(syscalls)
-	sysCallsPath := fmt.Sprintf("/spec/%s/%d/syscalls/-", containerType, containerIndex)
-	for _, syscall := range syscalls {
-		profileOperations = append(profileOperations, PatchOperation{
-			Op:    "add",
-			Path:  sysCallsPath,
-			Value: syscall,
-		})
-	}
-
-	// add execs
-	execsPath := fmt.Sprintf("/spec/%s/%d/execs/-", containerType, containerIndex)
-	for path, exec := range execs {
-		args := exec.ToSlice()
-		sort.Strings(args)
-		profileOperations = append(profileOperations, PatchOperation{
-			Op:   "add",
-			Path: execsPath,
-			Value: v1beta1.ExecCalls{
-				Path: path,
-				Args: args,
-			},
-		})
-	}
-	// add opens
-	opensPath := fmt.Sprintf("/spec/%s/%d/opens/-", containerType, containerIndex)
-	for path, open := range opens {
-		flags := open.ToSlice()
-		sort.Strings(flags)
-
-		profileOperations = append(profileOperations, PatchOperation{
-			Op:   "add",
-			Path: opensPath,
-			Value: v1beta1.OpenCalls{
-				Path:  path,
-				Flags: flags,
-			},
-		})
-	}
-	return profileOperations
 }
 
 func AppendStatusAnnotationPatchOperations(existingPatch []PatchOperation, watchedContainer *WatchedContainerData) []PatchOperation {

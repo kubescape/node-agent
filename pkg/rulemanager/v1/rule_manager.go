@@ -202,7 +202,6 @@ func (rm *RuleManager) ensureInstanceID(container *containercollection.Container
 		watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName)
 	}
 
-	// FIXME ephemeralContainers are not supported yet
 	return nil
 }
 
