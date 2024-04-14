@@ -44,6 +44,9 @@ jobs:
           "TestAllAlertsFromMaliciousApp",
         ]
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Set up Kind
         run: |
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-$(uname)-amd64
