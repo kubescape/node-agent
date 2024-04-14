@@ -4,7 +4,9 @@
 package tests
 
 import (
+	utilspkg "node-agent/pkg/utils"
 	"node-agent/tests/utils"
+	"path"
 	"testing"
 	"time"
 )
@@ -37,7 +39,7 @@ func TestBasicAlertTest(t *testing.T) {
 	defer tearDownTest(t, start)
 
 	ns := utils.NewRandomNamespace()
-	wl, err := utils.NewTestWorkload(ns.Name, "component-tests/resources/nginx-deployment.yaml")
+	wl, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/nginx-deployment.yaml"))
 	if err != nil {
 		t.Errorf("Error creating workload: %v", err)
 	}
@@ -81,5 +83,68 @@ func TestBasicAlertTest(t *testing.T) {
 }
 
 func TestAllAlertsFromMaliciousApp(t *testing.T) {
-	print("b")
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	// Create a random namespace
+	ns := utils.NewRandomNamespace()
+
+	// Create a workload
+	wl, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/malicious-job.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	// Wait for the workload to be ready
+	err = wl.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
+
+	// Wait for the application profile to be created and completed
+	err = wl.WaitForApplicationProfile(80)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+
+	// Wait for the alerts to be generated
+	time.Sleep(20)
+
+	// Get all the alerts for the namespace
+	alerts, err := utils.GetAlerts(wl.Namespace)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	// Validate that all alerts are signaled
+	expectedAlerts := map[string]bool{
+		"Unexpected process launched":             false,
+		"Unexpected file access":                  false,
+		"Unexpected system call":                  false,
+		"Unexpected capability used":              false,
+		"Unexpected domain request":               false,
+		"Unexpected Service Account Token Access": false,
+		"Kubernetes Client Executed":              false,
+		"Exec from malicious source":              false,
+		"Kernel Module Load":                      false,
+		"Exec Binary Not In Base Image":           false,
+		// "Malicious SSH Connection", (This rule needs to be updated to be more reliable).
+		"Exec from mount":                          false,
+		"Crypto Mining Related Port Communication": false,
+	}
+
+	for _, alert := range alerts {
+		ruleName, ruleOk := alert.Labels["rule_name"]
+		if ruleOk {
+			if _, exists := expectedAlerts[ruleName]; exists {
+				expectedAlerts[ruleName] = true
+			}
+		}
+	}
+
+	for ruleName, signaled := range expectedAlerts {
+		if !signaled {
+			t.Errorf("Expected alert %s was not signaled", ruleName)
+		}
+	}
 }

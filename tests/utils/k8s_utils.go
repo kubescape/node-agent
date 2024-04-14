@@ -5,9 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	utilspkg "node-agent/pkg/utils"
 	"os"
-	"path"
 	"strings"
 	"time"
 
@@ -40,7 +38,7 @@ type TestWorkload struct {
 func NewTestWorkload(namespace, resourcePath string) (*TestWorkload, error) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 
-	yamlData, err := os.ReadFile(path.Join(utilspkg.CurrentDir(), resourcePath))
+	yamlData, err := os.ReadFile(resourcePath)
 	if err != nil {
 		return nil, err
 	}
