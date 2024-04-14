@@ -42,6 +42,7 @@ jobs:
         test: [
           "TestBasicAlertTest",
           "TestAllAlertsFromMaliciousApp",
+          "TestBasicLoadActivities",
         ]
     steps:
       - name: Checkout code

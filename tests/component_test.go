@@ -9,6 +9,8 @@ import (
 	"path"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -21,14 +23,14 @@ func tearDownTest(t *testing.T, startTime time.Time) {
 	end := time.Now()
 
 	t.Log("Waiting 60 seconds for Prometheus to scrape the data")
-	time.Sleep(60)
+	time.Sleep(1 * time.Minute)
 
-	err := utils.PlotPrometheusCPUUsage(t.Name(), startTime, end)
+	err := utils.PlotNodeAgentPrometheusCPUUsage(t.Name(), startTime, end)
 	if err != nil {
 		t.Errorf("Error plotting CPU usage: %v", err)
 	}
 
-	err = utils.PlotPrometheusMemoryUsage(t.Name(), startTime, end)
+	err = utils.PlotNodeAgentPrometheusMemoryUsage(t.Name(), startTime, end)
 	if err != nil {
 		t.Errorf("Error plotting memory usage: %v", err)
 	}
@@ -53,7 +55,7 @@ func TestBasicAlertTest(t *testing.T) {
 		t.Errorf("Error waiting for application profile to be completed: %v", err)
 	}
 
-	time.Sleep(10)
+	time.Sleep(10 * time.Second)
 
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"})
 	if err != nil {
@@ -61,7 +63,7 @@ func TestBasicAlertTest(t *testing.T) {
 	}
 
 	// Wait for the alert to be signaled
-	time.Sleep(5)
+	time.Sleep(5 * time.Second)
 
 	alerts, err := utils.GetAlerts(wl.Namespace)
 	if err != nil {
@@ -108,7 +110,7 @@ func TestAllAlertsFromMaliciousApp(t *testing.T) {
 	}
 
 	// Wait for the alerts to be generated
-	time.Sleep(20)
+	time.Sleep(20 * time.Second)
 
 	// Get all the alerts for the namespace
 	alerts, err := utils.GetAlerts(wl.Namespace)
@@ -146,5 +148,56 @@ func TestAllAlertsFromMaliciousApp(t *testing.T) {
 		if !signaled {
 			t.Errorf("Expected alert %s was not signaled", ruleName)
 		}
+	}
+}
+
+func TestBasicLoadActivities(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	// Create a random namespace
+	ns := utils.NewRandomNamespace()
+
+	// Create a workload
+	wl, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/nginx-deployment.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	// Wait for the workload to be ready
+	err = wl.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
+
+	// Wait for the application profile to be created and completed
+	err = wl.WaitForApplicationProfile(80)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+
+	// Create loader
+	loader, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/locust-deployment.yaml"))
+	err = loader.WaitForReady(80)
+
+	loadStart := time.Now()
+
+	// Create a load of 5 minutes
+	time.Sleep(5 * time.Minute)
+
+	loadEnd := time.Now()
+
+	// Get CPU usage of Node Agent pods
+	podToCpuUsage, err := utils.GetNodeAgentAverageCPUUsage(loadStart, loadEnd)
+	if err != nil {
+		t.Errorf("Error getting CPU usage: %v", err)
+	}
+
+	if len(podToCpuUsage) == 0 {
+		t.Errorf("No CPU usage data found")
+	}
+
+	for pod, cpuUsage := range podToCpuUsage {
+		assert.LessOrEqual(t, cpuUsage, 0.1, "CPU usage of Node Agent is too high. CPU usage is %f, Pod: %s", cpuUsage, pod)
 	}
 }

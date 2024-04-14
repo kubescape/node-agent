@@ -136,7 +136,7 @@ func (w *TestWorkload) GetPod() (*v1.Pod, error) {
 }
 
 func (w *TestWorkload) WaitForReady(maxRetries uint64) error {
-	time.Sleep(5)
+	time.Sleep(5 * time.Second)
 	k8sClient := k8sinterface.NewKubernetesApi()
 
 	pod, err := w.GetPod()

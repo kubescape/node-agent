@@ -42,7 +42,32 @@ func getNodeAgentPods() []string {
 	return podNames
 }
 
-func PlotPrometheusCPUUsage(testcase string, startTime, endTime time.Time) error {
+func GetNodeAgentAverageCPUUsage(start, end time.Time) (map[string]float64, error) {
+	response := map[string]float64{}
+
+	nodeAgentPods := getNodeAgentPods()
+	for _, podName := range nodeAgentPods {
+		query := fmt.Sprintf(`'avg by(cpu, instance) (irate(container_cpu_usage_seconds_total{pod="%s"}[5m]))`, podName)
+		_, values, err := sendPromQLQueryToProm(query, start, end, "")
+		if err != nil {
+			return response, err
+		}
+		// Calculate average
+		response[podName] = sum(values) / float64(len(values))
+
+	}
+	return response, nil
+}
+
+func sum(numbers []float64) float64 {
+	var sum float64
+	for _, number := range numbers {
+		sum += number
+	}
+	return sum
+}
+
+func PlotNodeAgentPrometheusCPUUsage(testcase string, startTime, endTime time.Time) error {
 	nodeAgentPods := getNodeAgentPods()
 	for _, podName := range nodeAgentPods {
 		query := fmt.Sprintf(`sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{namespace="kubescape", pod="%s", container="node-agent"}) by (container)`, podName)
@@ -58,7 +83,7 @@ func PlotPrometheusCPUUsage(testcase string, startTime, endTime time.Time) error
 	return nil
 }
 
-func PlotPrometheusMemoryUsage(testcase string, startTime, endTime time.Time) error {
+func PlotNodeAgentPrometheusMemoryUsage(testcase string, startTime, endTime time.Time) error {
 	nodeAgentPods := getNodeAgentPods()
 	for _, podName := range nodeAgentPods {
 		query := fmt.Sprintf(`sum(container_memory_working_set_bytes{pod="%s", container="node-agent"}) by (container)`, podName)
