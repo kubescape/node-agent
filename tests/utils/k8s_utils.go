@@ -190,19 +190,23 @@ func (w *TestWorkload) getApplicationProfile() (*v1beta1.ApplicationProfile, err
 	return nil, fmt.Errorf("application profile not found")
 }
 
-func (w *TestWorkload) WaitForApplicationProfile(maxRetries uint64) error {
+func (w *TestWorkload) WaitForApplicationProfileCompletion(maxRetries uint64) error {
+	return w.WaitForApplicationProfile(maxRetries, "completed")
+}
+
+func (w *TestWorkload) WaitForApplicationProfile(maxRetries uint64, expectedStatus string) error {
 	return backoff.RetryNotify(func() error {
 		appProfile, err := w.getApplicationProfile()
 		if err != nil {
 			return err
 		}
 
-		if appProfile.Annotations["kubescape.io/status"] == "completed" {
+		if appProfile.Annotations["kubescape.io/status"] == expectedStatus {
 			return nil
 		}
-		return fmt.Errorf("application profile is not completed")
+		return fmt.Errorf("application profile is not in status '%s'", expectedStatus)
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
-		logger.L().Info("waiting for app profile to be ready", helpers.Error(err), helpers.String("retry in", d.String()))
+		logger.L().Info("waiting for app profile", helpers.Error(err), helpers.String("retry in", d.String()))
 	})
 }
 

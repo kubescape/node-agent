@@ -45,6 +45,7 @@ jobs:
           "TestBasicLoadActivities",
           "TestMemoryLeak",
           "TestMemoryLeak_10K_Alerts",
+          "TestKillProcessInTheMiddle",
         ]
     steps:
       - name: Checkout code

@@ -50,7 +50,7 @@ func TestBasicAlertTest(t *testing.T) {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
 	}
 
-	err = wl.WaitForApplicationProfile(80)
+	err = wl.WaitForApplicationProfileCompletion(80)
 	if err != nil {
 		t.Errorf("Error waiting for application profile to be completed: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestAllAlertsFromMaliciousApp(t *testing.T) {
 	timer := time.NewTimer(time.Second * 220)
 
 	// Wait for the application profile to be created and completed
-	err = wl.WaitForApplicationProfile(80)
+	err = wl.WaitForApplicationProfileCompletion(80)
 	if err != nil {
 		t.Errorf("Error waiting for application profile to be completed: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestBasicLoadActivities(t *testing.T) {
 	}
 
 	// Wait for the application profile to be created and completed
-	err = wl.WaitForApplicationProfile(80)
+	err = wl.WaitForApplicationProfileCompletion(80)
 	if err != nil {
 		t.Errorf("Error waiting for application profile to be completed: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestMemoryLeak(t *testing.T) {
 		if err != nil {
 			t.Errorf("Error waiting for workload to be ready: %v", err)
 		}
-		err = wl.WaitForApplicationProfile(80)
+		err = wl.WaitForApplicationProfileCompletion(80)
 		if err != nil {
 			t.Errorf("Error waiting for application profile to be completed: %v", err)
 		}
@@ -278,7 +278,7 @@ func TestMemoryLeak_10K_Alerts(t *testing.T) {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
 	}
 
-	err = nginx.WaitForApplicationProfile(80)
+	err = nginx.WaitForApplicationProfileCompletion(80)
 	if err != nil {
 		t.Errorf("Error waiting for application profile to be completed: %v", err)
 	}
@@ -321,3 +321,71 @@ func TestMemoryLeak_10K_Alerts(t *testing.T) {
 		assert.LessOrEqual(t, lastValue, firstValue+6000000, "Memory leak detected in node-agent pod (%s). Memory usage at the end of the test is %f and at the beginning of the test is %f", podName, lastValue, firstValue)
 	}
 }
+
+func TestKillProcessInTheMiddle(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	// Create a random namespace
+	ns := utils.NewRandomNamespace()
+	// Create nginx deployment
+	nginx, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/nginx-deployment.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+	err = nginx.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
+
+	// Wait for the application profile to be created and 'ready' (not 'completed')
+	err = nginx.WaitForApplicationProfile(80, "ready")
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be 'ready': %v", err)
+	}
+
+	// Exec into the nginx pod and kill the process
+	_, _, err = nginx.ExecIntoPod([]string{"bash", "-c", "kill -9 1"})
+	if err != nil {
+		t.Errorf("Error executing remote command: %v", err)
+	}
+
+	// Wait for the application profile to be 'completed'
+	err = nginx.WaitForApplicationProfileCompletion(20)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+}
+
+/*
+
+
+  # we want to kill the application before the kaprofile creation is complete
+    # exec into the pod and kill the process
+    try:
+
+
+
+        # check that the final app profile did not get created
+        get_proc = subprocess.run(["kubectl", "-n", namespace, "get", "applicationprofiles", f"pod-{nginx_pod_name}", "-oyaml"], capture_output=True)
+        assert get_proc.returncode == 0 and 'kapprofiler.kubescape.io/final: "true"' not in get_proc.stdout.decode("utf-8"), f"applicationprofile ({get_proc.returncode}) did got created {get_proc.stdout.decode('utf-8')}"
+
+        # check that the app profile did get created after 30 seconds
+        print("Waiting 40 seconds to see we are final")
+        time.sleep(40)
+        get_proc = subprocess.run(["kubectl", "-n", namespace, "get", "applicationprofiles", f"pod-{nginx_pod_name}", "-oyaml"], capture_output=True)
+        assert get_proc.returncode == 0 and 'kapprofiler.kubescape.io/final: "true"' in get_proc.stdout.decode("utf-8"), f"final applicationprofile ({get_proc.returncode}) did not got created {get_proc.stdout.decode('utf-8')}"
+
+        subprocess.check_call(["kubectl", "delete", "namespace", namespace])
+
+    except Exception as e:
+        print("Exception: ", e)
+        # Delete the namespace
+        subprocess.check_call(["kubectl", "delete", "namespace", namespace])
+        return 1
+
+    return 0
+
+
+
+*/
