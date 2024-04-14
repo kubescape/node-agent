@@ -34,3 +34,6 @@ func (a ApplicationProfileManagerMock) ReportFileOpen(_, _ string, _ []string) {
 func (a ApplicationProfileManagerMock) ReportDroppedEvent(_ string) {
 	// noop
 }
+func (a ApplicationProfileManagerMock) ContainerReachedMaxTime(_ string) {
+	// noop
+}

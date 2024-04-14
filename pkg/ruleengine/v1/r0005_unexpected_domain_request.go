@@ -83,15 +83,18 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 			AlertName: rule.Name(),
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the domain %s to the whitelist in the application profile for the Pod %s. You can use the following command: %s",
 				domainEvent.DNSName,
-				domainEvent.DNSName,
+				domainEvent.GetPod(),
 				rule.generatePatchCommand(domainEvent, nn)),
 			Severity: R0005UnexpectedDomainRequestRuleDescriptor.Priority,
 		},
-		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-			Comm: domainEvent.Comm,
-			GID:  domainEvent.Gid,
-			PID:  domainEvent.Pid,
-			UID:  domainEvent.Uid,
+		RuntimeProcessDetails: apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				Comm: domainEvent.Comm,
+				Gid:  domainEvent.Gid,
+				PID:  domainEvent.Pid,
+				Uid:  domainEvent.Uid,
+			},
+			ContainerID: domainEvent.Runtime.ContainerID,
 		},
 		TriggerEvent: domainEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
@@ -100,8 +103,6 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 	}
-
-	enrichRuleFailure(domainEvent.Event, domainEvent.Pid, &ruleFailure)
 
 	return &ruleFailure
 }

@@ -7,6 +7,7 @@ import (
 	"node-agent/pkg/utils"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -93,14 +94,18 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
+				InfectedPID:    event.Pid,
 				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 				Severity:       R0007KubernetesClientExecutedDescriptor.Priority,
 			},
-			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-				Comm: event.Comm,
-				GID:  event.Gid,
-				PID:  event.Pid,
-				UID:  event.Uid,
+			RuntimeProcessDetails: apitypes.ProcessTree{
+				ProcessTree: apitypes.Process{
+					Comm: event.Comm,
+					Gid:  event.Gid,
+					PID:  event.Pid,
+					Uid:  event.Uid,
+				},
+				ContainerID: event.Runtime.ContainerID,
 			},
 			TriggerEvent: event.Event,
 			RuleAlert: apitypes.RuleAlert{
@@ -109,8 +114,6 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}
-
-		enrichRuleFailure(event.Event, event.Pid, &ruleFailure)
 
 		return &ruleFailure
 	}
@@ -133,24 +136,30 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 	}
 
 	if slices.Contains(kubernetesClients, filepath.Base(execPath)) || slices.Contains(kubernetesClients, event.ExePath) {
-		isPartOfImage := !event.UpperLayer
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName: rule.Name(),
+				AlertName:   rule.Name(),
+				InfectedPID: event.Pid,
 				Arguments: map[string]interface{}{
 					"hardlink": event.ExePath,
 				},
 				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 				Severity:       R0007KubernetesClientExecutedDescriptor.Priority,
-				IsPartOfImage:  &isPartOfImage,
-				PPID:           &event.Ppid,
-				PPIDComm:       &event.Pcomm,
 			},
-			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-				Comm: event.Comm,
-				GID:  event.Gid,
-				PID:  event.Pid,
-				UID:  event.Uid,
+			RuntimeProcessDetails: apitypes.ProcessTree{
+				ProcessTree: apitypes.Process{
+					Comm:       event.Comm,
+					Gid:        event.Gid,
+					PID:        event.Pid,
+					Uid:        event.Uid,
+					UpperLayer: event.UpperLayer,
+					PPID:       event.Ppid,
+					Pcomm:      event.Pcomm,
+					Cwd:        event.Cwd,
+					Hardlink:   event.ExePath,
+					Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(event.Args, " ")),
+				},
+				ContainerID: event.Runtime.ContainerID,
 			},
 			TriggerEvent: event.Event,
 			RuleAlert: apitypes.RuleAlert{
@@ -159,8 +168,6 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}
-
-		enrichRuleFailure(event.Event, event.Pid, &ruleFailure)
 
 		return &ruleFailure
 	}

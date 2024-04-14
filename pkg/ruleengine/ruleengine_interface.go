@@ -54,7 +54,7 @@ type RuleFailure interface {
 	// Get Base Runtime Alert
 	GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert
 	// Get Runtime Process Details
-	GetRuntimeProcessDetails() apitypes.RuntimeAlertProcessDetails
+	GetRuntimeProcessDetails() apitypes.ProcessTree
 	// Get Trigger Event
 	GetTriggerEvent() igtypes.Event
 	// Get Rule Description
@@ -64,4 +64,14 @@ type RuleFailure interface {
 
 	// Set Workload Details
 	SetWorkloadDetails(workloadDetails string)
+	// Set Base Runtime Alert
+	SetBaseRuntimeAlert(baseRuntimeAlert apitypes.BaseRuntimeAlert)
+	// Set Runtime Process Details
+	SetRuntimeProcessDetails(runtimeProcessDetails apitypes.ProcessTree)
+	// Set Trigger Event
+	SetTriggerEvent(triggerEvent igtypes.Event)
+	// Set Rule Description
+	SetRuleAlert(ruleAlert apitypes.RuleAlert)
+	// Set K8s Runtime Details
+	SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails)
 }

@@ -257,10 +257,19 @@ func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *con
 				// handle collection of relevant data one more time
 				rm.handleRelevancy(ctx, watchedContainer, container.Runtime.ContainerID)
 				return nil
+			case errors.Is(err, utils.ContainerReachedMaxTime):
+				rm.handleRelevancy(ctx, watchedContainer, container.Runtime.ContainerID)
+				return nil
 			case errors.Is(err, utils.IncompleteSBOMError):
 				return utils.IncompleteSBOMError
 			}
 		}
+	}
+}
+
+func (rm *RelevancyManager) ContainerReachedMaxTime(containerID string) {
+	if channel := rm.watchedContainerChannels.Get(containerID); channel != nil {
+		channel <- utils.ContainerReachedMaxTime
 	}
 }
 

@@ -13,10 +13,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	mapset "github.com/deckarep/golang-set/v2"
 
@@ -38,12 +39,15 @@ import (
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 var (
-	ContainerHasTerminatedError     = errors.New("container has terminated")
-	TooLargeApplicationProfileError = errors.New("application profile is too large")
-	IncompleteSBOMError             = errors.New("incomplete SBOM")
+	ContainerHasTerminatedError = errors.New("container has terminated")
+	ContainerReachedMaxTime     = errors.New("container reached max time")
+	TooLargeObjectError         = errors.New("object is too large")
+	IncompleteSBOMError         = errors.New("incomplete SBOM")
 )
 
 type PackageSourceInfoData struct {
@@ -100,13 +104,13 @@ type WatchedContainerData struct {
 	SBOMResourceVersion                        int
 	ContainerType                              ContainerType
 	ContainerIndex                             int
-	ContainerNames                             []string // depends on the container type
+	ContainerNames                             map[ContainerType][]string
 	NsMntId                                    uint64
 	InitialDelayExpired                        bool
-
-	statusUpdated    bool
-	status           WatchedContainerStatus
-	completionStatus WatchedContainerCompletionStatus
+	statusUpdated                              bool
+	status                                     WatchedContainerStatus
+	completionStatus                           WatchedContainerCompletionStatus
+	ParentWorkloadSelector                     *metav1.LabelSelector
 }
 
 func Between(value string, a string, b string) string {
@@ -198,47 +202,6 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 	return labels
 }
 
-func GetApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) *v1beta1.ApplicationProfileContainer {
-	if profile == nil {
-		return nil
-	}
-	switch containerType {
-	case Container:
-		if len(profile.Spec.Containers) > containerIndex {
-			return &profile.Spec.Containers[containerIndex]
-		}
-	case InitContainer:
-		if len(profile.Spec.InitContainers) > containerIndex {
-			return &profile.Spec.InitContainers[containerIndex]
-		}
-	case EphemeralContainer:
-		if len(profile.Spec.EphemeralContainers) > containerIndex {
-			return &profile.Spec.EphemeralContainers[containerIndex]
-		}
-	}
-	return nil
-}
-
-func InsertApplicationProfileContainer(profile *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int, profileContainer *v1beta1.ApplicationProfileContainer) {
-	switch containerType {
-	case Container:
-		if len(profile.Spec.Containers) <= containerIndex {
-			profile.Spec.Containers = append(profile.Spec.Containers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.Containers)+1)...)
-		}
-		profile.Spec.Containers[containerIndex] = *profileContainer
-	case InitContainer:
-		if len(profile.Spec.InitContainers) <= containerIndex {
-			profile.Spec.InitContainers = append(profile.Spec.InitContainers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.InitContainers)+1)...)
-		}
-		profile.Spec.InitContainers[containerIndex] = *profileContainer
-	case EphemeralContainer:
-		if len(profile.Spec.EphemeralContainers) <= containerIndex {
-			profile.Spec.EphemeralContainers = append(profile.Spec.EphemeralContainers, make([]v1beta1.ApplicationProfileContainer, containerIndex-len(profile.Spec.EphemeralContainers)+1)...)
-		}
-		profile.Spec.EphemeralContainers[containerIndex] = *profileContainer
-	}
-}
-
 func (watchedContainer *WatchedContainerData) GetStatus() WatchedContainerStatus {
 	return watchedContainer.status
 }
@@ -270,6 +233,9 @@ func (watchedContainer *WatchedContainerData) StatusUpdated() bool {
 }
 
 func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterface.IWorkload, containerName string) {
+	if watchedContainer.ContainerNames == nil {
+		watchedContainer.ContainerNames = make(map[ContainerType][]string)
+	}
 	checkContainers := func(containers []v1.Container, ephemeralContainers []v1.EphemeralContainer, containerType ContainerType) {
 		var containerNames []string
 		if containerType == EphemeralContainer {
@@ -278,7 +244,6 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 				if c.Name == containerName {
 					watchedContainer.ContainerIndex = i
 					watchedContainer.ContainerType = containerType
-					watchedContainer.ContainerNames = containerNames
 				}
 			}
 		} else {
@@ -287,10 +252,10 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 				if c.Name == containerName {
 					watchedContainer.ContainerIndex = i
 					watchedContainer.ContainerType = containerType
-					watchedContainer.ContainerNames = containerNames
 				}
 			}
 		}
+		watchedContainer.ContainerNames[containerType] = containerNames
 	}
 	// containers
 	containers, err := wl.GetContainers()
@@ -344,35 +309,6 @@ func (watchedContainer *WatchedContainerData) GetTerminationExitCode(k8sObjectsC
 	return 0
 }
 
-func EnrichProfileContainer(newProfileContainer *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string]) {
-	// add capabilities
-	sort.Strings(observedCapabilities)
-	newProfileContainer.Capabilities = observedCapabilities
-	// add syscalls
-	sort.Strings(observedSyscalls)
-	newProfileContainer.Syscalls = observedSyscalls
-	// add execs
-	newProfileContainer.Execs = make([]v1beta1.ExecCalls, 0)
-	for path, exec := range execs {
-		args := exec.ToSlice()
-		sort.Strings(args)
-		newProfileContainer.Execs = append(newProfileContainer.Execs, v1beta1.ExecCalls{
-			Path: path,
-			Args: args,
-		})
-	}
-	// add opens
-	newProfileContainer.Opens = make([]v1beta1.OpenCalls, 0)
-	for path, open := range opens {
-		flags := open.ToSlice()
-		sort.Strings(flags)
-		newProfileContainer.Opens = append(newProfileContainer.Opens, v1beta1.OpenCalls{
-			Path:  path,
-			Flags: flags,
-		})
-	}
-}
-
 type PatchOperation struct {
 	Op    string      `json:"op"`
 	Path  string      `json:"path"`
@@ -385,61 +321,6 @@ func EscapeJSONPointerElement(s string) string {
 	s = strings.ReplaceAll(s, "~", "~0")
 	s = strings.ReplaceAll(s, "/", "~1")
 	return s
-}
-
-func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string], containerType string, containerIndex int) []PatchOperation {
-	var profileOperations []PatchOperation
-	// add capabilities
-	sort.Strings(capabilities)
-	capabilitiesPath := fmt.Sprintf("/spec/%s/%d/capabilities/-", containerType, containerIndex)
-	for _, capability := range capabilities {
-		profileOperations = append(profileOperations, PatchOperation{
-			Op:    "add",
-			Path:  capabilitiesPath,
-			Value: capability,
-		})
-	}
-	// add syscalls
-	sort.Strings(syscalls)
-	sysCallsPath := fmt.Sprintf("/spec/%s/%d/syscalls/-", containerType, containerIndex)
-	for _, syscall := range syscalls {
-		profileOperations = append(profileOperations, PatchOperation{
-			Op:    "add",
-			Path:  sysCallsPath,
-			Value: syscall,
-		})
-	}
-
-	// add execs
-	execsPath := fmt.Sprintf("/spec/%s/%d/execs/-", containerType, containerIndex)
-	for path, exec := range execs {
-		args := exec.ToSlice()
-		sort.Strings(args)
-		profileOperations = append(profileOperations, PatchOperation{
-			Op:   "add",
-			Path: execsPath,
-			Value: v1beta1.ExecCalls{
-				Path: path,
-				Args: args,
-			},
-		})
-	}
-	// add opens
-	opensPath := fmt.Sprintf("/spec/%s/%d/opens/-", containerType, containerIndex)
-	for path, open := range opens {
-		flags := open.ToSlice()
-		sort.Strings(flags)
-
-		profileOperations = append(profileOperations, PatchOperation{
-			Op:   "add",
-			Path: opensPath,
-			Value: v1beta1.OpenCalls{
-				Path:  path,
-				Flags: flags,
-			},
-		})
-	}
-	return profileOperations
 }
 
 func AppendStatusAnnotationPatchOperations(existingPatch []PatchOperation, watchedContainer *WatchedContainerData) []PatchOperation {
@@ -505,7 +386,7 @@ func GetCmdlineByPid(pid int) (*string, error) {
 	return &cmdlineStr, nil
 }
 
-func GetParentByPid(pid int) (*procfs.ProcStat, error) {
+func GetProcessStat(pid int) (*procfs.ProcStat, error) {
 	fs, err := procfs.NewFS("/proc")
 	if err != nil {
 		return nil, err
@@ -516,12 +397,12 @@ func GetParentByPid(pid int) (*procfs.ProcStat, error) {
 		return nil, err
 	}
 
-	parent, err := proc.Stat()
+	stat, err := proc.Stat()
 	if err != nil {
 		return nil, err
 	}
 
-	return &parent, nil
+	return &stat, nil
 }
 
 // Get the path of the file on the node.
@@ -545,6 +426,14 @@ func GetExecPathFromEvent(event *tracerexectype.Event) string {
 		return event.Args[0]
 	}
 	return event.Comm
+}
+
+// Get exec args from the given event.
+func GetExecArgsFromEvent(event *tracerexectype.Event) []string {
+	if len(event.Args) > 1 {
+		return event.Args[1:]
+	}
+	return []string{}
 }
 
 // Get the size of the given file.
@@ -618,4 +507,135 @@ func CalculateMD5FileHash(path string) (string, error) {
 	hashString := hex.EncodeToString(hashInBytes)
 
 	return hashString, nil
+}
+
+// Creates a process tree from a process.
+// The process tree will be built from scanning the /proc filesystem.
+func CreateProcessTree(process *apitypes.Process, shimPid uint32) (*apitypes.Process, error) {
+	procfs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return nil, err
+	}
+
+	proc, err := procfs.Proc(int(process.PID))
+	if err != nil {
+		logger.L().Debug("Failed to get process", helpers.String("error", err.Error()))
+		return nil, err
+	}
+
+	// build the process tree
+	treeRoot, err := buildProcessTree(proc, &procfs, shimPid, *process)
+	if err != nil {
+		return nil, err
+	}
+
+	return treeRoot, nil
+}
+
+// Recursively build the process tree.
+func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, processTree apitypes.Process) (*apitypes.Process, error) {
+	stat, err := proc.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	parent, err := procfs.Proc(stat.PPID)
+	if err != nil {
+		return nil, err
+	}
+
+	var uid, gid uint32
+	status, err := proc.NewStatus()
+	if err != nil {
+		return nil, nil
+	} else {
+		// TODO: When (https://github.com/prometheus/procfs/pull/620) is merged, use the UID and GID as integers.
+		uid64, err := strconv.ParseUint(status.UIDs[1], 10, 32)
+		if err != nil {
+			return nil, nil
+		}
+		uid = uint32(uid64)
+
+		gid64, err := strconv.ParseUint(status.GIDs[1], 10, 32)
+		if err != nil {
+			return nil, nil
+		}
+		gid = uint32(gid64)
+	}
+
+	// Make the parent process the parent of the current process (move the current process to the parent's children).
+	currentProcess := apitypes.Process{
+		PID:  uint32(stat.PID),
+		PPID: uint32(parent.PID),
+		Cmdline: func() string {
+			cmdline, err := proc.CmdLine()
+			if err != nil {
+				return ""
+			}
+			return strings.Join(cmdline, " ")
+		}(),
+		Pcomm: func() string {
+			pcomm, err := parent.Comm()
+			if err != nil {
+				return ""
+			}
+			return pcomm
+		}(),
+		Gid: gid,
+		Uid: uid,
+		Cwd: func() string {
+			cwd, err := proc.Cwd()
+			if err != nil {
+				return ""
+			}
+			return cwd
+		}(),
+	}
+
+	currentProcess.Children = append(currentProcess.Children, processTree)
+
+	// If the parent process is the shim, return the process tree.
+	if stat.PPID == int(shimPid) {
+		return &currentProcess, nil
+	}
+
+	return buildProcessTree(parent, procfs, shimPid, currentProcess)
+}
+
+func GetPathFromPid(pid uint32) (string, error) {
+	fs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return "", err
+	}
+
+	proc, err := fs.Proc(int(pid))
+	if err != nil {
+		return "", err
+	}
+
+	path, err := proc.Executable()
+	if err != nil {
+		return "", err
+	}
+
+	return path, nil
+}
+
+func GetCommFromPid(pid uint32) (string, error) {
+	fs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return "", err
+	}
+
+	proc, err := fs.Proc(int(pid))
+	if err != nil {
+		return "", err
+	}
+
+	comm, err := proc.Comm()
+	if err != nil {
+		return "", err
+	}
+
+	return comm, nil
 }

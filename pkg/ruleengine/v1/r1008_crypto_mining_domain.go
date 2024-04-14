@@ -171,14 +171,18 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:      rule.Name(),
+					InfectedPID:    dnsEvent.Pid,
 					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 					Severity:       R1008CryptoMiningDomainCommunicationRuleDescriptor.Priority,
 				},
-				RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-					Comm: dnsEvent.Comm,
-					GID:  dnsEvent.Gid,
-					PID:  dnsEvent.Pid,
-					UID:  dnsEvent.Uid,
+				RuntimeProcessDetails: apitypes.ProcessTree{
+					ProcessTree: apitypes.Process{
+						Comm: dnsEvent.Comm,
+						Gid:  dnsEvent.Gid,
+						PID:  dnsEvent.Pid,
+						Uid:  dnsEvent.Uid,
+					},
+					ContainerID: dnsEvent.Runtime.ContainerID,
 				},
 				TriggerEvent: dnsEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
@@ -187,8 +191,6 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}
-
-			enrichRuleFailure(dnsEvent.Event, dnsEvent.Pid, &ruleFailure)
 
 			return &ruleFailure
 		}

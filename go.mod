@@ -5,7 +5,7 @@ go 1.21.3
 toolchain go1.21.4
 
 require (
-	github.com/armosec/armoapi-go v0.0.370
+	github.com/armosec/armoapi-go v0.0.379
 	github.com/armosec/utils-k8s-go v0.0.26
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cilium/ebpf v0.14.0
@@ -23,7 +23,7 @@ require (
 	github.com/kubescape/backend v0.0.16
 	github.com/kubescape/go-logger v0.0.22
 	github.com/kubescape/k8s-interface v0.0.165
-	github.com/kubescape/storage v0.0.79
+	github.com/kubescape/storage v0.0.80-0.20240412125709-82a0123c5163
 	github.com/panjf2000/ants/v2 v2.9.0
 	github.com/prometheus/alertmanager v0.27.0
 	github.com/prometheus/client_golang v1.19.0

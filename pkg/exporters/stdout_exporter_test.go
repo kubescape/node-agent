@@ -54,7 +54,6 @@ func TestStdoutExporter_SendAlert(t *testing.T) {
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
-		RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			ContainerID:   "testcontainerid",
 			ContainerName: "testcontainer",

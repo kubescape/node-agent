@@ -10,6 +10,7 @@ import (
 	"node-agent/pkg/malwaremanager"
 	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/networkmanager"
+	networkmanagerv1 "node-agent/pkg/networkmanager/v1"
 	"node-agent/pkg/relevancymanager"
 	rulebinding "node-agent/pkg/rulebindingmanager"
 	"node-agent/pkg/rulemanager"
@@ -71,6 +72,7 @@ type IGContainerWatcher struct {
 	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	k8sClient                 *k8sinterface.KubernetesApi
 	relevancyManager          relevancymanager.RelevancyManagerClient
+	networkManagerv1          networkmanagerv1.NetworkManagerClient
 	networkManager            networkmanager.NetworkManagerClient
 	dnsManager                dnsmanager.DNSManagerClient
 	ruleManager               rulemanager.RuleManagerClient
@@ -116,7 +118,7 @@ type IGContainerWatcher struct {
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerv1Client networkmanagerv1.NetworkManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -204,14 +206,17 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
 		// dropped events
 		if event.Type != types.NORMAL {
-			networkManagerClient.ReportDroppedEvent(event.Runtime.ContainerID, event)
+			networkManagerv1Client.ReportDroppedEvent(event.Runtime.ContainerID, event)
+			networkManagerClient.ReportDroppedEvent(k8sContainerID)
 			return
 		}
 		metrics.ReportEvent(utils.NetworkEventType)
-		networkManagerClient.ReportNetworkEvent(event.Runtime.ContainerID, event)
+		networkManagerv1Client.ReportNetworkEvent(event.Runtime.ContainerID, event)
+		networkManagerClient.ReportNetworkEvent(k8sContainerID, event)
 		ruleManager.ReportNetworkEvent(event.Runtime.ContainerID, event)
 	})
 	if err != nil {
@@ -267,6 +272,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		applicationProfileManager: applicationProfileManager,
 		k8sClient:                 k8sClient,
 		relevancyManager:          relevancyManager,
+		networkManagerv1:          networkManagerv1Client,
 		networkManager:            networkManagerClient,
 		dnsManager:                dnsManagerClient,
 		ruleManager:               ruleManager,

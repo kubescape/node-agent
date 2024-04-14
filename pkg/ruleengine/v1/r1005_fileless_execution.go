@@ -77,14 +77,18 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
+				InfectedPID:    syscallEvent.Pid,
 				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
 				Severity:       R1005FilelessExecutionRuleDescriptor.Priority,
 			},
-			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-				Comm: syscallEvent.Comm,
-				GID:  syscallEvent.Gid,
-				PID:  syscallEvent.Pid,
-				UID:  syscallEvent.Uid,
+			RuntimeProcessDetails: apitypes.ProcessTree{
+				ProcessTree: apitypes.Process{
+					Comm: syscallEvent.Comm,
+					Gid:  syscallEvent.Gid,
+					PID:  syscallEvent.Pid,
+					Uid:  syscallEvent.Uid,
+				},
+				ContainerID: syscallEvent.Runtime.ContainerID,
 			},
 			TriggerEvent: syscallEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
@@ -93,8 +97,6 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}
-
-		enrichRuleFailure(syscallEvent.Event, syscallEvent.Pid, &ruleFailure)
 
 		return &ruleFailure
 	}
@@ -117,24 +119,30 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 	// is memory mapped file
 
 	if strings.HasPrefix(execPath, "/proc/self/fd") || strings.HasPrefix(execEvent.Cwd, "/proc/self/fd") || strings.HasPrefix(execEvent.ExePath, "/proc/self/fd") {
-		isPartOfImage := !execEvent.UpperLayer
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName: rule.Name(),
+				AlertName:   rule.Name(),
+				InfectedPID: execEvent.Pid,
 				Arguments: map[string]interface{}{
 					"hardlink": execEvent.ExePath,
 				},
 				FixSuggestions: "If this is a legitimate action, please add consider removing this workload from the binding of this rule.",
 				Severity:       R1005FilelessExecutionRuleDescriptor.Priority,
-				IsPartOfImage:  &isPartOfImage,
-				PPID:           &execEvent.Ppid,
-				PPIDComm:       &execEvent.Pcomm,
 			},
-			RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-				Comm: execEvent.Comm,
-				GID:  execEvent.Gid,
-				PID:  execEvent.Pid,
-				UID:  execEvent.Uid,
+			RuntimeProcessDetails: apitypes.ProcessTree{
+				ProcessTree: apitypes.Process{
+					Comm:       execEvent.Comm,
+					Gid:        execEvent.Gid,
+					PID:        execEvent.Pid,
+					Uid:        execEvent.Uid,
+					UpperLayer: execEvent.UpperLayer,
+					PPID:       execEvent.Ppid,
+					Pcomm:      execEvent.Pcomm,
+					Cwd:        execEvent.Cwd,
+					Hardlink:   execEvent.ExePath,
+					Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+				},
+				ContainerID: execEvent.Runtime.ContainerID,
 			},
 			TriggerEvent: execEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
@@ -143,8 +151,6 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}
-
-		enrichRuleFailure(execEvent.Event, execEvent.Pid, &ruleFailure)
 
 		return &ruleFailure
 	}
