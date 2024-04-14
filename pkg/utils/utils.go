@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"math/rand"
 	"node-agent/pkg/objectcache"
 	"os"
@@ -17,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	mapset "github.com/deckarep/golang-set/v2"
 
@@ -534,7 +535,6 @@ func CreateProcessTree(process *apitypes.Process, shimPid uint32) (*apitypes.Pro
 func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, processTree apitypes.Process) (*apitypes.Process, error) {
 	stat, err := proc.Stat()
 	if err != nil {
-		logger.L().Debug("Failed to get process stat", helpers.String("error", err.Error()))
 		return nil, err
 	}
 
@@ -546,7 +546,6 @@ func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, proce
 	var uid, gid uint32
 	status, err := proc.NewStatus()
 	if err != nil {
-		logger.L().Debug("Failed to get process status", helpers.String("error", err.Error()))
 		return nil, nil
 	} else {
 		// TODO: When (https://github.com/prometheus/procfs/pull/620) is merged, use the UID and GID as integers.
