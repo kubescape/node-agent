@@ -9,8 +9,6 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 )
 
 const (
@@ -67,8 +65,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 
 	for _, mount := range mounts {
 		p := getExecPathFromEvent(execEvent)
-		if rule.isPathContained(p, mount) || rule.isPathContained(execEvent.ExePath, p) {
-			logger.L().Debug("Exec from mount", helpers.String("path", p), helpers.String("mount", mount))
+		if rule.isPathContained(p, mount) || rule.isPathContained(execEvent.ExePath, mount) {
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:   rule.Name(),
