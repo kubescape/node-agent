@@ -268,6 +268,12 @@ func (am *NetworkManager) deleteResources(container *containercollection.Contain
 	am.watchedContainerChannels.Delete(container.Runtime.ContainerID)
 }
 
+func (am *NetworkManager) ContainerReachedMaxTime(containerID string) {
+	if channel := am.watchedContainerChannels.Get(containerID); channel != nil {
+		channel <- utils.ContainerReachedMaxTime
+	}
+}
+
 func (am *NetworkManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	// set completion status & status as soon as we start monitoring the container
 	if am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
@@ -291,6 +297,10 @@ func (am *NetworkManager) monitorContainer(ctx context.Context, container *conta
 			am.saveNetworkEvents(ctx, container, watchedContainer)
 		case err := <-watchedContainer.SyncChannel:
 			switch {
+			case errors.Is(err, utils.ContainerReachedMaxTime):
+				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+				am.saveNetworkEvents(ctx, container, watchedContainer)
+				return nil
 			case errors.Is(err, utils.ContainerHasTerminatedError):
 				// if exit code is 0 we set the status to completed
 				// TODO: Should we split ContainerHasTerminatedError to indicate if we reached the maxSniffingTime?

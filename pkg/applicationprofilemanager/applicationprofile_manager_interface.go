@@ -9,4 +9,5 @@ type ApplicationProfileManagerClient interface {
 	ReportFileExec(k8sContainerID, path string, args []string)
 	ReportFileOpen(k8sContainerID, path string, flags []string)
 	ReportDroppedEvent(k8sContainerID string)
+	ContainerReachedMaxTime(containerID string)
 }

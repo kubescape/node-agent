@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"k8s.io/utils/ptr"
 	"node-agent/pkg/config"
 	"node-agent/pkg/dnsmanager"
 	"node-agent/pkg/k8sclient"
@@ -14,6 +13,8 @@ import (
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
 	"time"
+
+	"k8s.io/utils/ptr"
 
 	"github.com/cenkalti/backoff/v4"
 	"go.opentelemetry.io/otel/attribute"
@@ -75,11 +76,11 @@ func CreateNetworkManager(ctx context.Context, cfg config.Config, clusterName st
 	}
 }
 
-func (am *NetworkManager) ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+func (nm *NetworkManager) ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	if watchedContainer.InstanceID != nil {
 		return nil
 	}
-	wl, err := am.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
+	wl, err := nm.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
 	if err != nil {
 		return fmt.Errorf("failed to get workload: %w", err)
 	}
@@ -89,16 +90,16 @@ func (am *NetworkManager) ensureInstanceID(container *containercollection.Contai
 	watchedContainer.TemplateHash, _ = pod.GetLabel("pod-template-hash")
 
 	// find parentWlid
-	kind, name, err := am.k8sClient.CalculateWorkloadParentRecursive(pod)
+	kind, name, err := nm.k8sClient.CalculateWorkloadParentRecursive(pod)
 	if err != nil {
 		return fmt.Errorf("failed to calculate workload parent: %w", err)
 	}
-	parentWorkload, err := am.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
+	parentWorkload, err := nm.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
 	if err != nil {
 		return fmt.Errorf("failed to get parent workload: %w", err)
 	}
 	w := parentWorkload.(*workloadinterface.Workload)
-	watchedContainer.Wlid = w.GenerateWlid(am.clusterName)
+	watchedContainer.Wlid = w.GenerateWlid(nm.clusterName)
 	err = wlid.IsWlidValid(watchedContainer.Wlid)
 	if err != nil {
 		return fmt.Errorf("failed to validate WLID: %w", err)
@@ -127,22 +128,27 @@ func (am *NetworkManager) ensureInstanceID(container *containercollection.Contai
 	return nil
 }
 
-func (am *NetworkManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
+func (nm *NetworkManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
 	// make sure we don't run deleteResources and saveProfile at the same time
-	am.containerMutexes.Lock(watchedContainer.K8sContainerID)
-	defer am.containerMutexes.Unlock(watchedContainer.K8sContainerID)
-	am.removedContainers.Add(watchedContainer.K8sContainerID)
+	nm.containerMutexes.Lock(watchedContainer.K8sContainerID)
+	defer nm.containerMutexes.Unlock(watchedContainer.K8sContainerID)
+	nm.removedContainers.Add(watchedContainer.K8sContainerID)
 	// delete resources
 	watchedContainer.UpdateDataTicker.Stop()
-	am.trackedContainers.Remove(watchedContainer.K8sContainerID)
-	am.droppedEvents.Delete(watchedContainer.K8sContainerID)
-	am.savedEvents.Delete(watchedContainer.K8sContainerID)
-	am.toSaveEvents.Delete(watchedContainer.K8sContainerID)
-	am.watchedContainerChannels.Delete(watchedContainer.ContainerID)
+	nm.trackedContainers.Remove(watchedContainer.K8sContainerID)
+	nm.droppedEvents.Delete(watchedContainer.K8sContainerID)
+	nm.savedEvents.Delete(watchedContainer.K8sContainerID)
+	nm.toSaveEvents.Delete(watchedContainer.K8sContainerID)
+	nm.watchedContainerChannels.Delete(watchedContainer.ContainerID)
+}
+func (nm *NetworkManager) ContainerReachedMaxTime(containerID string) {
+	if channel := nm.watchedContainerChannels.Get(containerID); channel != nil {
+		channel <- utils.ContainerReachedMaxTime
+	}
 }
 
 // isValidEvent checks if the event is a valid event that should be saved
-func (am *NetworkManager) isValidEvent(event tracernetworktype.Event) bool {
+func (nm *NetworkManager) isValidEvent(event tracernetworktype.Event) bool {
 	// unknown type, shouldn't happen
 	if event.PktType != networkmanager.HostPktType && event.PktType != networkmanager.OutgoingPktType {
 		logger.L().Debug("NetworkManager - pktType is not HOST or OUTGOING", helpers.Interface("event", event))
@@ -162,15 +168,15 @@ func (am *NetworkManager) isValidEvent(event tracernetworktype.Event) bool {
 	return true
 }
 
-func (am *NetworkManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+func (nm *NetworkManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	// set completion status & status as soon as we start monitoring the container
-	if am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
+	if nm.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
 		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
 	} else {
 		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
 	}
 	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
-	am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
+	nm.saveNetworkEvents(ctx, watchedContainer, container.K8s.Namespace)
 
 	for {
 		select {
@@ -178,20 +184,23 @@ func (am *NetworkManager) monitorContainer(ctx context.Context, container *conta
 			// adjust ticker after first tick
 			if !watchedContainer.InitialDelayExpired {
 				watchedContainer.InitialDelayExpired = true
-				watchedContainer.UpdateDataTicker.Reset(am.cfg.UpdateDataPeriod)
+				watchedContainer.UpdateDataTicker.Reset(nm.cfg.UpdateDataPeriod)
 			}
 			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
-			am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
+			nm.saveNetworkEvents(ctx, watchedContainer, container.K8s.Namespace)
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
 				// if exit code is 0 we set the status to completed
 				// TODO: Should we split ContainerHasTerminatedError to indicate if we reached the maxSniffingTime?
-				if watchedContainer.GetTerminationExitCode(am.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName) == 0 {
+				if watchedContainer.GetTerminationExitCode(nm.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName) == 0 {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				}
-
-				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
+				nm.saveNetworkEvents(ctx, watchedContainer, container.K8s.Namespace)
+				return nil
+			case errors.Is(err, utils.ContainerReachedMaxTime):
+				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+				nm.saveNetworkEvents(ctx, watchedContainer, container.K8s.Namespace)
 				return nil
 			case errors.Is(err, utils.TooLargeObjectError):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
@@ -201,16 +210,16 @@ func (am *NetworkManager) monitorContainer(ctx context.Context, container *conta
 	}
 }
 
-func (am *NetworkManager) saveProfile(ctx context.Context, watchedContainer *utils.WatchedContainerData, namespace string) {
+func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContainer *utils.WatchedContainerData, namespace string) {
 	ctx, span := otel.Tracer("").Start(ctx, "NetworkManager.saveProfile")
 	defer span.End()
 
 	// make sure we don't run deleteResources and saveProfile at the same time
-	am.containerMutexes.Lock(watchedContainer.K8sContainerID)
-	defer am.containerMutexes.Unlock(watchedContainer.K8sContainerID)
+	nm.containerMutexes.Lock(watchedContainer.K8sContainerID)
+	defer nm.containerMutexes.Unlock(watchedContainer.K8sContainerID)
 
 	// verify the container hasn't already been deleted
-	if !am.trackedContainers.Contains(watchedContainer.K8sContainerID) {
+	if !nm.trackedContainers.Contains(watchedContainer.K8sContainerID) {
 		logger.L().Ctx(ctx).Debug("NetworkManager - container isn't tracked, not saving profile",
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
@@ -240,19 +249,19 @@ func (am *NetworkManager) saveProfile(ctx context.Context, watchedContainer *uti
 	// sleep for container index second to desynchronize the profiles saving
 	time.Sleep(time.Duration(watchedContainer.ContainerIndex) * time.Second)
 
-	if droppedEvents := am.droppedEvents.Get(watchedContainer.K8sContainerID); droppedEvents {
+	if droppedEvents := nm.droppedEvents.Get(watchedContainer.K8sContainerID); droppedEvents {
 		watchedContainer.SetStatus(utils.WatchedContainerStatusMissingRuntime)
 	}
 
 	// get pointer to events map from IG
-	toSaveEvents := am.toSaveEvents.Get(watchedContainer.K8sContainerID)
+	toSaveEvents := nm.toSaveEvents.Get(watchedContainer.K8sContainerID)
 	// point IG to a new events map
-	am.toSaveEvents.Set(watchedContainer.K8sContainerID, mapset.NewSet[networkmanager.NetworkEvent]())
+	nm.toSaveEvents.Set(watchedContainer.K8sContainerID, mapset.NewSet[networkmanager.NetworkEvent]())
 	// add to ingress and egress
 	var ingress []v1beta1.NetworkNeighbor
 	var egress []v1beta1.NetworkNeighbor
 	for _, event := range toSaveEvents.ToSlice() {
-		neighbor := am.createNetworkNeighbor(event, namespace)
+		neighbor := nm.createNetworkNeighbor(event, namespace)
 		if neighbor == nil {
 			continue
 		}
@@ -288,7 +297,7 @@ func (am *NetworkManager) saveProfile(ctx context.Context, watchedContainer *uti
 		}
 		// 1. try to patch object
 		var gotErr error
-		if err := am.storageClient.PatchNetworkNeighborhood(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
+		if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
 			if apierrors.IsNotFound(err) {
 				// 2a. new object
 				newObject := &v1beta1.NetworkNeighborhood{
@@ -321,7 +330,7 @@ func (am *NetworkManager) saveProfile(ctx context.Context, watchedContainer *uti
 				newContainer := utils.GetNetworkNeighborhoodContainer(newObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
 				utils.EnrichNeighborhoodContainer(newContainer, ingress, egress)
 				// try to create object
-				if err := am.storageClient.CreateNetworkNeighborhood(newObject, namespace); err != nil {
+				if err := nm.storageClient.CreateNetworkNeighborhood(newObject, namespace); err != nil {
 					gotErr = err
 					logger.L().Ctx(ctx).Error("NetworkManager - failed to create network neighborhood", helpers.Error(err),
 						helpers.String("slug", slug),
@@ -336,7 +345,7 @@ func (am *NetworkManager) saveProfile(ctx context.Context, watchedContainer *uti
 					helpers.String("container ID", watchedContainer.ContainerID),
 					helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				// 2b. get existing object
-				existingObject, err := am.storageClient.GetNetworkNeighborhood(namespace, slug)
+				existingObject, err := nm.storageClient.GetNetworkNeighborhood(namespace, slug)
 				if err != nil {
 					gotErr = err
 					logger.L().Ctx(ctx).Error("NetworkManager - failed to get existing network neighborhood", helpers.Error(err),
@@ -413,7 +422,7 @@ func (am *NetworkManager) saveProfile(ctx context.Context, watchedContainer *uti
 							helpers.String("k8s workload", watchedContainer.K8sContainerID))
 						return
 					}
-					if err := am.storageClient.PatchNetworkNeighborhood(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
+					if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
 						gotErr = err
 						logger.L().Ctx(ctx).Error("NetworkManager - failed to patch network neighborhood", helpers.Error(err),
 							helpers.String("slug", slug),
@@ -426,13 +435,13 @@ func (am *NetworkManager) saveProfile(ctx context.Context, watchedContainer *uti
 		}
 		if gotErr != nil {
 			// restore events
-			am.toSaveEvents.Get(watchedContainer.K8sContainerID).Append(toSaveEvents.ToSlice()...)
+			nm.toSaveEvents.Get(watchedContainer.K8sContainerID).Append(toSaveEvents.ToSlice()...)
 		} else {
 			// for status updates to be tracked, we reset the update flag
 			watchedContainer.ResetStatusUpdatedFlag()
 
 			// record saved events
-			am.savedEvents.Get(watchedContainer.K8sContainerID).Append(toSaveEvents.ToSlice()...)
+			nm.savedEvents.Get(watchedContainer.K8sContainerID).Append(toSaveEvents.ToSlice()...)
 			logger.L().Debug("NetworkManager - saved neighborhood",
 				helpers.Int("events", toSaveEvents.Cardinality()),
 				helpers.String("slug", slug),
@@ -443,16 +452,16 @@ func (am *NetworkManager) saveProfile(ctx context.Context, watchedContainer *uti
 	}
 }
 
-func (am *NetworkManager) startNetworkMonitoring(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
+func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
 	ctx, span := otel.Tracer("").Start(ctx, "NetworkManager.startNetworkMonitoring")
 	defer span.End()
 
 	syncChannel := make(chan error, 10)
-	am.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
+	nm.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:      container.Runtime.ContainerID,
-		UpdateDataTicker: time.NewTicker(utils.AddRandomDuration(5, 10, am.cfg.InitialDelay)), // get out of sync with the relevancy manager
+		UpdateDataTicker: time.NewTicker(utils.AddRandomDuration(5, 10, nm.cfg.InitialDelay)), // get out of sync with the relevancy manager
 		SyncChannel:      syncChannel,
 		K8sContainerID:   k8sContainerID,
 		NsMntId:          container.Mntns,
@@ -460,7 +469,7 @@ func (am *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
 	if err := backoff.Retry(func() error {
-		return am.ensureInstanceID(container, watchedContainer)
+		return nm.ensureInstanceID(container, watchedContainer)
 	}, backoff.NewExponentialBackOff()); err != nil {
 		logger.L().Ctx(ctx).Error("NetworkManager - failed to ensure instanceID", helpers.Error(err),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
@@ -468,72 +477,72 @@ func (am *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
 
-	if err := am.monitorContainer(ctx, container, watchedContainer); err != nil {
+	if err := nm.monitorContainer(ctx, container, watchedContainer); err != nil {
 		logger.L().Info("NetworkManager - stop monitor on container", helpers.String("reason", err.Error()),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
 
-	am.deleteResources(watchedContainer)
+	nm.deleteResources(watchedContainer)
 }
 
-func (am *NetworkManager) waitForContainer(k8sContainerID string) error {
-	if am.removedContainers.Contains(k8sContainerID) {
+func (nm *NetworkManager) waitForContainer(k8sContainerID string) error {
+	if nm.removedContainers.Contains(k8sContainerID) {
 		return fmt.Errorf("container %s has been removed", k8sContainerID)
 	}
 	return backoff.Retry(func() error {
-		if am.trackedContainers.Contains(k8sContainerID) {
+		if nm.trackedContainers.Contains(k8sContainerID) {
 			return nil
 		}
 		return fmt.Errorf("container %s not found", k8sContainerID)
 	}, backoff.NewExponentialBackOff())
 }
 
-func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEvent) {
+func (nm *NetworkManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
-	ctx, span := otel.Tracer("").Start(am.ctx, "NetworkManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
+	ctx, span := otel.Tracer("").Start(nm.ctx, "NetworkManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
 	defer span.End()
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		if am.watchedContainerChannels.Has(notif.Container.Runtime.ContainerID) {
+		if nm.watchedContainerChannels.Has(notif.Container.Runtime.ContainerID) {
 			logger.L().Debug("container already exist in memory",
 				helpers.String("container ID", notif.Container.Runtime.ContainerID),
 				helpers.String("k8s workload", k8sContainerID))
 			return
 		}
-		am.droppedEvents.Set(k8sContainerID, false)
-		am.savedEvents.Set(k8sContainerID, mapset.NewSet[networkmanager.NetworkEvent]())
-		am.toSaveEvents.Set(k8sContainerID, mapset.NewSet[networkmanager.NetworkEvent]())
-		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
-		am.trackedContainers.Add(k8sContainerID)
-		go am.startNetworkMonitoring(ctx, notif.Container, k8sContainerID)
+		nm.droppedEvents.Set(k8sContainerID, false)
+		nm.savedEvents.Set(k8sContainerID, mapset.NewSet[networkmanager.NetworkEvent]())
+		nm.toSaveEvents.Set(k8sContainerID, mapset.NewSet[networkmanager.NetworkEvent]())
+		nm.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
+		nm.trackedContainers.Add(k8sContainerID)
+		go nm.startNetworkMonitoring(ctx, notif.Container, k8sContainerID)
 
 		// stop monitoring after MaxSniffingTime
-		time.AfterFunc(am.cfg.MaxSniffingTime, func() {
+		time.AfterFunc(nm.cfg.MaxSniffingTime, func() {
 			logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			event := containercollection.PubSubEvent{
 				Timestamp: time.Now().Format(time.RFC3339),
 				Type:      containercollection.EventTypeRemoveContainer,
 				Container: notif.Container,
 			}
-			am.ContainerCallback(event)
+			nm.ContainerCallback(event)
 		})
 	case containercollection.EventTypeRemoveContainer:
-		channel := am.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
+		channel := nm.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
 		if channel != nil {
 			channel <- utils.ContainerHasTerminatedError
 		}
-		am.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
+		nm.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 
-func (am *NetworkManager) ReportNetworkEvent(k8sContainerID string, event tracernetworktype.Event) {
-	if err := am.waitForContainer(k8sContainerID); err != nil {
+func (nm *NetworkManager) ReportNetworkEvent(k8sContainerID string, event tracernetworktype.Event) {
+	if err := nm.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
-	if !am.isValidEvent(event) {
+	if !nm.isValidEvent(event) {
 		return
 	}
 
@@ -552,21 +561,21 @@ func (am *NetworkManager) ReportNetworkEvent(k8sContainerID string, event tracer
 	networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
 
 	// skip if we already saved this event
-	savedEvents := am.savedEvents.Get(k8sContainerID)
+	savedEvents := nm.savedEvents.Get(k8sContainerID)
 	if savedEvents.Contains(networkEvent) {
 		return
 	}
-	am.toSaveEvents.Get(k8sContainerID).Add(networkEvent)
+	nm.toSaveEvents.Get(k8sContainerID).Add(networkEvent)
 }
 
-func (am *NetworkManager) ReportDroppedEvent(k8sContainerID string) {
-	if err := am.waitForContainer(k8sContainerID); err != nil {
+func (nm *NetworkManager) ReportDroppedEvent(k8sContainerID string) {
+	if err := nm.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
-	am.droppedEvents.Set(k8sContainerID, true)
+	nm.droppedEvents.Set(k8sContainerID, true)
 }
 
-func (am *NetworkManager) createNetworkNeighbor(networkEvent networkmanager.NetworkEvent, namespace string) *v1beta1.NetworkNeighbor {
+func (nm *NetworkManager) createNetworkNeighbor(networkEvent networkmanager.NetworkEvent, namespace string) *v1beta1.NetworkNeighbor {
 	var neighborEntry v1beta1.NetworkNeighbor
 
 	portIdentifier := networkmanager.GeneratePortIdentifierFromEvent(networkEvent)
@@ -590,7 +599,7 @@ func (am *NetworkManager) createNetworkNeighbor(networkEvent networkmanager.Netw
 
 	} else if networkEvent.Destination.Kind == networkmanager.EndpointKindService {
 		// for service, we need to retrieve it and use its selector
-		svc, err := am.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
+		svc, err := nm.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
 		if err != nil {
 			logger.L().Warning("failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
 			return nil
@@ -618,8 +627,8 @@ func (am *NetworkManager) createNetworkNeighbor(networkEvent networkmanager.Netw
 		}
 		neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 
-		if am.dnsResolverClient != nil {
-			domain, ok := am.dnsResolverClient.ResolveIPAddress(networkEvent.Destination.IPAddress)
+		if nm.dnsResolverClient != nil {
+			domain, ok := nm.dnsResolverClient.ResolveIPAddress(networkEvent.Destination.IPAddress)
 			if ok {
 				neighborEntry.DNS = domain
 				neighborEntry.DNSNames = []string{domain}

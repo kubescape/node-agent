@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"math/rand"
 	"node-agent/pkg/objectcache"
 	"os"
@@ -17,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	mapset "github.com/deckarep/golang-set/v2"
 
@@ -42,6 +43,7 @@ import (
 
 var (
 	ContainerHasTerminatedError = errors.New("container has terminated")
+	ContainerReachedMaxTime     = errors.New("container reached max time")
 	TooLargeObjectError         = errors.New("object is too large")
 	IncompleteSBOMError         = errors.New("incomplete SBOM")
 )
