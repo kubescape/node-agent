@@ -1,0 +1,255 @@
+package utils
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"math/rand"
+	utilspkg "node-agent/pkg/utils"
+	"os"
+	"path"
+	"strings"
+	"time"
+
+	"sigs.k8s.io/yaml"
+
+	"github.com/cenkalti/backoff/v4"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	spdxv1beta1client "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
+
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/remotecommand"
+	"k8s.io/kubectl/pkg/scheme"
+)
+
+type TestWorkload struct {
+	Namespace       string
+	UnstructuredObj *unstructured.Unstructured
+	WorkloadObj     *workloadinterface.Workload
+	client          dynamic.ResourceInterface
+}
+
+func NewTestWorkload(namespace, resourcePath string) (*TestWorkload, error) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+
+	yamlData, err := os.ReadFile(path.Join(utilspkg.CurrentDir(), resourcePath))
+	if err != nil {
+		return nil, err
+	}
+	data, err := yaml.YAMLToJSON(yamlData)
+	if err != nil {
+		return nil, err
+	}
+	wl, err := workloadinterface.NewWorkload(data)
+	if err != nil {
+		return nil, err
+	}
+
+	gvr, err := k8sinterface.GetGroupVersionResource(wl.GetKind())
+	if err != nil {
+		return nil, err
+	}
+
+	clientResource := k8sClient.DynamicClient.Resource(gvr)
+
+	obj := &unstructured.Unstructured{}
+	err = obj.UnmarshalJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	client := clientResource.Namespace(namespace)
+	_, err = client.Create(context.TODO(), obj, metav1.CreateOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return &TestWorkload{
+		Namespace:       namespace,
+		UnstructuredObj: obj,
+		WorkloadObj:     wl,
+		client:          client,
+	}, nil
+}
+
+func (w *TestWorkload) ExecIntoPod(command []string) (string, string, error) {
+	pod, err := w.GetPod()
+	if err != nil {
+		return "", "", err
+	}
+
+	k8sClient := k8sinterface.NewKubernetesApi()
+
+	buf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	request := k8sClient.KubernetesClient.CoreV1().RESTClient().
+		Post().
+		Namespace(pod.Namespace).
+		Resource("pods").
+		Name(pod.Name).
+		SubResource("exec").
+		VersionedParams(&v1.PodExecOptions{
+			Command: command,
+			Stdin:   false,
+			Stdout:  true,
+			Stderr:  true,
+			TTY:     true,
+		}, scheme.ParameterCodec)
+	exec, err := remotecommand.NewSPDYExecutor(k8sClient.K8SConfig, "POST", request.URL())
+	if err != nil {
+		return "", "", err
+	}
+	err = exec.StreamWithContext(context.TODO(), remotecommand.StreamOptions{
+		Stdout: buf,
+		Stderr: errBuf,
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("%w Failed executing command %s on %v/%v", err, command, pod.Namespace, pod.Name)
+	}
+
+	return buf.String(), errBuf.String(), nil
+}
+
+func (w *TestWorkload) GetPod() (*v1.Pod, error) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+
+	appLabel, _ := w.WorkloadObj.GetLabel("app")
+	namespace := w.Namespace
+
+	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"app": appLabel}}
+	listOptions := metav1.ListOptions{
+		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
+	}
+
+	pods, err := k8sClient.KubernetesClient.CoreV1().Pods(namespace).List(context.TODO(), listOptions)
+	if err != nil {
+		return nil, err
+	}
+	if len(pods.Items) == 0 {
+		return nil, fmt.Errorf("no pods found")
+	}
+	return &pods.Items[0], nil
+}
+
+func (w *TestWorkload) WaitForReady(maxRetries uint64) error {
+	time.Sleep(5)
+	k8sClient := k8sinterface.NewKubernetesApi()
+
+	pod, err := w.GetPod()
+	if err != nil {
+		return err
+	}
+	podName := pod.Name
+	return backoff.RetryNotify(func() error {
+		p, err := k8sClient.KubernetesClient.CoreV1().Pods(w.Namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		for _, cond := range p.Status.Conditions {
+			if cond.Type == "Ready" && cond.Status == "True" {
+				return nil
+			}
+		}
+		return fmt.Errorf("pod %s is not ready", podName)
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), maxRetries), func(err error, d time.Duration) {
+		logger.L().Info("waiting for pod to be ready", helpers.String("pod", podName), helpers.Error(err), helpers.String("retry in", d.String()))
+	})
+
+}
+
+func (w *TestWorkload) listApplicationProfilesInNamespace() ([]v1beta1.ApplicationProfile, error) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	profiles, err := storageclient.ApplicationProfiles(w.Namespace).List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return profiles.Items, nil
+}
+
+func (w *TestWorkload) getApplicationProfile() (*v1beta1.ApplicationProfile, error) {
+	appProfiles, err := w.listApplicationProfilesInNamespace()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, appProfile := range appProfiles {
+		wlKind := appProfile.Labels["kubescape.io/workload-kind"]
+		wlName := appProfile.Labels["kubescape.io/workload-name"]
+		wlNs := appProfile.Labels["kubescape.io/workload-namespace"]
+
+		if wlKind == w.WorkloadObj.GetKind() && wlName == w.WorkloadObj.GetName() && wlNs == w.Namespace {
+			return &appProfile, nil
+		}
+	}
+	return nil, fmt.Errorf("application profile not found")
+}
+
+func (w *TestWorkload) WaitForApplicationProfile(maxRetries uint64) error {
+	return backoff.RetryNotify(func() error {
+		appProfile, err := w.getApplicationProfile()
+		if err != nil {
+			return err
+		}
+
+		if appProfile.Annotations["kubescape.io/status"] == "completed" {
+			return nil
+		}
+		return fmt.Errorf("application profile is not completed")
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
+		logger.L().Info("waiting for app profile to be ready", helpers.Error(err), helpers.String("retry in", d.String()))
+	})
+}
+
+type TestNamespace struct {
+	Name    string
+	created bool
+}
+
+func NewRandomNamespace() TestNamespace {
+	return NewNamespace(generateRandomNamespaceName())
+}
+func NewNamespace(name string) TestNamespace {
+	ns := TestNamespace{}
+	ns.Name = name
+
+	k8sClient := k8sinterface.NewKubernetesApi()
+	_, err := k8sClient.KubernetesClient.CoreV1().Namespaces().Get(context.TODO(), ns.Name, metav1.GetOptions{})
+	if err != nil {
+		nsSpec := &v1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: ns.Name,
+			},
+		}
+
+		_, err := k8sClient.KubernetesClient.CoreV1().Namespaces().Create(context.TODO(), nsSpec, metav1.CreateOptions{})
+		if err != nil {
+			panic(err)
+		}
+		ns.created = true
+
+	} else {
+		ns.created = false
+	}
+
+	return ns
+}
+
+func generateRandomNamespaceName() string {
+	const letters = "abcdefghijklmnopqrstuvwxyz"
+	var sb strings.Builder
+	prefix := "node-agent-test-"
+	sb.WriteString(prefix)
+	for i := 0; i < 4; i++ {
+		randomIndex := rand.Intn(len(letters))
+		sb.WriteByte(letters[randomIndex])
+	}
+	return sb.String()
+}

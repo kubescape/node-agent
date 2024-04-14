@@ -6,9 +6,19 @@ on:
       - '**/*.md'
     types: [labeled, synchronize, ready_for_review, opened, reopened]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   component-tests:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test: [
+          "TestBasicAlertTest",
+          "TestAllAlertsFromMaliciousApp"
+        ]
 
     steps:
     - name: Checkout code
@@ -60,13 +70,20 @@ jobs:
         kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=node-agent -n kubescape --timeout=300s
         sleep 5
 
-    - name: Install python dependencies
+    - name: Run Port Forwarding
       run: |
-        pip install -r tests/component-tests/requirements.txt
+        ./tests/scripts/port-forward.sh
 
-    - name: Run Component Tests
-      run: |
-        ./tests/scripts/run-component-tests.sh
+     - name: Set up Go
+        env:
+          CGO_ENABLED: 0
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Run test
+        run: |
+          cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=integration
 
     - name: Upload plot images
       if: always()
@@ -96,9 +113,3 @@ jobs:
             repo: context.repo.repo,
             body: comment
           });
-
-    # - name: Cleanup
-    #   if: always()
-    #   run: |
-    #     # If it is a kind cluster, delete it
-    #     ./kind delete cluster
