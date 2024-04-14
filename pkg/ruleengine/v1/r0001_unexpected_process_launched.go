@@ -5,6 +5,7 @@ import (
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
+	"slices"
 	"strings"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -86,7 +87,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 	}
 
 	for _, execCall := range appProfileExecList.Execs {
-		if execCall.Path == execPath {
+		if execCall.Path == execPath && slices.Compare(execCall.Args, execEvent.Args) == 0 {
 			return nil
 		}
 	}

@@ -537,7 +537,6 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 
 	if rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeProcessDetails().ContainerID) {
 		shimPid := rm.containerIdToShimPid.Get(ruleFailure.GetRuntimeProcessDetails().ContainerID)
-		logger.L().Info("RuleManager - enriching process tree with shim pid", helpers.Int("shim pid", int(shimPid)))
 		tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree, shimPid)
 		if err != nil {
 			logger.L().Debug("Failed to create process tree", helpers.Error(err))
