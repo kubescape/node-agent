@@ -270,9 +270,9 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			}
 		}
 		rm.trackedContainers.Add(k8sContainerID)
-		shim, err := utils.GetParentByPid(int(notif.Container.Pid))
+		shim, err := utils.GetProcessStat(int(notif.Container.Pid))
 		if err != nil {
-			logger.L().Error("RuleManager - failed to get shim process", helpers.Error(err))
+			logger.L().Warning("RuleManager - failed to get shim process", helpers.Error(err))
 		} else {
 			rm.containerIdToShimPid.Set(notif.Container.Runtime.ContainerID, uint32(shim.PPID))
 		}
@@ -506,7 +506,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	}
 
 	if runtimeProcessDetails.ProcessTree.PPID == 0 {
-		parent, err := utils.GetParentByPid(int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID))
+		parent, err := utils.GetProcessStat(int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID))
 		if err != nil {
 			logger.L().Debug("Failed to get ppid by pid", helpers.Error(err))
 			runtimeProcessDetails.ProcessTree.PPID = 0
@@ -536,8 +536,9 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 		runtimeProcessDetails.ProcessTree.Comm = comm
 	}
 
-	if rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeAlertK8sDetails().ContainerID) {
-		shimPid := rm.containerIdToShimPid.Get(ruleFailure.GetRuntimeAlertK8sDetails().ContainerID)
+	if rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeProcessDetails().ContainerID) {
+		shimPid := rm.containerIdToShimPid.Get(ruleFailure.GetRuntimeProcessDetails().ContainerID)
+		logger.L().Info("RuleManager - enriching process tree with shim pid", helpers.Int("shim pid", int(shimPid)))
 		tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree, shimPid)
 		if err != nil {
 			logger.L().Debug("Failed to create process tree", helpers.Error(err))

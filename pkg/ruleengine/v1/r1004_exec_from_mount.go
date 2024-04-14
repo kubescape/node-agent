@@ -90,7 +90,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 						Pcomm:      execEvent.Pcomm,
 						Cwd:        execEvent.Cwd,
 						Hardlink:   execEvent.ExePath,
-						Cmdline:    fmt.Sprintf("%s %s", p, strings.Join(execEvent.Args, " ")),
+						Cmdline:    fmt.Sprintf("%s %s", p, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 					},
 					ContainerID: execEvent.Runtime.ContainerID,
 				},

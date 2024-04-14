@@ -140,7 +140,7 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 					Pcomm:      execEvent.Pcomm,
 					Cwd:        execEvent.Cwd,
 					Hardlink:   execEvent.ExePath,
-					Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(execEvent.Args, " ")),
+					Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 				},
 				ContainerID: execEvent.Runtime.ContainerID,
 			},

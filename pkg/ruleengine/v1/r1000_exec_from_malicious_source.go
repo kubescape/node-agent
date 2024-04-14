@@ -97,7 +97,7 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 						Pcomm:      execEvent.Pcomm,
 						Cwd:        execEvent.Cwd,
 						Hardlink:   execEvent.ExePath,
-						Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(execEvent.Args, " ")),
+						Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 					},
 					ContainerID: execEvent.Runtime.ContainerID,
 				},

@@ -79,7 +79,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 					Pcomm:      execEvent.Pcomm,
 					Cwd:        execEvent.Cwd,
 					Hardlink:   execEvent.ExePath,
-					Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(execEvent.Args, " ")),
+					Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 				},
 				ContainerID: execEvent.Runtime.ContainerID,
 			},
