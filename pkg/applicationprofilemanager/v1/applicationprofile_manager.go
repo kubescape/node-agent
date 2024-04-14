@@ -147,7 +147,7 @@ func (am *ApplicationProfileManager) ContainerReachedMaxTime(containerID string)
 }
 
 func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	logger.L().Info("ApplicationProfileManager - start monitor on container",
+	logger.L().Debug("ApplicationProfileManager - start monitor on container",
 		helpers.Interface("preRunning", am.preRunningContainerIDs.Contains(container.Runtime.ContainerID)),
 		helpers.Int("container index", watchedContainer.ContainerIndex),
 		helpers.String("container ID", watchedContainer.ContainerID),

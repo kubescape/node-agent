@@ -97,6 +97,9 @@ func TestAllAlertsFromMaliciousApp(t *testing.T) {
 		t.Errorf("Error creating workload: %v", err)
 	}
 
+	// Malicious activity will be detected in 3 minutes + 20 seconds to wait for the alerts to be generated
+	timer := time.NewTimer(time.Second * 200)
+
 	// Wait for the workload to be ready
 	err = wl.WaitForReady(80)
 	if err != nil {
@@ -110,7 +113,7 @@ func TestAllAlertsFromMaliciousApp(t *testing.T) {
 	}
 
 	// Wait for the alerts to be generated
-	time.Sleep(20 * time.Second)
+	<-timer.C
 
 	// Get all the alerts for the namespace
 	alerts, err := utils.GetAlerts(wl.Namespace)

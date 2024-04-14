@@ -89,7 +89,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 }
 
 func (rm *RuleManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	logger.L().Info("RuleManager - start monitor on container",
+	logger.L().Debug("RuleManager - start monitor on container",
 		helpers.Int("container index", watchedContainer.ContainerIndex),
 		helpers.String("container ID", watchedContainer.ContainerID),
 		helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -235,7 +235,7 @@ func (rm *RuleManager) startRuleManager(ctx context.Context, container *containe
 	}
 
 	if err := rm.monitorContainer(ctx, container, watchedContainer); err != nil {
-		logger.L().Info("RuleManager - stop monitor on container", helpers.String("reason", err.Error()),
+		logger.L().Debug("RuleManager - stop monitor on container", helpers.String("reason", err.Error()),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -350,7 +350,6 @@ func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectyp
 
 	// list exec rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	logger.L().Info("RuleManager - ReportFileExec", helpers.String("namespace", event.GetNamespace()), helpers.String("name", event.GetPod()))
 	rm.processEvent(utils.ExecveEventType, &event, rules)
 }
 
