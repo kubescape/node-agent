@@ -2,13 +2,9 @@ name: Node Agent Component Test
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
-    branches: 
-      - 'main'
     paths-ignore:
-      - '*.md' 
-      - '*.yaml'
-      - '.github/workflows/*'
+      - '**/*.md'
+    types: [labeled, synchronize, ready_for_review, opened, reopened]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
