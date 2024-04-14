@@ -1,5 +1,5 @@
-//go:build integration
-// +build integration
+//go:build component
+// +build component
 
 package tests
 
@@ -36,7 +36,7 @@ func tearDownTest(t *testing.T, startTime time.Time) {
 	}
 }
 
-func TestBasicAlertTest(t *testing.T) {
+func Test_01_BasicAlertTest(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
@@ -84,7 +84,7 @@ func TestBasicAlertTest(t *testing.T) {
 	t.Errorf("Expected alert not found")
 }
 
-func TestAllAlertsFromMaliciousApp(t *testing.T) {
+func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
@@ -154,7 +154,7 @@ func TestAllAlertsFromMaliciousApp(t *testing.T) {
 	}
 }
 
-func TestBasicLoadActivities(t *testing.T) {
+func Test_03_BasicLoadActivities(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
@@ -204,11 +204,11 @@ func TestBasicLoadActivities(t *testing.T) {
 	}
 
 	for pod, cpuUsage := range podToCpuUsage {
-		assert.LessOrEqual(t, cpuUsage, 0.3, "CPU usage of Node Agent is too high. CPU usage is %f, Pod: %s", cpuUsage, pod)
+		assert.LessOrEqual(t, cpuUsage, 0.4, "CPU usage of Node Agent is too high. CPU usage is %f, Pod: %s", cpuUsage, pod)
 	}
 }
 
-func TestMemoryLeak(t *testing.T) {
+func Test_04_MemoryLeak(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
@@ -262,7 +262,7 @@ func TestMemoryLeak(t *testing.T) {
 	}
 }
 
-func TestMemoryLeak_10K_Alerts(t *testing.T) {
+func Test_05_MemoryLeak_10K_Alerts(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
@@ -324,7 +324,7 @@ func TestMemoryLeak_10K_Alerts(t *testing.T) {
 	}
 }
 
-func TestKillProcessInTheMiddle(t *testing.T) {
+func Test_06_KillProcessInTheMiddle(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 

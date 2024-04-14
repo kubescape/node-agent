@@ -1,4 +1,4 @@
-name: Node Agent Component
+name: Node Agent Component Tests
 on:
   pull_request:
     types: [labeled, synchronize, ready_for_review, opened, reopened]
@@ -40,12 +40,12 @@ jobs:
     strategy:
       matrix:
         test: [
-          "TestBasicAlertTest",
-          "TestAllAlertsFromMaliciousApp",
-          "TestBasicLoadActivities",
-          "TestMemoryLeak",
-          "TestMemoryLeak_10K_Alerts",
-          "TestKillProcessInTheMiddle",
+          Test_01_BasicAlertTest,
+          Test_02_AllAlertsFromMaliciousApp,
+          Test_03_BasicLoadActivities,
+          Test_04_MemoryLeak,
+          Test_05_MemoryLeak_10K_Alerts,
+          Test_06_KillProcessInTheMiddle,
         ]
     steps:
       - name: Checkout code
@@ -88,19 +88,19 @@ jobs:
           go-version: "1.21"
       - name: Run test
         run: |
-          cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=integration
+          cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=component
       - name: Upload plot images
         if: always()
         uses: actions/upload-artifact@v2
         with:
           name: Performance plots
-          path: "*.png"
+          path: "tests/*.png"
       - name: Upload pprof files
         if: always()
         uses: actions/upload-artifact@v2
         with:
           name: Pprof files
-          path: "*.pprof"
+          path: "tests/*.pprof"
       - name: Comment on PR
         if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
         uses: actions/github-script@v3

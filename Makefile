@@ -1,7 +1,7 @@
 DOCKERFILE_PATH=./build/Dockerfile
 BINARY_NAME=node-agent
 
-IMAGE?=quay.io/amirm_armo/$(BINARY_NAME)
+IMAGE?=quay.io/kubescape/$(BINARY_NAME)
 TAG?=test
 # TAG?=v0.0.1
 
