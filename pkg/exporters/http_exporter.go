@@ -50,7 +50,8 @@ type HTTPAlertsList struct {
 }
 
 type HTTPAlertsListSpec struct {
-	Alerts []apitypes.RuntimeAlert `json:"alerts"`
+	Alerts      []apitypes.RuntimeAlert `json:"alerts"`
+	ProcessTree apitypes.ProcessTree    `json:"processTree"`
 }
 
 func (config *HTTPExporterConfig) Validate() error {
@@ -100,12 +101,12 @@ func (exporter *HTTPExporter) sendAlertLimitReached() {
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			NodeName:    exporter.NodeName,
-			ClusterName: &exporter.ClusterName,
+			ClusterName: exporter.ClusterName,
 		},
 	}
 
 	logger.L().Error("Alert limit reached", helpers.Int("alerts", exporter.alertCount), helpers.String("since", exporter.alertCountStart.Format(time.RFC3339)))
-	exporter.sendInAlertList(httpAlert)
+	exporter.sendInAlertList(httpAlert, apitypes.ProcessTree{})
 }
 
 func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
@@ -117,25 +118,25 @@ func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	// populate the RuntimeAlert struct with the data from the failedRule
 	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = exporter.NodeName
-	k8sDetails.ClusterName = &exporter.ClusterName
+	k8sDetails.ClusterName = exporter.ClusterName
 
 	httpAlert := apitypes.RuntimeAlert{
-		Message:                    failedRule.GetRuleAlert().RuleDescription,
-		HostName:                   exporter.Host,
-		AlertType:                  apitypes.AlertTypeRule,
-		BaseRuntimeAlert:           failedRule.GetBaseRuntimeAlert(),
-		RuntimeAlertK8sDetails:     k8sDetails,
-		RuntimeAlertProcessDetails: failedRule.GetRuntimeProcessDetails(),
-		RuleAlert:                  failedRule.GetRuleAlert(),
+		Message:                failedRule.GetRuleAlert().RuleDescription,
+		HostName:               exporter.Host,
+		AlertType:              apitypes.AlertTypeRule,
+		BaseRuntimeAlert:       failedRule.GetBaseRuntimeAlert(),
+		RuntimeAlertK8sDetails: k8sDetails,
+		RuleAlert:              failedRule.GetRuleAlert(),
 	}
-	exporter.sendInAlertList(httpAlert)
+	exporter.sendInAlertList(httpAlert, failedRule.GetRuntimeProcessDetails())
 }
 
-func (exporter *HTTPExporter) sendInAlertList(httpAlert apitypes.RuntimeAlert) {
+func (exporter *HTTPExporter) sendInAlertList(httpAlert apitypes.RuntimeAlert, processTree apitypes.ProcessTree) {
 	// create the HTTPAlertsListSpec struct
 	// TODO: accumulate alerts and send them in a batch
 	httpAlertsListSpec := HTTPAlertsListSpec{
-		Alerts: []apitypes.RuntimeAlert{httpAlert},
+		Alerts:      []apitypes.RuntimeAlert{httpAlert},
+		ProcessTree: processTree,
 	}
 	// create the HTTPAlertsList struct
 	httpAlertsList := HTTPAlertsList{
@@ -188,18 +189,17 @@ func (exporter *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.Malw
 	}
 	k8sDetails := malwareResult.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = exporter.NodeName
-	k8sDetails.ClusterName = &exporter.ClusterName
+	k8sDetails.ClusterName = exporter.ClusterName
 
 	httpAlert := apitypes.RuntimeAlert{
-		Message:                    fmt.Sprintf("Malware detected: %s", malwareResult.GetBasicRuntimeAlert().AlertName),
-		HostName:                   exporter.Host,
-		AlertType:                  apitypes.AlertTypeMalware,
-		BaseRuntimeAlert:           malwareResult.GetBasicRuntimeAlert(),
-		RuntimeAlertK8sDetails:     k8sDetails,
-		RuntimeAlertProcessDetails: malwareResult.GetRuntimeProcessDetails(),
-		MalwareAlert:               malwareResult.GetMalwareRuntimeAlert(),
+		Message:                fmt.Sprintf("Malware detected: %s", malwareResult.GetBasicRuntimeAlert().AlertName),
+		HostName:               exporter.Host,
+		AlertType:              apitypes.AlertTypeMalware,
+		BaseRuntimeAlert:       malwareResult.GetBasicRuntimeAlert(),
+		RuntimeAlertK8sDetails: k8sDetails,
+		MalwareAlert:           malwareResult.GetMalwareRuntimeAlert(),
 	}
-	exporter.sendInAlertList(httpAlert)
+	exporter.sendInAlertList(httpAlert, malwareResult.GetRuntimeProcessDetails())
 }
 
 func (exporter *HTTPExporter) checkAlertLimit() bool {

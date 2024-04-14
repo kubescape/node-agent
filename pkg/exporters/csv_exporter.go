@@ -61,14 +61,6 @@ func (ce *CsvExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	csvWriter := csv.NewWriter(csvFile)
 	defer csvWriter.Flush()
 
-	// TODO: This is ugly, find a better way.
-	var ppid int
-	if failedRule.GetBaseRuntimeAlert().PPID != nil {
-		ppid = int(*failedRule.GetBaseRuntimeAlert().PPID)
-	} else {
-		ppid = -1
-	}
-
 	csvWriter.Write([]string{
 		failedRule.GetBaseRuntimeAlert().AlertName,
 		failedRule.GetRuleAlert().RuleDescription,
@@ -77,11 +69,11 @@ func (ce *CsvExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 		failedRule.GetRuntimeAlertK8sDetails().ContainerName,
 		failedRule.GetRuntimeAlertK8sDetails().Namespace,
 		failedRule.GetRuntimeAlertK8sDetails().ContainerID,
-		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().PID),
-		failedRule.GetRuntimeProcessDetails().Comm,
-		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().UID),
-		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().GID),
-		fmt.Sprintf("%d", ppid),
+		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.PID),
+		failedRule.GetRuntimeProcessDetails().ProcessTree.Comm,
+		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.Uid),
+		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.Gid),
+		fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.PPID),
 		failedRule.GetBaseRuntimeAlert().Timestamp.String(),
 	})
 }
@@ -126,7 +118,7 @@ func (ce *CsvExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResu
 	csvWriter.Write([]string{
 		malwareResult.GetBasicRuntimeAlert().AlertName,
 		malwareResult.GetMalwareRuntimeAlert().MalwareDescription,
-		malwareResult.GetRuntimeProcessDetails().Path,
+		malwareResult.GetRuntimeProcessDetails().ProcessTree.Cmdline,
 		malwareResult.GetBasicRuntimeAlert().MD5Hash,
 		malwareResult.GetBasicRuntimeAlert().SHA256Hash,
 		malwareResult.GetBasicRuntimeAlert().SHA1Hash,
@@ -154,7 +146,7 @@ func writeMalwareHeaders(csvPath string) {
 	csvWriter.Write([]string{
 		"Malware Name",
 		"Description",
-		"Path",
+		"Cmdline",
 		"MD5 Hash",
 		"SHA256 Hash",
 		"SHA1 Hash",

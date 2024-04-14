@@ -39,6 +39,8 @@ import (
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 var (
@@ -384,7 +386,7 @@ func GetCmdlineByPid(pid int) (*string, error) {
 	return &cmdlineStr, nil
 }
 
-func GetParentByPid(pid int) (*procfs.ProcStat, error) {
+func GetProcessStat(pid int) (*procfs.ProcStat, error) {
 	fs, err := procfs.NewFS("/proc")
 	if err != nil {
 		return nil, err
@@ -395,12 +397,12 @@ func GetParentByPid(pid int) (*procfs.ProcStat, error) {
 		return nil, err
 	}
 
-	parent, err := proc.Stat()
+	stat, err := proc.Stat()
 	if err != nil {
 		return nil, err
 	}
 
-	return &parent, nil
+	return &stat, nil
 }
 
 // Get the path of the file on the node.
@@ -424,6 +426,14 @@ func GetExecPathFromEvent(event *tracerexectype.Event) string {
 		return event.Args[0]
 	}
 	return event.Comm
+}
+
+// Get exec args from the given event.
+func GetExecArgsFromEvent(event *tracerexectype.Event) []string {
+	if len(event.Args) > 1 {
+		return event.Args[1:]
+	}
+	return []string{}
 }
 
 // Get the size of the given file.
@@ -497,4 +507,135 @@ func CalculateMD5FileHash(path string) (string, error) {
 	hashString := hex.EncodeToString(hashInBytes)
 
 	return hashString, nil
+}
+
+// Creates a process tree from a process.
+// The process tree will be built from scanning the /proc filesystem.
+func CreateProcessTree(process *apitypes.Process, shimPid uint32) (*apitypes.Process, error) {
+	procfs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return nil, err
+	}
+
+	proc, err := procfs.Proc(int(process.PID))
+	if err != nil {
+		logger.L().Debug("Failed to get process", helpers.String("error", err.Error()))
+		return nil, err
+	}
+
+	// build the process tree
+	treeRoot, err := buildProcessTree(proc, &procfs, shimPid, *process)
+	if err != nil {
+		return nil, err
+	}
+
+	return treeRoot, nil
+}
+
+// Recursively build the process tree.
+func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, processTree apitypes.Process) (*apitypes.Process, error) {
+	stat, err := proc.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	parent, err := procfs.Proc(stat.PPID)
+	if err != nil {
+		return nil, err
+	}
+
+	var uid, gid uint32
+	status, err := proc.NewStatus()
+	if err != nil {
+		return nil, nil
+	} else {
+		// TODO: When (https://github.com/prometheus/procfs/pull/620) is merged, use the UID and GID as integers.
+		uid64, err := strconv.ParseUint(status.UIDs[1], 10, 32)
+		if err != nil {
+			return nil, nil
+		}
+		uid = uint32(uid64)
+
+		gid64, err := strconv.ParseUint(status.GIDs[1], 10, 32)
+		if err != nil {
+			return nil, nil
+		}
+		gid = uint32(gid64)
+	}
+
+	// Make the parent process the parent of the current process (move the current process to the parent's children).
+	currentProcess := apitypes.Process{
+		PID:  uint32(stat.PID),
+		PPID: uint32(parent.PID),
+		Cmdline: func() string {
+			cmdline, err := proc.CmdLine()
+			if err != nil {
+				return ""
+			}
+			return strings.Join(cmdline, " ")
+		}(),
+		Pcomm: func() string {
+			pcomm, err := parent.Comm()
+			if err != nil {
+				return ""
+			}
+			return pcomm
+		}(),
+		Gid: gid,
+		Uid: uid,
+		Cwd: func() string {
+			cwd, err := proc.Cwd()
+			if err != nil {
+				return ""
+			}
+			return cwd
+		}(),
+	}
+
+	currentProcess.Children = append(currentProcess.Children, processTree)
+
+	// If the parent process is the shim, return the process tree.
+	if stat.PPID == int(shimPid) {
+		return &currentProcess, nil
+	}
+
+	return buildProcessTree(parent, procfs, shimPid, currentProcess)
+}
+
+func GetPathFromPid(pid uint32) (string, error) {
+	fs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return "", err
+	}
+
+	proc, err := fs.Proc(int(pid))
+	if err != nil {
+		return "", err
+	}
+
+	path, err := proc.Executable()
+	if err != nil {
+		return "", err
+	}
+
+	return path, nil
+}
+
+func GetCommFromPid(pid uint32) (string, error) {
+	fs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return "", err
+	}
+
+	proc, err := fs.Proc(int(pid))
+	if err != nil {
+		return "", err
+	}
+
+	comm, err := proc.Comm()
+	if err != nil {
+		return "", err
+	}
+
+	return comm, nil
 }

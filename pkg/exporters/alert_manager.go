@@ -53,7 +53,7 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 		failedRule.GetRuntimeAlertK8sDetails().Namespace,
 		failedRule.GetRuntimeAlertK8sDetails().PodName,
 		failedRule.GetRuntimeAlertK8sDetails().ContainerName,
-		fmt.Sprintf("%s (%d)", failedRule.GetRuntimeProcessDetails().Comm, failedRule.GetRuntimeProcessDetails().PID),
+		fmt.Sprintf("%s (%d)", failedRule.GetRuntimeProcessDetails().ProcessTree.Comm, failedRule.GetRuntimeProcessDetails().ProcessTree.PID),
 	)
 	summary := fmt.Sprintf("Rule '%s' in '%s' namespace '%s' failed", failedRule.GetBaseRuntimeAlert().AlertName, failedRule.GetRuntimeAlertK8sDetails().PodName, failedRule.GetRuntimeAlertK8sDetails().Namespace)
 	myAlert := models.PostableAlert{
@@ -79,16 +79,14 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 				"severity":       PriorityToStatus(failedRule.GetBaseRuntimeAlert().Severity),
 				"host":           ame.Host,
 				"node_name":      ame.NodeName,
-				"pid":            fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().PID),
-				"comm":           failedRule.GetRuntimeProcessDetails().Comm,
-				"uid":            fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().UID),
-				"gid":            fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().GID),
+				"pid":            fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.PID),
+				"ppid":           fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.PPID),
+				"pcomm":          failedRule.GetRuntimeProcessDetails().ProcessTree.Pcomm,
+				"comm":           failedRule.GetRuntimeProcessDetails().ProcessTree.Comm,
+				"uid":            fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.Uid),
+				"gid":            fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.Gid),
 			},
 		},
-	}
-
-	if failedRule.GetBaseRuntimeAlert().PPID != nil {
-		myAlert.Labels["ppid"] = fmt.Sprintf("%d", *failedRule.GetBaseRuntimeAlert().PPID)
 	}
 
 	// Send the alert
@@ -105,7 +103,7 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 }
 
 func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
-	summary := fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s' path '%s'", malwareResult.GetBasicRuntimeAlert().AlertName, malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(), malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(), malwareResult.GetMalwareRuntimeAlert().MalwareDescription, malwareResult.GetRuntimeProcessDetails().Path)
+	summary := fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s'", malwareResult.GetBasicRuntimeAlert().AlertName, malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(), malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(), malwareResult.GetMalwareRuntimeAlert().MalwareDescription)
 	myAlert := models.PostableAlert{
 		StartsAt: strfmt.DateTime(time.Now()),
 		EndsAt:   strfmt.DateTime(time.Now().Add(time.Hour)),
@@ -136,10 +134,6 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 				"node_name":              ame.NodeName,
 			},
 		},
-	}
-
-	if malwareResult.GetBasicRuntimeAlert().IsPartOfImage != nil {
-		myAlert.Labels["is_part_of_image"] = fmt.Sprintf("%t", *malwareResult.GetBasicRuntimeAlert().IsPartOfImage)
 	}
 
 	// Send the alert

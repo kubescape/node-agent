@@ -76,24 +76,30 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 	for _, maliciousExecPathPrefix := range maliciousExecPathPrefixes {
 		// if the exec path or the current dir is from a malicious source
 		if strings.HasPrefix(execPath, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.ExePath, maliciousExecPathPrefix) {
-			isPartOfImage := !execEvent.UpperLayer
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName: rule.Name(),
+					AlertName:   rule.Name(),
+					InfectedPID: execEvent.Pid,
 					Arguments: map[string]interface{}{
 						"hardlink": execEvent.ExePath,
 					},
 					FixSuggestions: "If this is a legitimate action, please add consider removing this workload from the binding of this rule.",
 					Severity:       R1000ExecFromMaliciousSourceDescriptor.Priority,
-					IsPartOfImage:  &isPartOfImage,
-					PPID:           &execEvent.Ppid,
-					PPIDComm:       &execEvent.Pcomm,
 				},
-				RuntimeProcessDetails: apitypes.RuntimeAlertProcessDetails{
-					Comm: execEvent.Comm,
-					GID:  execEvent.Gid,
-					PID:  execEvent.Pid,
-					UID:  execEvent.Uid,
+				RuntimeProcessDetails: apitypes.ProcessTree{
+					ProcessTree: apitypes.Process{
+						Comm:       execEvent.Comm,
+						Gid:        execEvent.Gid,
+						PID:        execEvent.Pid,
+						Uid:        execEvent.Uid,
+						UpperLayer: execEvent.UpperLayer,
+						PPID:       execEvent.Ppid,
+						Pcomm:      execEvent.Pcomm,
+						Cwd:        execEvent.Cwd,
+						Hardlink:   execEvent.ExePath,
+						Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+					},
+					ContainerID: execEvent.Runtime.ContainerID,
 				},
 				TriggerEvent: execEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
@@ -102,8 +108,6 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}
-
-			enrichRuleFailure(execEvent.Event, execEvent.Pid, &ruleFailure)
 
 			return &ruleFailure
 		}
