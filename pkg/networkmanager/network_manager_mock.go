@@ -25,3 +25,6 @@ func (am *NetworkManagerMock) ReportNetworkEvent(_ string, _ tracernetworktype.E
 func (am *NetworkManagerMock) ReportDroppedEvent(_ string) {
 	// noop
 }
+func (am *NetworkManagerMock) ContainerReachedMaxTime(_ string) {
+	// noop
+}

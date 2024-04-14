@@ -7,6 +7,7 @@ import (
 
 type NetworkManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
+	ContainerReachedMaxTime(containerID string)
 	ReportNetworkEvent(containerID string, event tracernetworktype.Event)
 	ReportDroppedEvent(containerID string, event tracernetworktype.Event)
 }

@@ -22,3 +22,6 @@ func (r RelevancyManagerMock) ReportFileExec(_, _, _ string) {
 func (r RelevancyManagerMock) ReportFileOpen(_, _, _ string) {
 	// noop
 }
+func (r RelevancyManagerMock) ContainerReachedMaxTime(_ string) {
+	// noop
+}

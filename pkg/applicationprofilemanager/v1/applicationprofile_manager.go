@@ -140,6 +140,11 @@ func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.Wat
 	am.toSaveOpens.Delete(watchedContainer.K8sContainerID)
 	am.watchedContainerChannels.Delete(watchedContainer.ContainerID)
 }
+func (am *ApplicationProfileManager) ContainerReachedMaxTime(containerID string) {
+	if channel := am.watchedContainerChannels.Get(containerID); channel != nil {
+		channel <- utils.ContainerReachedMaxTime
+	}
+}
 
 func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	// set completion status & status as soon as we start monitoring the container
@@ -170,6 +175,10 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				}
 
+				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
+				return nil
+			case errors.Is(err, utils.ContainerReachedMaxTime):
+				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
 				return nil
 			case errors.Is(err, utils.TooLargeObjectError):

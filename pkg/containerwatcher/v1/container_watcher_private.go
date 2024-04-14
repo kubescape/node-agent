@@ -36,6 +36,10 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		time.AfterFunc(ch.cfg.MaxSniffingTime, func() {
 			ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 			ch.unregisterContainer(notif.Container)
+			ch.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
+			ch.relevancyManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
+			ch.networkManagerv1.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
+			ch.networkManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 		})
 	case containercollection.EventTypeRemoveContainer:
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
