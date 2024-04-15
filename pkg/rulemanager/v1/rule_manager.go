@@ -501,16 +501,15 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	if runtimeProcessDetails.ProcessTree.Cmdline == "" {
 		commandLine, err := utils.GetCmdlineByPid(int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID))
 		if err != nil {
-			logger.L().Debug("Failed to get command line by pid", helpers.Error(err))
-			commandLine = nil
+			runtimeProcessDetails.ProcessTree.Cmdline = ""
+		} else {
+			runtimeProcessDetails.ProcessTree.Cmdline = *commandLine
 		}
-		runtimeProcessDetails.ProcessTree.Cmdline = *commandLine
 	}
 
 	if runtimeProcessDetails.ProcessTree.PPID == 0 {
 		parent, err := utils.GetProcessStat(int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID))
 		if err != nil {
-			logger.L().Debug("Failed to get ppid by pid", helpers.Error(err))
 			runtimeProcessDetails.ProcessTree.PPID = 0
 		} else {
 			runtimeProcessDetails.ProcessTree.PPID = uint32(parent.PPID)

@@ -129,6 +129,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 		"Unexpected Service Account Token Access":  true, // FIXME: should be 'false, check why alerts are not being signaled
 		"Unexpected domain request":                true, // FIXME: should be 'false, check why alerts are not being signaled
 		"Crypto Mining Related Port Communication": true, // FIXME: should be 'false, check why alerts are not being signaled
+		"Crypto Mining Domain Communication":       false,
 	}
 
 	for _, alert := range alerts {
