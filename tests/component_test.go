@@ -130,11 +130,9 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 		ruleengine.R1001Name: false, // Exec Binary Not In Base Image
 		ruleengine.R1004Name: false, // Exec from mount"
 		ruleengine.R0006Name: false, // Unexpected Service Account Token Access
-		ruleengine.R1005Name: false, // Unexpected domain request":
+		ruleengine.R1005Name: false, // Unexpected domain request
 		ruleengine.R1009Name: false, // Crypto Mining Related Port Communication
-
-		//FIXME: should be 'false, check why alerts are not being signaled
-		ruleengine.R1008Name: true, // Crypto Mining Domain Communication
+		ruleengine.R1008Name: false, // Crypto Mining Domain Communication
 	}
 
 	for _, alert := range alerts {
