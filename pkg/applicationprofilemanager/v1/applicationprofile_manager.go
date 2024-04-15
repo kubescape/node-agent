@@ -356,7 +356,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				}
 			} else {
-				logger.L().Ctx(ctx).Warning("ApplicationProfileManager - failed to patch application profile, will get existing one and adjust patch", helpers.Error(err),
+				logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to patch application profile, will get existing one and adjust patch", helpers.Error(err),
 					helpers.String("slug", slug),
 					helpers.Int("container index", watchedContainer.ContainerIndex),
 					helpers.String("container ID", watchedContainer.ContainerID),

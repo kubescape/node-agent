@@ -339,7 +339,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				}
 			} else {
-				logger.L().Ctx(ctx).Warning("NetworkManager - failed to patch network neighborhood, will get existing one and adjust patch", helpers.Error(err),
+				logger.L().Ctx(ctx).Debug("NetworkManager - failed to patch network neighborhood, will get existing one and adjust patch", helpers.Error(err),
 					helpers.String("slug", slug),
 					helpers.Int("container index", watchedContainer.ContainerIndex),
 					helpers.String("container ID", watchedContainer.ContainerID),

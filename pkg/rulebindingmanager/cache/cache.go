@@ -170,11 +170,16 @@ func (c *RBCache) addRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) {
 	c.rbNameToPodNames.Set(rbName, mapset.NewSet[string]())
 	c.rbNameToRules.Set(rbName, c.createRules(ruleBinding.Spec.Rules))
 
-	// get related namespaces
-	namespaces, err := c.k8sClient.GetKubernetesClient().CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{LabelSelector: nsSelectorStr})
-	if err != nil {
-		logger.L().Error("failed to list namespaces", helpers.String("ruleBiding", rbName), helpers.String("nsSelector", nsSelectorStr), helpers.Error(err))
-		return
+	var namespaces *corev1.NamespaceList
+	if ruleBinding.GetNamespace() == "" {
+		// get related namespaces
+		namespaces, err = c.k8sClient.GetKubernetesClient().CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{LabelSelector: nsSelectorStr})
+		if err != nil {
+			logger.L().Error("failed to list namespaces", helpers.String("ruleBiding", rbName), helpers.String("nsSelector", nsSelectorStr), helpers.Error(err))
+			return
+		}
+	} else {
+		namespaces = &corev1.NamespaceList{Items: []corev1.Namespace{{ObjectMeta: metav1.ObjectMeta{Name: ruleBinding.GetNamespace()}}}}
 	}
 
 	// get related pods
