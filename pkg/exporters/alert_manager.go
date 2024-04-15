@@ -20,6 +20,10 @@ import (
 	"github.com/prometheus/alertmanager/api/v2/models"
 )
 
+const (
+	AlertManagerAlertName = "KubescapeRuleViolated"
+)
+
 // TODO: Add missing fields.
 
 type AlertManagerExporter struct {
@@ -69,7 +73,7 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 		Alert: models.Alert{
 			GeneratorURL: strfmt.URI(sourceUrl),
 			Labels: map[string]string{
-				"alertname":      "KubescapeRuleViolated",
+				"alertname":      AlertManagerAlertName,
 				"rule_name":      failedRule.GetBaseRuntimeAlert().AlertName,
 				"rule_id":        failedRule.GetRuleAlert().RuleID,
 				"container_id":   failedRule.GetRuntimeAlertK8sDetails().ContainerID,

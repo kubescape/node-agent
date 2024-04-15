@@ -443,7 +443,6 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	path, err := utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
 	hostPath := ""
 	if err != nil {
-		logger.L().Debug("Failed to get path from event", helpers.Error(err))
 		path = ""
 	} else {
 		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID, path))
@@ -457,7 +456,6 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	if baseRuntimeAlert.MD5Hash == "" && hostPath != "" {
 		md5hash, err := utils.CalculateMD5FileHash(hostPath)
 		if err != nil {
-			logger.L().Debug("Failed to calculate md5 hash for file", helpers.Error(err))
 			md5hash = ""
 		}
 		baseRuntimeAlert.MD5Hash = md5hash
@@ -466,7 +464,6 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	if baseRuntimeAlert.SHA1Hash == "" && hostPath != "" {
 		sha1hash, err := utils.CalculateSHA1FileHash(hostPath)
 		if err != nil {
-			logger.L().Debug("Failed to calculate sha1 hash for file", helpers.Error(err))
 			sha1hash = ""
 		}
 
@@ -476,7 +473,6 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	if baseRuntimeAlert.SHA256Hash == "" && hostPath != "" {
 		sha256hash, err := utils.CalculateSHA256FileHash(hostPath)
 		if err != nil {
-			logger.L().Debug("Failed to calculate sha256 hash for file", helpers.Error(err))
 			sha256hash = ""
 		}
 
@@ -486,7 +482,6 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	if baseRuntimeAlert.Size == nil && hostPath != "" {
 		size, err := utils.GetFileSize(hostPath)
 		if err != nil {
-			logger.L().Debug("Failed to get file size", helpers.Error(err))
 			sizeStr := ""
 			baseRuntimeAlert.Size = &sizeStr
 		} else {
@@ -531,7 +526,6 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	if runtimeProcessDetails.ProcessTree.Comm == "" {
 		comm, err := utils.GetCommFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
 		if err != nil {
-			logger.L().Debug("Failed to get comm from pid", helpers.Error(err))
 			comm = ""
 		}
 		runtimeProcessDetails.ProcessTree.Comm = comm
@@ -540,9 +534,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	if rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeProcessDetails().ContainerID) {
 		shimPid := rm.containerIdToShimPid.Get(ruleFailure.GetRuntimeProcessDetails().ContainerID)
 		tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree, shimPid)
-		if err != nil {
-			logger.L().Debug("Failed to create process tree", helpers.Error(err))
-		} else {
+		if err == nil {
 			runtimeProcessDetails.ProcessTree = *tree
 		}
 	}
