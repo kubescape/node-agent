@@ -82,7 +82,9 @@ func InitHTTPExporter(config HTTPExporterConfig, clusterName string, nodeName st
 	}
 
 	return &HTTPExporter{
-		config: config,
+		ClusterName: clusterName,
+		NodeName:    nodeName,
+		config:      config,
 		httpClient: &http.Client{
 			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
 		},
