@@ -97,8 +97,10 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
 	}
 
-	// Malicious activity will be detected in 3 minutes + 40 seconds to wait for the alerts to be generated
-	timer := time.NewTimer(time.Second * 220)
+	// Malicious activity will be detected in 3 minutes + X seconds to wait for the alerts to be generated
+	maliciousAppWaitBeforeStart := time.Minute * 3
+	waitBeforeLookingForAlerts := time.Minute * 2
+	timer := time.NewTimer(maliciousAppWaitBeforeStart + waitBeforeLookingForAlerts)
 
 	// Wait for the application profile to be created and completed
 	err = wl.WaitForApplicationProfileCompletion(80)
@@ -126,10 +128,10 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 		"Kernel Module Load":                       false,
 		"Exec Binary Not In Base Image":            false,
 		"Exec from mount":                          false,
-		"Unexpected Service Account Token Access":  true, // FIXME: should be 'false, check why alerts are not being signaled
-		"Unexpected domain request":                true, // FIXME: should be 'false, check why alerts are not being signaled
-		"Crypto Mining Related Port Communication": true, // FIXME: should be 'false, check why alerts are not being signaled
-		"Crypto Mining Domain Communication":       false,
+		"Unexpected Service Account Token Access":  false,
+		"Unexpected domain request":                false,
+		"Crypto Mining Related Port Communication": false,
+		"Crypto Mining Domain Communication":       true, // FIXME: should be 'false, check why alerts are not being signaled
 	}
 
 	for _, alert := range alerts {
