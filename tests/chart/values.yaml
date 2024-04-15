@@ -1,0 +1,180 @@
+clusterName: "cluster"
+ksNamespace: kubescape
+logger:
+  level: debug
+  name: zap
+volumes: [ ]
+volumeMounts: [ ]
+
+capabilities:
+  runtimeObservability: enable
+  networkPolicyService: enable
+  runtimeDetection: enable
+  malwareDetection: enable
+
+configurations:
+  persistence: enable
+  prometheusAnnotations: disable
+
+persistence:
+  storageClass: "-"
+  accessMode: ReadWriteOnce
+  size:
+    backingStorage: 5Gi
+    kubevuln: 2Gi
+
+global:
+  namespaceTier: ks-control-plane
+  cloudConfig: ks-cloud-config
+  overrideRuntimePath: ""
+
+storage:
+  name: "storage"
+  image:
+    repository: quay.io/kubescape/storage
+    tag: v0.0.79
+    pullPolicy: IfNotPresent
+  cleanupInterval: "6h"
+  labels:
+    app.kubernetes.io/name: "storage"
+    app.kubernetes.io/component: "apiserver"
+    app.kubernetes.io/part-of: "kubescape-storage"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 400Mi
+    limits:
+      cpu: 500m
+      memory: 1500Mi
+nodeAgent:
+  name: node-agent
+  image:
+    repository: quay.io/kubescape/node-agent
+    tag: v0.2.21
+    pullPolicy: IfNotPresent
+
+  config:
+    maxLearningPeriod: 2m 
+    learningPeriod: 1m
+    updatePeriod: 30s 
+    prometheusExporter: enable
+    httpExporterConfig: {}
+    alertManagerExporterUrls: [
+      "alertmanager-operated.monitoring.svc.cluster.local:9093"
+    ]
+    stdoutExporter: false
+    syslogExporterURL: ""
+
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 15s
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 180Mi
+    limits:
+      cpu: 500m
+      memory: 700Mi
+
+  env:
+    - name: NodeName
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+
+  privileged: false
+  seLinuxType: spc_t
+
+  volumeMounts:
+    - mountPath: /host
+      name: host
+    - mountPath: /run
+      name: run
+    - mountPath: /lib/modules
+      name: modules
+    - mountPath: /sys/kernel/debug
+      name: debugfs
+    - mountPath: /sys/fs/cgroup
+      name: cgroup
+    - mountPath: /sys/fs/bpf
+      name: bpffs
+    - mountPath: /data
+      name: data
+
+  volumes:
+    - hostPath:
+        path: /
+      name: host
+    - hostPath:
+        path: /run
+      name: run
+    - hostPath:
+        path: /sys/fs/cgroup
+      name: cgroup
+    - hostPath:
+        path: /lib/modules
+      name: modules
+    - hostPath:
+        path: /sys/fs/bpf
+      name: bpffs
+    - hostPath:
+        path: /sys/kernel/debug
+      name: debugfs
+    - emptyDir:
+      name: data
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/os
+                operator: In
+                values:
+                  - linux
+  nodeSelector:
+    kubernetes.io/os: linux
+
+clamav:
+  name: clamav
+  image:
+    repository: quay.io/armosec/klamav
+    tag: beta5
+    pullPolicy: Always
+  resources:
+    limits:
+      cpu: 300m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  volumeMounts:
+    - mountPath: /var/lib/clamav-tmp
+      name: clamdb
+      readOnly: false
+    - mountPath: /etc/clamav
+      name: etc
+      readOnly: true
+  volumes:
+  - name: clamdb
+    emptyDir: {}
+  - name: etc
+    configMap:
+      name: clamav
+      items:
+      - key: clamd.conf
+        path: clamd.conf
+      - key: freshclam.conf
+        path: freshclam.conf
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/os
+                operator: In
+                values:
+                  - linux
+  nodeSelector:
+    kubernetes.io/os: linux

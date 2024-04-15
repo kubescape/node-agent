@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: malicious-app-job
+  labels:
+    app: malicious-app
+spec:
+  template:
+    metadata:
+      labels:
+        app: malicious-app
+    spec:
+      containers:
+      - name: malicious-app
+        # sourcecode: node-agent/tests/images/malicious-app
+        image: quay.io/kubescape/node-agent:maliciousapp
+        imagePullPolicy: Always
+        env:
+          - name: WAIT_FOR_SIGTERM
+            value: "true"
+          - name: WAIT_BEFORE_START
+            value: "3m"
+        volumeMounts:
+          - mountPath: /podmount
+            name: mount-for-alert
+      restartPolicy: Never
+      volumes:
+      - name: mount-for-alert
+        emptyDir: {}
+  backoffLimit: 1

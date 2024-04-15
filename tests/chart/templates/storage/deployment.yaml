@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.storage.name }}
+  namespace: {{ .Values.ksNamespace }}
+  labels:
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+    {{ .Values.storage.labels | toYaml  | nindent 4 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{ .Values.storage.labels | toYaml | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        kubescape.io/tier: "core"
+        {{ .Values.storage.labels | toYaml | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.storage.name }}
+      securityContext:
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+      - name: apiserver
+        image: "{{ .Values.storage.image.repository }}:{{ .Values.storage.image.tag }}"
+        imagePullPolicy: {{ .Values.storage.image.pullPolicy }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+        env:
+          - name: "CLEANUP_INTERVAL"
+            value: "{{ .Values.storage.cleanupInterval }}"
+          - name: "GOMEMLIMIT"
+            value: "{{ .Values.storage.resources.requests.memory }}B"
+          - name: KS_LOGGER_LEVEL
+            value: "{{ .Values.logger.level }}"
+          - name: KS_LOGGER_NAME
+            value: "{{ .Values.logger.name }}"
+        volumeMounts:
+          - name: "data"
+            mountPath: "/data"
+          - name: {{ .Values.global.cloudConfig }}
+            mountPath: /etc/config
+            readOnly: true
+        resources:
+{{ toYaml .Values.storage.resources | indent 12 }}
+      nodeSelector:
+      {{- if .Values.storage.nodeSelector }}
+      {{- toYaml .Values.storage.nodeSelector | nindent 8 }}
+      {{- end }}
+      affinity:
+      {{- if .Values.storage.affinity }}
+      {{- toYaml .Values.storage.affinity | nindent 8 }}
+      {{- end }}
+      tolerations:
+      {{- if .Values.storage.tolerations }}
+      {{- toYaml .Values.storage.tolerations | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: "data"
+          {{- if eq .Values.configurations.persistence "enable" }}
+          persistentVolumeClaim:
+            claimName: kubescape-{{ .Values.storage.name }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: {{ .Values.global.cloudConfig }}
+          configMap:
+            name: {{ .Values.global.cloudConfig }}
+            items:
+            - key: "clusterData"
+              path: "clusterData.json"

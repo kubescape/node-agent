@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.nodeAgent.name }}
+  namespace: {{ .Values.ksNamespace }}
+  labels:
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  config.json: |
+    {
+        "applicationProfileServiceEnabled": {{ eq .Values.capabilities.runtimeObservability "enable" }},
+        "relevantCVEServiceEnabled": true,
+        "prometheusExporterEnabled": {{ eq .Values.nodeAgent.config.prometheusExporter "enable" }},
+        "runtimeDetectionEnabled": {{ eq .Values.capabilities.runtimeDetection "enable" }},
+        "networkServiceEnabled": {{ eq .Values.capabilities.networkPolicyService "enable" }},
+        "malwareDetectionEnabled": {{ eq .Values.capabilities.malwareDetection "enable" }},
+        "InitialDelay": "{{ .Values.nodeAgent.config.learningPeriod }}",
+        "updateDataPeriod": "{{ .Values.nodeAgent.config.updatePeriod }}",
+        "maxSniffingTimePerContainer": "{{ .Values.nodeAgent.config.maxLearningPeriod }}",
+        "exporters": {
+          "httpExporterConfig": {{- .Values.nodeAgent.config.httpExporterConfig | toJson }},
+          "alertManagerExporterUrls": {{- .Values.nodeAgent.config.alertManagerExporterUrls | toJson }},
+          "stdoutExporter": {{- .Values.nodeAgent.config.stdoutExporter }},
+          "syslogExporterURL": "{{- .Values.nodeAgent.config.syslogExporterURL }}"
+        }
+    }
+---
+{{- if eq .Values.capabilities.malwareDetection "enable" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.clamav.name }}
+  namespace: {{ .Values.ksNamespace }}
+data:
+  clamd.conf: |-
+{{ .Files.Get "clamav/clamd.conf" | indent 4 }}
+  freshclam.conf: |-
+{{ .Files.Get "clamav/freshclam.conf" | indent 4 }}
+{{- end }}

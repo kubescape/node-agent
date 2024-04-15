@@ -3,3 +3,4 @@ temp
 .vscode
 resources/ebpf/falco/*
 node-agent
+__pycache__

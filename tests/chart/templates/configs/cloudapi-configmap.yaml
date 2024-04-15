@@ -1,0 +1,29 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: {{ .Values.global.cloudConfig }}
+  namespace: {{ .Values.ksNamespace }}
+  labels:
+    app: {{ .Values.global.cloudConfig }}
+    tier: {{ .Values.global.namespaceTier }}
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+    kubescape.io/infra: config
+data:
+  clusterData: |
+    {
+      "serviceDiscovery": false,
+      "clusterName": "{{ regexReplaceAll "\\W+" .Values.clusterName "-" }}",
+      "storage": true,
+      "relevantImageVulnerabilitiesEnabled": true,
+      "namespace": "{{ .Values.ksNamespace }}",
+      "imageVulnerabilitiesScanningEnabled": false,
+      "postureScanEnabled": false,
+      "otelCollector": false,
+      "nodeAgent": "true",
+      "maxImageSize": 5368709120,
+      "keepLocal": true,
+      "vexGeneration": false,
+      "continuousPostureScan": false,
+      "relevantImageVulnerabilitiesConfiguration": "true"
+    }

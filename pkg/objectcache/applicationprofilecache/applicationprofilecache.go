@@ -216,6 +216,7 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 			return
 		}
 		ap.slugToAppProfile.Set(apName, fullAP)
+		logger.L().Debug("added pod to application profile cache", helpers.String("name", apName))
 	}
 }
 
