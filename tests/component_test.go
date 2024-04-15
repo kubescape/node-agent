@@ -13,12 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const (
-	kubescapeNamespace = "kubescape"
-	namespace          = "default"
-	name               = "test"
-)
-
 func tearDownTest(t *testing.T, startTime time.Time) {
 	end := time.Now()
 
@@ -124,17 +118,16 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	// Validate that all alerts are signaled
 	expectedAlerts := map[string]bool{
 		"Unexpected process launched":              false,
-		"Unexpected file access":                   true, // FIXME: should be 'false, check why alerts are not being signaled
+		"Unexpected file access":                   false,
 		"Unexpected system call":                   false,
-		"Unexpected capability used":               true, // FIXME: should be 'false, check why alerts are not being signaled
-		"Unexpected domain request":                true, // FIXME: should be 'false, check why alerts are not being signaled
-		"Unexpected Service Account Token Access":  true, // FIXME: should be 'false, check why alerts are not being signaled
+		"Unexpected capability used":               false,
 		"Kubernetes Client Executed":               false,
 		"Exec from malicious source":               false,
 		"Kernel Module Load":                       false,
 		"Exec Binary Not In Base Image":            false,
-		"Malicious SSH Connection":                 true, // FIXME: This rule needs to be updated to be more reliable
 		"Exec from mount":                          false,
+		"Unexpected Service Account Token Access":  true, // FIXME: should be 'false, check why alerts are not being signaled
+		"Unexpected domain request":                true, // FIXME: should be 'false, check why alerts are not being signaled
 		"Crypto Mining Related Port Communication": true, // FIXME: should be 'false, check why alerts are not being signaled
 	}
 
