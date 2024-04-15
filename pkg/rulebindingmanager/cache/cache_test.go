@@ -2,14 +2,13 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"node-agent/mocks"
 	"node-agent/pkg/rulebindingmanager"
 	typesv1 "node-agent/pkg/rulebindingmanager/types/v1"
 	"node-agent/pkg/ruleengine"
 	"slices"
-	"sync"
 	"testing"
-	"time"
 
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 
@@ -723,135 +722,6 @@ func TestDeleteRuleBinding(t *testing.T) {
 	}
 }
 
-func TestDeleteRuleBindingWithNotify(t *testing.T) {
-
-	defer func() {
-		mocks.NAMESPACE = ""
-	}()
-
-	k8sClient := k8sinterface.NewKubernetesApiMock()
-	var r []runtime.Object
-	mocks.NAMESPACE = "default"
-	r = append(r, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: mocks.NAMESPACE}})
-	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection))
-	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx))
-
-	mocks.NAMESPACE = "other"
-	r = append(r, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: mocks.NAMESPACE}})
-	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection))
-	r = append(r, mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx))
-
-	k8sClient.KubernetesClient = k8sfake.NewSimpleClientset(r...)
-
-	tests := []struct {
-		podToRBNames         map[string][]string
-		name                 string
-		uniqueName           string
-		expectedNotifiedPods []string
-	}{
-		{
-			name:       "Test notify",
-			uniqueName: "test-unique-name",
-			podToRBNames: map[string][]string{
-				"default/collection-94c495554-z8s5k": {"test-unique-name"},
-				"default/nginx-77b4fdf86c-hp4x5":     {"test-unique-name"},
-			},
-			expectedNotifiedPods: []string{"default/collection-94c495554-z8s5k", "default/nginx-77b4fdf86c-hp4x5"},
-		},
-		{
-			name:       "Test notify different namespaces",
-			uniqueName: "test-unique-name",
-			podToRBNames: map[string][]string{
-				"default/collection-94c495554-z8s5k": {"test-unique-name"},
-				"other/nginx-77b4fdf86c-hp4x5":       {"test-unique-name"},
-			},
-			expectedNotifiedPods: []string{"default/collection-94c495554-z8s5k", "other/nginx-77b4fdf86c-hp4x5"},
-		},
-		{
-			name:       "Test notify only one pod",
-			uniqueName: "test-unique-name",
-			podToRBNames: map[string][]string{
-				"default/collection-94c495554-z8s5k": {"test-unique-name"},
-				"other/collection-94c495554-z8s5k":   {"test-unique-name"},
-				"default/nginx-77b4fdf86c-hp4x5":     {"test-unique-name", "test-unique-name-2"},
-			},
-			expectedNotifiedPods: []string{"default/collection-94c495554-z8s5k", "other/collection-94c495554-z8s5k"},
-		},
-		{
-			name:       "Test do not notify",
-			uniqueName: "test-unique-name",
-			podToRBNames: map[string][]string{
-				"default/collection-94c495554-z8s5k": {"test-unique-name", "test-unique-name-2"},
-				"default/nginx-77b4fdf86c-hp4x5":     {"test-unique-name", "test-unique-name-2"},
-			},
-			expectedNotifiedPods: []string{},
-		},
-		{
-			name:       "Test do not notify, pod not found",
-			uniqueName: "test-unique-name",
-			podToRBNames: map[string][]string{
-				"bla/collection-94c495554-z8s5k": {"test-unique-name"},
-			},
-			expectedNotifiedPods: []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := NewCacheMock("")
-			c.k8sClient = k8sClient
-
-			for k, v := range tt.podToRBNames {
-				for _, s := range v {
-					c.rbNameToRB.Set(s, typesv1.RuntimeAlertRuleBinding{})
-					c.rbNameToRules.Set(s, []ruleengine.RuleEvaluator{&ruleengine.RuleMock{}})
-
-					if !c.rbNameToPodNames.Has(s) {
-						c.rbNameToPodNames.Set(s, mapset.NewSet[string]())
-					}
-					c.rbNameToPodNames.Get(s).Add(k)
-
-					if !c.podToRBNames.Has(k) {
-						c.podToRBNames.Set(k, mapset.NewSet[string]())
-					}
-					c.podToRBNames.Get(k).Add(s)
-				}
-
-			}
-
-			notifyChan := make(chan rulebindingmanager.RuleBindingNotify)
-			received := []string{}
-
-			wg := &sync.WaitGroup{}
-			wg.Add(len(tt.expectedNotifiedPods))
-
-			go func() {
-				for {
-					n := <-notifyChan
-					assert.Equal(t, n.Action, rulebindingmanager.Removed)
-					received = append(received, n.Pod.GetNamespace()+"/"+n.Pod.GetName())
-					wg.Done()
-				}
-			}()
-
-			c.AddNotifier(&notifyChan)
-
-			c.deleteRuleBinding(tt.uniqueName)
-
-			// wait for notified resources
-			wg.Wait()
-
-			// some resources should not be notify, so we wait to make sure they were not notified
-			time.Sleep(2 * time.Second)
-
-			slices.Sort(received)
-			slices.Sort(tt.expectedNotifiedPods)
-			assert.Equal(t, tt.expectedNotifiedPods, received)
-
-		})
-	}
-}
-
 func TestAddRuleBinding(t *testing.T) {
 
 	defer func() {
@@ -1142,34 +1012,7 @@ func TestAddRuleBinding(t *testing.T) {
 			c := NewCacheMock("")
 			c.k8sClient = k8sClient
 
-			notifyChan := make(chan rulebindingmanager.RuleBindingNotify)
-			received := []string{}
-
-			wg := &sync.WaitGroup{}
-			wg.Add(len(tt.expectedNotifiedPods))
-
-			go func() {
-				for {
-					n := <-notifyChan
-					assert.Equal(t, n.Action, rulebindingmanager.Added)
-					received = append(received, n.Pod.GetNamespace()+"/"+n.Pod.GetName())
-					wg.Done()
-				}
-			}()
-
-			c.AddNotifier(&notifyChan)
-
 			c.addRuleBinding(tt.rb)
-
-			// wait for notified resources
-			wg.Wait()
-
-			// some resources should not be notify, so we wait to make sure they were not notified
-			time.Sleep(2 * time.Second)
-
-			slices.Sort(received)
-			slices.Sort(tt.expectedNotifiedPods)
-			assert.Equal(t, tt.expectedNotifiedPods, received)
 
 			rbName := rbUniqueName(tt.rb)
 
@@ -1189,6 +1032,140 @@ func TestAddRuleBinding(t *testing.T) {
 				assert.True(t, c.podToRBNames.Get(pod).Contains(rbName))
 			}
 
+		})
+	}
+}
+
+func TestDiff(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b []rulebindingmanager.RuleBindingNotify
+		want []rulebindingmanager.RuleBindingNotify
+	}{
+		{
+			name: "Test with non-overlapping slices",
+			a: []rulebindingmanager.RuleBindingNotify{
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: "default"}},
+					Action: rulebindingmanager.Added,
+				},
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: "default"}},
+					Action: rulebindingmanager.Added,
+				},
+			},
+			b: []rulebindingmanager.RuleBindingNotify{
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: "default-2"}},
+					Action: rulebindingmanager.Removed,
+				},
+			},
+			want: []rulebindingmanager.RuleBindingNotify{
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: "default"}},
+					Action: rulebindingmanager.Added,
+				},
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: "default"}},
+					Action: rulebindingmanager.Added,
+				},
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: "default-2"}},
+					Action: rulebindingmanager.Removed,
+				},
+			},
+		},
+		{
+			name: "Test with overlapping slices",
+			a: []rulebindingmanager.RuleBindingNotify{
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: "default"}},
+					Action: rulebindingmanager.Added,
+				},
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: "default"}},
+					Action: rulebindingmanager.Added,
+				},
+			},
+			b: []rulebindingmanager.RuleBindingNotify{
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: "default"}},
+					Action: rulebindingmanager.Removed,
+				},
+			},
+			want: []rulebindingmanager.RuleBindingNotify{
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: "default"}},
+					Action: rulebindingmanager.Added,
+				},
+			},
+		},
+		{
+			name: "Test with overlapping slices - 2",
+			a: []rulebindingmanager.RuleBindingNotify{
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: "default"}},
+					Action: rulebindingmanager.Added,
+				},
+			},
+			b: []rulebindingmanager.RuleBindingNotify{
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: "default"}},
+					Action: rulebindingmanager.Removed,
+				},
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: "default"}},
+					Action: rulebindingmanager.Removed,
+				},
+			},
+			want: []rulebindingmanager.RuleBindingNotify{
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: "default"}},
+					Action: rulebindingmanager.Removed,
+				},
+			},
+		},
+		{
+			name: "Test all overlapping slices",
+			a: []rulebindingmanager.RuleBindingNotify{
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: "default"}},
+					Action: rulebindingmanager.Added,
+				},
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: "default"}},
+					Action: rulebindingmanager.Added,
+				},
+			},
+			b: []rulebindingmanager.RuleBindingNotify{
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: "default"}},
+					Action: rulebindingmanager.Removed,
+				},
+				{
+					Pod:    corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: "default"}},
+					Action: rulebindingmanager.Removed,
+				},
+			},
+			want: []rulebindingmanager.RuleBindingNotify{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := diff(tt.a, tt.b)
+			var gotL []string
+			for _, v := range got {
+				gotL = append(gotL, fmt.Sprintf("%s-%s-%d", v.Pod.Namespace, v.Pod.Name, v.Action))
+			}
+			var wantL []string
+			for _, v := range tt.want {
+				wantL = append(wantL, fmt.Sprintf("%s-%s-%d", v.Pod.Namespace, v.Pod.Name, v.Action))
+			}
+			slices.Sort(gotL)
+			slices.Sort(wantL)
+
+			assert.Equal(t, wantL, gotL)
 		})
 	}
 }

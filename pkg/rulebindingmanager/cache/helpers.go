@@ -1,11 +1,12 @@
 package cache
 
 import (
-	"encoding/json"
 	"fmt"
 	typesv1 "node-agent/pkg/rulebindingmanager/types/v1"
 	"node-agent/pkg/watcher"
 	"strings"
+
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,30 +35,19 @@ func unstructuredUniqueName(obj *unstructured.Unstructured) string {
 }
 
 func unstructuredToRuleBinding(obj *unstructured.Unstructured) (*typesv1.RuntimeAlertRuleBinding, error) {
-	bytes, err := obj.MarshalJSON()
-	if err != nil {
+	rb := &typesv1.RuntimeAlertRuleBinding{}
+	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, rb); err != nil {
 		return nil, err
 	}
-
-	var runtimeAlertRuleBindingObj *typesv1.RuntimeAlertRuleBinding
-	err = json.Unmarshal(bytes, &runtimeAlertRuleBindingObj)
-	if err != nil {
-		return nil, err
-	}
-	return runtimeAlertRuleBindingObj, nil
+	return rb, nil
 }
 func unstructuredToPod(obj *unstructured.Unstructured) (*corev1.Pod, error) {
-	bytes, err := obj.MarshalJSON()
-	if err != nil {
-		return nil, err
-	}
-
-	var pod *corev1.Pod
-	err = json.Unmarshal(bytes, &pod)
-	if err != nil {
+	pod := &corev1.Pod{}
+	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, pod); err != nil {
 		return nil, err
 	}
 	return pod, nil
+
 }
 func resourcesToWatch(nodeName string) []watcher.WatchResource {
 	w := []watcher.WatchResource{}
