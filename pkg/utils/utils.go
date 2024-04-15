@@ -524,7 +524,7 @@ func CreateProcessTree(process *apitypes.Process, shimPid uint32) (*apitypes.Pro
 	}
 
 	// build the process tree
-	treeRoot, err := buildProcessTree(proc, &procfs, shimPid, *process)
+	treeRoot, err := buildProcessTree(proc, &procfs, shimPid, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -533,7 +533,12 @@ func CreateProcessTree(process *apitypes.Process, shimPid uint32) (*apitypes.Pro
 }
 
 // Recursively build the process tree.
-func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, processTree apitypes.Process) (*apitypes.Process, error) {
+func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, processTree *apitypes.Process) (*apitypes.Process, error) {
+	// If the current process is the shim, return the process tree.
+	if proc.PID == int(shimPid) {
+		return processTree, nil
+	}
+
 	stat, err := proc.Stat()
 	if err != nil {
 		return nil, err
@@ -565,6 +570,9 @@ func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, proce
 
 	// Make the parent process the parent of the current process (move the current process to the parent's children).
 	currentProcess := apitypes.Process{
+		Comm: stat.Comm,
+		// TODO: Hardlink
+		// TODO: UpperLayer
 		PID:  uint32(stat.PID),
 		PPID: uint32(parent.PID),
 		Cmdline: func() string {
@@ -592,14 +600,11 @@ func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, proce
 		}(),
 	}
 
-	currentProcess.Children = append(currentProcess.Children, processTree)
+	if processTree != nil {
+		currentProcess.Children = append(currentProcess.Children, *processTree)
 
-	// If the parent process is the shim, return the process tree.
-	if stat.PPID == int(shimPid) {
-		return &currentProcess, nil
 	}
-
-	return buildProcessTree(parent, procfs, shimPid, currentProcess)
+	return buildProcessTree(parent, procfs, shimPid, &currentProcess)
 }
 
 func GetPathFromPid(pid uint32) (string, error) {

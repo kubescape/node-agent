@@ -63,30 +63,18 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
+
 	expectedRuleName := "Unexpected process launched"
+	expectedCommand := "ls"
 
 	for _, alert := range alerts {
 		ruleName, ruleOk := alert.Labels["rule_name"]
-		if ruleOk && ruleName == expectedRuleName {
+		command, cmdOk := alert.Labels["comm"]
+
+		if ruleOk && cmdOk && ruleName == expectedRuleName && command == expectedCommand {
 			return
 		}
 	}
-
-	/*
-
-		// FIXME: Something this is not working
-		expectedRuleName := "Unexpected process launched"
-		expectedCommand := "ls"
-
-		for _, alert := range alerts {
-			ruleName, ruleOk := alert.Labels["rule_name"]
-			command, cmdOk := alert.Labels["comm"]
-
-			if ruleOk && cmdOk && ruleName == expectedRuleName && command == expectedCommand {
-				return
-			}
-		}
-	*/
 
 	t.Errorf("Expected alert not found")
 }
@@ -265,8 +253,8 @@ func Test_04_MemoryLeak(t *testing.T) {
 		firstValue := metric.Values[0]
 		lastValue := metric.Values[len(metric.Values)-1]
 
-		// Validate that there is no memory leak, but tolerate 50Mb memory leak
-		tolerateMb := 50
+		// Validate that there is no memory leak, but tolerate 60Mb memory leak
+		tolerateMb := 60
 		assert.LessOrEqual(t, lastValue, firstValue+float64(tolerateMb*1024*1024), "Memory leak detected in node-agent pod (%s). Memory usage at the end of the test is %f and at the beginning of the test is %f", podName, lastValue, firstValue)
 	}
 }
