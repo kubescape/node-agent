@@ -20,7 +20,6 @@ import (
 	metricprometheus "node-agent/pkg/metricsmanager/prometheus"
 	"node-agent/pkg/networkmanager"
 	networkmanagerv1 "node-agent/pkg/networkmanager/v1"
-	networkmanagerv2 "node-agent/pkg/networkmanager/v2"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/objectcache/applicationprofilecache"
 	"node-agent/pkg/objectcache/k8scache"
@@ -211,7 +210,8 @@ func main() {
 		dnsManager := dnsmanager.CreateDNSManager()
 		dnsManagerClient = dnsManager
 		networkManagerv1Client = networkmanagerv1.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName, dnsManager, preRunningContainersIDs, k8sObjectCache)
-		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
+		// networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
+		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 	} else {
 		networkManagerv1Client = networkmanagerv1.CreateNetworkManagerMock()
 		networkManagerClient = networkmanager.CreateNetworkManagerMock()
