@@ -26,14 +26,14 @@ fi
 if [ "$(kubectl config current-context)" == "kind-kind" ]; then
   echo "Kind cluster detected."
   # Load the docker image into the kind cluster.
-  kind load docker-image kubecop:latest || error_exit "Failed to load docker image into kind cluster."
+  kind load docker-image node-agent:latest || error_exit "Failed to load docker image into kind cluster."
 fi
 
 # Check if the cluster is minikube cluster by checking current context.
 if [ "$(kubectl config current-context)" == "minikube" ]; then
   echo "Minikube cluster detected."
   # Load the docker image into the minikube cluster.
-  minikube image load kubecop:latest || error_exit "Failed to load docker image into minikube cluster."
+  minikube image load node-agent:latest || error_exit "Failed to load docker image into minikube cluster."
 fi
 
 

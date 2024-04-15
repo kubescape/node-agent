@@ -12,6 +12,7 @@ spec:
     spec:
       containers:
       - name: malicious-app
+        # sourcecode: node-agent/tests/images/malicious-app
         image: quay.io/kubescape/node-agent:maliciousapp
         imagePullPolicy: Always
         env:

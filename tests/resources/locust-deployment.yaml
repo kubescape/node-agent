@@ -16,6 +16,7 @@ spec:
     spec:
       containers:
       - name: locust
+        # sourcecode: node-agent/tests/images/locustimage
         image: quay.io/kubescape/node-agent:locust
         env:
           - name: TARGET_URL

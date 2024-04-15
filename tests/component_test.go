@@ -4,8 +4,8 @@
 package tests
 
 import (
-	utilspkg "node-agent/pkg/utils"
-	"node-agent/tests/utils"
+	"node-agent/pkg/utils"
+	"node-agent/tests/testutils"
 	"path"
 	"testing"
 	"time"
@@ -25,12 +25,12 @@ func tearDownTest(t *testing.T, startTime time.Time) {
 	t.Log("Waiting 60 seconds for Prometheus to scrape the data")
 	time.Sleep(1 * time.Minute)
 
-	err := utils.PlotNodeAgentPrometheusCPUUsage(t.Name(), startTime, end)
+	err := testutils.PlotNodeAgentPrometheusCPUUsage(t.Name(), startTime, end)
 	if err != nil {
 		t.Errorf("Error plotting CPU usage: %v", err)
 	}
 
-	_, err = utils.PlotNodeAgentPrometheusMemoryUsage(t.Name(), startTime, end)
+	_, err = testutils.PlotNodeAgentPrometheusMemoryUsage(t.Name(), startTime, end)
 	if err != nil {
 		t.Errorf("Error plotting memory usage: %v", err)
 	}
@@ -40,8 +40,8 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
-	ns := utils.NewRandomNamespace()
-	wl, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/nginx-deployment.yaml"))
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
 	if err != nil {
 		t.Errorf("Error creating workload: %v", err)
 	}
@@ -65,7 +65,7 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	// Wait for the alert to be signaled
 	time.Sleep(5 * time.Second)
 
-	alerts, err := utils.GetAlerts(wl.Namespace)
+	alerts, err := testutils.GetAlerts(wl.Namespace)
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
@@ -89,10 +89,10 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	defer tearDownTest(t, start)
 
 	// Create a random namespace
-	ns := utils.NewRandomNamespace()
+	ns := testutils.NewRandomNamespace()
 
 	// Create a workload
-	wl, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/malicious-job.yaml"))
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/malicious-job.yaml"))
 	if err != nil {
 		t.Errorf("Error creating workload: %v", err)
 	}
@@ -116,7 +116,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	<-timer.C
 
 	// Get all the alerts for the namespace
-	alerts, err := utils.GetAlerts(wl.Namespace)
+	alerts, err := testutils.GetAlerts(wl.Namespace)
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
@@ -159,10 +159,10 @@ func Test_03_BasicLoadActivities(t *testing.T) {
 	defer tearDownTest(t, start)
 
 	// Create a random namespace
-	ns := utils.NewRandomNamespace()
+	ns := testutils.NewRandomNamespace()
 
 	// Create a workload
-	wl, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/nginx-deployment.yaml"))
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
 	if err != nil {
 		t.Errorf("Error creating workload: %v", err)
 	}
@@ -180,7 +180,7 @@ func Test_03_BasicLoadActivities(t *testing.T) {
 	}
 
 	// Create loader
-	loader, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/locust-deployment.yaml"))
+	loader, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/locust-deployment.yaml"))
 	err = loader.WaitForReady(80)
 	if err != nil {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
@@ -194,7 +194,7 @@ func Test_03_BasicLoadActivities(t *testing.T) {
 	loadEnd := time.Now()
 
 	// Get CPU usage of Node Agent pods
-	podToCpuUsage, err := utils.GetNodeAgentAverageCPUUsage(loadStart, loadEnd)
+	podToCpuUsage, err := testutils.GetNodeAgentAverageCPUUsage(loadStart, loadEnd)
 	if err != nil {
 		t.Errorf("Error getting CPU usage: %v", err)
 	}
@@ -213,16 +213,16 @@ func Test_04_MemoryLeak(t *testing.T) {
 	defer tearDownTest(t, start)
 
 	// Create a random namespace
-	ns := utils.NewRandomNamespace()
+	ns := testutils.NewRandomNamespace()
 
 	// Create 2 workloads
 	wlPaths := []string{
-		"component-tests/resources/locust-deployment.yaml",
-		"component-tests/resources/nginx-deployment.yaml",
+		"resources/locust-deployment.yaml",
+		"resources/nginx-deployment.yaml",
 	}
-	workloads := []utils.TestWorkload{}
+	workloads := []testutils.TestWorkload{}
 	for _, p := range wlPaths {
-		wl, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), p))
+		wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), p))
 		if err != nil {
 			t.Errorf("Error creating deployment: %v", err)
 		}
@@ -242,7 +242,7 @@ func Test_04_MemoryLeak(t *testing.T) {
 	// Wait for 60 seconds for the GC to run, so the memory leak can be detected
 	time.Sleep(60 * time.Second)
 
-	metrics, err := utils.PlotNodeAgentPrometheusMemoryUsage("memleak_basic", start, time.Now())
+	metrics, err := testutils.PlotNodeAgentPrometheusMemoryUsage("memleak_basic", start, time.Now())
 	if err != nil {
 		t.Errorf("Error plotting memory usage: %v", err)
 	}
@@ -267,10 +267,10 @@ func Test_05_MemoryLeak_10K_Alerts(t *testing.T) {
 	defer tearDownTest(t, start)
 
 	// Create a random namespace
-	ns := utils.NewRandomNamespace()
+	ns := testutils.NewRandomNamespace()
 
 	// Create nginx workload
-	nginx, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/nginx-deployment.yaml"))
+	nginx, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
 	if err != nil {
 		t.Errorf("Error creating workload: %v", err)
 	}
@@ -304,7 +304,7 @@ func Test_05_MemoryLeak_10K_Alerts(t *testing.T) {
 	t.Log("Waiting 300 seconds to GC to run")
 	time.Sleep(300 * time.Second)
 
-	metrics, err := utils.PlotNodeAgentPrometheusMemoryUsage("memleak_10k_alerts", startLoad, time.Now())
+	metrics, err := testutils.PlotNodeAgentPrometheusMemoryUsage("memleak_10k_alerts", startLoad, time.Now())
 	if err != nil {
 		t.Errorf("Error plotting memory usage: %v", err)
 	}
@@ -329,9 +329,9 @@ func Test_06_KillProcessInTheMiddle(t *testing.T) {
 	defer tearDownTest(t, start)
 
 	// Create a random namespace
-	ns := utils.NewRandomNamespace()
+	ns := testutils.NewRandomNamespace()
 	// Create nginx deployment
-	nginx, err := utils.NewTestWorkload(ns.Name, path.Join(utilspkg.CurrentDir(), "component-tests/resources/nginx-deployment.yaml"))
+	nginx, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
 	if err != nil {
 		t.Errorf("Error creating workload: %v", err)
 	}
@@ -358,3 +358,45 @@ func Test_06_KillProcessInTheMiddle(t *testing.T) {
 		t.Errorf("Error waiting for application profile to be completed: %v", err)
 	}
 }
+
+func Test_07_RuleBindingApplyTest(t *testing.T) {
+	ruleBindingPath := func(name string) string {
+		return path.Join(utils.CurrentDir(), "resources/rulebindings", name)
+	}
+
+	// valid
+	exitCode := testutils.RunCommand("kubectl", "apply", "-f", ruleBindingPath("all-valid.yaml"))
+	assert.Equal(t, 0, exitCode, "Error applying valid rule binding")
+	_ = testutils.RunCommand("kubectl", "delete", "-f", ruleBindingPath("all-valid.yaml"))
+
+	// invalid fields
+	file := ruleBindingPath("invalid-name.yaml")
+	exitCode = testutils.RunCommand("kubectl", "apply", "-f", file)
+	assert.NotEqualf(t, 0, exitCode, "Expected error when applying rule binding '%s'", file)
+
+	file = ruleBindingPath("invalid-id.yaml")
+	exitCode = testutils.RunCommand("kubectl", "apply", "-f", file)
+	assert.NotEqualf(t, 0, exitCode, "Expected error when applying rule binding '%s'", file)
+
+	file = ruleBindingPath("invalid-tag.yaml")
+	exitCode = testutils.RunCommand("kubectl", "apply", "-f", file)
+	assert.NotEqualf(t, 0, exitCode, "Expected error when applying rule binding '%s'", file)
+
+	// duplicate fields
+	file = ruleBindingPath("dup-fields-name-tag.yaml")
+	exitCode = testutils.RunCommand("kubectl", "apply", "-f", file)
+	assert.NotEqualf(t, 0, exitCode, "Expected error when applying rule binding '%s'", file)
+
+	file = ruleBindingPath("dup-fields-name-id.yaml")
+	exitCode = testutils.RunCommand("kubectl", "apply", "-f", file)
+	assert.NotEqualf(t, 0, exitCode, "Expected error when applying rule binding '%s'", file)
+
+	file = ruleBindingPath("dup-fields-id-tag.yaml")
+	exitCode = testutils.RunCommand("kubectl", "apply", "-f", file)
+	assert.NotEqualf(t, 0, exitCode, "Expected error when applying rule binding '%s'", file)
+}
+
+// TODO: create a test with an existing app profile and check if the alerts are generated
+//func Test_08_BasicAlertTestExistingProfile(t *testing.T) {
+//
+//}
