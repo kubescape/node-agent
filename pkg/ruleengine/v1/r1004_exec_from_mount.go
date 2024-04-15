@@ -64,8 +64,8 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 	}
 
 	for _, mount := range mounts {
-		p := getExecPathFromEvent(execEvent)
-		if rule.isPathContained(p, mount) || rule.isPathContained(execEvent.ExePath, mount) {
+		fullPath := getExecFullPathFromEvent(execEvent)
+		if rule.isPathContained(fullPath, mount) || rule.isPathContained(execEvent.ExePath, mount) {
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:   rule.Name(),
@@ -87,14 +87,14 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 						Pcomm:      execEvent.Pcomm,
 						Cwd:        execEvent.Cwd,
 						Hardlink:   execEvent.ExePath,
-						Cmdline:    fmt.Sprintf("%s %s", p, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+						Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 					},
 					ContainerID: execEvent.Runtime.ContainerID,
 				},
 				TriggerEvent: execEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
 					RuleID:          rule.ID(),
-					RuleDescription: fmt.Sprintf("Process (%s) was executed from a mounted path (%s) in: %s", p, mount, execEvent.GetContainer()),
+					RuleDescription: fmt.Sprintf("Process (%s) was executed from a mounted path (%s) in: %s", fullPath, mount, execEvent.GetContainer()),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 			}

@@ -105,20 +105,15 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 }
 
 func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.Event) ruleengine.RuleFailure {
-	execPath := getExecPathFromEvent(execEvent)
-	if strings.HasPrefix(execPath, "./") || strings.HasPrefix(execPath, "../") {
-		execPath = filepath.Join(execEvent.Cwd, execPath)
-	} else if !strings.HasPrefix(execPath, "/") {
-		execPath = "/" + execPath
-	}
-	execPath = filepath.Dir(execPath)
+
+	execPathDir := filepath.Dir(getExecFullPathFromEvent(execEvent))
 
 	// /proc/self/fd/<n> is classic way to hide malicious execs
 	// (see ezuri packer for example)
 	// Here it would be even more interesting to check if the fd
 	// is memory mapped file
 
-	if strings.HasPrefix(execPath, "/proc/self/fd") || strings.HasPrefix(execEvent.Cwd, "/proc/self/fd") || strings.HasPrefix(execEvent.ExePath, "/proc/self/fd") {
+	if strings.HasPrefix(execPathDir, "/proc/self/fd") || strings.HasPrefix(execEvent.Cwd, "/proc/self/fd") || strings.HasPrefix(execEvent.ExePath, "/proc/self/fd") {
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:   rule.Name(),
@@ -140,14 +135,14 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 					Pcomm:      execEvent.Pcomm,
 					Cwd:        execEvent.Cwd,
 					Hardlink:   execEvent.ExePath,
-					Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+					Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 				},
 				ContainerID: execEvent.Runtime.ContainerID,
 			},
 			TriggerEvent: execEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleID:          rule.ID(),
-				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source \"%s\"", execPath, "/proc/self/fd"),
+				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source \"%s\"", execPathDir, "/proc/self/fd"),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
 		}

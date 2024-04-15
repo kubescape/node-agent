@@ -3,6 +3,8 @@ package ruleengine
 import (
 	"fmt"
 	"node-agent/pkg/objectcache"
+	"path/filepath"
+	"strings"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -13,6 +15,16 @@ func getExecPathFromEvent(event *tracerexectype.Event) string {
 		return event.Args[0]
 	}
 	return event.Comm
+}
+
+func getExecFullPathFromEvent(event *tracerexectype.Event) string {
+	execPath := getExecPathFromEvent(event)
+	if strings.HasPrefix(execPath, "./") || strings.HasPrefix(execPath, "../") {
+		execPath = filepath.Join(event.Cwd, execPath)
+	} else if !strings.HasPrefix(execPath, "/") {
+		execPath = "/" + execPath
+	}
+	return execPath
 }
 
 func getContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containerName string) (v1beta1.ApplicationProfileContainer, error) {
