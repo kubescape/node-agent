@@ -18,7 +18,7 @@ func TestR1008CryptoMiningDomainCommunication(t *testing.T) {
 
 	// Create dns event
 	e2 := &tracerdnstype.Event{
-		DNSName: "xmr.gntl.uk",
+		DNSName: "xmr.gntl.uk.",
 	}
 
 	ruleResult := r.ProcessEvent(utils.DnsEventType, e2, &RuleObjectCacheMock{})
