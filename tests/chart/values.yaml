@@ -32,7 +32,7 @@ storage:
   name: "storage"
   image:
     repository: quay.io/kubescape/storage
-    tag: v0.0.76
+    tag: v0.0.79
     pullPolicy: IfNotPresent
   cleanupInterval: "6h"
   labels:
