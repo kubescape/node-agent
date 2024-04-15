@@ -268,6 +268,10 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) {
 	}
 
 	for _, rb := range c.rbNameToRB.Values() {
+		if rb.GetNamespace() != "" && rb.GetNamespace() != pod.GetNamespace() {
+			// rule binding is not in the same namespace as the pod
+			continue
+		}
 		rbName := rbUniqueName(&rb)
 
 		// check pod selectors

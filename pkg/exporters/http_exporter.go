@@ -64,7 +64,7 @@ func (config *HTTPExporterConfig) Validate() error {
 		config.TimeoutSeconds = 5
 	}
 	if config.MaxAlertsPerMinute == 0 {
-		config.MaxAlertsPerMinute = 10000
+		config.MaxAlertsPerMinute = 100
 	}
 	if config.Headers == nil {
 		config.Headers = make(map[string]string)

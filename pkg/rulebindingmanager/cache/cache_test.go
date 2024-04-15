@@ -938,6 +938,67 @@ func TestAddRuleBinding(t *testing.T) {
 			},
 		},
 		{
+			name: "Add namespaced roleBinding",
+			rb: &typesv1.RuntimeAlertRuleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "rb1",
+					Namespace: "other",
+				},
+				Spec: typesv1.RuntimeAlertRuleBindingSpec{
+					NamespaceSelector: metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      "app",
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{"other"},
+							},
+						},
+					},
+					Rules: []typesv1.RuntimeAlertRuleBindingRule{
+						{
+							RuleID: "R0001",
+						},
+						{
+							RuleID: "R0002",
+						},
+					},
+				},
+			},
+			expectedNotifiedPods: []string{
+				"other/collection-94c495554-z8s5k",
+				"other/nginx-77b4fdf86c-hp4x5",
+			},
+		},
+		{
+			name: "Add namespaced roleBinding without pods",
+			rb: &typesv1.RuntimeAlertRuleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "rb1",
+					Namespace: "blabla",
+				},
+				Spec: typesv1.RuntimeAlertRuleBindingSpec{
+					NamespaceSelector: metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      "app",
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{"other"},
+							},
+						},
+					},
+					Rules: []typesv1.RuntimeAlertRuleBindingRule{
+						{
+							RuleID: "R0001",
+						},
+						{
+							RuleID: "R0002",
+						},
+					},
+				},
+			},
+			expectedNotifiedPods: []string{},
+		},
+		{
 			name: "Add roleBinding exclude namespace 'other'",
 			rb: &typesv1.RuntimeAlertRuleBinding{
 				ObjectMeta: metav1.ObjectMeta{
