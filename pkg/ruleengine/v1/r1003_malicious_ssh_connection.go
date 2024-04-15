@@ -122,7 +122,7 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 		if !ok {
 			return nil
 		} else {
-			if IsSSHConfigFile(openEvent.Path) {
+			if IsSSHConfigFile(openEvent.FullPath) {
 				rule.accessRelatedFiles = true
 				rule.sshInitiatorPid = openEvent.Pid
 				rule.configFileAccessTimeStamp = int64(openEvent.Timestamp)
