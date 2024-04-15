@@ -54,8 +54,13 @@ helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
 # Check that the prometheus pod is running
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=prometheus -n monitoring --timeout=300s || error_exit "Prometheus did not start."
 
-# Install kubescape app profile
+STORAGE_TAG=$(./storage-tag.sh)
+NODE_AGENT_TAG=$(./node-agent-tag.sh)
+
+# Install node agent chart
 helm upgrade --install kubescape ../chart --set clusterName=`kubectl config current-context` \
+    --set nodeAgent.image.tag=$NODE_AGENT_TAG \
+    --set storage.image.tag=$NODE_AGENT_TAG \
     -n kubescape --create-namespace --wait --timeout 5m || error_exit "Failed to install node-agent chart."
 
 # Check that the node-agent pod is running

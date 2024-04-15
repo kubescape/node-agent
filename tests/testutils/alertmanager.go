@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"node-agent/pkg/exporters"
 	"os"
 )
 
@@ -30,7 +29,7 @@ func GetAlerts(namespace string) ([]Alert, error) {
 		return nil, fmt.Errorf("could not get alerts: %v", err)
 	}
 
-	alerts = filterAlertsByLabel(alerts, "alertname", exporters.AlertManagerAlertName)
+	alerts = filterAlertsByLabel(alerts, "alertname", "KubescapeRuleViolated")
 	alerts = filterAlertsByLabel(alerts, "namespace", namespace)
 
 	return alerts, nil
