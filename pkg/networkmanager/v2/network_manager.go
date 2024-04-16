@@ -605,7 +605,14 @@ func (nm *NetworkManager) createNetworkNeighbor(networkEvent networkmanager.Netw
 			return nil
 		}
 
-		selector := svc.GetServiceSelector()
+		var selector map[string]string
+		if svc.GetName() == "kubernetes" && svc.GetNamespace() == "default" {
+			// the default service has no selectors, in addition, we want to save the default service address
+			selector = svc.GetLabels()
+			neighborEntry.IPAddress = networkEvent.Destination.IPAddress
+		} else {
+			selector = svc.GetServiceSelector()
+		}
 		if len(selector) == 0 {
 			// FIXME check if we need to handle services with no selectors
 			return nil
