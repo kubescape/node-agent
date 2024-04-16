@@ -77,9 +77,9 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: syscallEvent.Comm,
-					Gid:  syscallEvent.Gid,
+					Gid:  &syscallEvent.Gid,
 					PID:  syscallEvent.Pid,
-					Uid:  syscallEvent.Uid,
+					Uid:  &syscallEvent.Uid,
 				},
 				ContainerID: syscallEvent.Runtime.ContainerID,
 			},

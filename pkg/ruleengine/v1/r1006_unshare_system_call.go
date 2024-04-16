@@ -79,9 +79,9 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event i
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: syscallEvent.Comm,
-					Gid:  syscallEvent.Gid,
+					Gid:  &syscallEvent.Gid,
 					PID:  syscallEvent.Pid,
-					Uid:  syscallEvent.Uid,
+					Uid:  &syscallEvent.Uid,
 				},
 				ContainerID: syscallEvent.Runtime.ContainerID,
 			},

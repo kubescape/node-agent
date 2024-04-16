@@ -91,9 +91,9 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
 				Comm: capEvent.Comm,
-				Gid:  capEvent.Gid,
+				Gid:  &capEvent.Gid,
 				PID:  capEvent.Pid,
-				Uid:  capEvent.Uid,
+				Uid:  &capEvent.Uid,
 			},
 			ContainerID: capEvent.Runtime.ContainerID,
 		},

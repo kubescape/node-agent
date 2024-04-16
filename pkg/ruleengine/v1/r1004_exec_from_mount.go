@@ -79,9 +79,9 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{
 						Comm:       execEvent.Comm,
-						Gid:        execEvent.Gid,
+						Gid:        &execEvent.Gid,
 						PID:        execEvent.Pid,
-						Uid:        execEvent.Uid,
+						Uid:        &execEvent.Uid,
 						UpperLayer: execEvent.UpperLayer,
 						PPID:       execEvent.Ppid,
 						Pcomm:      execEvent.Pcomm,

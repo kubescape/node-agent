@@ -69,9 +69,9 @@ func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event 
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm:       randomXEvent.Comm,
-					Gid:        randomXEvent.Gid,
+					Gid:        &randomXEvent.Gid,
 					PID:        randomXEvent.Pid,
-					Uid:        randomXEvent.Uid,
+					Uid:        &randomXEvent.Uid,
 					UpperLayer: randomXEvent.UpperLayer,
 					PPID:       randomXEvent.PPid,
 				},

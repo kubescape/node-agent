@@ -158,9 +158,9 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{
 						Comm: networkEvent.Comm,
-						Gid:  networkEvent.Gid,
+						Gid:  &networkEvent.Gid,
 						PID:  networkEvent.Pid,
-						Uid:  networkEvent.Uid,
+						Uid:  &networkEvent.Uid,
 					},
 					ContainerID: networkEvent.Runtime.ContainerID,
 				},

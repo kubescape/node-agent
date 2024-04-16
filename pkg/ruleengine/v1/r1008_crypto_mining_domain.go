@@ -178,9 +178,9 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{
 						Comm: dnsEvent.Comm,
-						Gid:  dnsEvent.Gid,
+						Gid:  &dnsEvent.Gid,
 						PID:  dnsEvent.Pid,
-						Uid:  dnsEvent.Uid,
+						Uid:  &dnsEvent.Uid,
 					},
 					ContainerID: dnsEvent.Runtime.ContainerID,
 				},

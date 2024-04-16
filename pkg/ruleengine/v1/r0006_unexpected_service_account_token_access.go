@@ -124,9 +124,9 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
 				Comm: openEvent.Comm,
-				Gid:  openEvent.Gid,
+				Gid:  &openEvent.Gid,
 				PID:  openEvent.Pid,
-				Uid:  openEvent.Uid,
+				Uid:  &openEvent.Uid,
 			},
 			ContainerID: openEvent.Runtime.ContainerID,
 		},

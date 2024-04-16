@@ -31,11 +31,10 @@ func TestCsvExporter(t *testing.T) {
 			RuleDescription: "Application profile is missing",
 		},
 	})
-	sizeStr := "2MiB"
 	csvExporter.SendMalwareAlert(&mmtypes.GenericMalwareResult{
 		BasicRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:  "testmalware",
-			Size:       &sizeStr,
+			Size:       "2MiB",
 			MD5Hash:    "testmalwarehash",
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",

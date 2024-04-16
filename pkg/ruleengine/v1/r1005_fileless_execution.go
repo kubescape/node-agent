@@ -84,9 +84,9 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: syscallEvent.Comm,
-					Gid:  syscallEvent.Gid,
+					Gid:  &syscallEvent.Gid,
 					PID:  syscallEvent.Pid,
-					Uid:  syscallEvent.Uid,
+					Uid:  &syscallEvent.Uid,
 				},
 				ContainerID: syscallEvent.Runtime.ContainerID,
 			},
@@ -134,9 +134,9 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm:       execEvent.Comm,
-					Gid:        execEvent.Gid,
+					Gid:        &execEvent.Gid,
 					PID:        execEvent.Pid,
-					Uid:        execEvent.Uid,
+					Uid:        &execEvent.Uid,
 					UpperLayer: execEvent.UpperLayer,
 					PPID:       execEvent.Ppid,
 					Pcomm:      execEvent.Pcomm,

@@ -71,9 +71,9 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm:       execEvent.Comm,
-					Gid:        execEvent.Gid,
+					Gid:        &execEvent.Gid,
 					PID:        execEvent.Pid,
-					Uid:        execEvent.Uid,
+					Uid:        &execEvent.Uid,
 					UpperLayer: execEvent.UpperLayer,
 					PPID:       execEvent.Ppid,
 					Pcomm:      execEvent.Pcomm,

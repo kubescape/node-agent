@@ -91,9 +91,9 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
 				Comm: domainEvent.Comm,
-				Gid:  domainEvent.Gid,
+				Gid:  &domainEvent.Gid,
 				PID:  domainEvent.Pid,
-				Uid:  domainEvent.Uid,
+				Uid:  &domainEvent.Uid,
 			},
 			ContainerID: domainEvent.Runtime.ContainerID,
 		},

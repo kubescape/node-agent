@@ -101,9 +101,9 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: event.Comm,
-					Gid:  event.Gid,
+					Gid:  &event.Gid,
 					PID:  event.Pid,
-					Uid:  event.Uid,
+					Uid:  &event.Uid,
 				},
 				ContainerID: event.Runtime.ContainerID,
 			},
@@ -151,9 +151,9 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm:       event.Comm,
-					Gid:        event.Gid,
+					Gid:        &event.Gid,
 					PID:        event.Pid,
-					Uid:        event.Uid,
+					Uid:        &event.Uid,
 					UpperLayer: event.UpperLayer,
 					PPID:       event.Ppid,
 					Pcomm:      event.Pcomm,
