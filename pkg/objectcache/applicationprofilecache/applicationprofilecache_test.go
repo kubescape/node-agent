@@ -35,18 +35,21 @@ func Test_AddHandlers(t *testing.T) {
 		f      func(ap *ApplicationProfileCacheImpl, ctx context.Context, obj *unstructured.Unstructured)
 		obj    *unstructured.Unstructured
 		name   string
+		slug   string
 		length int
 	}{
 		{
 			name:   "add application profile",
 			obj:    mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
 			f:      (*ApplicationProfileCacheImpl).AddHandler,
+			slug:   "default/replicaset-nginx-77b4fdf86c",
 			length: 1,
 		},
 		{
 			name:   "add pod",
 			obj:    mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
 			f:      (*ApplicationProfileCacheImpl).AddHandler,
+			slug:   "default/replicaset-collection-94c495554",
 			length: 6,
 		},
 		{
@@ -59,27 +62,30 @@ func Test_AddHandlers(t *testing.T) {
 			name:   "modify pod",
 			obj:    mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
 			f:      (*ApplicationProfileCacheImpl).ModifyHandler,
+			slug:   "default/replicaset-collection-94c495554",
 			length: 6,
 		},
 		{
 			name:   "delete application profile",
 			obj:    mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
 			f:      (*ApplicationProfileCacheImpl).DeleteHandler,
+			slug:   "default/replicaset-nginx-77b4fdf86c",
 			length: 0,
 		},
 		{
 			name:   "delete pod",
 			obj:    mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
 			f:      (*ApplicationProfileCacheImpl).DeleteHandler,
+			slug:   "default/replicaset-collection-94c495554",
 			length: 0,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.obj.SetNamespace("default")
-
 			k8sClient := k8sinterface.NewKubernetesApiMock()
 			ap := NewApplicationProfileCache("", k8sClient)
+			ap.slugToContainers.Set(tt.slug, mapset.NewSet[string]())
 
 			tt.f(ap, context.Background(), tt.obj)
 
@@ -87,7 +93,7 @@ func Test_AddHandlers(t *testing.T) {
 			case mocks.TestKindAP:
 				assert.Equal(t, tt.length, ap.allProfiles.Cardinality())
 			case mocks.TestKindPod:
-				assert.Equal(t, tt.length, ap.containerToSlug.Len())
+				assert.Equal(t, tt.length, ap.slugToContainers.Get(tt.slug).Cardinality())
 			}
 		})
 	}
