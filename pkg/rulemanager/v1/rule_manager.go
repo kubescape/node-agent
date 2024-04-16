@@ -536,7 +536,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	}
 
 	if runtimek8sdetails.ContainerName == "" {
-		runtimek8sdetails.ContainerName = ruleFailure.GetTriggerEvent().Runtime.ContainerName
+		runtimek8sdetails.ContainerName = ruleFailure.GetTriggerEvent().K8s.ContainerName
 	}
 
 	if runtimek8sdetails.ContainerID == "" {
@@ -552,7 +552,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 
 	return ruleFailure
 }
- 
+
 // Checks if the event type is relevant to the rule.
 func isEventRelevant(ruleSpec ruleengine.RuleSpec, eventType utils.EventType) bool {
 	for _, i := range ruleSpec.RequiredEventTypes() {
