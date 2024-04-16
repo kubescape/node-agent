@@ -175,9 +175,9 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
 				Comm: openEvent.Comm,
-				Gid:  openEvent.Gid,
+				Gid:  &openEvent.Gid,
 				PID:  openEvent.Pid,
-				Uid:  openEvent.Uid,
+				Uid:  &openEvent.Uid,
 			},
 			ContainerID: openEvent.Runtime.ContainerID,
 		},
@@ -185,6 +185,9 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 		RuleAlert: apitypes.RuleAlert{
 			RuleID:          rule.ID(),
 			RuleDescription: fmt.Sprintf("Unexpected file access: %s with flags %s in: %s", openEvent.FullPath, strings.Join(openEvent.Flags, ","), openEvent.GetContainer()),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName: openEvent.GetPod(),
 		},
 	}
 

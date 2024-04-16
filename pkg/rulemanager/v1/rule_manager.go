@@ -449,14 +449,12 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 		baseRuntimeAlert.SHA256Hash = sha256hash
 	}
 
-	if baseRuntimeAlert.Size == nil && hostPath != "" {
+	if baseRuntimeAlert.Size == "" && hostPath != "" {
 		size, err := utils.GetFileSize(hostPath)
 		if err != nil {
-			sizeStr := ""
-			baseRuntimeAlert.Size = &sizeStr
+			baseRuntimeAlert.Size = ""
 		} else {
-			size := humanize.Bytes(uint64(size))
-			baseRuntimeAlert.Size = &size
+			baseRuntimeAlert.Size = humanize.Bytes(uint64(size))
 		}
 	}
 
@@ -499,6 +497,10 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 			comm = ""
 		}
 		runtimeProcessDetails.ProcessTree.Comm = comm
+	}
+
+	if runtimeProcessDetails.ProcessTree.Path == "" && path != "" {
+		runtimeProcessDetails.ProcessTree.Path = path
 	}
 
 	if rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeProcessDetails().ContainerID) {

@@ -84,9 +84,9 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: syscallEvent.Comm,
-					Gid:  syscallEvent.Gid,
+					Gid:  &syscallEvent.Gid,
 					PID:  syscallEvent.Pid,
-					Uid:  syscallEvent.Uid,
+					Uid:  &syscallEvent.Uid,
 				},
 				ContainerID: syscallEvent.Runtime.ContainerID,
 			},
@@ -95,7 +95,9 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("Fileless execution detected: syscall memfd_create executed in: %s", syscallEvent.GetContainer()),
 			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName: syscallEvent.GetPod(),
+			},
 		}
 
 		return &ruleFailure
@@ -127,9 +129,9 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm:       execEvent.Comm,
-					Gid:        execEvent.Gid,
+					Gid:        &execEvent.Gid,
 					PID:        execEvent.Pid,
-					Uid:        execEvent.Uid,
+					Uid:        &execEvent.Uid,
 					UpperLayer: execEvent.UpperLayer,
 					PPID:       execEvent.Ppid,
 					Pcomm:      execEvent.Pcomm,
@@ -144,7 +146,9 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source \"%s\"", execPathDir, "/proc/self/fd"),
 			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName: execEvent.GetPod(),
+			},
 		}
 
 		return &ruleFailure

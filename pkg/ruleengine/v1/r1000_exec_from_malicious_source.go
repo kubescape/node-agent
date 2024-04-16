@@ -82,9 +82,9 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{
 						Comm:       execEvent.Comm,
-						Gid:        execEvent.Gid,
+						Gid:        &execEvent.Gid,
 						PID:        execEvent.Pid,
-						Uid:        execEvent.Uid,
+						Uid:        &execEvent.Uid,
 						UpperLayer: execEvent.UpperLayer,
 						PPID:       execEvent.Ppid,
 						Pcomm:      execEvent.Pcomm,
@@ -99,7 +99,9 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 					RuleID:          rule.ID(),
 					RuleDescription: fmt.Sprintf("Execution from malicious source: %s in: %s", execPathDir, execEvent.GetContainer()),
 				},
-				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+					PodName: execEvent.GetPod(),
+				},
 			}
 
 			return &ruleFailure
