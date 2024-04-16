@@ -102,7 +102,7 @@ func (rule *R0002UnexpectedFileAccess) generatePatchCommand(event *traceropentyp
 		flagList = flagList[:len(flagList)-1]
 	}
 	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"opens\": [{\"path\": \"%s\", \"flags\": %s}]}]}}'"
-	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(), event.GetContainer(), event.Path, flagList)
+	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(), event.GetContainer(), event.FullPath, flagList)
 }
 
 func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
@@ -117,7 +117,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 
 	// Check if path is ignored
 	for _, prefix := range rule.ignorePrefixes {
-		if strings.HasPrefix(openEvent.Path, prefix) {
+		if strings.HasPrefix(openEvent.FullPath, prefix) {
 			return nil
 		}
 	}
@@ -128,13 +128,13 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 			return nil
 		}
 		for _, mount := range mounts {
-			if isPathContained(mount, openEvent.Path) {
+			if isPathContained(mount, openEvent.FullPath) {
 				return nil
 			}
 		}
 	}
 
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.GetNamespace(), openEvent.GetPod())
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
 	if ap == nil {
 		return nil
 	}
@@ -145,7 +145,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 	}
 
 	for _, open := range appProfileOpenList.Opens {
-		if open.Path == openEvent.Path {
+		if open.Path == openEvent.FullPath {
 			found := 0
 			for _, eventOpenFlag := range openEvent.Flags {
 				// Check that event open flag is in the open.Flags
@@ -169,22 +169,25 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 			Arguments: map[string]interface{}{
 				"flags": openEvent.Flags,
 			},
-			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
+			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.FullPath, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
 			Severity:       R0002UnexpectedFileAccessRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
 				Comm: openEvent.Comm,
-				Gid:  openEvent.Gid,
+				Gid:  &openEvent.Gid,
 				PID:  openEvent.Pid,
-				Uid:  openEvent.Uid,
+				Uid:  &openEvent.Uid,
 			},
 			ContainerID: openEvent.Runtime.ContainerID,
 		},
 		TriggerEvent: openEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
 			RuleID:          rule.ID(),
-			RuleDescription: fmt.Sprintf("Unexpected file access: %s with flags %s in: %s", openEvent.Path, strings.Join(openEvent.Flags, ","), openEvent.GetContainer()),
+			RuleDescription: fmt.Sprintf("Unexpected file access: %s with flags %s in: %s", openEvent.FullPath, strings.Join(openEvent.Flags, ","), openEvent.GetContainer()),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName: openEvent.GetPod(),
 		},
 	}
 

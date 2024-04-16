@@ -65,7 +65,7 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(capEvent.GetNamespace(), capEvent.GetPod())
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(capEvent.Runtime.ContainerID)
 	if ap == nil {
 		return nil
 	}
@@ -91,9 +91,9 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
 				Comm: capEvent.Comm,
-				Gid:  capEvent.Gid,
+				Gid:  &capEvent.Gid,
 				PID:  capEvent.Pid,
-				Uid:  capEvent.Uid,
+				Uid:  &capEvent.Uid,
 			},
 			ContainerID: capEvent.Runtime.ContainerID,
 		},
@@ -102,7 +102,9 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 			RuleID:          rule.ID(),
 			RuleDescription: fmt.Sprintf("Unexpected capability used (capability %s used in syscall %s) in: %s", capEvent.CapName, capEvent.Syscall, capEvent.GetContainer()),
 		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName: capEvent.GetPod(),
+		},
 	}
 
 	return &ruleFailure

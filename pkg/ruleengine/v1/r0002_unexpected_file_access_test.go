@@ -46,7 +46,7 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 
 	// Test with whitelisted file
 	objCache := RuleObjectCacheMock{}
-	profile := objCache.ApplicationProfileCache().GetApplicationProfile("test", "test")
+	profile := objCache.ApplicationProfileCache().GetApplicationProfile("test")
 	if profile == nil {
 		profile = &v1beta1.ApplicationProfile{
 			Spec: v1beta1.ApplicationProfileSpec{
@@ -79,7 +79,7 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 
 	// Test with mounted file
 	e.Flags = []string{"O_RDONLY"}
-	e.Path = "/var/test1"
+	e.FullPath = "/var/test1"
 	objCache.SetPodSpec(&corev1.PodSpec{
 		Containers: []corev1.Container{
 			{
@@ -111,7 +111,7 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 	}
 
 	// Test with ignored prefix
-	e.Path = "/var/test1"
+	e.FullPath = "/var/test1"
 	ignorePrefixes := []interface{}{"/var"}
 	r.SetParameters(map[string]interface{}{"ignoreMounts": false, "ignorePrefixes": ignorePrefixes})
 	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)

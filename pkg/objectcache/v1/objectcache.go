@@ -30,16 +30,3 @@ func (o *ObjectCacheImpl) ApplicationProfileCache() objectcache.ApplicationProfi
 func (o *ObjectCacheImpl) NetworkNeighborsCache() objectcache.NetworkNeighborsCache {
 	return o.np
 }
-
-func (o *ObjectCacheImpl) IsCached(kind, namespace, name string) bool {
-	if !o.k.IsCached(kind, namespace, name) {
-		return false
-	}
-	if !o.ap.IsCached(kind, namespace, name) {
-		return false
-	}
-	if !o.np.IsCached(kind, namespace, name) {
-		return false
-	}
-	return true
-}

@@ -71,9 +71,9 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm:       execEvent.Comm,
-					Gid:        execEvent.Gid,
+					Gid:        &execEvent.Gid,
 					PID:        execEvent.Pid,
-					Uid:        execEvent.Uid,
+					Uid:        &execEvent.Uid,
 					UpperLayer: execEvent.UpperLayer,
 					PPID:       execEvent.Ppid,
 					Pcomm:      execEvent.Pcomm,
@@ -88,7 +88,9 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is not part of the image", execEvent.Comm, execEvent.GetContainer()),
 			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName: execEvent.GetPod(),
+			},
 		}
 
 		return &ruleFailure

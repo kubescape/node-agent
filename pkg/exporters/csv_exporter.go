@@ -122,7 +122,7 @@ func (ce *CsvExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResu
 		malwareResult.GetBasicRuntimeAlert().MD5Hash,
 		malwareResult.GetBasicRuntimeAlert().SHA256Hash,
 		malwareResult.GetBasicRuntimeAlert().SHA1Hash,
-		*malwareResult.GetBasicRuntimeAlert().Size,
+		malwareResult.GetBasicRuntimeAlert().Size,
 		malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
 		malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
 		malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),

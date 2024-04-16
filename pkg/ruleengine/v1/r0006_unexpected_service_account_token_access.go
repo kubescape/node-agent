@@ -70,7 +70,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) generatePatchCommand(event
 	}
 	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"opens\": [{\"path\": \"%s\", \"flags\": %s}]}]}}'"
 	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(),
-		event.GetContainer(), event.Path, flagList)
+		event.GetContainer(), event.FullPath, flagList)
 }
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
@@ -86,7 +86,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 	shouldCheckEvent := false
 
 	for _, prefix := range serviceAccountTokenPathsPrefix {
-		if strings.HasPrefix(openEvent.Path, prefix) {
+		if strings.HasPrefix(openEvent.FullPath, prefix) {
 			shouldCheckEvent = true
 			break
 		}
@@ -96,7 +96,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		return nil
 	}
 
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.GetNamespace(), openEvent.GetPod())
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
 	if ap == nil {
 		return nil
 	}
@@ -118,24 +118,26 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:      rule.Name(),
 			InfectedPID:    openEvent.Pid,
-			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.Path, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
+			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.FullPath, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
 			Severity:       R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
 				Comm: openEvent.Comm,
-				Gid:  openEvent.Gid,
+				Gid:  &openEvent.Gid,
 				PID:  openEvent.Pid,
-				Uid:  openEvent.Uid,
+				Uid:  &openEvent.Uid,
 			},
 			ContainerID: openEvent.Runtime.ContainerID,
 		},
 		TriggerEvent: openEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
 			RuleID:          rule.ID(),
-			RuleDescription: fmt.Sprintf("Unexpected access to service account token: %s with flags: %s in: %s", openEvent.Path, strings.Join(openEvent.Flags, ","), openEvent.GetContainer()),
+			RuleDescription: fmt.Sprintf("Unexpected access to service account token: %s with flags: %s in: %s", openEvent.FullPath, strings.Join(openEvent.Flags, ","), openEvent.GetContainer()),
 		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName: openEvent.GetPod(),
+		},
 	}
 
 	return &ruleFailure

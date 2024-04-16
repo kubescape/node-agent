@@ -122,7 +122,7 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 		if !ok {
 			return nil
 		} else {
-			if IsSSHConfigFile(openEvent.Path) {
+			if IsSSHConfigFile(openEvent.FullPath) {
 				rule.accessRelatedFiles = true
 				rule.sshInitiatorPid = openEvent.Pid
 				rule.configFileAccessTimeStamp = int64(openEvent.Timestamp)
@@ -158,9 +158,9 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{
 						Comm: networkEvent.Comm,
-						Gid:  networkEvent.Gid,
+						Gid:  &networkEvent.Gid,
 						PID:  networkEvent.Pid,
-						Uid:  networkEvent.Uid,
+						Uid:  &networkEvent.Uid,
 					},
 					ContainerID: networkEvent.Runtime.ContainerID,
 				},
@@ -169,7 +169,9 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 					RuleID:          rule.ID(),
 					RuleDescription: fmt.Sprintf("SSH connection to disallowed port %d", networkEvent.Port),
 				},
-				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+					PodName: networkEvent.GetPod(),
+				},
 			}
 
 			return &ruleFailure

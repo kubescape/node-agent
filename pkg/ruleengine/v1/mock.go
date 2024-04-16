@@ -19,7 +19,7 @@ type RuleObjectCacheMock struct {
 	nn        *v1beta1.NetworkNeighbors
 }
 
-func (r *RuleObjectCacheMock) GetApplicationProfile(namespace, name string) *v1beta1.ApplicationProfile {
+func (r *RuleObjectCacheMock) GetApplicationProfile(string) *v1beta1.ApplicationProfile {
 	return r.profile
 }
 
@@ -64,7 +64,4 @@ func (r *RuleObjectCacheMock) GetNetworkNeighbors(namespace, name string) *v1bet
 func (r *RuleObjectCacheMock) SetNetworkNeighbors(nn *v1beta1.NetworkNeighbors) {
 	r.nn = nn
 }
-
-func (r *RuleObjectCacheMock) IsCached(_, _, _ string) bool {
-	return true
-}
+ 

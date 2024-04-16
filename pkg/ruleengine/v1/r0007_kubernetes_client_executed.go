@@ -101,9 +101,9 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: event.Comm,
-					Gid:  event.Gid,
+					Gid:  &event.Gid,
 					PID:  event.Pid,
-					Uid:  event.Uid,
+					Uid:  &event.Uid,
 				},
 				ContainerID: event.Runtime.ContainerID,
 			},
@@ -112,7 +112,9 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("Kubernetes client executed: %s", event.Comm),
 			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName: event.GetPod(),
+			},
 		}
 
 		return &ruleFailure
@@ -149,9 +151,9 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm:       event.Comm,
-					Gid:        event.Gid,
+					Gid:        &event.Gid,
 					PID:        event.Pid,
-					Uid:        event.Uid,
+					Uid:        &event.Uid,
 					UpperLayer: event.UpperLayer,
 					PPID:       event.Ppid,
 					Pcomm:      event.Pcomm,
@@ -166,7 +168,9 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("Kubernetes client %s was executed in: %s", execPath, event.GetContainer()),
 			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName: event.GetPod(),
+			},
 		}
 
 		return &ruleFailure
@@ -186,7 +190,7 @@ func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventTyp
 			return nil
 		}
 
-		ap := objCache.ApplicationProfileCache().GetApplicationProfile(execEvent.GetNamespace(), execEvent.GetPod())
+		ap := objCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
 		if ap == nil {
 			return nil
 		}

@@ -84,9 +84,9 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: syscallEvent.Comm,
-					Gid:  syscallEvent.Gid,
+					Gid:  &syscallEvent.Gid,
 					PID:  syscallEvent.Pid,
-					Uid:  syscallEvent.Uid,
+					Uid:  &syscallEvent.Uid,
 				},
 				ContainerID: syscallEvent.Runtime.ContainerID,
 			},
@@ -95,7 +95,9 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("Fileless execution detected: syscall memfd_create executed in: %s", syscallEvent.GetContainer()),
 			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName: syscallEvent.GetPod(),
+			},
 		}
 
 		return &ruleFailure
@@ -105,20 +107,15 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 }
 
 func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.Event) ruleengine.RuleFailure {
-	execPath := getExecPathFromEvent(execEvent)
-	if strings.HasPrefix(execPath, "./") || strings.HasPrefix(execPath, "../") {
-		execPath = filepath.Join(execEvent.Cwd, execPath)
-	} else if !strings.HasPrefix(execPath, "/") {
-		execPath = "/" + execPath
-	}
-	execPath = filepath.Dir(execPath)
+
+	execPathDir := filepath.Dir(getExecFullPathFromEvent(execEvent))
 
 	// /proc/self/fd/<n> is classic way to hide malicious execs
 	// (see ezuri packer for example)
 	// Here it would be even more interesting to check if the fd
 	// is memory mapped file
 
-	if strings.HasPrefix(execPath, "/proc/self/fd") || strings.HasPrefix(execEvent.Cwd, "/proc/self/fd") || strings.HasPrefix(execEvent.ExePath, "/proc/self/fd") {
+	if strings.HasPrefix(execPathDir, "/proc/self/fd") || strings.HasPrefix(execEvent.Cwd, "/proc/self/fd") || strings.HasPrefix(execEvent.ExePath, "/proc/self/fd") {
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:   rule.Name(),
@@ -132,24 +129,26 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm:       execEvent.Comm,
-					Gid:        execEvent.Gid,
+					Gid:        &execEvent.Gid,
 					PID:        execEvent.Pid,
-					Uid:        execEvent.Uid,
+					Uid:        &execEvent.Uid,
 					UpperLayer: execEvent.UpperLayer,
 					PPID:       execEvent.Ppid,
 					Pcomm:      execEvent.Pcomm,
 					Cwd:        execEvent.Cwd,
 					Hardlink:   execEvent.ExePath,
-					Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+					Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 				},
 				ContainerID: execEvent.Runtime.ContainerID,
 			},
 			TriggerEvent: execEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleID:          rule.ID(),
-				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source \"%s\"", execPath, "/proc/self/fd"),
+				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source \"%s\"", execPathDir, "/proc/self/fd"),
 			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName: execEvent.GetPod(),
+			},
 		}
 
 		return &ruleFailure

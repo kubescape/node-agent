@@ -65,17 +65,10 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 		"/proc/self",
 	}
 
-	// The assumption here is that the event path is absolute!
-	execPath := getExecPathFromEvent(execEvent)
-	if strings.HasPrefix(execPath, "./") || strings.HasPrefix(execPath, "../") {
-		execPath = filepath.Join(execEvent.Cwd, execPath)
-	} else if !strings.HasPrefix(execPath, "/") {
-		execPath = "/" + execPath
-	}
-	execPath = filepath.Dir(execPath)
+	execPathDir := filepath.Dir(getExecFullPathFromEvent(execEvent))
 	for _, maliciousExecPathPrefix := range maliciousExecPathPrefixes {
 		// if the exec path or the current dir is from a malicious source
-		if strings.HasPrefix(execPath, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.ExePath, maliciousExecPathPrefix) {
+		if strings.HasPrefix(execPathDir, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.ExePath, maliciousExecPathPrefix) {
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:   rule.Name(),
@@ -89,24 +82,26 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{
 						Comm:       execEvent.Comm,
-						Gid:        execEvent.Gid,
+						Gid:        &execEvent.Gid,
 						PID:        execEvent.Pid,
-						Uid:        execEvent.Uid,
+						Uid:        &execEvent.Uid,
 						UpperLayer: execEvent.UpperLayer,
 						PPID:       execEvent.Ppid,
 						Pcomm:      execEvent.Pcomm,
 						Cwd:        execEvent.Cwd,
 						Hardlink:   execEvent.ExePath,
-						Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+						Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 					},
 					ContainerID: execEvent.Runtime.ContainerID,
 				},
 				TriggerEvent: execEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
 					RuleID:          rule.ID(),
-					RuleDescription: fmt.Sprintf("Execution from malicious source: %s in: %s", execPath, execEvent.GetContainer()),
+					RuleDescription: fmt.Sprintf("Execution from malicious source: %s in: %s", execPathDir, execEvent.GetContainer()),
 				},
-				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+					PodName: execEvent.GetPod(),
+				},
 			}
 
 			return &ruleFailure

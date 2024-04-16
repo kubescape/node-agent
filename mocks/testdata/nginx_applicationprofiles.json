@@ -3,7 +3,9 @@
     "kind": "ApplicationProfile",
     "metadata": {
         "annotations": {
-            "kubescape.io/resource-size": "85"
+            "kubescape.io/resource-size": "85",
+            "kubescape.io/completion": "complete",
+            "kubescape.io/status": "completed"
         },
         "creationTimestamp": "2024-03-19T09:27:05Z",
         "labels": {

@@ -3,7 +3,9 @@
     "kind": "ApplicationProfile",
     "metadata": {
         "annotations": {
-            "kubescape.io/resource-size": "24"
+            "kubescape.io/resource-size": "24",
+            "kubescape.io/completion": "complete",
+            "kubescape.io/status": "completed"
         },
         "labels": {
             "kubescape.io/instance-template-hash": "94c495554",

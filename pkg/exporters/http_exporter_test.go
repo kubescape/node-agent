@@ -165,11 +165,10 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create a mock malware description
-	sizeStr := "2MiB"
 	malwareDesc := &mmtypes.GenericMalwareResult{
 		BasicRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:  "testmalware",
-			Size:       &sizeStr,
+			Size:       "2MiB",
 			MD5Hash:    "testmalwarehash",
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",

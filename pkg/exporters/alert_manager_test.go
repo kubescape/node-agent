@@ -95,11 +95,10 @@ func TestSendMalwareAlert(t *testing.T) {
 		t.Fatalf("Failed to create new Alertmanager exporter")
 	}
 	// Call SendAlert
-	sizeStr := "2MiB"
 	exporter.SendMalwareAlert(&mmtypes.GenericMalwareResult{
 		BasicRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:  "testmalware",
-			Size:       &sizeStr,
+			Size:       "2MiB",
 			MD5Hash:    "testmalwarehash",
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",

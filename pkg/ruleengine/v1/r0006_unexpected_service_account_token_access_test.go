@@ -42,9 +42,9 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 	}
 
 	// Test with whitelisted file
-	e.Path = "/run/secrets/kubernetes.io/serviceaccount/asdasd"
+	e.FullPath = "/run/secrets/kubernetes.io/serviceaccount/asdasd"
 	objCache := RuleObjectCacheMock{}
-	profile := objCache.ApplicationProfileCache().GetApplicationProfile("test", "test")
+	profile := objCache.ApplicationProfileCache().GetApplicationProfile("test")
 	if profile == nil {
 		profile = &v1beta1.ApplicationProfile{}
 		profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{

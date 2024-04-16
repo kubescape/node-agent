@@ -56,8 +56,8 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 				},
 			},
 		},
-		Path: "/etc/ssh/sshd_config",
-		Pid:  1,
+		FullPath: "/etc/ssh/sshd_config",
+		Pid:      1,
 	}
 	rule.ProcessEvent(utils.OpenEventType, openEvent, &RuleObjectCacheMock{})
 	failure := rule.ProcessEvent(utils.NetworkEventType, networkEvent, &RuleObjectCacheMock{})

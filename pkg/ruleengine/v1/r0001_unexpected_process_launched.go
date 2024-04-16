@@ -76,7 +76,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 	}
 	execPath := getExecPathFromEvent(execEvent)
 
-	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.GetNamespace(), execEvent.GetPod())
+	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
 	if ap == nil {
 		return nil
 	}
@@ -86,7 +86,10 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		return nil
 	}
 
+	slices.Sort(execEvent.Args)
+
 	for _, execCall := range appProfileExecList.Execs {
+		slices.Sort(execCall.Args)
 		if execCall.Path == execPath && slices.Compare(execCall.Args, execEvent.Args) == 0 {
 			return nil
 		}
@@ -105,9 +108,9 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
 				Comm:       execEvent.Comm,
-				Gid:        execEvent.Gid,
+				Gid:        &execEvent.Gid,
 				PID:        execEvent.Pid,
-				Uid:        execEvent.Uid,
+				Uid:        &execEvent.Uid,
 				UpperLayer: execEvent.UpperLayer,
 				PPID:       execEvent.Ppid,
 				Pcomm:      execEvent.Pcomm,
@@ -121,6 +124,9 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		RuleAlert: apitypes.RuleAlert{
 			RuleID:          rule.ID(),
 			RuleDescription: fmt.Sprintf("Unexpected process launched: %s in: %s", execPath, execEvent.GetContainer()),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName: execEvent.GetPod(),
 		},
 	}
 

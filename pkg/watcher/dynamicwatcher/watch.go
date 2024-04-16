@@ -131,7 +131,7 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 			}
 			return fmt.Errorf("client resource: %w", err)
 		}
-		logger.L().Info("starting watch", helpers.String("resource", res.Resource))
+		logger.L().Debug("starting watch", helpers.String("resource", res.Resource))
 		for {
 			event, chanActive := <-watcher.ResultChan()
 			// set resource version to resume watch from
@@ -155,7 +155,7 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 		}
 	}, newBackOff(), func(err error, d time.Duration) {
 		if !errors.Is(err, errWatchClosed) {
-			logger.L().Ctx(ctx).Warning("watch", helpers.Error(err),
+			logger.L().Ctx(ctx).Debug("watch", helpers.Error(err),
 				helpers.String("resource", res.Resource),
 				helpers.String("retry in", d.String()))
 		}

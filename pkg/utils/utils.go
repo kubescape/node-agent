@@ -571,6 +571,13 @@ func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, proce
 	// Make the parent process the parent of the current process (move the current process to the parent's children).
 	currentProcess := apitypes.Process{
 		Comm: stat.Comm,
+		Path: func() string {
+			path, err := proc.Executable()
+			if err != nil {
+				return ""
+			}
+			return path
+		}(),
 		// TODO: Hardlink
 		// TODO: UpperLayer
 		PID:  uint32(stat.PID),
@@ -589,8 +596,8 @@ func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, proce
 			}
 			return pcomm
 		}(),
-		Gid: gid,
-		Uid: uid,
+		Gid: &gid,
+		Uid: &uid,
 		Cwd: func() string {
 			cwd, err := proc.Cwd()
 			if err != nil {
@@ -643,4 +650,18 @@ func GetCommFromPid(pid uint32) (string, error) {
 	}
 
 	return comm, nil
+}
+
+func GetProcessFromProcessTree(process *apitypes.Process, pid uint32) *apitypes.Process {
+	if process.PID == pid {
+		return process
+	}
+
+	for i := range process.Children {
+		if p := GetProcessFromProcessTree(&process.Children[i], pid); p != nil {
+			return p
+		}
+	}
+
+	return nil
 }

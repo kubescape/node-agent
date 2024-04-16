@@ -32,10 +32,25 @@ var groupVersionResource = schema.GroupVersionResource{
 var _ objectcache.ApplicationProfileCache = (*ApplicationProfileCacheImpl)(nil)
 var _ watcher.Adaptor = (*ApplicationProfileCacheImpl)(nil)
 
+type applicationProfileState struct {
+	status string
+	mode   string
+}
+
+func newApplicationProfileState(ap *v1beta1.ApplicationProfile) applicationProfileState {
+	mode := ap.Annotations[helpersv1.CompletionMetadataKey]
+	status := ap.Annotations[helpersv1.StatusMetadataKey]
+	return applicationProfileState{
+		status: status,
+		mode:   mode,
+	}
+}
+
 type ApplicationProfileCacheImpl struct {
-	podToSlug        maps.SafeMap[string, string]                      // cache the pod to slug mapping, this will enable a quick lookup of the application profile
+	containerToSlug  maps.SafeMap[string, string]                      // cache the containerID to slug mapping, this will enable a quick lookup of the application profile
 	slugToAppProfile maps.SafeMap[string, *v1beta1.ApplicationProfile] // cache the application profile
-	slugToPods       maps.SafeMap[string, mapset.Set[string]]          // cache the pods that belong to the application profile, this will enable removing from cache AP without pods
+	slugToContainers maps.SafeMap[string, mapset.Set[string]]          // cache the containerIDs that belong to the application profile, this will enable removing from cache AP without pods
+	slugToState      maps.SafeMap[string, applicationProfileState]     // cache the containerID to slug mapping, this will enable a quick lookup of the application profile
 	k8sClient        k8sclient.K8sClientInterface
 	allProfiles      mapset.Set[string] // cache all the application profiles that are ready. this will enable removing from cache AP without pods that are running on the same node
 	nodeName         string
@@ -43,34 +58,22 @@ type ApplicationProfileCacheImpl struct {
 
 func NewApplicationProfileCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *ApplicationProfileCacheImpl {
 	return &ApplicationProfileCacheImpl{
-		nodeName:    nodeName,
-		k8sClient:   k8sClient,
-		podToSlug:   maps.SafeMap[string, string]{},
-		slugToPods:  maps.SafeMap[string, mapset.Set[string]]{},
-		allProfiles: mapset.NewSet[string](),
+		nodeName:         nodeName,
+		k8sClient:        k8sClient,
+		containerToSlug:  maps.SafeMap[string, string]{},
+		slugToContainers: maps.SafeMap[string, mapset.Set[string]]{},
+		allProfiles:      mapset.NewSet[string](),
 	}
 
 }
 
 // ------------------ objectcache.ApplicationProfileCache methods -----------------------
 
-func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(namespace, name string) *v1beta1.ApplicationProfile {
-	uniqueName := objectcache.UniqueName(namespace, name)
-	if s := ap.podToSlug.Get(uniqueName); s != "" {
+func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string) *v1beta1.ApplicationProfile {
+	if s := ap.containerToSlug.Get(containerID); s != "" {
 		return ap.slugToAppProfile.Get(s)
 	}
 	return nil
-}
-
-func (ap *ApplicationProfileCacheImpl) IsCached(kind, namespace, name string) bool {
-	switch kind {
-	case "Pod":
-		return ap.podToSlug.Has(objectcache.UniqueName(namespace, name))
-	case "ApplicationProfile":
-		return ap.allProfiles.Contains(objectcache.UniqueName(namespace, name))
-	default:
-		return false
-	}
 }
 
 // ------------------ watcher.Adaptor methods -----------------------
@@ -128,56 +131,90 @@ func (ap *ApplicationProfileCacheImpl) DeleteHandler(_ context.Context, obj *uns
 // ------------------ watch pod methods -----------------------
 
 func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
-	podName := objectcache.UnstructuredUniqueName(podU)
-
-	if ap.podToSlug.Has(podName) {
-		return
-	}
 
 	slug, err := getSlug(podU)
 	if err != nil {
-		logger.L().Error("failed to get slug", helpers.String("pod", podName), helpers.Error(err))
+		logger.L().Error("ApplicationProfileCacheImpl: failed to get slug", helpers.String("namespace", podU.GetNamespace()), helpers.String("pod", podU.GetName()), helpers.Error(err))
 		return
 	}
 
 	uniqueSlug := objectcache.UniqueName(podU.GetNamespace(), slug)
-	ap.podToSlug.Set(podName, uniqueSlug)
 
-	// if application profile exists but is not cached
-	if ap.allProfiles.Contains(uniqueSlug) && !ap.slugToAppProfile.Has(uniqueSlug) {
+	pod, err := objectcache.UnstructuredToPod(podU)
+	if err != nil {
+		logger.L().Error("ApplicationProfileCacheImpl: failed to unmarshal pod", helpers.String("namespace", podU.GetNamespace()), helpers.String("pod", podU.GetName()), helpers.Error(err))
+		return
+	}
 
-		// get the application profile
-		appProfile, err := ap.getApplicationProfile(podU.GetNamespace(), slug)
-		if err != nil {
-			logger.L().Error("failed to get application profile", helpers.Error(err))
-			return
+	// in case of modified pod, remove the old containers
+	terminatedContainers := objectcache.ListTerminatedContainers(pod)
+	for _, container := range terminatedContainers {
+		ap.removeContainer(container)
+	}
+
+	containers := objectcache.ListContainersIDs(pod)
+	for _, container := range containers {
+
+		if !ap.slugToContainers.Has(uniqueSlug) {
+			ap.slugToContainers.Set(uniqueSlug, mapset.NewSet[string]())
 		}
-		ap.slugToAppProfile.Set(uniqueSlug, appProfile)
+		ap.slugToContainers.Get(uniqueSlug).Add(container)
+
+		if s := ap.slugToState.Get(uniqueSlug); s.mode != helpersv1.Complete {
+			// if application profile is not complete, do not cache the pod
+			continue
+		}
+
+		// add the container to the cache
+		if ap.containerToSlug.Has(container) {
+			continue
+		}
+		ap.containerToSlug.Set(container, uniqueSlug)
+
+		// if application profile exists but is not cached
+		if ap.allProfiles.Contains(uniqueSlug) && !ap.slugToAppProfile.Has(uniqueSlug) {
+
+			// get the application profile
+			appProfile, err := ap.getApplicationProfile(podU.GetNamespace(), slug)
+			if err != nil {
+				logger.L().Error("failed to get application profile", helpers.Error(err))
+				continue
+			}
+
+			ap.slugToAppProfile.Set(uniqueSlug, appProfile)
+		}
 
 	}
-
-	// cache objects
-	if !ap.slugToPods.Has(uniqueSlug) {
-		ap.slugToPods.Set(uniqueSlug, mapset.NewSet[string]())
-	}
-	ap.slugToPods.Get(uniqueSlug).Add(podName)
 
 }
 
 func (ap *ApplicationProfileCacheImpl) deletePod(obj *unstructured.Unstructured) {
-	podName := objectcache.UnstructuredUniqueName(obj)
-	uniqueSlug := ap.podToSlug.Get(podName)
-	ap.podToSlug.Delete(podName)
+
+	pod, err := objectcache.UnstructuredToPod(obj)
+	if err != nil {
+		logger.L().Error("ApplicationProfileCacheImpl: failed to unmarshal pod", helpers.String("namespace", obj.GetNamespace()), helpers.String("pod", obj.GetName()), helpers.Error(err))
+		return
+	}
+
+	containers := objectcache.ListContainersIDs(pod)
+	for _, container := range containers {
+		ap.removeContainer(container)
+	}
+}
+func (ap *ApplicationProfileCacheImpl) removeContainer(containerID string) {
+
+	uniqueSlug := ap.containerToSlug.Get(containerID)
+	ap.containerToSlug.Delete(containerID)
 
 	// remove pod form the application profile mapping
-	if ap.slugToPods.Has(uniqueSlug) {
-		ap.slugToPods.Get(uniqueSlug).Remove(podName)
-		if ap.slugToPods.Get(uniqueSlug).Cardinality() == 0 {
+	if ap.slugToContainers.Has(uniqueSlug) {
+		ap.slugToContainers.Get(uniqueSlug).Remove(containerID)
+		if ap.slugToContainers.Get(uniqueSlug).Cardinality() == 0 {
 			// remove full application profile from cache
-			ap.slugToPods.Delete(uniqueSlug)
+			ap.slugToContainers.Delete(uniqueSlug)
 			ap.allProfiles.Remove(uniqueSlug)
 			ap.slugToAppProfile.Delete(uniqueSlug)
-			logger.L().Info("deleted pod from application profile cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
+			logger.L().Debug("deleted pod from application profile cache", helpers.String("containerID", containerID), helpers.String("uniqueSlug", uniqueSlug))
 		}
 	}
 }
@@ -191,23 +228,24 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 		logger.L().Error("failed to unmarshal application profile", helpers.String("name", apName), helpers.Error(err))
 		return
 	}
+	apState := newApplicationProfileState(appProfile)
+	ap.slugToState.Set(apName, apState)
 
 	// the cache holds only completed application profiles.
 	// check if the application profile is completed
 	// if status was completed and now is not (e.g. mode changed from complete to partial), remove from cache
-	if status, ok := appProfile.Annotations[helpersv1.StatusMetadataKey]; ok {
-		if status != helpersv1.Completed {
-			if ap.slugToAppProfile.Has(apName) {
-				ap.slugToAppProfile.Delete(apName)
-				ap.allProfiles.Remove(apName)
-			}
-			return
+	if apState.status != helpersv1.Completed {
+		if ap.slugToAppProfile.Has(apName) {
+			ap.slugToAppProfile.Delete(apName)
+			ap.allProfiles.Remove(apName)
 		}
+		return
 	}
+
 	// add to the cache
 	ap.allProfiles.Add(apName)
 
-	if ap.slugToPods.Has(apName) {
+	if ap.slugToContainers.Has(apName) {
 		// get the full application profile from the storage
 		// the watch only returns the metadata
 		fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
@@ -216,6 +254,10 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 			return
 		}
 		ap.slugToAppProfile.Set(apName, fullAP)
+		for i := range ap.slugToContainers.Get(apName).Iter() {
+			ap.containerToSlug.Set(i, apName)
+		}
+
 		logger.L().Debug("added pod to application profile cache", helpers.String("name", apName))
 	}
 }
@@ -223,7 +265,9 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj *unstructured.Unstructured) {
 	apName := objectcache.UnstructuredUniqueName(obj)
 	ap.slugToAppProfile.Delete(apName)
+	ap.slugToState.Delete(apName)
 	ap.allProfiles.Remove(apName)
+
 	logger.L().Info("deleted application profile from cache", helpers.String("uniqueSlug", apName))
 }
 
