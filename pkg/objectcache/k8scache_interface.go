@@ -5,7 +5,6 @@ import (
 )
 
 type K8sObjectCache interface {
-	IsCached(kind, namespace, name string) bool
 	GetPodSpec(namespace, podName string) *corev1.PodSpec
 	GetPodStatus(namespace, podName string) *corev1.PodStatus
 	GetApiServerIpAddress() string
@@ -27,7 +26,4 @@ func (k *K8sObjectCacheMock) GetPodStatus(namespace, podName string) *corev1.Pod
 }
 func (k *K8sObjectCacheMock) GetApiServerIpAddress() string {
 	return k.ApiServerIpAddress
-}
-func (k *K8sObjectCacheMock) IsCached(kind, namespace, name string) bool {
-	return true
 }

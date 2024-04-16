@@ -6,6 +6,7 @@ import (
 	"node-agent/mocks"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/watcher"
+	"slices"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -46,7 +47,7 @@ func Test_AddHandlers(t *testing.T) {
 			name:   "add pod",
 			obj:    mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
 			f:      (*ApplicationProfileCacheImpl).AddHandler,
-			length: 1,
+			length: 6,
 		},
 		{
 			name:   "modify application profile",
@@ -58,7 +59,7 @@ func Test_AddHandlers(t *testing.T) {
 			name:   "modify pod",
 			obj:    mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
 			f:      (*ApplicationProfileCacheImpl).ModifyHandler,
-			length: 1,
+			length: 6,
 		},
 		{
 			name:   "delete application profile",
@@ -86,7 +87,7 @@ func Test_AddHandlers(t *testing.T) {
 			case mocks.TestKindAP:
 				assert.Equal(t, tt.length, ap.allProfiles.Cardinality())
 			case mocks.TestKindPod:
-				assert.Equal(t, tt.length, ap.podToSlug.Len())
+				assert.Equal(t, tt.length, ap.containerToSlug.Len())
 			}
 		})
 	}
@@ -105,15 +106,20 @@ func Test_addApplicationProfile(t *testing.T) {
 		shouldAddToPod bool
 	}{
 		{
-			name:      "add single application profile nginx",
-			obj:       mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
+			name: "add single application profile nginx",
+			obj:  mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx),
+			annotations: map[string]string{
+				"kubescape.io/status":     "completed",
+				"kubescape.io/completion": "complete",
+			},
 			shouldAdd: true,
 		},
 		{
-			name: "add application profile with complete annotation",
+			name: "add application profile with partial annotation",
 			obj:  mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
 			annotations: map[string]string{
-				"kubescape.io/status": "completed",
+				"kubescape.io/status":     "completed",
+				"kubescape.io/completion": "partial",
 			},
 			shouldAdd: true,
 		},
@@ -121,7 +127,8 @@ func Test_addApplicationProfile(t *testing.T) {
 			name: "ignore single application profile with incomplete annotation",
 			obj:  mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
 			annotations: map[string]string{
-				"kubescape.io/status": "ready",
+				"kubescape.io/status":     "ready",
+				"kubescape.io/completion": "complete",
 			},
 			shouldAdd: false,
 		},
@@ -130,7 +137,8 @@ func Test_addApplicationProfile(t *testing.T) {
 			obj:            mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
 			preCreatedPods: []*unstructured.Unstructured{mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection)},
 			annotations: map[string]string{
-				"kubescape.io/status": "completed",
+				"kubescape.io/status":     "completed",
+				"kubescape.io/completion": "complete",
 			},
 			shouldAdd:      true,
 			shouldAddToPod: true,
@@ -140,7 +148,8 @@ func Test_addApplicationProfile(t *testing.T) {
 			obj:            mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
 			preCreatedPods: []*unstructured.Unstructured{mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx)},
 			annotations: map[string]string{
-				"kubescape.io/status": "completed",
+				"kubescape.io/status":     "completed",
+				"kubescape.io/completion": "complete",
 			},
 			shouldAdd:      true,
 			shouldAddToPod: false,
@@ -191,16 +200,22 @@ func Test_addApplicationProfile(t *testing.T) {
 			}
 
 			if tt.shouldAddToPod {
-				assert.True(t, ap.slugToPods.Has(apName))
+				assert.True(t, ap.slugToContainers.Has(apName))
 				assert.True(t, ap.slugToAppProfile.Has(apName))
 				for i := range tt.preCreatedPods {
-					assert.NotNil(t, ap.GetApplicationProfile(namespace, tt.preCreatedPods[i].GetName()))
+					p, _ := objectcache.UnstructuredToPod(tt.preCreatedPods[i])
+					for _, c := range objectcache.ListContainersIDs(p) {
+						assert.NotNil(t, ap.GetApplicationProfile(c))
+					}
 				}
 			} else {
-				assert.False(t, ap.slugToPods.Has(apName))
+				assert.False(t, ap.slugToContainers.Has(apName))
 				assert.False(t, ap.slugToAppProfile.Has(apName))
 				for i := range tt.preCreatedPods {
-					assert.Nil(t, ap.GetApplicationProfile(namespace, tt.preCreatedPods[i].GetName()))
+					p, _ := objectcache.UnstructuredToPod(tt.preCreatedPods[i])
+					for _, c := range objectcache.ListContainersIDs(p) {
+						assert.Nil(t, ap.GetApplicationProfile(c))
+					}
 				}
 			}
 		})
@@ -244,7 +259,7 @@ func Test_deleteApplicationProfile(t *testing.T) {
 			ap.allProfiles.Append(tt.slugs...)
 			for _, i := range tt.slugs {
 				ap.slugToAppProfile.Set(i, &v1beta1.ApplicationProfile{})
-				ap.slugToPods.Set(i, nil)
+				ap.slugToContainers.Set(i, nil)
 			}
 
 			ap.deleteApplicationProfile(tt.obj)
@@ -252,11 +267,11 @@ func Test_deleteApplicationProfile(t *testing.T) {
 			if tt.shouldDelete {
 				assert.Equal(t, len(tt.slugs)-1, ap.allProfiles.Cardinality())
 				assert.False(t, ap.slugToAppProfile.Has(tt.slug))
-				assert.True(t, ap.slugToPods.Has(tt.slug)) // this field should not be deleted
+				assert.True(t, ap.slugToContainers.Has(tt.slug)) // this field should not be deleted
 			} else {
 				assert.Equal(t, len(tt.slugs), ap.allProfiles.Cardinality())
 				assert.True(t, ap.slugToAppProfile.Has(tt.slug))
-				assert.True(t, ap.slugToPods.Has(tt.slug))
+				assert.True(t, ap.slugToContainers.Has(tt.slug))
 			}
 		})
 	}
@@ -267,7 +282,7 @@ func Test_deletePod(t *testing.T) {
 	tests := []struct {
 		obj          *unstructured.Unstructured
 		name         string
-		podName      string
+		containers   []string
 		slug         string
 		otherSlugs   []string
 		shouldDelete bool
@@ -275,19 +290,19 @@ func Test_deletePod(t *testing.T) {
 		{
 			name:         "delete pod",
 			obj:          mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx),
-			podName:      "/nginx-77b4fdf86c-hp4x5",
+			containers:   []string{"containerd://b0416f7a782e62badf28e03fc9b82305cd02e9749dc24435d8592fab66349c78"},
 			shouldDelete: true,
 		},
 		{
 			name:         "pod not deleted",
 			obj:          mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx),
-			podName:      "blabla",
+			containers:   []string{"containerd://blabla"},
 			shouldDelete: false,
 		},
 		{
 			name:         "delete pod with slug",
 			obj:          mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx),
-			podName:      "/nginx-77b4fdf86c-hp4x5",
+			containers:   []string{"containerd://b0416f7a782e62badf28e03fc9b82305cd02e9749dc24435d8592fab66349c78"},
 			slug:         "/replicaset-nginx-77b4fdf86c",
 			otherSlugs:   []string{"1111111", "222222"},
 			shouldDelete: true,
@@ -295,7 +310,7 @@ func Test_deletePod(t *testing.T) {
 		{
 			name:         "delete pod with slug",
 			obj:          mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx),
-			podName:      "/nginx-77b4fdf86c-hp4x5",
+			containers:   []string{"containerd://b0416f7a782e62badf28e03fc9b82305cd02e9749dc24435d8592fab66349c78"},
 			slug:         "/replicaset-nginx-77b4fdf86c",
 			shouldDelete: true,
 		},
@@ -304,31 +319,34 @@ func Test_deletePod(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ap := NewApplicationProfileCache("", nil)
 			for _, i := range tt.otherSlugs {
-				ap.slugToPods.Set(i, mapset.NewSet[string]())
+				ap.slugToContainers.Set(i, mapset.NewSet[string]())
 				ap.slugToAppProfile.Set(i, &v1beta1.ApplicationProfile{})
 			}
 			if tt.slug != "" {
-				ap.slugToPods.Set(tt.slug, mapset.NewSet[string](tt.podName))
+				ap.slugToContainers.Set(tt.slug, mapset.NewSet[string](tt.containers...))
 				ap.slugToAppProfile.Set(tt.slug, &v1beta1.ApplicationProfile{})
 			}
 
-			ap.podToSlug.Set(tt.podName, tt.slug)
-
+			for i := range tt.containers {
+				ap.containerToSlug.Set(tt.containers[i], tt.slug)
+			}
 			ap.deletePod(tt.obj)
 
-			if tt.shouldDelete {
-				assert.False(t, ap.podToSlug.Has(tt.podName))
-			} else {
-				assert.True(t, ap.podToSlug.Has(tt.podName))
+			for i := range tt.containers {
+				if tt.shouldDelete {
+					assert.False(t, ap.containerToSlug.Has(tt.containers[i]))
+				} else {
+					assert.True(t, ap.containerToSlug.Has(tt.containers[i]))
+				}
 			}
 
 			if tt.slug != "" {
-				assert.False(t, ap.slugToPods.Has(tt.slug))
-				assert.Equal(t, len(tt.otherSlugs), ap.slugToPods.Len())
+				assert.False(t, ap.slugToContainers.Has(tt.slug))
+				assert.Equal(t, len(tt.otherSlugs), ap.slugToContainers.Len())
 				assert.Equal(t, len(tt.otherSlugs), ap.slugToAppProfile.Len())
 
 				if len(tt.otherSlugs) == 0 {
-					assert.False(t, ap.slugToPods.Has(tt.slug))
+					assert.False(t, ap.slugToContainers.Has(tt.slug))
 					assert.False(t, ap.slugToAppProfile.Has(tt.slug))
 				}
 			}
@@ -337,9 +355,9 @@ func Test_deletePod(t *testing.T) {
 }
 func Test_GetApplicationProfile(t *testing.T) {
 	type args struct {
-		name      string
-		namespace string
-		slug      string
+		containerID         string
+		slug                string
+		setSlugToAppProfile bool
 	}
 	tests := []struct {
 		get      args
@@ -351,19 +369,18 @@ func Test_GetApplicationProfile(t *testing.T) {
 			name: "application profile found",
 			pods: []args{
 				{
-					name:      "nginx",
-					namespace: "default",
-					slug:      "default/replicaset-nginx-1234",
+					containerID:         "1234",
+					slug:                "default/replicaset-nginx-1234",
+					setSlugToAppProfile: true,
 				},
 				{
-					name:      "collection",
-					namespace: "default",
-					slug:      "default/replicaset-collection-1234",
+					containerID:         "9876",
+					slug:                "default/replicaset-collection-1234",
+					setSlugToAppProfile: true,
 				},
 			},
 			get: args{
-				name:      "nginx",
-				namespace: "default",
+				containerID: "1234",
 			},
 			expected: true,
 		},
@@ -371,19 +388,18 @@ func Test_GetApplicationProfile(t *testing.T) {
 			name: "application profile not found",
 			pods: []args{
 				{
-					name:      "nginx",
-					namespace: "default",
-					slug:      "default/replicaset-nginx-1234",
+					containerID:         "1234",
+					slug:                "default/replicaset-nginx-1234",
+					setSlugToAppProfile: true,
 				},
 				{
-					name:      "collection",
-					namespace: "default",
-					slug:      "default/replicaset-collection-1234",
+					containerID:         "9876",
+					slug:                "default/replicaset-collection-1234",
+					setSlugToAppProfile: true,
 				},
 			},
 			get: args{
-				name:      "nginx",
-				namespace: "collection",
+				containerID: "6789",
 			},
 			expected: false,
 		},
@@ -391,19 +407,18 @@ func Test_GetApplicationProfile(t *testing.T) {
 			name: "pod exists but application profile is not",
 			pods: []args{
 				{
-					name:      "nginx",
-					namespace: "default",
-					slug:      "default/replicaset-nginx-1234",
+					containerID:         "1234",
+					slug:                "default/replicaset-nginx-1234",
+					setSlugToAppProfile: true,
 				},
 				{
-					name:      "collection",
-					namespace: "default",
-					slug:      "",
+					containerID:         "9876",
+					slug:                "default/collection",
+					setSlugToAppProfile: false,
 				},
 			},
 			get: args{
-				name:      "collection",
-				namespace: "default",
+				containerID: "9876",
 			},
 			expected: false,
 		},
@@ -413,14 +428,13 @@ func Test_GetApplicationProfile(t *testing.T) {
 			ap := NewApplicationProfileCache("", k8sinterface.NewKubernetesApiMock())
 
 			for _, c := range tt.pods {
-				n := objectcache.UniqueName(c.namespace, c.name)
-				ap.podToSlug.Set(n, c.slug)
-				if c.slug != "" {
+				ap.containerToSlug.Set(c.containerID, c.slug)
+				if c.setSlugToAppProfile {
 					ap.slugToAppProfile.Set(c.slug, &v1beta1.ApplicationProfile{})
 				}
 			}
 
-			p := ap.GetApplicationProfile(tt.get.namespace, tt.get.name)
+			p := ap.GetApplicationProfile(tt.get.containerID)
 			if tt.expected {
 				assert.NotNil(t, p)
 			} else {
@@ -495,8 +509,8 @@ func Test_addApplicationProfile_existing(t *testing.T) {
 
 			// add pods
 			for i := range tt.pods {
-				ap.podToSlug.Set(tt.pods[i].podName, tt.pods[i].slug)
-				ap.slugToPods.Set(tt.pods[i].slug, mapset.NewSet(tt.pods[i].podName))
+				ap.containerToSlug.Set(tt.pods[i].podName, tt.pods[i].slug)
+				ap.slugToContainers.Set(tt.pods[i].slug, mapset.NewSet(tt.pods[i].podName))
 			}
 
 			ap.addApplicationProfile(context.Background(), tt.obj1)
@@ -614,59 +628,6 @@ func Test_WatchResources(t *testing.T) {
 	assert.Equal(t, expectedPodWatchResource, watchResources[0])
 	assert.Equal(t, expectedAPWatchResource, watchResources[1])
 }
-func Test_IsCached(t *testing.T) {
-	ap := NewApplicationProfileCache("", nil)
-
-	// Add some test data to the cache
-	ap.podToSlug.Set("namespace1/pod1", "")
-	ap.allProfiles.Add("namespace2/applicationprofile1")
-
-	tests := []struct {
-		kind      string
-		namespace string
-		name      string
-		expected  bool
-	}{
-		{
-			kind:      "Pod",
-			namespace: "namespace1",
-			name:      "pod1",
-			expected:  true,
-		},
-		{
-			kind:      "Pod",
-			namespace: "namespace1",
-			name:      "pod2",
-			expected:  false,
-		},
-		{
-			kind:      "ApplicationProfile",
-			namespace: "namespace2",
-			name:      "applicationprofile1",
-			expected:  true,
-		},
-		{
-			kind:      "ApplicationProfile",
-			namespace: "namespace2",
-			name:      "applicationprofile2",
-			expected:  false,
-		},
-		{
-			kind:      "InvalidKind",
-			namespace: "namespace1",
-			name:      "pod1",
-			expected:  false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("kind=%s, namespace=%s, name=%s", tt.kind, tt.namespace, tt.name), func(t *testing.T) {
-			actual := ap.IsCached(tt.kind, tt.namespace, tt.name)
-			assert.Equal(t, tt.expected, actual)
-		})
-	}
-}
-
 func TestGetSlug(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -718,6 +679,102 @@ func TestGetSlug(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+func Test_addPod(t *testing.T) {
+
+	// add single application profile
+	tests := []struct {
+		obj                     *unstructured.Unstructured
+		name                    string
+		addedContainers         []string
+		ignoredContainers       []string
+		preCreatedAPAnnotations map[string]string
+		preCreatedAP            *unstructured.Unstructured // pre created application profiles
+		shouldAddToProfile      bool
+	}{
+		{
+			name:         "add pod with partial application profile",
+			obj:          mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
+			preCreatedAP: mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
+			preCreatedAPAnnotations: map[string]string{
+				"kubescape.io/status":     "completed",
+				"kubescape.io/completion": "partial",
+			},
+			shouldAddToProfile: false,
+			ignoredContainers: []string{
+				"containerd://2c8cb9f14afc39390c49b53cc21da12c903460ee041839dd705881475ae92c0e",
+				"containerd://5924eafa8ec13fd5793b0ef8591576f1a3ea9068b6b7a0c45d82829c33779927",
+				"containerd://6565eafa8ec13fd5793b0ef8591576f1a3ea9068b6b7a0c45d82829c33779234",
+				"containerd://725fee5efd1881b37157fded3061f2b049f6637e37ee1dcef534273d187b56d4",
+				"containerd://baacccdd158dd7140c436207c7b3d12d15bd6a4313d59dbf471d835d7f2f8dee",
+				"containerd://d6926a10223d03aea3da4aef78dbef02efb4c2cebf57cdb3da0ca1fcb4263383",
+			},
+		},
+		{
+			name:         "add pod with application profile",
+			obj:          mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
+			preCreatedAP: mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection),
+			preCreatedAPAnnotations: map[string]string{
+				"kubescape.io/status":     "completed",
+				"kubescape.io/completion": "complete",
+			},
+			shouldAddToProfile: true,
+			addedContainers: []string{
+				"containerd://2c8cb9f14afc39390c49b53cc21da12c903460ee041839dd705881475ae92c0e",
+				"containerd://5924eafa8ec13fd5793b0ef8591576f1a3ea9068b6b7a0c45d82829c33779927",
+				"containerd://6565eafa8ec13fd5793b0ef8591576f1a3ea9068b6b7a0c45d82829c33779234",
+				"containerd://725fee5efd1881b37157fded3061f2b049f6637e37ee1dcef534273d187b56d4",
+				"containerd://baacccdd158dd7140c436207c7b3d12d15bd6a4313d59dbf471d835d7f2f8dee",
+				"containerd://d6926a10223d03aea3da4aef78dbef02efb4c2cebf57cdb3da0ca1fcb4263383",
+			},
+		},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.preCreatedAPAnnotations) != 0 {
+				tt.preCreatedAP.SetAnnotations(tt.preCreatedAPAnnotations)
+			}
+			namespace := fmt.Sprintf("default-%d", i)
+			k8sClient := k8sinterface.NewKubernetesApiMock()
+
+			var runtimeObjs []runtime.Object
+			tt.obj.SetNamespace(namespace)
+			runtimeObjs = append(runtimeObjs, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}})
+
+			tt.preCreatedAP.SetNamespace(namespace)
+			runtimeObjs = append(runtimeObjs, mocks.UnstructuredToRuntime(tt.preCreatedAP))
+			runtimeObjs = append(runtimeObjs, mocks.UnstructuredToRuntime(tt.obj))
+
+			k8sClient.DynamicClient = dynamicfake.NewSimpleDynamicClient(scheme.Scheme, runtimeObjs...)
+
+			ap := NewApplicationProfileCache("", k8sClient)
+
+			ap.addApplicationProfile(context.Background(), tt.preCreatedAP)
+
+			ap.addPod(tt.obj)
+
+			// test if the application profile is added to the cache
+			assert.Equal(t, 1, ap.allProfiles.Cardinality())
+			assert.True(t, ap.slugToContainers.Has(objectcache.UnstructuredUniqueName(tt.preCreatedAP)))
+
+			c := ap.containerToSlug.Keys()
+			slices.Sort(c)
+			slices.Sort(tt.addedContainers)
+
+			if tt.shouldAddToProfile {
+				assert.Equal(t, tt.addedContainers, c)
+				for i := range tt.addedContainers {
+					assert.NotNil(t, ap.GetApplicationProfile(tt.addedContainers[i]))
+				}
+			} else {
+				assert.Equal(t, tt.addedContainers, c)
+				for i := range tt.ignoredContainers {
+					assert.Nil(t, ap.GetApplicationProfile(tt.ignoredContainers[i]))
+				}
 			}
 		})
 	}

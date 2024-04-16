@@ -46,7 +46,7 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 
 	// Test with whitelisted file
 	objCache := RuleObjectCacheMock{}
-	profile := objCache.ApplicationProfileCache().GetApplicationProfile("test", "test")
+	profile := objCache.ApplicationProfileCache().GetApplicationProfile("test")
 	if profile == nil {
 		profile = &v1beta1.ApplicationProfile{
 			Spec: v1beta1.ApplicationProfileSpec{

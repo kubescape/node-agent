@@ -96,7 +96,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		return nil
 	}
 
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.GetNamespace(), openEvent.GetPod())
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
 	if ap == nil {
 		return nil
 	}

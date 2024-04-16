@@ -285,63 +285,7 @@ func TestCreateRule(t *testing.T) {
 		})
 	}
 }
-func TestIsCached(t *testing.T) {
-	c := &RBCache{
-		allPods: mapset.NewSet[string]("default/pod-1"),
-	}
-	c.rbNameToRB.Set("default/rule-1", typesv1.RuntimeAlertRuleBinding{})
 
-	tests := []struct {
-		name      string
-		kind      string
-		namespace string
-		rName     string
-		expected  bool
-	}{
-		{
-			name:      "Test with cached Pod",
-			kind:      "Pod",
-			namespace: "default",
-			rName:     "pod-1",
-			expected:  true,
-		},
-		{
-			name:      "Test with uncached Pod",
-			kind:      "Pod",
-			namespace: "default",
-			rName:     "pod-2",
-			expected:  false,
-		},
-		{
-			name:      "Test with cached RuntimeRuleAlertBinding",
-			kind:      "RuntimeRuleAlertBinding",
-			namespace: "default",
-			rName:     "rule-1",
-			expected:  true,
-		},
-		{
-			name:      "Test with uncached RuntimeRuleAlertBinding",
-			kind:      "RuntimeRuleAlertBinding",
-			namespace: "default",
-			rName:     "rule-2",
-			expected:  false,
-		},
-		{
-			name:      "Test with unknown kind",
-			kind:      "Unknown",
-			namespace: "default",
-			rName:     "unknown-1",
-			expected:  false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := c.IsCached(tt.kind, tt.namespace, tt.rName)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
 func TestDeleteHandler(t *testing.T) {
 	type expected struct {
 		pod  string

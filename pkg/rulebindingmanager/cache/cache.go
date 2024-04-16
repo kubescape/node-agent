@@ -81,16 +81,6 @@ func (c *RBCache) ListRulesForPod(namespace, name string) []ruleengine.RuleEvalu
 	return rulesSlice
 }
 
-func (c *RBCache) IsCached(kind, namespace, name string) bool {
-	switch kind {
-	case "Pod":
-		return c.allPods.Contains(uniqueName(namespace, name))
-	case "RuntimeRuleAlertBinding":
-		return c.rbNameToRB.Has(uniqueName(namespace, name))
-	default:
-		return false
-	}
-}
 func (c *RBCache) AddNotifier(n *chan rulebindingmanager.RuleBindingNotify) {
 	c.notifiers = append(c.notifiers, n)
 }

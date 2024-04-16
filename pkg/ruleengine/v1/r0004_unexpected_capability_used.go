@@ -65,7 +65,7 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(capEvent.GetNamespace(), capEvent.GetPod())
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(capEvent.Runtime.ContainerID)
 	if ap == nil {
 		return nil
 	}

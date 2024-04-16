@@ -34,7 +34,7 @@ func TestR0007KubernetesClientExecuted(t *testing.T) {
 	}
 
 	objCache := RuleObjectCacheMock{}
-	profile := objCache.ApplicationProfileCache().GetApplicationProfile("test", "test")
+	profile := objCache.ApplicationProfileCache().GetApplicationProfile("test")
 	if profile == nil {
 		profile = &v1beta1.ApplicationProfile{}
 		profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{

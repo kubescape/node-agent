@@ -186,7 +186,7 @@ func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventTyp
 			return nil
 		}
 
-		ap := objCache.ApplicationProfileCache().GetApplicationProfile(execEvent.GetNamespace(), execEvent.GetPod())
+		ap := objCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
 		if ap == nil {
 			return nil
 		}

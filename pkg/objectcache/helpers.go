@@ -31,3 +31,41 @@ func UnstructuredToPod(obj *unstructured.Unstructured) (*corev1.Pod, error) {
 	}
 	return pod, nil
 }
+
+// list containerIDs from pod status
+func ListContainersIDs(pod *corev1.Pod) []string {
+	var containers []string
+
+	for i := range pod.Status.ContainerStatuses {
+		containers = append(containers, pod.Status.ContainerStatuses[i].ContainerID)
+	}
+	for i := range pod.Status.InitContainerStatuses {
+		containers = append(containers, pod.Status.InitContainerStatuses[i].ContainerID)
+	}
+	for i := range pod.Status.EphemeralContainerStatuses {
+		containers = append(containers, pod.Status.EphemeralContainerStatuses[i].ContainerID)
+	}
+	return containers
+}
+
+// list terminated containers from pod status
+func ListTerminatedContainers(pod *corev1.Pod) []string {
+	var containers []string
+
+	for i := range pod.Status.ContainerStatuses {
+		if pod.Status.ContainerStatuses[i].State.Terminated != nil {
+			containers = append(containers, pod.Status.ContainerStatuses[i].ContainerID)
+		}
+	}
+	for i := range pod.Status.InitContainerStatuses {
+		if pod.Status.InitContainerStatuses[i].State.Terminated != nil {
+			containers = append(containers, pod.Status.InitContainerStatuses[i].ContainerID)
+		}
+	}
+	for i := range pod.Status.EphemeralContainerStatuses {
+		if pod.Status.EphemeralContainerStatuses[i].State.Terminated != nil {
+			containers = append(containers, pod.Status.EphemeralContainerStatuses[i].ContainerID)
+		}
+	}
+	return containers
+}

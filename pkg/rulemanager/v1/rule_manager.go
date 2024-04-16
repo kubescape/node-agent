@@ -607,9 +607,9 @@ func (rm *RuleManager) isCached(namespace, name string) bool {
 
 	// wait for pod to be cached
 	if err := backoff.Retry(func() error {
-		if !rm.objectCache.K8sObjectCache().IsCached("Pod", namespace, name) {
-			return fmt.Errorf("pod %s/%s not found in K8sObjectCache", namespace, name)
-		}
+		// if !rm.objectCache.K8sObjectCache().IsCached("Pod", namespace, name) {
+		// 	return fmt.Errorf("pod %s/%s not found in K8sObjectCache", namespace, name)
+		// }
 
 		return nil
 	}, backoff.NewExponentialBackOff()); err != nil {

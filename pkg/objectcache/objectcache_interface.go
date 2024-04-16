@@ -1,7 +1,6 @@
 package objectcache
 
 type ObjectCache interface {
-	IsCached(kind, namespace, name string) bool
 	K8sObjectCache() K8sObjectCache
 	ApplicationProfileCache() ApplicationProfileCache
 	NetworkNeighborsCache() NetworkNeighborsCache
@@ -24,8 +23,4 @@ func (om *ObjectCacheMock) ApplicationProfileCache() ApplicationProfileCache {
 }
 func (om *ObjectCacheMock) NetworkNeighborsCache() NetworkNeighborsCache {
 	return &NetworkNeighborsCacheMock{}
-}
-
-func (om *ObjectCacheMock) IsCached(kind, namespace, name string) bool {
-	return true
 }

@@ -61,16 +61,6 @@ func (np *NetworkNeighborsCacheImp) GetNetworkNeighbors(namespace, name string) 
 	}
 	return nil
 }
-func (np *NetworkNeighborsCacheImp) IsCached(kind, namespace, name string) bool {
-	switch kind {
-	case "Pod":
-		return np.podToSlug.Has(objectcache.UniqueName(namespace, name))
-	case "NetworkNeighbors":
-		return np.allNeighbors.Contains(objectcache.UniqueName(namespace, name))
-	default:
-		return false
-	}
-}
 
 // ------------------ watcher.Adaptor methods -----------------------
 
