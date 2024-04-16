@@ -52,6 +52,7 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 	opensPath := fmt.Sprintf("/spec/%s/%d/opens/-", containerType, containerIndex)
 	for path, open := range opens {
 		flags := open.ToSlice()
+		sort.Strings(flags)
 
 		profileOperations = append(profileOperations, PatchOperation{
 			Op:   "add",
@@ -89,6 +90,7 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 	container.Opens = make([]v1beta1.OpenCalls, 0)
 	for path, open := range opens {
 		flags := open.ToSlice()
+		sort.Strings(flags)
 		container.Opens = append(container.Opens, v1beta1.OpenCalls{
 			Path:  path,
 			Flags: flags,

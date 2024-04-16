@@ -374,13 +374,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					existingContainer := utils.GetApplicationProfileContainer(existingObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
 					var addContainer bool
 					if existingContainer == nil {
-
-						logger.L().Ctx(ctx).Error("ApplicationProfileManager::saveProfile - existing container is nil, will add a new one",
-							helpers.String("slug", slug),
-							helpers.Int("container index", watchedContainer.ContainerIndex),
-							helpers.String("container ID", watchedContainer.ContainerID),
-							helpers.String("k8s workload", watchedContainer.K8sContainerID))
-
 						existingContainer = &v1beta1.ApplicationProfileContainer{
 							Name: watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex],
 						}
@@ -401,12 +394,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					// replace or add container using patch
 					switch {
 					case existingContainers == nil:
-						logger.L().Ctx(ctx).Error("ApplicationProfileManager::saveProfile - existingContainers is nil",
-							helpers.String("slug", slug),
-							helpers.Int("container index", watchedContainer.ContainerIndex),
-							helpers.String("container ID", watchedContainer.ContainerID),
-							helpers.String("k8s workload", watchedContainer.K8sContainerID))
-
 						// 3a. insert a new container slice, with the new container at the right index
 						containers := make([]v1beta1.ApplicationProfileContainer, watchedContainer.ContainerIndex+1)
 						containers[watchedContainer.ContainerIndex] = *existingContainer
@@ -443,13 +430,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					replaceOperations = utils.AppendStatusAnnotationPatchOperations(replaceOperations, watchedContainer)
 
 					patch, err := json.Marshal(replaceOperations)
-					logger.L().Ctx(ctx).Error("ApplicationProfileManager::saveProfile - patch result",
-						helpers.String("patch", string(patch)),
-						helpers.String("slug", slug),
-						helpers.Int("container index", watchedContainer.ContainerIndex),
-						helpers.String("container ID", watchedContainer.ContainerID),
-						helpers.String("k8s workload", watchedContainer.K8sContainerID))
-
 					if err != nil {
 						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to marshal patch", helpers.Error(err),
 							helpers.String("slug", slug),
