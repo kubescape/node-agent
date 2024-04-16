@@ -651,3 +651,17 @@ func GetCommFromPid(pid uint32) (string, error) {
 
 	return comm, nil
 }
+
+func GetProcessFromProcessTree(process *apitypes.Process, pid uint32) *apitypes.Process {
+	if process.PID == pid {
+		return process
+	}
+
+	for i := range process.Children {
+		if p := GetProcessFromProcessTree(&process.Children[i], pid); p != nil {
+			return p
+		}
+	}
+
+	return nil
+}

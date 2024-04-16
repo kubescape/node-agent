@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"node-agent/pkg/malwaremanager"
 	"node-agent/pkg/ruleengine"
+	"node-agent/pkg/utils"
 	"os"
 	"time"
 
@@ -45,6 +46,12 @@ func InitAlertManagerExporter(alertManagerURL string) *AlertManagerExporter {
 }
 
 func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+	processTree := failedRule.GetRuntimeProcessDetails().ProcessTree
+	process := utils.GetProcessFromProcessTree(&processTree, failedRule.GetBaseRuntimeAlert().InfectedPID)
+	if process == nil {
+		logger.L().Error("Failed to get process from process tree")
+		return
+	}
 	sourceUrl := fmt.Sprintf("https://armosec.github.io/kubecop/alertviewer/?AlertMessage=%s&AlertRuleName=%s&AlertRuleID=%s&AlertFix=%s&AlertNamespace=%s&AlertPod=%s&AlertContainer=%s&AlertProcess=%s",
 		failedRule.GetRuleAlert().RuleDescription,
 		failedRule.GetBaseRuntimeAlert().AlertName,
@@ -53,7 +60,7 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 		failedRule.GetRuntimeAlertK8sDetails().Namespace,
 		failedRule.GetRuntimeAlertK8sDetails().PodName,
 		failedRule.GetRuntimeAlertK8sDetails().ContainerName,
-		fmt.Sprintf("%s (%d)", failedRule.GetRuntimeProcessDetails().ProcessTree.Comm, failedRule.GetRuntimeProcessDetails().ProcessTree.PID),
+		fmt.Sprintf("%s (%d)", process.Comm, process.PID),
 	)
 	summary := fmt.Sprintf("Rule '%s' in '%s' namespace '%s' failed", failedRule.GetBaseRuntimeAlert().AlertName, failedRule.GetRuntimeAlertK8sDetails().PodName, failedRule.GetRuntimeAlertK8sDetails().Namespace)
 	myAlert := models.PostableAlert{
@@ -79,12 +86,12 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 				"severity":       PriorityToStatus(failedRule.GetBaseRuntimeAlert().Severity),
 				"host":           ame.Host,
 				"node_name":      ame.NodeName,
-				"pid":            fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.PID),
-				"ppid":           fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.PPID),
-				"pcomm":          failedRule.GetRuntimeProcessDetails().ProcessTree.Pcomm,
-				"comm":           failedRule.GetRuntimeProcessDetails().ProcessTree.Comm,
-				"uid":            fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.Uid),
-				"gid":            fmt.Sprintf("%d", failedRule.GetRuntimeProcessDetails().ProcessTree.Gid),
+				"pid":            fmt.Sprintf("%d", process.PID),
+				"ppid":           fmt.Sprintf("%d", process.PPID),
+				"pcomm":          process.Pcomm,
+				"comm":           process.Comm,
+				"uid":            fmt.Sprintf("%d", process.Uid),
+				"gid":            fmt.Sprintf("%d", process.Gid),
 			},
 		},
 	}

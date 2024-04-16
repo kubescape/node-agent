@@ -1,10 +1,12 @@
 package utils
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/stretchr/testify/assert"
 )
@@ -218,6 +220,64 @@ func Test_GetLabels(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := GetLabels(tt.args.watchedContainer, tt.args.stripContainer)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetProcessFromProcessTree(t *testing.T) {
+	type args struct {
+		process *apitypes.Process
+		pid     uint32
+	}
+	tests := []struct {
+		name string
+		args args
+		want *apitypes.Process
+	}{
+		{
+			name: "Test Case 1: Process found in tree",
+			args: args{
+				process: &apitypes.Process{
+					PID: 1,
+					Children: []apitypes.Process{
+						{
+							PID: 2,
+						},
+						{
+							PID: 3,
+						},
+					},
+				},
+				pid: 2,
+			},
+			want: &apitypes.Process{
+				PID: 2,
+			},
+		},
+		{
+			name: "Test Case 2: Process not found in tree",
+			args: args{
+				process: &apitypes.Process{
+					PID: 1,
+					Children: []apitypes.Process{
+						{
+							PID: 2,
+						},
+						{
+							PID: 3,
+						},
+					},
+				},
+				pid: 4,
+			},
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := GetProcessFromProcessTree(tt.args.process, tt.args.pid); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetProcessFromProcessTree() = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }
