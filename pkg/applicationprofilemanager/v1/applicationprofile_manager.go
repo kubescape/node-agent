@@ -43,12 +43,12 @@ type ApplicationProfileManager struct {
 	trackedContainers        mapset.Set[string]                                              // key is k8sContainerID
 	removedContainers        mapset.Set[string]                                              // key is k8sContainerID
 	savedCapabilities        maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
-	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
+	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, []string]]           // key is k8sContainerID
 	droppedEvents            maps.SafeMap[string, bool]                                      // key is k8sContainerID
 	savedOpens               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
 	savedSyscalls            maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
 	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
-	toSaveExecs              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
+	toSaveExecs              maps.SafeMap[string, *maps.SafeMap[string, []string]]           // key is k8sContainerID
 	toSaveOpens              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
 	watchedContainerChannels maps.SafeMap[string, chan error]                                // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
@@ -257,7 +257,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 
 	// get capabilities from IG
 	var capabilities []string
-	execs := make(map[string]mapset.Set[string])
+	execs := make(map[string][]string)
 	opens := make(map[string]mapset.Set[string])
 	if toSaveCapabilities := am.toSaveCapabilities.Get(watchedContainer.K8sContainerID); toSaveCapabilities.Cardinality() > 0 {
 		// remove capabilities to save in a thread safe way using Pop
@@ -274,13 +274,11 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// get pointer to execs map from IG
 	toSaveExecs := am.toSaveExecs.Get(watchedContainer.K8sContainerID)
 	// point IG to a new exec map
-	am.toSaveExecs.Set(watchedContainer.K8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
+	am.toSaveExecs.Set(watchedContainer.K8sContainerID, new(maps.SafeMap[string, []string]))
+
 	// prepare execs map
-	toSaveExecs.Range(func(path string, exec mapset.Set[string]) bool {
-		if _, exist := execs[path]; !exist {
-			execs[path] = mapset.NewSet[string]()
-		}
-		execs[path].Append(exec.ToSlice()...)
+	toSaveExecs.Range(func(execIdentifier string, pathAndArgs []string) bool {
+		execs[execIdentifier] = pathAndArgs
 		return true
 	})
 	// get pointer to opens map from IG
@@ -376,11 +374,19 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					existingContainer := utils.GetApplicationProfileContainer(existingObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
 					var addContainer bool
 					if existingContainer == nil {
+
+						logger.L().Ctx(ctx).Error("ApplicationProfileManager::saveProfile - existing container is nil, will add a new one",
+							helpers.String("slug", slug),
+							helpers.Int("container index", watchedContainer.ContainerIndex),
+							helpers.String("container ID", watchedContainer.ContainerID),
+							helpers.String("k8s workload", watchedContainer.K8sContainerID))
+
 						existingContainer = &v1beta1.ApplicationProfileContainer{
 							Name: watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex],
 						}
 						addContainer = true
 					}
+
 					// update it
 					utils.EnrichApplicationProfileContainer(existingContainer, capabilities, observedSyscalls, execs, opens)
 					// get existing containers
@@ -395,6 +401,12 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					// replace or add container using patch
 					switch {
 					case existingContainers == nil:
+						logger.L().Ctx(ctx).Error("ApplicationProfileManager::saveProfile - existingContainers is nil",
+							helpers.String("slug", slug),
+							helpers.Int("container index", watchedContainer.ContainerIndex),
+							helpers.String("container ID", watchedContainer.ContainerID),
+							helpers.String("k8s workload", watchedContainer.K8sContainerID))
+
 						// 3a. insert a new container slice, with the new container at the right index
 						containers := make([]v1beta1.ApplicationProfileContainer, watchedContainer.ContainerIndex+1)
 						containers[watchedContainer.ContainerIndex] = *existingContainer
@@ -431,6 +443,13 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					replaceOperations = utils.AppendStatusAnnotationPatchOperations(replaceOperations, watchedContainer)
 
 					patch, err := json.Marshal(replaceOperations)
+					logger.L().Ctx(ctx).Error("ApplicationProfileManager::saveProfile - patch result",
+						helpers.String("patch", string(patch)),
+						helpers.String("slug", slug),
+						helpers.Int("container index", watchedContainer.ContainerIndex),
+						helpers.String("container ID", watchedContainer.ContainerID),
+						helpers.String("k8s workload", watchedContainer.K8sContainerID))
+
 					if err != nil {
 						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to marshal patch", helpers.Error(err),
 							helpers.String("slug", slug),
@@ -454,7 +473,12 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			// restore capabilities set
 			am.toSaveCapabilities.Get(watchedContainer.K8sContainerID).Append(capabilities...)
 			// restore execs map entries
-			toSaveExecs.Range(utils.SetInMap(am.toSaveExecs.Get(watchedContainer.K8sContainerID)))
+			toSaveExecs.Range(func(uniqueExecIdentifier string, v []string) bool {
+				if !am.toSaveExecs.Get(watchedContainer.K8sContainerID).Has(uniqueExecIdentifier) {
+					am.toSaveExecs.Get(watchedContainer.K8sContainerID).Set(uniqueExecIdentifier, v)
+				}
+				return true
+			})
 			// restore opens map entries
 			toSaveOpens.Range(utils.SetInMap(am.toSaveOpens.Get(watchedContainer.K8sContainerID)))
 		} else {
@@ -466,7 +490,12 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			// record saved capabilities
 			am.savedCapabilities.Get(watchedContainer.K8sContainerID).Append(capabilities...)
 			// record saved execs
-			toSaveExecs.Range(utils.SetInMap(am.savedExecs.Get(watchedContainer.K8sContainerID)))
+			toSaveExecs.Range(func(uniqueExecIdentifier string, v []string) bool {
+				if !am.savedExecs.Get(watchedContainer.K8sContainerID).Has(uniqueExecIdentifier) {
+					am.savedExecs.Get(watchedContainer.K8sContainerID).Set(uniqueExecIdentifier, v)
+				}
+				return true
+			})
 			// record saved opens
 			toSaveOpens.Range(utils.SetInMap(am.savedOpens.Get(watchedContainer.K8sContainerID)))
 			logger.L().Debug("ApplicationProfileManager - saved application profile",
@@ -543,11 +572,11 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		}
 		am.savedCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
 		am.droppedEvents.Set(k8sContainerID, false)
-		am.savedExecs.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
+		am.savedExecs.Set(k8sContainerID, new(maps.SafeMap[string, []string]))
 		am.savedOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		am.savedSyscalls.Set(k8sContainerID, mapset.NewSet[string]())
 		am.toSaveCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
-		am.toSaveExecs.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
+		am.toSaveExecs.Set(k8sContainerID, new(maps.SafeMap[string, []string]))
 		am.toSaveOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		am.trackedContainers.Add(k8sContainerID)
@@ -595,17 +624,16 @@ func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string,
 		return
 	}
 	// check if we already have this exec
+	// we use a SHA256 hash of the exec to identify it uniquely (path + args, in the order they were provided)
 	savedExecs := am.savedExecs.Get(k8sContainerID)
-	if savedExecs.Has(path) && savedExecs.Get(path).Contains(args...) {
+	execIdentifier := utils.CalculateSHA256FileExecHash(path, args)
+	if savedExecs.Has(execIdentifier) {
 		return
 	}
-	// add to exec map
+
+	// add to exec map, first element is the path, the rest are the args
 	execMap := am.toSaveExecs.Get(k8sContainerID)
-	if execMap.Has(path) {
-		execMap.Get(path).Append(args...)
-	} else {
-		execMap.Set(path, mapset.NewSet[string](args...))
-	}
+	execMap.Set(execIdentifier, append([]string{path}, args...))
 }
 
 func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID, path string, flags []string) {

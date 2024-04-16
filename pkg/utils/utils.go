@@ -325,11 +325,12 @@ func EscapeJSONPointerElement(s string) string {
 
 func AppendStatusAnnotationPatchOperations(existingPatch []PatchOperation, watchedContainer *WatchedContainerData) []PatchOperation {
 	if watchedContainer.statusUpdated {
-		existingPatch = append(existingPatch, PatchOperation{
-			Op:    "replace",
-			Path:  "/metadata/annotations/" + EscapeJSONPointerElement(helpersv1.StatusMetadataKey),
-			Value: string(watchedContainer.status),
-		},
+		existingPatch = append(existingPatch,
+			PatchOperation{
+				Op:    "replace",
+				Path:  "/metadata/annotations/" + EscapeJSONPointerElement(helpersv1.StatusMetadataKey),
+				Value: string(watchedContainer.status),
+			},
 			PatchOperation{
 				Op:    "replace",
 				Path:  "/metadata/annotations/" + EscapeJSONPointerElement(helpersv1.CompletionMetadataKey),
@@ -450,6 +451,13 @@ func GetFileSize(path string) (int64, error) {
 	}
 
 	return fileInfo.Size(), nil
+}
+
+func CalculateSHA256FileExecHash(path string, args []string) string {
+	hash := sha256.New()
+	hash.Write([]byte(fmt.Sprintf("%s;%v", path, args)))
+	hashInBytes := hash.Sum(nil)
+	return hex.EncodeToString(hashInBytes)
 }
 
 // Calculate the SHA256 hash of the given file.
