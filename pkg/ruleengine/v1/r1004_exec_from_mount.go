@@ -96,7 +96,9 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 					RuleID:          rule.ID(),
 					RuleDescription: fmt.Sprintf("Process (%s) was executed from a mounted path (%s) in: %s", p, mount, execEvent.GetContainer()),
 				},
-				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+					PodName: execEvent.GetPod(),
+				},
 			}
 
 			return &ruleFailure

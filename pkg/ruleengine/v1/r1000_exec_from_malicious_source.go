@@ -106,7 +106,9 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 					RuleID:          rule.ID(),
 					RuleDescription: fmt.Sprintf("Execution from malicious source: %s in: %s", execPath, execEvent.GetContainer()),
 				},
-				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+					PodName: execEvent.GetPod(),
+				},
 			}
 
 			return &ruleFailure

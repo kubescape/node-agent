@@ -169,7 +169,9 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 					RuleID:          rule.ID(),
 					RuleDescription: fmt.Sprintf("SSH connection to disallowed port %d", networkEvent.Port),
 				},
-				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+					PodName: networkEvent.GetPod(),
+				},
 			}
 
 			return &ruleFailure
