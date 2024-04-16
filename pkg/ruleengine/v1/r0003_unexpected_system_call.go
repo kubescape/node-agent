@@ -37,7 +37,6 @@ var _ ruleengine.RuleEvaluator = (*R0003UnexpectedSystemCall)(nil)
 
 type R0003UnexpectedSystemCall struct {
 	BaseRule
-	// listOfAlertedSyscalls []string
 	listOfAlertedSyscalls mapset.Set[string]
 }
 
