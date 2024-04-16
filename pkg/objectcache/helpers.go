@@ -2,6 +2,7 @@ package objectcache
 
 import (
 	"encoding/json"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -37,13 +38,13 @@ func ListContainersIDs(pod *corev1.Pod) []string {
 	var containers []string
 
 	for i := range pod.Status.ContainerStatuses {
-		containers = append(containers, pod.Status.ContainerStatuses[i].ContainerID)
+		containers = append(containers, strings.TrimPrefix(pod.Status.ContainerStatuses[i].ContainerID, "containerd://"))
 	}
 	for i := range pod.Status.InitContainerStatuses {
-		containers = append(containers, pod.Status.InitContainerStatuses[i].ContainerID)
+		containers = append(containers, strings.TrimPrefix(pod.Status.InitContainerStatuses[i].ContainerID, "containerd://"))
 	}
 	for i := range pod.Status.EphemeralContainerStatuses {
-		containers = append(containers, pod.Status.EphemeralContainerStatuses[i].ContainerID)
+		containers = append(containers, strings.TrimPrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID, "containerd://"))
 	}
 	return containers
 }
@@ -54,17 +55,17 @@ func ListTerminatedContainers(pod *corev1.Pod) []string {
 
 	for i := range pod.Status.ContainerStatuses {
 		if pod.Status.ContainerStatuses[i].State.Terminated != nil {
-			containers = append(containers, pod.Status.ContainerStatuses[i].ContainerID)
+			containers = append(containers, strings.TrimPrefix(pod.Status.ContainerStatuses[i].ContainerID, "containerd://"))
 		}
 	}
 	for i := range pod.Status.InitContainerStatuses {
 		if pod.Status.InitContainerStatuses[i].State.Terminated != nil {
-			containers = append(containers, pod.Status.InitContainerStatuses[i].ContainerID)
+			containers = append(containers, strings.TrimPrefix(pod.Status.InitContainerStatuses[i].ContainerID, "containerd://"))
 		}
 	}
 	for i := range pod.Status.EphemeralContainerStatuses {
 		if pod.Status.EphemeralContainerStatuses[i].State.Terminated != nil {
-			containers = append(containers, pod.Status.EphemeralContainerStatuses[i].ContainerID)
+			containers = append(containers, strings.TrimPrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID, "containerd://"))
 		}
 	}
 	return containers
