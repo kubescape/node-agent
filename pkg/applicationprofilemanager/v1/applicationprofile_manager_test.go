@@ -53,6 +53,10 @@ func TestApplicationProfileManager(t *testing.T) {
 	// report file exec
 	go am.ReportFileExec("ns/pod/cont", "", []string{"ls"}) // will not be reported
 	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"})
+	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"})       // duplicate - not reported
+	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls", "-l"}) // additional arg - reported
+	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"ls", "-c"})       // different order of args - reported
+	go am.ReportFileExec("ns/pod/cont", "/bin/ls", []string{"-l"})
 	// report file open
 	go am.ReportFileOpen("ns/pod/cont", "/etc/passwd", []string{"O_RDONLY"})
 	// report container started (race condition with reports)
@@ -64,6 +68,8 @@ func TestApplicationProfileManager(t *testing.T) {
 	time.Sleep(15 * time.Second) // need to sleep longer because of AddRandomDuration in startApplicationProfiling
 	// report another file open
 	go am.ReportFileOpen("ns/pod/cont", "/etc/hosts", []string{"O_RDONLY"})
+	// report another file open
+	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"}) // duplicate - will not be reported
 	// sleep more
 	time.Sleep(2 * time.Second)
 	// report container stopped
@@ -79,12 +85,23 @@ func TestApplicationProfileManager(t *testing.T) {
 	sort.Strings(storageClient.ApplicationProfiles[0].Spec.Containers[0].Capabilities)
 	assert.Equal(t, []string{"dup", "listen"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Syscalls)
 	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Capabilities)
-	assert.Equal(t, []v1beta1.ExecCalls{{Path: "/bin/bash", Args: []string{"-c", "ls"}, Envs: []string(nil)}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Execs)
+
+	reportedExecs := storageClient.ApplicationProfiles[0].Spec.Containers[1].Execs
+	expectedExecs := []v1beta1.ExecCalls{
+		{Path: "/bin/bash", Args: []string{"-c", "ls"}, Envs: []string(nil)},
+		{Path: "/bin/bash", Args: []string{"-c", "ls", "-l"}, Envs: []string(nil)},
+		{Path: "/bin/bash", Args: []string{"ls", "-c"}, Envs: []string(nil)},
+		{Path: "/bin/ls", Args: []string{"-l"}, Envs: []string(nil)},
+	}
+	assert.Len(t, reportedExecs, len(expectedExecs))
+	for _, expectedExec := range expectedExecs {
+		assert.Contains(t, reportedExecs, expectedExec)
+	}
 	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Opens)
 	// check the second profile - this is a patch for execs and opens
 	sort.Strings(storageClient.ApplicationProfiles[1].Spec.Containers[0].Capabilities)
 	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Capabilities)
-	assert.Equal(t, []v1beta1.ExecCalls{{Path: "/bin/bash", Args: []string{"-c", "ls"}, Envs: []string(nil)}}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Execs)
+	assert.Equal(t, storageClient.ApplicationProfiles[0].Spec.Containers[1].Execs, storageClient.ApplicationProfiles[1].Spec.Containers[1].Execs)
 	assert.Equal(t, []v1beta1.OpenCalls{
 		{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}},
 		{Path: "/etc/hosts", Flags: []string{"O_RDONLY"}},
