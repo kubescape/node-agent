@@ -68,13 +68,18 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 
 func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string]) {
 	// add capabilities
-	sort.Strings(observedCapabilities)
-	container.Capabilities = observedCapabilities
+	caps := mapset.NewSet(observedCapabilities...)
+	caps.Append(container.Capabilities...)
+	container.Capabilities = caps.ToSlice()
+	sort.Strings(container.Capabilities)
+
 	// add syscalls
-	sort.Strings(observedSyscalls)
-	container.Syscalls = observedSyscalls
+	syscalls := mapset.NewSet(observedSyscalls...)
+	syscalls.Append(container.Syscalls...)
+	container.Syscalls = syscalls.ToSlice()
+	sort.Strings(container.Syscalls)
+
 	// add execs
-	container.Execs = make([]v1beta1.ExecCalls, 0)
 	for _, pathAndArgs := range execs {
 		path := pathAndArgs[0]
 		var args []string
@@ -87,7 +92,6 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 		})
 	}
 	// add opens
-	container.Opens = make([]v1beta1.OpenCalls, 0)
 	for path, open := range opens {
 		flags := open.ToSlice()
 		sort.Strings(flags)

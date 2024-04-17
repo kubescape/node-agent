@@ -4,11 +4,21 @@
 package tests
 
 import (
+	"context"
+	"encoding/json"
 	"node-agent/pkg/utils"
 	"node-agent/tests/testutils"
 	"path"
 	"testing"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	spdxv1beta1client "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -397,3 +407,77 @@ func Test_07_RuleBindingApplyTest(t *testing.T) {
 //func Test_08_BasicAlertTestExistingProfile(t *testing.T) {
 //
 //}
+
+func TestApplicationProfilePatching_AlwaysFail(t *testing.T) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	t.Log("Creating namespace")
+	ns := testutils.NewRandomNamespace()
+
+	name := "replicaset-checkoutservice-59596bf8d8"
+	applicationProfile := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+			Labels: map[string]string{
+				"kubescape.io/instance-template-hash":    "59596bf8d8",
+				"kubescape.io/workload-api-group":        "apps",
+				"kubescape.io/workload-api-version":      "v1",
+				"kubescape.io/workload-kind":             "Deployment",
+				"kubescape.io/workload-name":             "checkoutservice",
+				"kubescape.io/workload-namespace":        "node-agent-test-veum",
+				"kubescape.io/workload-resource-version": "667544",
+			},
+			Annotations: map[string]string{
+				"kubescape.io/completion": "complete",
+				"kubescape.io/status":     "initializing",
+			},
+		},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{
+				{
+					Name: "server",
+					Syscalls: []string{
+						"capget", "capset", "chdir", "close", "epoll_ctl", "faccessat2",
+						"fcntl", "fstat", "fstatfs", "futex", "getdents64", "getppid",
+						"nanosleep", "newfstatat", "openat", "prctl", "read", "setgid",
+						"setgroups", "setuid", "write",
+					},
+				},
+			},
+		},
+		Status: v1beta1.ApplicationProfileStatus{},
+	}
+
+	_, err := storageclient.ApplicationProfiles(ns.Name).Create(context.TODO(), applicationProfile, metav1.CreateOptions{})
+	assert.NoError(t, err)
+
+	// patch the application profile
+	patchOperations := []utils.PatchOperation{
+		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "NET_ADMIN"},
+		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SETGID"},
+		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SETPCAP"},
+		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SETUID"},
+		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SYS_ADMIN"},
+		{Op: "add", Path: "/spec/containers/0/syscalls/-", Value: "accept4"},
+		{Op: "add", Path: "/spec/containers/0/syscalls/-", Value: "arch_prctl"},
+		{Op: "add", Path: "/spec/containers/0/syscalls/-", Value: "bind"},
+		{Op: "add", Path: "/spec/containers/0/execs/-", Value: map[string]interface{}{
+			"path": "/checkoutservice",
+			"args": []string{"/checkoutservice"},
+		}},
+		{Op: "add", Path: "/spec/containers/0/execs/-", Value: map[string]interface{}{
+			"path": "/bin/grpc_health_probe",
+			"args": []string{"/bin/grpc_health_probe", "-addr=:5050"},
+		}},
+		{Op: "replace", Path: "/metadata/annotations/kubescape.io~1status", Value: "ready"},
+		{Op: "replace", Path: "/metadata/annotations/kubescape.io~1completion", Value: "complete"},
+	}
+
+	patch, err := json.Marshal(patchOperations)
+	assert.NoError(t, err)
+
+	_, err = storageclient.ApplicationProfiles(ns.Name).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
+	// TODO: FIXME - should not fail
+	assert.Error(t, err)
+}
