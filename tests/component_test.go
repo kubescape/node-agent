@@ -408,7 +408,7 @@ func Test_07_RuleBindingApplyTest(t *testing.T) {
 //
 //}
 
-func TestApplicationProfilePatching_AlwaysFail(t *testing.T) {
+func Test_08_ApplicationProfilePatching(t *testing.T) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
@@ -482,7 +482,7 @@ func TestApplicationProfilePatching_AlwaysFail(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func Test_08_FalsePositiveTest(t *testing.T) {
+func Test_09_FalsePositiveTest(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
