@@ -38,13 +38,13 @@ func ListContainersIDs(pod *corev1.Pod) []string {
 	var containers []string
 
 	for i := range pod.Status.ContainerStatuses {
-		containers = append(containers, strings.TrimPrefix(pod.Status.ContainerStatuses[i].ContainerID, "containerd://"))
+		containers = append(containers, trimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID))
 	}
 	for i := range pod.Status.InitContainerStatuses {
-		containers = append(containers, strings.TrimPrefix(pod.Status.InitContainerStatuses[i].ContainerID, "containerd://"))
+		containers = append(containers, trimRuntimePrefix(pod.Status.InitContainerStatuses[i].ContainerID))
 	}
 	for i := range pod.Status.EphemeralContainerStatuses {
-		containers = append(containers, strings.TrimPrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID, "containerd://"))
+		containers = append(containers, trimRuntimePrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID))
 	}
 	return containers
 }
@@ -55,18 +55,28 @@ func ListTerminatedContainers(pod *corev1.Pod) []string {
 
 	for i := range pod.Status.ContainerStatuses {
 		if pod.Status.ContainerStatuses[i].State.Terminated != nil {
-			containers = append(containers, strings.TrimPrefix(pod.Status.ContainerStatuses[i].ContainerID, "containerd://"))
+			containers = append(containers, trimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID))
 		}
 	}
 	for i := range pod.Status.InitContainerStatuses {
 		if pod.Status.InitContainerStatuses[i].State.Terminated != nil {
-			containers = append(containers, strings.TrimPrefix(pod.Status.InitContainerStatuses[i].ContainerID, "containerd://"))
+			containers = append(containers, trimRuntimePrefix(pod.Status.InitContainerStatuses[i].ContainerID))
 		}
 	}
 	for i := range pod.Status.EphemeralContainerStatuses {
 		if pod.Status.EphemeralContainerStatuses[i].State.Terminated != nil {
-			containers = append(containers, strings.TrimPrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID, "containerd://"))
+			containers = append(containers, trimRuntimePrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID))
 		}
 	}
 	return containers
+}
+
+// trimRuntimePrefix removes the runtime prefix from a container ID.
+func trimRuntimePrefix(id string) string {
+	parts := strings.SplitN(id, "//", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+
+	return parts[1]
 }

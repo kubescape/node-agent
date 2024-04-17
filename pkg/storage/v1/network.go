@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"node-agent/pkg/utils"
 	"strconv"
+
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func (sc Storage) GetNetworkNeighborhood(namespace, name string) (*v1beta1.NetworkNeighborhood, error) {
@@ -36,6 +37,17 @@ func (sc Storage) PatchNetworkNeighborhood(name, namespace string, patch []byte,
 		if s == helpers.TooLarge {
 			if channel != nil {
 				channel <- utils.TooLargeObjectError
+			}
+		}
+		return nil
+	}
+	// check if returned profile is completed
+	if c, ok := neighborhood.Annotations[helpers.CompletionMetadataKey]; ok {
+		if s, ok := neighborhood.Annotations[helpers.StatusMetadataKey]; ok {
+			if s == helpers.Complete && c == helpers.Completed {
+				if channel != nil {
+					channel <- utils.ObjectCompleted
+				}
 			}
 		}
 		return nil

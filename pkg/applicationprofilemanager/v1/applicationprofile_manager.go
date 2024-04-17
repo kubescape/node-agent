@@ -187,6 +187,9 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
 				return nil
+			case errors.Is(err, utils.ObjectCompleted):
+				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+				return nil
 			case errors.Is(err, utils.TooLargeObjectError):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
 				return nil

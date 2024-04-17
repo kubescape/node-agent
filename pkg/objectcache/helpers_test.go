@@ -72,3 +72,36 @@ func TestListContainers(t *testing.T) {
 		})
 	}
 }
+func TestTrimRuntimePrefix(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{
+			name: "Test with valid runtime prefix",
+			id:   "runtime//containerID",
+			want: "containerID",
+		},
+		{
+			name: "Test with no runtime prefix",
+			id:   "containerID",
+			want: "",
+		},
+		{
+			name: "Test with docker runtime prefix",
+			id:   "docker://containerID",
+			want: "containerID",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := trimRuntimePrefix(tt.id)
+
+			if got != tt.want {
+				t.Errorf("trimRuntimePrefix() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

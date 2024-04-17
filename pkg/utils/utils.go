@@ -46,6 +46,7 @@ import (
 var (
 	ContainerHasTerminatedError = errors.New("container has terminated")
 	ContainerReachedMaxTime     = errors.New("container reached max time")
+	ObjectCompleted             = errors.New("object is completed")
 	TooLargeObjectError         = errors.New("object is too large")
 	IncompleteSBOMError         = errors.New("incomplete SBOM")
 )

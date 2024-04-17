@@ -155,7 +155,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 					Pcomm:      event.Pcomm,
 					Cwd:        event.Cwd,
 					Hardlink:   event.ExePath,
-					Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(event.Args, " ")),
+					Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(event), " ")),
 				},
 				ContainerID: event.Runtime.ContainerID,
 			},
