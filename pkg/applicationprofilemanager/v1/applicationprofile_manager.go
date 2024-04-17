@@ -360,7 +360,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			} else {
 				logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to patch application profile, will get existing one and adjust patch", helpers.Error(err),
 					helpers.String("slug", slug),
-					helpers.String("patch", string(patch)),
 					helpers.Int("container index", watchedContainer.ContainerIndex),
 					helpers.String("container ID", watchedContainer.ContainerID),
 					helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -451,12 +450,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							helpers.String("k8s workload", watchedContainer.K8sContainerID))
 						return
 					}
-					logger.L().Ctx(ctx).Error("ApplicationProfileManager - 442 patch application profile",
-						helpers.String("patch", string(patch)),
-						helpers.String("slug", slug),
-						helpers.Int("container index", watchedContainer.ContainerIndex),
-						helpers.String("container ID", watchedContainer.ContainerID),
-						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 
 					if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
 						gotErr = err
