@@ -488,6 +488,8 @@ func Test_09_FalsePositiveTest(t *testing.T) {
 
 	testutils.IncreaseNodeAgentSniffingTime("10m")
 
+	time.Sleep(5 * time.Second)
+
 	t.Log("Creating namespace")
 	ns := testutils.NewRandomNamespace()
 
