@@ -278,7 +278,7 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 	checkContainers(nil, ephemeralContainers, EphemeralContainer)
 }
 
-// SetTerminationStatus updates the terminated flag and sets the exit code on the watched container
+// GetTerminationExitCode returns the termination exit code of the container, otherwise -1
 func (watchedContainer *WatchedContainerData) GetTerminationExitCode(k8sObjectsCache objectcache.K8sObjectCache, namespace, podName, containerName string) int32 {
 	time.Sleep(3 * time.Second)
 	podStatus := k8sObjectsCache.GetPodStatus(namespace, podName)
@@ -287,7 +287,6 @@ func (watchedContainer *WatchedContainerData) GetTerminationExitCode(k8sObjectsC
 			if podStatus.ContainerStatuses[i].Name == containerName {
 				if podStatus.ContainerStatuses[i].LastTerminationState.Terminated != nil {
 					return podStatus.ContainerStatuses[i].LastTerminationState.Terminated.ExitCode
-
 				}
 			}
 		}
@@ -307,7 +306,7 @@ func (watchedContainer *WatchedContainerData) GetTerminationExitCode(k8sObjectsC
 		}
 	}
 
-	return 0
+	return -1
 }
 
 type PatchOperation struct {
