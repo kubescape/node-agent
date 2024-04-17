@@ -335,8 +335,11 @@ func (am *NetworkManager) saveNetworkEvents(_ context.Context, container *contai
 			return
 		}
 	}
+
+	currSpec := v1beta1.NetworkNeighborsSpec{}
 	if err == nil {
 		networkNeighborsExists = true
+		currSpec = networkNeighbors.Spec
 	}
 
 	if droppedEvents := am.containerAndPodToDroppedEvent.Get(container.Runtime.ContainerID + container.K8s.PodName); droppedEvents {
@@ -346,7 +349,7 @@ func (am *NetworkManager) saveNetworkEvents(_ context.Context, container *contai
 	networkEvents := am.containerAndPodToEventsMap.Get(container.Runtime.ContainerID + container.K8s.PodName)
 
 	// update CRD based on events
-	networkNeighborsSpec := am.generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents, networkNeighbors.Spec)
+	networkNeighborsSpec := am.generateNetworkNeighborsEntries(container.K8s.Namespace, networkEvents, currSpec)
 
 	if networkNeighborsExists {
 		// patch only if there are changes
