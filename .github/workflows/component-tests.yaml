@@ -47,6 +47,7 @@ jobs:
           Test_05_MemoryLeak_10K_Alerts,
           Test_06_KillProcessInTheMiddle,
           Test_07_RuleBindingApplyTest,
+          Test_08_FalsePositiveTest,
         ]
     steps:
       - name: Checkout code

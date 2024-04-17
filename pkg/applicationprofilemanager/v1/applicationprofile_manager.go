@@ -332,7 +332,13 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				}
 				addContainers := func(containers []v1beta1.ApplicationProfileContainer, containerNames []string) []v1beta1.ApplicationProfileContainer {
 					for _, name := range containerNames {
-						containers = append(containers, v1beta1.ApplicationProfileContainer{Name: name})
+						containers = append(containers, v1beta1.ApplicationProfileContainer{
+							Name:         name,
+							Execs:        make([]v1beta1.ExecCalls, 0),
+							Opens:        make([]v1beta1.OpenCalls, 0),
+							Capabilities: make([]string, 0),
+							Syscalls:     make([]string, 0),
+						})
 					}
 					return containers
 				}
@@ -354,6 +360,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			} else {
 				logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to patch application profile, will get existing one and adjust patch", helpers.Error(err),
 					helpers.String("slug", slug),
+					helpers.String("patch", string(patch)),
 					helpers.Int("container index", watchedContainer.ContainerIndex),
 					helpers.String("container ID", watchedContainer.ContainerID),
 					helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -373,7 +380,11 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					var addContainer bool
 					if existingContainer == nil {
 						existingContainer = &v1beta1.ApplicationProfileContainer{
-							Name: watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex],
+							Name:         watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex],
+							Execs:        make([]v1beta1.ExecCalls, 0),
+							Opens:        make([]v1beta1.OpenCalls, 0),
+							Capabilities: make([]string, 0),
+							Syscalls:     make([]string, 0),
 						}
 						addContainer = true
 					}
@@ -407,7 +418,11 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 								Op:   "add",
 								Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
 								Value: v1beta1.ApplicationProfileContainer{
-									Name: watchedContainer.ContainerNames[watchedContainer.ContainerType][i],
+									Name:         watchedContainer.ContainerNames[watchedContainer.ContainerType][i],
+									Execs:        make([]v1beta1.ExecCalls, 0),
+									Opens:        make([]v1beta1.OpenCalls, 0),
+									Capabilities: make([]string, 0),
+									Syscalls:     make([]string, 0),
 								},
 							})
 						}
@@ -436,6 +451,13 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							helpers.String("k8s workload", watchedContainer.K8sContainerID))
 						return
 					}
+					logger.L().Ctx(ctx).Error("ApplicationProfileManager - 442 patch application profile",
+						helpers.String("patch", string(patch)),
+						helpers.String("slug", slug),
+						helpers.Int("container index", watchedContainer.ContainerIndex),
+						helpers.String("container ID", watchedContainer.ContainerID),
+						helpers.String("k8s workload", watchedContainer.K8sContainerID))
+
 					if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
 						gotErr = err
 						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to patch application profile", helpers.Error(err),

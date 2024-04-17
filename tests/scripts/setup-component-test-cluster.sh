@@ -60,7 +60,7 @@ NODE_AGENT_TAG=$(./node-agent-tag.sh)
 # Install node agent chart
 helm upgrade --install kubescape ../chart --set clusterName=`kubectl config current-context` \
     --set nodeAgent.image.tag=$NODE_AGENT_TAG \
-    --set storage.image.tag=$NODE_AGENT_TAG \
+    --set storage.image.tag=$STORAGE_TAG \
     -n kubescape --create-namespace --wait --timeout 5m || error_exit "Failed to install node-agent chart."
 
 # Check that the node-agent pod is running
