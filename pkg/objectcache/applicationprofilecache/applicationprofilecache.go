@@ -254,7 +254,7 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 			return
 		}
 		ap.slugToAppProfile.Set(apName, fullAP)
-		for i := range ap.slugToContainers.Get(apName).Iter() {
+		for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
 			ap.containerToSlug.Set(i, apName)
 		}
 
