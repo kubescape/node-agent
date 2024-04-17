@@ -5,6 +5,7 @@ import (
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
+	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
@@ -66,12 +67,17 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		return nil
 	}
 
+	// TODO: fix this, currently we are ignoring in-cluster communication
+	if strings.HasSuffix(domainEvent.DNSName, "svc.cluster.local.") {
+		return nil
+	}
+
 	nn := objCache.NetworkNeighborsCache().GetNetworkNeighbors(domainEvent.GetNamespace(), domainEvent.GetPod())
 	if nn == nil {
 		return nil
 	}
 
-	// // Check that the domain is in the application profile
+	// Check that the domain is in the network neighbors
 	for _, dns := range nn.Spec.Egress {
 		if dns.DNS == domainEvent.DNSName {
 			return nil

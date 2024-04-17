@@ -2,12 +2,13 @@ package utils
 
 import (
 	"fmt"
-	"github.com/deckarep/golang-set/v2"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"sort"
+
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string], containerType string, containerIndex int) []PatchOperation {
+func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], containerType string, containerIndex int) []PatchOperation {
 	var profileOperations []PatchOperation
 	// add capabilities
 	sort.Strings(capabilities)
@@ -32,9 +33,12 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 
 	// add execs
 	execsPath := fmt.Sprintf("/spec/%s/%d/execs/-", containerType, containerIndex)
-	for path, exec := range execs {
-		args := exec.ToSlice()
-		sort.Strings(args)
+	for _, pathAndArgs := range execs {
+		path := pathAndArgs[0]
+		var args []string
+		if len(pathAndArgs) > 1 {
+			args = pathAndArgs[1:]
+		}
 		profileOperations = append(profileOperations, PatchOperation{
 			Op:   "add",
 			Path: execsPath,
@@ -62,7 +66,7 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 	return profileOperations
 }
 
-func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string]mapset.Set[string], opens map[string]mapset.Set[string]) {
+func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string]) {
 	// add capabilities
 	sort.Strings(observedCapabilities)
 	container.Capabilities = observedCapabilities
@@ -71,9 +75,12 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 	container.Syscalls = observedSyscalls
 	// add execs
 	container.Execs = make([]v1beta1.ExecCalls, 0)
-	for path, exec := range execs {
-		args := exec.ToSlice()
-		sort.Strings(args)
+	for _, pathAndArgs := range execs {
+		path := pathAndArgs[0]
+		var args []string
+		if len(pathAndArgs) > 1 {
+			args = pathAndArgs[1:]
+		}
 		container.Execs = append(container.Execs, v1beta1.ExecCalls{
 			Path: path,
 			Args: args,

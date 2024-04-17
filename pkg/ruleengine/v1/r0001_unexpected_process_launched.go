@@ -86,10 +86,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		return nil
 	}
 
-	slices.Sort(execEvent.Args)
-
 	for _, execCall := range appProfileExecList.Execs {
-		slices.Sort(execCall.Args)
 		if execCall.Path == execPath && slices.Compare(execCall.Args, execEvent.Args) == 0 {
 			return nil
 		}
