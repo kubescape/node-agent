@@ -80,47 +80,43 @@ func (rule *R0007KubernetesClientExecuted) DeleteRule() {
 func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetworktype.Event, nn *v1beta1.NetworkNeighbors, k8sObjCache objectcache.K8sObjectCache) *GenericRuleFailure {
 
 	for _, egress := range nn.Spec.Egress {
-		if egress.DNS == event.DstEndpoint.Addr {
+		if egress.IPAddress == event.DstEndpoint.Addr {
 			return nil
 		}
 	}
 
 	apiServerIP := k8sObjCache.GetApiServerIpAddress()
-	if apiServerIP == "" {
+	if apiServerIP == "" || event.DstEndpoint.Addr != apiServerIP {
 		return nil
 	}
 
-	if event.DstEndpoint.Addr == apiServerIP {
-		ruleFailure := GenericRuleFailure{
-			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
-				InfectedPID:    event.Pid,
-				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-				Severity:       R0007KubernetesClientExecutedDescriptor.Priority,
+	ruleFailure := GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName:      rule.Name(),
+			InfectedPID:    event.Pid,
+			FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
+			Severity:       R0007KubernetesClientExecutedDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				Comm: event.Comm,
+				Gid:  &event.Gid,
+				PID:  event.Pid,
+				Uid:  &event.Uid,
 			},
-			RuntimeProcessDetails: apitypes.ProcessTree{
-				ProcessTree: apitypes.Process{
-					Comm: event.Comm,
-					Gid:  &event.Gid,
-					PID:  event.Pid,
-					Uid:  &event.Uid,
-				},
-				ContainerID: event.Runtime.ContainerID,
-			},
-			TriggerEvent: event.Event,
-			RuleAlert: apitypes.RuleAlert{
-				RuleID:          rule.ID(),
-				RuleDescription: fmt.Sprintf("Kubernetes client executed: %s", event.Comm),
-			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName: event.GetPod(),
-			},
-		}
-
-		return &ruleFailure
+			ContainerID: event.Runtime.ContainerID,
+		},
+		TriggerEvent: event.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleID:          rule.ID(),
+			RuleDescription: fmt.Sprintf("Kubernetes client executed: %s", event.Comm),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName: event.GetPod(),
+		},
 	}
 
-	return nil
+	return &ruleFailure
 }
 
 func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype.Event, ap *v1beta1.ApplicationProfile) *GenericRuleFailure {

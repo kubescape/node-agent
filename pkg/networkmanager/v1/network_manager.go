@@ -468,9 +468,16 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 				continue
 			}
 
-			selector := svc.GetServiceSelector()
+			var selector map[string]string
+			if svc.GetName() == "kubernetes" && svc.GetNamespace() == "default" {
+				// the default service has no selectors, in addition, we want to save the default service address
+				selector = svc.GetLabels()
+				neighborEntry.IPAddress = networkEvent.Destination.IPAddress
+			} else {
+				selector = svc.GetServiceSelector()
+			}
 			if len(selector) == 0 {
-				if err = am.handleServiceWithNoSelectors(svc, networkEvent, egressIdentifiersMap, ingressIdentifiersMap); err != nil {
+				if err = am.handleServiceWithNoSelectors(networkEvent, egressIdentifiersMap, ingressIdentifiersMap); err != nil {
 					logger.L().Warning("failed to handle service with no selectors", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
 				}
 				continue
@@ -496,6 +503,7 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 				domain, ok := am.dnsResolverClient.ResolveIPAddress(networkEvent.Destination.IPAddress)
 				if ok {
 					neighborEntry.DNS = domain
+					neighborEntry.DNSNames = []string{domain}
 				}
 			}
 		}
@@ -572,7 +580,7 @@ func addToMap(identifiersMap map[string]v1beta1.NetworkNeighbor, identifier stri
 	identifiersMap[identifier] = neighborEntry
 }
 
-func (am *NetworkManager) handleServiceWithNoSelectors(svc workloadinterface.IWorkload, networkEvent networkmanager.NetworkEvent, egressIdentifiersMap map[string]v1beta1.NetworkNeighbor, ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor) error {
+func (am *NetworkManager) handleServiceWithNoSelectors(networkEvent networkmanager.NetworkEvent, egressIdentifiersMap map[string]v1beta1.NetworkNeighbor, ingressIdentifiersMap map[string]v1beta1.NetworkNeighbor) error {
 
 	// retrieve endpoint
 	endpoints, err := am.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Endpoint", networkEvent.Destination.Name)

@@ -5,11 +5,11 @@ import (
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
-	"slices"
 
 	ruleenginetypes "node-agent/pkg/ruleengine/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	mapset "github.com/deckarep/golang-set/v2"
 )
 
 const (
@@ -37,11 +37,13 @@ var _ ruleengine.RuleEvaluator = (*R0003UnexpectedSystemCall)(nil)
 
 type R0003UnexpectedSystemCall struct {
 	BaseRule
-	listOfAlertedSyscalls []string
+	listOfAlertedSyscalls mapset.Set[string]
 }
 
 func CreateRuleR0003UnexpectedSystemCall() *R0003UnexpectedSystemCall {
-	return &R0003UnexpectedSystemCall{}
+	return &R0003UnexpectedSystemCall{
+		listOfAlertedSyscalls: mapset.NewSet[string](),
+	}
 }
 
 func (rule *R0003UnexpectedSystemCall) Name() string {
@@ -83,7 +85,7 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 	}
 
 	// We have already alerted for this syscall
-	if slices.Contains(rule.listOfAlertedSyscalls, syscallEvent.SyscallName) {
+	if rule.listOfAlertedSyscalls.ContainsOne(syscallEvent.SyscallName) {
 		return nil
 	}
 
@@ -109,6 +111,8 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 			PodName: syscallEvent.GetPod(),
 		},
 	}
+
+	rule.listOfAlertedSyscalls.Add(syscallEvent.SyscallName)
 
 	return &ruleFailure
 }
