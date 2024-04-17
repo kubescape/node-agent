@@ -77,11 +77,10 @@ func NewTestWorkload(namespace, resourcePath string) (*TestWorkload, error) {
 }
 
 func (w *TestWorkload) ExecIntoPod(command []string) (string, string, error) {
-	pods, err := w.GetPods()
+	pod, err := w.GetPod()
 	if err != nil {
 		return "", "", err
 	}
-	pod := pods[0]
 
 	k8sClient := k8sinterface.NewKubernetesApi()
 
@@ -115,7 +114,7 @@ func (w *TestWorkload) ExecIntoPod(command []string) (string, string, error) {
 	return buf.String(), errBuf.String(), nil
 }
 
-func (w *TestWorkload) GetPods() ([]v1.Pod, error) {
+func (w *TestWorkload) GetPod() (*v1.Pod, error) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 
 	appLabel, _ := w.WorkloadObj.GetLabel("app")
@@ -133,42 +132,33 @@ func (w *TestWorkload) GetPods() ([]v1.Pod, error) {
 	if len(pods.Items) == 0 {
 		return nil, fmt.Errorf("no pods found")
 	}
-	return pods.Items, nil
+	return &pods.Items[0], nil
 }
 
 func (w *TestWorkload) WaitForReady(maxRetries uint64) error {
 	time.Sleep(5 * time.Second)
 	k8sClient := k8sinterface.NewKubernetesApi()
 
-	pods, err := w.GetPods()
+	pod, err := w.GetPod()
 	if err != nil {
 		return err
 	}
-	podNames := make([]string, 0)
-	for _, pod := range pods {
-		podNames = append(podNames, pod.Name)
-	}
-
-	for _, podName := range podNames {
-		err := backoff.RetryNotify(func() error {
-			p, err := k8sClient.KubernetesClient.CoreV1().Pods(w.Namespace).Get(context.TODO(), podName, metav1.GetOptions{})
-			if err != nil {
-				return err
-			}
-			for _, cond := range p.Status.Conditions {
-				if cond.Type == "Ready" && cond.Status == "True" {
-					return nil
-				}
-			}
-			return fmt.Errorf("pod %s is not ready", podName)
-		}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), maxRetries), func(err error, d time.Duration) {
-			logger.L().Info("waiting for pod to be ready", helpers.String("pod", podName), helpers.Error(err), helpers.String("retry in", d.String()))
-		})
+	podName := pod.Name
+	return backoff.RetryNotify(func() error {
+		p, err := k8sClient.KubernetesClient.CoreV1().Pods(w.Namespace).Get(context.TODO(), podName, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
-	}
-	return nil
+		for _, cond := range p.Status.Conditions {
+			if cond.Type == "Ready" && cond.Status == "True" {
+				return nil
+			}
+		}
+		return fmt.Errorf("pod %s is not ready", podName)
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), maxRetries), func(err error, d time.Duration) {
+		logger.L().Info("waiting for pod to be ready", helpers.String("pod", podName), helpers.Error(err), helpers.String("retry in", d.String()))
+	})
+
 }
 
 func (w *TestWorkload) listApplicationProfilesInNamespace() ([]v1beta1.ApplicationProfile, error) {
