@@ -202,6 +202,9 @@ func (nm *NetworkManager) monitorContainer(ctx context.Context, container *conta
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				nm.saveNetworkEvents(ctx, watchedContainer, container.K8s.Namespace)
 				return nil
+			case errors.Is(err, utils.ObjectCompleted):
+				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+				return nil
 			case errors.Is(err, utils.TooLargeObjectError):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
 				return nil
