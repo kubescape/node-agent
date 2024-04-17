@@ -161,7 +161,7 @@ func (c *RBCache) DeleteHandler(_ context.Context, obj *unstructured.Unstructure
 func (c *RBCache) addRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) []rulebindingmanager.RuleBindingNotify {
 	var rbs []rulebindingmanager.RuleBindingNotify
 	rbName := rbUniqueName(ruleBinding)
-	logger.L().Info("AddRuleBinding", helpers.String("name", rbName))
+	logger.L().Info("RuleBinding added/modified", helpers.String("name", rbName))
 
 	// convert selectors to string
 	nsSelector, err := metav1.LabelSelectorAsSelector(&ruleBinding.Spec.NamespaceSelector)
@@ -223,13 +223,13 @@ func (c *RBCache) addRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) [
 			n := rulebindingmanager.NewRuleBindingNotifierImpl(rulebindingmanager.Added, pod)
 			rbs = append(rbs, n)
 
-			logger.L().Info("AddRuleBinding", helpers.String("ruleBinding", rbName), helpers.String("pod", podName))
+			logger.L().Debug("ruleBinding attached to pod", helpers.String("ruleBinding", rbName), helpers.String("pod", podName))
 		}
 	}
 	return rbs
 }
 func (c *RBCache) deleteRuleBinding(uniqueName string) []rulebindingmanager.RuleBindingNotify {
-	logger.L().Info("DeleteRuleBinding", helpers.String("name", uniqueName))
+	logger.L().Info("RuleBinding deleted", helpers.String("name", uniqueName))
 	var rbs []rulebindingmanager.RuleBindingNotify
 
 	// remove the rule binding from the pods
@@ -327,7 +327,7 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) []rulebindingmana
 		} else {
 			c.rbNameToPodNames.Get(rbName).Add(podName)
 		}
-		logger.L().Info("AddPod", helpers.String("pod", podName), helpers.String("ruleBinding", rbName))
+		logger.L().Debug("adding pod to roleBinding", helpers.String("pod", podName), helpers.String("ruleBinding", rbName))
 
 		n := rulebindingmanager.NewRuleBindingNotifierImpl(rulebindingmanager.Added, *pod)
 		rbs = append(rbs, n)
@@ -350,7 +350,6 @@ func (c *RBCache) deletePod(uniqueName string) {
 		}
 	}
 	c.podToRBNames.Delete(uniqueName)
-	logger.L().Info("DeletePod", helpers.String("pod", uniqueName))
 }
 
 func (c *RBCache) createRules(rulesForPod []typesv1.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {

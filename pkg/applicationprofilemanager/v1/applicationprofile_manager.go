@@ -176,8 +176,7 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
 				// if exit code is 0 we set the status to completed
-				// TODO: Should we split ContainerHasTerminatedError to indicate if we reached the maxSniffingTime?
-				if watchedContainer.GetTerminationExitCode(am.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName) == 0 {
+				if objectcache.GetTerminationExitCode(am.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName, container.Runtime.ContainerID) == 0 {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				}
 
@@ -208,10 +207,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 
 	// verify the container hasn't already been deleted
 	if !am.trackedContainers.Contains(watchedContainer.K8sContainerID) {
-		logger.L().Ctx(ctx).Debug("ApplicationProfileManager - container isn't tracked, not saving profile",
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
 		return
 	}
 
@@ -548,9 +543,6 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		if am.watchedContainerChannels.Has(notif.Container.Runtime.ContainerID) {
-			logger.L().Debug("container already exist in memory",
-				helpers.String("container ID", notif.Container.Runtime.ContainerID),
-				helpers.String("k8s workload", k8sContainerID))
 			return
 		}
 		am.savedCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
@@ -565,22 +557,11 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.trackedContainers.Add(k8sContainerID)
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
 
-		// stop monitoring after MaxSniffingTime
-		time.AfterFunc(am.cfg.MaxSniffingTime, func() {
-			logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-			event := containercollection.PubSubEvent{
-				Timestamp: time.Now().Format(time.RFC3339),
-				Type:      containercollection.EventTypeRemoveContainer,
-				Container: notif.Container,
-			}
-			am.ContainerCallback(event)
-		})
 	case containercollection.EventTypeRemoveContainer:
 		channel := am.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
 		if channel != nil {
 			channel <- utils.ContainerHasTerminatedError
 		}
-		am.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 

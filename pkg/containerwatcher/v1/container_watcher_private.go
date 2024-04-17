@@ -34,12 +34,13 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 	case containercollection.EventTypeAddContainer:
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		time.AfterFunc(ch.cfg.MaxSniffingTime, func() {
+			logger.L().Info("monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
-			ch.unregisterContainer(notif.Container)
 			ch.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.relevancyManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.networkManagerv1.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.networkManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
+			ch.unregisterContainer(notif.Container)
 		})
 	case containercollection.EventTypeRemoveContainer:
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
@@ -286,7 +287,7 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 		return
 	}
 
-	logger.L().Info("stop monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
+	logger.L().Info("stopping to monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
 
 	ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
 

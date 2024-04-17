@@ -293,7 +293,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		// Channels
 		capabilitiesWorkerChan: make(chan *tracercapabilitiestype.Event, 1000),
 		execWorkerChan:         make(chan *tracerexectype.Event, 1000),
-		openWorkerChan:         make(chan *traceropentype.Event, 50000),
+		openWorkerChan:         make(chan *traceropentype.Event, 100000),
 		networkWorkerChan:      make(chan *tracernetworktype.Event, 50000),
 		dnsWorkerChan:          make(chan *tracerdnstype.Event, 10000),
 		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 500),
