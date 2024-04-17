@@ -408,7 +408,7 @@ func Test_07_RuleBindingApplyTest(t *testing.T) {
 //
 //}
 
-func TestApplicationProfilePatching_AlwaysFail(t *testing.T) {
+func Test_08_ApplicationProfilePatching(t *testing.T) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 
@@ -478,6 +478,61 @@ func TestApplicationProfilePatching_AlwaysFail(t *testing.T) {
 	assert.NoError(t, err)
 
 	_, err = storageclient.ApplicationProfiles(ns.Name).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
-	// TODO: FIXME - should not fail
-	assert.Error(t, err)
+
+	assert.NoError(t, err)
+}
+
+func Test_09_FalsePositiveTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	testutils.IncreaseNodeAgentSniffingTime("10m")
+
+	time.Sleep(5 * time.Second)
+
+	t.Log("Creating namespace")
+	ns := testutils.NewRandomNamespace()
+
+	t.Log("Creating services")
+	_, err := testutils.CreateWorkloadsInPath(ns.Name, path.Join(utils.CurrentDir(), "resources/hipster_shop/services"))
+	if err != nil {
+		t.Errorf("Error creating services: %v", err)
+	}
+
+	t.Log("Creating deployments")
+	deployments, err := testutils.CreateWorkloadsInPath(ns.Name, path.Join(utils.CurrentDir(), "resources/hipster_shop/deployments"))
+	if err != nil {
+		t.Errorf("Error creating deployments: %v", err)
+	}
+
+	t.Log("Waiting for all workloads to be ready")
+	for _, wl := range deployments {
+		err = wl.WaitForReady(80)
+		if err != nil {
+			t.Errorf("Error waiting for workload to be ready: %v", err)
+		}
+	}
+	t.Log("All workloads are ready")
+
+	t.Log("Waiting for all application profiles to be completed")
+	for _, wl := range deployments {
+		err = wl.WaitForApplicationProfileCompletion(80)
+		if err != nil {
+			t.Errorf("Error waiting for application profile to be completed: %v", err)
+		}
+	}
+
+	// wait for 1 minute for the alerts to be generated
+	time.Sleep(1 * time.Minute)
+
+	if err != nil {
+		t.Errorf("Error getting pods with restarts: %v", err)
+	}
+
+	alerts, err := testutils.GetAlerts(ns.Name)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	assert.Equal(t, 0, len(alerts), "Expected no alerts to be generated, but got %d alerts", len(alerts))
 }

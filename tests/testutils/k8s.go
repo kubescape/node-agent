@@ -3,9 +3,12 @@ package testutils
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -77,10 +80,11 @@ func NewTestWorkload(namespace, resourcePath string) (*TestWorkload, error) {
 }
 
 func (w *TestWorkload) ExecIntoPod(command []string) (string, string, error) {
-	pod, err := w.GetPod()
+	pods, err := w.GetPods()
 	if err != nil {
 		return "", "", err
 	}
+	pod := pods[0]
 
 	k8sClient := k8sinterface.NewKubernetesApi()
 
@@ -114,7 +118,7 @@ func (w *TestWorkload) ExecIntoPod(command []string) (string, string, error) {
 	return buf.String(), errBuf.String(), nil
 }
 
-func (w *TestWorkload) GetPod() (*v1.Pod, error) {
+func (w *TestWorkload) GetPods() ([]v1.Pod, error) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 
 	appLabel, _ := w.WorkloadObj.GetLabel("app")
@@ -132,33 +136,42 @@ func (w *TestWorkload) GetPod() (*v1.Pod, error) {
 	if len(pods.Items) == 0 {
 		return nil, fmt.Errorf("no pods found")
 	}
-	return &pods.Items[0], nil
+	return pods.Items, nil
 }
 
 func (w *TestWorkload) WaitForReady(maxRetries uint64) error {
 	time.Sleep(5 * time.Second)
 	k8sClient := k8sinterface.NewKubernetesApi()
 
-	pod, err := w.GetPod()
+	pods, err := w.GetPods()
 	if err != nil {
 		return err
 	}
-	podName := pod.Name
-	return backoff.RetryNotify(func() error {
-		p, err := k8sClient.KubernetesClient.CoreV1().Pods(w.Namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+	podNames := make([]string, 0)
+	for _, pod := range pods {
+		podNames = append(podNames, pod.Name)
+	}
+
+	for _, podName := range podNames {
+		err := backoff.RetryNotify(func() error {
+			p, err := k8sClient.KubernetesClient.CoreV1().Pods(w.Namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			for _, cond := range p.Status.Conditions {
+				if cond.Type == "Ready" && cond.Status == "True" {
+					return nil
+				}
+			}
+			return fmt.Errorf("pod %s is not ready", podName)
+		}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), maxRetries), func(err error, d time.Duration) {
+			logger.L().Info("waiting for pod to be ready", helpers.String("pod", podName), helpers.Error(err), helpers.String("retry in", d.String()))
+		})
 		if err != nil {
 			return err
 		}
-		for _, cond := range p.Status.Conditions {
-			if cond.Type == "Ready" && cond.Status == "True" {
-				return nil
-			}
-		}
-		return fmt.Errorf("pod %s is not ready", podName)
-	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), maxRetries), func(err error, d time.Duration) {
-		logger.L().Info("waiting for pod to be ready", helpers.String("pod", podName), helpers.Error(err), helpers.String("retry in", d.String()))
-	})
-
+	}
+	return nil
 }
 
 func (w *TestWorkload) listApplicationProfilesInNamespace() ([]v1beta1.ApplicationProfile, error) {
@@ -254,4 +267,102 @@ func generateRandomNamespaceName() string {
 		sb.WriteByte(letters[randomIndex])
 	}
 	return sb.String()
+}
+
+func CreateWorkloadsInPath(namespace, dir string) ([]TestWorkload, error) {
+	workloads := []TestWorkload{}
+	err := filepath.Walk(dir, func(path string, info fs.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			wl, err := NewTestWorkload(namespace, path)
+			if err != nil {
+				return err
+			}
+			workloads = append(workloads, *wl)
+		}
+		return nil
+	})
+
+	return workloads, err
+}
+
+func IncreaseNodeAgentSniffingTime(newDuration string) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	ctx := context.TODO()
+	namespace := "kubescape"
+
+	cm, err := k8sClient.KubernetesClient.CoreV1().ConfigMaps(namespace).Get(context.TODO(), "node-agent", metav1.GetOptions{})
+	if err != nil {
+		panic(err)
+	}
+	val := cm.Data["config.json"]
+	config := map[string]interface{}{}
+	err = json.Unmarshal([]byte(val), &config)
+	if err != nil {
+		panic(err)
+	}
+	config["maxSniffingTimePerContainer"] = newDuration
+
+	newVal, err := json.Marshal(config)
+	if err != nil {
+		panic(err)
+	}
+	cm.Data["config.json"] = string(newVal)
+	_, err = k8sClient.KubernetesClient.CoreV1().ConfigMaps(namespace).Update(context.TODO(), cm, metav1.UpdateOptions{})
+	if err != nil {
+		panic(err)
+	}
+
+	// restart the daemonset
+	daemonset, err := k8sClient.KubernetesClient.AppsV1().DaemonSets(namespace).Get(context.TODO(), "node-agent", metav1.GetOptions{})
+	if err != nil {
+		panic(err)
+	}
+
+	if daemonset.Spec.Template.ObjectMeta.Annotations == nil {
+		daemonset.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+	}
+	daemonset.Spec.Template.ObjectMeta.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
+
+	_, err = k8sClient.KubernetesClient.AppsV1().DaemonSets(namespace).Update(ctx, daemonset, metav1.UpdateOptions{})
+	if err != nil {
+		panic(err)
+	}
+
+	time.Sleep(5 * time.Second)
+
+	// wait for the daemonset to be ready
+	err = backoff.RetryNotify(func() error {
+		labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"app": "node-agent"}}
+		pods, err := k8sClient.KubernetesClient.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
+		})
+		if err != nil {
+			return err
+		}
+
+		if len(pods.Items) == 0 {
+			return fmt.Errorf("no pods found")
+		}
+
+		for _, p := range pods.Items {
+			for _, cs := range p.Status.ContainerStatuses {
+				if cs.Ready && cs.State.Running != nil {
+					continue
+				} else {
+					return fmt.Errorf("pod %s is not ready", p.Name)
+				}
+			}
+		}
+
+		return nil
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), 40), func(err error, d time.Duration) {
+		logger.L().Info("waiting for node agent", helpers.Error(err), helpers.String("retry in", d.String()))
+	})
+	if err != nil {
+		panic(err)
+	}
+
 }
