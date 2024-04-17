@@ -192,8 +192,7 @@ func (nm *NetworkManager) monitorContainer(ctx context.Context, container *conta
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
 				// if exit code is 0 we set the status to completed
-				// TODO: Should we split ContainerHasTerminatedError to indicate if we reached the maxSniffingTime?
-				if watchedContainer.GetTerminationExitCode(nm.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName) == 0 {
+				if objectcache.GetTerminationExitCode(nm.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName, container.Runtime.ContainerID) == 0 {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				}
 				nm.saveNetworkEvents(ctx, watchedContainer, container.K8s.Namespace)
@@ -521,17 +520,6 @@ func (nm *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 		nm.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		nm.trackedContainers.Add(k8sContainerID)
 		go nm.startNetworkMonitoring(ctx, notif.Container, k8sContainerID)
-
-		// stop monitoring after MaxSniffingTime
-		time.AfterFunc(nm.cfg.MaxSniffingTime, func() {
-			logger.L().Info("stop monitor on container - after monitoring time", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-			event := containercollection.PubSubEvent{
-				Timestamp: time.Now().Format(time.RFC3339),
-				Type:      containercollection.EventTypeRemoveContainer,
-				Container: notif.Container,
-			}
-			nm.ContainerCallback(event)
-		})
 	case containercollection.EventTypeRemoveContainer:
 		channel := nm.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
 		if channel != nil {

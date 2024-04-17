@@ -174,7 +174,7 @@ func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schem
 	if err != nil {
 		return "", fmt.Errorf("list resources: %w", err)
 	}
-	logger.L().Info("got existing objects from storage", helpers.String("resource", res.Resource), helpers.Int("count", len(list.Items)))
+	logger.L().Debug("got existing objects from storage", helpers.String("resource", res.Resource), helpers.Int("count", len(list.Items)))
 	for i := range list.Items {
 		for _, handler := range wh.handlers {
 			var l unstructured.Unstructured

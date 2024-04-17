@@ -3,6 +3,7 @@ package objectcache
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -79,4 +80,34 @@ func trimRuntimePrefix(id string) string {
 	}
 
 	return parts[1]
+}
+
+// GetTerminationExitCode returns the termination exit code of the container, otherwise -1
+func GetTerminationExitCode(k8sObjectsCache K8sObjectCache, namespace, podName, containerName, containerID string) int32 {
+	notFound := int32(-1)
+	time.Sleep(3 * time.Second)
+	podStatus := k8sObjectsCache.GetPodStatus(namespace, podName)
+	if podStatus == nil {
+		return notFound
+	}
+
+	// check only container status
+	// in case the terminated container is an init or ephemeral container
+	// return -1 to avoid setting the status later to completed
+	for i := range podStatus.ContainerStatuses {
+		if podStatus.ContainerStatuses[i].Name != containerName {
+			continue
+		}
+		if podStatus.ContainerStatuses[i].State.Running != nil {
+			return notFound
+		}
+		if podStatus.ContainerStatuses[i].LastTerminationState.Terminated != nil {
+			// trim ID
+			if containerID == trimRuntimePrefix(podStatus.ContainerStatuses[i].LastTerminationState.Terminated.ContainerID) {
+				return podStatus.ContainerStatuses[i].LastTerminationState.Terminated.ExitCode
+			}
+		}
+	}
+
+	return notFound
 }

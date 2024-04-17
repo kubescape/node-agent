@@ -72,6 +72,7 @@ func TestListContainers(t *testing.T) {
 		})
 	}
 }
+
 func TestTrimRuntimePrefix(t *testing.T) {
 	tests := []struct {
 		name string

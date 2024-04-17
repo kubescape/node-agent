@@ -87,16 +87,6 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 		}
 		go am.handleContainerStarted(ctx, notif.Container, k8sContainerID)
 
-		// stop monitoring after MaxSniffingTime
-		time.AfterFunc(am.cfg.MaxSniffingTime, func() {
-			event := containercollection.PubSubEvent{
-				Timestamp: time.Now().Format(time.RFC3339),
-				Type:      containercollection.EventTypeRemoveContainer,
-				Container: notif.Container,
-			}
-			am.ContainerCallback(event)
-		})
-
 	case containercollection.EventTypeRemoveContainer:
 		channel := am.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
 		if channel != nil {
@@ -303,8 +293,8 @@ func (am *NetworkManager) monitorContainer(ctx context.Context, container *conta
 				return nil
 			case errors.Is(err, utils.ContainerHasTerminatedError):
 				// if exit code is 0 we set the status to completed
-				// TODO: Should we split ContainerHasTerminatedError to indicate if we reached the maxSniffingTime?
-				if watchedContainer.GetTerminationExitCode(am.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName) == 0 {
+
+				if objectcache.GetTerminationExitCode(am.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName, container.Runtime.ContainerID) == 0 {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				}
 				am.saveNetworkEvents(ctx, container, watchedContainer)

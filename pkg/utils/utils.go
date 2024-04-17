@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"node-agent/pkg/objectcache"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -276,38 +275,6 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 		return
 	}
 	checkContainers(nil, ephemeralContainers, EphemeralContainer)
-}
-
-// SetTerminationStatus updates the terminated flag and sets the exit code on the watched container
-func (watchedContainer *WatchedContainerData) GetTerminationExitCode(k8sObjectsCache objectcache.K8sObjectCache, namespace, podName, containerName string) int32 {
-	time.Sleep(3 * time.Second)
-	podStatus := k8sObjectsCache.GetPodStatus(namespace, podName)
-	if podStatus != nil {
-		for i := range podStatus.ContainerStatuses {
-			if podStatus.ContainerStatuses[i].Name == containerName {
-				if podStatus.ContainerStatuses[i].LastTerminationState.Terminated != nil {
-					return podStatus.ContainerStatuses[i].LastTerminationState.Terminated.ExitCode
-
-				}
-			}
-		}
-
-		// in case the terminated container is an init or ephemeral container
-		// return -1 to avoid setting the status later to completed
-		for i := range podStatus.InitContainerStatuses {
-			if podStatus.InitContainerStatuses[i].Name == containerName {
-				return -1
-			}
-		}
-
-		for i := range podStatus.EphemeralContainerStatuses {
-			if podStatus.EphemeralContainerStatuses[i].Name == containerName {
-				return -1
-			}
-		}
-	}
-
-	return 0
 }
 
 type PatchOperation struct {

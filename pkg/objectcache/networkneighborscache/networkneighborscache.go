@@ -173,7 +173,7 @@ func (np *NetworkNeighborsCacheImp) deletePod(obj *unstructured.Unstructured) {
 			np.slugToPods.Delete(uniqueSlug)
 			np.slugToNetworkNeighbor.Delete(uniqueSlug)
 			np.allNeighbors.Remove(uniqueSlug)
-			logger.L().Info("deleted pod from network neighbors cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
+			logger.L().Debug("deleted pod from network neighbors cache", helpers.String("podName", podName), helpers.String("uniqueSlug", uniqueSlug))
 		}
 	}
 }
@@ -209,17 +209,15 @@ func (np *NetworkNeighborsCacheImp) addNetworkNeighbor(_ context.Context, obj *u
 			return
 		}
 		np.slugToNetworkNeighbor.Set(nnName, fullNN)
-		logger.L().Info("added pod to network neighbors cache", helpers.String("uniqueSlug", nnName))
-
+		logger.L().Debug("added pod to network neighbors cache", helpers.String("uniqueSlug", nnName))
 	}
-
 }
 
 func (np *NetworkNeighborsCacheImp) deleteNetworkNeighbor(obj *unstructured.Unstructured) {
 	nnName := objectcache.UnstructuredUniqueName(obj)
 	np.slugToNetworkNeighbor.Delete(nnName)
 	np.allNeighbors.Remove(nnName)
-	logger.L().Info("deleted network neighbors from cache", helpers.String("name", nnName))
+	logger.L().Debug("deleted network neighbors from cache", helpers.String("name", nnName))
 }
 
 func unstructuredToNetworkNeighbors(obj *unstructured.Unstructured) (*v1beta1.NetworkNeighbors, error) {
