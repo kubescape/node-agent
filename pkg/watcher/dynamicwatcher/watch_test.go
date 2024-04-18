@@ -24,9 +24,9 @@ import (
 )
 
 var (
-	resourcePod                = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "Pod"}
-	resourceNetworkNeighbor    = schema.GroupVersionResource{Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "networkneighborses"}
-	resourceApplicationProfile = schema.GroupVersionResource{Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "applicationprofiles"}
+	resourcePod                 = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "Pod"}
+	resourceNetworkNeighborhood = schema.GroupVersionResource{Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "networkneighborhoods"}
+	resourceApplicationProfile  = schema.GroupVersionResource{Group: "spdx.softwarecomposition.kubescape.io", Version: "v1beta1", Resource: "applicationprofiles"}
 )
 
 func init() {
@@ -39,8 +39,8 @@ func getGroupVersionResource(obj *unstructured.Unstructured) schema.GroupVersion
 	switch obj.GetKind() {
 	case "ApplicationProfile":
 		return resourceApplicationProfile
-	case "NetworkNeighbors":
-		return resourceNetworkNeighbor
+	case "NetworkNeighborhood":
+		return resourceNetworkNeighborhood
 	default:
 		return schema.GroupVersionResource{
 			Group:    obj.GetObjectKind().GroupVersionKind().Group,
@@ -183,8 +183,8 @@ func TestStart_1(t *testing.T) {
 			preCreatedObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindAP, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindAP, mocks.TestCollection)},
 		},
 		{
-			name:              "list NetworkNeighbors",
-			resources:         []schema.GroupVersionResource{resourceNetworkNeighbor},
+			name:              "list NetworkNeighborhoods",
+			resources:         []schema.GroupVersionResource{resourceNetworkNeighborhood},
 			preCreatedObjects: []runtime.Object{mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx), mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection)},
 		},
 		{
@@ -198,8 +198,8 @@ func TestStart_1(t *testing.T) {
 			createObjects: []*unstructured.Unstructured{mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx), mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection)},
 		},
 		{
-			name:          "watch NetworkNeighbors",
-			resources:     []schema.GroupVersionResource{resourceNetworkNeighbor},
+			name:          "watch NetworkNeighborhoods",
+			resources:     []schema.GroupVersionResource{resourceNetworkNeighborhood},
 			createObjects: []*unstructured.Unstructured{mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx), mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection)},
 		},
 	}
@@ -279,7 +279,7 @@ func TestStart_5(t *testing.T) {
 	tt := []testObj{
 		{
 			name:            "multi watch, modify, and delete",
-			resources:       []schema.GroupVersionResource{resourceApplicationProfile, resourceNetworkNeighbor, resourcePod},
+			resources:       []schema.GroupVersionResource{resourceApplicationProfile, resourceNetworkNeighborhood, resourcePod},
 			createObjects:   []*unstructured.Unstructured{mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx), mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection), mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx), mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection), mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx), mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection)},
 			modifiedObjects: []*unstructured.Unstructured{mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx), mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection), mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx), mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection), mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx), mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection)},
 			deleteObjects:   []*unstructured.Unstructured{mocks.GetUnstructured(mocks.TestKindAP, mocks.TestNginx), mocks.GetUnstructured(mocks.TestKindAP, mocks.TestCollection), mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx), mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection), mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx), mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection)},
