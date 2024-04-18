@@ -18,13 +18,13 @@
         "name": "replicaset-nginx-77b4fdf86c"
     },
     "spec": {
+        "matchLabels": {
+            "app": "nginx"
+        },
         "containers": [
             {
                 "egress": null,
                 "ingress": null,
-                "matchLabels": {
-                    "app": "nginx"
-                },
                 "name": "nginx"
             }
         ]

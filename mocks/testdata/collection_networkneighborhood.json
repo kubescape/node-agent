@@ -18,29 +18,23 @@
         "name": "replicaset-collection-94c495554"
     },
     "spec": {
+        "matchLabels": {
+            "app": "collection"
+        },
         "containers": [
             {
                 "egress": null,
                 "ingress": null,
-                "matchLabels": {
-                    "app": "collection"
-                },
                 "name": "alpine-container"
             },
             {
                 "egress": null,
                 "ingress": null,
-                "matchLabels": {
-                    "app": "collection"
-                },
                 "name": "redis"
             },
             {
                 "egress": null,
                 "ingress": null,
-                "matchLabels": {
-                    "app": "collection"
-                },
                 "name": "wordpress"
             }
         ],
@@ -48,17 +42,11 @@
             {
                 "egress": null,
                 "ingress": null,
-                "matchLabels": {
-                    "app": "collection"
-                },
                 "name": "busybox"
             },
             {
                 "egress": null,
                 "ingress": null,
-                "matchLabels": {
-                    "app": "collection"
-                },
                 "name": "alpine"
             }
         ]

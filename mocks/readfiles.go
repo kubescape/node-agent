@@ -31,20 +31,20 @@ const (
 )
 
 const (
-	nginxPodBytes                  = "testdata/nginx_pod.json"
-	nginxRSBytes                   = "testdata/nginx_rs.json"
-	nginxDeploymentBytes           = "testdata/nginx_deploy.json"
-	nginxApplicationProfileBytes   = "testdata/nginx_applicationprofiles.json"
-	nginxApplicationActivityBytes  = "testdata/nginx_applicationactivities.json"
-	nginxNetworkNeighborhoodsBytes = "testdata/nginx_networkneighborhoods.json"
+	nginxPodBytes                 = "testdata/nginx_pod.json"
+	nginxRSBytes                  = "testdata/nginx_rs.json"
+	nginxDeploymentBytes          = "testdata/nginx_deploy.json"
+	nginxApplicationProfileBytes  = "testdata/nginx_applicationprofiles.json"
+	nginxApplicationActivityBytes = "testdata/nginx_applicationactivities.json"
+	nginxNetworkNeighborhoodBytes = "testdata/nginx_networkneighborhood.json"
 )
 const (
-	collectionPodBytes                  = "testdata/collection_pod.json"
-	collectionRSBytes                   = "testdata/collection_rs.json"
-	collectionDeploymentBytes           = "testdata/collection_deploy.json"
-	collectionApplicationProfileBytes   = "testdata/collection_applicationprofiles.json"
-	collectionApplicationActivityBytes  = "testdata/collection_applicationactivities.json"
-	collectionNetworkNeighborhoodsBytes = "testdata/collection_networkneighborhoods.json"
+	collectionPodBytes                 = "testdata/collection_pod.json"
+	collectionRSBytes                  = "testdata/collection_rs.json"
+	collectionDeploymentBytes          = "testdata/collection_deploy.json"
+	collectionApplicationProfileBytes  = "testdata/collection_applicationprofiles.json"
+	collectionApplicationActivityBytes = "testdata/collection_applicationactivities.json"
+	collectionNetworkNeighborhoodBytes = "testdata/collection_networkneighborhood.json"
 )
 
 var NAMESPACE = ""
@@ -166,9 +166,9 @@ func GetBytes(kind TestKinds, name TestName) []byte {
 	case TestKindNN:
 		switch name {
 		case TestNginx:
-			return readFile(nginxNetworkNeighborhoodsBytes)
+			return readFile(nginxNetworkNeighborhoodBytes)
 		case TestCollection:
-			return readFile(collectionNetworkNeighborhoodsBytes)
+			return readFile(collectionNetworkNeighborhoodBytes)
 		}
 	}
 	return []byte{}
