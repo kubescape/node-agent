@@ -20,10 +20,11 @@ import (
 	metricprometheus "node-agent/pkg/metricsmanager/prometheus"
 	"node-agent/pkg/networkmanager"
 	networkmanagerv1 "node-agent/pkg/networkmanager/v1"
+	networkmanagerv2 "node-agent/pkg/networkmanager/v2"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/objectcache/applicationprofilecache"
 	"node-agent/pkg/objectcache/k8scache"
-	"node-agent/pkg/objectcache/networkneighborscache"
+	"node-agent/pkg/objectcache/networkneighborhoodcache"
 	objectcachev1 "node-agent/pkg/objectcache/v1"
 	"node-agent/pkg/relevancymanager"
 	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
@@ -169,7 +170,7 @@ func main() {
 		apc := applicationprofilecache.NewApplicationProfileCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(apc)
 
-		nnc := networkneighborscache.NewNetworkNeighborsCache(nodeName, k8sClient)
+		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(nnc)
 
 		// create object cache
@@ -210,10 +211,8 @@ func main() {
 		dnsManager := dnsmanager.CreateDNSManager()
 		dnsManagerClient = dnsManager
 		networkManagerv1Client = networkmanagerv1.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName, dnsManager, preRunningContainersIDs, k8sObjectCache)
-		// networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
-		networkManagerClient = networkmanager.CreateNetworkManagerMock()
+		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
 	} else {
-		networkManagerv1Client = networkmanagerv1.CreateNetworkManagerMock()
 		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
 	}

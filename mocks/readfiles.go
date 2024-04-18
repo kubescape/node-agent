@@ -22,7 +22,7 @@ const (
 	TestKindDeploy TestKinds = "Deployment"
 	TestKindAP     TestKinds = "ApplicationProfile"
 	TestKindAA     TestKinds = "ApplicationActivity"
-	TestKindNN     TestKinds = "NetworkNeighbors"
+	TestKindNN     TestKinds = "NetworkNeighborhood"
 )
 
 const (
@@ -31,20 +31,20 @@ const (
 )
 
 const (
-	nginxPodBytes                 = "testdata/nginx_pod.json"
-	nginxRSBytes                  = "testdata/nginx_rs.json"
-	nginxDeploymentBytes          = "testdata/nginx_deploy.json"
-	nginxApplicationProfileBytes  = "testdata/nginx_applicationprofiles.json"
-	nginxApplicationActivityBytes = "testdata/nginx_applicationactivities.json"
-	nginxNetworkNeighborsBytes    = "testdata/nginx_networkneighbors.json"
+	nginxPodBytes                  = "testdata/nginx_pod.json"
+	nginxRSBytes                   = "testdata/nginx_rs.json"
+	nginxDeploymentBytes           = "testdata/nginx_deploy.json"
+	nginxApplicationProfileBytes   = "testdata/nginx_applicationprofiles.json"
+	nginxApplicationActivityBytes  = "testdata/nginx_applicationactivities.json"
+	nginxNetworkNeighborhoodsBytes = "testdata/nginx_networkneighborhoods.json"
 )
 const (
-	collectionPodBytes                 = "testdata/collection_pod.json"
-	collectionRSBytes                  = "testdata/collection_rs.json"
-	collectionDeploymentBytes          = "testdata/collection_deploy.json"
-	collectionApplicationProfileBytes  = "testdata/collection_applicationprofiles.json"
-	collectionApplicationActivityBytes = "testdata/collection_applicationactivities.json"
-	collectionNetworkNeighborsBytes    = "testdata/collection_networkneighbors.json"
+	collectionPodBytes                  = "testdata/collection_pod.json"
+	collectionRSBytes                   = "testdata/collection_rs.json"
+	collectionDeploymentBytes           = "testdata/collection_deploy.json"
+	collectionApplicationProfileBytes   = "testdata/collection_applicationprofiles.json"
+	collectionApplicationActivityBytes  = "testdata/collection_applicationactivities.json"
+	collectionNetworkNeighborhoodsBytes = "testdata/collection_networkneighborhoods.json"
 )
 
 var NAMESPACE = ""
@@ -98,7 +98,7 @@ func UnstructuredToRuntime(u *unstructured.Unstructured) k8sruntime.Object {
 			return aa
 		}
 	case TestKindNN:
-		nn := &v1beta1.NetworkNeighbors{}
+		nn := &v1beta1.NetworkNeighborhood{}
 		if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(u.Object, nn); err == nil {
 			return nn
 		}
@@ -166,9 +166,9 @@ func GetBytes(kind TestKinds, name TestName) []byte {
 	case TestKindNN:
 		switch name {
 		case TestNginx:
-			return readFile(nginxNetworkNeighborsBytes)
+			return readFile(nginxNetworkNeighborhoodsBytes)
 		case TestCollection:
-			return readFile(collectionNetworkNeighborsBytes)
+			return readFile(collectionNetworkNeighborhoodsBytes)
 		}
 	}
 	return []byte{}

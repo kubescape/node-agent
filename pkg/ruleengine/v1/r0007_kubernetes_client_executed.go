@@ -77,9 +77,13 @@ func (rule *R0007KubernetesClientExecuted) ID() string {
 func (rule *R0007KubernetesClientExecuted) DeleteRule() {
 }
 
-func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetworktype.Event, nn *v1beta1.NetworkNeighbors, k8sObjCache objectcache.K8sObjectCache) *GenericRuleFailure {
+func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetworktype.Event, nn *v1beta1.NetworkNeighborhood, k8sObjCache objectcache.K8sObjectCache) *GenericRuleFailure {
+	nnContainer, err := getContainerFromNetworkNeighborhood(nn, event.GetContainer())
+	if err != nil {
+		return nil
+	}
 
-	for _, egress := range nn.Spec.Egress {
+	for _, egress := range nnContainer.Egress {
 		if egress.IPAddress == event.DstEndpoint.Addr {
 			return nil
 		}
@@ -206,7 +210,7 @@ func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventTyp
 	if networkEvent.PktType != "OUTGOING" {
 		return nil
 	}
-	nn := objCache.NetworkNeighborsCache().GetNetworkNeighbors(networkEvent.GetNamespace(), networkEvent.GetPod())
+	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
 	if nn == nil {
 		return nil
 	}

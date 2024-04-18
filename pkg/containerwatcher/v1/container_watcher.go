@@ -10,7 +10,6 @@ import (
 	"node-agent/pkg/malwaremanager"
 	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/networkmanager"
-	networkmanagerv1 "node-agent/pkg/networkmanager/v1"
 	"node-agent/pkg/relevancymanager"
 	rulebinding "node-agent/pkg/rulebindingmanager"
 	"node-agent/pkg/rulemanager"

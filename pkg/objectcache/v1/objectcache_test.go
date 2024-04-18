@@ -19,8 +19,8 @@ func TestApplicationProfileCache(t *testing.T) {
 	assert.NotNil(t, k8sObjectCache.ApplicationProfileCache())
 }
 
-func TestNetworkNeighborsCache(t *testing.T) {
-	nn := &objectcache.NetworkNeighborsCacheMock{}
+func TestNetworkNeighborhoodCache(t *testing.T) {
+	nn := &objectcache.NetworkNeighborhoodCacheMock{}
 	k8sObjectCache := NewObjectCache(nil, nil, nn)
-	assert.NotNil(t, k8sObjectCache.NetworkNeighborsCache())
+	assert.NotNil(t, k8sObjectCache.NetworkNeighborhoodCache())
 }
