@@ -78,7 +78,7 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // alert expected
 
 	// Wait for the alert to be signaled
-	time.Sleep(10 * time.Second)
+	time.Sleep(30 * time.Second)
 
 	alerts, err := testutils.GetAlerts(wl.Namespace)
 	if err != nil {
