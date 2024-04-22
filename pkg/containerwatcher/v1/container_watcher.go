@@ -35,6 +35,7 @@ import (
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
@@ -80,6 +81,7 @@ type IGContainerWatcher struct {
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
+	socketEnricher      *socketenricher.SocketEnricher
 	// IG Tracers
 	capabilitiesTracer *tracercapabilities.Tracer
 	execTracer         *tracerexec.Tracer
@@ -90,6 +92,7 @@ type IGContainerWatcher struct {
 	randomxTracer      *tracerandomx.Tracer
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
+
 	// Worker pools
 	capabilitiesWorkerPool *ants.PoolWithFunc
 	execWorkerPool         *ants.PoolWithFunc
@@ -225,10 +228,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	// Create a dns worker pool
 	dnsWorkerPool, err := ants.NewPoolWithFunc(dnsWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerdnstype.Event)
-		// ignore events with empty container name
-		if event.K8s.ContainerName == "" {
-			return
-		}
 
 		// ignore DNS events that are not responses
 		if event.Qr != tracerdnstype.DNSPktTypeResponse {

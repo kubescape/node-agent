@@ -26,8 +26,8 @@ import (
 func tearDownTest(t *testing.T, startTime time.Time) {
 	end := time.Now()
 
-	t.Log("Waiting 60 seconds for Prometheus to scrape the data")
-	time.Sleep(1 * time.Minute)
+	t.Log("Waiting 30 seconds for Prometheus to scrape the data")
+	time.Sleep(30 * time.Second)
 
 	err := testutils.PlotNodeAgentPrometheusCPUUsage(t.Name(), startTime, end)
 	if err != nil {
@@ -45,48 +45,57 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	defer tearDownTest(t, start)
 
 	ns := testutils.NewRandomNamespace()
-	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
 	if err != nil {
 		t.Errorf("Error creating workload: %v", err)
 	}
-	err = wl.WaitForReady(80)
-	if err != nil {
-		t.Errorf("Error waiting for workload to be ready: %v", err)
-	}
+	assert.NoError(t, wl.WaitForReady(80))
+
+	assert.NoError(t, wl.WaitForApplicationProfile(80, "ready"))
+	assert.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"))
+
+	// process launched from nginx container
+	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
+
+	// network activity from server container
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
+
+	// network activity from nginx container
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")
 
 	err = wl.WaitForApplicationProfileCompletion(80)
 	if err != nil {
 		t.Errorf("Error waiting for application profile to be completed: %v", err)
 	}
+	err = wl.WaitForNetworkNeighborhoodCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
+	}
 
 	time.Sleep(10 * time.Second)
 
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"})
-	if err != nil {
-		t.Errorf("Error executing remote command: %v", err)
-	}
+	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // no alert expected
+	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // alert expected
 
 	// Wait for the alert to be signaled
-	time.Sleep(5 * time.Second)
+	time.Sleep(10 * time.Second)
 
 	alerts, err := testutils.GetAlerts(wl.Namespace)
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
 
-	expectedRuleName := "Unexpected process launched"
-	expectedCommand := "ls"
+	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "server")
+	testutils.AssertNotContains(t, alerts, "Unexpected process launched", "ls", "nginx")
 
-	for _, alert := range alerts {
-		ruleName, ruleOk := alert.Labels["rule_name"]
-		command, cmdOk := alert.Labels["comm"]
+	// check network neighborhood instead of alerts because DNS tracer events are not
+	// enriched with container name for pods with more than 1 container (bug)
+	nn, _ := wl.GetNetworkNeighborhood()
+	testutils.AssertNetworkNeighborhoodContains(t, nn, "nginx", []string{"kubernetes.io."}, []string{})
+	testutils.AssertNetworkNeighborhoodNotContains(t, nn, "server", []string{"kubernetes.io."}, []string{})
 
-		if ruleOk && cmdOk && ruleName == expectedRuleName && command == expectedCommand {
-			return
-		}
-	}
-
-	t.Errorf("Expected alert not found")
+	testutils.AssertNetworkNeighborhoodContains(t, nn, "server", []string{"ebpf.io."}, []string{})
+	testutils.AssertNetworkNeighborhoodNotContains(t, nn, "nginx", []string{"ebpf.io."}, []string{})
 }
 
 func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
@@ -298,7 +307,7 @@ func Test_05_MemoryLeak_10K_Alerts(t *testing.T) {
 	//Exec into the nginx pod and create a file in the /tmp directory in a loop
 	startLoad := time.Now()
 	for i := 0; i < 100; i++ {
-		_, _, err := nginx.ExecIntoPod([]string{"bash", "-c", "for i in {1..100}; do touch /tmp/nginx-test-$i; done"})
+		_, _, err := nginx.ExecIntoPod([]string{"bash", "-c", "for i in {1..100}; do touch /tmp/nginx-test-$i; done"}, "")
 		if err != nil {
 			t.Errorf("Error executing remote command: %v", err)
 		}
@@ -354,7 +363,7 @@ func Test_06_KillProcessInTheMiddle(t *testing.T) {
 	}
 
 	// Exec into the nginx pod and kill the process
-	_, _, err = nginx.ExecIntoPod([]string{"bash", "-c", "kill -9 1"})
+	_, _, err = nginx.ExecIntoPod([]string{"bash", "-c", "kill -9 1"}, "")
 	if err != nil {
 		t.Errorf("Error executing remote command: %v", err)
 	}

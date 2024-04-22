@@ -10,8 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"sigs.k8s.io/yaml"
 
 	"github.com/cenkalti/backoff/v4"
@@ -21,6 +23,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1client "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
+	"github.com/stretchr/testify/assert"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,7 +82,7 @@ func NewTestWorkload(namespace, resourcePath string) (*TestWorkload, error) {
 	}, nil
 }
 
-func (w *TestWorkload) ExecIntoPod(command []string) (string, string, error) {
+func (w *TestWorkload) ExecIntoPod(command []string, container string) (string, string, error) {
 	pods, err := w.GetPods()
 	if err != nil {
 		return "", "", err
@@ -90,19 +93,26 @@ func (w *TestWorkload) ExecIntoPod(command []string) (string, string, error) {
 
 	buf := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}
+
+	podExecOpts := &v1.PodExecOptions{
+		Command: command,
+		Stdin:   false,
+		Stdout:  true,
+		Stderr:  true,
+		TTY:     true,
+	}
+
+	if container != "" {
+		podExecOpts.Container = container
+	}
+
 	request := k8sClient.KubernetesClient.CoreV1().RESTClient().
 		Post().
 		Namespace(pod.Namespace).
 		Resource("pods").
 		Name(pod.Name).
 		SubResource("exec").
-		VersionedParams(&v1.PodExecOptions{
-			Command: command,
-			Stdin:   false,
-			Stdout:  true,
-			Stderr:  true,
-			TTY:     true,
-		}, scheme.ParameterCodec)
+		VersionedParams(podExecOpts, scheme.ParameterCodec)
 	exec, err := remotecommand.NewSPDYExecutor(k8sClient.K8SConfig, "POST", request.URL())
 	if err != nil {
 		return "", "", err
@@ -185,6 +195,17 @@ func (w *TestWorkload) listApplicationProfilesInNamespace() ([]v1beta1.Applicati
 	return profiles.Items, nil
 }
 
+func (w *TestWorkload) listNetworkNeighborhoodInNamespace() ([]v1beta1.NetworkNeighborhood, error) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	profiles, err := storageclient.NetworkNeighborhoods(w.Namespace).List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return profiles.Items, nil
+}
+
 func (w *TestWorkload) getApplicationProfile() (*v1beta1.ApplicationProfile, error) {
 	appProfiles, err := w.listApplicationProfilesInNamespace()
 	if err != nil {
@@ -201,6 +222,28 @@ func (w *TestWorkload) getApplicationProfile() (*v1beta1.ApplicationProfile, err
 		}
 	}
 	return nil, fmt.Errorf("application profile not found")
+}
+
+func (w *TestWorkload) GetNetworkNeighborhood() (*v1beta1.NetworkNeighborhood, error) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	nn, err := w.listNetworkNeighborhoodInNamespace()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, n := range nn {
+		wlKind := n.Labels["kubescape.io/workload-kind"]
+		wlName := n.Labels["kubescape.io/workload-name"]
+		wlNs := n.Labels["kubescape.io/workload-namespace"]
+
+		if wlKind == w.WorkloadObj.GetKind() && wlName == w.WorkloadObj.GetName() && wlNs == w.Namespace {
+			// get the network neighborhood
+			return storageclient.NetworkNeighborhoods(w.Namespace).Get(context.TODO(), n.Name, metav1.GetOptions{})
+		}
+	}
+	return nil, fmt.Errorf("network neighborhood not found")
 }
 
 func (w *TestWorkload) WaitForApplicationProfileCompletion(maxRetries uint64) error {
@@ -220,6 +263,26 @@ func (w *TestWorkload) WaitForApplicationProfile(maxRetries uint64, expectedStat
 		return fmt.Errorf("application profile is not in status '%s'", expectedStatus)
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
 		logger.L().Info("waiting for app profile", helpers.Error(err), helpers.String("retry in", d.String()))
+	})
+}
+
+func (w *TestWorkload) WaitForNetworkNeighborhoodCompletion(maxRetries uint64) error {
+	return w.WaitForNetworkNeighborhood(maxRetries, "completed")
+}
+
+func (w *TestWorkload) WaitForNetworkNeighborhood(maxRetries uint64, expectedStatus string) error {
+	return backoff.RetryNotify(func() error {
+		networkNeighborhood, err := w.GetNetworkNeighborhood()
+		if err != nil {
+			return err
+		}
+
+		if networkNeighborhood.Annotations["kubescape.io/status"] == expectedStatus {
+			return nil
+		}
+		return fmt.Errorf("network neighborhood is not in status '%s'", expectedStatus)
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
+		logger.L().Info("waiting for network neighborhood", helpers.Error(err), helpers.String("retry in", d.String()))
 	})
 }
 
@@ -365,4 +428,79 @@ func IncreaseNodeAgentSniffingTime(newDuration string) {
 		panic(err)
 	}
 
+}
+
+func AssertNetworkNeighborhoodNotContains(t *testing.T, nn *v1beta1.NetworkNeighborhood, containerName string, notExpectedEgress, notExpectedIngress []string) {
+	container, err := getContainerFromNetworkNeighborhood(nn, containerName)
+	if err != nil {
+		t.Errorf("Error getting container from network neighborhood: %v", err)
+		return
+	}
+
+	egress := getEgressDnsNames(container)
+	for _, dnsName := range notExpectedEgress {
+		assert.False(t, egress.Contains(dnsName), "did not expect egress DNS name '%s' in network neighborhood", dnsName)
+	}
+	ingress := getIngressDnsNames(container)
+	for _, dnsName := range notExpectedIngress {
+		assert.False(t, ingress.Contains(dnsName), "did not expect ingress DNS name '%s' in network neighborhood", dnsName)
+	}
+}
+
+func AssertNetworkNeighborhoodContains(t *testing.T, nn *v1beta1.NetworkNeighborhood, containerName string, expectedEgress, expectedIngress []string) {
+	container, err := getContainerFromNetworkNeighborhood(nn, containerName)
+	if err != nil {
+		t.Errorf("Error getting container from network neighborhood: %v", err)
+		return
+	}
+
+	egress := getEgressDnsNames(container)
+	for _, dnsName := range expectedEgress {
+		assert.True(t, egress.Contains(dnsName), "Expected egress DNS name '%s' not found in network neighborhood", dnsName)
+	}
+	ingress := getIngressDnsNames(container)
+	for _, dnsName := range expectedIngress {
+		assert.True(t, ingress.Contains(dnsName), "Expected ingress DNS name '%s' not found in network neighborhood", dnsName)
+	}
+}
+
+func getEgressDnsNames(nnc *v1beta1.NetworkNeighborhoodContainer) mapset.Set[string] {
+	dns := mapset.NewSet[string]()
+	for _, egress := range nnc.Egress {
+		for _, dnsName := range egress.DNSNames {
+			dns.Add(dnsName)
+		}
+	}
+	return dns
+}
+
+func getIngressDnsNames(nnc *v1beta1.NetworkNeighborhoodContainer) mapset.Set[string] {
+	dns := mapset.NewSet[string]()
+	for _, ingress := range nnc.Ingress {
+		for _, dnsName := range ingress.DNSNames {
+			dns.Add(dnsName)
+		}
+	}
+	return dns
+}
+
+func getContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, containerName string) (*v1beta1.NetworkNeighborhoodContainer, error) {
+	for _, container := range nn.Spec.Containers {
+		if container.Name == containerName {
+			return &container, nil
+		}
+	}
+
+	for _, container := range nn.Spec.InitContainers {
+		if container.Name == containerName {
+			return &container, nil
+		}
+	}
+
+	for _, container := range nn.Spec.EphemeralContainers {
+		if container.Name == containerName {
+			return &container, nil
+		}
+	}
+	return nil, fmt.Errorf("container '%s' not found", containerName)
 }

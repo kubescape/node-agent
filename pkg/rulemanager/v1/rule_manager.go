@@ -365,6 +365,11 @@ func (rm *RuleManager) ReportNetworkEvent(k8sContainerID string, event tracernet
 }
 
 func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
+	// ignore events with empty container name
+	if event.K8s.ContainerName == "" {
+		return
+	}
+
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportDNSEvent event")
 		return

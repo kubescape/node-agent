@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"testing"
 )
 
 const (
@@ -71,4 +72,30 @@ func filterAlertsByLabel(alerts []Alert, labelKey, labelValue string) []Alert {
 		}
 	}
 	return filteredAlerts
+}
+
+func AssertContains(t *testing.T, alerts []Alert, expectedRuleName string, expectedCommand string, expectedContainerName string) {
+	for _, alert := range alerts {
+		ruleName, ruleOk := alert.Labels["rule_name"]
+		command, cmdOk := alert.Labels["comm"]
+		containerName, containerOk := alert.Labels["container_name"]
+
+		if ruleOk && cmdOk && containerOk && ruleName == expectedRuleName && command == expectedCommand && containerName == expectedContainerName {
+			return
+		}
+	}
+
+	t.Error("expected alert with rule name: ", expectedRuleName, " command: ", expectedCommand, " container name: ", expectedContainerName, " not found")
+}
+
+func AssertNotContains(t *testing.T, alerts []Alert, notExpectedRuleName string, notExpectedCommand string, notExpectedContainerName string) {
+	for _, alert := range alerts {
+		ruleName, ruleOk := alert.Labels["rule_name"]
+		command, cmdOk := alert.Labels["comm"]
+		containerName, containerOk := alert.Labels["container_name"]
+
+		if ruleOk && cmdOk && containerOk && ruleName == notExpectedRuleName && command == notExpectedCommand && containerName == notExpectedContainerName {
+			t.Error("did not expect an alert with rule name: ", notExpectedRuleName, " command: ", notExpectedCommand, " container name: ", notExpectedContainerName, " not found")
+		}
+	}
 }

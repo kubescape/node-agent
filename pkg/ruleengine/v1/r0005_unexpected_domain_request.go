@@ -5,6 +5,7 @@ import (
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
+	"slices"
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -57,7 +58,6 @@ func (rule *R0005UnexpectedDomainRequest) generatePatchCommand(event *tracerdnst
 }
 
 func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-
 	if eventType != utils.DnsEventType {
 		return nil
 	}
@@ -84,7 +84,7 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 
 	// Check that the domain is in the network neighbors
 	for _, dns := range nnContainer.Egress {
-		if dns.DNS == domainEvent.DNSName {
+		if dns.DNS == domainEvent.DNSName || slices.Contains(dns.DNSNames, domainEvent.DNSName) {
 			return nil
 		}
 	}

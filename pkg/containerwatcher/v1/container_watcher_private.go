@@ -10,6 +10,7 @@ import (
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -189,6 +190,13 @@ func (ch *IGContainerWatcher) startTracers() error {
 			return err
 		}
 
+		socketEnricher, err := socketenricher.NewSocketEnricher()
+		if err != nil {
+			logger.L().Error("error creating socket enricher", helpers.Error(err))
+			return err
+		}
+		ch.socketEnricher = socketEnricher
+
 		if err := ch.startDNSTracing(); err != nil {
 			// not failing on dns tracing error
 			logger.L().Error("error starting dns tracing", helpers.Error(err))
@@ -221,24 +229,24 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		// Stop capabilities tracer
 		if err := ch.stopCapabilitiesTracing(); err != nil {
 			logger.L().Error("error stopping capabilities tracing", helpers.Error(err))
-			errs = errors.Join(err, ch.stopCapabilitiesTracing())
+			errs = errors.Join(errs, err)
 		}
 		// Stop syscall tracer
 		if err := ch.stopSystemcallTracing(); err != nil {
 			logger.L().Error("error stopping seccomp tracing", helpers.Error(err))
-			errs = errors.Join(err, ch.stopCapabilitiesTracing())
+			errs = errors.Join(errs, err)
 		}
 	}
 	if ch.cfg.EnableRelevancy || ch.cfg.EnableApplicationProfile {
 		// Stop exec tracer
 		if err := ch.stopExecTracing(); err != nil {
 			logger.L().Error("error stopping exec tracing", helpers.Error(err))
-			errs = errors.Join(err, ch.stopCapabilitiesTracing())
+			errs = errors.Join(errs, err)
 		}
 		// Stop open tracer
 		if err := ch.stopOpenTracing(); err != nil {
 			logger.L().Error("error stopping open tracing", helpers.Error(err))
-			errs = errors.Join(err, ch.stopCapabilitiesTracing())
+			errs = errors.Join(errs, err)
 		}
 	}
 
@@ -246,12 +254,12 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		// Stop network tracer
 		if err := ch.stopNetworkTracing(); err != nil {
 			logger.L().Error("error stopping network tracing", helpers.Error(err))
-			errs = errors.Join(err, ch.stopNetworkTracing())
+			errs = errors.Join(errs, err)
 		}
 		// Stop dns tracer
 		if err := ch.stopDNSTracing(); err != nil {
 			logger.L().Error("error stopping dns tracing", helpers.Error(err))
-			errs = errors.Join(err, ch.stopDNSTracing())
+			errs = errors.Join(errs, err)
 		}
 	}
 
@@ -260,7 +268,7 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		if runtime.GOARCH == "amd64" && ch.randomxTracer != nil {
 			if err := ch.stopRandomxTracing(); err != nil {
 				logger.L().Error("error stopping randomx tracing", helpers.Error(err))
-				errs = errors.Join(err, ch.stopRandomxTracing())
+				errs = errors.Join(errs, err)
 			}
 		}
 	}
