@@ -86,6 +86,7 @@ func AssertContains(t *testing.T, alerts []Alert, expectedRuleName string, expec
 	}
 
 	t.Error("expected alert with rule name: ", expectedRuleName, " command: ", expectedCommand, " container name: ", expectedContainerName, " not found")
+	t.Logf("All alerts: %v", alerts)
 }
 
 func AssertNotContains(t *testing.T, alerts []Alert, notExpectedRuleName string, notExpectedCommand string, notExpectedContainerName string) {
@@ -96,6 +97,7 @@ func AssertNotContains(t *testing.T, alerts []Alert, notExpectedRuleName string,
 
 		if ruleOk && cmdOk && containerOk && ruleName == notExpectedRuleName && command == notExpectedCommand && containerName == notExpectedContainerName {
 			t.Error("did not expect an alert with rule name: ", notExpectedRuleName, " command: ", notExpectedCommand, " container name: ", notExpectedContainerName, " not found")
+			t.Logf("All alerts: %v", alerts)
 		}
 	}
 }
