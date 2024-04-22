@@ -7,7 +7,11 @@ import (
 	"node-agent/pkg/storage"
 	"os"
 	"strconv"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
@@ -58,6 +62,16 @@ func CreateStorage(namespace string) (*Storage, error) {
 	maxNetworkNeighborhoodSize, err := strconv.Atoi(os.Getenv("MAX_NETWORK_NEIGHBORHOOD_SIZE"))
 	if err != nil {
 		maxNetworkNeighborhoodSize = DefaultMaxNetworkNeighborhoodSize
+	}
+
+	// wait for storage to be ready
+	if err := backoff.RetryNotify(func() error {
+		_, err := clientset.SpdxV1beta1().ApplicationProfiles("default").List(context.Background(), metav1.ListOptions{})
+		return err
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), 60), func(err error, d time.Duration) {
+		logger.L().Info("waiting for storage to be ready", helpers.Error(err), helpers.String("retry in", d.String()))
+	}); err != nil {
+		return nil, fmt.Errorf("too many retries waiting for storage: %w", err)
 	}
 
 	return &Storage{
