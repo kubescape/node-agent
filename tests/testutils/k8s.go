@@ -206,7 +206,10 @@ func (w *TestWorkload) listNetworkNeighborhoodInNamespace() ([]v1beta1.NetworkNe
 	return profiles.Items, nil
 }
 
-func (w *TestWorkload) getApplicationProfile() (*v1beta1.ApplicationProfile, error) {
+func (w *TestWorkload) GetApplicationProfile() (*v1beta1.ApplicationProfile, error) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
 	appProfiles, err := w.listApplicationProfilesInNamespace()
 	if err != nil {
 		return nil, err
@@ -218,7 +221,7 @@ func (w *TestWorkload) getApplicationProfile() (*v1beta1.ApplicationProfile, err
 		wlNs := appProfile.Labels["kubescape.io/workload-namespace"]
 
 		if wlKind == w.WorkloadObj.GetKind() && wlName == w.WorkloadObj.GetName() && wlNs == w.Namespace {
-			return &appProfile, nil
+			return storageclient.ApplicationProfiles(w.Namespace).Get(context.TODO(), appProfile.Name, metav1.GetOptions{})
 		}
 	}
 	return nil, fmt.Errorf("application profile not found")
@@ -252,7 +255,7 @@ func (w *TestWorkload) WaitForApplicationProfileCompletion(maxRetries uint64) er
 
 func (w *TestWorkload) WaitForApplicationProfile(maxRetries uint64, expectedStatus string) error {
 	return backoff.RetryNotify(func() error {
-		appProfile, err := w.getApplicationProfile()
+		appProfile, err := w.GetApplicationProfile()
 		if err != nil {
 			return err
 		}
