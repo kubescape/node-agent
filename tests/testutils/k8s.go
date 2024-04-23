@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"math/rand"
 	"os"
@@ -506,4 +507,52 @@ func getContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, contai
 		}
 	}
 	return nil, fmt.Errorf("container '%s' not found", containerName)
+}
+
+func PrintNodeAgentLogs(t *testing.T) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	labelSelector := metav1.LabelSelector{MatchLabels: map[string]string{"app": "node-agent"}}
+	pods, err := k8sClient.KubernetesClient.CoreV1().Pods("kubescape").List(context.TODO(), metav1.ListOptions{
+		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
+	})
+	if err != nil {
+		t.Errorf("error getting node-agent pods: %v", err)
+		return
+	}
+	if len(pods.Items) == 0 {
+		t.Error("no node-agent pods found")
+		return
+	}
+
+	for _, pod := range pods.Items {
+		buf := &bytes.Buffer{}
+
+		request := k8sClient.KubernetesClient.CoreV1().RESTClient().
+			Get().
+			Namespace(pod.Namespace).
+			Name(pod.Name).
+			Resource("pods").
+			SubResource("log").
+			VersionedParams(&v1.PodLogOptions{
+				Follow:    false,
+				Previous:  false,
+				Container: "node-agent",
+			}, scheme.ParameterCodec)
+
+		readCloser, err := request.Stream(context.TODO())
+		if err != nil {
+			t.Errorf("error getting log stream: %v", err)
+			return
+		}
+		_, err = io.Copy(buf, readCloser)
+		if err != nil {
+			t.Errorf("error copying log stream: %v", err)
+			return
+		}
+
+		t.Logf("---- Logs for pod: %s ----", pod.Name)
+		t.Log(buf.String())
+		t.Logf("---- End of logs for pod: %s ----", pod.Name)
+		readCloser.Close()
+	}
 }

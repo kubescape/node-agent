@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"encoding/json"
 	"fmt"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
@@ -10,6 +11,8 @@ import (
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -66,6 +69,8 @@ func (rule *R0001UnexpectedProcessLaunched) generatePatchCommand(event *tracerex
 }
 
 func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventType, event interface{}, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	logger.L().Debug("R0001UnexpectedProcessLaunched: Processing event")
+
 	if eventType != utils.ExecveEventType {
 		return nil
 	}
@@ -74,6 +79,10 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 	if !ok {
 		return nil
 	}
+
+	x, _ := json.Marshal(execEvent)
+	logger.L().Debug("R0001UnexpectedProcessLaunched: Processing event", helpers.String("event", string(x)))
+
 	execPath := getExecPathFromEvent(execEvent)
 
 	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
