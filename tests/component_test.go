@@ -81,8 +81,13 @@ func Test_01_BasicAlertTest(t *testing.T) {
 
 	t.Logf("application profile: %v", string(appProfileJson))
 
-	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // no alert expected
-	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // alert expected
+	for i := 0; i < 10; i++ {
+		wl.ExecIntoPod([]string{"ls", "-l"}, "nginx") // no alert expected
+		for j := 0; j < 10; j++ {
+			wl.ExecIntoPod([]string{"ls", "-l"}, "server") // alert expected
+		}
+		time.Sleep(1 * time.Second)
+	}
 
 	// Wait for the alert to be signaled
 	time.Sleep(30 * time.Second)
