@@ -23,6 +23,7 @@ func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Eve
 		// dropped event
 		logger.L().Ctx(ch.ctx).Warning("network tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 	} else {
+
 		ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
 		ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
 

@@ -92,9 +92,6 @@ func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 		if channel != nil {
 			channel <- utils.ContainerHasTerminatedError
 		}
-		am.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
-		am.removedContainers.Add(notif.Container.Runtime.ContainerID)
-		am.trackedContainers.Remove(notif.Container.Runtime.ContainerID)
 	}
 }
 
@@ -252,10 +249,13 @@ func (am *NetworkManager) getParentWorkloadFromContainer(container *containercol
 
 func (am *NetworkManager) deleteResources(container *containercollection.Container) {
 	// clean up
+	am.removedContainers.Add(container.Runtime.ContainerID)
+	am.trackedContainers.Remove(container.Runtime.ContainerID)
 	am.containerAndPodToWLIDMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 	am.containerAndPodToEventsMap.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 	am.containerAndPodToDroppedEvent.Delete(container.Runtime.ContainerID + container.K8s.PodName)
 	am.watchedContainerChannels.Delete(container.Runtime.ContainerID)
+
 }
 
 func (am *NetworkManager) ContainerReachedMaxTime(containerID string) {

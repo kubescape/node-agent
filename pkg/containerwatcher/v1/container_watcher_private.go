@@ -44,10 +44,10 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			ch.unregisterContainer(notif.Container)
 		})
 	case containercollection.EventTypeRemoveContainer:
+		logger.L().Info("stop monitor on container - container has terminated", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 		ch.ruleManagedContainers.Remove(notif.Container.Runtime.ContainerID)
-		logger.L().Info("stop monitor on container - container has terminated", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
 }
 func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) error {
@@ -290,8 +290,15 @@ func (ch *IGContainerWatcher) printNsMap(id string) {
 }
 
 func (ch *IGContainerWatcher) unregisterContainer(container *containercollection.Container) {
-	if ch.timeBasedContainers.Contains(container.Runtime.ContainerID) || ch.ruleManagedContainers.Contains(container.Runtime.ContainerID) {
+	timeBased := ch.timeBasedContainers.Contains(container.Runtime.ContainerID)
+	ruleManaged := ch.ruleManagedContainers.Contains(container.Runtime.ContainerID)
+	if timeBased || ruleManaged {
 		// the container should still be monitored
+		logger.L().Debug("container should still be monitored",
+			helpers.String("container ID", container.Runtime.ContainerID),
+			helpers.Interface("timeBased", timeBased),
+			helpers.Interface("ruleManaged", ruleManaged),
+		)
 		return
 	}
 

@@ -525,7 +525,6 @@ func (nm *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 		if channel != nil {
 			channel <- utils.ContainerHasTerminatedError
 		}
-		nm.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 
