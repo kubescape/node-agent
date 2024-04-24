@@ -99,6 +99,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 }
 
 func (ch *IGContainerWatcher) startRunningContainers() error {
+	logger.L().Debug("startRunningContainers start")
 	k8sClient, err := containercollection.NewK8sClient(ch.nodeName)
 	if err != nil {
 		logger.L().Fatal("creating IG Kubernetes client", helpers.Error(err))
@@ -107,11 +108,17 @@ func (ch *IGContainerWatcher) startRunningContainers() error {
 	for n := range *ch.ruleBindingPodNotify {
 		ch.addRunningContainers(k8sClient, &n)
 	}
+
+	logger.L().Debug("startRunningContainers ended")
 	return nil
 }
 
 func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *rulebindingmanager.RuleBindingNotify) {
+	logger.L().Debug("addRunningContainers", helpers.Interface("notify", notf))
+
 	pod := notf.GetPod()
+
+	logger.L().Debug("addRunningContainers", helpers.Interface("podName", pod.Name))
 
 	// skip containers that should be ignored
 	if ch.ignoreContainer(pod.GetNamespace(), pod.GetName()) {
@@ -120,6 +127,8 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 	}
 
 	containers := k8sClient.GetRunningContainers(pod)
+	logger.L().Debug("addRunningContainers", helpers.Interface("containers", len(containers)))
+
 	for _, container := range containers {
 		switch notf.GetAction() {
 		case rulebindingmanager.Removed:
@@ -129,12 +138,14 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 			ch.unregisterContainer(&container)
 
 		case rulebindingmanager.Added:
+			logger.L().Info("addRunningContainers: going to add container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", pod.GetNamespace()), helpers.String("pod name", pod.GetName()))
+
 			if ch.ruleManagedContainers.Contains(container.Runtime.ContainerID) {
 				// the container is already being monitored
 				continue
 			}
 
-			logger.L().Info("adding container to  ruleManagedContainers", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
+			logger.L().Info("adding container to ruleManagedContainers", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
 			// add to the list of containers that are being monitored because of ruless
 			ch.ruleManagedContainers.Add(container.Runtime.ContainerID)
 
