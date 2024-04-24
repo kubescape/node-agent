@@ -123,6 +123,8 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 	for _, container := range containers {
 		switch notf.GetAction() {
 		case rulebindingmanager.Removed:
+			logger.L().Info("removing container from ruleManagedContainers", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
+
 			ch.ruleManagedContainers.Remove(container.Runtime.ContainerID)
 			ch.unregisterContainer(&container)
 
@@ -132,6 +134,7 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 				continue
 			}
 
+			logger.L().Info("adding container to  ruleManagedContainers", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
 			// add to the list of containers that are being monitored because of ruless
 			ch.ruleManagedContainers.Add(container.Runtime.ContainerID)
 
@@ -290,6 +293,10 @@ func (ch *IGContainerWatcher) printNsMap(id string) {
 }
 
 func (ch *IGContainerWatcher) unregisterContainer(container *containercollection.Container) {
+	logger.L().Debug("unregisterContainer container called", helpers.String("container ID", container.Runtime.ContainerID),
+		helpers.Interface("ruleManagedContainers", ch.ruleManagedContainers),
+		helpers.Interface("timeBasedContainers", ch.timeBasedContainers),
+	)
 	timeBased := ch.timeBasedContainers.Contains(container.Runtime.ContainerID)
 	ruleManaged := ch.ruleManagedContainers.Contains(container.Runtime.ContainerID)
 	if timeBased || ruleManaged {
