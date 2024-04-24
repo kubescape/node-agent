@@ -318,7 +318,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkWorkerChan:      make(chan *tracernetworktype.Event, 50000),
 		dnsWorkerChan:          make(chan *tracerdnstype.Event, 10000),
 		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 500),
-		syscallsWorkerChan:     make(chan *tracersyscallstype.Event, 10000),
+		syscallsWorkerChan:     make(chan *tracersyscallstype.Event, 100000),
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,

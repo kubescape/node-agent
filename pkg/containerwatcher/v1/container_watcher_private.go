@@ -44,14 +44,25 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 
 			// Read the syscall tracer events in a separate goroutine.
 			go func() {
-				evs, err := ch.syscallTracer.Read(notif.Container.Runtime.ContainerID)
-				if err != nil {
-					logger.L().Error("reading syscall tracer", helpers.String("error", err.Error()))
-					return
-				}
-				for _, ev := range evs {
-					ev.SetContainerMetadata(&notif.Container.K8s.BasicK8sMetadata, &notif.Container.Runtime.BasicRuntimeMetadata)
-					ch.syscallEventCallback(ev)
+				for {
+					// If the container is not being monitored anymore, stop reading the events.
+					if !ch.timeBasedContainers.Contains(notif.Container.Runtime.ContainerID) && !ch.ruleManagedContainers.Contains(notif.Container.Runtime.ContainerID) {
+						ch.unregisterContainer(notif.Container)
+						return
+					}
+
+					evs, err := ch.syscallTracer.Read(notif.Container.Runtime.ContainerID)
+					if err != nil {
+						logger.L().Error("reading syscall tracer", helpers.String("error", err.Error()))
+						return
+					}
+					for _, ev := range evs {
+						ev.SetContainerMetadata(&notif.Container.K8s.BasicK8sMetadata, &notif.Container.Runtime.BasicRuntimeMetadata)
+						ch.syscallEventCallback(ev)
+					}
+
+					// Sleep for a while before reading the next batch of events.
+					time.Sleep(2 * time.Second) // TODO: make this configurable.
 				}
 			}()
 		}
