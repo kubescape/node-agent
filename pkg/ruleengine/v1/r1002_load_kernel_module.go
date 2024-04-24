@@ -6,7 +6,7 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
@@ -35,7 +35,6 @@ var _ ruleengine.RuleEvaluator = (*R1002LoadKernelModule)(nil)
 
 type R1002LoadKernelModule struct {
 	BaseRule
-	alerted bool
 }
 
 func CreateRuleR1002LoadKernelModule() *R1002LoadKernelModule {
@@ -52,21 +51,16 @@ func (rule *R1002LoadKernelModule) DeleteRule() {
 }
 
 func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if rule.alerted {
-		return nil
-	}
-
 	if eventType != utils.SyscallEventType {
 		return nil
 	}
 
-	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
+	syscallEvent, ok := event.(*tracersyscallstype.Event)
 	if !ok {
 		return nil
 	}
 
-	if syscallEvent.SyscallName == "init_module" {
-		rule.alerted = true
+	if syscallEvent.Syscall == "init_module" {
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
@@ -77,9 +71,7 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: syscallEvent.Comm,
-					Gid:  &syscallEvent.Gid,
 					PID:  syscallEvent.Pid,
-					Uid:  &syscallEvent.Uid,
 				},
 				ContainerID: syscallEvent.Runtime.ContainerID,
 			},

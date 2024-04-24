@@ -6,7 +6,7 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
@@ -36,11 +36,10 @@ var _ ruleengine.RuleEvaluator = (*R1006UnshareSyscall)(nil)
 
 type R1006UnshareSyscall struct {
 	BaseRule
-	alreadyNotified bool
 }
 
 func CreateRuleR1006UnshareSyscall() *R1006UnshareSyscall {
-	return &R1006UnshareSyscall{alreadyNotified: false}
+	return &R1006UnshareSyscall{}
 }
 
 func (rule *R1006UnshareSyscall) Name() string {
@@ -54,21 +53,16 @@ func (rule *R1006UnshareSyscall) DeleteRule() {
 }
 
 func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if rule.alreadyNotified {
-		return nil
-	}
-
 	if eventType != utils.SyscallEventType {
 		return nil
 	}
 
-	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
+	syscallEvent, ok := event.(*tracersyscallstype.Event)
 	if !ok {
 		return nil
 	}
 
-	if syscallEvent.SyscallName == "unshare" {
-		rule.alreadyNotified = true
+	if syscallEvent.Syscall == "unshare" {
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
@@ -79,9 +73,7 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event i
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: syscallEvent.Comm,
-					Gid:  &syscallEvent.Gid,
 					PID:  syscallEvent.Pid,
-					Uid:  &syscallEvent.Uid,
 				},
 				ContainerID: syscallEvent.Runtime.ContainerID,
 			},

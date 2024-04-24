@@ -5,7 +5,7 @@ import (
 	"node-agent/pkg/utils"
 	"testing"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -20,7 +20,7 @@ func TestR0003UnexpectedSystemCall(t *testing.T) {
 	}
 
 	// Create a syscall event
-	e := &ruleenginetypes.SyscallEvent{
+	e := &tracersyscallstype.Event{
 		Event: eventtypes.Event{
 			CommonData: eventtypes.CommonData{
 				K8s: eventtypes.K8sMetadata{
@@ -30,8 +30,8 @@ func TestR0003UnexpectedSystemCall(t *testing.T) {
 				},
 			},
 		},
-		Comm:        "test",
-		SyscallName: "test",
+		Comm:    "test",
+		Syscall: "test",
 	}
 
 	// Test with nil application profile

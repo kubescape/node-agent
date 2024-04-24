@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -40,11 +42,10 @@ var _ ruleengine.RuleEvaluator = (*R1005FilelessExecution)(nil)
 
 type R1005FilelessExecution struct {
 	BaseRule
-	alreadyNotified bool
 }
 
 func CreateRuleR1005FilelessExecution() *R1005FilelessExecution {
-	return &R1005FilelessExecution{alreadyNotified: false}
+	return &R1005FilelessExecution{}
 }
 
 func (rule *R1005FilelessExecution) Name() string {
@@ -59,7 +60,7 @@ func (rule *R1005FilelessExecution) DeleteRule() {
 
 func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType == utils.SyscallEventType {
-		return rule.handleSyscallEvent(event.(*ruleenginetypes.SyscallEvent))
+		return rule.handleSyscallEvent(event.(*tracersyscallstype.Event))
 	} else if eventType == utils.ExecveEventType {
 		return rule.handleExecveEvent(event.(*tracerexectype.Event))
 	}
@@ -67,13 +68,9 @@ func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, even
 	return nil
 }
 
-func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginetypes.SyscallEvent) ruleengine.RuleFailure {
-	if rule.alreadyNotified {
-		return nil
-	}
-
-	if syscallEvent.SyscallName == "memfd_create" {
-		rule.alreadyNotified = true
+func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *tracersyscallstype.Event) ruleengine.RuleFailure {
+	logger.L().Info("Fileless execution", helpers.String("syscall", syscallEvent.Syscall), helpers.Interface("args", syscallEvent.Parameters))
+	if syscallEvent.Syscall == "memfd_create" {
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
@@ -84,9 +81,7 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: syscallEvent.Comm,
-					Gid:  &syscallEvent.Gid,
 					PID:  syscallEvent.Pid,
-					Uid:  &syscallEvent.Uid,
 				},
 				ContainerID: syscallEvent.Runtime.ContainerID,
 			},

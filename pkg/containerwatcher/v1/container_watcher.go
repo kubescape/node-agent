@@ -23,7 +23,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	tracerdns "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/tracer"
@@ -34,6 +33,8 @@ import (
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	tracersyscalls "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/tracer"
+	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -50,12 +51,14 @@ const (
 	dnsTraceName               = "trace_dns"
 	openTraceName              = "trace_open"
 	randomxTraceName           = "trace_randomx"
+	syscallsTraceName          = "trace_syscalls"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
 	networkWorkerPoolSize      = 1
 	dnsWorkerPoolSize          = 5
 	randomxWorkerPoolSize      = 1
+	syscallsWorkerPoolSize     = 5
 )
 
 type IGContainerWatcher struct {
@@ -84,7 +87,7 @@ type IGContainerWatcher struct {
 	capabilitiesTracer *tracercapabilities.Tracer
 	execTracer         *tracerexec.Tracer
 	openTracer         *traceropen.Tracer
-	syscallTracer      *tracerseccomp.Tracer
+	syscallTracer      *tracersyscalls.Tracer
 	networkTracer      *tracernetwork.Tracer
 	dnsTracer          *tracerdns.Tracer
 	randomxTracer      *tracerandomx.Tracer
@@ -97,6 +100,7 @@ type IGContainerWatcher struct {
 	networkWorkerPool      *ants.PoolWithFunc
 	dnsWorkerPool          *ants.PoolWithFunc
 	randomxWorkerPool      *ants.PoolWithFunc
+	syscallsWorkerPool     *ants.PoolWithFunc
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *tracerexectype.Event
@@ -104,6 +108,7 @@ type IGContainerWatcher struct {
 	networkWorkerChan      chan *tracernetworktype.Event
 	dnsWorkerChan          chan *tracerdnstype.Event
 	randomxWorkerChan      chan *tracerandomxtype.Event
+	syscallsWorkerChan     chan *tracersyscallstype.Event
 
 	preRunningContainersIDs mapset.Set[string]
 
@@ -259,6 +264,21 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	if err != nil {
 		return nil, fmt.Errorf("creating randomx worker pool: %w", err)
 	}
+	// Create a syscalls worker pool
+	syscallsWorkerPool, err := ants.NewPoolWithFunc(syscallsWorkerPoolSize, func(i interface{}) {
+		event := i.(tracersyscallstype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
+		metrics.ReportEvent(utils.SyscallEventType)
+		applicationProfileManager.ReportSyscallEvent(k8sContainerID, event.Syscall)
+		ruleManager.ReportSyscallEvent(event.Runtime.ContainerID, event)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating syscalls worker pool: %w", err)
+	}
 
 	return &IGContainerWatcher{
 		// Configuration
@@ -287,6 +307,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkWorkerPool:       networkWorkerPool,
 		dnsWorkerPool:           dnsWorkerPool,
 		randomxWorkerPool:       randomxWorkerPool,
+		syscallsWorkerPool:      syscallsWorkerPool,
 		metrics:                 metrics,
 		preRunningContainersIDs: preRunningContainers,
 
@@ -297,6 +318,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkWorkerChan:      make(chan *tracernetworktype.Event, 50000),
 		dnsWorkerChan:          make(chan *tracerdnstype.Event, 10000),
 		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 500),
+		syscallsWorkerChan:     make(chan *tracersyscallstype.Event, 10000),
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,

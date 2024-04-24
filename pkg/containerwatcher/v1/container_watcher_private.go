@@ -33,6 +33,10 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+
+		// Attach the container to the syscall tracer
+		ch.syscallTracer.Attach(notif.Container.Runtime.ContainerID, notif.Container.Mntns)
+
 		time.AfterFunc(ch.cfg.MaxSniffingTime, func() {
 			logger.L().Info("monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
@@ -46,6 +50,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 		ch.ruleManagedContainers.Remove(notif.Container.Runtime.ContainerID)
+		ch.syscallTracer.Detach(notif.Container.Mntns)
 		logger.L().Info("stop monitor on container - container has terminated", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 	}
 }
@@ -158,8 +163,8 @@ func (ch *IGContainerWatcher) stopContainerCollection() {
 func (ch *IGContainerWatcher) startTracers() error {
 	if ch.cfg.EnableApplicationProfile {
 		// Start syscall tracer
-		if err := ch.startSystemcallTracing(); err != nil {
-			logger.L().Error("error starting seccomp tracing", helpers.Error(err))
+		if err := ch.startSyscallTracing(); err != nil {
+			logger.L().Error("error starting syscall tracing", helpers.Error(err))
 			return err
 		}
 		// Start capabilities tracer
@@ -221,24 +226,24 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		// Stop capabilities tracer
 		if err := ch.stopCapabilitiesTracing(); err != nil {
 			logger.L().Error("error stopping capabilities tracing", helpers.Error(err))
-			errs = errors.Join(err, ch.stopCapabilitiesTracing())
+			errs = errors.Join(errs, err)
 		}
 		// Stop syscall tracer
 		if err := ch.stopSystemcallTracing(); err != nil {
-			logger.L().Error("error stopping seccomp tracing", helpers.Error(err))
-			errs = errors.Join(err, ch.stopCapabilitiesTracing())
+			logger.L().Error("error stopping syscall tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
 		}
 	}
 	if ch.cfg.EnableRelevancy || ch.cfg.EnableApplicationProfile {
 		// Stop exec tracer
 		if err := ch.stopExecTracing(); err != nil {
 			logger.L().Error("error stopping exec tracing", helpers.Error(err))
-			errs = errors.Join(err, ch.stopCapabilitiesTracing())
+			errs = errors.Join(errs, err)
 		}
 		// Stop open tracer
 		if err := ch.stopOpenTracing(); err != nil {
 			logger.L().Error("error stopping open tracing", helpers.Error(err))
-			errs = errors.Join(err, ch.stopCapabilitiesTracing())
+			errs = errors.Join(errs, err)
 		}
 	}
 
@@ -246,12 +251,12 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		// Stop network tracer
 		if err := ch.stopNetworkTracing(); err != nil {
 			logger.L().Error("error stopping network tracing", helpers.Error(err))
-			errs = errors.Join(err, ch.stopNetworkTracing())
+			errs = errors.Join(errs, err)
 		}
 		// Stop dns tracer
 		if err := ch.stopDNSTracing(); err != nil {
 			logger.L().Error("error stopping dns tracing", helpers.Error(err))
-			errs = errors.Join(err, ch.stopDNSTracing())
+			errs = errors.Join(errs, err)
 		}
 	}
 
@@ -260,7 +265,7 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		if runtime.GOARCH == "amd64" && ch.randomxTracer != nil {
 			if err := ch.stopRandomxTracing(); err != nil {
 				logger.L().Error("error stopping randomx tracing", helpers.Error(err))
-				errs = errors.Join(err, ch.stopRandomxTracing())
+				errs = errors.Join(errs, err)
 			}
 		}
 	}

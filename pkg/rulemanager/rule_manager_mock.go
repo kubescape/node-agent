@@ -9,6 +9,7 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
 )
 
 type RuleManagerMock struct {
@@ -21,10 +22,6 @@ func CreateRuleManagerMock() *RuleManagerMock {
 }
 
 func (r *RuleManagerMock) ContainerCallback(_ containercollection.PubSubEvent) {
-	// noop
-}
-
-func (r *RuleManagerMock) RegisterPeekFunc(_ func(mntns uint64) ([]string, error)) {
 	// noop
 }
 
@@ -46,5 +43,9 @@ func (r *RuleManagerMock) ReportDNSEvent(event tracerdnstype.Event) {
 	// noop
 }
 func (r *RuleManagerMock) ReportRandomxEvent(_ string, _ tracerrandomxtype.Event) {
+	// noop
+}
+
+func (r *RuleManagerMock) ReportSyscallEvent(_ string, _ tracersyscallstype.Event) {
 	// noop
 }
