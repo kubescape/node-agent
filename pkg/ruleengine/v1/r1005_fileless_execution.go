@@ -9,8 +9,6 @@ import (
 	"strings"
 
 	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -69,7 +67,6 @@ func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, even
 }
 
 func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *tracersyscallstype.Event) ruleengine.RuleFailure {
-	logger.L().Info("Fileless execution", helpers.String("syscall", syscallEvent.Syscall), helpers.Interface("args", syscallEvent.Parameters))
 	if syscallEvent.Syscall == "memfd_create" {
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{

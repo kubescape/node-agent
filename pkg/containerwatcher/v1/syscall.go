@@ -26,8 +26,9 @@ func (ch *IGContainerWatcher) startSyscallTracing() error {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
 
+	syscallTracer.SetEventHandler(ch.syscallEventCallback)
+
 	ch.syscallTracer = syscallTracer
-	ch.syscallTracer.SetEventHandler(ch.syscallEventCallback)
 
 	return nil
 }

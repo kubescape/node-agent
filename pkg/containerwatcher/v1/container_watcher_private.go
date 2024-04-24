@@ -34,8 +34,27 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 	case containercollection.EventTypeAddContainer:
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 
-		// Attach the container to the syscall tracer
-		ch.syscallTracer.Attach(notif.Container.Runtime.ContainerID, notif.Container.Mntns)
+		if ch.syscallTracer != nil {
+			// Attach the container to the syscall tracer
+			if err := ch.syscallTracer.Attach(notif.Container.Runtime.ContainerID, notif.Container.Mntns); err != nil {
+				logger.L().Error("attaching container to syscall tracer", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID), helpers.Error(err))
+				ch.unregisterContainer(notif.Container)
+				return
+			}
+
+			// Read the syscall tracer events in a separate goroutine.
+			go func() {
+				evs, err := ch.syscallTracer.Read(notif.Container.Runtime.ContainerID)
+				if err != nil {
+					logger.L().Error("reading syscall tracer", helpers.String("error", err.Error()))
+					return
+				}
+				for _, ev := range evs {
+					ev.SetContainerMetadata(&notif.Container.K8s.BasicK8sMetadata, &notif.Container.Runtime.BasicRuntimeMetadata)
+					ch.syscallEventCallback(ev)
+				}
+			}()
+		}
 
 		time.AfterFunc(ch.cfg.MaxSniffingTime, func() {
 			logger.L().Info("monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
