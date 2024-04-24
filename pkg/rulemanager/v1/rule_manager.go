@@ -216,7 +216,7 @@ func (rm *RuleManager) getWorkloadIdentifier(podNamespace, podName string) (stri
 	return generatedWlid, nil
 }
 
-func (rm *RuleManager) ReportSyscallEvent(k8sContainerID string, event tracersyscallstype.Event) {
+func (rm *RuleManager) ReportSyscallEvent(event tracersyscallstype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportSyscallEvent event")
 		return
@@ -228,7 +228,7 @@ func (rm *RuleManager) ReportSyscallEvent(k8sContainerID string, event tracersys
 	rm.processEvent(utils.SyscallEventType, &event, rules)
 }
 
-func (rm *RuleManager) ReportCapability(k8sContainerID string, event tracercapabilitiestype.Event) {
+func (rm *RuleManager) ReportCapability(event tracercapabilitiestype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportCapability event")
 		return
@@ -240,7 +240,7 @@ func (rm *RuleManager) ReportCapability(k8sContainerID string, event tracercapab
 	rm.processEvent(utils.CapabilitiesEventType, &event, rules)
 }
 
-func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectype.Event) {
+func (rm *RuleManager) ReportFileExec(event tracerexectype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileExec event")
 		return
@@ -251,7 +251,7 @@ func (rm *RuleManager) ReportFileExec(k8sContainerID string, event tracerexectyp
 	rm.processEvent(utils.ExecveEventType, &event, rules)
 }
 
-func (rm *RuleManager) ReportFileOpen(k8sContainerID string, event traceropentype.Event) {
+func (rm *RuleManager) ReportFileOpen(event traceropentype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileOpen event")
 		return
@@ -263,7 +263,7 @@ func (rm *RuleManager) ReportFileOpen(k8sContainerID string, event traceropentyp
 	rm.processEvent(utils.OpenEventType, &event, rules)
 
 }
-func (rm *RuleManager) ReportNetworkEvent(k8sContainerID string, event tracernetworktype.Event) {
+func (rm *RuleManager) ReportNetworkEvent(event tracernetworktype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportNetworkEvent event")
 		return
@@ -287,7 +287,7 @@ func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
 	rm.processEvent(utils.DnsEventType, &event, rules)
 }
 
-func (rm *RuleManager) ReportRandomxEvent(k8sContainerID string, event tracerrandomxtype.Event) {
+func (rm *RuleManager) ReportRandomxEvent(event tracerrandomxtype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from randomx event")
 		return

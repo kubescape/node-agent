@@ -25,27 +25,27 @@ func (r *RuleManagerMock) ContainerCallback(_ containercollection.PubSubEvent) {
 	// noop
 }
 
-func (r *RuleManagerMock) ReportCapability(_ string, _ tracercapabilitiestype.Event) {
+func (r *RuleManagerMock) ReportCapability(_ tracercapabilitiestype.Event) {
 	// noop
 }
 
-func (r *RuleManagerMock) ReportFileExec(_ string, _ tracerexectype.Event) {
+func (r *RuleManagerMock) ReportFileExec(_ tracerexectype.Event) {
 	// noop
 }
 
-func (r *RuleManagerMock) ReportFileOpen(_ string, _ traceropentype.Event) {
+func (r *RuleManagerMock) ReportFileOpen(_ traceropentype.Event) {
 	// noop
 }
-func (r *RuleManagerMock) ReportNetworkEvent(_ string, _ tracernetworktype.Event) {
+func (r *RuleManagerMock) ReportNetworkEvent(_ tracernetworktype.Event) {
 	// noop
 }
 func (r *RuleManagerMock) ReportDNSEvent(event tracerdnstype.Event) {
 	// noop
 }
-func (r *RuleManagerMock) ReportRandomxEvent(_ string, _ tracerrandomxtype.Event) {
+func (r *RuleManagerMock) ReportRandomxEvent(_ tracerrandomxtype.Event) {
 	// noop
 }
 
-func (r *RuleManagerMock) ReportSyscallEvent(_ string, _ tracersyscallstype.Event) {
+func (r *RuleManagerMock) ReportSyscallEvent(_ tracersyscallstype.Event) {
 	// noop
 }

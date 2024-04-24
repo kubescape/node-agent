@@ -141,7 +141,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.CapabilitiesEventType)
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
-		ruleManager.ReportCapability(k8sContainerID, event)
+		ruleManager.ReportCapability(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating capabilities worker pool: %w", err)
@@ -169,7 +169,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.ExecveEventType)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
-		ruleManager.ReportFileExec(k8sContainerID, event)
+		ruleManager.ReportFileExec(event)
 		malwareManager.ReportFileExec(k8sContainerID, event)
 	})
 	if err != nil {
@@ -198,7 +198,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
 		relevancyManager.ReportFileOpen(event.Runtime.ContainerID, k8sContainerID, path)
-		ruleManager.ReportFileOpen(k8sContainerID, event)
+		ruleManager.ReportFileOpen(event)
 		malwareManager.ReportFileOpen(k8sContainerID, event)
 	})
 	if err != nil {
@@ -222,7 +222,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.NetworkEventType)
 		networkManagerv1Client.ReportNetworkEvent(event.Runtime.ContainerID, event)
 		networkManagerClient.ReportNetworkEvent(k8sContainerID, event)
-		ruleManager.ReportNetworkEvent(event.Runtime.ContainerID, event)
+		ruleManager.ReportNetworkEvent(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating network worker pool: %w", err)
@@ -259,7 +259,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 		metrics.ReportEvent(utils.RandomXEventType)
-		ruleManager.ReportRandomxEvent(event.Runtime.ContainerID, event)
+		ruleManager.ReportRandomxEvent(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating randomx worker pool: %w", err)
@@ -274,7 +274,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		metrics.ReportEvent(utils.SyscallEventType)
 		applicationProfileManager.ReportSyscallEvent(k8sContainerID, event.Syscall)
-		ruleManager.ReportSyscallEvent(event.Runtime.ContainerID, event)
+		ruleManager.ReportSyscallEvent(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating syscalls worker pool: %w", err)

@@ -14,11 +14,11 @@ import (
 
 type RuleManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
-	ReportCapability(k8sContainerID string, event tracercapabilitiestype.Event)
-	ReportFileExec(k8sContainerID string, event tracerexectype.Event)
-	ReportFileOpen(k8sContainerID string, event traceropentype.Event)
-	ReportNetworkEvent(k8sContainerID string, event tracernetworktype.Event)
+	ReportCapability(event tracercapabilitiestype.Event)
+	ReportFileExec(event tracerexectype.Event)
+	ReportFileOpen(event traceropentype.Event)
+	ReportNetworkEvent(event tracernetworktype.Event)
 	ReportDNSEvent(event tracerdnstype.Event)
-	ReportRandomxEvent(k8sContainerID string, event tracerrandomxtype.Event)
-	ReportSyscallEvent(k8sContainerID string, event tracersyscallstype.Event)
+	ReportRandomxEvent(event tracerrandomxtype.Event)
+	ReportSyscallEvent(event tracersyscallstype.Event)
 }
