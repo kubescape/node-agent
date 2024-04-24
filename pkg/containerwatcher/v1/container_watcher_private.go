@@ -37,20 +37,12 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		if ch.syscallTracer != nil {
 			// Attach the container to the syscall tracer
 			if err := ch.syscallTracer.Attach(notif.Container.Runtime.ContainerID, notif.Container.Mntns); err != nil {
-				logger.L().Error("attaching container to syscall tracer", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID), helpers.Error(err))
-				ch.unregisterContainer(notif.Container)
-				return
+				logger.L().Fatal("attaching container to syscall tracer", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID), helpers.Error(err))
 			}
 
 			// Read the syscall tracer events in a separate goroutine.
 			go func() {
 				for {
-					// If the container is not being monitored anymore, stop reading the events.
-					if !ch.timeBasedContainers.Contains(notif.Container.Runtime.ContainerID) && !ch.ruleManagedContainers.Contains(notif.Container.Runtime.ContainerID) {
-						ch.unregisterContainer(notif.Container)
-						return
-					}
-
 					evs, err := ch.syscallTracer.Read(notif.Container.Runtime.ContainerID)
 					if err != nil {
 						logger.L().Error("reading syscall tracer", helpers.String("error", err.Error()))
