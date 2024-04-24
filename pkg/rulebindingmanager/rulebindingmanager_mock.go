@@ -15,3 +15,7 @@ func (r *RuleBindingCacheMock) ListRulesForPod(namespace, name string) []ruleeng
 }
 func (r *RuleBindingCacheMock) AddNotifier(_ *chan RuleBindingNotify) {
 }
+
+func (r *RuleBindingCacheMock) IsCached(namespace, name string) bool {
+	return false
+}

@@ -85,6 +85,10 @@ func (c *RBCache) AddNotifier(n *chan rulebindingmanager.RuleBindingNotify) {
 	c.notifiers = append(c.notifiers, n)
 }
 
+func (c *RBCache) IsCached(namespace, name string) bool {
+	return c.allPods.Contains(uniqueName(namespace, name))
+}
+
 // ------------------ watcher.Watcher methods -----------------------
 func (c *RBCache) AddHandler(ctx context.Context, obj *unstructured.Unstructured) {
 	var rbs []rulebindingmanager.RuleBindingNotify
