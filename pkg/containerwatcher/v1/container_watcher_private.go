@@ -46,7 +46,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 				for {
 					evs, err := ch.syscallTracer.Read(notif.Container.Runtime.ContainerID)
 					if err != nil {
-						logger.L().Error("reading syscall tracer", helpers.String("error", err.Error()))
+						logger.L().Debug("syscalls perf buffer closed", helpers.String("error", err.Error()))
 						return
 					}
 					for _, ev := range evs {
@@ -76,6 +76,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 		ch.syscallTracer.Detach(notif.Container.Mntns)
+		ch.syscallTracer.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) error {
