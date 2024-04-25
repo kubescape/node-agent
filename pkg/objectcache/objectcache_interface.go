@@ -3,7 +3,7 @@ package objectcache
 type ObjectCache interface {
 	K8sObjectCache() K8sObjectCache
 	ApplicationProfileCache() ApplicationProfileCache
-	NetworkNeighborsCache() NetworkNeighborsCache
+	NetworkNeighborhoodCache() NetworkNeighborhoodCache
 }
 
 var _ ObjectCache = (*ObjectCacheMock)(nil)
@@ -21,6 +21,6 @@ func (om *ObjectCacheMock) K8sObjectCache() K8sObjectCache {
 func (om *ObjectCacheMock) ApplicationProfileCache() ApplicationProfileCache {
 	return &ApplicationProfileCacheMock{}
 }
-func (om *ObjectCacheMock) NetworkNeighborsCache() NetworkNeighborsCache {
-	return &NetworkNeighborsCacheMock{}
+func (om *ObjectCacheMock) NetworkNeighborhoodCache() NetworkNeighborhoodCache {
+	return &NetworkNeighborhoodCacheMock{}
 }

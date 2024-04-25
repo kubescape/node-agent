@@ -5,6 +5,7 @@ import (
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
+	"slices"
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -50,14 +51,13 @@ func (rule *R0005UnexpectedDomainRequest) ID() string {
 func (rule *R0005UnexpectedDomainRequest) DeleteRule() {
 }
 
-func (rule *R0005UnexpectedDomainRequest) generatePatchCommand(event *tracerdnstype.Event, nn *v1beta1.NetworkNeighbors) string {
-	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"dns\": [{\"dnsName\": \"%s\"}]}]}}'"
+func (rule *R0005UnexpectedDomainRequest) generatePatchCommand(event *tracerdnstype.Event, nn *v1beta1.NetworkNeighborhood) string {
+	baseTemplate := "kubectl patch networkneighborhood %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"dns\": [{\"dnsName\": \"%s\"}]}]}}'"
 	return fmt.Sprintf(baseTemplate, nn.GetName(), nn.GetNamespace(),
 		event.GetContainer(), event.DNSName)
 }
 
 func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-
 	if eventType != utils.DnsEventType {
 		return nil
 	}
@@ -72,14 +72,19 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		return nil
 	}
 
-	nn := objCache.NetworkNeighborsCache().GetNetworkNeighbors(domainEvent.GetNamespace(), domainEvent.GetPod())
+	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(domainEvent.Runtime.ContainerID)
 	if nn == nil {
 		return nil
 	}
 
+	nnContainer, err := getContainerFromNetworkNeighborhood(nn, domainEvent.GetContainer())
+	if err != nil {
+		return nil
+	}
+
 	// Check that the domain is in the network neighbors
-	for _, dns := range nn.Spec.Egress {
-		if dns.DNS == domainEvent.DNSName {
+	for _, dns := range nnContainer.Egress {
+		if dns.DNS == domainEvent.DNSName || slices.Contains(dns.DNSNames, domainEvent.DNSName) {
 			return nil
 		}
 	}

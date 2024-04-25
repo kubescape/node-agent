@@ -1,8 +1,8 @@
 name: Node Agent Component Tests
 on:
   pull_request:
-    types: [labeled, synchronize, ready_for_review, opened, reopened]
-
+    types: [synchronize, ready_for_review, opened, reopened]
+  
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -75,8 +75,7 @@ jobs:
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=prometheus -n monitoring --timeout=300s
       - name: Install Node Agent Chart
         run: |
-          STORAGE_TAG=v0.0.81
-          # STORAGE_TAG=$(./tests/scripts/storage-tag.sh)
+          STORAGE_TAG=$(./tests/scripts/storage-tag.sh)
           echo "Storage tag that will be used: ${STORAGE_TAG}"
           helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=${{ needs.build-and-push-image.outputs.image_tag }} --set nodeAgent.image.repository=${{ needs.build-and-push-image.outputs.image_repo }} --set storage.image.tag=${STORAGE_TAG} -n kubescape --create-namespace --wait --timeout 5m --debug
           # Check that the node-agent pod is running
@@ -94,29 +93,29 @@ jobs:
       - name: Run test
         run: |
           cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=component
-      - name: Upload plot images
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: Performance plots
-          path: "tests/*.png"
-      - name: Upload pprof files
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: Pprof files
-          path: "tests/*.pprof"
-      - name: Comment on PR
-        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
-        uses: actions/github-script@v3
-        with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
-          script: |
-            const artifactUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
-            const comment = `:sparkles: Artifacts are available [here](${artifactUrl}).`;
-            github.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+      # - name: Upload plot images
+      #   if: always()
+      #   uses: actions/upload-artifact@v2
+      #   with:
+      #     name: Performance plots
+      #     path: "tests/*.png"
+      # - name: Upload pprof files
+      #   if: always()
+      #   uses: actions/upload-artifact@v2
+      #   with:
+      #     name: Pprof files
+      #     path: "tests/*.pprof"
+      # - name: Comment on PR
+      #   if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
+      #   uses: actions/github-script@v3
+      #   with:
+      #     github-token: ${{secrets.GITHUB_TOKEN}}
+      #     script: |
+      #       const artifactUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+      #       const comment = `:sparkles: Artifacts are available [here](${artifactUrl}).`;
+      #       github.issues.createComment({
+      #         issue_number: context.issue.number,
+      #         owner: context.repo.owner,
+      #         repo: context.repo.repo,
+      #         body: comment
+      #       });

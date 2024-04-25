@@ -66,6 +66,12 @@ func (k *IGK8sClientMock) GetRunningContainers(pod *corev1.Pod) []containercolle
 					ContainerID: s.Name,
 				},
 			},
+			K8s: containercollection.K8sMetadata{
+				BasicK8sMetadata: types.BasicK8sMetadata{
+					PodName:   pod.Name,
+					Namespace: pod.Namespace,
+				},
+			},
 		})
 	}
 
