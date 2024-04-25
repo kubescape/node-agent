@@ -464,6 +464,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		if gotErr != nil {
 			// restore capabilities set
 			am.toSaveCapabilities.Get(watchedContainer.K8sContainerID).Append(capabilities...)
+			// restore syscalls set
+			am.toSaveSyscalls.Get(watchedContainer.K8sContainerID).Append(observedSyscalls...)
 			// restore execs map entries
 			toSaveExecs.Range(func(uniqueExecIdentifier string, v []string) bool {
 				if !am.toSaveExecs.Get(watchedContainer.K8sContainerID).Has(uniqueExecIdentifier) {
