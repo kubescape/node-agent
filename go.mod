@@ -84,6 +84,7 @@ require (
 	github.com/containerd/typeurl/v2 v2.1.1 // indirect
 	github.com/coreos/go-oidc v2.2.1+incompatible // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
+	github.com/cyphar/filepath-securejoin v0.2.4 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/cli v26.0.0+incompatible // indirect
@@ -273,4 +274,4 @@ replace github.com/anchore/packageurl-go => github.com/anchore/packageurl-go v0.
 // fork of release-v0.27
 // 	with this fix https://github.com/inspektor-gadget/inspektor-gadget/pull/2768
 // 	until new IG version is released
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/amirmalka/inspektor-gadget v0.27.1-0.20240425081746-ef1190827800
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/amirmalka/inspektor-gadget v0.27.1-0.20240425125818-32020c0b86df
