@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: multiple-containers-app
+  name: multiple-containers-deployment
+spec:
+  selector:
+    matchLabels:
+      app: multiple-containers-app
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: multiple-containers-app
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25.5
+        ports:
+        - containerPort: 80
+      - name: server
+        image: gcr.io/google-samples/microservices-demo/adservice:v0.3.4
+        ports:
+        - containerPort: 9555
+        env:
+        - name: PORT
+          value: "9555"
+        readinessProbe:
+          initialDelaySeconds: 20
+          periodSeconds: 15
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:9555"]
+        livenessProbe:
+          initialDelaySeconds: 20
+          periodSeconds: 15
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:9555"]

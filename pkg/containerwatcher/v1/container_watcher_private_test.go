@@ -45,23 +45,20 @@ func TestAddRunningContainers(t *testing.T) {
 		namespace string
 	}
 	tests := []struct {
-		notify                        *rulebindingmanager.RuleBindingNotify
-		ignore                        ignore
-		name                          string
-		expectedPreRunning            []string
-		expectedRuleManagedContainers []string
-		containersToRemove            []string
-		containersToAdd               []string
-		preTimeBasedContainers        []string
-		preRuleManagedContainers      []string
+		notify                  *rulebindingmanager.RuleBindingNotify
+		ignore                  ignore
+		name                    string
+		expectedPreRunning      []string
+		expectedRuleManagedPods []string
+		containersToRemove      []string
+		containersToAdd         []string
+		preTimeBasedContainers  []string
+		preRuleManagedPods      []string
 	}{
 		{
 			name: "Test add all containers",
-			expectedRuleManagedContainers: []string{
-				"container1",
-				"container2",
-				"initContainer1",
-				"initContainer2",
+			expectedRuleManagedPods: []string{
+				"namespace1/pod1",
 			},
 			expectedPreRunning: []string{
 				"container1",
@@ -88,14 +85,11 @@ func TestAddRunningContainers(t *testing.T) {
 				"initContainer1",
 				"initContainer2",
 			},
-			preRuleManagedContainers: []string{
-				"container1",
-				"container2",
-				"initContainer1",
-				"initContainer2",
+			preRuleManagedPods: []string{
+				"namespace1/pod1",
 			},
-			expectedRuleManagedContainers: []string{},
-			expectedPreRunning:            []string{},
+			expectedRuleManagedPods: []string{},
+			expectedPreRunning:      []string{},
 			notify: &rulebindingmanager.RuleBindingNotify{
 				Action: rulebindingmanager.Removed,
 				Pod:    pod,
@@ -103,14 +97,11 @@ func TestAddRunningContainers(t *testing.T) {
 		},
 		{
 			name: "Test add some containers",
-			expectedRuleManagedContainers: []string{
-				"container1",
-				"container2",
-				"initContainer1",
-				"initContainer2",
+			expectedRuleManagedPods: []string{
+				"namespace1/pod1",
 			},
-			preRuleManagedContainers: []string{
-				"container1",
+			preRuleManagedPods: []string{
+				"namespace1/pod1",
 			},
 			preTimeBasedContainers: []string{
 				"container1",
@@ -130,9 +121,9 @@ func TestAddRunningContainers(t *testing.T) {
 			},
 		},
 		{
-			name:                          "Test ignore pod",
-			expectedRuleManagedContainers: []string{},
-			expectedPreRunning:            []string{},
+			name:                    "Test ignore pod",
+			expectedRuleManagedPods: []string{},
+			expectedPreRunning:      []string{},
 			ignore: ignore{
 				name:      "pod1",
 				namespace: "namespace1",
@@ -147,12 +138,12 @@ func TestAddRunningContainers(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			slices.Sort(tt.expectedRuleManagedContainers)
+			slices.Sort(tt.expectedRuleManagedPods)
 			slices.Sort(tt.expectedPreRunning)
 			slices.Sort(tt.containersToRemove)
 
 			ch := IGContainerWatcher{
-				ruleManagedContainers:   mapset.NewSet[string](tt.preRuleManagedContainers...),
+				ruleManagedPods:         mapset.NewSet[string](tt.preRuleManagedPods...),
 				timeBasedContainers:     mapset.NewSet[string](tt.preTimeBasedContainers...),
 				preRunningContainersIDs: mapset.NewSet[string](),
 				containerCollection:     &containercollection.ContainerCollection{},
@@ -166,16 +157,16 @@ func TestAddRunningContainers(t *testing.T) {
 
 			ch.addRunningContainers(k8sMock, tt.notify)
 
-			r := ch.ruleManagedContainers.ToSlice()
+			r := ch.ruleManagedPods.ToSlice()
 			p := ch.preRunningContainersIDs.ToSlice()
 			slices.Sort(r)
 			slices.Sort(p)
 
-			assert.Equal(t, tt.expectedRuleManagedContainers, r)
+			assert.Equal(t, tt.expectedRuleManagedPods, r)
 			assert.Equal(t, tt.expectedPreRunning, p)
 
 			for _, containerID := range tt.containersToRemove {
-				assert.False(t, ch.ruleManagedContainers.Contains(containerID))
+				assert.False(t, ch.ruleManagedPods.Contains(containerID))
 			}
 
 			for _, containerID := range tt.containersToAdd {
@@ -186,46 +177,61 @@ func TestAddRunningContainers(t *testing.T) {
 }
 
 func TestUnregisterContainer(t *testing.T) {
-
 	tests := []struct {
-		name                     string
-		unregisterContainer      string
-		preTimeBasedContainers   []string
-		preRuleManagedContainers []string
-		containers               []string
-		expectedContainers       []string
+		name                    string
+		unregisterContainer     string
+		unregisterContainersPod string
+		preTimeBasedContainers  []string
+		preRuleManagedPods      []string
+		podToContainers         map[string][]string
+		expectedContainers      []string
 	}{
 		{
-			name:                     "Test unregister container",
-			unregisterContainer:      "container1",
-			containers:               []string{"container1", "container2"},
-			preTimeBasedContainers:   []string{"container2"},
-			preRuleManagedContainers: []string{"container2"},
-			expectedContainers:       []string{"container2"},
+			name:                    "Test unregister container",
+			unregisterContainer:     "container1",
+			unregisterContainersPod: "pod1",
+			podToContainers: map[string][]string{
+				"pod1": {"container1"},
+				"pod2": {"container2"},
+			},
+			preTimeBasedContainers: []string{"container2"},
+			preRuleManagedPods:     []string{"test/pod2"},
+			expectedContainers:     []string{"container2"},
 		},
 		{
-			name:                     "Test still in TimeBasedContainers",
-			unregisterContainer:      "container1",
-			containers:               []string{"container1", "container2"},
-			preTimeBasedContainers:   []string{"container1", "container2"},
-			preRuleManagedContainers: []string{"container2"},
-			expectedContainers:       []string{"container1", "container2"},
+			name:                    "Test still in TimeBasedContainers",
+			unregisterContainer:     "container1",
+			unregisterContainersPod: "pod1",
+			podToContainers: map[string][]string{
+				"pod1": {"container1"},
+				"pod2": {"container2"},
+			},
+			preTimeBasedContainers: []string{"container1", "container2"},
+			preRuleManagedPods:     []string{"test/pod2"},
+			expectedContainers:     []string{"container1", "container2"},
 		},
 		{
-			name:                     "Test still in RuleManagedContainers",
-			unregisterContainer:      "container1",
-			containers:               []string{"container1", "container2"},
-			preTimeBasedContainers:   []string{"container2"},
-			preRuleManagedContainers: []string{"container1", "container2"},
-			expectedContainers:       []string{"container1", "container2"},
+			name:                    "Test still in RuleManagedPods",
+			unregisterContainer:     "container1",
+			unregisterContainersPod: "pod1",
+			podToContainers: map[string][]string{
+				"pod1": {"container1", "container2"},
+			},
+			preTimeBasedContainers: []string{"container2"},
+			preRuleManagedPods:     []string{"test/pod1"},
+			expectedContainers:     []string{"container1", "container2"},
 		},
 		{
-			name:                     "Test still in both",
-			unregisterContainer:      "container1",
-			containers:               []string{"container1", "container2"},
-			preTimeBasedContainers:   []string{"container1", "container2"},
-			preRuleManagedContainers: []string{"container1", "container2"},
-			expectedContainers:       []string{"container1", "container2"},
+			name:                    "Test still in both",
+			unregisterContainer:     "container1",
+			unregisterContainersPod: "pod1",
+			podToContainers: map[string][]string{
+				"pod1": {"container1"},
+				"pod2": {"container2"},
+			},
+			preTimeBasedContainers: []string{"container1", "container2"},
+			preRuleManagedPods:     []string{"test/pod1", "test/pod2"},
+			expectedContainers:     []string{"container1", "container2"},
 		},
 	}
 
@@ -233,27 +239,42 @@ func TestUnregisterContainer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			ch := IGContainerWatcher{
-				ruleManagedContainers:   mapset.NewSet[string](tt.preRuleManagedContainers...),
+				ruleManagedPods:         mapset.NewSet[string](tt.preRuleManagedPods...),
 				timeBasedContainers:     mapset.NewSet[string](tt.preTimeBasedContainers...),
 				preRunningContainersIDs: mapset.NewSet[string](),
 				containerCollection:     &containercollection.ContainerCollection{},
 				tracerCollection:        &tracercollection.TracerCollection{},
 			}
 
-			for _, s := range tt.containers {
-				ch.containerCollection.AddContainer(&containercollection.Container{
-					Runtime: containercollection.RuntimeMetadata{
-						BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-							ContainerID: s,
+			for pod, containers := range tt.podToContainers {
+				for _, s := range containers {
+					ch.containerCollection.AddContainer(&containercollection.Container{
+						Runtime: containercollection.RuntimeMetadata{
+							BasicRuntimeMetadata: types.BasicRuntimeMetadata{
+								ContainerID: s,
+							},
 						},
-					},
-				})
+						K8s: containercollection.K8sMetadata{
+							BasicK8sMetadata: types.BasicK8sMetadata{
+								PodName:   pod,
+								Namespace: "test",
+							},
+						},
+					})
+				}
+
 			}
 
 			c := &containercollection.Container{
 				Runtime: containercollection.RuntimeMetadata{
 					BasicRuntimeMetadata: types.BasicRuntimeMetadata{
 						ContainerID: tt.unregisterContainer,
+					},
+				},
+				K8s: containercollection.K8sMetadata{
+					BasicK8sMetadata: types.BasicK8sMetadata{
+						PodName:   tt.unregisterContainersPod,
+						Namespace: "test",
 					},
 				},
 			}

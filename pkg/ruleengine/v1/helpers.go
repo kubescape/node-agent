@@ -46,6 +46,25 @@ func getContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containe
 	return v1beta1.ApplicationProfileContainer{}, fmt.Errorf("container %s not found in application profile", containerName)
 }
 
+func getContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, containerName string) (v1beta1.NetworkNeighborhoodContainer, error) {
+	for i := range nn.Spec.Containers {
+		if nn.Spec.Containers[i].Name == containerName {
+			return nn.Spec.Containers[i], nil
+		}
+	}
+	for i := range nn.Spec.InitContainers {
+		if nn.Spec.InitContainers[i].Name == containerName {
+			return nn.Spec.InitContainers[i], nil
+		}
+	}
+	for i := range nn.Spec.EphemeralContainers {
+		if nn.Spec.EphemeralContainers[i].Name == containerName {
+			return nn.Spec.EphemeralContainers[i], nil
+		}
+	}
+	return v1beta1.NetworkNeighborhoodContainer{}, fmt.Errorf("container %s not found in network neighborhood profile", containerName)
+}
+
 func getContainerMountPaths(namespace, podName, containerName string, k8sObjCache objectcache.K8sObjectCache) ([]string, error) {
 	podSpec := k8sObjCache.GetPodSpec(namespace, podName)
 	if podSpec == nil {

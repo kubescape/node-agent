@@ -10,13 +10,13 @@ import (
 
 var _ objectcache.ApplicationProfileCache = (*RuleObjectCacheMock)(nil)
 var _ objectcache.K8sObjectCache = (*RuleObjectCacheMock)(nil)
-var _ objectcache.NetworkNeighborsCache = (*RuleObjectCacheMock)(nil)
+var _ objectcache.NetworkNeighborhoodCache = (*RuleObjectCacheMock)(nil)
 
 type RuleObjectCacheMock struct {
 	profile   *v1beta1.ApplicationProfile
 	podSpec   *corev1.PodSpec
 	podStatus *corev1.PodStatus
-	nn        *v1beta1.NetworkNeighbors
+	nn        *v1beta1.NetworkNeighborhood
 }
 
 func (r *RuleObjectCacheMock) GetApplicationProfile(string) *v1beta1.ApplicationProfile {
@@ -53,15 +53,14 @@ func (r *RuleObjectCacheMock) K8sObjectCache() objectcache.K8sObjectCache {
 	return r
 }
 
-func (r *RuleObjectCacheMock) NetworkNeighborsCache() objectcache.NetworkNeighborsCache {
+func (r *RuleObjectCacheMock) NetworkNeighborhoodCache() objectcache.NetworkNeighborhoodCache {
 	return r
 }
 
-func (r *RuleObjectCacheMock) GetNetworkNeighbors(namespace, name string) *v1beta1.NetworkNeighbors {
+func (r *RuleObjectCacheMock) GetNetworkNeighborhood(string) *v1beta1.NetworkNeighborhood {
 	return r.nn
 }
 
-func (r *RuleObjectCacheMock) SetNetworkNeighbors(nn *v1beta1.NetworkNeighbors) {
+func (r *RuleObjectCacheMock) SetNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood) {
 	r.nn = nn
 }
- 

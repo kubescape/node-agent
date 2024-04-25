@@ -36,6 +36,7 @@ import (
 	tracersyscalls "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/tracer"
 	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
@@ -83,6 +84,7 @@ type IGContainerWatcher struct {
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
+	socketEnricher      *socketenricher.SocketEnricher
 	// IG Tracers
 	capabilitiesTracer *tracercapabilities.Tracer
 	execTracer         *tracerexec.Tracer
@@ -93,6 +95,7 @@ type IGContainerWatcher struct {
 	randomxTracer      *tracerandomx.Tracer
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
+
 	// Worker pools
 	capabilitiesWorkerPool *ants.PoolWithFunc
 	execWorkerPool         *ants.PoolWithFunc
@@ -112,10 +115,9 @@ type IGContainerWatcher struct {
 
 	preRunningContainersIDs mapset.Set[string]
 
-	timeBasedContainers   mapset.Set[string] // list of containers to track based on ticker
-	ruleManagedContainers mapset.Set[string] // list of containers to track based on rules
-
-	metrics metricsmanager.MetricsManager
+	timeBasedContainers mapset.Set[string] // list of containers to track based on ticker
+	ruleManagedPods     mapset.Set[string] // list of pods to track based on rules
+	metrics             metricsmanager.MetricsManager
 
 	// cache
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify
@@ -230,10 +232,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	// Create a dns worker pool
 	dnsWorkerPool, err := ants.NewPoolWithFunc(dnsWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerdnstype.Event)
-		// ignore events with empty container name
-		if event.K8s.ContainerName == "" {
-			return
-		}
 
 		// ignore DNS events that are not responses
 		if event.Qr != tracerdnstype.DNSPktTypeResponse {
@@ -323,8 +321,8 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,
 
-		timeBasedContainers:   mapset.NewSet[string](),
-		ruleManagedContainers: mapset.NewSet[string](),
+		timeBasedContainers: mapset.NewSet[string](),
+		ruleManagedPods:     mapset.NewSet[string](),
 	}, nil
 }
 

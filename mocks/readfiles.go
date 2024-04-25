@@ -22,7 +22,7 @@ const (
 	TestKindDeploy TestKinds = "Deployment"
 	TestKindAP     TestKinds = "ApplicationProfile"
 	TestKindAA     TestKinds = "ApplicationActivity"
-	TestKindNN     TestKinds = "NetworkNeighbors"
+	TestKindNN     TestKinds = "NetworkNeighborhood"
 )
 
 const (
@@ -36,7 +36,7 @@ const (
 	nginxDeploymentBytes          = "testdata/nginx_deploy.json"
 	nginxApplicationProfileBytes  = "testdata/nginx_applicationprofiles.json"
 	nginxApplicationActivityBytes = "testdata/nginx_applicationactivities.json"
-	nginxNetworkNeighborsBytes    = "testdata/nginx_networkneighbors.json"
+	nginxNetworkNeighborhoodBytes = "testdata/nginx_networkneighborhood.json"
 )
 const (
 	collectionPodBytes                 = "testdata/collection_pod.json"
@@ -44,7 +44,7 @@ const (
 	collectionDeploymentBytes          = "testdata/collection_deploy.json"
 	collectionApplicationProfileBytes  = "testdata/collection_applicationprofiles.json"
 	collectionApplicationActivityBytes = "testdata/collection_applicationactivities.json"
-	collectionNetworkNeighborsBytes    = "testdata/collection_networkneighbors.json"
+	collectionNetworkNeighborhoodBytes = "testdata/collection_networkneighborhood.json"
 )
 
 var NAMESPACE = ""
@@ -98,7 +98,7 @@ func UnstructuredToRuntime(u *unstructured.Unstructured) k8sruntime.Object {
 			return aa
 		}
 	case TestKindNN:
-		nn := &v1beta1.NetworkNeighbors{}
+		nn := &v1beta1.NetworkNeighborhood{}
 		if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(u.Object, nn); err == nil {
 			return nn
 		}
@@ -166,9 +166,9 @@ func GetBytes(kind TestKinds, name TestName) []byte {
 	case TestKindNN:
 		switch name {
 		case TestNginx:
-			return readFile(nginxNetworkNeighborsBytes)
+			return readFile(nginxNetworkNeighborhoodBytes)
 		case TestCollection:
-			return readFile(collectionNetworkNeighborsBytes)
+			return readFile(collectionNetworkNeighborhoodBytes)
 		}
 	}
 	return []byte{}

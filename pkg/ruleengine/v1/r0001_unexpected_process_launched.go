@@ -74,6 +74,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 	if !ok {
 		return nil
 	}
+
 	execPath := getExecPathFromEvent(execEvent)
 
 	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
