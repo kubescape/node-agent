@@ -38,7 +38,13 @@ func (ch *IGContainerWatcher) startDNSTracing() error {
 		}
 	}()
 
+	tracerDns.SetSocketEnricherMap(ch.socketEnricher.SocketsMap())
 	tracerDns.SetEventHandler(ch.dnsEventCallback)
+
+	err = tracerDns.RunWorkaround()
+	if err != nil {
+		return fmt.Errorf("running workaround: %w", err)
+	}
 
 	ch.dnsTracer = tracerDns
 

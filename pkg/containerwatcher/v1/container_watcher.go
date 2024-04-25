@@ -110,10 +110,9 @@ type IGContainerWatcher struct {
 
 	preRunningContainersIDs mapset.Set[string]
 
-	timeBasedContainers   mapset.Set[string] // list of containers to track based on ticker
-	ruleManagedContainers mapset.Set[string] // list of containers to track based on rules
-
-	metrics metricsmanager.MetricsManager
+	timeBasedContainers mapset.Set[string] // list of containers to track based on ticker
+	ruleManagedPods     mapset.Set[string] // list of pods to track based on rules
+	metrics             metricsmanager.MetricsManager
 
 	// cache
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify
@@ -300,8 +299,8 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,
 
-		timeBasedContainers:   mapset.NewSet[string](),
-		ruleManagedContainers: mapset.NewSet[string](),
+		timeBasedContainers: mapset.NewSet[string](),
+		ruleManagedPods:     mapset.NewSet[string](),
 	}, nil
 }
 

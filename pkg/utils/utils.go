@@ -154,6 +154,10 @@ func CreateK8sContainerID(namespaceName string, podName string, containerName st
 	return strings.Join([]string{namespaceName, podName, containerName}, "/")
 }
 
+func CreateK8sPodID(namespaceName string, podName string) string {
+	return strings.Join([]string{namespaceName, podName}, "/")
+}
+
 // AddRandomDuration adds between min and max seconds to duration
 func AddRandomDuration(min, max int, duration time.Duration) time.Duration {
 	// we don't initialize the seed, so we will get the same sequence of random numbers every time
