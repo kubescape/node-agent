@@ -54,7 +54,7 @@ nodeAgent:
     pullPolicy: IfNotPresent
 
   config:
-    maxLearningPeriod: 3m 
+    maxLearningPeriod: 2m
     learningPeriod: 1m
     updatePeriod: 30s 
     prometheusExporter: enable

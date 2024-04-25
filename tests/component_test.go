@@ -81,13 +81,10 @@ func Test_01_BasicAlertTest(t *testing.T) {
 
 	t.Logf("application profile: %v", string(appProfileJson))
 
-	for i := 0; i < 10; i++ {
-		wl.ExecIntoPod([]string{"ls", "-l"}, "nginx") // no alert expected
-		for j := 0; j < 10; j++ {
-			wl.ExecIntoPod([]string{"ls", "-l"}, "server") // alert expected
-		}
-		time.Sleep(1 * time.Second)
-	}
+	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")                                           // no alert expected
+	wl.ExecIntoPod([]string{"ls", "-l"}, "server")                                          // alert expected
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // no alert expected
+	_, _, err = wl.ExecIntoPod([]string{"curl", "ebpf.io", "-m", "2"}, "nginx")             // alert expected
 
 	// Wait for the alert to be signaled
 	time.Sleep(30 * time.Second)
@@ -100,8 +97,10 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "server")
 	testutils.AssertNotContains(t, alerts, "Unexpected process launched", "ls", "nginx")
 
-	// check network neighborhood instead of alerts because DNS tracer events are not
-	// enriched with container name for pods with more than 1 container (bug)
+	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx")
+	testutils.AssertNotContains(t, alerts, "Unexpected domain request", "wget", "server")
+
+	// check network neighborhood
 	nn, _ := wl.GetNetworkNeighborhood()
 	testutils.AssertNetworkNeighborhoodContains(t, nn, "nginx", []string{"kubernetes.io."}, []string{})
 	testutils.AssertNetworkNeighborhoodNotContains(t, nn, "server", []string{"kubernetes.io."}, []string{})

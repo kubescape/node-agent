@@ -93,29 +93,29 @@ jobs:
       - name: Run test
         run: |
           cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=component
-      - name: Upload plot images
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: Performance plots
-          path: "tests/*.png"
-      - name: Upload pprof files
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: Pprof files
-          path: "tests/*.pprof"
-      - name: Comment on PR
-        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
-        uses: actions/github-script@v3
-        with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
-          script: |
-            const artifactUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
-            const comment = `:sparkles: Artifacts are available [here](${artifactUrl}).`;
-            github.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+      # - name: Upload plot images
+      #   if: always()
+      #   uses: actions/upload-artifact@v2
+      #   with:
+      #     name: Performance plots
+      #     path: "tests/*.png"
+      # - name: Upload pprof files
+      #   if: always()
+      #   uses: actions/upload-artifact@v2
+      #   with:
+      #     name: Pprof files
+      #     path: "tests/*.pprof"
+      # - name: Comment on PR
+      #   if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
+      #   uses: actions/github-script@v3
+      #   with:
+      #     github-token: ${{secrets.GITHUB_TOKEN}}
+      #     script: |
+      #       const artifactUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+      #       const comment = `:sparkles: Artifacts are available [here](${artifactUrl}).`;
+      #       github.issues.createComment({
+      #         issue_number: context.issue.number,
+      #         owner: context.repo.owner,
+      #         repo: context.repo.repo,
+      #         body: comment
+      #       });
