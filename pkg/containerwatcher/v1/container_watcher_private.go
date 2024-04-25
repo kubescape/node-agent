@@ -303,8 +303,7 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 		// the container should still be monitored
 		logger.L().Debug("container should still be monitored",
 			helpers.String("container ID", container.Runtime.ContainerID),
-			helpers.Interface("timeBased", timeBased),
-			helpers.Interface("ruleManaged", ruleManaged),
+			helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName),
 		)
 		return
 	}

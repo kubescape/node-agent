@@ -58,7 +58,7 @@ func TestAddRunningContainers(t *testing.T) {
 		{
 			name: "Test add all containers",
 			expectedRuleManagedPods: []string{
-				"pod1",
+				"namespace1/pod1",
 			},
 			expectedPreRunning: []string{
 				"container1",
@@ -86,7 +86,7 @@ func TestAddRunningContainers(t *testing.T) {
 				"initContainer2",
 			},
 			preRuleManagedPods: []string{
-				"pod1",
+				"namespace1/pod1",
 			},
 			expectedRuleManagedPods: []string{},
 			expectedPreRunning:      []string{},
@@ -98,13 +98,10 @@ func TestAddRunningContainers(t *testing.T) {
 		{
 			name: "Test add some containers",
 			expectedRuleManagedPods: []string{
-				"container1",
-				"container2",
-				"initContainer1",
-				"initContainer2",
+				"namespace1/pod1",
 			},
 			preRuleManagedPods: []string{
-				"pod1",
+				"namespace1/pod1",
 			},
 			preTimeBasedContainers: []string{
 				"container1",
@@ -180,7 +177,6 @@ func TestAddRunningContainers(t *testing.T) {
 }
 
 func TestUnregisterContainer(t *testing.T) {
-
 	tests := []struct {
 		name                    string
 		unregisterContainer     string
@@ -195,50 +191,46 @@ func TestUnregisterContainer(t *testing.T) {
 			unregisterContainer:     "container1",
 			unregisterContainersPod: "pod1",
 			podToContainers: map[string][]string{
-				"pod1": []string{"container1"},
-				"pod2": []string{"container2"},
+				"pod1": {"container1"},
+				"pod2": {"container2"},
 			},
 			preTimeBasedContainers: []string{"container2"},
-			preRuleManagedPods:     []string{"pod2"},
+			preRuleManagedPods:     []string{"test/pod2"},
 			expectedContainers:     []string{"container2"},
 		},
 		{
 			name:                    "Test still in TimeBasedContainers",
 			unregisterContainer:     "container1",
 			unregisterContainersPod: "pod1",
-
 			podToContainers: map[string][]string{
-				"pod1": []string{"container1"},
-				"pod2": []string{"container2"},
+				"pod1": {"container1"},
+				"pod2": {"container2"},
 			},
 			preTimeBasedContainers: []string{"container1", "container2"},
-			preRuleManagedPods:     []string{"pod2"},
+			preRuleManagedPods:     []string{"test/pod2"},
 			expectedContainers:     []string{"container1", "container2"},
 		},
 		{
-			name:                    "Test still in RuleManagedContainers",
+			name:                    "Test still in RuleManagedPods",
 			unregisterContainer:     "container1",
 			unregisterContainersPod: "pod1",
-
 			podToContainers: map[string][]string{
-				"pod1": []string{"container1"},
-				"pod2": []string{"container2"},
+				"pod1": {"container1", "container2"},
 			},
 			preTimeBasedContainers: []string{"container2"},
-			preRuleManagedPods:     []string{"pod1", "pod2"},
+			preRuleManagedPods:     []string{"test/pod1"},
 			expectedContainers:     []string{"container1", "container2"},
 		},
 		{
 			name:                    "Test still in both",
 			unregisterContainer:     "container1",
 			unregisterContainersPod: "pod1",
-
 			podToContainers: map[string][]string{
-				"pod1": []string{"container1"},
-				"pod2": []string{"container2"},
+				"pod1": {"container1"},
+				"pod2": {"container2"},
 			},
 			preTimeBasedContainers: []string{"container1", "container2"},
-			preRuleManagedPods:     []string{"pod1", "pod2"},
+			preRuleManagedPods:     []string{"test/pod1", "test/pod2"},
 			expectedContainers:     []string{"container1", "container2"},
 		},
 	}
@@ -264,7 +256,8 @@ func TestUnregisterContainer(t *testing.T) {
 						},
 						K8s: containercollection.K8sMetadata{
 							BasicK8sMetadata: types.BasicK8sMetadata{
-								PodName: pod,
+								PodName:   pod,
+								Namespace: "test",
 							},
 						},
 					})
@@ -280,7 +273,8 @@ func TestUnregisterContainer(t *testing.T) {
 				},
 				K8s: containercollection.K8sMetadata{
 					BasicK8sMetadata: types.BasicK8sMetadata{
-						PodName: tt.unregisterContainersPod,
+						PodName:   tt.unregisterContainersPod,
+						Namespace: "test",
 					},
 				},
 			}
