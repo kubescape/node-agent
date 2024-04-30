@@ -2,12 +2,18 @@ package storage
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"node-agent/pkg/storage"
 	"os"
 	"strconv"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
@@ -58,6 +64,28 @@ func CreateStorage(namespace string) (*Storage, error) {
 	maxNetworkNeighborhoodSize, err := strconv.Atoi(os.Getenv("MAX_NETWORK_NEIGHBORHOOD_SIZE"))
 	if err != nil {
 		maxNetworkNeighborhoodSize = DefaultMaxNetworkNeighborhoodSize
+	}
+
+	// wait for storage to be ready
+	// create a client to skip TLS verification
+	customTransport := http.DefaultTransport.(*http.Transport).Clone()
+	// #nosec G402
+	customTransport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	client := &http.Client{Transport: customTransport}
+	if err := backoff.RetryNotify(func() error {
+		// call storage readiness endpoint
+		response, err := client.Get("https://storage:443/readyz")
+		if err != nil {
+			return err
+		}
+		if response.StatusCode != http.StatusOK {
+			return fmt.Errorf("storage not ready yet")
+		}
+		return nil
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), 60), func(err error, d time.Duration) {
+		logger.L().Info("waiting for storage to be ready", helpers.Error(err), helpers.String("retry in", d.String()))
+	}); err != nil {
+		return nil, fmt.Errorf("too many retries waiting for storage: %w", err)
 	}
 
 	return &Storage{
