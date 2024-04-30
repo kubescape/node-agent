@@ -2,10 +2,8 @@ package storage
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"node-agent/pkg/storage"
 	"os"
 	"strconv"
@@ -67,21 +65,9 @@ func CreateStorage(namespace string) (*Storage, error) {
 	}
 
 	// wait for storage to be ready
-	// create a client to skip TLS verification
-	customTransport := http.DefaultTransport.(*http.Transport).Clone()
-	// #nosec G402
-	customTransport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	client := &http.Client{Transport: customTransport}
 	if err := backoff.RetryNotify(func() error {
-		// call storage readiness endpoint
-		response, err := client.Get("https://storage:443/readyz")
-		if err != nil {
-			return err
-		}
-		if response.StatusCode != http.StatusOK {
-			return fmt.Errorf("storage not ready yet")
-		}
-		return nil
+		_, err := clientset.SpdxV1beta1().ApplicationProfiles("default").List(context.Background(), metav1.ListOptions{})
+		return err
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), 60), func(err error, d time.Duration) {
 		logger.L().Info("waiting for storage to be ready", helpers.Error(err), helpers.String("retry in", d.String()))
 	}); err != nil {

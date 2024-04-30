@@ -12,12 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-//go:embed testdata/kollector-syft.json
-var syftKollectorSBOM []byte
-
-//go:embed testdata/kollector-syft-filtered.json
-var syftKollectorSBOMfiltered []byte
-
 // func TestFilterRelevantFilesInSBOM(t *testing.T) {
 // 	tests := []struct {
 // 		name                   string
@@ -107,7 +101,7 @@ func TestFilterSBOM(t *testing.T) {
 					ImageTag:    "kollector",
 					InstanceID:  instanceID,
 					RelevantRealtimeFilesByIdentifier: map[string]bool{
-						"dad6eaf501b8c3b7": true,
+						"272fc1a4e05df74a": true,
 					},
 					RelevantRelationshipsArtifactsByIdentifier: make(map[string]bool),
 					RelevantArtifactsFilesByIdentifier:         make(map[string]bool),
@@ -132,7 +126,7 @@ func TestFilterSBOM(t *testing.T) {
 					ImageTag:            "kollector",
 					InstanceID:          instanceID,
 					RelevantRealtimeFilesByIdentifier: map[string]bool{
-						"dad6eaf501b8c3b7": true,
+						"272fc1a4e05df74a": true,
 					},
 					RelevantRelationshipsArtifactsByIdentifier: make(map[string]bool),
 					RelevantArtifactsFilesByIdentifier:         make(map[string]bool),
