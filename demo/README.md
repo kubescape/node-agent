@@ -27,7 +27,7 @@ After you have a Kubernetes cluster up and running, you can install Node Agent b
 ```bash
 git clone https://github.com/kubescape/node-agent.git && cd node-agent
 # Assuming AlertManager is running in service  "alertmanager-operated" in namespace "monitoring"
-helm repo add kubescape https://kubescape.github.io/helm-charts/ ; helm repo update ; helm upgrade --install kubescape kubescape/kubescape-operator -n kubescape --create-namespace --set clusterName=`kubectl config current-context` --set nodeAgent.config.alertManagerExporterUrls=alertmanager-operated.monitoring.svc.cluster.local:9093 --set nodeAgent.config.maxLearningPeriod=15m --set nodeAgent.config.learningPeriod=2m --set nodeAgent.config.updatePeriod=1m --set capabilities.runtimeDetection=enable
+helm repo add kubescape https://kubescape.github.io/helm-charts/ ; helm repo update ; helm upgrade --install kubescape kubescape/kubescape-operator -n kubescape --create-namespace --set clusterName=`kubectl config current-context` --set nodeAgent.config.alertManagerExporterUrls=alertmanager-operated.monitoring.svc.cluster.local:9093 --set nodeAgent.config.maxLearningPeriod=15m --set nodeAgent.config.learningPeriod=2m --set nodeAgent.config.updatePeriod=1m --set capabilities.runtimeDetection=enable --set alertCRD.installDefault=true --set alertCRD.scopeClustered=true
 ```
 
 You should be getting alerts after the learning period ends. The learning period is the time Node Agent takes to learn the normal behavior of the cluster, during this period Node Agent will raise alerts only for malicious activities. After the learning period, Node Agent will raise alerts for both malicious and abnormal activities.
@@ -68,15 +68,16 @@ You can access the web application by using a web browser and going to `http://<
 You should see the following page:
 ![Web Application](assets/webapp.png)
 
+The application is a "Ping service", it allows the user to ping a host, and it will return the output of the ping command.
+Let's try to ping `1.1.1.1` and see the output.
+
+![Ping](assets/ping.png)
+
 Once you have the web application up and running, let's attack it and see how Node Agent detects the attack.
 
 ## Attack Web Application
 
 Our web application is deliberatly made vulnerable to a [command injection](https://owasp.org/www-community/attacks/Command_Injection) attack.
-The application is a "Ping service", it allows the user to ping a host, and it will return the output of the ping command.
-Let's try to ping `1.1.1.1` and see the output.
-
-![Ping](assets/ping.png)
 
 Behind the scenes, the application is taking the IP from the form as a string and concatenates it to a command. Since there is no proper input sanitization we can use this to run arbitrary commands on the web application container and get the output.
 
