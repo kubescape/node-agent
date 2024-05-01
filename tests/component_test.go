@@ -698,8 +698,11 @@ func Test_11_DuplicationTest(t *testing.T) {
 	// Validate that unexpected process launched alert is signaled only once
 	count := 0
 	for _, alert := range alerts {
-		if alert.Labels["rule_name"] == "Unexpected process launched" {
-			count++
+		ruleName, ruleOk := alert.Labels["rule_name"]
+		if ruleOk {
+			if ruleName == "Unexpected process launched" {
+				count++
+			}
 		}
 	}
 
