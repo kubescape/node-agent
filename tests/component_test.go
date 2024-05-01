@@ -687,6 +687,9 @@ func Test_11_DuplicationTest(t *testing.T) {
 
 	// process launched from nginx container
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
+	if err != nil {
+		t.Errorf("Error executing remote command: %v", err)
+	}
 
 	time.Sleep(10 * time.Second)
 
@@ -705,6 +708,8 @@ func Test_11_DuplicationTest(t *testing.T) {
 			}
 		}
 	}
+
+	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx")
 
 	assert.Equal(t, 1, count, "Expected 1 alert of type 'Unexpected process launched' but got %d", count)
 }
