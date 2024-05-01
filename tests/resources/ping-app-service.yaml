@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ping-app
+  labels:
+    app: ping-app
+spec:
+  selector:
+    app: ping-app
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
