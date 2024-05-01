@@ -666,3 +666,42 @@ func Test_09_FalsePositiveTest(t *testing.T) {
 // 		}
 // 	}
 // }
+
+func Test_11_DuplicationTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+	assert.NoError(t, wl.WaitForReady(80))
+
+	assert.NoError(t, wl.WaitForApplicationProfile(80, "ready"))
+
+	err = wl.WaitForApplicationProfileCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+
+	// process launched from nginx container
+	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
+
+	time.Sleep(10 * time.Second)
+
+	alerts, err := testutils.GetAlerts(wl.Namespace)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	// Validate that unexpected process launched alert is signaled only once
+	count := 0
+	for _, alert := range alerts {
+		if alert.Labels["rule_name"] == "Unexpected process launched" {
+			count++
+		}
+	}
+
+	assert.Equal(t, 1, count, "Expected 1 alert of type 'Unexpected process launched' but got %d", count)
+}
