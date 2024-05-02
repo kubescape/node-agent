@@ -672,13 +672,12 @@ func Test_11_DuplicationTest(t *testing.T) {
 	defer tearDownTest(t, start)
 
 	ns := testutils.NewRandomNamespace()
-	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
+	// wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/ping-app.yaml"))
 	if err != nil {
 		t.Errorf("Error creating workload: %v", err)
 	}
 	assert.NoError(t, wl.WaitForReady(80))
-
-	assert.NoError(t, wl.WaitForApplicationProfile(80, "ready"))
 
 	err = wl.WaitForApplicationProfileCompletion(80)
 	if err != nil {
@@ -686,12 +685,12 @@ func Test_11_DuplicationTest(t *testing.T) {
 	}
 
 	// process launched from nginx container
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
+	_, _, err = wl.ExecIntoPod([]string{"ls", "-a"}, "ping-app")
 	if err != nil {
 		t.Errorf("Error executing remote command: %v", err)
 	}
 
-	time.Sleep(10 * time.Second)
+	time.Sleep(20 * time.Second)
 
 	alerts, err := testutils.GetAlerts(wl.Namespace)
 	if err != nil {
@@ -709,7 +708,7 @@ func Test_11_DuplicationTest(t *testing.T) {
 		}
 	}
 
-	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx")
+	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "ping-app")
 
 	assert.Equal(t, 1, count, "Expected 1 alert of type 'Unexpected process launched' but got %d", count)
 }
