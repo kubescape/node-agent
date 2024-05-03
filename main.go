@@ -235,6 +235,8 @@ func main() {
 			os.Exit(utils.ExitCodeIncompatibleKernel)
 		case strings.Contains(err.Error(), utils.ErrMacOS):
 			os.Exit(utils.ExitCodeMacOS)
+		case strings.Contains(err.Error(), utils.ErrRuncNotFound):
+			os.Exit(utils.ExitCodeRuncNotFound)
 		default:
 			os.Exit(utils.ExitCodeError)
 		}
