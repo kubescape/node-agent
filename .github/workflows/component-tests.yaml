@@ -48,6 +48,8 @@ jobs:
           Test_06_KillProcessInTheMiddle,
           Test_07_RuleBindingApplyTest,
           Test_08_ApplicationProfilePatching,
+          # Test_10_DemoTest
+          # Test_11_DuplicationTest
         ]
     steps:
       - name: Checkout code
