@@ -14,10 +14,17 @@ import (
 )
 
 func (sc Storage) GetNetworkNeighborhood(namespace, name string) (*v1beta1.NetworkNeighborhood, error) {
-	return sc.StorageClient.NetworkNeighborhoods(namespace).Get(context.Background(), name, v1.GetOptions{})
+	nn, err := sc.StorageClient.NetworkNeighborhoods(namespace).Get(context.Background(), sc.modifyName(name), v1.GetOptions{})
+	if nn != nil {
+		sc.revertNameP(&nn.Name)
+	}
+	return nn, err
 }
 
 func (sc Storage) CreateNetworkNeighborhood(neighborhood *v1beta1.NetworkNeighborhood, namespace string) error {
+	sc.modifyNameP(&neighborhood.Name)
+	defer sc.revertNameP(&neighborhood.Name)
+
 	// unset resourceVersion
 	neighborhood.ResourceVersion = ""
 	_, err := sc.StorageClient.NetworkNeighborhoods(namespace).Create(context.Background(), neighborhood, v1.CreateOptions{})
@@ -28,7 +35,7 @@ func (sc Storage) CreateNetworkNeighborhood(neighborhood *v1beta1.NetworkNeighbo
 }
 
 func (sc Storage) PatchNetworkNeighborhood(name, namespace string, patch []byte, channel chan error) error {
-	neighborhood, err := sc.StorageClient.NetworkNeighborhoods(namespace).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
+	neighborhood, err := sc.StorageClient.NetworkNeighborhoods(namespace).Patch(context.Background(), sc.modifyName(name), types.JSONPatchType, patch, v1.PatchOptions{})
 	if err != nil {
 		return fmt.Errorf("patch application neighborhood: %w", err)
 	}
@@ -71,7 +78,7 @@ func (sc Storage) PatchNetworkNeighborhood(name, namespace string, patch []byte,
 			if err != nil {
 				return fmt.Errorf("create patch for annotations: %w", err)
 			}
-			_, err = sc.StorageClient.NetworkNeighborhoods(namespace).Patch(context.Background(), name, types.JSONPatchType, annotationsPatch, v1.PatchOptions{})
+			_, err = sc.StorageClient.NetworkNeighborhoods(namespace).Patch(context.Background(), sc.modifyName(name), types.JSONPatchType, annotationsPatch, v1.PatchOptions{})
 			if err != nil {
 				return fmt.Errorf("patch application neighborhood annotations: %w", err)
 			}

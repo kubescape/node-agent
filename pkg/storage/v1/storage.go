@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"node-agent/pkg/config"
 	"node-agent/pkg/storage"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -33,23 +35,24 @@ type Storage struct {
 	maxApplicationProfileSize  int
 	maxNetworkNeighborhoodSize int
 	namespace                  string
+	multiplier                 *int // used for testing to multiply the resources by this
 }
 
 var _ storage.StorageClient = (*Storage)(nil)
 
 func CreateStorage(namespace string) (*Storage, error) {
-	var config *rest.Config
+	var cfg *rest.Config
 	kubeconfig := os.Getenv(KubeConfig)
 	// use the current context in kubeconfig
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
-		config, err = rest.InClusterConfig()
+		cfg, err = rest.InClusterConfig()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create K8S Aggregated API Client with err: %v", err)
 		}
 	}
 
-	clientset, err := versioned.NewForConfig(config)
+	clientset, err := versioned.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create K8S Aggregated API Client with err: %v", err)
 	}
@@ -79,6 +82,7 @@ func CreateStorage(namespace string) (*Storage, error) {
 		maxApplicationProfileSize:  maxApplicationProfileSize,
 		maxNetworkNeighborhoodSize: maxNetworkNeighborhoodSize,
 		namespace:                  namespace,
+		multiplier:                 getMultiplier(),
 	}, nil
 }
 
@@ -90,6 +94,9 @@ func CreateFakeStorage(namespace string) (*Storage, error) {
 }
 
 func (sc Storage) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error {
+	sc.modifyNameP(&networkNeighbors.Name)
+	defer sc.modifyNameP(&networkNeighbors.Name)
+
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Create(context.Background(), networkNeighbors, metav1.CreateOptions{})
 	if err != nil {
 		return err
@@ -98,16 +105,23 @@ func (sc Storage) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighb
 }
 
 func (sc Storage) GetNetworkNeighbors(namespace, name string) (*v1beta1.NetworkNeighbors, error) {
-	return sc.StorageClient.NetworkNeighborses(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	nn, err := sc.StorageClient.NetworkNeighborses(namespace).Get(context.Background(), sc.modifyName(name), metav1.GetOptions{})
+	if nn != nil {
+		sc.revertNameP(&nn.Name)
+	}
+	return nn, err
 }
 
 func (sc Storage) PatchNetworkNeighborsIngressAndEgress(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
+	sc.modifyNameP(&networkNeighbors.Name)
+	defer sc.revertNameP(&networkNeighbors.Name)
+
 	bytes, err := json.Marshal(networkNeighbors)
 	if err != nil {
 		return err
 	}
 
-	_, err = sc.StorageClient.NetworkNeighborses(namespace).Patch(context.Background(), name, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+	_, err = sc.StorageClient.NetworkNeighborses(namespace).Patch(context.Background(), sc.modifyName(name), types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		return err
 	}
@@ -116,12 +130,18 @@ func (sc Storage) PatchNetworkNeighborsIngressAndEgress(name, namespace string, 
 }
 
 func (sc Storage) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
+	sc.modifyNameP(&networkNeighbors.Name)
+	defer sc.revertNameP(&networkNeighbors.Name)
+
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Update(context.Background(), networkNeighbors, metav1.UpdateOptions{})
 
 	return err
 }
 
 func (sc Storage) CreateApplicationActivity(activity *v1beta1.ApplicationActivity, namespace string) error {
+	sc.modifyNameP(&activity.Name)
+	defer sc.revertNameP(&activity.Name)
+
 	_, err := sc.StorageClient.ApplicationActivities(namespace).Create(context.Background(), activity, metav1.CreateOptions{})
 	if err != nil {
 		return err
@@ -130,11 +150,16 @@ func (sc Storage) CreateApplicationActivity(activity *v1beta1.ApplicationActivit
 }
 
 func (sc Storage) GetApplicationActivity(namespace, name string) (*v1beta1.ApplicationActivity, error) {
-	return sc.StorageClient.ApplicationActivities(namespace).Get(context.Background(), name, metav1.GetOptions{})
+
+	aa, err := sc.StorageClient.ApplicationActivities(namespace).Get(context.Background(), sc.modifyName(name), metav1.GetOptions{})
+	if aa != nil {
+		sc.revertNameP(&aa.Name)
+	}
+	return aa, err
 }
 
-func (sc Storage) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error {
-	_, err := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
+func (sc Storage) CreateFilteredSBOM(sbom *v1beta1.SBOMSyftFiltered) error {
+	_, err := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Create(context.Background(), sbom, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
@@ -149,8 +174,9 @@ func (sc Storage) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func (sc Storage) PatchFilteredSBOM(name string, SBOM *v1beta1.SBOMSyftFiltered) error {
-	bytes, err := json.Marshal(SBOM)
+func (sc Storage) PatchFilteredSBOM(name string, sbom *v1beta1.SBOMSyftFiltered) error {
+
+	bytes, err := json.Marshal(sbom)
 	if err != nil {
 		return err
 	}
@@ -167,4 +193,35 @@ func (sc Storage) IncrementImageUse(_ string) {
 
 func (sc Storage) DecrementImageUse(_ string) {
 	// noop
+}
+
+func (sc Storage) modifyName(n string) string {
+	if sc.multiplier != nil {
+		return fmt.Sprintf("%s-%d", n, *sc.multiplier)
+	}
+	return n
+}
+func (sc Storage) modifyNameP(n *string) {
+	if sc.multiplier != nil {
+		*n = fmt.Sprintf("%s-%d", *n, *sc.multiplier)
+	}
+}
+
+func (sc Storage) revertNameP(n *string) {
+	if sc.multiplier != nil {
+		*n = strings.TrimSuffix(*n, fmt.Sprintf("-%d", *sc.multiplier))
+	}
+}
+func getMultiplier() *int {
+	if m := os.Getenv("MULTIPLY"); m != "true" {
+		return nil
+	}
+	podName := os.Getenv(config.PodNameEnvVar)
+	s := strings.Split(podName, "-")
+	if len(s) > 0 {
+		if m, err := strconv.Atoi(s[len(s)-1]); err == nil {
+			return &m
+		}
+	}
+	return nil
 }
