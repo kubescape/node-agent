@@ -2,6 +2,7 @@ package containerwatcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"node-agent/pkg/applicationprofilemanager"
 	"node-agent/pkg/config"
@@ -14,9 +15,9 @@ import (
 	"node-agent/pkg/relevancymanager"
 	rulebinding "node-agent/pkg/rulebindingmanager"
 	"node-agent/pkg/rulemanager"
-
 	"node-agent/pkg/utils"
 	"os"
+	"time"
 
 	tracerandomx "node-agent/pkg/ebpf/gadgets/randomx/tracer"
 	tracerandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
@@ -307,6 +308,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	if !ch.running {
 
+		if err := ch.checkRuntimePath(); err != nil {
+			return fmt.Errorf("checking runtime path: %w", err)
+		}
+
 		if err := ch.startContainerCollection(ctx); err != nil {
 			return fmt.Errorf("setting up container collection: %w", err)
 		}
@@ -331,4 +336,36 @@ func (ch *IGContainerWatcher) Stop() {
 		}
 		ch.running = false
 	}
+}
+
+func (ch *IGContainerWatcher) checkRuntimePath() error {
+	// create a set of opened files
+	openedFiles := mapset.NewSet[string]()
+	callBack := func(event *traceropentype.Event) {
+		if event.Comm == "node-agent" {
+			openedFiles.Add(event.Path)
+		}
+	}
+	// create an open tracer for our container
+	containerCollection := &containercollection.ContainerCollection{}
+	tracerOpen, err := traceropen.NewTracer(&traceropen.Config{}, containerCollection, callBack)
+	if err != nil {
+		return fmt.Errorf("creating open tracer: %w", err)
+	}
+	defer tracerOpen.Stop()
+	// open a specific file
+	f, err := os.CreateTemp("", "test")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	defer func(name string) {
+		_ = os.Remove(name)
+	}(f.Name())
+	// wait a bit for the event to be processed
+	time.Sleep(2 * time.Second)
+	// check if we have seen this file being opened
+	if !openedFiles.ContainsOne(f.Name()) {
+		return errors.New(utils.ErrRuncNotFound)
+	}
+	return nil
 }
