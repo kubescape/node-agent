@@ -37,6 +37,15 @@ var _ ruleengine.RuleEvaluator = (*R0001UnexpectedProcessLaunched)(nil)
 
 type R0001UnexpectedProcessLaunched struct {
 	BaseRule
+	enforceArgs bool
+}
+
+func (rule *R0001UnexpectedProcessLaunched) SetParameters(params map[string]interface{}) {
+	if enforceArgs, ok := params["enforceArgs"].(bool); ok {
+		rule.enforceArgs = enforceArgs
+	} else {
+		rule.enforceArgs = false
+	}
 }
 
 func (rule *R0001UnexpectedProcessLaunched) Name() string {
@@ -47,7 +56,7 @@ func (rule *R0001UnexpectedProcessLaunched) ID() string {
 }
 
 func CreateRuleR0001UnexpectedProcessLaunched() *R0001UnexpectedProcessLaunched {
-	return &R0001UnexpectedProcessLaunched{}
+	return &R0001UnexpectedProcessLaunched{enforceArgs: false}
 }
 
 func (rule *R0001UnexpectedProcessLaunched) generatePatchCommand(event *tracerexectype.Event, ap *v1beta1.ApplicationProfile) string {
@@ -88,8 +97,12 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 	}
 
 	for _, execCall := range appProfileExecList.Execs {
-		if execCall.Path == execPath && slices.Compare(execCall.Args, execEvent.Args) == 0 {
-			return nil
+		if execCall.Path == execPath {
+			// if enforceArgs is set to true, we need to compare the arguments as well
+			// if not set, we only compare the path
+			if !rule.enforceArgs || slices.Compare(execCall.Args, execEvent.Args) == 0 {
+				return nil
+			}
 		}
 	}
 
