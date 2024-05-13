@@ -58,6 +58,11 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 		return nil
 	}
 
+	// Check if the event is whitelisted, if so return nil
+	if whiteListed, err := isExecEventWhitelisted(execEvent, objCache, false); whiteListed || err != nil {
+		return nil
+	}
+
 	mounts, err := getContainerMountPaths(execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer(), objCache.K8sObjectCache())
 	if err != nil {
 		return nil

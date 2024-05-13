@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"node-agent/pkg/objectcache"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -97,4 +98,29 @@ func getContainerMountPaths(namespace, podName, containerName string, k8sObjCach
 	}
 
 	return mountPaths, nil
+}
+
+func isExecEventWhitelisted(execEvent *tracerexectype.Event, objectCache objectcache.ObjectCache, compareArgs bool) (bool, error) {
+	// Check if the exec is whitelisted, if so, return nil
+	execPath := getExecPathFromEvent(execEvent)
+
+	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
+	if ap == nil {
+		return false, fmt.Errorf("application profile not found for container %s", execEvent.Runtime.ContainerID)
+	}
+
+	appProfileExecList, err := getContainerFromApplicationProfile(ap, execEvent.GetContainer())
+	if err != nil {
+		return false, fmt.Errorf("container %s not found in application profile", execEvent.GetContainer())
+	}
+
+	for _, exec := range appProfileExecList.Execs {
+		if exec.Path == execPath {
+			// Either compare args false or args match
+			if !compareArgs || slices.Compare(exec.Args, execEvent.Args) == 0 {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
