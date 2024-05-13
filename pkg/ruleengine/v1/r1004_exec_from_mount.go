@@ -59,7 +59,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 	}
 
 	// Check if the event is whitelisted, if so return nil
-	if whiteListed, err := isExecEventWhitelisted(execEvent, objCache, false); whiteListed || err != nil {
+	if whiteListed, err := isExecEventWhitelisted(execEvent, objCache, false); whiteListed && err != nil {
 		return nil
 	}
 

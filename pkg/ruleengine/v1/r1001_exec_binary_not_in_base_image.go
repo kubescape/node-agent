@@ -62,7 +62,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 
 	if execEvent.UpperLayer {
 
-		if whiteListed, err := isExecEventWhitelisted(execEvent, objectCache, false); whiteListed || err != nil {
+		if whiteListed, err := isExecEventWhitelisted(execEvent, objectCache, false); whiteListed && err != nil {
 			return nil
 		}
 
