@@ -50,7 +50,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) ID() string {
 func (rule *R1001ExecBinaryNotInBaseImage) DeleteRule() {
 }
 
-func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventType, event interface{}, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}
@@ -61,6 +61,11 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 	}
 
 	if execEvent.UpperLayer {
+
+		if whiteListed, err := isExecEventWhitelisted(execEvent, objectCache, false); whiteListed && err != nil {
+			return nil
+		}
+
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
