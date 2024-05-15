@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"errors"
 	"fmt"
 	"node-agent/pkg/objectcache"
 	"path/filepath"
@@ -9,6 +10,11 @@ import (
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+)
+
+var (
+	ContainerNotFound = errors.New("container not found")
+	ProfileNotFound   = errors.New("application profile not found")
 )
 
 func getExecPathFromEvent(event *tracerexectype.Event) string {
@@ -44,7 +50,7 @@ func getContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containe
 			return ap.Spec.EphemeralContainers[i], nil
 		}
 	}
-	return v1beta1.ApplicationProfileContainer{}, fmt.Errorf("container %s not found in application profile", containerName)
+	return v1beta1.ApplicationProfileContainer{}, ContainerNotFound
 }
 
 func getContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, containerName string) (v1beta1.NetworkNeighborhoodContainer, error) {
@@ -63,7 +69,7 @@ func getContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, contai
 			return nn.Spec.EphemeralContainers[i], nil
 		}
 	}
-	return v1beta1.NetworkNeighborhoodContainer{}, fmt.Errorf("container %s not found in network neighborhood profile", containerName)
+	return v1beta1.NetworkNeighborhoodContainer{}, ContainerNotFound
 }
 
 func getContainerMountPaths(namespace, podName, containerName string, k8sObjCache objectcache.K8sObjectCache) ([]string, error) {
@@ -100,18 +106,18 @@ func getContainerMountPaths(namespace, podName, containerName string, k8sObjCach
 	return mountPaths, nil
 }
 
-func isExecEventWhitelisted(execEvent *tracerexectype.Event, objectCache objectcache.ObjectCache, compareArgs bool) (bool, error) {
+func isExecEventInProfile(execEvent *tracerexectype.Event, objectCache objectcache.ObjectCache, compareArgs bool) (bool, error) {
 	// Check if the exec is whitelisted, if so, return nil
 	execPath := getExecPathFromEvent(execEvent)
 
 	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
 	if ap == nil {
-		return false, fmt.Errorf("application profile not found for container %s", execEvent.Runtime.ContainerID)
+		return false, ProfileNotFound
 	}
 
 	appProfileExecList, err := getContainerFromApplicationProfile(ap, execEvent.GetContainer())
 	if err != nil {
-		return false, fmt.Errorf("container %s not found in application profile", execEvent.GetContainer())
+		return false, ContainerNotFound
 	}
 
 	for _, exec := range appProfileExecList.Execs {

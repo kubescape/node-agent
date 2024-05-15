@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"errors"
 	"fmt"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
@@ -62,7 +63,9 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 
 	if execEvent.UpperLayer {
 
-		if whiteListed, err := isExecEventWhitelisted(execEvent, objectCache, false); whiteListed && err != nil {
+		// Check if the event is expected, if so return nil
+		// No application profile also returns nil
+		if whiteListed, err := isExecEventInProfile(execEvent, objectCache, false); whiteListed || errors.Is(err, ProfileNotFound) {
 			return nil
 		}
 

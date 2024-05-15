@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"errors"
 	"fmt"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
@@ -58,8 +59,9 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 		return nil
 	}
 
-	// Check if the event is whitelisted, if so return nil
-	if whiteListed, err := isExecEventWhitelisted(execEvent, objCache, false); whiteListed && err != nil {
+	// Check if the event is expected, if so return nil
+	// No application profile also returns nil
+	if whiteListed, err := isExecEventInProfile(execEvent, objCache, false); whiteListed || errors.Is(err, ProfileNotFound) {
 		return nil
 	}
 
