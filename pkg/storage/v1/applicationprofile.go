@@ -14,10 +14,17 @@ import (
 )
 
 func (sc Storage) GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
-	return sc.StorageClient.ApplicationProfiles(namespace).Get(context.Background(), name, v1.GetOptions{})
+	ap, err := sc.StorageClient.ApplicationProfiles(namespace).Get(context.Background(), sc.modifyName(name), v1.GetOptions{})
+	if ap != nil {
+		sc.revertNameP(&ap.Name)
+	}
+	return ap, err
 }
 
 func (sc Storage) CreateApplicationProfile(profile *v1beta1.ApplicationProfile, namespace string) error {
+	sc.modifyNameP(&profile.Name)
+	defer sc.revertNameP(&profile.Name)
+
 	// unset resourceVersion
 	profile.ResourceVersion = ""
 	_, err := sc.StorageClient.ApplicationProfiles(namespace).Create(context.Background(), profile, v1.CreateOptions{})
@@ -28,7 +35,7 @@ func (sc Storage) CreateApplicationProfile(profile *v1beta1.ApplicationProfile, 
 }
 
 func (sc Storage) PatchApplicationProfile(name, namespace string, patch []byte, channel chan error) error {
-	profile, err := sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
+	profile, err := sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), sc.modifyName(name), types.JSONPatchType, patch, v1.PatchOptions{})
 	if err != nil {
 		return fmt.Errorf("patch application profile: %w", err)
 	}
@@ -71,7 +78,7 @@ func (sc Storage) PatchApplicationProfile(name, namespace string, patch []byte, 
 			if err != nil {
 				return fmt.Errorf("create patch for annotations: %w", err)
 			}
-			_, err = sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), name, types.JSONPatchType, annotationsPatch, v1.PatchOptions{})
+			_, err = sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), sc.modifyName(name), types.JSONPatchType, annotationsPatch, v1.PatchOptions{})
 			if err != nil {
 				return fmt.Errorf("patch application profile annotations: %w", err)
 			}
