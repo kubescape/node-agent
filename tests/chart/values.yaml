@@ -56,7 +56,7 @@ nodeAgent:
   config:
     maxLearningPeriod: 2m
     learningPeriod: 1m
-    updatePeriod: 30s 
+    updatePeriod: 30s
     prometheusExporter: enable
     httpExporterConfig: {}
     alertManagerExporterUrls: [
@@ -102,6 +102,9 @@ nodeAgent:
       name: bpffs
     - mountPath: /data
       name: data
+    - mountPath: /clamav
+      name: clamrun
+      readOnly: false
 
   volumes:
     - hostPath:
@@ -139,9 +142,9 @@ nodeAgent:
 clamav:
   name: clamav
   image:
-    repository: quay.io/armosec/klamav
-    tag: beta5
-    pullPolicy: Always
+    repository: clamav/clamav-debian
+    tag: 1.0.6
+    pullPolicy: IfNotPresent
   resources:
     limits:
       cpu: 300m
@@ -156,8 +159,13 @@ clamav:
     - mountPath: /etc/clamav
       name: etc
       readOnly: true
+    - mountPath: /run/clamav
+      name: clamrun
+      readOnly: false
   volumes:
   - name: clamdb
+    emptyDir: {}
+  - name: clamrun
     emptyDir: {}
   - name: etc
     configMap:
