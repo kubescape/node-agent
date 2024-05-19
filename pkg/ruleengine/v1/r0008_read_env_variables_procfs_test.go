@@ -78,4 +78,11 @@ func TestR0008ReadingEnvVariablesFromProcFS(t *testing.T) {
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since file is not /proc file")
 	}
+
+	// Test with /proc file but not /environ
+	e.FullPath = "/proc/1/test"
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since file is not /environ file")
+	}
 }

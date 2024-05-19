@@ -226,6 +226,11 @@ func (ch *IGContainerWatcher) startTracers() error {
 		} else {
 			logger.L().Warning("randomx tracing is not supported on this architecture", helpers.String("architecture", runtime.GOARCH))
 		}
+
+		if err := ch.startSignalTracing(); err != nil {
+			logger.L().Error("error starting signal tracing", helpers.Error(err))
+			return err
+		}
 	}
 
 	return nil
@@ -278,6 +283,12 @@ func (ch *IGContainerWatcher) stopTracers() error {
 				logger.L().Error("error stopping randomx tracing", helpers.Error(err))
 				errs = errors.Join(errs, err)
 			}
+		}
+
+		// Stop signal tracer
+		if err := ch.stopSignalTracing(); err != nil {
+			logger.L().Error("error stopping signal tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
 		}
 	}
 

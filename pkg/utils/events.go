@@ -1,17 +1,5 @@
 package utils
 
-import (
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
-
-	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
-
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
-)
-
 const (
 	ContainerActivityEventStart    = "start"
 	ContainerActivityEventAttached = "attached"
@@ -28,6 +16,7 @@ const (
 	NetworkEventType
 	SyscallEventType
 	RandomXEventType
+	SignalEventType
 	AllEventType
 )
 
@@ -49,129 +38,4 @@ type GeneralEvent struct {
 	Timestamp     int64
 	EventType     EventType
 	ContainerID   string
-}
-
-func ExecToGeneralEvent(event *tracerexectype.Event) *GeneralEvent {
-	return &GeneralEvent{
-		ProcessDetails: ProcessDetails{
-			Pid:  event.Pid,
-			Ppid: event.Ppid,
-			Comm: event.Comm,
-			Cwd:  event.Cwd,
-			Uid:  event.Uid,
-			Gid:  event.Gid,
-		},
-		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
-		ContainerName: event.GetContainer(),
-		PodName:       event.GetPod(),
-		Namespace:     event.GetNamespace(),
-		MountNsID:     event.MountNsID,
-		Timestamp:     int64(event.Timestamp),
-		EventType:     ExecveEventType,
-	}
-}
-func OpenToGeneralEvent(event *traceropentype.Event) *GeneralEvent {
-	return &GeneralEvent{
-		ProcessDetails: ProcessDetails{
-			Pid:  event.Pid,
-			Comm: event.Comm,
-			Uid:  event.Uid,
-			Gid:  event.Gid,
-		},
-		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
-		ContainerName: event.GetContainer(),
-		PodName:       event.GetPod(),
-		Namespace:     event.GetNamespace(),
-		MountNsID:     event.MountNsID,
-		Timestamp:     int64(event.Timestamp),
-		EventType:     OpenEventType,
-	}
-}
-
-func CapabilitiesToGeneralEvent(event *tracercapabilitiestype.Event) *GeneralEvent {
-	return &GeneralEvent{
-		ProcessDetails: ProcessDetails{
-			Pid:  event.Pid,
-			Comm: event.Comm,
-			Uid:  event.Uid,
-			Gid:  event.Gid,
-		},
-		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
-		ContainerName: event.GetContainer(),
-		PodName:       event.GetPod(),
-		Namespace:     event.GetNamespace(),
-		MountNsID:     event.MountNsID,
-		Timestamp:     int64(event.Timestamp),
-		EventType:     CapabilitiesEventType,
-	}
-}
-
-func DnsToGeneralEvent(event *tracerdnstype.Event) *GeneralEvent {
-	return &GeneralEvent{
-		ProcessDetails: ProcessDetails{
-			Pid:  event.Pid,
-			Comm: event.Comm,
-			Uid:  event.Uid,
-			Gid:  event.Gid,
-		},
-		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
-		ContainerName: event.GetContainer(),
-		PodName:       event.GetPod(),
-		Namespace:     event.GetNamespace(),
-		MountNsID:     event.MountNsID,
-		Timestamp:     int64(event.Timestamp),
-		EventType:     DnsEventType,
-	}
-}
-func NetworkToGeneralEvent(event *tracernetworktype.Event) *GeneralEvent {
-	return &GeneralEvent{
-		ProcessDetails: ProcessDetails{
-			Pid:  event.Pid,
-			Comm: event.Comm,
-			Uid:  event.Uid,
-			Gid:  event.Gid,
-		},
-		ContainerID:   event.GetBaseEvent().Runtime.ContainerID,
-		ContainerName: event.GetContainer(),
-		PodName:       event.GetPod(),
-		Namespace:     event.GetNamespace(),
-		MountNsID:     event.MountNsID,
-		Timestamp:     int64(event.Timestamp),
-		EventType:     NetworkEventType,
-	}
-}
-
-func RandomxToGeneralEvent(event *tracerrandomxtype.Event) *GeneralEvent {
-	return &GeneralEvent{
-		ProcessDetails: ProcessDetails{
-			Pid:  event.Pid,
-			Ppid: event.PPid,
-			Comm: event.Comm,
-			Uid:  event.Uid,
-			Gid:  event.Gid,
-		},
-		ContainerName: event.GetContainer(),
-		PodName:       event.GetPod(),
-		Namespace:     event.GetNamespace(),
-		MountNsID:     event.MountNsID,
-		Timestamp:     int64(event.Timestamp),
-		EventType:     RandomXEventType,
-	}
-}
-
-func SyscallToGeneralEvent(event *ruleenginetypes.SyscallEvent) *GeneralEvent {
-	return &GeneralEvent{
-		ProcessDetails: ProcessDetails{
-			Pid:  event.Pid,
-			Comm: event.Comm,
-			Uid:  event.Uid,
-			Gid:  event.Gid,
-		},
-		ContainerName: event.GetContainer(),
-		PodName:       event.GetPod(),
-		Namespace:     event.GetNamespace(),
-		MountNsID:     event.MountNsID,
-		Timestamp:     int64(event.Timestamp),
-		EventType:     SyscallEventType,
-	}
 }

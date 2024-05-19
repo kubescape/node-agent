@@ -15,7 +15,7 @@ func (ch *IGContainerWatcher) openEventCallback(event *traceropentype.Event) {
 		// dropped event
 		logger.L().Ctx(ch.ctx).Warning("open tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 	}
-	if event.Ret > -1 && event.FullPath != "" {
+	if event.Err > -1 && event.FullPath != "" {
 		ch.openWorkerChan <- event
 	}
 }
