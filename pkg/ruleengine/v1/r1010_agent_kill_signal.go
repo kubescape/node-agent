@@ -66,6 +66,11 @@ func (rule *R1010AgentKillSignalRule) ProcessEvent(eventType utils.EventType, ev
 	}
 
 	if (signalEvent.Signal == "SIGKILL" || signalEvent.Signal == "SIGTERM") && signalEvent.TargetPid == uint32(rule.agentPid) {
+		// Check if the signal is coming from Kubernetes
+		if signalEvent.Runtime.ContainerID == "" {
+			return nil
+		}
+
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
