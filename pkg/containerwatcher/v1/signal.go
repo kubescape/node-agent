@@ -37,7 +37,7 @@ func (ch *IGContainerWatcher) startSignalTracing() error {
 		}
 	}()
 
-	tracerSignal, err := tracersignal.NewTracer(&tracersignal.Config{MountnsMap: signalMountnsmap, KillOnly: true}, ch.containerCollection, ch.signalEventCallback)
+	tracerSignal, err := tracersignal.NewTracer(&tracersignal.Config{MountnsMap: signalMountnsmap}, ch.containerCollection, ch.signalEventCallback)
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}

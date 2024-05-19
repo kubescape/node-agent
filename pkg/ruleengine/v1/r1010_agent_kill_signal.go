@@ -9,6 +9,8 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracersignaltype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/signal/types"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 const (
@@ -66,6 +68,7 @@ func (rule *R1010AgentKillSignalRule) ProcessEvent(eventType utils.EventType, ev
 	}
 
 	if (signalEvent.Signal == "SIGKILL" || signalEvent.Signal == "SIGTERM") && signalEvent.TargetPid == uint32(rule.agentPid) {
+		logger.L().Info("Processing signal event", helpers.Interface("event", signalEvent))
 		// Check if the signal is coming from Kubernetes
 		if signalEvent.Runtime.ContainerID == "" {
 			return nil

@@ -30,6 +30,7 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R1007XMRCryptoMiningRuleDescriptor,
 			R1008CryptoMiningDomainCommunicationRuleDescriptor,
 			R1009CryptoMiningRelatedPortRuleDescriptor,
+			R1010AgentKillSignalRuleDescriptor,
 		},
 	}
 }
