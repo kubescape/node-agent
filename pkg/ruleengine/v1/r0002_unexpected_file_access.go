@@ -168,6 +168,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 			InfectedPID: openEvent.Pid,
 			Arguments: map[string]interface{}{
 				"flags": openEvent.Flags,
+				"path":  openEvent.FullPath,
 			},
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.FullPath, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
 			Severity:       R0002UnexpectedFileAccessRuleDescriptor.Priority,
