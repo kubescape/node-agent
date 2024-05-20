@@ -9,6 +9,7 @@ import (
 	"node-agent/pkg/utils"
 	"node-agent/tests/testutils"
 	"path"
+	"slices"
 	"testing"
 	"time"
 
@@ -555,6 +556,55 @@ func Test_09_FalsePositiveTest(t *testing.T) {
 	}
 
 	assert.Equal(t, 0, len(alerts), "Expected no alerts to be generated, but got %d alerts", len(alerts))
+}
+
+func Test_10_MalwareDetectionTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	t.Log("Creating namespace")
+	ns := testutils.NewRandomNamespace()
+
+	t.Log("Deploy container with malware")
+	exitCode := testutils.RunCommand("kubectl", "run", "-n", ns.Name, "malware-cryptominer", "--image=quay.io/petr_ruzicka/malware-cryptominer-container:2.0.2")
+	assert.Equalf(t, 0, exitCode, "expected no error when deploying malware container")
+
+	// Wait for pod to be ready
+	exitCode = testutils.RunCommand("kubectl", "wait", "--for=condition=Ready", "pod", "malware-cryptominer", "-n", ns.Name, "--timeout=300s")
+	assert.Equalf(t, 0, exitCode, "expected no error when waiting for pod to be ready")
+
+	// wait for application profile to be completed
+	time.Sleep(3 * time.Minute)
+
+	_, _, err := testutils.ExecIntoPod("malware-cryptominer", ns.Name, []string{"ls", "-l", "/usr/share/nginx/html/xmrig"}, "")
+	assert.NoErrorf(t, err, "expected no error when executing command in malware container")
+
+	// wait for the alerts to be generated
+	time.Sleep(20 * time.Second)
+
+	alerts, err := testutils.GetMalwareAlerts(ns.Name)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	expectedMalwares := []string{
+		"Multios.Coinminer.Miner-6781728-2.UNOFFICIAL",
+	}
+
+	malwaresDetected := map[string]bool{}
+
+	for _, alert := range alerts {
+		podName, podNameOk := alert.Labels["pod_name"]
+		malewareName, malewareNameOk := alert.Labels["malware_name"]
+
+		if podNameOk && malewareNameOk {
+			if podName == "malware-cryptominer" && slices.Contains(expectedMalwares, malewareName) {
+				malwaresDetected[malewareName] = true
+			}
+		}
+	}
+
+	assert.Equal(t, len(expectedMalwares), len(malwaresDetected), "Expected %d malwares to be detected, but got %d malwares", len(expectedMalwares), len(malwaresDetected))
 }
 
 // func Test_10_DemoTest(t *testing.T) {
