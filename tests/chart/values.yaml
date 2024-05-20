@@ -142,10 +142,8 @@ nodeAgent:
 clamav:
   name: clamav
   image:
-    repository: quay.io/armosec/klamav
-    tag: beta5
-    #repository: clamav/clamav-debian
-    #tag: 1.0.6
+    repository: quay.io/kubescape/klamav
+    tag: 1.2.0-6_base
     pullPolicy: IfNotPresent
   resources:
     limits:
