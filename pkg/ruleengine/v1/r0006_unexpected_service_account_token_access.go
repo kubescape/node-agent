@@ -22,6 +22,8 @@ const (
 var serviceAccountTokenPathsPrefix = []string{
 	"/run/secrets/kubernetes.io/serviceaccount",
 	"/var/run/secrets/kubernetes.io/serviceaccount",
+	"/run/secrets/eks.amazonaws.com/serviceaccount",
+	"/var/run/secrets/eks.amazonaws.com/serviceaccount",
 }
 
 var R0006UnexpectedServiceAccountTokenAccessRuleDescriptor = RuleDescriptor{

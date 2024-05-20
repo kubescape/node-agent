@@ -18,6 +18,8 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R0005UnexpectedDomainRequestRuleDescriptor,
 			R0006UnexpectedServiceAccountTokenAccessRuleDescriptor,
 			R0007KubernetesClientExecutedDescriptor,
+			R0008ReadEnvironmentVariablesProcFSRuleDescriptor,
+			R0009EbpfProgramLoadRuleDescriptor,
 			R1000ExecFromMaliciousSourceDescriptor,
 			R1001ExecBinaryNotInBaseImageRuleDescriptor,
 			R1002LoadKernelModuleRuleDescriptor,

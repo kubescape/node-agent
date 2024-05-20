@@ -36,4 +36,14 @@ func TestR1002LoadKernelModule(t *testing.T) {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of init_module is not allowed")
 	}
+
+	// Create a syscall event with finit_module syscall
+	r2 := CreateRuleR1002LoadKernelModule()
+	e.SyscallName = "finit_module"
+
+	ruleResult = r2.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
+	if ruleResult == nil {
+		fmt.Printf("ruleResult: %v\n", ruleResult)
+		t.Errorf("Expected ruleResult to be Failure because of finit_module is not allowed")
+	}
 }
