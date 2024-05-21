@@ -426,7 +426,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	// Enrich BaseRuntimeAlert
 	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
 
-	baseRuntimeAlert.Timestamp = time.Unix(int64(ruleFailure.GetTriggerEvent().Timestamp)/1e9, 0)
+	baseRuntimeAlert.Timestamp = time.Unix(0, int64(ruleFailure.GetTriggerEvent().Timestamp))
 
 	if baseRuntimeAlert.MD5Hash == "" && hostPath != "" {
 		md5hash, err := utils.CalculateMD5FileHash(hostPath)
