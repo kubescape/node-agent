@@ -11,6 +11,6 @@ var _ ApplicationProfileCache = (*ApplicationProfileCacheMock)(nil)
 type ApplicationProfileCacheMock struct {
 }
 
-func (ap *ApplicationProfileCacheMock) GetApplicationProfile(containerID string) *v1beta1.ApplicationProfile {
+func (ap *ApplicationProfileCacheMock) GetApplicationProfile(_ string) *v1beta1.ApplicationProfile {
 	return nil
 }

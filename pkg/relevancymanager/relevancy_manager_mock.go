@@ -1,6 +1,9 @@
 package relevancymanager
 
-import containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+import (
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	corev1 "k8s.io/api/core/v1"
+)
 
 type RelevancyManagerMock struct {
 }
@@ -22,6 +25,11 @@ func (r RelevancyManagerMock) ReportFileExec(_, _, _ string) {
 func (r RelevancyManagerMock) ReportFileOpen(_, _, _ string) {
 	// noop
 }
+
 func (r RelevancyManagerMock) ContainerReachedMaxTime(_ string) {
 	// noop
+}
+
+func (r RelevancyManagerMock) HasRelevancyCalculating(_ *corev1.Pod) bool {
+	return false
 }
