@@ -1,6 +1,6 @@
 ARG CLAMAV_VERSION
 
-FROM ubuntu:23.10 as builder
+FROM --platform=$BUILDPLATFORM ubuntu:23.10 as builder
 ARG SOCKS_PROXY
 ENV SOCKS_PROXY=$SOCKS_PROXY
 RUN apt-get update && apt-get install -y python3 python3-pip clamav
