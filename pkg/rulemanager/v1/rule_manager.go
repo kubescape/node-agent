@@ -35,6 +35,7 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	tracersignaltype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/signal/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -391,6 +392,18 @@ func (rm *RuleManager) ReportRandomxEvent(k8sContainerID string, event tracerran
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
 	rm.processEvent(utils.RandomXEventType, &event, rules)
+}
+
+func (rm *RuleManager) ReportSignalEvent(k8sContainerID string, event tracersignaltype.Event) {
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportSignalEvent event")
+		return
+	}
+
+	// list signal rules
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
+	rm.processEvent(utils.SignalEventType, &event, rules)
 }
 
 func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator) {

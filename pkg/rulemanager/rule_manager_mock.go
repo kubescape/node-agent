@@ -9,6 +9,7 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	tracersignaltype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/signal/types"
 )
 
 type RuleManagerMock struct {
@@ -46,5 +47,8 @@ func (r *RuleManagerMock) ReportDNSEvent(event tracerdnstype.Event) {
 	// noop
 }
 func (r *RuleManagerMock) ReportRandomxEvent(_ string, _ tracerrandomxtype.Event) {
+	// noop
+}
+func (r *RuleManagerMock) ReportSignalEvent(_ string, _ tracersignaltype.Event) {
 	// noop
 }

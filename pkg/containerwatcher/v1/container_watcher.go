@@ -34,6 +34,8 @@ import (
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	tracersignal "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/signal/tracer"
+	tracersignaltype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/signal/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
@@ -51,12 +53,14 @@ const (
 	dnsTraceName               = "trace_dns"
 	openTraceName              = "trace_open"
 	randomxTraceName           = "trace_randomx"
+	signalTraceName            = "trace_signal"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
 	networkWorkerPoolSize      = 1
 	dnsWorkerPoolSize          = 5
 	randomxWorkerPoolSize      = 1
+	signalWorkerPoolSize       = 1
 )
 
 type IGContainerWatcher struct {
@@ -90,6 +94,7 @@ type IGContainerWatcher struct {
 	networkTracer      *tracernetwork.Tracer
 	dnsTracer          *tracerdns.Tracer
 	randomxTracer      *tracerandomx.Tracer
+	signalTracer       *tracersignal.Tracer
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
 
@@ -100,6 +105,7 @@ type IGContainerWatcher struct {
 	networkWorkerPool      *ants.PoolWithFunc
 	dnsWorkerPool          *ants.PoolWithFunc
 	randomxWorkerPool      *ants.PoolWithFunc
+	signalWorkerPool       *ants.PoolWithFunc
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *tracerexectype.Event
@@ -107,6 +113,7 @@ type IGContainerWatcher struct {
 	networkWorkerChan      chan *tracernetworktype.Event
 	dnsWorkerChan          chan *tracerdnstype.Event
 	randomxWorkerChan      chan *tracerandomxtype.Event
+	signalWorkerChan       chan *tracersignaltype.Event
 
 	preRunningContainersIDs mapset.Set[string]
 
@@ -257,6 +264,18 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	if err != nil {
 		return nil, fmt.Errorf("creating randomx worker pool: %w", err)
 	}
+	// Create a signal worker pool
+	signalWorkerPool, err := ants.NewPoolWithFunc(signalWorkerPoolSize, func(i interface{}) {
+		event := i.(tracersignaltype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		metrics.ReportEvent(utils.SignalEventType)
+		ruleManager.ReportSignalEvent(event.Runtime.ContainerID, event)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating signal worker pool: %w", err)
+	}
 
 	return &IGContainerWatcher{
 		// Configuration
@@ -285,6 +304,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkWorkerPool:       networkWorkerPool,
 		dnsWorkerPool:           dnsWorkerPool,
 		randomxWorkerPool:       randomxWorkerPool,
+		signalWorkerPool:        signalWorkerPool,
 		metrics:                 metrics,
 		preRunningContainersIDs: preRunningContainers,
 
@@ -295,6 +315,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkWorkerChan:      make(chan *tracernetworktype.Event, 50000),
 		dnsWorkerChan:          make(chan *tracerdnstype.Event, 10000),
 		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 500),
+		signalWorkerChan:       make(chan *tracersignaltype.Event, 500),
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,

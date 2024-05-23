@@ -9,6 +9,7 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	tracersignaltype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/signal/types"
 )
 
 type RuleManagerClient interface {
@@ -20,4 +21,5 @@ type RuleManagerClient interface {
 	ReportNetworkEvent(k8sContainerID string, event tracernetworktype.Event)
 	ReportDNSEvent(event tracerdnstype.Event)
 	ReportRandomxEvent(k8sContainerID string, event tracerrandomxtype.Event)
+	ReportSignalEvent(k8sContainerID string, event tracersignaltype.Event)
 }

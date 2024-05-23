@@ -38,4 +38,11 @@ func TestR0009EbpfProgramLoad(t *testing.T) {
 		t.Errorf("Expected ruleResult to be Failure because of bpf is used")
 		return
 	}
+
+	// Create a syscall event with bpf syscall
+	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
+	if ruleResult != nil {
+		fmt.Printf("ruleResult: %v\n", ruleResult)
+		t.Errorf("Expected ruleResult to nil since bpf syscall was already alerted")
+	}
 }
