@@ -62,7 +62,6 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 	}
 
 	if execEvent.UpperLayer {
-
 		// Check if the event is expected, if so return nil
 		// No application profile also returns nil
 		if whiteListed, err := isExecEventInProfile(execEvent, objectCache, false); whiteListed || errors.Is(err, ProfileNotFound) {
@@ -82,11 +81,12 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 					Gid:        &execEvent.Gid,
 					PID:        execEvent.Pid,
 					Uid:        &execEvent.Uid,
-					UpperLayer: execEvent.UpperLayer,
+					UpperLayer: &execEvent.UpperLayer,
 					PPID:       execEvent.Ppid,
 					Pcomm:      execEvent.Pcomm,
 					Cwd:        execEvent.Cwd,
 					Hardlink:   execEvent.ExePath,
+					Path:       getExecFullPathFromEvent(execEvent),
 					Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 				},
 				ContainerID: execEvent.Runtime.ContainerID,
