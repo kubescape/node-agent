@@ -333,9 +333,9 @@ func ToInstanceType(c ContainerType) helpersv1.InstanceType {
 		return initcontainerinstance.InstanceType
 	case EphemeralContainer:
 		return ephemeralcontainerinstance.InstanceType
+	default:
+		return containerinstance.InstanceType
 	}
-
-	return containerinstance.InstanceType
 }
 
 func GetCmdlineByPid(pid int) (*string, error) {
@@ -438,7 +438,9 @@ func CalculateSHA256FileHash(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		_ = file.Close()
+	}(file)
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
@@ -457,7 +459,9 @@ func CalculateSHA1FileHash(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		_ = file.Close()
+	}(file)
 
 	hash := sha1.New()
 	if _, err := io.Copy(hash, file); err != nil {
@@ -476,7 +480,9 @@ func CalculateMD5FileHash(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		_ = file.Close()
+	}(file)
 
 	hash := md5.New()
 	if _, err := io.Copy(hash, file); err != nil {
@@ -492,19 +498,19 @@ func CalculateMD5FileHash(path string) (string, error) {
 // Creates a process tree from a process.
 // The process tree will be built from scanning the /proc filesystem.
 func CreateProcessTree(process *apitypes.Process, shimPid uint32) (*apitypes.Process, error) {
-	procfs, err := procfs.NewFS("/proc")
+	pfs, err := procfs.NewFS("/proc")
 	if err != nil {
 		return nil, err
 	}
 
-	proc, err := procfs.Proc(int(process.PID))
+	proc, err := pfs.Proc(int(process.PID))
 	if err != nil {
 		logger.L().Debug("Failed to get process", helpers.String("error", err.Error()))
 		return nil, err
 	}
 
 	// build the process tree
-	treeRoot, err := buildProcessTree(proc, &procfs, shimPid, nil)
+	treeRoot, err := buildProcessTree(proc, &pfs, shimPid, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -644,4 +650,14 @@ func GetProcessFromProcessTree(process *apitypes.Process, pid uint32) *apitypes.
 	}
 
 	return nil
+}
+
+// TrimRuntimePrefix removes the runtime prefix from a container ID.
+func TrimRuntimePrefix(id string) string {
+	parts := strings.SplitN(id, "//", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+
+	return parts[1]
 }

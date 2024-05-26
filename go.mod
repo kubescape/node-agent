@@ -20,11 +20,11 @@ require (
 	github.com/goradd/maps v0.1.5
 	github.com/inspektor-gadget/inspektor-gadget v0.27.0
 	github.com/kinbiko/jsonassert v1.1.1
-	github.com/kubescape/backend v0.0.16
+	github.com/kubescape/backend v0.0.20
 	github.com/kubescape/go-logger v0.0.22
-	github.com/kubescape/k8s-interface v0.0.165
-	github.com/kubescape/storage v0.0.83
-	github.com/panjf2000/ants/v2 v2.9.0
+	github.com/kubescape/k8s-interface v0.0.166
+	github.com/kubescape/storage v0.0.85
+	github.com/panjf2000/ants/v2 v2.9.1
 	github.com/prometheus/alertmanager v0.27.0
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/procfs v0.13.0
@@ -34,6 +34,7 @@ require (
 	go.etcd.io/bbolt v1.3.9
 	go.opentelemetry.io/otel v1.26.0
 	go.opentelemetry.io/otel/trace v1.26.0
+	golang.org/x/net v0.25.0
 	golang.org/x/sys v0.20.0
 	gonum.org/v1/plot v0.14.0
 	gopkg.in/mcuadros/go-syslog.v2 v2.3.0
@@ -216,7 +217,6 @@ require (
 	golang.org/x/crypto v0.23.0 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
 	golang.org/x/image v0.16.0 // indirect
-	golang.org/x/net v0.25.0 // indirect
 	golang.org/x/oauth2 v0.20.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect
 	golang.org/x/term v0.20.0 // indirect

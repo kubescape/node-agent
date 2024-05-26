@@ -156,7 +156,8 @@ func (exporter *HTTPExporter) sendInAlertList(httpAlert apitypes.RuntimeAlert, p
 	bodyReader := bytes.NewReader(bodyBytes)
 
 	// send the HTTP request
-	req, err := http.NewRequest(exporter.config.Method, exporter.config.URL, bodyReader)
+	req, err := http.NewRequest(exporter.config.Method,
+		exporter.config.URL+"/v1/runtimealerts", bodyReader)
 	if err != nil {
 		logger.L().Error("failed to create HTTP request", helpers.Error(err))
 		return
