@@ -52,11 +52,8 @@ func (sc *SyftHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 	// check SBOM is complete
 	if syftData.Annotations != nil {
 		if status, ok := syftData.Annotations[helpersv1.StatusMetadataKey]; ok {
-			if status == helpersv1.Incomplete {
-				watchedContainer.SyncChannel <- utils.IncompleteSBOMError
-			}
-			// dwertent
-			if status == helpersv1.Unauthorize {
+			switch status {
+			case helpersv1.Incomplete, helpersv1.TooLarge, helpersv1.Unauthorize:
 				watchedContainer.SyncChannel <- utils.IncompleteSBOMError
 			}
 		}
@@ -206,10 +203,10 @@ func filterRelevantFilesInSBOM(watchedContainer *utils.WatchedContainerData, syf
 
 }
 
-func (sc *SyftHandler) IncrementImageUse(imageID string) {
+func (sc *SyftHandler) IncrementImageUse(_ string) {
 
 }
-func (sc *SyftHandler) DecrementImageUse(imageID string) {
+func (sc *SyftHandler) DecrementImageUse(_ string) {
 
 }
 
