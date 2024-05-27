@@ -399,8 +399,8 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 
 		res := rule.ProcessEvent(eventType, event, rm.objectCache)
 		if res != nil {
-			res.SetWorkloadDetails(rm.podToWlid.Get(utils.CreateK8sPodID(res.GetRuntimeAlertK8sDetails().Namespace, res.GetRuntimeAlertK8sDetails().PodName)))
 			res = rm.enrichRuleFailure(res)
+			res.SetWorkloadDetails(rm.podToWlid.Get(utils.CreateK8sPodID(res.GetRuntimeAlertK8sDetails().Namespace, res.GetRuntimeAlertK8sDetails().PodName)))
 			rm.exporter.SendRuleAlert(res)
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}
