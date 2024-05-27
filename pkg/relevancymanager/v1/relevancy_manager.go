@@ -362,7 +362,7 @@ func (rm *RelevancyManager) ReportFileOpen(containerID, k8sContainerID, file str
 }
 
 func (rm *RelevancyManager) HasRelevancyCalculating(pod *v1.Pod) bool {
-	for _, c := range pod.Status.ContainerStatuses {
+	for _, c := range utils.GetContainerStatuses(pod.Status) {
 		if rm.watchedContainerChannels.Has(utils.TrimRuntimePrefix(c.ContainerID)) {
 			return true
 		}
