@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -660,4 +661,8 @@ func TrimRuntimePrefix(id string) string {
 	}
 
 	return parts[1]
+}
+
+func GetContainerStatuses(podStatus v1.PodStatus) []v1.ContainerStatus {
+	return slices.Concat(podStatus.ContainerStatuses, podStatus.InitContainerStatuses, podStatus.EphemeralContainerStatuses)
 }

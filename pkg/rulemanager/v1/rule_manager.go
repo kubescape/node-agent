@@ -566,7 +566,7 @@ func (rm *RuleManager) HasApplicableRuleBindings(namespace, name string) bool {
 }
 
 func (rm *RuleManager) HasFinalApplicationProfile(pod *corev1.Pod) bool {
-	for _, c := range pod.Status.ContainerStatuses {
+	for _, c := range utils.GetContainerStatuses(pod.Status) {
 		ap := rm.objectCache.ApplicationProfileCache().GetApplicationProfile(utils.TrimRuntimePrefix(c.ContainerID))
 		if ap != nil {
 			if status, ok := ap.Annotations[helpersv1.StatusMetadataKey]; ok {

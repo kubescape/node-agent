@@ -76,10 +76,15 @@ func (n *NodeProfileManager) getProfile() (*armotypes.NodeProfile, error) {
 	for _, pod := range n.k8sObjectCache.GetPods() {
 		var app string
 		if pod.Labels != nil {
-			app = pod.Labels["app"]
+			for _, k := range []string{"app", "app.kubernetes.io/name"} {
+				if v, ok := pod.Labels[k]; ok {
+					app = v
+					break
+				}
+			}
 		}
 		state, reason, message, transitionTime := getPodState(pod.Status.Conditions)
-		statusesMap := mapContainerStatuses(pod.Status.ContainerStatuses)
+		statusesMap := mapContainerStatuses(utils.GetContainerStatuses(pod.Status))
 		podStatus := armotypes.PodStatus{
 			CustomerGUID:               n.clusterData.AccountID,
 			Cluster:                    n.clusterData.ClusterName,
