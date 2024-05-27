@@ -332,3 +332,7 @@ func (ch *IGContainerWatcher) Stop() {
 		ch.running = false
 	}
 }
+
+func (ch *IGContainerWatcher) Ready() bool {
+	return ch.running
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"node-agent/pkg/healthmanager"
 	"strings"
 
 	"net/http"
@@ -239,6 +240,10 @@ func main() {
 
 	// Start the prometheusExporter
 	prometheusExporter.Start()
+
+	// Start the health manager
+	healthManager := healthmanager.NewHealthManager(mainHandler)
+	healthManager.Start(ctx)
 
 	// Start the container handler
 	err = mainHandler.Start(ctx)
