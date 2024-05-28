@@ -475,7 +475,7 @@ func Test_08_ApplicationProfilePatching(t *testing.T) {
 
 	// patch the application profile
 	patchOperations := []utils.PatchOperation{
-		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "NET_ADMIN"},
+		{Op: "replace", Path: "/spec/containers/0/capabilities", Value: []string{"NET_ADMIN"}},
 		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SETGID"},
 		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SETPCAP"},
 		{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SETUID"},
@@ -483,10 +483,10 @@ func Test_08_ApplicationProfilePatching(t *testing.T) {
 		{Op: "add", Path: "/spec/containers/0/syscalls/-", Value: "accept4"},
 		{Op: "add", Path: "/spec/containers/0/syscalls/-", Value: "arch_prctl"},
 		{Op: "add", Path: "/spec/containers/0/syscalls/-", Value: "bind"},
-		{Op: "add", Path: "/spec/containers/0/execs/-", Value: map[string]interface{}{
+		{Op: "replace", Path: "/spec/containers/0/execs", Value: []map[string]interface{}{{
 			"path": "/checkoutservice",
 			"args": []string{"/checkoutservice"},
-		}},
+		}}},
 		{Op: "add", Path: "/spec/containers/0/execs/-", Value: map[string]interface{}{
 			"path": "/bin/grpc_health_probe",
 			"args": []string{"/bin/grpc_health_probe", "-addr=:5050"},
