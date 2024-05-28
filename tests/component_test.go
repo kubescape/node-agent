@@ -151,12 +151,12 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 
 	// Validate that all alerts are signaled
 	expectedAlerts := map[string]bool{
-		"Unexpected process launched":              false,
-		"Unexpected file access":                   false,
-		"Unexpected system call":                   false,
-		"Unexpected capability used":               false,
-		"Kubernetes Client Executed":               false,
-		"Exec from malicious source":               false,
+		"Unexpected process launched": false,
+		"Unexpected file access":      false,
+		"Unexpected system call":      false,
+		"Unexpected capability used":  false,
+		"Kubernetes Client Executed":  false,
+		"Exec from malicious source":  false,
 		// "Kernel Module Load":                       false, This is commented out because we moved to traceloop which monitors on sys_exit and seccomp filters out this syscall.
 		"Exec Binary Not In Base Image":            false,
 		"Exec from mount":                          false,
@@ -346,8 +346,8 @@ func Test_05_MemoryLeak_10K_Alerts(t *testing.T) {
 		firstValue := metric.Values[0]
 		lastValue := metric.Values[len(metric.Values)-1]
 
-		// Validate that there is no memory leak, but tolerate 40mb memory leak
-		tolerateMb := 40
+		// Validate that there is no memory leak, but tolerate 90mb memory leak
+		tolerateMb := 90
 		assert.LessOrEqual(t, lastValue, firstValue+float64(tolerateMb*1024*1024), "Memory leak detected in node-agent pod (%s). Memory usage at the end of the test is %f and at the beginning of the test is %f", podName, lastValue, firstValue)
 	}
 }

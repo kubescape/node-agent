@@ -59,7 +59,7 @@ const (
 	networkWorkerPoolSize      = 1
 	dnsWorkerPoolSize          = 5
 	randomxWorkerPoolSize      = 1
-	syscallsWorkerPoolSize     = 5
+	syscallsWorkerPoolSize     = 3
 )
 
 type IGContainerWatcher struct {
@@ -316,7 +316,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkWorkerChan:      make(chan *tracernetworktype.Event, 500000),
 		dnsWorkerChan:          make(chan *tracerdnstype.Event, 100000),
 		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 5000),
-    syscallsWorkerChan:     make(chan *tracersyscallstype.Event, 100000),
+		syscallsWorkerChan:     make(chan *tracersyscallstype.Event, 100000),
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,
