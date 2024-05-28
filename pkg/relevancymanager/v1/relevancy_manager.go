@@ -31,7 +31,7 @@ import (
 
 type RelevancyManager struct {
 	cfg                      config.Config
-	watchedContainerChannels maps.SafeMap[string, chan error]
+	watchedContainerChannels maps.SafeMap[string, chan error] // key is containerID
 	ctx                      context.Context
 	fileHandler              filehandler.FileHandler
 	k8sClient                k8sclient.K8sClientInterface
@@ -193,6 +193,8 @@ func findImageID(pod workloadinterface.IWorkload, containerName string, containe
 		containerStatuses = podStatus.InitContainerStatuses
 	case utils.EphemeralContainer:
 		containerStatuses = podStatus.EphemeralContainerStatuses
+	default:
+		// noop
 	}
 
 	for i := range containerStatuses {
@@ -203,6 +205,7 @@ func findImageID(pod workloadinterface.IWorkload, containerName string, containe
 	return "", nil
 
 }
+
 func findImageTag(pod workloadinterface.IWorkload, containerName string, containerType utils.ContainerType) (string, error) {
 	var containers []v1.Container
 	var ephemeralContainers []v1.EphemeralContainer
@@ -224,6 +227,8 @@ func findImageTag(pod workloadinterface.IWorkload, containerName string, contain
 		if err != nil {
 			return "", err
 		}
+	default:
+		// noop
 
 	}
 	for i := range containers {
@@ -266,7 +271,6 @@ func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *con
 		}
 	}
 }
-
 func (rm *RelevancyManager) ContainerReachedMaxTime(containerID string) {
 	if channel := rm.watchedContainerChannels.Get(containerID); channel != nil {
 		channel <- utils.ContainerReachedMaxTime
@@ -355,4 +359,13 @@ func (rm *RelevancyManager) ReportFileOpen(containerID, k8sContainerID, file str
 		return
 	}
 	rm.fileHandler.AddFile(k8sContainerID, file)
+}
+
+func (rm *RelevancyManager) HasRelevancyCalculating(pod *v1.Pod) bool {
+	for _, c := range utils.GetContainerStatuses(pod.Status) {
+		if rm.watchedContainerChannels.Has(utils.TrimRuntimePrefix(c.ContainerID)) {
+			return true
+		}
+	}
+	return false
 }

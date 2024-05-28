@@ -3,7 +3,6 @@ package rulemanager
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/config"
 	"node-agent/pkg/exporters"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/ruleengine"
@@ -15,6 +14,7 @@ import (
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/dustin/go-humanize"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"go.opentelemetry.io/otel"
 
 	bindingcache "node-agent/pkg/rulebindingmanager"
@@ -43,7 +43,6 @@ import (
 )
 
 type RuleManager struct {
-	cfg                      config.Config
 	watchedContainerChannels maps.SafeMap[string, chan error] // key is k8sContainerID
 	ruleBindingCache         bindingcache.RuleBindingCache
 	trackedContainers        mapset.Set[string] // key is k8sContainerID
@@ -55,8 +54,7 @@ type RuleManager struct {
 	preRunningContainerIDs   mapset.Set[string]            // key is k8sContainerID
 	cachedPods               mapset.Set[string]            // key is namespace/podName
 	containerMutexes         storageUtils.MapMutex[string] // key is k8sContainerID
-	podInCacheMutexes        storageUtils.MapMutex[string] // key is namespace+podName
-	podToWlid                maps.SafeMap[string, string]
+	podToWlid                maps.SafeMap[string, string]  // key is namespace/podName
 	nodeName                 string
 	clusterName              string
 	containerIdToShimPid     maps.SafeMap[string, uint32]
@@ -64,22 +62,18 @@ type RuleManager struct {
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, preRunningContainersIDs mapset.Set[string], nodeName string, clusterName string) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string) (*RuleManager, error) {
 	return &RuleManager{
-		cfg:                    cfg,
-		ctx:                    ctx,
-		k8sClient:              k8sClient,
-		containerMutexes:       storageUtils.NewMapMutex[string](),
-		podInCacheMutexes:      storageUtils.NewMapMutex[string](),
-		trackedContainers:      mapset.NewSet[string](),
-		ruleBindingCache:       ruleBindingCache,
-		objectCache:            objectCache,
-		exporter:               exporter,
-		metrics:                metrics,
-		preRunningContainerIDs: preRunningContainersIDs,
-		cachedPods:             mapset.NewSet[string](),
-		nodeName:               nodeName,
-		clusterName:            clusterName,
+		ctx:               ctx,
+		k8sClient:         k8sClient,
+		containerMutexes:  storageUtils.NewMapMutex[string](),
+		trackedContainers: mapset.NewSet[string](),
+		ruleBindingCache:  ruleBindingCache,
+		objectCache:       objectCache,
+		exporter:          exporter,
+		metrics:           metrics,
+		nodeName:          nodeName,
+		clusterName:       clusterName,
 	}, nil
 }
 
@@ -163,12 +157,13 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 				helpers.String("k8s workload", k8sContainerID))
 			return
 		}
-		if !rm.podToWlid.Has(notif.Container.K8s.PodName) {
-			wlid, err := rm.getWorkloadIdentifier(notif.Container.K8s.Namespace, notif.Container.K8s.PodName)
+		podID := utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName)
+		if !rm.podToWlid.Has(podID) {
+			w, err := rm.getWorkloadIdentifier(notif.Container.K8s.Namespace, notif.Container.K8s.PodName)
 			if err != nil {
 				logger.L().Debug("RuleManager - failed to get workload identifier", helpers.Error(err), helpers.String("k8s workload", notif.Container.K8s.PodName))
 			} else {
-				rm.podToWlid.Set(notif.Container.K8s.PodName, wlid)
+				rm.podToWlid.Set(podID, w)
 			}
 		}
 		rm.trackedContainers.Add(k8sContainerID)
@@ -185,7 +180,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			channel <- utils.ContainerHasTerminatedError
 		}
 		rm.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
-		rm.podToWlid.Delete(notif.Container.K8s.PodName)
+		rm.podToWlid.Delete(utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName))
 		rm.containerIdToShimPid.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
@@ -246,7 +241,7 @@ func (rm *RuleManager) ReportSyscallEvent(event tracersyscallstype.Event) {
 	rm.processEvent(utils.SyscallEventType, &event, rules)
 }
 
-func (rm *RuleManager) ReportCapability(event tracercapabilitiestype.Event) {
+func (rm *RuleManager) ReportCapability(_ string, event tracercapabilitiestype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportCapability event")
 		return
@@ -261,7 +256,7 @@ func (rm *RuleManager) ReportCapability(event tracercapabilitiestype.Event) {
 	rm.processEvent(utils.CapabilitiesEventType, &event, rules)
 }
 
-func (rm *RuleManager) ReportFileExec(event tracerexectype.Event) {
+func (rm *RuleManager) ReportFileExec(_ string, event tracerexectype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileExec event")
 		return
@@ -276,7 +271,7 @@ func (rm *RuleManager) ReportFileExec(event tracerexectype.Event) {
 	rm.processEvent(utils.ExecveEventType, &event, rules)
 }
 
-func (rm *RuleManager) ReportFileOpen(event traceropentype.Event) {
+func (rm *RuleManager) ReportFileOpen(_ string, event traceropentype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileOpen event")
 		return
@@ -291,7 +286,8 @@ func (rm *RuleManager) ReportFileOpen(event traceropentype.Event) {
 	rm.processEvent(utils.OpenEventType, &event, rules)
 
 }
-func (rm *RuleManager) ReportNetworkEvent(event tracernetworktype.Event) {
+  
+func (rm *RuleManager) ReportNetworkEvent(_ string, event tracernetworktype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportNetworkEvent event")
 		return
@@ -326,7 +322,7 @@ func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
 	rm.processEvent(utils.DnsEventType, &event, rules)
 }
 
-func (rm *RuleManager) ReportRandomxEvent(event tracerrandomxtype.Event) {
+func (rm *RuleManager) ReportRandomxEvent(_ string, event tracerrandomxtype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from randomx event")
 		return
@@ -353,15 +349,14 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 
 		res := rule.ProcessEvent(eventType, event, rm.objectCache)
 		if res != nil {
-			res.SetWorkloadDetails(rm.podToWlid.Get(res.GetRuntimeAlertK8sDetails().PodName))
 			res = rm.enrichRuleFailure(res)
+			res.SetWorkloadDetails(rm.podToWlid.Get(utils.CreateK8sPodID(res.GetRuntimeAlertK8sDetails().Namespace, res.GetRuntimeAlertK8sDetails().PodName)))
 			rm.exporter.SendRuleAlert(res)
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())
 	}
 }
-
 func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
 	path, err := utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
 	hostPath := ""
@@ -374,7 +369,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	// Enrich BaseRuntimeAlert
 	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
 
-	baseRuntimeAlert.Timestamp = time.Unix(int64(ruleFailure.GetTriggerEvent().Timestamp)/1e9, 0)
+	baseRuntimeAlert.Timestamp = time.Unix(0, int64(ruleFailure.GetTriggerEvent().Timestamp))
 
 	if baseRuntimeAlert.MD5Hash == "" && hostPath != "" {
 		md5hash, err := utils.CalculateMD5FileHash(hostPath)
@@ -514,4 +509,29 @@ func isEventRelevant(ruleSpec ruleengine.RuleSpec, eventType utils.EventType) bo
 		}
 	}
 	return false
+}
+
+func (rm *RuleManager) HasApplicableRuleBindings(namespace, name string) bool {
+	return len(rm.ruleBindingCache.ListRulesForPod(namespace, name)) > 0
+}
+
+func (rm *RuleManager) HasFinalApplicationProfile(pod *corev1.Pod) bool {
+	for _, c := range utils.GetContainerStatuses(pod.Status) {
+		ap := rm.objectCache.ApplicationProfileCache().GetApplicationProfile(utils.TrimRuntimePrefix(c.ContainerID))
+		if ap != nil {
+			if status, ok := ap.Annotations[helpersv1.StatusMetadataKey]; ok {
+				// in theory, only completed profiles are stored in cache, but we check anyway
+				return status == helpersv1.Completed
+			}
+		}
+	}
+	return false
+}
+
+func (rm *RuleManager) IsContainerMonitored(k8sContainerID string) bool {
+	return rm.trackedContainers.Contains(k8sContainerID)
+}
+
+func (rm *RuleManager) IsPodMonitored(namespace, pod string) bool {
+	return rm.podToWlid.Has(utils.CreateK8sPodID(namespace, pod))
 }

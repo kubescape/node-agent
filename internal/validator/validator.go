@@ -98,18 +98,12 @@ func CheckPrerequisites() error {
 	if err := checkKernelVersion(KubescapeEBPFEngineMinKernelVersionSupport); err != nil {
 		return fmt.Errorf("%s: %w", utils.ErrKernelVersion, err)
 	}
-	// Get Node name from environment variable
-	logger.L().Debug("checking node name")
-	if nodeName := os.Getenv(config.NodeNameEnvVar); nodeName == "" {
-		return fmt.Errorf("%s environment variable not set", config.NodeNameEnvVar)
-	}
-	logger.L().Debug("checking pod name")
-	if nodeName := os.Getenv(config.PodNameEnvVar); nodeName == "" {
-		return fmt.Errorf("%s environment variable not set", config.NodeNameEnvVar)
-	}
-	logger.L().Debug("checking namespace name")
-	if nodeName := os.Getenv(config.NamespaceEnvVar); nodeName == "" {
-		return fmt.Errorf("%s environment variable not set", config.NodeNameEnvVar)
+	// Check environment variables
+	for _, envVar := range []string{config.NodeNameEnvVar, config.PodNameEnvVar, config.NamespaceEnvVar} {
+		logger.L().Debug("checking environment variable", helpers.String("envVar", envVar))
+		if getenv := os.Getenv(envVar); getenv == "" {
+			return fmt.Errorf("%s environment variable not set", envVar)
+		}
 	}
 	// Ensure all filesystems are mounted
 	logger.L().Debug("checking mounts")

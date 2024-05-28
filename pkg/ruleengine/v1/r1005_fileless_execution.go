@@ -99,8 +99,8 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *tracersysca
 }
 
 func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.Event) ruleengine.RuleFailure {
-
-	execPathDir := filepath.Dir(getExecFullPathFromEvent(execEvent))
+	execFullPath := getExecFullPathFromEvent(execEvent)
+	execPathDir := filepath.Dir(execFullPath)
 
 	// /proc/self/fd/<n> is classic way to hide malicious execs
 	// (see ezuri packer for example)
@@ -124,11 +124,12 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 					Gid:        &execEvent.Gid,
 					PID:        execEvent.Pid,
 					Uid:        &execEvent.Uid,
-					UpperLayer: execEvent.UpperLayer,
+					UpperLayer: &execEvent.UpperLayer,
 					PPID:       execEvent.Ppid,
 					Pcomm:      execEvent.Pcomm,
 					Cwd:        execEvent.Cwd,
 					Hardlink:   execEvent.ExePath,
+					Path:       execFullPath,
 					Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 				},
 				ContainerID: execEvent.Runtime.ContainerID,

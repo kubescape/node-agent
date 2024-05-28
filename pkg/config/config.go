@@ -23,6 +23,8 @@ type Config struct {
 	EnableRuntimeDetection   bool                      `mapstructure:"runtimeDetectionEnabled"`
 	EnableNetworkTracing     bool                      `mapstructure:"networkServiceEnabled"`
 	EnableRelevancy          bool                      `mapstructure:"relevantCVEServiceEnabled"`
+	EnableNodeProfile        bool                      `mapstructure:"nodeProfileServiceEnabled"`
+	NodeProfileInterval      time.Duration             `mapstructure:"nodeProfileInterval"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -33,6 +35,7 @@ func LoadConfig(path string) (Config, error) {
 
 	viper.SetDefault("fullPathTracingEnabled", true)
 	viper.SetDefault("initialDelay", 2*time.Minute)
+	viper.SetDefault("nodeProfileInterval", 10*time.Minute)
 
 	viper.AutomaticEnv()
 

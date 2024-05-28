@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"node-agent/pkg/healthmanager"
 	"strings"
 
 	"net/http"
@@ -21,6 +22,8 @@ import (
 	"node-agent/pkg/networkmanager"
 	networkmanagerv1 "node-agent/pkg/networkmanager/v1"
 	networkmanagerv2 "node-agent/pkg/networkmanager/v2"
+	"node-agent/pkg/nodeprofilemanager"
+	nodeprofilemanagerv1 "node-agent/pkg/nodeprofilemanager/v1"
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/objectcache/applicationprofilecache"
 	"node-agent/pkg/objectcache/k8scache"
@@ -62,19 +65,18 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
 	}
 
+	if credentials, err := beUtils.LoadCredentialsFromFile("/etc/credentials"); err != nil {
+		logger.L().Warning("failed to load credentials", helpers.Error(err))
+	} else {
+		clusterData.AccountID = credentials.Account
+		logger.L().Info("credentials loaded", helpers.Int("accountLength", len(credentials.Account)))
+	}
+
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
-		var accountId string
-		if credentials, err := beUtils.LoadCredentialsFromFile("/etc/credentials"); err != nil {
-			logger.L().Warning("failed to load credentials", helpers.Error(err))
-		} else {
-			accountId = credentials.Account
-			logger.L().Info("credentials loaded", helpers.Int("accountLength", len(credentials.Account)))
-		}
-
 		ctx = logger.InitOtel("node-agent",
 			os.Getenv("RELEASE"),
-			accountId,
+			clusterData.AccountID,
 			clusterData.ClusterName,
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
@@ -180,7 +182,7 @@ func main() {
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
 
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, preRunningContainersIDs, nodeName, clusterData.ClusterName)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, nodeName, clusterData.ClusterName)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
@@ -191,6 +193,16 @@ func main() {
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
 	}
 
+	// Create the node profile manager
+	var profileManager nodeprofilemanager.NodeProfileManagerClient
+	if cfg.EnableNodeProfile {
+		// FIXME validate the HTTPExporterConfig before we use it ?
+		profileManager = nodeprofilemanagerv1.NewNodeProfileManager(cfg, *clusterData, nodeName, k8sObjectCache, relevancyManager, ruleManager)
+	} else {
+		profileManager = nodeprofilemanager.NewNodeProfileManagerMock()
+	}
+
+	// Create the malware manager
 	var malwareManager malwaremanager.MalwareManagerClient
 	if cfg.EnableMalwareDetection {
 		// create exporter
@@ -223,8 +235,15 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
 
+	// Start the profileManager
+	profileManager.Start(ctx)
+
 	// Start the prometheusExporter
 	prometheusExporter.Start()
+
+	// Start the health manager
+	healthManager := healthmanager.NewHealthManager(mainHandler)
+	healthManager.Start(ctx)
 
 	// Start the container handler
 	err = mainHandler.Start(ctx)

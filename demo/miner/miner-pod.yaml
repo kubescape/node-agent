@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-miner-deployment
+  namespace: kubescape
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-miner
+  template:
+    metadata:
+      labels:
+        app: k8s-miner
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      containers:
+      - name: k8s-miner
+        image: docker.io/amitschendel/crypto-miner-1
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            memory: "3Gi"
+            cpu: "3"

@@ -48,6 +48,9 @@ jobs:
           Test_06_KillProcessInTheMiddle,
           Test_07_RuleBindingApplyTest,
           Test_08_ApplicationProfilePatching,
+          Test_10_MalwareDetectionTest,
+          # Test_10_DemoTest
+          # Test_11_DuplicationTest
         ]
     steps:
       - name: Checkout code
@@ -89,7 +92,7 @@ jobs:
           CGO_ENABLED: 0
         uses: actions/setup-go@v4
         with:
-          go-version: "1.21"
+          go-version: "1.22"
       - name: Run test
         run: |
           cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=component

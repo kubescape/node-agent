@@ -72,7 +72,7 @@ func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event 
 					Gid:        &randomXEvent.Gid,
 					PID:        randomXEvent.Pid,
 					Uid:        &randomXEvent.Uid,
-					UpperLayer: randomXEvent.UpperLayer,
+					UpperLayer: &randomXEvent.UpperLayer,
 					PPID:       randomXEvent.PPid,
 				},
 				ContainerID: randomXEvent.Runtime.ContainerID,

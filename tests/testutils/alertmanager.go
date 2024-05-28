@@ -36,6 +36,23 @@ func GetAlerts(namespace string) ([]Alert, error) {
 	return alerts, nil
 }
 
+func GetMalwareAlerts(namespace string) ([]Alert, error) {
+	url := alertManagerURL
+	if envURL, exists := os.LookupEnv("ALERTMANAGER_URL"); exists {
+		url = envURL
+	}
+
+	alerts, err := getActiveAlerts(url)
+	if err != nil {
+		return nil, fmt.Errorf("could not get alerts: %v", err)
+	}
+
+	alerts = filterAlertsByLabel(alerts, "alertname", "KubescapeMalwareDetected")
+	alerts = filterAlertsByLabel(alerts, "namespace", namespace)
+
+	return alerts, nil
+}
+
 // getActiveAlerts fetches the active alerts from Alertmanager
 func getActiveAlerts(alertManagerURL string) ([]Alert, error) {
 	endpoint := fmt.Sprintf("%s/api/v2/alerts?active=true", alertManagerURL)
