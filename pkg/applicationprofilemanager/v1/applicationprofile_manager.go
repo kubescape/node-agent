@@ -50,11 +50,11 @@ type ApplicationProfileManager struct {
 	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
 	toSaveExecs              maps.SafeMap[string, *maps.SafeMap[string, []string]]           // key is k8sContainerID
 	toSaveOpens              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
+	toSaveSyscalls           maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
 	watchedContainerChannels maps.SafeMap[string, chan error]                                // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
 	k8sObjectCache           objectcache.K8sObjectCache
 	storageClient            storage.StorageClient
-	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	preRunningContainerIDs   mapset.Set[string]
 }
 
@@ -138,6 +138,7 @@ func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.Wat
 	am.toSaveCapabilities.Delete(watchedContainer.K8sContainerID)
 	am.toSaveExecs.Delete(watchedContainer.K8sContainerID)
 	am.toSaveOpens.Delete(watchedContainer.K8sContainerID)
+	am.toSaveSyscalls.Delete(watchedContainer.K8sContainerID)
 	am.watchedContainerChannels.Delete(watchedContainer.ContainerID)
 }
 func (am *ApplicationProfileManager) ContainerReachedMaxTime(containerID string) {
@@ -238,17 +239,15 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 
 	// application activity is deprecated
 	// syscalls now reside in the application profile
-
-	// get syscalls from IG
 	var observedSyscalls []string
-	var toSaveSyscalls []string
-	if am.syscallPeekFunc != nil {
-		if observedSyscalls, err = am.syscallPeekFunc(watchedContainer.NsMntId); err == nil {
-			// check if we have new activities to save
-			savedSyscalls := am.savedSyscalls.Get(watchedContainer.K8sContainerID)
-			toSaveSyscallsSet := mapset.NewSet[string](observedSyscalls...).Difference(savedSyscalls)
-			if !toSaveSyscallsSet.IsEmpty() {
-				toSaveSyscalls = toSaveSyscallsSet.ToSlice()
+	if toSaveSyscalls := am.toSaveSyscalls.Get(watchedContainer.K8sContainerID); toSaveSyscalls.Cardinality() > 0 {
+		// remove syscalls to save in a thread safe way using Pop
+		for {
+			syscall, continuePop := toSaveSyscalls.Pop()
+			if continuePop {
+				observedSyscalls = append(observedSyscalls, syscall)
+			} else {
+				break
 			}
 		}
 	}
@@ -300,7 +299,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// 3a. the object is missing its container slice - ADD one with the container profile at the right index
 	// 3b. the object is missing the container profile - ADD the container profile at the right index
 	// 3c. default - patch the container ourselves and REPLACE it at the right index
-	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || watchedContainer.StatusUpdated() {
+	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || len(observedSyscalls) > 0 || watchedContainer.StatusUpdated() {
 		// 0. calculate patch
 		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
@@ -465,6 +464,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		if gotErr != nil {
 			// restore capabilities set
 			am.toSaveCapabilities.Get(watchedContainer.K8sContainerID).Append(capabilities...)
+			// restore syscalls set
+			am.toSaveSyscalls.Get(watchedContainer.K8sContainerID).Append(observedSyscalls...)
 			// restore execs map entries
 			toSaveExecs.Range(func(uniqueExecIdentifier string, v []string) bool {
 				if !am.toSaveExecs.Get(watchedContainer.K8sContainerID).Has(uniqueExecIdentifier) {
@@ -479,7 +480,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			watchedContainer.ResetStatusUpdatedFlag()
 
 			// record saved syscalls
-			am.savedSyscalls.Get(watchedContainer.K8sContainerID).Append(toSaveSyscalls...)
+			am.savedSyscalls.Get(watchedContainer.K8sContainerID).Append(observedSyscalls...)
 			// record saved capabilities
 			am.savedCapabilities.Get(watchedContainer.K8sContainerID).Append(capabilities...)
 			// record saved execs
@@ -568,6 +569,7 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.toSaveCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
 		am.toSaveExecs.Set(k8sContainerID, new(maps.SafeMap[string, []string]))
 		am.toSaveOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
+		am.toSaveSyscalls.Set(k8sContainerID, mapset.NewSet[string]())
 		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		am.trackedContainers.Add(k8sContainerID)
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
@@ -580,15 +582,21 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 	}
 }
 
-func (am *ApplicationProfileManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error)) {
-	am.syscallPeekFunc = peek
+func (am *ApplicationProfileManager) ReportSyscallEvent(k8sContainerID string, syscall string) {
+	if err := am.waitForContainer(k8sContainerID); err != nil {
+		return
+	}
+	if am.savedSyscalls.Get(k8sContainerID).ContainsOne(syscall) {
+		return
+	}
+	am.toSaveSyscalls.Get(k8sContainerID).Add(syscall)
 }
 
 func (am *ApplicationProfileManager) ReportCapability(k8sContainerID, capability string) {
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
-	if am.savedCapabilities.Has(capability) {
+	if am.savedCapabilities.Get(k8sContainerID).ContainsOne(capability) {
 		return
 	}
 	am.toSaveCapabilities.Get(k8sContainerID).Add(capability)

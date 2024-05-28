@@ -23,7 +23,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	tracerdns "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/tracer"
@@ -34,6 +33,8 @@ import (
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	tracersyscalls "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/tracer"
+	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
@@ -51,12 +52,14 @@ const (
 	dnsTraceName               = "trace_dns"
 	openTraceName              = "trace_open"
 	randomxTraceName           = "trace_randomx"
+	syscallsTraceName          = "trace_syscalls"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
 	networkWorkerPoolSize      = 1
 	dnsWorkerPoolSize          = 5
 	randomxWorkerPoolSize      = 1
+	syscallsWorkerPoolSize     = 3
 )
 
 type IGContainerWatcher struct {
@@ -86,7 +89,7 @@ type IGContainerWatcher struct {
 	capabilitiesTracer *tracercapabilities.Tracer
 	execTracer         *tracerexec.Tracer
 	openTracer         *traceropen.Tracer
-	syscallTracer      *tracerseccomp.Tracer
+	syscallTracer      *tracersyscalls.Tracer
 	networkTracer      *tracernetwork.Tracer
 	dnsTracer          *tracerdns.Tracer
 	randomxTracer      *tracerandomx.Tracer
@@ -100,6 +103,7 @@ type IGContainerWatcher struct {
 	networkWorkerPool      *ants.PoolWithFunc
 	dnsWorkerPool          *ants.PoolWithFunc
 	randomxWorkerPool      *ants.PoolWithFunc
+	syscallsWorkerPool     *ants.PoolWithFunc
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *tracerexectype.Event
@@ -107,6 +111,7 @@ type IGContainerWatcher struct {
 	networkWorkerChan      chan *tracernetworktype.Event
 	dnsWorkerChan          chan *tracerdnstype.Event
 	randomxWorkerChan      chan *tracerandomxtype.Event
+	syscallsWorkerChan     chan *tracersyscallstype.Event
 
 	preRunningContainersIDs mapset.Set[string]
 
@@ -138,7 +143,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.CapabilitiesEventType)
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
-		ruleManager.ReportCapability(k8sContainerID, event)
+		ruleManager.ReportCapability(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating capabilities worker pool: %w", err)
@@ -166,7 +171,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.ExecveEventType)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
-		ruleManager.ReportFileExec(k8sContainerID, event)
+		ruleManager.ReportFileExec(event)
 		malwareManager.ReportFileExec(k8sContainerID, event)
 	})
 	if err != nil {
@@ -195,7 +200,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
 		relevancyManager.ReportFileOpen(event.Runtime.ContainerID, k8sContainerID, path)
-		ruleManager.ReportFileOpen(k8sContainerID, event)
+		ruleManager.ReportFileOpen(event)
 		malwareManager.ReportFileOpen(k8sContainerID, event)
 	})
 	if err != nil {
@@ -219,7 +224,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.NetworkEventType)
 		networkManagerv1Client.ReportNetworkEvent(event.Runtime.ContainerID, event)
 		networkManagerClient.ReportNetworkEvent(k8sContainerID, event)
-		ruleManager.ReportNetworkEvent(event.Runtime.ContainerID, event)
+		ruleManager.ReportNetworkEvent(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating network worker pool: %w", err)
@@ -252,10 +257,25 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 		metrics.ReportEvent(utils.RandomXEventType)
-		ruleManager.ReportRandomxEvent(event.Runtime.ContainerID, event)
+		ruleManager.ReportRandomxEvent(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating randomx worker pool: %w", err)
+	}
+	// Create a syscalls worker pool
+	syscallsWorkerPool, err := ants.NewPoolWithFunc(syscallsWorkerPoolSize, func(i interface{}) {
+		event := i.(tracersyscallstype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
+		metrics.ReportEvent(utils.SyscallEventType)
+		applicationProfileManager.ReportSyscallEvent(k8sContainerID, event.Syscall)
+		ruleManager.ReportSyscallEvent(event)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating syscalls worker pool: %w", err)
 	}
 
 	return &IGContainerWatcher{
@@ -285,6 +305,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkWorkerPool:       networkWorkerPool,
 		dnsWorkerPool:           dnsWorkerPool,
 		randomxWorkerPool:       randomxWorkerPool,
+		syscallsWorkerPool:      syscallsWorkerPool,
 		metrics:                 metrics,
 		preRunningContainersIDs: preRunningContainers,
 
@@ -295,6 +316,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkWorkerChan:      make(chan *tracernetworktype.Event, 500000),
 		dnsWorkerChan:          make(chan *tracerdnstype.Event, 100000),
 		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 5000),
+		syscallsWorkerChan:     make(chan *tracersyscallstype.Event, 100000),
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,

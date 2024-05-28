@@ -5,6 +5,6 @@ import (
 )
 
 type RuleBindingCache interface {
-	ListRulesForPod(namespace, name string) []ruleengine.RuleEvaluator
+	ListRulesForPod(namespace, podName string) []ruleengine.RuleEvaluator
 	AddNotifier(*chan RuleBindingNotify)
 }

@@ -44,10 +44,9 @@ func TestApplicationProfileManager(t *testing.T) {
 			},
 		},
 	}
-	// register peek function for syscall tracer
-	go am.RegisterPeekFunc(func(_ uint64) ([]string, error) {
-		return []string{"dup", "listen"}, nil
-	})
+	// report syscall events
+	go am.ReportSyscallEvent("ns/pod/cont", "dup")
+	go am.ReportSyscallEvent("ns/pod/cont", "listen")
 	// report capability
 	go am.ReportCapability("ns/pod/cont", "NET_BIND_SERVICE")
 	// report file exec

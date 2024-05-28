@@ -6,14 +6,15 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
-	R0009ID   = "R0009"
-	R0009Name = "eBPF Program Load"
+	R0009ID       = "R0009"
+	R0009Name     = "eBPF Program Load"
+	BPF_PROG_LOAD = 5
 )
 
 var R0009EbpfProgramLoadRuleDescriptor = RuleDescriptor{
@@ -36,11 +37,10 @@ var _ ruleengine.RuleEvaluator = (*R0009EbpfProgramLoad)(nil)
 
 type R0009EbpfProgramLoad struct {
 	BaseRule
-	alreadyNotified bool
 }
 
 func CreateRuleR0009EbpfProgramLoad() *R0009EbpfProgramLoad {
-	return &R0009EbpfProgramLoad{alreadyNotified: false}
+	return &R0009EbpfProgramLoad{}
 }
 
 func (rule *R0009EbpfProgramLoad) Name() string {
@@ -54,21 +54,16 @@ func (rule *R0009EbpfProgramLoad) DeleteRule() {
 }
 
 func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if rule.alreadyNotified {
-		return nil
-	}
-
 	if eventType != utils.SyscallEventType {
 		return nil
 	}
 
-	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
+	syscallEvent, ok := event.(*tracersyscallstype.Event)
 	if !ok {
 		return nil
 	}
 
-	if syscallEvent.SyscallName == "bpf" {
-		rule.alreadyNotified = true
+	if syscallEvent.Syscall == "bpf" && syscallEvent.Parameters[0].Name == "cmd" && syscallEvent.Parameters[0].Value == fmt.Sprintf("%d", BPF_PROG_LOAD) {
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
@@ -79,9 +74,7 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: syscallEvent.Comm,
-					Gid:  &syscallEvent.Gid,
 					PID:  syscallEvent.Pid,
-					Uid:  &syscallEvent.Uid,
 				},
 				ContainerID: syscallEvent.Runtime.ContainerID,
 			},
