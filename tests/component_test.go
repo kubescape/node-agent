@@ -157,7 +157,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 		"Unexpected capability used":               false,
 		"Kubernetes Client Executed":               false,
 		"Exec from malicious source":               false,
-		"Kernel Module Load":                       false,
+		// "Kernel Module Load":                       false, This is commented out because we moved to traceloop which monitors on sys_exit and seccomp filters out this syscall.
 		"Exec Binary Not In Base Image":            false,
 		"Exec from mount":                          false,
 		"Unexpected Service Account Token Access":  false,
