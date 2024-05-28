@@ -12,6 +12,17 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
+// SensitiveFiles is a list of sensitive files that should not be accessed by the application unexpectedly.
+var SensitiveFiles = []string{
+	"/etc/shadow",
+	"/etc/passwd",
+	"/etc/sudoers",
+	"/etc/ssh/sshd_config",
+	"/etc/ssh/ssh_config",
+	"/etc/pam.d",
+	"/etc/group",
+}
+
 var (
 	ContainerNotFound = errors.New("container not found")
 	ProfileNotFound   = errors.New("application profile not found")
@@ -129,4 +140,16 @@ func isExecEventInProfile(execEvent *tracerexectype.Event, objectCache objectcac
 		}
 	}
 	return false, nil
+}
+
+func interfaceToStringSlice(val interface{}) ([]string, bool) {
+	sliceOfInterfaces, ok := val.([]interface{})
+	if ok {
+		sliceOfStrings := []string{}
+		for _, interfaceVal := range sliceOfInterfaces {
+			sliceOfStrings = append(sliceOfStrings, fmt.Sprintf("%v", interfaceVal))
+		}
+		return sliceOfStrings, true
+	}
+	return nil, false
 }
