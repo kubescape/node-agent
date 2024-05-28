@@ -18,7 +18,7 @@ type Alert struct {
 	Labels map[string]string `json:"labels"`
 }
 
-// getAlerts retrieves and filters alerts from Alertmanager
+// GetAlerts retrieves and filters alerts from Alertmanager
 func GetAlerts(namespace string) ([]Alert, error) {
 	url := alertManagerURL
 	if envURL, exists := os.LookupEnv("ALERTMANAGER_URL"); exists {

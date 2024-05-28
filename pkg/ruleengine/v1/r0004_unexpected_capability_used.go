@@ -75,8 +75,8 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
-	for _, cap := range appProfileCapabilitiesList.Capabilities {
-		if capEvent.CapName == cap {
+	for _, capability := range appProfileCapabilitiesList.Capabilities {
+		if capEvent.CapName == capability {
 			return nil
 		}
 	}

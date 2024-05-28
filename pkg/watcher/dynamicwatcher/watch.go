@@ -123,7 +123,7 @@ func (wh *WatchHandler) Stop(_ context.Context) {
 func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions, eventQueue *cooldownqueue.CooldownQueue) {
 	exitFatal := true
 	if err := backoff.RetryNotify(func() error {
-		watcher, err := wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), watchOpts)
+		w, err := wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), watchOpts)
 		if err != nil {
 			if k8sErrors.ReasonForError(err) == metav1.StatusReasonNotFound {
 				exitFatal = false
@@ -133,14 +133,14 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 		}
 		logger.L().Debug("starting watch", helpers.String("resource", res.Resource))
 		for {
-			event, chanActive := <-watcher.ResultChan()
+			event, chanActive := <-w.ResultChan()
 			// set resource version to resume watch from
 			// inspired by https://github.com/kubernetes/client-go/blob/5a0a4247921dd9e72d158aaa6c1ee124aba1da80/tools/watch/retrywatcher.go#L157
 			if metaObject, ok := event.Object.(resourceVersionGetter); ok {
 				watchOpts.ResourceVersion = metaObject.GetResourceVersion()
 			}
 			if eventQueue.Closed() {
-				watcher.Stop()
+				w.Stop()
 				return backoff.Permanent(errors.New("event queue closed"))
 			}
 			if !chanActive {

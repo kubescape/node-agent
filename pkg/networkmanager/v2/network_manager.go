@@ -576,7 +576,7 @@ func (nm *NetworkManager) createNetworkNeighbor(networkEvent networkmanager.Netw
 	}}
 
 	if networkEvent.Destination.Kind == networkmanager.EndpointKindPod {
-		// for Pods we need to remove the default labels
+		// for Pods, we need to remove the default labels
 		neighborEntry.PodSelector = &metav1.LabelSelector{
 			MatchLabels: networkmanager.FilterLabels(networkEvent.GetDestinationPodLabels()),
 		}

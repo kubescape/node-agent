@@ -81,7 +81,7 @@ func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string)
 // ------------------ watcher.WatchResources methods -----------------------
 
 func (ap *ApplicationProfileCacheImpl) WatchResources() []watcher.WatchResource {
-	w := []watcher.WatchResource{}
+	var w []watcher.WatchResource
 
 	// add pod
 	p := watcher.NewWatchResource(schema.GroupVersionResource{
@@ -103,6 +103,7 @@ func (ap *ApplicationProfileCacheImpl) WatchResources() []watcher.WatchResource 
 }
 
 // ------------------ watcher.Watcher methods -----------------------
+
 func (ap *ApplicationProfileCacheImpl) AddHandler(ctx context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":

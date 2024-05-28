@@ -112,7 +112,7 @@ func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interfa
 func (rule *R1003MaliciousSSHConnection) DeleteRule() {
 }
 
-func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType && eventType != utils.NetworkEventType {
 		return nil
 	}

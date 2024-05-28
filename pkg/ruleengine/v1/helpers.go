@@ -89,7 +89,7 @@ func getContainerMountPaths(namespace, podName, containerName string, k8sObjCach
 		return []string{}, fmt.Errorf("pod spec not available for %s/%s", namespace, podName)
 	}
 
-	mountPaths := []string{}
+	var mountPaths []string
 	for _, container := range podSpec.Containers {
 		if container.Name == containerName {
 			for _, volumeMount := range container.VolumeMounts {

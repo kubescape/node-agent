@@ -27,7 +27,7 @@ const (
 
 func getNodeAgentPods() []string {
 	k8sClient := k8sinterface.NewKubernetesApi()
-	podNames := []string{}
+	var podNames []string
 	pods, err := k8sClient.KubernetesClient.CoreV1().Pods("kubescape").List(context.TODO(), metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/name=node-agent",
 	})
@@ -83,23 +83,6 @@ func PlotNodeAgentPrometheusCPUUsage(testcase string, startTime, endTime time.Ti
 	return nil
 }
 
-func GetNodeAgentMemoryUsage(start, end time.Time) (map[string]float64, error) {
-	response := map[string]float64{}
-
-	nodeAgentPods := getNodeAgentPods()
-	for _, podName := range nodeAgentPods {
-		query := fmt.Sprintf(`'avg by(cpu, instance) (irate(container_cpu_usage_seconds_total{pod="%s"}[5m]))`, podName)
-		_, values, err := sendPromQLQueryToProm(query, start, end, "")
-		if err != nil {
-			return response, err
-		}
-		// Calculate average
-		response[podName] = sum(values) / float64(len(values))
-
-	}
-	return response, nil
-}
-
 type WorkloadMetrics struct {
 	Name       string
 	Timestamps []float64
@@ -108,7 +91,7 @@ type WorkloadMetrics struct {
 
 func PlotNodeAgentPrometheusMemoryUsage(testcase string, startTime, endTime time.Time) ([]WorkloadMetrics, error) {
 	nodeAgentPods := getNodeAgentPods()
-	workloadMetrics := []WorkloadMetrics{}
+	var workloadMetrics []WorkloadMetrics
 
 	for _, podName := range nodeAgentPods {
 		query := fmt.Sprintf(`sum(container_memory_working_set_bytes{pod="%s", container="node-agent"}) by (container)`, podName)
@@ -178,13 +161,13 @@ func sendPromQLQueryToProm(query string, timeStart, timeEnd time.Time, steps str
 	}
 
 	// Get Prometheus URL from environment variable or use default
-	url := prometheusURL
+	u := prometheusURL
 	if envURL, exists := os.LookupEnv("PROMETHEUS_URL"); exists {
-		url = envURL
+		u = envURL
 	}
 
 	// Execute the query
-	data, err := executePromQLQuery(url, query, timeStart, timeEnd, steps)
+	data, err := executePromQLQuery(u, query, timeStart, timeEnd, steps)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error executing PromQL query: %w", err)
 	}

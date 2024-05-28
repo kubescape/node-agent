@@ -3,14 +3,6 @@ package v2
 import (
 	"context"
 	"fmt"
-	mapset "github.com/deckarep/golang-set/v2"
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"github.com/stretchr/testify/assert"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 	"node-agent/pkg/config"
 	"node-agent/pkg/dnsmanager"
 	"node-agent/pkg/k8sclient"
@@ -19,6 +11,15 @@ import (
 	"node-agent/pkg/storage"
 	"testing"
 	"time"
+
+	mapset "github.com/deckarep/golang-set/v2"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 func TestCreateNetworkManager(t *testing.T) {

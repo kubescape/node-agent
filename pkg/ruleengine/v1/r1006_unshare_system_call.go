@@ -52,7 +52,7 @@ func (rule *R1006UnshareSyscall) ID() string {
 func (rule *R1006UnshareSyscall) DeleteRule() {
 }
 
-func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.SyscallEventType {
 		return nil
 	}

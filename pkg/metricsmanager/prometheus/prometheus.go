@@ -16,9 +16,9 @@ const (
 	prometheusRuleIdLabel = "rule_id"
 )
 
-var _ metricsmanager.MetricsManager = (*prometheusMetric)(nil)
+var _ metricsmanager.MetricsManager = (*PrometheusMetric)(nil)
 
-type prometheusMetric struct {
+type PrometheusMetric struct {
 	ebpfExecCounter       prometheus.Counter
 	ebpfOpenCounter       prometheus.Counter
 	ebpfNetworkCounter    prometheus.Counter
@@ -31,8 +31,8 @@ type prometheusMetric struct {
 	alertCounter          *prometheus.CounterVec
 }
 
-func NewPrometheusMetric() *prometheusMetric {
-	return &prometheusMetric{
+func NewPrometheusMetric() *PrometheusMetric {
+	return &PrometheusMetric{
 		ebpfExecCounter: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "node_agent_exec_counter",
 			Help: "The total number of exec events received from the eBPF probe",
@@ -75,7 +75,7 @@ func NewPrometheusMetric() *prometheusMetric {
 		}, []string{prometheusRuleIdLabel}),
 	}
 }
-func (p *prometheusMetric) Start() {
+func (p *PrometheusMetric) Start() {
 	// Start prometheus metrics server
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
@@ -84,7 +84,7 @@ func (p *prometheusMetric) Start() {
 	}()
 }
 
-func (p *prometheusMetric) Destroy() {
+func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.ebpfExecCounter)
 	prometheus.Unregister(p.ebpfOpenCounter)
 	prometheus.Unregister(p.ebpfNetworkCounter)
@@ -97,7 +97,7 @@ func (p *prometheusMetric) Destroy() {
 	prometheus.Unregister(p.alertCounter)
 }
 
-func (p *prometheusMetric) ReportEvent(eventType utils.EventType) {
+func (p *PrometheusMetric) ReportEvent(eventType utils.EventType) {
 	switch eventType {
 	case utils.ExecveEventType:
 		p.ebpfExecCounter.Inc()
@@ -116,14 +116,14 @@ func (p *prometheusMetric) ReportEvent(eventType utils.EventType) {
 	}
 }
 
-func (p *prometheusMetric) ReportFailedEvent() {
+func (p *PrometheusMetric) ReportFailedEvent() {
 	p.ebpfFailedCounter.Inc()
 }
 
-func (p *prometheusMetric) ReportRuleProcessed(ruleID string) {
+func (p *PrometheusMetric) ReportRuleProcessed(ruleID string) {
 	p.ruleCounter.With(prometheus.Labels{prometheusRuleIdLabel: ruleID}).Inc()
 }
 
-func (p *prometheusMetric) ReportRuleAlert(ruleID string) {
+func (p *PrometheusMetric) ReportRuleAlert(ruleID string) {
 	p.alertCounter.With(prometheus.Labels{prometheusRuleIdLabel: ruleID}).Inc()
 }
