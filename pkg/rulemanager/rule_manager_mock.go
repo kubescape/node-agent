@@ -43,10 +43,6 @@ func (r *RuleManagerMock) ReportNetworkEvent(_ tracernetworktype.Event) {
 }
 
 func (r *RuleManagerMock) ReportSyscallEvent(_ tracersyscallstype.Event) {
-  // noop
-}
-
-func (r *RuleManagerMock) ReportNetworkEvent(_ string, _ tracernetworktype.Event) {
 	// noop
 }
 
@@ -54,7 +50,7 @@ func (r *RuleManagerMock) ReportDNSEvent(_ tracerdnstype.Event) {
 	// noop
 }
 
-func (r *RuleManagerMock) ReportRandomxEvent(_ string, _ tracerrandomxtype.Event) {
+func (r *RuleManagerMock) ReportRandomxEvent(_ tracerrandomxtype.Event) {
 	// noop
 }
 

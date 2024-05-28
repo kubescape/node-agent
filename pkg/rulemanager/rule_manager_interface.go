@@ -20,8 +20,8 @@ type RuleManagerClient interface {
 	ReportFileOpen(event traceropentype.Event)
 	ReportNetworkEvent(event tracernetworktype.Event)
 	ReportDNSEvent(event tracerdnstype.Event)
-  ReportSyscallEvent(event tracersyscallstype.Event)
-	ReportRandomxEvent(k8sContainerID string, event tracerrandomxtype.Event)
+	ReportSyscallEvent(event tracersyscallstype.Event)
+	ReportRandomxEvent(event tracerrandomxtype.Event)
 	HasApplicableRuleBindings(namespace, name string) bool
 	HasFinalApplicationProfile(pod *v1.Pod) bool
 	IsContainerMonitored(k8sContainerID string) bool

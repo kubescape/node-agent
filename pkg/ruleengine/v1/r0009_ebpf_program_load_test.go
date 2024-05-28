@@ -5,7 +5,7 @@ import (
 	"node-agent/pkg/utils"
 	"testing"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
 )
 
 func TestR0009EbpfProgramLoad(t *testing.T) {
@@ -17,9 +17,9 @@ func TestR0009EbpfProgramLoad(t *testing.T) {
 	}
 
 	// Create a syscall event
-	e := &ruleenginetypes.SyscallEvent{
-		Comm:        "test",
-		SyscallName: "test",
+	e := &tracersyscallstype.Event{
+		Comm:    "test",
+		Syscall: "test",
 	}
 
 	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
@@ -30,7 +30,7 @@ func TestR0009EbpfProgramLoad(t *testing.T) {
 	}
 
 	// Create a syscall event with bpf syscall
-	e.SyscallName = "bpf"
+	e.Syscall = "bpf"
 
 	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {

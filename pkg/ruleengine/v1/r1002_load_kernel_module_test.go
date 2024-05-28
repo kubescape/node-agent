@@ -39,7 +39,7 @@ func TestR1002LoadKernelModule(t *testing.T) {
 
 	// Create a syscall event with finit_module syscall
 	r2 := CreateRuleR1002LoadKernelModule()
-	e.SyscallName = "finit_module"
+	e.Syscall = "finit_module"
 
 	ruleResult = r2.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {

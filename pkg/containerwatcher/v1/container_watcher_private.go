@@ -50,7 +50,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 						return
 					}
 					for _, ev := range evs {
-						ev.SetContainerMetadata(&notif.Container.K8s.BasicK8sMetadata, &notif.Container.Runtime.BasicRuntimeMetadata)
+						ev.SetContainerMetadata(notif.Container)
 						ch.syscallEventCallback(ev)
 					}
 

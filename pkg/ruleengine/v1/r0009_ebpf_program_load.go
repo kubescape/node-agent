@@ -6,7 +6,7 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
@@ -62,12 +62,12 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 		return nil
 	}
 
-	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
+	syscallEvent, ok := event.(*tracersyscallstype.Event)
 	if !ok {
 		return nil
 	}
 
-	if syscallEvent.SyscallName == "bpf" {
+	if syscallEvent.Syscall == "bpf" {
 		rule.alreadyNotified = true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
@@ -79,9 +79,7 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: syscallEvent.Comm,
-					Gid:  &syscallEvent.Gid,
 					PID:  syscallEvent.Pid,
-					Uid:  &syscallEvent.Uid,
 				},
 				ContainerID: syscallEvent.Runtime.ContainerID,
 			},

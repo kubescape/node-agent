@@ -35,10 +35,13 @@ var _ ruleengine.RuleEvaluator = (*R1002LoadKernelModule)(nil)
 
 type R1002LoadKernelModule struct {
 	BaseRule
+	alerted bool
 }
 
 func CreateRuleR1002LoadKernelModule() *R1002LoadKernelModule {
-	return &R1002LoadKernelModule{}
+	return &R1002LoadKernelModule{
+		alerted: false,
+	}
 }
 
 func (rule *R1002LoadKernelModule) Name() string {
@@ -60,7 +63,7 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 		return nil
 	}
 
-	if syscallEvent.SyscallName == "init_module" || syscallEvent.SyscallName == "finit_module" {
+	if syscallEvent.Syscall == "init_module" || syscallEvent.Syscall == "finit_module" {
 		rule.alerted = true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
@@ -79,7 +82,7 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 			TriggerEvent: syscallEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleID:          rule.ID(),
-				RuleDescription: fmt.Sprintf("Kernel module load syscall (%s) was called in: %s", syscallEvent.SyscallName, syscallEvent.GetContainer()),
+				RuleDescription: fmt.Sprintf("Kernel module load syscall (%s) was called in: %s", syscallEvent.Syscall, syscallEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName: syscallEvent.GetPod(),
