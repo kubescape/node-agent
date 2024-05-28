@@ -7,5 +7,4 @@ import (
 type RuleBindingCache interface {
 	ListRulesForPod(namespace, podName string) []ruleengine.RuleEvaluator
 	AddNotifier(*chan RuleBindingNotify)
-	IsCached(namespace, podName string) bool
 }

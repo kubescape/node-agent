@@ -213,27 +213,9 @@ func (rm *RuleManager) getWorkloadIdentifier(podNamespace, podName string) (stri
 	return generatedWlid, nil
 }
 
-func (rm *RuleManager) waitForRuleBindings(namespace, podName string) error {
-	// wait for container to be ready
-	if err := backoff.Retry(func() error {
-		if !rm.ruleBindingCache.IsCached(namespace, podName) {
-			return fmt.Errorf("container not tracked")
-		}
-		return nil
-	}, backoff.NewExponentialBackOff()); err != nil {
-		return fmt.Errorf("failed to wait for container in pod: %w, %s", err, fmt.Sprintf("%s/%s", namespace, podName))
-	}
-
-	return nil
-}
-
 func (rm *RuleManager) ReportSyscallEvent(event tracersyscallstype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportSyscallEvent event")
-		return
-	}
-
-	if err := rm.waitForRuleBindings(event.GetNamespace(), event.GetPod()); err != nil {
 		return
 	}
 
@@ -249,10 +231,6 @@ func (rm *RuleManager) ReportCapability(event tracercapabilitiestype.Event) {
 		return
 	}
 
-	if err := rm.waitForRuleBindings(event.GetNamespace(), event.GetPod()); err != nil {
-		return
-	}
-
 	// list capability rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 	rm.processEvent(utils.CapabilitiesEventType, &event, rules)
@@ -261,10 +239,6 @@ func (rm *RuleManager) ReportCapability(event tracercapabilitiestype.Event) {
 func (rm *RuleManager) ReportFileExec(event tracerexectype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileExec event")
-		return
-	}
-
-	if err := rm.waitForRuleBindings(event.GetNamespace(), event.GetPod()); err != nil {
 		return
 	}
 
@@ -279,10 +253,6 @@ func (rm *RuleManager) ReportFileOpen(event traceropentype.Event) {
 		return
 	}
 
-	if err := rm.waitForRuleBindings(event.GetNamespace(), event.GetPod()); err != nil {
-		return
-	}
-
 	// list open rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 	rm.processEvent(utils.OpenEventType, &event, rules)
@@ -292,10 +262,6 @@ func (rm *RuleManager) ReportFileOpen(event traceropentype.Event) {
 func (rm *RuleManager) ReportNetworkEvent(event tracernetworktype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportNetworkEvent event")
-		return
-	}
-
-	if err := rm.waitForRuleBindings(event.GetNamespace(), event.GetPod()); err != nil {
 		return
 	}
 
@@ -315,10 +281,6 @@ func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
 		return
 	}
 
-	if err := rm.waitForRuleBindings(event.GetNamespace(), event.GetPod()); err != nil {
-		return
-	}
-
 	// list dns rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 	rm.processEvent(utils.DnsEventType, &event, rules)
@@ -327,10 +289,6 @@ func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
 func (rm *RuleManager) ReportRandomxEvent(event tracerrandomxtype.Event) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from randomx event")
-		return
-	}
-
-	if err := rm.waitForRuleBindings(event.GetNamespace(), event.GetPod()); err != nil {
 		return
 	}
 

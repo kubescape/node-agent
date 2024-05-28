@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	R0009ID   = "R0009"
-	R0009Name = "eBPF Program Load"
+	R0009ID       = "R0009"
+	R0009Name     = "eBPF Program Load"
+	BPF_PROG_LOAD = 5
 )
 
 var R0009EbpfProgramLoadRuleDescriptor = RuleDescriptor{
@@ -67,7 +68,7 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 		return nil
 	}
 
-	if syscallEvent.Syscall == "bpf" {
+	if syscallEvent.Syscall == "bpf" && syscallEvent.Parameters[0].Name == "cmd" && syscallEvent.Parameters[0].Value == fmt.Sprintf("%d", BPF_PROG_LOAD) {
 		rule.alreadyNotified = true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
