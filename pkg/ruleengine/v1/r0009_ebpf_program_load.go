@@ -37,11 +37,10 @@ var _ ruleengine.RuleEvaluator = (*R0009EbpfProgramLoad)(nil)
 
 type R0009EbpfProgramLoad struct {
 	BaseRule
-	alreadyNotified bool
 }
 
 func CreateRuleR0009EbpfProgramLoad() *R0009EbpfProgramLoad {
-	return &R0009EbpfProgramLoad{alreadyNotified: false}
+	return &R0009EbpfProgramLoad{}
 }
 
 func (rule *R0009EbpfProgramLoad) Name() string {
@@ -55,10 +54,6 @@ func (rule *R0009EbpfProgramLoad) DeleteRule() {
 }
 
 func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if rule.alreadyNotified {
-		return nil
-	}
-
 	if eventType != utils.SyscallEventType {
 		return nil
 	}
@@ -69,7 +64,6 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 	}
 
 	if syscallEvent.Syscall == "bpf" && syscallEvent.Parameters[0].Name == "cmd" && syscallEvent.Parameters[0].Value == fmt.Sprintf("%d", BPF_PROG_LOAD) {
-		rule.alreadyNotified = true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
