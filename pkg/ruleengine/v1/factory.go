@@ -32,6 +32,7 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R1008CryptoMiningDomainCommunicationRuleDescriptor,
 			R1009CryptoMiningRelatedPortRuleDescriptor,
 			// R1010SymlinkCreatedOverSensitiveFileRuleDescriptor,
+			R1011LdPreloadHookRuleDescriptor,
 		},
 	}
 }
