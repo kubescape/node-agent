@@ -56,18 +56,6 @@ func (rule *R0002UnexpectedFileAccess) ID() string {
 	return R0002ID
 }
 
-func interfaceToStringSlice(val interface{}) ([]string, bool) {
-	sliceOfInterfaces, ok := val.([]interface{})
-	if ok {
-		sliceOfStrings := []string{}
-		for _, interfaceVal := range sliceOfInterfaces {
-			sliceOfStrings = append(sliceOfStrings, fmt.Sprintf("%v", interfaceVal))
-		}
-		return sliceOfStrings, true
-	}
-	return nil, false
-}
-
 func (rule *R0002UnexpectedFileAccess) SetParameters(parameters map[string]interface{}) {
 	rule.BaseRule.SetParameters(parameters)
 
@@ -86,7 +74,6 @@ func (rule *R0002UnexpectedFileAccess) SetParameters(parameters map[string]inter
 	} else {
 		logger.L().Warning("failed to convert ignorePrefixes to []string", helpers.String("ruleID", rule.ID()))
 	}
-
 }
 
 func (rule *R0002UnexpectedFileAccess) DeleteRule() {

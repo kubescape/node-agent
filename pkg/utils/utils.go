@@ -379,6 +379,33 @@ func GetProcessStat(pid int) (*procfs.ProcStat, error) {
 	return &stat, nil
 }
 
+func GetProcessEnv(pid int) (map[string]string, error) {
+	fs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return nil, err
+	}
+
+	proc, err := fs.Proc(pid)
+	if err != nil {
+		return nil, err
+	}
+
+	env, err := proc.Environ()
+	if err != nil {
+		return nil, err
+	}
+
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	return envMap, nil
+}
+
 // Get the path of the file on the node.
 func GetHostFilePathFromEvent(event interface{}, containerPid uint32) (string, error) {
 	if execEvent, ok := event.(*tracerexectype.Event); ok {

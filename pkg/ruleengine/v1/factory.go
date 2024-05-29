@@ -20,6 +20,7 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R0007KubernetesClientExecutedDescriptor,
 			R0008ReadEnvironmentVariablesProcFSRuleDescriptor,
 			R0009EbpfProgramLoadRuleDescriptor,
+			R0010UnexpectedSensitiveFileAccessRuleDescriptor,
 			R1000ExecFromMaliciousSourceDescriptor,
 			R1001ExecBinaryNotInBaseImageRuleDescriptor,
 			R1002LoadKernelModuleRuleDescriptor,
@@ -30,6 +31,8 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R1007XMRCryptoMiningRuleDescriptor,
 			R1008CryptoMiningDomainCommunicationRuleDescriptor,
 			R1009CryptoMiningRelatedPortRuleDescriptor,
+			// R1010SymlinkCreatedOverSensitiveFileRuleDescriptor,
+			R1011LdPreloadHookRuleDescriptor,
 		},
 	}
 }
