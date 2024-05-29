@@ -89,13 +89,11 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 	}
 
 	if syscallEvent.Syscall == "symlink" || syscallEvent.Syscall == "symlinkat" {
-		logger.L().Info("Symlink created over sensitive file", helpers.Interface("params", syscallEvent.Parameters))
 		if syscallEvent.Parameters[0].Name == "target" || syscallEvent.Parameters[0].Name == "oldname" {
 			value := syscallEvent.Parameters[0].Value
 			if syscallEvent.Parameters[0].Content != nil {
 				value = *syscallEvent.Parameters[0].Content
 			}
-			logger.L().Info("Symlink created over sensitive file", helpers.String("value", value))
 			for _, path := range rule.additionalPaths {
 				if strings.HasPrefix(value, path) {
 					return &GenericRuleFailure{
