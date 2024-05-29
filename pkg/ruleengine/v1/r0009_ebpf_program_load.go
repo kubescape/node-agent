@@ -5,6 +5,7 @@ import (
 	"node-agent/pkg/objectcache"
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
+	"slices"
 
 	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
 
@@ -60,6 +61,21 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 
 	syscallEvent, ok := event.(*tracersyscallstype.Event)
 	if !ok {
+		return nil
+	}
+
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEvent.Runtime.ContainerID)
+	if ap == nil {
+		return nil
+	}
+
+	appProfileSyscallList, err := getContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
+	if err != nil {
+		return nil
+	}
+
+	// Check if the syscall is in the list of allowed syscalls
+	if slices.Contains(appProfileSyscallList.Syscalls, syscallEvent.Syscall) {
 		return nil
 	}
 
