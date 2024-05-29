@@ -1,5 +1,7 @@
 package ruleengine
 
+// This rule is disabled because we need to implement a special gadget for this rule since traceloop doesn't capture pointer values.
+
 import (
 	"fmt"
 	"node-agent/pkg/objectcache"
@@ -87,9 +89,15 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 	}
 
 	if syscallEvent.Syscall == "symlink" || syscallEvent.Syscall == "symlinkat" {
-		if syscallEvent.Parameters[0].Name == "target" {
+		logger.L().Info("Symlink created over sensitive file", helpers.Interface("params", syscallEvent.Parameters))
+		if syscallEvent.Parameters[0].Name == "target" || syscallEvent.Parameters[0].Name == "oldname" {
+			value := syscallEvent.Parameters[0].Value
+			if syscallEvent.Parameters[0].Content != nil {
+				value = *syscallEvent.Parameters[0].Content
+			}
+			logger.L().Info("Symlink created over sensitive file", helpers.String("value", value))
 			for _, path := range rule.additionalPaths {
-				if strings.HasPrefix(syscallEvent.Parameters[0].Value, path) {
+				if strings.HasPrefix(value, path) {
 					return &GenericRuleFailure{
 						BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 							AlertName:      rule.Name(),
@@ -107,7 +115,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 						TriggerEvent: syscallEvent.Event,
 						RuleAlert: apitypes.RuleAlert{
 							RuleID:          rule.ID(),
-							RuleDescription: fmt.Sprintf("Symlink created over sensitive file: %s in: %s", syscallEvent.Parameters[0].Value, syscallEvent.GetContainer()),
+							RuleDescription: fmt.Sprintf("Symlink created over sensitive file: %s in: %s", value, syscallEvent.GetContainer()),
 						},
 						RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 							PodName: syscallEvent.GetPod(),
