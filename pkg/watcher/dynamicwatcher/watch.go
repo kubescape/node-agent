@@ -66,7 +66,7 @@ func (wh *WatchHandler) Start(ctx context.Context) {
 	for k, v := range wh.resources {
 		go func(r string, w watcher.WatchResource) {
 			if err := wh.watch(ctx, w, wh.eventQueues[r]); err != nil {
-				logger.L().Fatal("watch resource", helpers.Error(err))
+				logger.L().Fatal("WatchHandler - watch resource", helpers.Error(err))
 			}
 		}(k, v)
 	}
@@ -85,7 +85,8 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 			opt.ResourceVersion, err = wh.getExistingStorageObjects(ctx, res, opt)
 			return err
 		}, newBackOff(), func(err error, d time.Duration) {
-			// filed to list resources, will retry
+			logger.L().Ctx(ctx).Warning("WatchHandler - get existing storage objects", helpers.Error(err),
+				helpers.String("retry in", d.String()))
 		}); err != nil {
 			return fmt.Errorf("giving up get existing storage objects: %w", err)
 		}
@@ -131,7 +132,7 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 			}
 			return fmt.Errorf("client resource: %w", err)
 		}
-		logger.L().Debug("starting watch", helpers.String("resource", res.Resource))
+		logger.L().Debug("WatchHandler - starting watch", helpers.String("resource", res.Resource))
 		for {
 			event, chanActive := <-w.ResultChan()
 			// set resource version to resume watch from
@@ -155,12 +156,12 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 		}
 	}, newBackOff(), func(err error, d time.Duration) {
 		if !errors.Is(err, errWatchClosed) {
-			logger.L().Ctx(ctx).Debug("watch", helpers.Error(err),
+			logger.L().Debug("WatchHandler - watch", helpers.Error(err),
 				helpers.String("resource", res.Resource),
 				helpers.String("retry in", d.String()))
 		}
 	}); err != nil {
-		logger.L().Ctx(ctx).Error("giving up watch", helpers.Error(err),
+		logger.L().Ctx(ctx).Error("WatchHandler - giving up watch", helpers.Error(err),
 			helpers.String("resource", res.String()))
 		if exitFatal {
 			os.Exit(1)
@@ -169,12 +170,12 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 }
 
 func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions) (string, error) {
-	logger.L().Debug("getting existing objects from storage", helpers.String("resource", res.Resource))
+	logger.L().Debug("WatchHandler - getting existing objects from storage", helpers.String("resource", res.Resource))
 	list, err := wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), watchOpts)
 	if err != nil {
 		return "", fmt.Errorf("list resources: %w", err)
 	}
-	logger.L().Debug("got existing objects from storage", helpers.String("resource", res.Resource), helpers.Int("count", len(list.Items)))
+	logger.L().Debug("WatchHandler - got existing objects from storage", helpers.String("resource", res.Resource), helpers.Int("count", len(list.Items)))
 	for i := range list.Items {
 		for _, handler := range wh.handlers {
 			var l unstructured.Unstructured

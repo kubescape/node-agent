@@ -25,6 +25,7 @@ type Config struct {
 	EnableRelevancy          bool                      `mapstructure:"relevantCVEServiceEnabled"`
 	EnableNodeProfile        bool                      `mapstructure:"nodeProfileServiceEnabled"`
 	NodeProfileInterval      time.Duration             `mapstructure:"nodeProfileInterval"`
+	EnableSeccomp            bool                      `mapstructure:"seccompServiceEnabled"`
 }
 
 // LoadConfig reads configuration from file or environment variables.

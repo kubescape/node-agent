@@ -112,6 +112,7 @@ type WatchedContainerData struct {
 	status                                     WatchedContainerStatus
 	completionStatus                           WatchedContainerCompletionStatus
 	ParentWorkloadSelector                     *metav1.LabelSelector
+	SeccompProfilePath                         *string
 }
 
 func Between(value string, a string, b string) string {
@@ -241,6 +242,11 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 	if watchedContainer.ContainerNames == nil {
 		watchedContainer.ContainerNames = make(map[ContainerType][]string)
 	}
+	// check pod level seccomp profile (might be overridden at container level)
+	podSpec, err := wl.GetPodSpec()
+	if err == nil && podSpec.SecurityContext != nil && podSpec.SecurityContext.SeccompProfile != nil {
+		watchedContainer.SeccompProfilePath = podSpec.SecurityContext.SeccompProfile.LocalhostProfile
+	}
 	checkContainers := func(containers []v1.Container, ephemeralContainers []v1.EphemeralContainer, containerType ContainerType) {
 		var containerNames []string
 		if containerType == EphemeralContainer {
@@ -249,6 +255,9 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 				if c.Name == containerName {
 					watchedContainer.ContainerIndex = i
 					watchedContainer.ContainerType = containerType
+					if c.SecurityContext != nil && c.SecurityContext.SeccompProfile != nil {
+						watchedContainer.SeccompProfilePath = c.SecurityContext.SeccompProfile.LocalhostProfile
+					}
 				}
 			}
 		} else {
@@ -257,6 +266,9 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 				if c.Name == containerName {
 					watchedContainer.ContainerIndex = i
 					watchedContainer.ContainerType = containerType
+					if c.SecurityContext != nil && c.SecurityContext.SeccompProfile != nil {
+						watchedContainer.SeccompProfilePath = c.SecurityContext.SeccompProfile.LocalhostProfile
+					}
 				}
 			}
 		}

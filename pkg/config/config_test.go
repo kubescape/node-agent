@@ -32,6 +32,7 @@ func TestLoadConfig(t *testing.T) {
 				NodeProfileInterval:      1 * time.Minute,
 				EnablePrometheusExporter: true,
 				EnableRuntimeDetection:   true,
+				EnableSeccomp:            true,
 				Exporters: exporters.ExportersConfig{
 					SyslogExporter: "http://syslog.kubescape.svc.cluster.local:514",
 					StdoutExporter: &b,

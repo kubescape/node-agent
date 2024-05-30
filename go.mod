@@ -1,15 +1,14 @@
 module node-agent
 
-go 1.22.2
-
-toolchain go1.22.3
+go 1.22.3
 
 require (
-	github.com/armosec/armoapi-go v0.0.412
+	github.com/armosec/armoapi-go v0.0.413
 	github.com/armosec/utils-k8s-go v0.0.26
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cilium/ebpf v0.15.0
 	github.com/crewjam/rfc5424 v0.1.0
+	github.com/cyphar/filepath-securejoin v0.2.5
 	github.com/deckarep/golang-set/v2 v2.6.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
@@ -23,16 +22,18 @@ require (
 	github.com/kubescape/backend v0.0.20
 	github.com/kubescape/go-logger v0.0.22
 	github.com/kubescape/k8s-interface v0.0.166
-	github.com/kubescape/storage v0.0.85
+	github.com/kubescape/storage v0.0.89
 	github.com/panjf2000/ants/v2 v2.9.1
 	github.com/prometheus/alertmanager v0.27.0
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/procfs v0.13.0
 	github.com/sirupsen/logrus v1.9.3
+	github.com/spf13/afero v1.11.0
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.9.0
 	go.opentelemetry.io/otel v1.26.0
 	go.opentelemetry.io/otel/trace v1.26.0
+	go.uber.org/multierr v1.11.0
 	golang.org/x/net v0.25.0
 	golang.org/x/sys v0.20.0
 	gonum.org/v1/plot v0.14.0
@@ -78,9 +79,9 @@ require (
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/ttrpc v1.2.4 // indirect
 	github.com/containerd/typeurl/v2 v2.1.1 // indirect
+	github.com/containers/common v0.59.0 // indirect
 	github.com/coreos/go-oidc v2.2.1+incompatible // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
-	github.com/cyphar/filepath-securejoin v0.2.5 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/cli v26.1.3+incompatible // indirect
@@ -178,8 +179,8 @@ require (
 	github.com/sagikazarmark/locafero v0.4.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
 	github.com/scylladb/go-set v1.0.3-0.20200225121959-cc7b2070d91e // indirect
+	github.com/seccomp/libseccomp-golang v0.10.0 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
-	github.com/spf13/afero v1.11.0 // indirect
 	github.com/spf13/cast v1.6.0 // indirect
 	github.com/spf13/cobra v1.8.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
@@ -211,7 +212,6 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.26.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.2.0 // indirect
 	go.starlark.net v0.0.0-20240517230649-3792562d0b7f // indirect
-	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/crypto v0.23.0 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
