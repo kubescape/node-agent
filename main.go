@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"node-agent/pkg/healthmanager"
-	"strings"
-
 	"net/http"
+	_ "net/http/pprof"
 	"net/url"
 	"node-agent/internal/validator"
 	"node-agent/pkg/applicationprofilemanager"
@@ -15,6 +13,7 @@ import (
 	"node-agent/pkg/dnsmanager"
 	"node-agent/pkg/exporters"
 	"node-agent/pkg/filehandler/v1"
+	"node-agent/pkg/healthmanager"
 	"node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "node-agent/pkg/malwaremanager/v1"
 	"node-agent/pkg/metricsmanager"
@@ -41,6 +40,7 @@ import (
 	"node-agent/pkg/watcher/dynamicwatcher"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
