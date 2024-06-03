@@ -5,7 +5,7 @@ import (
 	"node-agent/pkg/utils"
 	"testing"
 
-	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
+	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
 )
 
 func TestR1010UnshareSyscall(t *testing.T) {
@@ -15,41 +15,33 @@ func TestR1010UnshareSyscall(t *testing.T) {
 		t.Errorf("Expected r to not be nil")
 	}
 
-	// Create a syscall event
-	e := &tracersyscallstype.Event{
+	// Create a symlink event
+	e := &tracersymlinktype.Event{
 		Comm:    "test",
-		Syscall: "test",
+		OldPath: "test",
+		NewPath: "test",
 	}
 
-	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
+	ruleResult := r.ProcessEvent(utils.SymlinkEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
-		t.Errorf("Expected ruleResult to be nil since syscall is not symlink")
+		t.Errorf("Expected ruleResult to be nil since symlink path is not sensitive")
 		return
 	}
 
-	// Create a syscall event with symlink syscall
-	e.Syscall = "symlink"
-	e.Parameters = []tracersyscallstype.SyscallParam{
-		{
-			Name:  "target",
-			Value: "/etc/shadow",
-		},
-		{
-			Name:  "linkpath",
-			Value: "/test/link",
-		},
-	}
+	// Create a symlink event with sensitive file path
+	e.OldPath = "/etc/passwd"
+	e.NewPath = "/etc/abc"
 
-	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
+	ruleResult = r.ProcessEvent(utils.SymlinkEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of symlink is used over sensitive file")
 		return
 	}
 
-	e.Parameters[0].Value = "/etc/abc"
-	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
+	e.OldPath = "/etc/abc"
+	ruleResult = r.ProcessEvent(utils.SymlinkEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since symlink is not used over sensitive file")
