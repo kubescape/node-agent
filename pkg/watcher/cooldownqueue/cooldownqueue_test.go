@@ -42,7 +42,7 @@ func TestCooldownQueue_Enqueue(t *testing.T) {
 				time.Sleep(50 * time.Millisecond) // need to sleep to preserve order since the insertion is async
 				q.Enqueue(e)
 			}
-			outEvents := []watch.Event{}
+			var outEvents []watch.Event
 			for e := range q.ResultChan {
 				outEvents = append(outEvents, e)
 			}

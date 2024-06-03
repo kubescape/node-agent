@@ -15,7 +15,7 @@ func TestR1001ExecBinaryNotInBaseImage(t *testing.T) {
 	if r == nil {
 		t.Errorf("Expected r to not be nil")
 	}
-	// Create a exec event
+	// Create an exec event
 	e := &tracerexectype.Event{
 		Event: eventtypes.Event{
 			CommonData: eventtypes.CommonData{
@@ -31,7 +31,7 @@ func TestR1001ExecBinaryNotInBaseImage(t *testing.T) {
 		UpperLayer: false,
 	}
 
-	// Test with non existing binary
+	// Test with non-existing binary
 	ruleResult := r.ProcessEvent(utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since exec is not in the upper layer")

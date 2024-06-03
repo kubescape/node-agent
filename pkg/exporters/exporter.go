@@ -17,8 +17,8 @@ var _ Exporter = (*ExporterMock)(nil)
 
 type ExporterMock struct{}
 
-func (e *ExporterMock) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+func (e *ExporterMock) SendRuleAlert(_ ruleengine.RuleFailure) {
 }
 
-func (e *ExporterMock) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
+func (e *ExporterMock) SendMalwareAlert(_ malwaremanager.MalwareResult) {
 }

@@ -115,7 +115,7 @@ func (sc Storage) PatchNetworkNeighborsIngressAndEgress(name, namespace string, 
 	return nil
 }
 
-func (sc Storage) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
+func (sc Storage) PatchNetworkNeighborsMatchLabels(_, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Update(context.Background(), networkNeighbors, metav1.UpdateOptions{})
 
 	return err

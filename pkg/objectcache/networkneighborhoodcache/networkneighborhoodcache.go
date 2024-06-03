@@ -81,7 +81,7 @@ func (nn *NetworkNeighborhoodCacheImpl) GetNetworkNeighborhood(containerID strin
 // ------------------ watcher.WatchResources methods -----------------------
 
 func (nn *NetworkNeighborhoodCacheImpl) WatchResources() []watcher.WatchResource {
-	w := []watcher.WatchResource{}
+	var w []watcher.WatchResource
 
 	// add pod
 	p := watcher.NewWatchResource(schema.GroupVersionResource{
@@ -103,6 +103,7 @@ func (nn *NetworkNeighborhoodCacheImpl) WatchResources() []watcher.WatchResource
 }
 
 // ------------------ watcher.Watcher methods -----------------------
+
 func (nn *NetworkNeighborhoodCacheImpl) AddHandler(ctx context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":

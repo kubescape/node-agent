@@ -11,6 +11,6 @@ var _ ApplicationActivityCache = (*ApplicationActivityCacheMock)(nil)
 type ApplicationActivityCacheMock struct {
 }
 
-func (ap *ApplicationActivityCacheMock) GetApplicationActivity(namespace, name string) *v1beta1.ApplicationActivity {
+func (ap *ApplicationActivityCacheMock) GetApplicationActivity(_, _ string) *v1beta1.ApplicationActivity {
 	return nil
 }

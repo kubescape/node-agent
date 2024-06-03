@@ -31,10 +31,10 @@ func (r *RuleObjectCacheMock) ApplicationProfileCache() objectcache.ApplicationP
 	return r
 }
 
-func (r *RuleObjectCacheMock) GetPodSpec(namespace, name string) *corev1.PodSpec {
+func (r *RuleObjectCacheMock) GetPodSpec(_, _ string) *corev1.PodSpec {
 	return r.podSpec
 }
-func (r *RuleObjectCacheMock) GetPodStatus(namespace, name string) *corev1.PodStatus {
+func (r *RuleObjectCacheMock) GetPodStatus(_, _ string) *corev1.PodStatus {
 	return r.podStatus
 }
 func (r *RuleObjectCacheMock) SetPodSpec(podSpec *corev1.PodSpec) {

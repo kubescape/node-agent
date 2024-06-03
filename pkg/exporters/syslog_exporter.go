@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 
 	"github.com/crewjam/rfc5424"

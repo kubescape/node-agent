@@ -14,7 +14,7 @@ func CreateNetworkManagerMock() *NetworkManagerMock {
 	return &NetworkManagerMock{}
 }
 
-func (am *NetworkManagerMock) ContainerCallback(notif containercollection.PubSubEvent) {
+func (am *NetworkManagerMock) ContainerCallback(_ containercollection.PubSubEvent) {
 
 }
 

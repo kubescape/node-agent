@@ -52,7 +52,7 @@ type AdaptorMock struct {
 }
 
 func (am *AdaptorMock) WatchResources() []WatchResource {
-	w := []WatchResource{}
+	var w []WatchResource
 	for i := range am.WatchResource {
 		w = append(w, &am.WatchResource[i])
 	}
