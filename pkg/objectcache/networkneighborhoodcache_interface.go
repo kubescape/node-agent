@@ -11,6 +11,6 @@ var _ NetworkNeighborhoodCache = (*NetworkNeighborhoodCacheMock)(nil)
 type NetworkNeighborhoodCacheMock struct {
 }
 
-func (ap *NetworkNeighborhoodCacheMock) GetNetworkNeighborhood(containerID string) *v1beta1.NetworkNeighborhood {
+func (ap *NetworkNeighborhoodCacheMock) GetNetworkNeighborhood(_ string) *v1beta1.NetworkNeighborhood {
 	return nil
 }

@@ -341,7 +341,7 @@ func generateRandomNamespaceName() string {
 }
 
 func CreateWorkloadsInPath(namespace, dir string) ([]TestWorkload, error) {
-	workloads := []TestWorkload{}
+	var workloads []TestWorkload
 	err := filepath.Walk(dir, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return err

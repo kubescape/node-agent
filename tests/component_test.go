@@ -1,5 +1,4 @@
 //go:build component
-// +build component
 
 package tests
 
@@ -248,7 +247,7 @@ func Test_04_MemoryLeak(t *testing.T) {
 		"resources/locust-deployment.yaml",
 		"resources/nginx-deployment.yaml",
 	}
-	workloads := []testutils.TestWorkload{}
+	var workloads []testutils.TestWorkload
 	for _, p := range wlPaths {
 		wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), p))
 		if err != nil {
@@ -595,11 +594,11 @@ func Test_10_MalwareDetectionTest(t *testing.T) {
 
 	for _, alert := range alerts {
 		podName, podNameOk := alert.Labels["pod_name"]
-		malewareName, malewareNameOk := alert.Labels["malware_name"]
+		malwareName, malwareNameOk := alert.Labels["malware_name"]
 
-		if podNameOk && malewareNameOk {
-			if podName == "malware-cryptominer" && slices.Contains(expectedMalwares, malewareName) {
-				malwaresDetected[malewareName] = true
+		if podNameOk && malwareNameOk {
+			if podName == "malware-cryptominer" && slices.Contains(expectedMalwares, malwareName) {
+				malwaresDetected[malwareName] = true
 			}
 		}
 	}
@@ -642,7 +641,7 @@ func Test_10_MalwareDetectionTest(t *testing.T) {
 // 	// 	t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
 // 	// }
 
-// 	// Do an ls command using command injection in the ping command
+// 	// Do a ls command using command injection in the ping command
 // 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;ls"}, "ping-app")
 // 	if err != nil {
 // 		t.Errorf("Error executing remote command: %v", err)
@@ -654,7 +653,7 @@ func Test_10_MalwareDetectionTest(t *testing.T) {
 // 		t.Errorf("Error executing remote command: %v", err)
 // 	}
 
-// 	// Do a uname command using command injection in the ping command
+// 	// Do an uname command using command injection in the ping command
 // 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;uname -m | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g'"}, "ping-app")
 // 	if err != nil {
 // 		t.Errorf("Error executing remote command: %v", err)

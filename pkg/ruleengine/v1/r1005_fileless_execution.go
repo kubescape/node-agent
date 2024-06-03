@@ -56,7 +56,7 @@ func (rule *R1005FilelessExecution) ID() string {
 func (rule *R1005FilelessExecution) DeleteRule() {
 }
 
-func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType == utils.SyscallEventType {
 		return rule.handleSyscallEvent(event.(*tracersyscallstype.Event))
 	} else if eventType == utils.ExecveEventType {
@@ -102,7 +102,7 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 	execFullPath := getExecFullPathFromEvent(execEvent)
 	execPathDir := filepath.Dir(execFullPath)
 
-	// /proc/self/fd/<n> is classic way to hide malicious execs
+	// /proc/self/fd/<n> is a classic way to hide malicious execs
 	// (see ezuri packer for example)
 	// Here it would be even more interesting to check if the fd
 	// is memory mapped file

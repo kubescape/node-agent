@@ -3,6 +3,7 @@ package utils
 import (
 	"crypto/sha256"
 	"fmt"
+
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 

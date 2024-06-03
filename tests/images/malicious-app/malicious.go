@@ -128,7 +128,7 @@ func runAllMaliciousBehaviors() error {
 	if err != nil {
 		fmt.Printf("Failed to open kubectl: %v\n", err)
 	} else {
-		// Get the the file descriptor
+		// Get the file descriptor
 		fd := file.Fd()
 		path := fmt.Sprintf("/proc/self/fd/%d", fd)
 		// Fork the process

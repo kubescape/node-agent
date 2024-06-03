@@ -52,7 +52,7 @@ func (k *K8sObjectCacheImpl) GetPodSpec(namespace, podName string) *corev1.PodSp
 	return nil
 }
 
-// GetPodSpec returns the pod spec for the given namespace and pod name, if not found returns nil
+// GetPodStatus returns the pod status for the given namespace and pod name, if not found returns nil
 func (k *K8sObjectCacheImpl) GetPodStatus(namespace, podName string) *corev1.PodStatus {
 	p := podKey(namespace, podName)
 	if k.pods.Has(p) {

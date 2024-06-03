@@ -45,7 +45,7 @@ helm repo update
 helm install alertmanager prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
 ```
 
-By default the Node Agent is exporting alerts to stdout, you can see the alerts by running the following command:
+By default, the Node Agent is exporting alerts to stdout, you can see the alerts by running the following command:
 ```bash
 kubectl logs -n kubescape -l app=node-agent -f
 ```

@@ -1,11 +1,5 @@
 package utils
 
-const (
-	ContainerActivityEventStart    = "start"
-	ContainerActivityEventAttached = "attached"
-	ContainerActivityEventStop     = "stop"
-)
-
 type EventType int
 
 const (

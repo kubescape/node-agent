@@ -1,7 +1,6 @@
 package types
 
 import (
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/columns"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
@@ -15,12 +14,6 @@ type Event struct {
 	Gid        uint32 `json:"gid,omitempty" column:"gid,template:gid"`
 	UpperLayer bool   `json:"upperlayer,omitempty" column:"upperlayer,template:upperlayer"`
 	Comm       string `json:"comm,omitempty" column:"comm,template:comm"`
-}
-
-func GetColumns() *columns.Columns[Event] {
-	randomxColumns := columns.MustCreateColumns[Event]()
-
-	return randomxColumns
 }
 
 func Base(ev eventtypes.Event) *Event {

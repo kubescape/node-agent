@@ -37,7 +37,7 @@ type HTTPExporter struct {
 	NodeName    string `json:"nodeName"`
 	ClusterName string `json:"clusterName"`
 	httpClient  *http.Client
-	// alertCount is the number of alerts sent in the last minute, used to limit the number of alerts sent so we don't overload the system or reach the rate limit
+	// alertCount is the number of alerts sent in the last minute, used to limit the number of alerts sent, so we don't overload the system or reach the rate limit
 	alertCount      int
 	alertCountLock  sync.Mutex
 	alertCountStart time.Time

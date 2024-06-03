@@ -5,7 +5,7 @@ import (
 	"node-agent/pkg/ruleengine"
 	"os"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
 
@@ -27,7 +27,7 @@ type ExporterBus struct {
 
 // InitExporters initializes all exporters.
 func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName string) *ExporterBus {
-	exporters := []Exporter{}
+	var exporters []Exporter
 	for _, url := range exportersConfig.AlertManagerExporterUrls {
 		alertMan := InitAlertManagerExporter(url)
 		if alertMan != nil {

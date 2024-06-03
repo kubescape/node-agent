@@ -4,7 +4,7 @@ import (
 	"context"
 	"node-agent/pkg/config"
 	"node-agent/pkg/filehandler/v1"
-	metricsmanager "node-agent/pkg/metricsmanager"
+	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/relevancymanager/v1"
 	"testing"
 

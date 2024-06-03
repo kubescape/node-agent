@@ -14,9 +14,9 @@ func CreateDNSManagerMock() *DNSManagerMock {
 	return &DNSManagerMock{}
 }
 
-func (n *DNSManagerMock) ReportDNSEvent(event tracerdnstype.Event) {
+func (n *DNSManagerMock) ReportDNSEvent(_ tracerdnstype.Event) {
 }
 
-func (n *DNSManagerMock) ResolveIPAddress(ipAddr string) (string, bool) {
+func (n *DNSManagerMock) ResolveIPAddress(_ string) (string, bool) {
 	return "", false
 }
