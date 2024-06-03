@@ -23,6 +23,7 @@ import (
 	"node-agent/pkg/objectcache"
 
 	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -295,6 +296,17 @@ func (rm *RuleManager) ReportRandomxEvent(event tracerrandomxtype.Event) {
 	// list randomx rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 	rm.processEvent(utils.RandomXEventType, &event, rules)
+}
+
+func (rm *RuleManager) ReportSymlinkEvent(event tracersymlinktype.Event) {
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportSymlinkEvent event")
+		return
+	}
+
+	// list symlink rules
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+	rm.processEvent(utils.SymlinkEventType, &event, rules)
 }
 
 func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator) {

@@ -254,6 +254,11 @@ func (ch *IGContainerWatcher) startTracers() error {
 		} else {
 			logger.L().Warning("randomx tracing is not supported on this architecture", helpers.String("architecture", runtime.GOARCH))
 		}
+
+		if err := ch.startSymlinkTracing(); err != nil {
+			logger.L().Error("error starting symlink tracing", helpers.Error(err))
+			return err
+		}
 	}
 
 	return nil
@@ -306,6 +311,12 @@ func (ch *IGContainerWatcher) stopTracers() error {
 				logger.L().Error("error stopping randomx tracing", helpers.Error(err))
 				errs = errors.Join(errs, err)
 			}
+		}
+
+		// Stop symlink tracer
+		if err := ch.stopSymlinkTracing(); err != nil {
+			logger.L().Error("error stopping symlink tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
 		}
 	}
 

@@ -10,5 +10,6 @@ const (
 	NetworkEventType
 	SyscallEventType
 	RandomXEventType
+	SymlinkEventType
 	AllEventType
 )

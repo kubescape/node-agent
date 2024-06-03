@@ -13,7 +13,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 
-	tracersyscalltype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
+	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
 )
 
 const (
@@ -29,7 +29,7 @@ var R1010SymlinkCreatedOverSensitiveFileRuleDescriptor = RuleDescriptor{
 	Priority:    RulePriorityHigh,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{
-			utils.SyscallEventType,
+			utils.SymlinkEventType,
 		},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
@@ -79,47 +79,43 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
 func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if eventType != utils.SyscallEventType {
+	if eventType != utils.SymlinkEventType {
 		return nil
 	}
 
-	syscallEvent, ok := event.(*tracersyscalltype.Event)
+	symlinkEvent, ok := event.(*tracersymlinktype.Event)
 	if !ok {
 		return nil
 	}
 
-	if syscallEvent.Syscall == "symlink" || syscallEvent.Syscall == "symlinkat" {
-		if syscallEvent.Parameters[0].Name == "target" || syscallEvent.Parameters[0].Name == "oldname" {
-			value := syscallEvent.Parameters[0].Value
-			if syscallEvent.Parameters[0].Content != nil {
-				value = *syscallEvent.Parameters[0].Content
-			}
-			for _, path := range rule.additionalPaths {
-				if strings.HasPrefix(value, path) {
-					return &GenericRuleFailure{
-						BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-							AlertName:      rule.Name(),
-							InfectedPID:    syscallEvent.Pid,
-							FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-							Severity:       R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
-						},
-						RuntimeProcessDetails: apitypes.ProcessTree{
-							ProcessTree: apitypes.Process{
-								Comm: syscallEvent.Comm,
-								PID:  syscallEvent.Pid,
-							},
-							ContainerID: syscallEvent.Runtime.ContainerID,
-						},
-						TriggerEvent: syscallEvent.Event,
-						RuleAlert: apitypes.RuleAlert{
-							RuleID:          rule.ID(),
-							RuleDescription: fmt.Sprintf("Symlink created over sensitive file: %s in: %s", value, syscallEvent.GetContainer()),
-						},
-						RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-							PodName: syscallEvent.GetPod(),
-						},
-					}
-				}
+	for _, path := range rule.additionalPaths {
+		if strings.HasPrefix(symlinkEvent.OldPath, path) {
+			return &GenericRuleFailure{
+				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+					AlertName:      rule.Name(),
+					InfectedPID:    symlinkEvent.Pid,
+					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
+					Severity:       R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
+				},
+				RuntimeProcessDetails: apitypes.ProcessTree{
+					ProcessTree: apitypes.Process{
+						Comm:       symlinkEvent.Comm,
+						PPID:       symlinkEvent.PPid,
+						PID:        symlinkEvent.Pid,
+						UpperLayer: &symlinkEvent.UpperLayer,
+						Uid:        &symlinkEvent.Uid,
+						Gid:        &symlinkEvent.Gid,
+					},
+					ContainerID: symlinkEvent.Runtime.ContainerID,
+				},
+				TriggerEvent: symlinkEvent.Event,
+				RuleAlert: apitypes.RuleAlert{
+					RuleID:          rule.ID(),
+					RuleDescription: fmt.Sprintf("Symlink created over sensitive file: %s - %s in: %s", symlinkEvent.OldPath, symlinkEvent.NewPath, symlinkEvent.GetContainer()),
+				},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+					PodName: symlinkEvent.GetPod(),
+				},
 			}
 		}
 	}
