@@ -20,6 +20,8 @@ import (
 
 	tracerandomx "node-agent/pkg/ebpf/gadgets/randomx/tracer"
 	tracerandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracersymlink "node-agent/pkg/ebpf/gadgets/symlink/tracer"
+	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -53,6 +55,7 @@ const (
 	openTraceName              = "trace_open"
 	randomxTraceName           = "trace_randomx"
 	syscallsTraceName          = "trace_syscalls"
+	symlinkTraceName           = "trace_symlink"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
@@ -60,6 +63,7 @@ const (
 	dnsWorkerPoolSize          = 5
 	randomxWorkerPoolSize      = 1
 	syscallsWorkerPoolSize     = 3
+	symlinkWorkerPoolSize      = 1
 )
 
 type IGContainerWatcher struct {
@@ -93,6 +97,7 @@ type IGContainerWatcher struct {
 	networkTracer      *tracernetwork.Tracer
 	dnsTracer          *tracerdns.Tracer
 	randomxTracer      *tracerandomx.Tracer
+	symlinkTracer      *tracersymlink.Tracer
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
 
@@ -104,6 +109,7 @@ type IGContainerWatcher struct {
 	dnsWorkerPool          *ants.PoolWithFunc
 	randomxWorkerPool      *ants.PoolWithFunc
 	syscallsWorkerPool     *ants.PoolWithFunc
+	symlinkWorkerPool      *ants.PoolWithFunc
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *tracerexectype.Event
@@ -112,6 +118,7 @@ type IGContainerWatcher struct {
 	dnsWorkerChan          chan *tracerdnstype.Event
 	randomxWorkerChan      chan *tracerandomxtype.Event
 	syscallsWorkerChan     chan *tracersyscallstype.Event
+	symlinkWorkerChan      chan *tracersymlinktype.Event
 
 	preRunningContainersIDs mapset.Set[string]
 
@@ -277,6 +284,18 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	if err != nil {
 		return nil, fmt.Errorf("creating syscalls worker pool: %w", err)
 	}
+	// Create a symlink worker pool
+	symlinkWorkerPool, err := ants.NewPoolWithFunc(symlinkWorkerPoolSize, func(i interface{}) {
+		event := i.(tracersymlinktype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		metrics.ReportEvent(utils.SymlinkEventType)
+		ruleManager.ReportSymlinkEvent(event)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating symlink worker pool: %w", err)
+	}
 
 	return &IGContainerWatcher{
 		// Configuration
@@ -306,6 +325,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		dnsWorkerPool:           dnsWorkerPool,
 		randomxWorkerPool:       randomxWorkerPool,
 		syscallsWorkerPool:      syscallsWorkerPool,
+		symlinkWorkerPool:       symlinkWorkerPool,
 		metrics:                 metrics,
 		preRunningContainersIDs: preRunningContainers,
 
@@ -317,6 +337,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		dnsWorkerChan:          make(chan *tracerdnstype.Event, 100000),
 		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 5000),
 		syscallsWorkerChan:     make(chan *tracersyscallstype.Event, 100000),
+		symlinkWorkerChan:      make(chan *tracersymlinktype.Event, 1000),
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,

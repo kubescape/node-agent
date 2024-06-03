@@ -2,6 +2,7 @@ package rulemanager
 
 import (
 	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
@@ -51,6 +52,10 @@ func (r *RuleManagerMock) ReportDNSEvent(_ tracerdnstype.Event) {
 }
 
 func (r *RuleManagerMock) ReportRandomxEvent(_ tracerrandomxtype.Event) {
+	// noop
+}
+
+func (r *RuleManagerMock) ReportSymlinkEvent(_ tracersymlinktype.Event) {
 	// noop
 }
 
