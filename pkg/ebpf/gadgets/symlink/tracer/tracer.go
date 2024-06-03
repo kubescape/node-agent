@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"node-agent/pkg/ebpf/gadgets/symlink/types"
 	"os"
+	"runtime"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
@@ -61,7 +62,9 @@ func (t *Tracer) Stop() {
 }
 
 func (t *Tracer) close() {
-	t.symlinkLink = gadgets.CloseLink(t.symlinkLink)
+	if runtime.GOARCH != "arm64" {
+		t.symlinkLink = gadgets.CloseLink(t.symlinkLink)
+	}
 	t.symlinkatLink = gadgets.CloseLink(t.symlinkatLink)
 
 	if t.reader != nil {
@@ -82,9 +85,11 @@ func (t *Tracer) install() error {
 		return fmt.Errorf("loading ebpf spec: %w", err)
 	}
 
-	t.symlinkLink, err = link.Tracepoint("syscalls", "sys_enter_symlink", t.objs.TracepointSysSymlink, nil)
-	if err != nil {
-		return fmt.Errorf("attaching tracepoint: %w", err)
+	if runtime.GOARCH != "arm64" {
+		t.symlinkLink, err = link.Tracepoint("syscalls", "sys_enter_symlink", t.objs.TracepointSysSymlink, nil)
+		if err != nil {
+			return fmt.Errorf("attaching tracepoint: %w", err)
+		}
 	}
 
 	t.symlinkatLink, err = link.Tracepoint("syscalls", "sys_enter_symlinkat", t.objs.TracepointSysSymlinkat, nil)
@@ -144,9 +149,6 @@ func (t *Tracer) run() {
 		}
 
 		t.eventCallback(&event)
-
-		// Once we have alerted, we don't need to keep track of this mntns anymore.
-		t.objs.symlinkMaps.GadgetMntnsFilterMap.Put(&bpfEvent.MntnsId, 0)
 	}
 }
 

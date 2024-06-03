@@ -63,7 +63,7 @@ func (rule *R1011LdPreloadHook) DeleteRule() {
 func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event) ruleengine.RuleFailure {
 	envVars, err := utils.GetProcessEnv(int(execEvent.Pid))
 	if err != nil {
-		logger.L().Info("Failed to get process environment variables", helpers.Error(err))
+		logger.L().Debug("Failed to get process environment variables", helpers.Error(err))
 		return nil
 	}
 

@@ -72,7 +72,7 @@ int tracepoint__sys_symlink(struct syscall_trace_enter *ctx)
     u32 zero = 0;
     event = bpf_map_lookup_elem(&empty_event, &zero);
     if (!event) {
-        return 0; // Should never happen.
+        return 0;
     }
 
     struct task_struct *current_task = (struct task_struct*)bpf_get_current_task();
@@ -97,17 +97,18 @@ int tracepoint__sys_symlink(struct syscall_trace_enter *ctx)
         return 0;
     }
 
-    int ret = 0;
+    size_t oldpath_len = 0;
+    size_t newpath_len = 0;
 
-    ret = bpf_probe_read_user_str(&event->oldpath, sizeof(event->oldpath), (char *)ctx->args[0]);
-    if(ret <= 0) {
-        bpf_printk("Failed to read oldpath, ret: %d\n", ret);
+    oldpath_len = bpf_probe_read_user_str(&event->oldpath, sizeof(event->oldpath), (void *)ctx->args[0]);
+    if(oldpath_len <= 0) {
+        bpf_printk("Failed to read oldpath, ret: %d\n", oldpath_len);
         return 0;
     }
 
-    ret = bpf_probe_read_user_str(&event->newpath, sizeof(event->newpath), (char *)ctx->args[1]);
-    if(ret <= 0) {
-        bpf_printk("Failed to read newpath, ret: %d\n", ret);
+    newpath_len = bpf_probe_read_user_str(&event->newpath, sizeof(event->newpath), (void *)ctx->args[1]);
+    if(newpath_len <= 0) {
+        bpf_printk("Failed to read newpath, ret: %d\n", newpath_len);
         return 0;
     }
 
@@ -121,7 +122,7 @@ int tracepoint__sys_symlink(struct syscall_trace_enter *ctx)
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
 
     /* emit event */
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(struct event));
 
     return 0;
 }
@@ -159,17 +160,18 @@ int tracepoint__sys_symlinkat(struct syscall_trace_enter *ctx)
         return 0;
     }
 
-    int ret = 0;
+    size_t oldpath_len = 0;
+    size_t newpath_len = 0;
 
-    ret = bpf_probe_read_user_str(&event->oldpath, sizeof(event->oldpath), (char *)ctx->args[0]);
-    if(ret <= 0) {
-        bpf_printk("Failed to read oldpath, ret: %d\n", ret);
+    oldpath_len = bpf_probe_read_user_str(&event->oldpath, sizeof(event->oldpath), (void *)ctx->args[0]);
+    if(oldpath_len <= 0) {
+        bpf_printk("Failed to read oldpath, ret: %d\n", oldpath_len);
         return 0;
     }
 
-    ret = bpf_probe_read_user_str(&event->newpath, sizeof(event->newpath), (char *)ctx->args[2]);
-    if(ret <= 0) {
-        bpf_printk("Failed to read newpath, ret: %d\n", ret);
+    newpath_len = bpf_probe_read_user_str(&event->newpath, sizeof(event->newpath), (void *)ctx->args[2]);
+    if(newpath_len <= 0) {
+        bpf_printk("Failed to read newpath, ret: %d\n", newpath_len);
         return 0;
     }
 
@@ -183,7 +185,7 @@ int tracepoint__sys_symlinkat(struct syscall_trace_enter *ctx)
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
 
     /* emit event */
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(struct event));
 
     return 0;
 }
