@@ -20,9 +20,9 @@ type Event struct {
 }
 
 func GetColumns() *columns.Columns[Event] {
-	symlinkColumns := columns.MustCreateColumns[Event]()
+	hardlinkColumns := columns.MustCreateColumns[Event]()
 
-	return symlinkColumns
+	return hardlinkColumns
 }
 
 func Base(ev eventtypes.Event) *Event {
