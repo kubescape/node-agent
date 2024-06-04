@@ -15,13 +15,14 @@ import (
 	rulebinding "node-agent/pkg/rulebindingmanager"
 	"node-agent/pkg/rulemanager"
 
-	"node-agent/pkg/utils"
-	"os"
-
+	tracerhardlink "node-agent/pkg/ebpf/gadgets/hardlink/tracer"
+	tracerhardlinktype "node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerandomx "node-agent/pkg/ebpf/gadgets/randomx/tracer"
 	tracerandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
 	tracersymlink "node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
+	"node-agent/pkg/utils"
+	"os"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -56,6 +57,7 @@ const (
 	randomxTraceName           = "trace_randomx"
 	syscallsTraceName          = "trace_syscalls"
 	symlinkTraceName           = "trace_symlink"
+	hardlinkTraceName          = "trace_hardlink"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
@@ -64,6 +66,7 @@ const (
 	randomxWorkerPoolSize      = 1
 	syscallsWorkerPoolSize     = 3
 	symlinkWorkerPoolSize      = 1
+	hardlinkWorkerPoolSize     = 1
 )
 
 type IGContainerWatcher struct {
@@ -98,6 +101,7 @@ type IGContainerWatcher struct {
 	dnsTracer          *tracerdns.Tracer
 	randomxTracer      *tracerandomx.Tracer
 	symlinkTracer      *tracersymlink.Tracer
+	hardlinkTracer     *tracerhardlink.Tracer
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
 
@@ -110,6 +114,7 @@ type IGContainerWatcher struct {
 	randomxWorkerPool      *ants.PoolWithFunc
 	syscallsWorkerPool     *ants.PoolWithFunc
 	symlinkWorkerPool      *ants.PoolWithFunc
+	hardlinkWorkerPool     *ants.PoolWithFunc
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *tracerexectype.Event
@@ -119,6 +124,7 @@ type IGContainerWatcher struct {
 	randomxWorkerChan      chan *tracerandomxtype.Event
 	syscallsWorkerChan     chan *tracersyscallstype.Event
 	symlinkWorkerChan      chan *tracersymlinktype.Event
+	hardlinkWorkerChan     chan *tracerhardlinktype.Event
 
 	preRunningContainersIDs mapset.Set[string]
 
@@ -296,6 +302,18 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	if err != nil {
 		return nil, fmt.Errorf("creating symlink worker pool: %w", err)
 	}
+	// Create a hardlink worker pool
+	hardlinkWorkerPool, err := ants.NewPoolWithFunc(symlinkWorkerPoolSize, func(i interface{}) {
+		event := i.(tracerhardlinktype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		metrics.ReportEvent(utils.HardlinkEventType)
+		ruleManager.ReportHardlinkEvent(event)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating hardlink worker pool: %w", err)
+	}
 
 	return &IGContainerWatcher{
 		// Configuration
@@ -326,6 +344,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		randomxWorkerPool:       randomxWorkerPool,
 		syscallsWorkerPool:      syscallsWorkerPool,
 		symlinkWorkerPool:       symlinkWorkerPool,
+		hardlinkWorkerPool:      hardlinkWorkerPool,
 		metrics:                 metrics,
 		preRunningContainersIDs: preRunningContainers,
 
@@ -338,6 +357,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 5000),
 		syscallsWorkerChan:     make(chan *tracersyscallstype.Event, 100000),
 		symlinkWorkerChan:      make(chan *tracersymlinktype.Event, 1000),
+		hardlinkWorkerChan:     make(chan *tracerhardlinktype.Event, 1000),
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,

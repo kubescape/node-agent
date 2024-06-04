@@ -1,6 +1,7 @@
 package rulemanager
 
 import (
+	tracerhardlinktype "node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
 	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
 
@@ -56,6 +57,10 @@ func (r *RuleManagerMock) ReportRandomxEvent(_ tracerrandomxtype.Event) {
 }
 
 func (r *RuleManagerMock) ReportSymlinkEvent(_ tracersymlinktype.Event) {
+	// noop
+}
+
+func (r *RuleManagerMock) ReportHardlinkEvent(_ tracerhardlinktype.Event) {
 	// noop
 }
 
