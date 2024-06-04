@@ -225,8 +225,9 @@ func main() {
 		networkManagerv1Client = networkmanagerv1.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName, dnsManager, preRunningContainersIDs, k8sObjectCache)
 		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
 	} else {
-		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
+		networkManagerv1Client = &networkmanagerv1.NetworkManagerMock{}
+		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 	}
 
 	// Create the container handler
