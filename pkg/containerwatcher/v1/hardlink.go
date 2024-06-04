@@ -33,8 +33,8 @@ func (ch *IGContainerWatcher) startHardlinkTracing() error {
 	}
 
 	go func() {
-		for event := range ch.symlinkWorkerChan {
-			ch.symlinkWorkerPool.Invoke(*event)
+		for event := range ch.hardlinkWorkerChan {
+			ch.hardlinkWorkerPool.Invoke(*event)
 		}
 	}()
 
