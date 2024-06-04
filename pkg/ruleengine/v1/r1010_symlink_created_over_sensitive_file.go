@@ -1,7 +1,5 @@
 package ruleengine
 
-// This rule is disabled because we need to implement a special gadget for this rule since traceloop doesn't capture pointer values.
-
 import (
 	"fmt"
 	"node-agent/pkg/objectcache"
