@@ -22,6 +22,7 @@ import (
 	"node-agent/pkg/metricsmanager"
 	"node-agent/pkg/objectcache"
 
+	tracerhardlinktype "node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
 	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
 
@@ -307,6 +308,17 @@ func (rm *RuleManager) ReportSymlinkEvent(event tracersymlinktype.Event) {
 	// list symlink rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 	rm.processEvent(utils.SymlinkEventType, &event, rules)
+}
+
+func (rm *RuleManager) ReportHardlinkEvent(event tracerhardlinktype.Event) {
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportHardlinkEvent event")
+		return
+	}
+
+	// list hardlink rules
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+	rm.processEvent(utils.HardlinkEventType, &event, rules)
 }
 
 func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator) {

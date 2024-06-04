@@ -8,7 +8,7 @@ import (
 	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
 )
 
-func TestR1010UnshareSyscall(t *testing.T) {
+func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {
 	// Create a new rule
 	r := CreateRuleR1010SymlinkCreatedOverSensitiveFile() // Assert r is not nil
 	if r == nil {

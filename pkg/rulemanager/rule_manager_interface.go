@@ -1,8 +1,8 @@
 package rulemanager
 
 import (
+	tracerhardlinktype "node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
-
 	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -25,6 +25,7 @@ type RuleManagerClient interface {
 	ReportSyscallEvent(event tracersyscallstype.Event)
 	ReportRandomxEvent(event tracerrandomxtype.Event)
 	ReportSymlinkEvent(event tracersymlinktype.Event)
+	ReportHardlinkEvent(event tracerhardlinktype.Event)
 	HasApplicableRuleBindings(namespace, name string) bool
 	HasFinalApplicationProfile(pod *v1.Pod) bool
 	IsContainerMonitored(k8sContainerID string) bool
