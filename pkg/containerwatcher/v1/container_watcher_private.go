@@ -31,6 +31,8 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		ch.timeBasedContainers.Add(notif.Container.Runtime.ContainerID)
 	}
 
+	traceloopCancelChannel := make(chan struct{})
+
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
@@ -41,21 +43,29 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 				logger.L().Fatal("attaching container to syscall tracer", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID), helpers.Error(err))
 			}
 
-			// Read the syscall tracer events in a separate goroutine.
+			// Read the syscall tracer events in a separate goroutine until the container is removed (signaled from the traceloopCancelChannel).
 			go func() {
 				for {
-					evs, err := ch.syscallTracer.Read(notif.Container.Runtime.ContainerID)
-					if err != nil {
-						logger.L().Debug("syscalls perf buffer closed", helpers.String("error", err.Error()))
+					select {
+					case <-traceloopCancelChannel:
+						logger.L().Info("stop traceloop on container - container has terminated",
+							helpers.String("container ID", notif.Container.Runtime.ContainerID),
+							helpers.String("k8s workload", k8sContainerID))
 						return
-					}
-					for _, ev := range evs {
-						ev.SetContainerMetadata(notif.Container)
-						ch.syscallEventCallback(ev)
-					}
+					default:
+						evs, err := ch.syscallTracer.Read(notif.Container.Runtime.ContainerID)
+						if err != nil {
+							logger.L().Debug("syscalls perf buffer closed", helpers.String("error", err.Error()))
+							return
+						}
+						for _, ev := range evs {
+							ev.SetContainerMetadata(notif.Container)
+							ch.syscallEventCallback(ev)
+						}
 
-					// Sleep for a while before reading the next batch of events.
-					time.Sleep(2 * time.Second) // TODO: make this configurable.
+						// Sleep for a while before reading the next batch of events.
+						time.Sleep(5 * time.Second) // TODO: make this configurable.
+					}
 				}
 			}()
 		}
@@ -73,6 +83,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		logger.L().Info("stop monitor on container - container has terminated",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
+		close(traceloopCancelChannel)
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 		ch.syscallTracer.Detach(notif.Container.Mntns)
