@@ -15,6 +15,10 @@ func (a ApplicationProfileManagerMock) ContainerCallback(_ containercollection.P
 	// noop
 }
 
+func (a ApplicationProfileManagerMock) RegisterPeekFunc(_ func(mntns uint64) ([]string, error)) {
+	// noop
+}
+
 func (a ApplicationProfileManagerMock) ReportCapability(_, _ string) {
 	// noop
 }
@@ -24,10 +28,6 @@ func (a ApplicationProfileManagerMock) ReportFileExec(_, _ string, _ []string) {
 }
 
 func (a ApplicationProfileManagerMock) ReportFileOpen(_, _ string, _ []string) {
-	// noop
-}
-
-func (a ApplicationProfileManagerMock) ReportSyscallEvent(_ string, _ string) {
 	// noop
 }
 

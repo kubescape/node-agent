@@ -5,7 +5,7 @@ import (
 	"node-agent/pkg/utils"
 	"testing"
 
-	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
 )
 
 func TestR1006UnshareSyscall(t *testing.T) {
@@ -17,9 +17,9 @@ func TestR1006UnshareSyscall(t *testing.T) {
 	}
 
 	// Create a syscall event
-	e := &tracersyscallstype.Event{
-		Comm:    "test",
-		Syscall: "test",
+	e := &ruleenginetypes.SyscallEvent{
+		Comm:        "test",
+		SyscallName: "test",
 	}
 
 	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
@@ -30,7 +30,7 @@ func TestR1006UnshareSyscall(t *testing.T) {
 	}
 
 	// Create a syscall event with unshare syscall
-	e.Syscall = "unshare"
+	e.SyscallName = "unshare"
 
 	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {

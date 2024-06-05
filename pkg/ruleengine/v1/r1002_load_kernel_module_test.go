@@ -5,7 +5,7 @@ import (
 	"node-agent/pkg/utils"
 	"testing"
 
-	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
 )
 
 func TestR1002LoadKernelModule(t *testing.T) {
@@ -17,9 +17,9 @@ func TestR1002LoadKernelModule(t *testing.T) {
 	}
 
 	// Create a syscall event
-	e := &tracersyscallstype.Event{
-		Comm:    "test",
-		Syscall: "test",
+	e := &ruleenginetypes.SyscallEvent{
+		Comm:        "test",
+		SyscallName: "test",
 	}
 
 	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
@@ -29,7 +29,7 @@ func TestR1002LoadKernelModule(t *testing.T) {
 	}
 
 	// Create a syscall event with init_module syscall
-	e.Syscall = "init_module"
+	e.SyscallName = "init_module"
 
 	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
@@ -39,7 +39,7 @@ func TestR1002LoadKernelModule(t *testing.T) {
 
 	// Create a syscall event with finit_module syscall
 	r2 := CreateRuleR1002LoadKernelModule()
-	e.Syscall = "finit_module"
+	e.SyscallName = "finit_module"
 
 	ruleResult = r2.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {

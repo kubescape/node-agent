@@ -11,7 +11,6 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
-	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -28,6 +27,10 @@ func (r *RuleManagerMock) ContainerCallback(_ containercollection.PubSubEvent) {
 	// noop
 }
 
+func (r *RuleManagerMock) RegisterPeekFunc(_ func(mntns uint64) ([]string, error)) {
+	// noop
+}
+
 func (r *RuleManagerMock) ReportCapability(_ tracercapabilitiestype.Event) {
 	// noop
 }
@@ -41,10 +44,6 @@ func (r *RuleManagerMock) ReportFileOpen(_ traceropentype.Event) {
 }
 
 func (r *RuleManagerMock) ReportNetworkEvent(_ tracernetworktype.Event) {
-	// noop
-}
-
-func (r *RuleManagerMock) ReportSyscallEvent(_ tracersyscallstype.Event) {
 	// noop
 }
 

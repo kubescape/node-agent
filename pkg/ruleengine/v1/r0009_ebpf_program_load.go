@@ -7,15 +7,14 @@ import (
 	"node-agent/pkg/utils"
 	"slices"
 
-	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
-	R0009ID       = "R0009"
-	R0009Name     = "eBPF Program Load"
-	BPF_PROG_LOAD = 5
+	R0009ID   = "R0009"
+	R0009Name = "eBPF Program Load"
 )
 
 var R0009EbpfProgramLoadRuleDescriptor = RuleDescriptor{
@@ -38,6 +37,7 @@ var _ ruleengine.RuleEvaluator = (*R0009EbpfProgramLoad)(nil)
 
 type R0009EbpfProgramLoad struct {
 	BaseRule
+	alreadyNotified bool
 }
 
 func CreateRuleR0009EbpfProgramLoad() *R0009EbpfProgramLoad {
@@ -55,11 +55,15 @@ func (rule *R0009EbpfProgramLoad) DeleteRule() {
 }
 
 func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	if rule.alreadyNotified {
+		return nil
+	}
+
 	if eventType != utils.SyscallEventType {
 		return nil
 	}
 
-	syscallEvent, ok := event.(*tracersyscallstype.Event)
+	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
 		return nil
 	}
@@ -75,11 +79,12 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 	}
 
 	// Check if the syscall is in the list of allowed syscalls
-	if slices.Contains(appProfileSyscallList.Syscalls, syscallEvent.Syscall) {
+	if slices.Contains(appProfileSyscallList.Syscalls, syscallEvent.SyscallName) {
 		return nil
 	}
 
-	if syscallEvent.Syscall == "bpf" && syscallEvent.Parameters[0].Name == "cmd" && syscallEvent.Parameters[0].Value == fmt.Sprintf("%d", BPF_PROG_LOAD) {
+	if syscallEvent.SyscallName == "bpf" {
+		rule.alreadyNotified = true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),

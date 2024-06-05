@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -40,10 +40,11 @@ var _ ruleengine.RuleEvaluator = (*R1005FilelessExecution)(nil)
 
 type R1005FilelessExecution struct {
 	BaseRule
+	alreadyNotified bool
 }
 
 func CreateRuleR1005FilelessExecution() *R1005FilelessExecution {
-	return &R1005FilelessExecution{}
+	return &R1005FilelessExecution{alreadyNotified: false}
 }
 
 func (rule *R1005FilelessExecution) Name() string {
@@ -58,7 +59,7 @@ func (rule *R1005FilelessExecution) DeleteRule() {
 
 func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType == utils.SyscallEventType {
-		return rule.handleSyscallEvent(event.(*tracersyscallstype.Event))
+		return rule.handleSyscallEvent(event.(*ruleenginetypes.SyscallEvent))
 	} else if eventType == utils.ExecveEventType {
 		return rule.handleExecveEvent(event.(*tracerexectype.Event))
 	}
@@ -66,8 +67,13 @@ func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, even
 	return nil
 }
 
-func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *tracersyscallstype.Event) ruleengine.RuleFailure {
-	if syscallEvent.Syscall == "memfd_create" {
+func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginetypes.SyscallEvent) ruleengine.RuleFailure {
+	if rule.alreadyNotified {
+		return nil
+	}
+
+	if syscallEvent.SyscallName == "memfd_create" {
+		rule.alreadyNotified = true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
@@ -78,7 +84,9 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *tracersysca
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: syscallEvent.Comm,
+					Gid:  &syscallEvent.Gid,
 					PID:  syscallEvent.Pid,
+					Uid:  &syscallEvent.Uid,
 				},
 				ContainerID: syscallEvent.Runtime.ContainerID,
 			},

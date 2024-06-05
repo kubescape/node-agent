@@ -5,7 +5,8 @@ import (
 	"node-agent/pkg/utils"
 	"testing"
 
-	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
+
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -40,7 +41,7 @@ func TestR0009EbpfProgramLoad(t *testing.T) {
 	}
 
 	// Create a syscall event
-	e := &tracersyscallstype.Event{
+	e := &ruleenginetypes.SyscallEvent{
 		Event: eventtypes.Event{
 			CommonData: eventtypes.CommonData{
 				K8s: eventtypes.K8sMetadata{
@@ -50,8 +51,8 @@ func TestR0009EbpfProgramLoad(t *testing.T) {
 				},
 			},
 		},
-		Comm:    "test",
-		Syscall: "test",
+		Comm:        "test",
+		SyscallName: "test",
 	}
 
 	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, &objCache)
@@ -62,27 +63,12 @@ func TestR0009EbpfProgramLoad(t *testing.T) {
 	}
 
 	// Create a syscall event with bpf syscall
-	e.Syscall = "bpf"
-	e.Parameters = []tracersyscallstype.SyscallParam{
-		{
-			Name:  "cmd",
-			Value: "5", // BPF_PROG_LOAD
-		},
-	}
+	e.SyscallName = "bpf"
 
 	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &objCache)
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of bpf is used")
-		return
-	}
-
-	// Create a syscall event with bpf syscall but not BPF_PROG_LOAD
-	e.Parameters[0].Value = "1"
-	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &objCache)
-	if ruleResult != nil {
-		fmt.Printf("ruleResult: %v\n", ruleResult)
-		t.Errorf("Expected ruleResult to be nil since syscall is bpf but not BPF_PROG_LOAD")
 		return
 	}
 }
