@@ -31,7 +31,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		ch.timeBasedContainers.Add(notif.Container.Runtime.ContainerID)
 	}
 
-	tracingContext := make(chan struct{})
+	traceloopCancelChannel := make(chan struct{})
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
@@ -43,11 +43,11 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 				logger.L().Fatal("attaching container to syscall tracer", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID), helpers.Error(err))
 			}
 
-			// Read the syscall tracer events in a separate goroutine until the container is removed (signaled from the tracing context).
+			// Read the syscall tracer events in a separate goroutine until the container is removed (signaled from the traceloopCancelChannel).
 			go func() {
 				for {
 					select {
-					case <-tracingContext:
+					case <-traceloopCancelChannel:
 						logger.L().Info("stop traceloop on container - container has terminated",
 							helpers.String("container ID", notif.Container.Runtime.ContainerID),
 							helpers.String("k8s workload", k8sContainerID))
@@ -83,7 +83,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		logger.L().Info("stop monitor on container - container has terminated",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
-		close(tracingContext)
+		close(traceloopCancelChannel)
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 		ch.syscallTracer.Detach(notif.Container.Mntns)
