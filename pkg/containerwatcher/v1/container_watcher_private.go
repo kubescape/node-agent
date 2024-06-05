@@ -44,6 +44,13 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			// Read the syscall tracer events in a separate goroutine.
 			go func() {
 				for {
+					if !ch.timeBasedContainers.Contains(notif.Container.Runtime.ContainerID) && !ch.preRunningContainersIDs.Contains(notif.Container.Runtime.ContainerID) {
+						logger.L().Info("stop monitor on container - container has been removed",
+							helpers.String("container ID", notif.Container.Runtime.ContainerID),
+							helpers.String("k8s workload", k8sContainerID))
+						return
+					}
+
 					evs, err := ch.syscallTracer.Read(notif.Container.Runtime.ContainerID)
 					if err != nil {
 						logger.L().Debug("syscalls perf buffer closed", helpers.String("error", err.Error()))
