@@ -2,6 +2,7 @@ package rulemanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"node-agent/pkg/exporters"
 	"node-agent/pkg/k8sclient"
@@ -16,6 +17,7 @@ import (
 	"github.com/dustin/go-humanize"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"go.opentelemetry.io/otel"
+	corev1 "k8s.io/api/core/v1"
 
 	bindingcache "node-agent/pkg/rulebindingmanager"
 
@@ -25,6 +27,7 @@ import (
 	tracerhardlinktype "node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
 	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -34,7 +37,8 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
-	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -42,8 +46,6 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
 	storageUtils "github.com/kubescape/storage/pkg/utils"
-
-	corev1 "k8s.io/api/core/v1"
 )
 
 type RuleManager struct {
@@ -55,8 +57,7 @@ type RuleManager struct {
 	objectCache              objectcache.ObjectCache
 	exporter                 exporters.Exporter
 	metrics                  metricsmanager.MetricsManager
-	preRunningContainerIDs   mapset.Set[string]            // key is k8sContainerID
-	cachedPods               mapset.Set[string]            // key is namespace/podName
+	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	containerMutexes         storageUtils.MapMutex[string] // key is k8sContainerID
 	podToWlid                maps.SafeMap[string, string]  // key is namespace/podName
 	nodeName                 string
@@ -79,6 +80,91 @@ func CreateRuleManager(ctx context.Context, k8sClient k8sclient.K8sClientInterfa
 		nodeName:          nodeName,
 		clusterName:       clusterName,
 	}, nil
+}
+
+func (rm *RuleManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+	logger.L().Debug("RuleManager - start monitor on container",
+		helpers.Int("container index", watchedContainer.ContainerIndex),
+		helpers.String("container ID", watchedContainer.ContainerID),
+		helpers.String("k8s workload", watchedContainer.K8sContainerID))
+
+	var pod *corev1.Pod
+	if err := backoff.Retry(func() error {
+		p, err := rm.k8sClient.GetKubernetesClient().CoreV1().Pods(container.K8s.Namespace).Get(ctx, container.K8s.PodName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		pod = p
+		return nil
+	}, backoff.NewExponentialBackOff()); err != nil {
+		logger.L().Ctx(ctx).Error("RuleManager - failed to get pod", helpers.Error(err),
+			helpers.String("namespace", container.K8s.Namespace),
+			helpers.String("name", container.K8s.PodName))
+		// failed to get pod
+		return err
+	}
+	syscallTicker := time.NewTicker(5 * time.Second)
+
+	for {
+		select {
+		case <-syscallTicker.C:
+			if rm.syscallPeekFunc == nil {
+				logger.L().Error("RuleManager - syscallPeekFunc is not set", helpers.String("container ID", watchedContainer.ContainerID))
+				continue
+			}
+
+			if watchedContainer.NsMntId == 0 {
+				logger.L().Error("RuleManager - mount namespace ID is not set", helpers.String("container ID", watchedContainer.ContainerID))
+			}
+
+			var syscalls []string
+			if syscallsFromFunc, err := rm.syscallPeekFunc(watchedContainer.NsMntId); err == nil {
+				syscalls = syscallsFromFunc
+			}
+
+			rules := rm.ruleBindingCache.ListRulesForPod(pod.GetNamespace(), pod.GetName())
+			for _, syscall := range syscalls {
+				event := ruleenginetypes.SyscallEvent{
+					Event: eventtypes.Event{
+						Timestamp: eventtypes.Time(time.Now().UnixNano()),
+						Type:      eventtypes.NORMAL,
+						CommonData: eventtypes.CommonData{
+							Runtime: eventtypes.BasicRuntimeMetadata{
+								ContainerID: watchedContainer.ContainerID,
+								RuntimeName: container.Runtime.RuntimeName,
+							},
+							K8s: eventtypes.K8sMetadata{
+								Node: pod.Spec.NodeName,
+								BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+									Namespace:     pod.GetNamespace(),
+									PodName:       pod.GetName(),
+									PodLabels:     pod.GetLabels(),
+									ContainerName: watchedContainer.InstanceID.GetContainerName(),
+								},
+								HostNetwork: pod.Spec.HostNetwork,
+							},
+						},
+					},
+					WithMountNsID: eventtypes.WithMountNsID{
+						MountNsID: watchedContainer.NsMntId,
+					},
+					Pid: container.Pid,
+					// TODO: Figure out how to get UID, GID and comm from the syscall.
+					// Uid:         container.OciConfig.Process.User.UID,
+					// Gid:         container.OciConfig.Process.User.GID,
+					// Comm:        container.OciConfig.Process.Args[0],
+					SyscallName: syscall,
+				}
+
+				rm.processEvent(utils.SyscallEventType, &event, rules)
+			}
+		case err := <-watchedContainer.SyncChannel:
+			switch {
+			case errors.Is(err, utils.ContainerHasTerminatedError):
+				return nil
+			}
+		}
+	}
 }
 
 func (rm *RuleManager) ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
@@ -132,6 +218,13 @@ func (rm *RuleManager) startRuleManager(ctx context.Context, container *containe
 		return rm.ensureInstanceID(container, watchedContainer)
 	}, backoff.NewExponentialBackOff()); err != nil {
 		logger.L().Ctx(ctx).Error("RuleManager - failed to ensure instanceID", helpers.Error(err),
+			helpers.Int("container index", watchedContainer.ContainerIndex),
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+	}
+
+	if err := rm.monitorContainer(ctx, container, watchedContainer); err != nil {
+		logger.L().Debug("RuleManager - stop monitor on container", helpers.String("reason", err.Error()),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -215,16 +308,8 @@ func (rm *RuleManager) getWorkloadIdentifier(podNamespace, podName string) (stri
 	return generatedWlid, nil
 }
 
-func (rm *RuleManager) ReportSyscallEvent(event tracersyscallstype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportSyscallEvent event")
-		return
-	}
-
-	// list syscall rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
-	rm.processEvent(utils.SyscallEventType, &event, rules)
+func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error)) {
+	rm.syscallPeekFunc = peek
 }
 
 func (rm *RuleManager) ReportCapability(event tracercapabilitiestype.Event) {
@@ -235,6 +320,7 @@ func (rm *RuleManager) ReportCapability(event tracercapabilitiestype.Event) {
 
 	// list capability rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
 	rm.processEvent(utils.CapabilitiesEventType, &event, rules)
 }
 
@@ -257,6 +343,7 @@ func (rm *RuleManager) ReportFileOpen(event traceropentype.Event) {
 
 	// list open rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
 	rm.processEvent(utils.OpenEventType, &event, rules)
 
 }
@@ -269,6 +356,7 @@ func (rm *RuleManager) ReportNetworkEvent(event tracernetworktype.Event) {
 
 	// list network rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
 	rm.processEvent(utils.NetworkEventType, &event, rules)
 }
 
@@ -285,6 +373,7 @@ func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
 
 	// list dns rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
 	rm.processEvent(utils.DnsEventType, &event, rules)
 }
 
@@ -296,6 +385,7 @@ func (rm *RuleManager) ReportRandomxEvent(event tracerrandomxtype.Event) {
 
 	// list randomx rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
 	rm.processEvent(utils.RandomXEventType, &event, rules)
 }
 

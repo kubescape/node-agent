@@ -6,9 +6,10 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 
-	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	mapset "github.com/deckarep/golang-set/v2"
 )
 
 const (
@@ -36,10 +37,13 @@ var _ ruleengine.RuleEvaluator = (*R0003UnexpectedSystemCall)(nil)
 
 type R0003UnexpectedSystemCall struct {
 	BaseRule
+	listOfAlertedSyscalls mapset.Set[string]
 }
 
 func CreateRuleR0003UnexpectedSystemCall() *R0003UnexpectedSystemCall {
-	return &R0003UnexpectedSystemCall{}
+	return &R0003UnexpectedSystemCall{
+		listOfAlertedSyscalls: mapset.NewSet[string](),
+	}
 }
 
 func (rule *R0003UnexpectedSystemCall) Name() string {
@@ -58,7 +62,7 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 		return nil
 	}
 
-	syscallEvent, ok := event.(*tracersyscallstype.Event)
+	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
 		return nil
 	}
@@ -75,34 +79,40 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 
 	// If the syscall is whitelisted, return nil
 	for _, syscall := range container.Syscalls {
-		if syscall == syscallEvent.Syscall {
+		if syscall == syscallEvent.SyscallName {
 			return nil
 		}
+	}
+
+	// We have already alerted for this syscall
+	if rule.listOfAlertedSyscalls.ContainsOne(syscallEvent.SyscallName) {
+		return nil
 	}
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:      rule.Name(),
 			InfectedPID:    syscallEvent.Pid,
-			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the system call \"%s\" to the whitelist in the application profile for the Pod \"%s\".", syscallEvent.Syscall, syscallEvent.GetPod()),
+			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the system call \"%s\" to the whitelist in the application profile for the Pod \"%s\".", syscallEvent.SyscallName, syscallEvent.GetPod()),
 			Severity:       R0003UnexpectedSystemCallRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
-				PID:  syscallEvent.Pid,
-				Comm: syscallEvent.Comm,
+				PID: syscallEvent.Pid,
 			},
 			ContainerID: syscallEvent.Runtime.ContainerID,
 		},
 		TriggerEvent: syscallEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
 			RuleID:          rule.ID(),
-			RuleDescription: fmt.Sprintf("Unexpected system call: %s in: %s", syscallEvent.Syscall, syscallEvent.GetContainer()),
+			RuleDescription: fmt.Sprintf("Unexpected system call: %s in: %s", syscallEvent.SyscallName, syscallEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName: syscallEvent.GetPod(),
 		},
 	}
+
+	rule.listOfAlertedSyscalls.Add(syscallEvent.SyscallName)
 
 	return &ruleFailure
 }

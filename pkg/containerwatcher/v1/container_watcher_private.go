@@ -36,40 +36,6 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-
-		if ch.syscallTracer != nil {
-			// Attach the container to the syscall tracer
-			if err := ch.syscallTracer.Attach(notif.Container.Runtime.ContainerID, notif.Container.Mntns); err != nil {
-				logger.L().Fatal("attaching container to syscall tracer", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID), helpers.Error(err))
-			}
-
-			// Read the syscall tracer events in a separate goroutine until the container is removed (signaled from the traceloopCancelChannel).
-			go func() {
-				for {
-					select {
-					case <-traceloopCancelChannel:
-						logger.L().Info("stop traceloop on container - container has terminated",
-							helpers.String("container ID", notif.Container.Runtime.ContainerID),
-							helpers.String("k8s workload", k8sContainerID))
-						return
-					default:
-						evs, err := ch.syscallTracer.Read(notif.Container.Runtime.ContainerID)
-						if err != nil {
-							logger.L().Debug("syscalls perf buffer closed", helpers.String("error", err.Error()))
-							return
-						}
-						for _, ev := range evs {
-							ev.SetContainerMetadata(notif.Container)
-							ch.syscallEventCallback(ev)
-						}
-
-						// Sleep for a while before reading the next batch of events.
-						time.Sleep(5 * time.Second) // TODO: make this configurable.
-					}
-				}
-			}()
-		}
-
 		time.AfterFunc(ch.cfg.MaxSniffingTime, func() {
 			logger.L().Info("monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
@@ -86,8 +52,6 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		close(traceloopCancelChannel)
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
-		ch.syscallTracer.Detach(notif.Container.Mntns)
-		ch.syscallTracer.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) error {
@@ -206,8 +170,8 @@ func (ch *IGContainerWatcher) stopContainerCollection() {
 func (ch *IGContainerWatcher) startTracers() error {
 	if ch.cfg.EnableApplicationProfile {
 		// Start syscall tracer
-		if err := ch.startSyscallTracing(); err != nil {
-			logger.L().Error("error starting syscall tracing", helpers.Error(err))
+		if err := ch.startSystemcallTracing(); err != nil {
+			logger.L().Error("error starting seccomp tracing", helpers.Error(err))
 			return err
 		}
 		// Start capabilities tracer
@@ -290,7 +254,7 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		}
 		// Stop syscall tracer
 		if err := ch.stopSystemcallTracing(); err != nil {
-			logger.L().Error("error stopping syscall tracing", helpers.Error(err))
+			logger.L().Error("error stopping seccomp tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 	}

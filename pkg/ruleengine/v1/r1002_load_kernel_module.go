@@ -6,7 +6,7 @@ import (
 	"node-agent/pkg/ruleengine"
 	"node-agent/pkg/utils"
 
-	tracersyscallstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/traceloop/types"
+	ruleenginetypes "node-agent/pkg/ruleengine/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
@@ -39,9 +39,7 @@ type R1002LoadKernelModule struct {
 }
 
 func CreateRuleR1002LoadKernelModule() *R1002LoadKernelModule {
-	return &R1002LoadKernelModule{
-		alerted: false,
-	}
+	return &R1002LoadKernelModule{}
 }
 
 func (rule *R1002LoadKernelModule) Name() string {
@@ -53,17 +51,21 @@ func (rule *R1002LoadKernelModule) ID() string {
 func (rule *R1002LoadKernelModule) DeleteRule() {
 }
 
-func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	if rule.alerted {
+		return nil
+	}
+
 	if eventType != utils.SyscallEventType {
 		return nil
 	}
 
-	syscallEvent, ok := event.(*tracersyscallstype.Event)
+	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
 		return nil
 	}
 
-	if syscallEvent.Syscall == "init_module" || syscallEvent.Syscall == "finit_module" {
+	if syscallEvent.SyscallName == "init_module" || syscallEvent.SyscallName == "finit_module" {
 		rule.alerted = true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
@@ -75,14 +77,16 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
 					Comm: syscallEvent.Comm,
+					Gid:  &syscallEvent.Gid,
 					PID:  syscallEvent.Pid,
+					Uid:  &syscallEvent.Uid,
 				},
 				ContainerID: syscallEvent.Runtime.ContainerID,
 			},
 			TriggerEvent: syscallEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleID:          rule.ID(),
-				RuleDescription: fmt.Sprintf("Kernel module load syscall (%s) was called in: %s", syscallEvent.Syscall, syscallEvent.GetContainer()),
+				RuleDescription: fmt.Sprintf("Kernel module load syscall (%s) was called in: %s", syscallEvent.SyscallName, syscallEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName: syscallEvent.GetPod(),
