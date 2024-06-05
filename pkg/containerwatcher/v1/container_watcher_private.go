@@ -347,5 +347,10 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 }
 
 func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {
+	// Ignore coreDNS pod
+	if namespace == "kube-system" && name == "coredns" {
+		return true
+	}
+	// Ignore node-agent pod
 	return name == ch.podName && namespace == ch.namespace
 }
