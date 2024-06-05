@@ -31,7 +31,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		ch.timeBasedContainers.Add(notif.Container.Runtime.ContainerID)
 	}
 
-	tracingContext := context.Background()
+	tracingContext := make(chan struct{})
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
@@ -47,8 +47,8 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			go func() {
 				for {
 					select {
-					case <-tracingContext.Done():
-						logger.L().Info("stop monitor on container - container has terminated",
+					case <-tracingContext:
+						logger.L().Info("stop traceloop on container - container has terminated",
 							helpers.String("container ID", notif.Container.Runtime.ContainerID),
 							helpers.String("k8s workload", k8sContainerID))
 						return
@@ -64,7 +64,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 						}
 
 						// Sleep for a while before reading the next batch of events.
-						time.Sleep(2 * time.Second) // TODO: make this configurable.
+						time.Sleep(5 * time.Second) // TODO: make this configurable.
 					}
 				}
 			}()
@@ -83,7 +83,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		logger.L().Info("stop monitor on container - container has terminated",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
-		tracingContext.Done()
+		close(tracingContext)
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 		ch.syscallTracer.Detach(notif.Container.Mntns)
