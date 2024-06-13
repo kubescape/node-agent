@@ -7,11 +7,28 @@ import (
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 	rule := CreateRuleR1003MaliciousSSHConnection()
 
+	objCache := RuleObjectCacheMock{}
+	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood("test")
+	if nn == nil {
+		nn = &v1beta1.NetworkNeighborhood{}
+		nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
+			Name: "test",
+
+			Egress: []v1beta1.NetworkNeighbor{
+				{
+					DNS: "test.com",
+				},
+			},
+		})
+
+		objCache.SetNetworkNeighborhood(nn)
+	}
 	// Test case 1: SSH connection to disallowed port
 	networkEvent := &tracernetworktype.Event{
 		Event: eventtypes.Event{
@@ -60,14 +77,14 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 		Pid:      1,
 	}
 	rule.ProcessEvent(utils.OpenEventType, openEvent, &RuleObjectCacheMock{})
-	failure := rule.ProcessEvent(utils.NetworkEventType, networkEvent, &RuleObjectCacheMock{})
+	failure := rule.ProcessEvent(utils.NetworkEventType, networkEvent, &objCache)
 	if failure == nil {
 		t.Errorf("Expected failure, but got nil")
 	}
 
 	// Test case 2: SSH connection to allowed port
 	networkEvent.Port = 22
-	failure = rule.ProcessEvent(utils.NetworkEventType, networkEvent, &RuleObjectCacheMock{})
+	failure = rule.ProcessEvent(utils.NetworkEventType, networkEvent, &objCache)
 	if failure != nil {
 		t.Errorf("Expected failure to be nil, but got %v", failure)
 	}
@@ -75,7 +92,7 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 	// Test case 3: SSH connection to disallowed port, but not from SSH initiator
 	networkEvent.Port = 2222
 	networkEvent.Pid = 2
-	failure = rule.ProcessEvent(utils.NetworkEventType, networkEvent, &RuleObjectCacheMock{})
+	failure = rule.ProcessEvent(utils.NetworkEventType, networkEvent, &objCache)
 	if failure != nil {
 		t.Errorf("Expected failure to be nil, but got %v", failure)
 	}
@@ -84,7 +101,7 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 	networkEvent.Port = 2222
 	networkEvent.Pid = 1
 	networkEvent.Timestamp = 3
-	failure = rule.ProcessEvent(utils.NetworkEventType, networkEvent, &RuleObjectCacheMock{})
+	failure = rule.ProcessEvent(utils.NetworkEventType, networkEvent, &objCache)
 	if failure != nil {
 		t.Errorf("Expected failure to be nil, but got %v", failure)
 	}
@@ -93,7 +110,7 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 	networkEvent.Port = 2222
 	networkEvent.Pid = 1
 	networkEvent.Timestamp = 5
-	failure = rule.ProcessEvent(utils.NetworkEventType, networkEvent, &RuleObjectCacheMock{})
+	failure = rule.ProcessEvent(utils.NetworkEventType, networkEvent, &objCache)
 	if failure != nil {
 		t.Errorf("Expected failure to be nil, but got %v", failure)
 	}

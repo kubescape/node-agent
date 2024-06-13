@@ -31,8 +31,6 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		ch.timeBasedContainers.Add(notif.Container.Runtime.ContainerID)
 	}
 
-	traceloopCancelChannel := make(chan struct{})
-
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
@@ -49,7 +47,6 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		logger.L().Info("stop monitor on container - container has terminated",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
-		close(traceloopCancelChannel)
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 	}
