@@ -6,6 +6,7 @@ import (
 
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestR1011LdPreloadHook(t *testing.T) {
@@ -15,27 +16,6 @@ func TestR1011LdPreloadHook(t *testing.T) {
 	if r == nil {
 		t.Errorf("Expected r to not be nil")
 	}
-	// // Create a exec event
-	// e := &tracerexectype.Event{
-	// 	Event: eventtypes.Event{
-	// 		CommonData: eventtypes.CommonData{
-	// 			K8s: eventtypes.K8sMetadata{
-	// 				BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-	// 					ContainerName: "test",
-	// 				},
-	// 			},
-	// 		},
-	// 	},
-	// 	Comm:       "/test",
-	// 	Args:       []string{},
-	// 	UpperLayer: false,
-	// }
-
-	// // Test with non existing binary
-	// ruleResult := r.ProcessEvent(utils.ExecveEventType, e, &RuleObjectCacheMock{})
-	// if ruleResult != nil {
-	// 	t.Errorf("Expected ruleResult to be nil since exec is not in the upper layer")
-	// }
 
 	// Create open event
 	e := &traceropentype.Event{
@@ -64,5 +44,42 @@ func TestR1011LdPreloadHook(t *testing.T) {
 	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since ld_preload file is opened with read flag")
+	}
+
+	// Test with pod spec
+	objCache := RuleObjectCacheMock{}
+	objCache.SetPodSpec(&corev1.PodSpec{
+		Containers: []corev1.Container{
+			{
+				Name: "test",
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "test",
+						MountPath: "/var",
+					},
+				},
+				Env: []corev1.EnvVar{
+					{
+						Name:  "LD_PRELOAD",
+						Value: "/var/test.so",
+					},
+				},
+			},
+		},
+		Volumes: []corev1.Volume{
+			{
+				Name: "test",
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: "/var",
+					},
+				},
+			},
+		},
+	})
+	e.FullPath = "/var/test.so"
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since LD_PRELOAD is set in pod spec")
 	}
 }
