@@ -57,7 +57,6 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx) {
     
     struct task_struct *current_task = (struct task_struct*)bpf_get_current_task();
     if (!current_task) {
-        bpf_printk("program start1");
         return 0;
     }
 
@@ -65,7 +64,6 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx) {
     u32 uid = (u32)uid_gid;
 
     if (valid_uid(targ_uid) && targ_uid != uid) {
-        bpf_printk("program start2");
         return 0;
     }
 
@@ -77,7 +75,6 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx) {
 
     void *fpu = BPF_CORE_READ(ctx, fpu);
     if (fpu == NULL) {
-        bpf_printk("program start3");
         return 0;
     }
 
