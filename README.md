@@ -23,8 +23,12 @@ Then run the binarty with root privileges:
 sudo ./node-agent
 ```
 
+## Running Node Agent in Kubernetes
+You can run the Node Agent in a Kubernetes cluster as part of Kubescape by using helm.
+Please refer to the [docs](https://kubescape.io/docs/) for more information.
+
 ## Limitations:
-1. This feature is using EBPF technology that is implemented only on linux.
+1. This feature is using eBPF technology that is implemented only on linux.
 2. the linux kernel version that supported it 5.4 and above.
 
 
