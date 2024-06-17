@@ -63,6 +63,7 @@ type RuleManager struct {
 	nodeName                 string
 	clusterName              string
 	containerIdToShimPid     maps.SafeMap[string, uint32]
+	containerIdToPid         maps.SafeMap[string, uint32]
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
@@ -270,6 +271,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		} else {
 			rm.containerIdToShimPid.Set(notif.Container.Runtime.ContainerID, uint32(shim.PPID))
 		}
+		rm.containerIdToPid.Set(notif.Container.Runtime.ContainerID, notif.Container.Pid)
 		go rm.startRuleManager(rm.ctx, notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:
 		channel := rm.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
@@ -279,6 +281,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		rm.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
 		rm.podToWlid.Delete(utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName))
 		rm.containerIdToShimPid.Delete(notif.Container.Runtime.ContainerID)
+		rm.containerIdToPid.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 
@@ -435,7 +438,9 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	path, err := utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
 	hostPath := ""
 	if err != nil {
-		path = ""
+		if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path != "" {
+			hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", rm.containerIdToPid.Get(ruleFailure.GetTriggerEvent().Runtime.ContainerID), ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path))
+		}
 	} else {
 		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID, path))
 	}
