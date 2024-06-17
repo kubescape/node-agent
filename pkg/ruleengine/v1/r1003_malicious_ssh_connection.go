@@ -112,7 +112,7 @@ func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interfa
 func (rule *R1003MaliciousSSHConnection) DeleteRule() {
 }
 
-func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType && eventType != utils.NetworkEventType {
 		return nil
 	}
@@ -136,6 +136,11 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 			return nil
 		}
 
+		nn := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
+		if nn == nil {
+			return nil
+		}
+
 		timestampDiffInSeconds := calculateTimestampDiffInSeconds(int64(networkEvent.Timestamp), rule.configFileAccessTimeStamp)
 		if timestampDiffInSeconds > MaxTimeDiffInSeconds {
 			rule.accessRelatedFiles = false
@@ -144,6 +149,17 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 			return nil
 		}
 		if networkEvent.Pid == rule.sshInitiatorPid && networkEvent.PktType == "OUTGOING" && networkEvent.Proto == "TCP" && !slices.Contains(rule.allowedPorts, networkEvent.Port) {
+			nnContainer, err := getContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
+			if err != nil {
+				return nil
+			}
+			for _, egress := range nnContainer.Egress {
+				for _, port := range egress.Ports {
+					if uint16(*port.Port) == networkEvent.Port {
+						return nil
+					}
+				}
+			}
 			rule.accessRelatedFiles = false
 			rule.sshInitiatorPid = 0
 			rule.configFileAccessTimeStamp = 0

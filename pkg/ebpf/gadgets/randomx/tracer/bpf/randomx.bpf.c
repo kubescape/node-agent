@@ -54,7 +54,7 @@ static __always_inline bool has_upper_layer()
 SEC("tracepoint/x86_fpu/x86_fpu_regs_deactivated")
 int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx) {
     struct event event = {};
-
+    
     struct task_struct *current_task = (struct task_struct*)bpf_get_current_task();
     if (!current_task) {
         return 0;
@@ -82,12 +82,11 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx) {
     // Since kernel 5.15, the fpu struct has been changed and CO-RE isn't able to read it.
     // We need to use the bpf_probe_read_kernel helper to read the mxcsr value.
     // The old_fpu struct is used for kernels <= 5.15.
-    #if LINUX_KERNEL_VERSION <= KERNEL_VERSION(5, 15, 0)
+    if(LINUX_KERNEL_VERSION <= KERNEL_VERSION(5, 15, 0)) {
         bpf_probe_read_kernel(&mxcsr, sizeof(mxcsr), &((struct old_fpu*)fpu)->state.xsave.i387.mxcsr);
-    #else
+    } else {
         mxcsr = BPF_CORE_READ((struct fpu*)fpu, fpstate, regs.xsave.i387.mxcsr);
-    #endif
-    
+    }
     int fpcr = (mxcsr & 0x6000) >> 13;
     if (fpcr != 0) {
         __u32 ppid = BPF_CORE_READ(current_task, real_parent, pid);

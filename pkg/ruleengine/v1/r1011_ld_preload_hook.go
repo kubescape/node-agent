@@ -60,7 +60,7 @@ func (rule *R1011LdPreloadHook) ID() string {
 func (rule *R1011LdPreloadHook) DeleteRule() {
 }
 
-func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event, k8sObjCache objectcache.K8sObjectCache) ruleengine.RuleFailure {
 	envVars, err := utils.GetProcessEnv(int(execEvent.Pid))
 	if err != nil {
 		logger.L().Debug("Failed to get process environment variables", helpers.Error(err))
@@ -79,6 +79,21 @@ func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event)
 
 	// Check if the environment variable is in the list of LD_PRELOAD_ENV_VARS
 	if shouldCheck {
+		// Check the pod spec for env vars that match the LD_PRELOAD_ENV_VARS
+		podSpec := k8sObjCache.GetPodSpec(execEvent.GetNamespace(), execEvent.GetPod())
+		if podSpec != nil {
+			for _, container := range podSpec.Containers {
+				if container.Name == execEvent.GetContainer() {
+					for _, envVar := range container.Env {
+						if envVar.Name == ldHookVar {
+							// The environment variable is set in the pod spec
+							return nil
+						}
+					}
+				}
+			}
+		}
+
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
@@ -163,7 +178,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event in
 			return nil
 		}
 
-		return rule.handleExecEvent(execEvent)
+		return rule.handleExecEvent(execEvent, objectCache.K8sObjectCache())
 	} else if eventType == utils.OpenEventType {
 		openEvent, ok := event.(*traceropentype.Event)
 		if !ok {
