@@ -92,12 +92,12 @@ func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginet
 			},
 			TriggerEvent: syscallEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
-				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("Fileless execution detected: syscall memfd_create executed in: %s", syscallEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName: syscallEvent.GetPod(),
 			},
+			RuleID: rule.ID(),
 		}
 
 		return &ruleFailure
@@ -144,12 +144,12 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 			},
 			TriggerEvent: execEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
-				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source \"%s\"", execPathDir, "/proc/self/fd"),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName: execEvent.GetPod(),
 			},
+			RuleID: rule.ID(),
 		}
 
 		return &ruleFailure

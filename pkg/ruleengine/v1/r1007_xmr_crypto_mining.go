@@ -79,12 +79,12 @@ func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event 
 			},
 			TriggerEvent: randomXEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
-				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("XMR Crypto Miner process: (%s) executed in: %s", randomXEvent.Comm, randomXEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName: randomXEvent.GetPod(),
 			},
+			RuleID: rule.ID(),
 		}
 
 		return &ruleFailure

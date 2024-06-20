@@ -129,6 +129,7 @@ func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 		BaseRuntimeAlert:       failedRule.GetBaseRuntimeAlert(),
 		RuntimeAlertK8sDetails: k8sDetails,
 		RuleAlert:              failedRule.GetRuleAlert(),
+		RuleID:                 failedRule.GetRuleId(),
 	}
 	exporter.sendInAlertList(httpAlert, failedRule.GetRuntimeProcessDetails())
 }
@@ -201,6 +202,7 @@ func (exporter *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.Malw
 		BaseRuntimeAlert:       malwareResult.GetBasicRuntimeAlert(),
 		RuntimeAlertK8sDetails: k8sDetails,
 		MalwareAlert:           malwareResult.GetMalwareRuntimeAlert(),
+		RuleID:                 "R3000", // Hardcoded rule ID for malware alerts.
 	}
 	exporter.sendInAlertList(httpAlert, malwareResult.GetRuntimeProcessDetails())
 }
