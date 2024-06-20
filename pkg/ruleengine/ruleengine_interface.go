@@ -61,6 +61,8 @@ type RuleFailure interface {
 	GetRuleAlert() apitypes.RuleAlert
 	// Get K8s Runtime Details
 	GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails
+	// Get Rule ID
+	GetRuleId() string
 
 	// Set Workload Details
 	SetWorkloadDetails(workloadDetails string)

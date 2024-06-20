@@ -83,12 +83,12 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 				},
 				TriggerEvent: networkEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
-					RuleID:          rule.ID(),
 					RuleDescription: fmt.Sprintf("Communication on a commonly used crypto mining port: %d in: %s", networkEvent.Port, networkEvent.GetContainer()),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 					PodName: networkEvent.GetPod(),
 				},
+				RuleID: rule.ID(),
 			}
 
 			return &ruleFailure

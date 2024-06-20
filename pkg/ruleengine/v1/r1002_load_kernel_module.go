@@ -85,12 +85,12 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 			},
 			TriggerEvent: syscallEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
-				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("Kernel module load syscall (%s) was called in: %s", syscallEvent.SyscallName, syscallEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName: syscallEvent.GetPod(),
 			},
+			RuleID: rule.ID(),
 		}
 
 		return &ruleFailure
