@@ -2,7 +2,8 @@ package rulebindingmanager
 
 import (
 	"context"
-	"node-agent/pkg/k8sclient"
+
+	"github.com/kubescape/node-agent/pkg/k8sclient"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 

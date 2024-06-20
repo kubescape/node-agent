@@ -1,8 +1,9 @@
 package ruleengine
 
 import (
-	"node-agent/pkg/utils"
 	"testing"
+
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 

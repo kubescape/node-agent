@@ -2,28 +2,24 @@ package cache
 
 import (
 	"context"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/rulebindingmanager/types"
-	typesv1 "node-agent/pkg/rulebindingmanager/types/v1"
-	"node-agent/pkg/ruleengine"
-	ruleenginev1 "node-agent/pkg/ruleengine/v1"
-	"node-agent/pkg/utils"
-	"node-agent/pkg/watcher"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
-
-	"node-agent/pkg/rulebindingmanager"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
-
 	mapset "github.com/deckarep/golang-set/v2"
-
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager/types"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/watcher"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 var _ rulebindingmanager.RuleBindingCache = (*RBCache)(nil)

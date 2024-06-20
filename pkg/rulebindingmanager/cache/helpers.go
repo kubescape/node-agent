@@ -1,10 +1,11 @@
 package cache
 
 import (
-	typesv1 "node-agent/pkg/rulebindingmanager/types/v1"
-	"node-agent/pkg/utils"
-	"node-agent/pkg/watcher"
 	"strings"
+
+	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/watcher"
 
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 

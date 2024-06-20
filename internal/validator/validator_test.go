@@ -1,8 +1,9 @@
 package validator
 
 import (
-	"node-agent/pkg/config"
 	"testing"
+
+	"github.com/kubescape/node-agent/pkg/config"
 )
 
 func TestInt8ToStr(t *testing.T) {

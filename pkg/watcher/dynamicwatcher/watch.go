@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/watcher"
-	"node-agent/pkg/watcher/cooldownqueue"
 	"os"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/watcher"
+	"github.com/kubescape/node-agent/pkg/watcher/cooldownqueue"
 
 	"github.com/cenkalti/backoff/v4"
 

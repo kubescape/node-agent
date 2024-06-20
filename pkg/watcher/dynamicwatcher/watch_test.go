@@ -2,11 +2,12 @@ package dynamicwatcher
 
 import (
 	"context"
-	"node-agent/mocks"
-	"node-agent/pkg/watcher"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kubescape/node-agent/mocks"
+	"github.com/kubescape/node-agent/pkg/watcher"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	appsv1 "k8s.io/api/apps/v1"

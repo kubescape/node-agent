@@ -1,10 +1,10 @@
 package config
 
 import (
-	"node-agent/pkg/exporters"
 	"testing"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/stretchr/testify/assert"
 )
 

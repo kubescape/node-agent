@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"node-agent/pkg/exporters"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/rulemanager"
-	"node-agent/pkg/utils"
 	"path/filepath"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v4"
@@ -19,15 +20,15 @@ import (
 	"go.opentelemetry.io/otel"
 	corev1 "k8s.io/api/core/v1"
 
-	bindingcache "node-agent/pkg/rulebindingmanager"
+	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 
-	"node-agent/pkg/metricsmanager"
-	"node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 
-	tracerhardlinktype "node-agent/pkg/ebpf/gadgets/hardlink/types"
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
-	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"

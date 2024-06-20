@@ -1,9 +1,9 @@
 package rulemanager
 
 import (
-	tracerhardlinktype "node-agent/pkg/ebpf/gadgets/hardlink/types"
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
-	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
+	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"

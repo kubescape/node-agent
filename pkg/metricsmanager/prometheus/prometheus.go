@@ -2,8 +2,9 @@ package metricsmanager
 
 import (
 	"net/http"
-	"node-agent/pkg/metricsmanager"
-	"node-agent/pkg/utils"
+
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"

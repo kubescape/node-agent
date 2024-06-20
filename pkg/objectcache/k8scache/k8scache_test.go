@@ -2,9 +2,10 @@ package k8scache
 
 import (
 	"context"
-	"node-agent/mocks"
-	"node-agent/pkg/watcher"
 	"testing"
+
+	"github.com/kubescape/node-agent/mocks"
+	"github.com/kubescape/node-agent/pkg/watcher"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/stretchr/testify/assert"

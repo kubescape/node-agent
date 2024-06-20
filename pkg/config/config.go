@@ -1,9 +1,9 @@
 package config
 
 import (
-	"node-agent/pkg/exporters"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/spf13/viper"
 )
 

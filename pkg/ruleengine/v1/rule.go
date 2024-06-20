@@ -1,8 +1,8 @@
 package ruleengine
 
 import (
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/goradd/maps"
 )

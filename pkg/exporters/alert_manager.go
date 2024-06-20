@@ -6,16 +6,15 @@ package exporters
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/malwaremanager"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 	"os"
 	"time"
 
+	"github.com/go-openapi/strfmt"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-
-	"github.com/go-openapi/strfmt"
+	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/prometheus/alertmanager/api/v2/client"
 	"github.com/prometheus/alertmanager/api/v2/client/alert"
 	"github.com/prometheus/alertmanager/api/v2/models"

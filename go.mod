@@ -1,4 +1,4 @@
-module node-agent
+module github.com/kubescape/node-agent
 
 go 1.22.3
 

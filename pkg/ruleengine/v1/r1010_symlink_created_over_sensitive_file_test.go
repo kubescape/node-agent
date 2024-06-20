@@ -2,10 +2,11 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/utils"
 	"testing"
 
-	tracersymlinktype "node-agent/pkg/ebpf/gadgets/symlink/types"
+	"github.com/kubescape/node-agent/pkg/utils"
+
+	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 )
 
 func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {

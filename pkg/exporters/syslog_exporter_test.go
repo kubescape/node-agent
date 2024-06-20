@@ -2,11 +2,12 @@ package exporters
 
 import (
 	"log"
-	mmtypes "node-agent/pkg/malwaremanager/v1/types"
-	ruleenginev1 "node-agent/pkg/ruleengine/v1"
 	"os"
 	"testing"
 	"time"
+
+	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
+	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
 
 	"gopkg.in/mcuadros/go-syslog.v2"
 

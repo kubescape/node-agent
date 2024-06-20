@@ -3,9 +3,10 @@ package seccompprofilewatcher
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/seccompmanager"
-	"node-agent/pkg/watcher"
+
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/seccompmanager"
+	"github.com/kubescape/node-agent/pkg/watcher"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"

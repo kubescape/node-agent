@@ -3,9 +3,10 @@ package networkneighborhoodcache
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/watcher"
+
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/watcher"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

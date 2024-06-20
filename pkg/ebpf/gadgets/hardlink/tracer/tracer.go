@@ -3,10 +3,11 @@ package tracer
 import (
 	"errors"
 	"fmt"
-	"node-agent/pkg/ebpf/gadgets/hardlink/types"
 	"os"
 	"runtime"
 	"unsafe"
+
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"

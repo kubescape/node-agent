@@ -3,10 +3,11 @@ package exporters
 import (
 	"fmt"
 	"log/syslog"
-	"node-agent/pkg/malwaremanager"
-	"node-agent/pkg/ruleengine"
 	"os"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"

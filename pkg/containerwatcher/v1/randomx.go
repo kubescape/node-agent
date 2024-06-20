@@ -3,8 +3,8 @@ package containerwatcher
 import (
 	"fmt"
 
-	tracerandomx "node-agent/pkg/ebpf/gadgets/randomx/tracer"
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracerandomx "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/tracer"
+	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"

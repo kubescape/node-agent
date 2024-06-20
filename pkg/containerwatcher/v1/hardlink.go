@@ -3,8 +3,8 @@ package containerwatcher
 import (
 	"fmt"
 
-	tracerhardlink "node-agent/pkg/ebpf/gadgets/hardlink/tracer"
-	tracerhardlinktype "node-agent/pkg/ebpf/gadgets/hardlink/types"
+	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
+	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"

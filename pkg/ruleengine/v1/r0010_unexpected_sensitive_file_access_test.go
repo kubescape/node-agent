@@ -3,8 +3,8 @@ package ruleengine
 import (
 	"testing"
 
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 

@@ -1,7 +1,7 @@
 package sbomhandler
 
 import (
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type SBOMHandlerClient interface {

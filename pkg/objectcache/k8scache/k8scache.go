@@ -2,9 +2,10 @@ package k8scache
 
 import (
 	"context"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/watcher"
+
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/watcher"
 
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
