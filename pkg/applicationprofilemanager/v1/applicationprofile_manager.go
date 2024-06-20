@@ -9,8 +9,10 @@ import (
 	"node-agent/pkg/config"
 	"node-agent/pkg/k8sclient"
 	"node-agent/pkg/objectcache"
+	"node-agent/pkg/seccompmanager"
 	"node-agent/pkg/storage"
 	"node-agent/pkg/utils"
+	"runtime"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -56,11 +58,12 @@ type ApplicationProfileManager struct {
 	storageClient            storage.StorageClient
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	preRunningContainerIDs   mapset.Set[string]
+	seccompManager           seccompmanager.SeccompManagerClient
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache) (*ApplicationProfileManager, error) {
+func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
 		cfg:                    cfg,
 		clusterName:            clusterName,
@@ -72,6 +75,7 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		trackedContainers:      mapset.NewSet[string](),
 		removedContainers:      mapset.NewSet[string](),
 		preRunningContainerIDs: preRunningContainerIDs,
+		seccompManager:         seccompManager,
 	}, nil
 }
 
@@ -304,6 +308,11 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		// 0. calculate patch
 		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
+		operations = append(operations, utils.PatchOperation{
+			Op:    "add",
+			Path:  "/spec/architectures/-",
+			Value: runtime.GOARCH,
+		})
 
 		patch, err := json.Marshal(operations)
 		if err != nil {
@@ -332,16 +341,26 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				}
 				addContainers := func(containers []v1beta1.ApplicationProfileContainer, containerNames []string) []v1beta1.ApplicationProfileContainer {
 					for _, name := range containerNames {
+						seccompProfile, err := am.seccompManager.GetSeccompProfile(name, watchedContainer.SeccompProfilePath)
+						if err != nil {
+							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
+								helpers.String("slug", slug),
+								helpers.Int("container index", watchedContainer.ContainerIndex),
+								helpers.String("container ID", watchedContainer.ContainerID),
+								helpers.String("k8s workload", watchedContainer.K8sContainerID))
+						}
 						containers = append(containers, v1beta1.ApplicationProfileContainer{
-							Name:         name,
-							Execs:        make([]v1beta1.ExecCalls, 0),
-							Opens:        make([]v1beta1.OpenCalls, 0),
-							Capabilities: make([]string, 0),
-							Syscalls:     make([]string, 0),
+							Name:           name,
+							Execs:          make([]v1beta1.ExecCalls, 0),
+							Opens:          make([]v1beta1.OpenCalls, 0),
+							Capabilities:   make([]string, 0),
+							Syscalls:       make([]string, 0),
+							SeccompProfile: seccompProfile,
 						})
 					}
 					return containers
 				}
+				newObject.Spec.Architectures = []string{runtime.GOARCH}
 				newObject.Spec.Containers = addContainers(newObject.Spec.Containers, watchedContainer.ContainerNames[utils.Container])
 				newObject.Spec.InitContainers = addContainers(newObject.Spec.InitContainers, watchedContainer.ContainerNames[utils.InitContainer])
 				newObject.Spec.EphemeralContainers = addContainers(newObject.Spec.EphemeralContainers, watchedContainer.ContainerNames[utils.EphemeralContainer])
@@ -358,7 +377,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				}
 			} else {
-				logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to patch application profile, will get existing one and adjust patch", helpers.Error(err),
+				logger.L().Debug("ApplicationProfileManager - failed to patch application profile, will get existing one and adjust patch", helpers.Error(err),
 					helpers.String("slug", slug),
 					helpers.Int("container index", watchedContainer.ContainerIndex),
 					helpers.String("container ID", watchedContainer.ContainerID),
@@ -378,12 +397,23 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					existingContainer := utils.GetApplicationProfileContainer(existingObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
 					var addContainer bool
 					if existingContainer == nil {
+						name := watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex]
+						seccompProfile, err := am.seccompManager.GetSeccompProfile(name, watchedContainer.SeccompProfilePath)
+						if err != nil {
+							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
+								helpers.String("slug", slug),
+								helpers.Int("container index", watchedContainer.ContainerIndex),
+								helpers.String("container ID", watchedContainer.ContainerID),
+								helpers.String("k8s workload", watchedContainer.K8sContainerID))
+						}
+						logger.L().Debug("ApplicationProfileManager - got seccomp profile", helpers.Interface("profile", seccompProfile))
 						existingContainer = &v1beta1.ApplicationProfileContainer{
-							Name:         watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex],
-							Execs:        make([]v1beta1.ExecCalls, 0),
-							Opens:        make([]v1beta1.OpenCalls, 0),
-							Capabilities: make([]string, 0),
-							Syscalls:     make([]string, 0),
+							Name:           watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex],
+							Execs:          make([]v1beta1.ExecCalls, 0),
+							Opens:          make([]v1beta1.OpenCalls, 0),
+							Capabilities:   make([]string, 0),
+							Syscalls:       make([]string, 0),
+							SeccompProfile: seccompProfile,
 						}
 						addContainer = true
 					}
@@ -413,15 +443,26 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					case addContainer:
 						// 3b. insert a new container at the right index
 						for i := len(existingContainers); i < watchedContainer.ContainerIndex; i++ {
+							name := watchedContainer.ContainerNames[watchedContainer.ContainerType][i]
+							seccompProfile, err := am.seccompManager.GetSeccompProfile(name, watchedContainer.SeccompProfilePath)
+							if err != nil {
+								logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
+									helpers.String("slug", slug),
+									helpers.Int("container index", watchedContainer.ContainerIndex),
+									helpers.String("container ID", watchedContainer.ContainerID),
+									helpers.String("k8s workload", watchedContainer.K8sContainerID))
+							}
+							logger.L().Debug("ApplicationProfileManager - got seccomp profile", helpers.Interface("profile", seccompProfile))
 							replaceOperations = append(replaceOperations, utils.PatchOperation{
 								Op:   "add",
 								Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
 								Value: v1beta1.ApplicationProfileContainer{
-									Name:         watchedContainer.ContainerNames[watchedContainer.ContainerType][i],
-									Execs:        make([]v1beta1.ExecCalls, 0),
-									Opens:        make([]v1beta1.OpenCalls, 0),
-									Capabilities: make([]string, 0),
-									Syscalls:     make([]string, 0),
+									Name:           watchedContainer.ContainerNames[watchedContainer.ContainerType][i],
+									Execs:          make([]v1beta1.ExecCalls, 0),
+									Opens:          make([]v1beta1.OpenCalls, 0),
+									Capabilities:   make([]string, 0),
+									Syscalls:       make([]string, 0),
+									SeccompProfile: seccompProfile,
 								},
 							})
 						}
@@ -440,6 +481,19 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					}
 
 					replaceOperations = utils.AppendStatusAnnotationPatchOperations(replaceOperations, watchedContainer)
+					if len(existingObject.Spec.Architectures) == 0 {
+						replaceOperations = append(replaceOperations, utils.PatchOperation{
+							Op:    "add",
+							Path:  "/spec/architectures",
+							Value: []string{runtime.GOARCH},
+						})
+					} else {
+						replaceOperations = append(replaceOperations, utils.PatchOperation{
+							Op:    "add",
+							Path:  "/spec/architectures/-",
+							Value: runtime.GOARCH,
+						})
+					}
 
 					patch, err := json.Marshal(replaceOperations)
 					if err != nil {

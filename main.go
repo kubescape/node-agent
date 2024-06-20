@@ -35,9 +35,12 @@ import (
 	"node-agent/pkg/rulemanager"
 	rulemanagerv1 "node-agent/pkg/rulemanager/v1"
 	"node-agent/pkg/sbomhandler/syfthandler"
+	"node-agent/pkg/seccompmanager"
+	seccompmanagerv1 "node-agent/pkg/seccompmanager/v1"
 	"node-agent/pkg/storage/v1"
 	"node-agent/pkg/utils"
 	"node-agent/pkg/watcher/dynamicwatcher"
+	"node-agent/pkg/watcher/seccompprofilewatcher"
 	"os"
 	"os/signal"
 	"strings"
@@ -128,10 +131,23 @@ func main() {
 	// Initiate pre-existing containers
 	preRunningContainersIDs := mapset.NewSet[string]() // Set of container IDs
 
+	// Create the seccomp manager
+	var seccompManager seccompmanager.SeccompManagerClient
+	if cfg.EnableSeccomp {
+		seccompManager, err = seccompmanagerv1.NewSeccompManager()
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating SeccompManager", helpers.Error(err))
+		}
+		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(k8sClient, seccompManager)
+		dWatcher.AddAdaptor(seccompWatcher)
+	} else {
+		seccompManager = seccompmanager.NewSeccompManagerMock()
+	}
+
 	// Create the application profile manager
 	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	if cfg.EnableApplicationProfile {
-		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, preRunningContainersIDs, k8sObjectCache)
+		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, preRunningContainersIDs, k8sObjectCache, seccompManager)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the application profile manager", helpers.Error(err))
 		}

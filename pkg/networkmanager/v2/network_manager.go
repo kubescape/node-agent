@@ -222,7 +222,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 
 	// verify the container hasn't already been deleted
 	if !nm.trackedContainers.Contains(watchedContainer.K8sContainerID) {
-		logger.L().Ctx(ctx).Debug("NetworkManager - container isn't tracked, not saving profile",
+		logger.L().Debug("NetworkManager - container isn't tracked, not saving profile",
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -341,7 +341,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				}
 			} else {
-				logger.L().Ctx(ctx).Debug("NetworkManager - failed to patch network neighborhood, will get existing one and adjust patch", helpers.Error(err),
+				logger.L().Debug("NetworkManager - failed to patch network neighborhood, will get existing one and adjust patch", helpers.Error(err),
 					helpers.String("slug", slug),
 					helpers.Int("container index", watchedContainer.ContainerIndex),
 					helpers.String("container ID", watchedContainer.ContainerID),
