@@ -11,6 +11,7 @@
   "runtimeDetectionEnabled": "true",
   "nodeProfileServiceEnabled": "true",
   "nodeProfileInterval": "1m",
+  "seccompServiceEnabled": "true",
   "exporters": {
     "syslogExporterURL": "http://syslog.kubescape.svc.cluster.local:514",
     "stdoutExporter": "false",
