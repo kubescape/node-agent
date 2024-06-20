@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"node-agent/pkg/rulebindingmanager"
-	"node-agent/pkg/utils"
 	"runtime"
 	"time"
 
@@ -14,6 +12,8 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {

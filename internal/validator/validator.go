@@ -2,10 +2,11 @@ package validator
 
 import (
 	"fmt"
-	"node-agent/pkg/config"
-	"node-agent/pkg/utils"
 	"os"
 	"syscall"
+
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/facette/natsort"

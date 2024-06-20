@@ -1,8 +1,8 @@
 package ruleengine
 
 import (
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 var _ RuleCreator = (*RuleCreatorMock)(nil)

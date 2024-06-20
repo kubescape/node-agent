@@ -3,10 +3,11 @@ package seccompmanager
 import (
 	"encoding/json"
 	"fmt"
-	"node-agent/pkg/seccompmanager"
 	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/kubescape/node-agent/pkg/seccompmanager"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 	mapset "github.com/deckarep/golang-set/v2"

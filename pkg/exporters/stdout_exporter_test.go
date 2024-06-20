@@ -1,9 +1,10 @@
 package exporters
 
 import (
-	"node-agent/pkg/ruleengine/v1"
 	"os"
 	"testing"
+
+	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"

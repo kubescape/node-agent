@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/evanphx/json-patch"
+	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
 )

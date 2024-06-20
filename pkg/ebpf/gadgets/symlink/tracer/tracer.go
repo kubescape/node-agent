@@ -5,10 +5,11 @@ package tracer
 import (
 	"errors"
 	"fmt"
-	"node-agent/pkg/ebpf/gadgets/symlink/types"
 	"os"
 	"runtime"
 	"unsafe"
+
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"

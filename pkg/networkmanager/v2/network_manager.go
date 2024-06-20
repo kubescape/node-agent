@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"node-agent/pkg/config"
-	"node-agent/pkg/dnsmanager"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/networkmanager"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/storage"
-	"node-agent/pkg/utils"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/networkmanager"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"k8s.io/utils/ptr"
 

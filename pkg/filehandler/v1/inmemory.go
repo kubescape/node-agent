@@ -2,8 +2,9 @@ package filehandler
 
 import (
 	"fmt"
-	"node-agent/pkg/filehandler"
 	"sync"
+
+	"github.com/kubescape/node-agent/pkg/filehandler"
 )
 
 const initFileListLength = 500

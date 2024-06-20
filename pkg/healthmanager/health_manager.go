@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"node-agent/pkg/containerwatcher/v1"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/containerwatcher/v1"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"

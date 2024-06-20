@@ -1,6 +1,6 @@
 package metricsmanager
 
-import "node-agent/pkg/utils"
+import "github.com/kubescape/node-agent/pkg/utils"
 
 // MetricsManager is an interface for reporting metrics
 type MetricsManager interface {

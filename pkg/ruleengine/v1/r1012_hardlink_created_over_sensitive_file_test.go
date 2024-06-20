@@ -2,10 +2,11 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/utils"
 	"testing"
 
-	tracerhardlinktype "node-agent/pkg/ebpf/gadgets/hardlink/types"
+	"github.com/kubescape/node-agent/pkg/utils"
+
+	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 )
 
 func TestR1012HardlinkCreatedOverSensitiveFile(t *testing.T) {

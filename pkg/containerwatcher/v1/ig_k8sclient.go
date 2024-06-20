@@ -1,9 +1,10 @@
 package containerwatcher
 
 import (
-	"node-agent/pkg/utils"
 	"slices"
 	"strings"
+
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"

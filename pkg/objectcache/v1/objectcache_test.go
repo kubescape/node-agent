@@ -1,8 +1,9 @@
 package objectcache
 
 import (
-	"node-agent/pkg/objectcache"
 	"testing"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	"github.com/stretchr/testify/assert"
 )

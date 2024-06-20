@@ -3,9 +3,10 @@ package exporters
 import (
 	"encoding/csv"
 	"fmt"
-	"node-agent/pkg/malwaremanager"
-	"node-agent/pkg/ruleengine"
 	"os"
+
+	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
 
 	"github.com/sirupsen/logrus"
 )

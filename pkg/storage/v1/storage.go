@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"node-agent/pkg/storage"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/storage"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/kubescape/go-logger"

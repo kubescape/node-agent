@@ -12,7 +12,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 
-	"node-agent/pkg/ebpf/gadgets/randomx/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"

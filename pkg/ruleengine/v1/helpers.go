@@ -3,10 +3,11 @@ package ruleengine
 import (
 	"errors"
 	"fmt"
-	"node-agent/pkg/objectcache"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"

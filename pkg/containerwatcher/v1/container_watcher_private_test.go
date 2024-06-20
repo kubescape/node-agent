@@ -1,9 +1,10 @@
 package containerwatcher
 
 import (
-	"node-agent/pkg/rulebindingmanager"
 	"slices"
 	"testing"
+
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 

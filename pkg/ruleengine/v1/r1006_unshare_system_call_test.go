@@ -2,10 +2,11 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/utils"
 	"testing"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	"github.com/kubescape/node-agent/pkg/utils"
+
+	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 )
 
 func TestR1006UnshareSyscall(t *testing.T) {

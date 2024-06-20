@@ -6,15 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	mmtypes "node-agent/pkg/malwaremanager/v1/types"
 	"strings"
 	"testing"
 
-	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-
-	"node-agent/pkg/ruleengine/v1"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
+	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/stretchr/testify/assert"
 )
 

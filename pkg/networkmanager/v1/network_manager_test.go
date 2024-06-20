@@ -3,12 +3,13 @@ package v1
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/config"
-	"node-agent/pkg/dnsmanager"
-	"node-agent/pkg/networkmanager"
-	"node-agent/pkg/networkmanager/testdata"
-	"node-agent/pkg/objectcache"
 	"testing"
+
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/networkmanager"
+	"github.com/kubescape/node-agent/pkg/networkmanager/testdata"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	_ "embed"
 

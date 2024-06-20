@@ -1,8 +1,9 @@
 package metricsmanager
 
 import (
-	"node-agent/pkg/utils"
 	"sync/atomic"
+
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/goradd/maps"
 )

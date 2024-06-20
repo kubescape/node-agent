@@ -3,25 +3,23 @@ package applicationprofilecache
 import (
 	"context"
 	"fmt"
-	"node-agent/mocks"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/watcher"
 	"slices"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/node-agent/mocks"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
-
 	"k8s.io/client-go/kubernetes/scheme"
-
-	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/stretchr/testify/assert"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func init() {
