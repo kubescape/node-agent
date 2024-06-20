@@ -37,6 +37,7 @@ func (exporter *StdoutExporter) SendRuleAlert(failedRule ruleengine.RuleFailure)
 		"BaseRuntimeMetadata":   failedRule.GetBaseRuntimeAlert(),
 		"RuntimeProcessDetails": failedRule.GetRuntimeProcessDetails(),
 		"RuntimeK8sDetails":     failedRule.GetRuntimeAlertK8sDetails(),
+		"RuleID":                failedRule.GetRuleId(),
 	}).Error(failedRule.GetBaseRuntimeAlert().AlertName)
 }
 
@@ -47,5 +48,6 @@ func (exporter *StdoutExporter) SendMalwareAlert(malwareResult malwaremanager.Ma
 		"BaseRuntimeMetadata":   malwareResult.GetBasicRuntimeAlert(),
 		"RuntimeProcessDetails": malwareResult.GetRuntimeProcessDetails(),
 		"RuntimeK8sDetails":     malwareResult.GetRuntimeAlertK8sDetails(),
+		"RuleID":                "R3000",
 	}).Error(malwareResult.GetBasicRuntimeAlert().AlertName)
 }
