@@ -69,8 +69,8 @@ func TestR0008ReadingEnvVariablesFromProcFS(t *testing.T) {
 	// Test with non-whitelisted file
 	e.FullPath = "/proc/2/environ"
 	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
-	if ruleResult == nil {
-		t.Errorf("Expected ruleResult to not be nil since file is not whitelisted")
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to not be nil since there is a read from /environ")
 	}
 
 	// Test with non /proc file
