@@ -39,9 +39,10 @@ type HTTPExporter struct {
 	ClusterName string `json:"clusterName"`
 	httpClient  *http.Client
 	// alertCount is the number of alerts sent in the last minute, used to limit the number of alerts sent, so we don't overload the system or reach the rate limit
-	alertCount      int
-	alertCountLock  sync.Mutex
-	alertCountStart time.Time
+	alertCount         int
+	alertCountLock     sync.Mutex
+	alertCountStart    time.Time
+	alertLimitNotified bool
 }
 
 type HTTPAlertsList struct {
@@ -114,10 +115,12 @@ func (exporter *HTTPExporter) sendAlertLimitReached() {
 
 func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	isLimitReached := exporter.checkAlertLimit()
-	if isLimitReached {
+	if isLimitReached && !exporter.alertLimitNotified {
 		exporter.sendAlertLimitReached()
+		exporter.alertLimitNotified = true
 		return
 	}
+
 	// populate the RuntimeAlert struct with the data from the failedRule
 	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = exporter.NodeName
@@ -188,10 +191,12 @@ func (exporter *HTTPExporter) sendInAlertList(httpAlert apitypes.RuntimeAlert, p
 
 func (exporter *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
 	isLimitReached := exporter.checkAlertLimit()
-	if isLimitReached {
+	if isLimitReached && !exporter.alertLimitNotified {
 		exporter.sendAlertLimitReached()
+		exporter.alertLimitNotified = true
 		return
 	}
+
 	k8sDetails := malwareResult.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = exporter.NodeName
 	k8sDetails.ClusterName = exporter.ClusterName
@@ -219,6 +224,7 @@ func (exporter *HTTPExporter) checkAlertLimit() bool {
 	if time.Since(exporter.alertCountStart) > time.Minute {
 		exporter.alertCountStart = time.Now()
 		exporter.alertCount = 0
+		exporter.alertLimitNotified = false
 	}
 
 	exporter.alertCount++
