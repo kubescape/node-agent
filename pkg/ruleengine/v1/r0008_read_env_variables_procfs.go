@@ -77,7 +77,8 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 	}
 
 	for _, open := range appProfileOpenList.Opens {
-		if open.Path == openEvent.FullPath {
+		// Check if there is an open call to /proc/<pid>/environ
+		if strings.HasPrefix(open.Path, "/proc/") && strings.Contains(open.Path, "/environ") {
 			return nil
 		}
 	}
