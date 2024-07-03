@@ -21,6 +21,7 @@ type hardlinkEvent struct {
 	Gid        uint32
 	UpperLayer bool
 	Comm       [16]uint8
+	Exepath    [4096]uint8
 	Oldpath    [4096]uint8
 	Newpath    [4096]uint8
 	_          [7]byte

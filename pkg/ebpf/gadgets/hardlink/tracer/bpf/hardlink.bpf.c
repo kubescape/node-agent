@@ -7,11 +7,12 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 
-#include "hardlink.h"
 #include "../../../../include/mntns_filter.h"
 #include "../../../../include/filesystem.h"
 #include "../../../../include/macros.h"
 #include "../../../../include/buffer.h"
+
+#include "hardlink.h"
 
 // Events map.
 struct {
@@ -121,6 +122,11 @@ int tracepoint__sys_link(struct syscall_trace_enter *ctx)
     event->upper_layer = has_upper_layer();
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
 
+    struct file *exe_file = BPF_CORE_READ(current_task, mm, exe_file);
+    char *exepath;
+    exepath = get_path_str(&exe_file->f_path);
+    bpf_probe_read_kernel_str(event->exepath, MAX_STRING_SIZE, exepath);
+
     /* emit event */
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(struct event));
 
@@ -183,6 +189,11 @@ int tracepoint__sys_linkat(struct syscall_trace_enter *ctx)
     event->gid = (u32)(uid_gid >> 32);
     event->upper_layer = has_upper_layer();
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
+
+    struct file *exe_file = BPF_CORE_READ(current_task, mm, exe_file);
+    char *exepath;
+    exepath = get_path_str(&exe_file->f_path);
+    bpf_probe_read_kernel_str(event->exepath, MAX_STRING_SIZE, exepath);
 
     /* emit event */
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(struct event));

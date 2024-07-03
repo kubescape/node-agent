@@ -15,6 +15,7 @@ type Event struct {
 	Gid        uint32 `json:"gid,omitempty" column:"gid,template:gid"`
 	UpperLayer bool   `json:"upperlayer,omitempty" column:"upperlayer,template:upperlayer"`
 	Comm       string `json:"comm,omitempty" column:"comm,template:comm"`
+	ExePath    string `json:"exe_path,omitempty" column:"exe_path,template:exe_path"`
 	OldPath    string `json:"oldpath,omitempty" column:"oldpath,template:oldpath"`
 	NewPath    string `json:"newpath,omitempty" column:"newpath,template:newpath"`
 }

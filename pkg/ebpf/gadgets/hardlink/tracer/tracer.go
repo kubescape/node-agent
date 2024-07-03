@@ -140,6 +140,7 @@ func (t *Tracer) run() {
 			Gid:           bpfEvent.Gid,
 			UpperLayer:    bpfEvent.UpperLayer,
 			Comm:          gadgets.FromCString(bpfEvent.Comm[:]),
+			ExePath:       gadgets.FromCString(bpfEvent.Exepath[:]),
 			OldPath:       gadgets.FromCString(bpfEvent.Oldpath[:]),
 			NewPath:       gadgets.FromCString(bpfEvent.Newpath[:]),
 		}
