@@ -16,6 +16,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
+const (
+	MaxSniffingTimeLabel = "kubescape.io/max-sniffing-time"
+)
+
 func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
 
 	// do not trace the node-agent pod
@@ -34,7 +38,18 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-		time.AfterFunc(ch.cfg.MaxSniffingTime, func() {
+
+		// Check if Pod has a label of max sniffing time
+		sniffingTime := ch.cfg.MaxSniffingTime
+		if podLabelMaxSniffingTime, ok := notif.Container.K8s.PodLabels[MaxSniffingTimeLabel]; ok {
+			if duration, err := time.ParseDuration(podLabelMaxSniffingTime); err == nil {
+				sniffingTime = duration
+			} else {
+				logger.L().Error("parsing sniffing time in label", helpers.Error(err))
+			}
+		}
+
+		time.AfterFunc(sniffingTime, func() {
 			logger.L().Info("monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 			ch.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
