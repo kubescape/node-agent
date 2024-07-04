@@ -62,7 +62,7 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 		return nil
 	}
 
-	if !strings.HasPrefix(openEvent.FullPath, "/proc/") || !strings.Contains(openEvent.FullPath, "/environ") {
+	if !strings.HasPrefix(openEvent.FullPath, "/proc/") || !strings.HasSuffix(openEvent.FullPath, "/environ") {
 		return nil
 	}
 
@@ -78,7 +78,7 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 
 	for _, open := range appProfileOpenList.Opens {
 		// Check if there is an open call to /proc/<pid>/environ
-		if strings.HasPrefix(open.Path, "/proc/") && strings.Contains(open.Path, "/environ") {
+		if strings.HasPrefix(open.Path, "/proc/") && strings.HasSuffix(open.Path, "/environ") {
 			return nil
 		}
 	}

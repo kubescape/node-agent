@@ -36,5 +36,6 @@ struct event {
     __u32 uid;
     __u32 gid;
 	bool upper_layer;
+	__u8 exepath[MAX_STRING_SIZE];
     __u8 comm[TASK_COMM_LEN];
 };

@@ -104,6 +104,8 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 						UpperLayer: &hardlinkEvent.UpperLayer,
 						Uid:        &hardlinkEvent.Uid,
 						Gid:        &hardlinkEvent.Gid,
+						Path:       hardlinkEvent.ExePath,
+						Hardlink:   hardlinkEvent.ExePath,
 					},
 					ContainerID: hardlinkEvent.Runtime.ContainerID,
 				},

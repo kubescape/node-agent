@@ -19,6 +19,7 @@ type randomxEvent struct {
 	Uid        uint32
 	Gid        uint32
 	UpperLayer bool
+	Exepath    [4096]uint8
 	Comm       [16]uint8
 	_          [7]byte
 }
@@ -71,6 +72,8 @@ type randomxProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type randomxMapSpecs struct {
+	Bufs                 *ebpf.MapSpec `ebpf:"bufs"`
+	EmptyEvent           *ebpf.MapSpec `ebpf:"empty_event"`
 	Events               *ebpf.MapSpec `ebpf:"events"`
 	GadgetHeap           *ebpf.MapSpec `ebpf:"gadget_heap"`
 	GadgetMntnsFilterMap *ebpf.MapSpec `ebpf:"gadget_mntns_filter_map"`
@@ -95,6 +98,8 @@ func (o *randomxObjects) Close() error {
 //
 // It can be passed to loadRandomxObjects or ebpf.CollectionSpec.LoadAndAssign.
 type randomxMaps struct {
+	Bufs                 *ebpf.Map `ebpf:"bufs"`
+	EmptyEvent           *ebpf.Map `ebpf:"empty_event"`
 	Events               *ebpf.Map `ebpf:"events"`
 	GadgetHeap           *ebpf.Map `ebpf:"gadget_heap"`
 	GadgetMntnsFilterMap *ebpf.Map `ebpf:"gadget_mntns_filter_map"`
@@ -102,6 +107,8 @@ type randomxMaps struct {
 
 func (m *randomxMaps) Close() error {
 	return _RandomxClose(
+		m.Bufs,
+		m.EmptyEvent,
 		m.Events,
 		m.GadgetHeap,
 		m.GadgetMntnsFilterMap,

@@ -104,6 +104,8 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 						UpperLayer: &symlinkEvent.UpperLayer,
 						Uid:        &symlinkEvent.Uid,
 						Gid:        &symlinkEvent.Gid,
+						Hardlink:   symlinkEvent.ExePath,
+						Path:       symlinkEvent.ExePath,
 					},
 					ContainerID: symlinkEvent.Runtime.ContainerID,
 				},
