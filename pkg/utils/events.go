@@ -12,5 +12,6 @@ const (
 	RandomXEventType
 	SymlinkEventType
 	HardlinkEventType
+	AntitamperingEventType
 	AllEventType
 )

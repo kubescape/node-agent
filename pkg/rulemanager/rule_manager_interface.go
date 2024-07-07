@@ -1,6 +1,7 @@
 package rulemanager
 
 import (
+	tracerantitamperingtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/antitampering/types"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
@@ -25,6 +26,7 @@ type RuleManagerClient interface {
 	ReportRandomxEvent(event tracerrandomxtype.Event)
 	ReportSymlinkEvent(event tracersymlinktype.Event)
 	ReportHardlinkEvent(event tracerhardlinktype.Event)
+	ReportAntitamperingEvent(event tracerantitamperingtype.Event)
 	HasApplicableRuleBindings(namespace, name string) bool
 	HasFinalApplicationProfile(pod *v1.Pod) bool
 	IsContainerMonitored(k8sContainerID string) bool

@@ -29,6 +29,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	tracerantitampering "github.com/kubescape/node-agent/pkg/ebpf/gadgets/antitampering/tracer"
+	tracerantitamperingtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/antitampering/types"
 	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerandomx "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/tracer"
@@ -47,22 +49,24 @@ import (
 )
 
 const (
-	capabilitiesTraceName      = "trace_capabilities"
-	execTraceName              = "trace_exec"
-	networkTraceName           = "trace_network"
-	dnsTraceName               = "trace_dns"
-	openTraceName              = "trace_open"
-	randomxTraceName           = "trace_randomx"
-	symlinkTraceName           = "trace_symlink"
-	hardlinkTraceName          = "trace_hardlink"
-	capabilitiesWorkerPoolSize = 1
-	execWorkerPoolSize         = 2
-	openWorkerPoolSize         = 8
-	networkWorkerPoolSize      = 1
-	dnsWorkerPoolSize          = 5
-	randomxWorkerPoolSize      = 1
-	symlinkWorkerPoolSize      = 1
-	hardlinkWorkerPoolSize     = 1
+	capabilitiesTraceName       = "trace_capabilities"
+	execTraceName               = "trace_exec"
+	networkTraceName            = "trace_network"
+	dnsTraceName                = "trace_dns"
+	openTraceName               = "trace_open"
+	randomxTraceName            = "trace_randomx"
+	symlinkTraceName            = "trace_symlink"
+	hardlinkTraceName           = "trace_hardlink"
+	antitamperingTraceName      = "trace_antitampering"
+	capabilitiesWorkerPoolSize  = 1
+	execWorkerPoolSize          = 2
+	openWorkerPoolSize          = 8
+	networkWorkerPoolSize       = 1
+	dnsWorkerPoolSize           = 5
+	randomxWorkerPoolSize       = 1
+	symlinkWorkerPoolSize       = 1
+	hardlinkWorkerPoolSize      = 1
+	antitamperingWorkerPoolSize = 1
 )
 
 type IGContainerWatcher struct {
@@ -89,27 +93,29 @@ type IGContainerWatcher struct {
 	tracerCollection    *tracercollection.TracerCollection
 	socketEnricher      *socketenricher.SocketEnricher
 	// IG Tracers
-	capabilitiesTracer *tracercapabilities.Tracer
-	execTracer         *tracerexec.Tracer
-	openTracer         *traceropen.Tracer
-	syscallTracer      *tracerseccomp.Tracer
-	networkTracer      *tracernetwork.Tracer
-	dnsTracer          *tracerdns.Tracer
-	randomxTracer      *tracerandomx.Tracer
-	symlinkTracer      *tracersymlink.Tracer
-	hardlinkTracer     *tracerhardlink.Tracer
-	kubeIPInstance     operators.OperatorInstance
-	kubeNameInstance   operators.OperatorInstance
+	capabilitiesTracer  *tracercapabilities.Tracer
+	execTracer          *tracerexec.Tracer
+	openTracer          *traceropen.Tracer
+	syscallTracer       *tracerseccomp.Tracer
+	networkTracer       *tracernetwork.Tracer
+	dnsTracer           *tracerdns.Tracer
+	randomxTracer       *tracerandomx.Tracer
+	symlinkTracer       *tracersymlink.Tracer
+	hardlinkTracer      *tracerhardlink.Tracer
+	antitamperingTracer *tracerantitampering.Tracer
+	kubeIPInstance      operators.OperatorInstance
+	kubeNameInstance    operators.OperatorInstance
 
 	// Worker pools
-	capabilitiesWorkerPool *ants.PoolWithFunc
-	execWorkerPool         *ants.PoolWithFunc
-	openWorkerPool         *ants.PoolWithFunc
-	networkWorkerPool      *ants.PoolWithFunc
-	dnsWorkerPool          *ants.PoolWithFunc
-	randomxWorkerPool      *ants.PoolWithFunc
-	symlinkWorkerPool      *ants.PoolWithFunc
-	hardlinkWorkerPool     *ants.PoolWithFunc
+	capabilitiesWorkerPool  *ants.PoolWithFunc
+	execWorkerPool          *ants.PoolWithFunc
+	openWorkerPool          *ants.PoolWithFunc
+	networkWorkerPool       *ants.PoolWithFunc
+	dnsWorkerPool           *ants.PoolWithFunc
+	randomxWorkerPool       *ants.PoolWithFunc
+	symlinkWorkerPool       *ants.PoolWithFunc
+	hardlinkWorkerPool      *ants.PoolWithFunc
+	antitamperingWorkerPool *ants.PoolWithFunc
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *tracerexectype.Event
@@ -119,6 +125,7 @@ type IGContainerWatcher struct {
 	randomxWorkerChan      chan *tracerandomxtype.Event
 	symlinkWorkerChan      chan *tracersymlinktype.Event
 	hardlinkWorkerChan     chan *tracerhardlinktype.Event
+	antitampWorkerChan     chan *tracerantitamperingtype.Event
 
 	preRunningContainersIDs mapset.Set[string]
 
@@ -293,6 +300,18 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	if err != nil {
 		return nil, fmt.Errorf("creating hardlink worker pool: %w", err)
 	}
+	// Create a antitampering worker pool
+	antitamperingWorkerPool, err := ants.NewPoolWithFunc(antitamperingWorkerPoolSize, func(i interface{}) {
+		event := i.(tracerantitamperingtype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		metrics.ReportEvent(utils.AntitamperingEventType)
+		ruleManager.ReportAntitamperingEvent(event)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating antitampering worker pool: %w", err)
+	}
 
 	return &IGContainerWatcher{
 		// Configuration
@@ -323,6 +342,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		randomxWorkerPool:       randomxWorkerPool,
 		symlinkWorkerPool:       symlinkWorkerPool,
 		hardlinkWorkerPool:      hardlinkWorkerPool,
+		antitamperingWorkerPool: antitamperingWorkerPool,
 		metrics:                 metrics,
 		preRunningContainersIDs: preRunningContainers,
 
@@ -335,6 +355,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 5000),
 		symlinkWorkerChan:      make(chan *tracersymlinktype.Event, 1000),
 		hardlinkWorkerChan:     make(chan *tracerhardlinktype.Event, 1000),
+		antitampWorkerChan:     make(chan *tracerantitamperingtype.Event, 1000),
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,

@@ -251,6 +251,11 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting hardlink tracing", helpers.Error(err))
 			return err
 		}
+
+		if err := ch.startantitamperingTracing(); err != nil {
+			logger.L().Error("error starting antitampering tracing", helpers.Error(err))
+			return err
+		}
 	}
 
 	return nil
@@ -314,6 +319,12 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		// Stop hardlink tracer
 		if err := ch.stopHardlinkTracing(); err != nil {
 			logger.L().Error("error stopping hardlink tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+
+		// Stop antitampering tracer
+		if err := ch.stopAntitamperingTracing(); err != nil {
+			logger.L().Error("error stopping antitampering tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 	}

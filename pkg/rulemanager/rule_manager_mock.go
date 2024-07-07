@@ -1,6 +1,7 @@
 package rulemanager
 
 import (
+	tracerantitamperingtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/antitampering/types"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
@@ -60,6 +61,10 @@ func (r *RuleManagerMock) ReportSymlinkEvent(_ tracersymlinktype.Event) {
 }
 
 func (r *RuleManagerMock) ReportHardlinkEvent(_ tracerhardlinktype.Event) {
+	// noop
+}
+
+func (r *RuleManagerMock) ReportAntitamperingEvent(_ tracerantitamperingtype.Event) {
 	// noop
 }
 
