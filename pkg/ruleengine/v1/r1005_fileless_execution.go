@@ -9,8 +9,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 
-	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 )
@@ -24,11 +22,10 @@ var R1005FilelessExecutionRuleDescriptor = RuleDescriptor{
 	ID:          R1005ID,
 	Name:        R1005Name,
 	Description: "Detecting Fileless Execution",
-	Tags:        []string{"syscall", "fileless", "execution"},
+	Tags:        []string{"fileless", "execution"},
 	Priority:    RulePriorityHigh,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{
-			utils.SyscallEventType,
 			utils.ExecveEventType,
 		},
 	},
@@ -41,11 +38,10 @@ var _ ruleengine.RuleEvaluator = (*R1005FilelessExecution)(nil)
 
 type R1005FilelessExecution struct {
 	BaseRule
-	alreadyNotified bool
 }
 
 func CreateRuleR1005FilelessExecution() *R1005FilelessExecution {
-	return &R1005FilelessExecution{alreadyNotified: false}
+	return &R1005FilelessExecution{}
 }
 
 func (rule *R1005FilelessExecution) Name() string {
@@ -59,49 +55,8 @@ func (rule *R1005FilelessExecution) DeleteRule() {
 }
 
 func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
-	if eventType == utils.SyscallEventType {
-		return rule.handleSyscallEvent(event.(*ruleenginetypes.SyscallEvent))
-	} else if eventType == utils.ExecveEventType {
+	if eventType == utils.ExecveEventType {
 		return rule.handleExecveEvent(event.(*tracerexectype.Event))
-	}
-
-	return nil
-}
-
-func (rule *R1005FilelessExecution) handleSyscallEvent(syscallEvent *ruleenginetypes.SyscallEvent) ruleengine.RuleFailure {
-	if rule.alreadyNotified {
-		return nil
-	}
-
-	if syscallEvent.SyscallName == "memfd_create" {
-		rule.alreadyNotified = true
-		ruleFailure := GenericRuleFailure{
-			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
-				InfectedPID:    syscallEvent.Pid,
-				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
-				Severity:       R1005FilelessExecutionRuleDescriptor.Priority,
-			},
-			RuntimeProcessDetails: apitypes.ProcessTree{
-				ProcessTree: apitypes.Process{
-					Comm: syscallEvent.Comm,
-					Gid:  &syscallEvent.Gid,
-					PID:  syscallEvent.Pid,
-					Uid:  &syscallEvent.Uid,
-				},
-				ContainerID: syscallEvent.Runtime.ContainerID,
-			},
-			TriggerEvent: syscallEvent.Event,
-			RuleAlert: apitypes.RuleAlert{
-				RuleDescription: fmt.Sprintf("Fileless execution detected: syscall memfd_create executed in: %s", syscallEvent.GetContainer()),
-			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName: syscallEvent.GetPod(),
-			},
-			RuleID: rule.ID(),
-		}
-
-		return &ruleFailure
 	}
 
 	return nil
