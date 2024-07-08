@@ -121,7 +121,7 @@ func main() {
 
 	nodeName := os.Getenv(config.NodeNameEnvVar)
 	// Create watchers
-	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, cfg)
+	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, cfg.SkipNamespace)
 	// create k8sObject cache
 	k8sObjectCache, err := k8scache.NewK8sObjectCache(nodeName, k8sClient)
 	if err != nil {

@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/node-agent/pkg/watcher/cooldownqueue"
@@ -34,22 +33,24 @@ type resourceVersionGetter interface {
 	GetResourceVersion() string
 }
 
+type SkipNamespaceFunc func(string) bool
+
 type WatchHandler struct {
-	k8sClient   k8sclient.K8sClientInterface
-	resources   map[string]watcher.WatchResource
-	eventQueues map[string]*cooldownqueue.CooldownQueue
-	handlers    []watcher.Watcher
-	cfg         config.Config
+	k8sClient         k8sclient.K8sClientInterface
+	resources         map[string]watcher.WatchResource
+	eventQueues       map[string]*cooldownqueue.CooldownQueue
+	handlers          []watcher.Watcher
+	skipNamespaceFunc SkipNamespaceFunc
 }
 
 var errWatchClosed = errors.New("watch channel closed")
 
-func NewWatchHandler(k8sClient k8sclient.K8sClientInterface, cfg config.Config) *WatchHandler {
+func NewWatchHandler(k8sClient k8sclient.K8sClientInterface, skipNamespaceFunc SkipNamespaceFunc) *WatchHandler {
 	return &WatchHandler{
-		k8sClient:   k8sClient,
-		resources:   make(map[string]watcher.WatchResource),
-		eventQueues: make(map[string]*cooldownqueue.CooldownQueue),
-		cfg:         cfg,
+		k8sClient:         k8sClient,
+		resources:         make(map[string]watcher.WatchResource),
+		eventQueues:       make(map[string]*cooldownqueue.CooldownQueue),
+		skipNamespaceFunc: skipNamespaceFunc,
 	}
 }
 
@@ -158,7 +159,7 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 				return fmt.Errorf("watch error: %s", event.Object)
 			}
 			pod := event.Object.(*unstructured.Unstructured)
-			if wh.cfg.SkipNamespace(pod.GetNamespace()) {
+			if wh.skipNamespaceFunc(pod.GetNamespace()) {
 				continue
 			}
 			eventQueue.Enqueue(event)
@@ -187,7 +188,7 @@ func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schem
 	if err := list.EachListItem(context.Background(), watchOpts, func(obj runtime.Object) error {
 		pod := obj.(*unstructured.Unstructured)
 		resourceVersion = pod.GetResourceVersion()
-		if wh.cfg.SkipNamespace(pod.GetNamespace()) {
+		if wh.skipNamespaceFunc(pod.GetNamespace()) {
 			return nil
 		}
 		for _, handler := range wh.handlers {

@@ -61,7 +61,7 @@ func (sc *SyftHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 	}
 
 	if watchedContainer.SBOMSyftFiltered == nil {
-		filteredSBOMKey, err := watchedContainer.InstanceID.GetSlug()
+		filteredSBOMKey, err := watchedContainer.InstanceID.GetSlug(false)
 		if err != nil {
 			return err
 		}

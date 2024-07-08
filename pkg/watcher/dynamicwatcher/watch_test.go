@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/mocks"
-	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/watcher"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -75,7 +74,9 @@ func startTest(t *testing.T, tc testObj) {
 	k8sClient := k8sinterface.NewKubernetesApiMock()
 	k8sClient.DynamicClient = dynamicfake.NewSimpleDynamicClient(scheme.Scheme, tc.preCreatedObjects...)
 
-	wh := NewWatchHandler(k8sClient, config.Config{})
+	wh := NewWatchHandler(k8sClient, func(s string) bool {
+		return false
+	})
 
 	wh.AddAdaptor(a)
 
