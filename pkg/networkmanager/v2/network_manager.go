@@ -358,14 +358,13 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				} else {
 					var replaceOperations []utils.PatchOperation
+					containerNames := watchedContainer.ContainerNames[watchedContainer.ContainerType]
 					// check existing container
 					existingContainer := utils.GetNetworkNeighborhoodContainer(existingObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
-					var addContainer bool
 					if existingContainer == nil {
 						existingContainer = &v1beta1.NetworkNeighborhoodContainer{
-							Name: watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex],
+							Name: containerNames[watchedContainer.ContainerIndex],
 						}
-						addContainer = true
 					}
 					// update it
 					utils.EnrichNeighborhoodContainer(existingContainer, ingress, egress)
@@ -379,40 +378,30 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 						existingContainers = existingObject.Spec.EphemeralContainers
 					}
 					// replace or add container using patch
-					switch {
-					case existingContainers == nil:
-						// 3a. insert a new container slice, with the new container at the right index
-						containers := make([]v1beta1.NetworkNeighborhoodContainer, watchedContainer.ContainerIndex+1)
-						containers[watchedContainer.ContainerIndex] = *existingContainer
+					// 3a. ensure we have a container slice
+					if existingContainers == nil {
 						replaceOperations = append(replaceOperations, utils.PatchOperation{
 							Op:    "add",
 							Path:  fmt.Sprintf("/spec/%s", watchedContainer.ContainerType),
-							Value: containers,
-						})
-					case addContainer:
-						// 3b. insert a new container at the right index
-						for i := len(existingContainers); i < watchedContainer.ContainerIndex; i++ {
-							replaceOperations = append(replaceOperations, utils.PatchOperation{
-								Op:   "add",
-								Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
-								Value: v1beta1.NetworkNeighborhoodContainer{
-									Name: watchedContainer.ContainerNames[watchedContainer.ContainerType][i],
-								},
-							})
-						}
-						replaceOperations = append(replaceOperations, utils.PatchOperation{
-							Op:    "add",
-							Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
-							Value: existingContainer,
-						})
-					default:
-						// 3c. replace the existing container at the right index
-						replaceOperations = append(replaceOperations, utils.PatchOperation{
-							Op:    "replace",
-							Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
-							Value: existingContainer,
+							Value: make([]v1beta1.NetworkNeighborhoodContainer, 0),
 						})
 					}
+					// 3b. ensure the slice has all the containers
+					for i := len(existingContainers); i < len(containerNames); i++ {
+						replaceOperations = append(replaceOperations, utils.PatchOperation{
+							Op:   "add",
+							Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
+							Value: v1beta1.NetworkNeighborhoodContainer{
+								Name: containerNames[i],
+							},
+						})
+					}
+					// 3c. replace the existing container at the right index
+					replaceOperations = append(replaceOperations, utils.PatchOperation{
+						Op:    "replace",
+						Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
+						Value: existingContainer,
+					})
 
 					replaceOperations = utils.AppendStatusAnnotationPatchOperations(replaceOperations, watchedContainer)
 
