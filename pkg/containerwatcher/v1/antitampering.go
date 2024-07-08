@@ -55,7 +55,7 @@ func (ch *IGContainerWatcher) startantitamperingTracing() error {
 		Name:       "restricted_maps_names",
 		Type:       ebpf.Hash,
 		KeySize:    16,
-		ValueSize:  1,
+		ValueSize:  4,
 		MaxEntries: 1024,
 	})
 	if err != nil {
@@ -71,18 +71,20 @@ func (ch *IGContainerWatcher) startantitamperingTracing() error {
 	// Initialize restricted maps names map with the name of the restricted maps.
 	restrictedMapsNames := []string{"gadget_heap", "gadget_mntns_filter_map"}
 	for _, name := range restrictedMapsNames {
-		if err := restrictedMapsNamesMap.Put([]byte(name), []byte{1}); err != nil {
+		key := make([]byte, 16)
+		copy(key, name)
+		if err := restrictedMapsNamesMap.Put(key, []byte{1, 0, 0, 0}); err != nil {
 			return fmt.Errorf("putting restricted map name in restrictedMapsNamesMap: %w", err)
 		}
 	}
 
-	tracerantitamperingtypeConfig := &tracerantitampering.Config{
+	tracerantitamperingConfig := &tracerantitampering.Config{
 		MountnsMap:          tracerantitamperingtypeMountnsmap,
 		AllowedPids:         allowedPidsMap,
 		RestrictedMapsNames: restrictedMapsNamesMap,
 	}
 
-	tracertracerantitamperingtype, err := tracerantitampering.NewTracer(tracerantitamperingtypeConfig, ch.containerCollection, ch.tracerantitamperingtypeEventCallback)
+	tracertracerantitamperingtype, err := tracerantitampering.NewTracer(tracerantitamperingConfig, ch.containerCollection, ch.tracerantitamperingtypeEventCallback)
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}

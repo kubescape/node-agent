@@ -44,8 +44,8 @@ struct {
 // Restricted maps names map.
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __type(key, u64);
-    __type(value, u8);
+    __type(key, char[16]); // BPF MAPS have a maximum name length of 16.
+    __type(value, u32);
     __uint(max_entries, 1024);
 } restricted_maps_names SEC(".maps");
 
@@ -167,18 +167,29 @@ static __always_inline void submit_event(void *ctx, const char *map_name) {
 
 // LSM hook function for bpf_map.
 SEC("lsm/bpf_map")
-int trace_tampering(void *ctx, struct bpf_map *map, fmode_t fmode) {
+int BPF_PROG(trace_tampering, struct bpf_map *map, fmode_t fmode, int ret) {
+    // ret is the return value from the previous BPF program or 0 if it's the first hook.
+    // If the previous hook returned an error, we don't need to do anything.
+    if (ret != 0) {
+        return 0;
+    }
+    bpf_printk("BPF map operation detected\n");
+    bpf_printk("Map name: %s\n", get_map_name(map));
     // Only check for write operations.
     if (fmode & FMODE_WRITE) {
         // Check if the PID is in the allowed_pids map and the map name is in the restricted_maps_names map.
         pid_t pid = bpf_get_current_pid_tgid() >> 32;
         u8 *value;
         value = bpf_map_lookup_elem(&allowed_pids, &pid);
-        const char *map_name = get_map_name(map);
-
+        char map_name[16] = {0};
+        // Ensure map_name is correctly filled using bpf_probe_read_kernel or similar
+        // (Assuming get_map_name is implemented correctly)
+        const char *map_name_ptr = get_map_name(map);
+        bpf_probe_read_kernel_str(map_name, sizeof(map_name), map_name_ptr);
+        
         if (!value && bpf_map_lookup_elem(&restricted_maps_names, map_name)) {
-            // PID not found in allowed_pids and map name found in restricted_maps_names, deny write operation and audit.
-            submit_event(ctx, map_name);
+            // Assuming submit_event is implemented correctly and ctx is valid
+            submit_event(ctx, map_name_ptr);
             return -EPERM;
         }
     }
