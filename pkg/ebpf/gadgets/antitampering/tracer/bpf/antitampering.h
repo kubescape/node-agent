@@ -11,16 +11,17 @@
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
-// Defined in include/uapi/linux/fs.h
+// Defined in include/linux/fs.h
 #ifndef FMODE_WRITE
 #define FMODE_WRITE ((fmode_t)2)
 #endif
-// Defined in include/uapi/linux/errno.h
+// Defined in include/linux/errno.h
 #ifndef EPERM
 #define EPERM 1
 #endif
 // Define maximum string length
 #define MAX_STRING_LEN 256
+#define MAX_MAP_NAME_LEN 16
 
 struct event {
     gadget_timestamp timestamp;
@@ -32,5 +33,5 @@ struct event {
 	bool upper_layer;
     __u8 comm[TASK_COMM_LEN];
     __u8 exepath[MAX_STRING_SIZE];
-    __u8 map_name[MAX_STRING_SIZE];
+    __u8 map_name[MAX_MAP_NAME_LEN];
 };

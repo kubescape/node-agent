@@ -44,7 +44,7 @@ struct {
 // Restricted maps names map.
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __type(key, char[16]); // BPF MAPS have a maximum name length of 16.
+    __type(key, char[MAX_MAP_NAME_LEN]); // BPF MAPS have a maximum name length of 16.
     __type(value, u32);
     __uint(max_entries, 1024);
 } restricted_maps_names SEC(".maps");
@@ -85,28 +85,6 @@ static __always_inline bool has_upper_layer()
     return upperdentry != NULL;
 }
 
-// Function to get the map name
-static __always_inline const char* get_map_name(struct bpf_map *map) {
-    const char *map_name;
-    bpf_probe_read_kernel(&map_name, sizeof(map_name), &map->name);
-    return map_name;
-}
-
-// static __always_inline int strcmp_ebpf(const char *s1, const char *s2) {
-//     for (int i = 0; i < MAX_STRING_LEN; i++) {
-//         char c1 = s1[i];
-//         char c2 = s2[i];
-        
-//         if (c1 != c2) {
-//             return c1 - c2;
-//         }
-//         if (c1 == '\0') {
-//             break;
-//         }
-//     }
-//     return 0;
-// }
-
 static __always_inline void submit_event(void *ctx, const char *map_name) {
     struct event *event;
     u32 zero = 0;
@@ -122,7 +100,6 @@ static __always_inline void submit_event(void *ctx, const char *map_name) {
 
     u64 uid_gid = bpf_get_current_uid_gid();
     u32 uid = (u32)uid_gid;
-
     if (valid_uid(targ_uid) && targ_uid != uid) {
         return;
     }
@@ -135,7 +112,9 @@ static __always_inline void submit_event(void *ctx, const char *map_name) {
     event->gid = (u32)(uid_gid >> 32);
     event->upper_layer = has_upper_layer();
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
-    bpf_probe_read_kernel_str(event->map_name, MAX_STRING_SIZE, map_name);
+
+    // Copy map name
+    bpf_probe_read_kernel_str(event->map_name, sizeof(event->map_name), map_name);
 
     struct file *exe_file = BPF_CORE_READ(current_task, mm, exe_file);
     char *exepath;
@@ -146,25 +125,6 @@ static __always_inline void submit_event(void *ctx, const char *map_name) {
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(struct event));
 }
 
-// // Iterate over all tasks and populate the allowed_pids map with the current PID of the "node-agent" process.
-// SEC("iter/task")
-// int iterate_over_tasks(struct bpf_iter__task *ctx) {
-//     struct task_struct *task = ctx->task;
-//     if (!task)
-//         return 0; // Continue iteration if task is NULL
-
-//     u32 pid = BPF_CORE_READ(task, pid);
-//     char comm[TASK_COMM_LEN];
-//     BPF_CORE_READ_STR_INTO(&comm, task, comm);
-
-//     // Direct comparison using BPF_CORE_READ_STR_INTO result
-//     if (strcmp_ebpf(comm, "node-agent") == 0) {
-//         bpf_map_update_elem(&allowed_pids, &pid, &pid, BPF_ANY);
-//     }
-
-//     return 0;
-// }
-
 // LSM hook function for bpf_map.
 SEC("lsm/bpf_map")
 int BPF_PROG(trace_tampering, struct bpf_map *map, fmode_t fmode, int ret) {
@@ -173,23 +133,19 @@ int BPF_PROG(trace_tampering, struct bpf_map *map, fmode_t fmode, int ret) {
     if (ret != 0) {
         return 0;
     }
-    bpf_printk("BPF map operation detected\n");
-    bpf_printk("Map name: %s\n", get_map_name(map));
+
     // Only check for write operations.
     if (fmode & FMODE_WRITE) {
         // Check if the PID is in the allowed_pids map and the map name is in the restricted_maps_names map.
         pid_t pid = bpf_get_current_pid_tgid() >> 32;
         u8 *value;
         value = bpf_map_lookup_elem(&allowed_pids, &pid);
-        char map_name[16] = {0};
-        // Ensure map_name is correctly filled using bpf_probe_read_kernel or similar
-        // (Assuming get_map_name is implemented correctly)
-        const char *map_name_ptr = get_map_name(map);
-        bpf_probe_read_kernel_str(map_name, sizeof(map_name), map_name_ptr);
+
+        const char *map_name = BPF_CORE_READ(map, name);
         
         if (!value && bpf_map_lookup_elem(&restricted_maps_names, map_name)) {
             // Assuming submit_event is implemented correctly and ctx is valid
-            submit_event(ctx, map_name_ptr);
+            submit_event(ctx, map_name);
             return -EPERM;
         }
     }

@@ -9,6 +9,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/btfgen"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/kubescape/go-logger"
@@ -79,8 +80,40 @@ func (t *Tracer) install() error {
 		return fmt.Errorf("loading ebpf program: %w", err)
 	}
 
-	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
-		return fmt.Errorf("loading ebpf spec: %w", err)
+	gadgets.FixBpfKtimeGetBootNs(spec.Programs)
+
+	mapReplacements := map[string]*ebpf.Map{}
+	filterByMntNs := false
+
+	if t.config.MountnsMap != nil {
+		filterByMntNs = true
+		mapReplacements[gadgets.MntNsFilterMapName] = t.config.MountnsMap
+	}
+
+	if t.config.AllowedPids != nil {
+		mapReplacements["allowed_pids"] = t.config.AllowedPids
+	}
+
+	if t.config.RestrictedMapsNames != nil {
+		mapReplacements["restricted_maps_names"] = t.config.RestrictedMapsNames
+	}
+
+	consts := map[string]interface{}{}
+	consts[gadgets.FilterByMntNsName] = filterByMntNs
+
+	if err := spec.RewriteConstants(consts); err != nil {
+		return fmt.Errorf("rewriting constants: %w", err)
+	}
+
+	opts := ebpf.CollectionOptions{
+		MapReplacements: mapReplacements,
+		Programs: ebpf.ProgramOptions{
+			KernelTypes: btfgen.GetBTFSpec(),
+		},
+	}
+
+	if err := spec.LoadAndAssign(&t.objs, &opts); err != nil {
+		return fmt.Errorf("loading maps and programs: %w", err)
 	}
 
 	t.bpfMapLsmLink, err = link.AttachLSM(link.LSMOptions{Program: t.objs.antitamperingPrograms.TraceTampering})
@@ -139,6 +172,7 @@ func (t *Tracer) run() {
 			t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
 		}
 
+		// TODO: Remove after making sure the event fields are correctly set.
 		logger.L().Info("antitampering event", helpers.Interface("event", event))
 
 		t.eventCallback(&event)

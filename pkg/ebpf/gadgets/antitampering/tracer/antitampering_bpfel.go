@@ -22,7 +22,7 @@ type antitamperingEvent struct {
 	UpperLayer bool
 	Comm       [16]uint8
 	Exepath    [4096]uint8
-	MapName    [4096]uint8
+	MapName    [16]uint8
 	_          [7]byte
 }
 
