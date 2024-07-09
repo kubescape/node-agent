@@ -22,7 +22,7 @@ const (
 
 func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
 
-	// do not trace the node-agent pod
+	// check if the container should be ignored
 	if ch.ignoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName) {
 		// avoid loops when the container is being removed
 		if notif.Type == containercollection.EventTypeAddContainer {
@@ -363,5 +363,10 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 }
 
 func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {
-	return name == ch.podName && namespace == ch.namespace
+	// do not trace the node-agent pod
+	if name == ch.podName && namespace == ch.namespace {
+		return true
+	}
+	// check if config excludes the namespace
+	return ch.cfg.SkipNamespace(namespace)
 }

@@ -24,14 +24,6 @@ type StorageHttpClientMock struct {
 	failedOnce            bool
 }
 
-func (sc *StorageHttpClientMock) GetApplicationActivity(_, _ string) (*spdxv1beta1.ApplicationActivity, error) {
-	return &spdxv1beta1.ApplicationActivity{
-		Spec: spdxv1beta1.ApplicationActivitySpec{
-			Syscalls: []string{"open"},
-		},
-	}, nil
-}
-
 var _ StorageClient = (*StorageHttpClientMock)(nil)
 
 func CreateSyftSBOMStorageHttpClientMock(sbom spdxv1beta1.SBOMSyft) *StorageHttpClientMock {

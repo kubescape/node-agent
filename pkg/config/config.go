@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/exporters"
@@ -26,6 +27,8 @@ type Config struct {
 	EnableNodeProfile        bool                      `mapstructure:"nodeProfileServiceEnabled"`
 	NodeProfileInterval      time.Duration             `mapstructure:"nodeProfileInterval"`
 	EnableSeccomp            bool                      `mapstructure:"seccompServiceEnabled"`
+	ExcludeNamespaces        []string                  `mapstructure:"excludeNamespaces"`
+	IncludeNamespaces        []string                  `mapstructure:"includeNamespaces"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -48,4 +51,19 @@ func LoadConfig(path string) (Config, error) {
 	var config Config
 	err = viper.Unmarshal(&config)
 	return config, err
+}
+
+func (c *Config) SkipNamespace(ns string) bool {
+	if includeNamespaces := c.IncludeNamespaces; len(includeNamespaces) > 0 {
+		if !slices.Contains(includeNamespaces, ns) {
+			// skip ns not in IncludeNamespaces
+			return true
+		}
+	} else if excludeNamespaces := c.ExcludeNamespaces; len(excludeNamespaces) > 0 {
+		if slices.Contains(excludeNamespaces, ns) {
+			// skip ns in ExcludeNamespaces
+			return true
+		}
+	}
+	return false
 }

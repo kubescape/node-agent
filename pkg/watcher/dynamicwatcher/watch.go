@@ -7,9 +7,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/node-agent/pkg/watcher/cooldownqueue"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/pager"
 
 	"github.com/cenkalti/backoff/v4"
 
@@ -36,15 +39,17 @@ type WatchHandler struct {
 	resources   map[string]watcher.WatchResource
 	eventQueues map[string]*cooldownqueue.CooldownQueue
 	handlers    []watcher.Watcher
+	cfg         config.Config
 }
 
 var errWatchClosed = errors.New("watch channel closed")
 
-func NewWatchHandler(k8sClient k8sclient.K8sClientInterface) *WatchHandler {
+func NewWatchHandler(k8sClient k8sclient.K8sClientInterface, cfg config.Config) *WatchHandler {
 	return &WatchHandler{
 		k8sClient:   k8sClient,
 		resources:   make(map[string]watcher.WatchResource),
 		eventQueues: make(map[string]*cooldownqueue.CooldownQueue),
+		cfg:         cfg,
 	}
 }
 
@@ -152,7 +157,10 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 			if event.Type == watch.Error {
 				return fmt.Errorf("watch error: %s", event.Object)
 			}
-
+			pod := event.Object.(*unstructured.Unstructured)
+			if wh.cfg.SkipNamespace(pod.GetNamespace()) {
+				continue
+			}
 			eventQueue.Enqueue(event)
 		}
 	}, newBackOff(), func(err error, d time.Duration) {
@@ -172,20 +180,25 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 
 func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions) (string, error) {
 	logger.L().Debug("WatchHandler - getting existing objects from storage", helpers.String("resource", res.Resource))
-	list, err := wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), watchOpts)
-	if err != nil {
+	list := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(ctx, opts)
+	})
+	var resourceVersion string
+	if err := list.EachListItem(context.Background(), watchOpts, func(obj runtime.Object) error {
+		pod := obj.(*unstructured.Unstructured)
+		resourceVersion = pod.GetResourceVersion()
+		if wh.cfg.SkipNamespace(pod.GetNamespace()) {
+			return nil
+		}
+		for _, handler := range wh.handlers {
+			handler.AddHandler(ctx, pod)
+		}
+		return nil
+	}); err != nil {
 		return "", fmt.Errorf("list resources: %w", err)
 	}
-	logger.L().Debug("WatchHandler - got existing objects from storage", helpers.String("resource", res.Resource), helpers.Int("count", len(list.Items)))
-	for i := range list.Items {
-		for _, handler := range wh.handlers {
-			var l unstructured.Unstructured
-			l = list.Items[i]
-			handler.AddHandler(ctx, &l)
-		}
-	}
 	// set resource version to watch from
-	return list.GetResourceVersion(), nil
+	return resourceVersion, nil
 }
 
 func newBackOff() backoff.BackOff {
