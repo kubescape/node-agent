@@ -391,11 +391,11 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				} else {
 					var replaceOperations []utils.PatchOperation
+					containerNames := watchedContainer.ContainerNames[watchedContainer.ContainerType]
 					// check existing container
 					existingContainer := utils.GetApplicationProfileContainer(existingObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
-					var addContainer bool
 					if existingContainer == nil {
-						name := watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex]
+						name := containerNames[watchedContainer.ContainerIndex]
 						seccompProfile, err := am.seccompManager.GetSeccompProfile(name, watchedContainer.SeccompProfilePath)
 						if err != nil {
 							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
@@ -406,16 +406,14 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						}
 						logger.L().Debug("ApplicationProfileManager - got seccomp profile", helpers.Interface("profile", seccompProfile))
 						existingContainer = &v1beta1.ApplicationProfileContainer{
-							Name:           watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex],
+							Name:           containerNames[watchedContainer.ContainerIndex],
 							Execs:          make([]v1beta1.ExecCalls, 0),
 							Opens:          make([]v1beta1.OpenCalls, 0),
 							Capabilities:   make([]string, 0),
 							Syscalls:       make([]string, 0),
 							SeccompProfile: seccompProfile,
 						}
-						addContainer = true
 					}
-
 					// update it
 					utils.EnrichApplicationProfileContainer(existingContainer, capabilities, observedSyscalls, execs, opens)
 					// get existing containers
@@ -428,55 +426,44 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						existingContainers = existingObject.Spec.EphemeralContainers
 					}
 					// replace or add container using patch
-					switch {
-					case existingContainers == nil:
-						// 3a. insert a new container slice, with the new container at the right index
-						containers := make([]v1beta1.ApplicationProfileContainer, watchedContainer.ContainerIndex+1)
-						containers[watchedContainer.ContainerIndex] = *existingContainer
+					// 3a. ensure we have a container slice
+					if existingContainers == nil {
 						replaceOperations = append(replaceOperations, utils.PatchOperation{
 							Op:    "add",
 							Path:  fmt.Sprintf("/spec/%s", watchedContainer.ContainerType),
-							Value: containers,
-						})
-					case addContainer:
-						// 3b. insert a new container at the right index
-						for i := len(existingContainers); i < watchedContainer.ContainerIndex; i++ {
-							name := watchedContainer.ContainerNames[watchedContainer.ContainerType][i]
-							seccompProfile, err := am.seccompManager.GetSeccompProfile(name, watchedContainer.SeccompProfilePath)
-							if err != nil {
-								logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
-									helpers.String("slug", slug),
-									helpers.Int("container index", watchedContainer.ContainerIndex),
-									helpers.String("container ID", watchedContainer.ContainerID),
-									helpers.String("k8s workload", watchedContainer.K8sContainerID))
-							}
-							logger.L().Debug("ApplicationProfileManager - got seccomp profile", helpers.Interface("profile", seccompProfile))
-							replaceOperations = append(replaceOperations, utils.PatchOperation{
-								Op:   "add",
-								Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
-								Value: v1beta1.ApplicationProfileContainer{
-									Name:           watchedContainer.ContainerNames[watchedContainer.ContainerType][i],
-									Execs:          make([]v1beta1.ExecCalls, 0),
-									Opens:          make([]v1beta1.OpenCalls, 0),
-									Capabilities:   make([]string, 0),
-									Syscalls:       make([]string, 0),
-									SeccompProfile: seccompProfile,
-								},
-							})
-						}
-						replaceOperations = append(replaceOperations, utils.PatchOperation{
-							Op:    "add",
-							Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
-							Value: existingContainer,
-						})
-					default:
-						// 3c. replace the existing container at the right index
-						replaceOperations = append(replaceOperations, utils.PatchOperation{
-							Op:    "replace",
-							Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
-							Value: existingContainer,
+							Value: make([]v1beta1.ApplicationProfileContainer, 0),
 						})
 					}
+					// 3b. ensure the slice has all the containers
+					for i := len(existingContainers); i < len(containerNames); i++ {
+						name := containerNames[i]
+						seccompProfile, err := am.seccompManager.GetSeccompProfile(name, watchedContainer.SeccompProfilePath)
+						if err != nil {
+							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
+								helpers.String("slug", slug),
+								helpers.Int("container index", watchedContainer.ContainerIndex),
+								helpers.String("container ID", watchedContainer.ContainerID),
+								helpers.String("k8s workload", watchedContainer.K8sContainerID))
+						}
+						replaceOperations = append(replaceOperations, utils.PatchOperation{
+							Op:   "add",
+							Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
+							Value: v1beta1.ApplicationProfileContainer{
+								Name:           name,
+								Execs:          make([]v1beta1.ExecCalls, 0),
+								Opens:          make([]v1beta1.OpenCalls, 0),
+								Capabilities:   make([]string, 0),
+								Syscalls:       make([]string, 0),
+								SeccompProfile: seccompProfile,
+							},
+						})
+					}
+					// 3c. replace the existing container at the right index
+					replaceOperations = append(replaceOperations, utils.PatchOperation{
+						Op:    "replace",
+						Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
+						Value: existingContainer,
+					})
 
 					replaceOperations = utils.AppendStatusAnnotationPatchOperations(replaceOperations, watchedContainer)
 					if len(existingObject.Spec.Architectures) == 0 {
@@ -502,7 +489,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							helpers.String("k8s workload", watchedContainer.K8sContainerID))
 						return
 					}
-
 					if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
 						gotErr = err
 						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to patch application profile", helpers.Error(err),
