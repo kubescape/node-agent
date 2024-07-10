@@ -24,7 +24,10 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 
 	// do not trace the node-agent pod
 	if ch.ignoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName) {
-		ch.unregisterContainer(notif.Container)
+		// avoid loops when the container is being removed
+		if notif.Type == containercollection.EventTypeAddContainer {
+			ch.unregisterContainer(notif.Container)
+		}
 		return
 	}
 
@@ -66,6 +69,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 	}
 }
+
 func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) error {
 	ch.ctx = ctx
 
@@ -345,7 +349,7 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 		return
 	}
 
-	logger.L().Info("stopping to monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
+	logger.L().Debug("stopping to monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
 
 	ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
 
