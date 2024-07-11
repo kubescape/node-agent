@@ -20,6 +20,7 @@ const (
 	R1011ID         = "R1011"
 	R1011Name       = "LD_PRELOAD Hook"
 	LD_PRELOAD_FILE = "/etc/ld.so.preload"
+	JAVA_COMM       = "java"
 )
 
 var LD_PRELOAD_ENV_VARS = []string{"LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH"}
@@ -62,6 +63,11 @@ func (rule *R1011LdPreloadHook) DeleteRule() {
 }
 
 func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event, k8sObjCache objectcache.K8sObjectCache) ruleengine.RuleFailure {
+	// Java is a special case, we don't want to alert on it because it uses LD_LIBRARY_PATH.
+	if execEvent.Comm == JAVA_COMM {
+		return nil
+	}
+
 	envVars, err := utils.GetProcessEnv(int(execEvent.Pid))
 	if err != nil {
 		logger.L().Debug("Failed to get process environment variables", helpers.Error(err))
