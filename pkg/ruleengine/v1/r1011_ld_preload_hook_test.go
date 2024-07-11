@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/utils"
 
+	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	corev1 "k8s.io/api/core/v1"
@@ -83,4 +84,24 @@ func TestR1011LdPreloadHook(t *testing.T) {
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since LD_PRELOAD is set in pod spec")
 	}
+
+	// Create open event
+	e2 := &tracerexectype.Event{
+		Event: eventtypes.Event{
+			CommonData: eventtypes.CommonData{
+				K8s: eventtypes.K8sMetadata{
+					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+						ContainerName: "test",
+					},
+				},
+			},
+		},
+		Comm: "java",
+	}
+	// Test with exec event
+	ruleResult = r.ProcessEvent(utils.ExecveEventType, e2, &RuleObjectCacheMock{})
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since exec event is on java")
+	}
+
 }
