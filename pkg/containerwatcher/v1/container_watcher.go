@@ -21,7 +21,6 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -165,8 +164,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
-		// dropped events
-		if event.Type != types.NORMAL {
+		if isDroppedEvent(event.Type, event.Message) {
 			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
 			return
 		}
@@ -193,8 +191,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
-		// dropped events
-		if event.Type != types.NORMAL {
+		if isDroppedEvent(event.Type, event.Message) {
 			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
 			return
 		}
@@ -222,8 +219,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
-		// dropped events
-		if event.Type != types.NORMAL {
+		if isDroppedEvent(event.Type, event.Message) {
 			networkManagerv1Client.ReportDroppedEvent(event.Runtime.ContainerID, event)
 			networkManagerClient.ReportDroppedEvent(k8sContainerID)
 			return
@@ -282,7 +278,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		return nil, fmt.Errorf("creating symlink worker pool: %w", err)
 	}
 	// Create a hardlink worker pool
-	hardlinkWorkerPool, err := ants.NewPoolWithFunc(symlinkWorkerPoolSize, func(i interface{}) {
+	hardlinkWorkerPool, err := ants.NewPoolWithFunc(hardlinkWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerhardlinktype.Event)
 		if event.K8s.ContainerName == "" {
 			return

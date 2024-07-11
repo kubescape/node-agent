@@ -12,8 +12,11 @@ import (
 )
 
 func (ch *IGContainerWatcher) symlinkEventCallback(event *tracersymlinktype.Event) {
-	if event.Type != types.NORMAL {
-		// dropped event
+	if event.Type == types.DEBUG {
+		return
+	}
+
+	if isDroppedEvent(event.Type, event.Message) {
 		logger.L().Ctx(ch.ctx).Warning("symlink tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
@@ -32,17 +35,17 @@ func (ch *IGContainerWatcher) startSymlinkTracing() error {
 		return fmt.Errorf("getting symlinkMountnsmap: %w", err)
 	}
 
-	go func() {
-		for event := range ch.symlinkWorkerChan {
-			ch.symlinkWorkerPool.Invoke(*event)
-		}
-	}()
-
-	tracersymlink, err := tracersymlink.NewTracer(&tracersymlink.Config{MountnsMap: symlinkMountnsmap}, ch.containerCollection, ch.symlinkEventCallback)
+	tracerSymlink, err := tracersymlink.NewTracer(&tracersymlink.Config{MountnsMap: symlinkMountnsmap}, ch.containerCollection, ch.symlinkEventCallback)
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
-	ch.symlinkTracer = tracersymlink
+	go func() {
+		for event := range ch.symlinkWorkerChan {
+			_ = ch.symlinkWorkerPool.Invoke(*event)
+		}
+	}()
+
+	ch.symlinkTracer = tracerSymlink
 
 	return nil
 }

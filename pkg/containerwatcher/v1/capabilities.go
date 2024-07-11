@@ -11,12 +11,16 @@ import (
 )
 
 func (ch *IGContainerWatcher) capabilitiesEventCallback(event *tracercapabilitiestype.Event) {
-	if event.Type != types.NORMAL {
-		// dropped event
+	if event.Type == types.DEBUG {
+		return
+	}
+
+	if isDroppedEvent(event.Type, event.Message) {
 		logger.L().Ctx(ch.ctx).Warning("capabilities tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
-	_ = ch.capabilitiesWorkerPool.Invoke(*event)
+
+	ch.capabilitiesWorkerChan <- event
 }
 
 func (ch *IGContainerWatcher) startCapabilitiesTracing() error {
@@ -34,6 +38,12 @@ func (ch *IGContainerWatcher) startCapabilitiesTracing() error {
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
+	go func() {
+		for event := range ch.capabilitiesWorkerChan {
+			_ = ch.capabilitiesWorkerPool.Invoke(*event)
+		}
+	}()
+
 	ch.capabilitiesTracer = tracerCapabilities
 
 	return nil

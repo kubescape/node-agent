@@ -12,7 +12,11 @@ import (
 )
 
 func (ch *IGContainerWatcher) dnsEventCallback(event *tracerdnstype.Event) {
-	if event.Type != types.NORMAL && event.Type != types.DEBUG {
+	if event.Type == types.DEBUG {
+		return
+	}
+
+	if isDroppedEvent(event.Type, event.Message) {
 		logger.L().Ctx(ch.ctx).Warning("dns tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
@@ -34,7 +38,7 @@ func (ch *IGContainerWatcher) startDNSTracing() error {
 	}
 	go func() {
 		for event := range ch.dnsWorkerChan {
-			ch.dnsWorkerPool.Invoke(*event)
+			_ = ch.dnsWorkerPool.Invoke(*event)
 		}
 	}()
 
@@ -68,8 +72,6 @@ func (ch *IGContainerWatcher) stopDNSTracing() error {
 	if err := ch.tracerCollection.RemoveTracer(dnsTraceName); err != nil {
 		return fmt.Errorf("removing tracer: %w", err)
 	}
-
 	ch.dnsTracer.Close()
-
 	return nil
 }
