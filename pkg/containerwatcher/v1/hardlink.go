@@ -12,8 +12,11 @@ import (
 )
 
 func (ch *IGContainerWatcher) hardlinkEventCallback(event *tracerhardlinktype.Event) {
-	if event.Type != types.NORMAL {
-		// dropped event
+	if event.Type == types.DEBUG {
+		return
+	}
+
+	if isDroppedEvent(event.Type, event.Message) {
 		logger.L().Ctx(ch.ctx).Warning("hardlink tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
@@ -32,17 +35,17 @@ func (ch *IGContainerWatcher) startHardlinkTracing() error {
 		return fmt.Errorf("getting hardlinkMountnsmap: %w", err)
 	}
 
-	go func() {
-		for event := range ch.hardlinkWorkerChan {
-			ch.hardlinkWorkerPool.Invoke(*event)
-		}
-	}()
-
-	tracerhardlink, err := tracerhardlink.NewTracer(&tracerhardlink.Config{MountnsMap: hardlinkMountnsmap}, ch.containerCollection, ch.hardlinkEventCallback)
+	tracerHardlink, err := tracerhardlink.NewTracer(&tracerhardlink.Config{MountnsMap: hardlinkMountnsmap}, ch.containerCollection, ch.hardlinkEventCallback)
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
-	ch.hardlinkTracer = tracerhardlink
+	go func() {
+		for event := range ch.hardlinkWorkerChan {
+			_ = ch.hardlinkWorkerPool.Invoke(*event)
+		}
+	}()
+
+	ch.hardlinkTracer = tracerHardlink
 
 	return nil
 }
