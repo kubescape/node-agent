@@ -2,6 +2,7 @@ package containerwatcher
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection/networktracer"
 	tracernetwork "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/tracer"
@@ -21,9 +22,10 @@ func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Eve
 
 	if event.Type != types.NORMAL {
 		// dropped event
-		logger.L().Ctx(ch.ctx).Warning("network tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
+		if !strings.Contains(event.Message, "stop tracing container") {
+			logger.L().Ctx(ch.ctx).Warning("network tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
+		}
 	} else {
-
 		ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
 		ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
 
