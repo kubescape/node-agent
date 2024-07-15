@@ -6,7 +6,6 @@ import (
 
 type StorageClient interface {
 	CreateApplicationActivity(activity *v1beta1.ApplicationActivity, namespace string) error
-	GetApplicationActivity(namespace, name string) (*v1beta1.ApplicationActivity, error)
 	CreateApplicationProfile(profile *v1beta1.ApplicationProfile, namespace string) error
 	PatchApplicationProfile(name, namespace string, patch []byte, channel chan error) error
 	GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error)
