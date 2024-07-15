@@ -62,13 +62,13 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
-	if execEvent.UpperLayer {
+	if execEvent.UpperLayer || execEvent.PupperLayer {
 		// Check if the event is expected, if so return nil
 		// No application profile also returns nil
 		if whiteListed, err := isExecEventInProfile(execEvent, objectCache, false); whiteListed || errors.Is(err, ProfileNotFound) {
 			return nil
 		}
-
+		upperLayer := true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
@@ -82,7 +82,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 					Gid:        &execEvent.Gid,
 					PID:        execEvent.Pid,
 					Uid:        &execEvent.Uid,
-					UpperLayer: &execEvent.UpperLayer,
+					UpperLayer: &upperLayer,
 					PPID:       execEvent.Ppid,
 					Pcomm:      execEvent.Pcomm,
 					Cwd:        execEvent.Cwd,

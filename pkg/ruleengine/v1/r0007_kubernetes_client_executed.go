@@ -139,6 +139,9 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 	}
 
 	if slices.Contains(kubernetesClients, filepath.Base(execPath)) || slices.Contains(kubernetesClients, event.ExePath) {
+		// If the parent process  is in the upper layer, the child process is also in the upper layer.
+		upperLayer := event.UpperLayer || event.PupperLayer
+
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:   rule.Name(),
@@ -155,7 +158,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 					Gid:        &event.Gid,
 					PID:        event.Pid,
 					Uid:        &event.Uid,
-					UpperLayer: &event.UpperLayer,
+					UpperLayer: &upperLayer,
 					PPID:       event.Ppid,
 					Pcomm:      event.Pcomm,
 					Cwd:        event.Cwd,

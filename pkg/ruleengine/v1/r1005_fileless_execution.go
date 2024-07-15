@@ -72,6 +72,7 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 	// is memory mapped file
 
 	if strings.HasPrefix(execPathDir, "/proc/self/fd") || strings.HasPrefix(execEvent.Cwd, "/proc/self/fd") || strings.HasPrefix(execEvent.ExePath, "/proc/self/fd") {
+		upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:   rule.Name(),
@@ -88,7 +89,7 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 					Gid:        &execEvent.Gid,
 					PID:        execEvent.Pid,
 					Uid:        &execEvent.Uid,
-					UpperLayer: &execEvent.UpperLayer,
+					UpperLayer: &upperLayer,
 					PPID:       execEvent.Ppid,
 					Pcomm:      execEvent.Pcomm,
 					Cwd:        execEvent.Cwd,
