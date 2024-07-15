@@ -248,8 +248,3 @@ require (
 )
 
 replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6
-
-// fork of release-v0.28.1
-// 	with this fix https://github.com/inspektor-gadget/inspektor-gadget/pull/2764
-// 	until new IG version is released
-// replace github.com/inspektor-gadget/inspektor-gadget => github.com/amirmalka/inspektor-gadget v0.27.1-0.20240519124445-e8e4abb82aa3
