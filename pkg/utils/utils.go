@@ -581,16 +581,10 @@ func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, proce
 		return nil, err
 	} else {
 		// TODO: When (https://github.com/prometheus/procfs/pull/620) is merged, use the UID and GID as integers.
-		uid64, err := strconv.ParseUint(status.UIDs[1], 10, 32)
-		if err != nil {
-			return nil, err
-		}
+		uid64 := status.UIDs[1]
 		uid = uint32(uid64)
 
-		gid64, err := strconv.ParseUint(status.GIDs[1], 10, 32)
-		if err != nil {
-			return nil, err
-		}
+		gid64 := status.GIDs[1]
 		gid = uint32(gid64)
 	}
 
