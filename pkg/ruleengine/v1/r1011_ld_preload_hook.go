@@ -101,6 +101,8 @@ func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event,
 			}
 		}
 
+		upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
+
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
@@ -114,7 +116,7 @@ func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event,
 					Gid:        &execEvent.Gid,
 					PID:        execEvent.Pid,
 					Uid:        &execEvent.Uid,
-					UpperLayer: &execEvent.UpperLayer,
+					UpperLayer: &upperLayer,
 					PPID:       execEvent.Ppid,
 					Pcomm:      execEvent.Pcomm,
 					Cwd:        execEvent.Cwd,

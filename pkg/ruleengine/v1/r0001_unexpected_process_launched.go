@@ -107,6 +107,9 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		}
 	}
 
+	// If the parent process  is in the upper layer, the child process is also in the upper layer.
+	upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
+
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:   rule.Name(),
@@ -123,7 +126,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 				Gid:        &execEvent.Gid,
 				PID:        execEvent.Pid,
 				Uid:        &execEvent.Uid,
-				UpperLayer: &execEvent.UpperLayer,
+				UpperLayer: &upperLayer,
 				PPID:       execEvent.Ppid,
 				Pcomm:      execEvent.Pcomm,
 				Cwd:        execEvent.Cwd,

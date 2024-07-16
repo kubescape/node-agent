@@ -17,7 +17,7 @@ require (
 	github.com/go-openapi/strfmt v0.23.0
 	github.com/google/uuid v1.6.0
 	github.com/goradd/maps v0.1.5
-	github.com/inspektor-gadget/inspektor-gadget v0.27.0
+	github.com/inspektor-gadget/inspektor-gadget v0.30.0
 	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/backend v0.0.20
 	github.com/kubescape/go-logger v0.0.22
@@ -25,23 +25,23 @@ require (
 	github.com/kubescape/storage v0.0.89
 	github.com/panjf2000/ants/v2 v2.9.1
 	github.com/prometheus/alertmanager v0.27.0
-	github.com/prometheus/client_golang v1.19.0
-	github.com/prometheus/procfs v0.13.0
+	github.com/prometheus/client_golang v1.19.1
+	github.com/prometheus/procfs v0.15.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/afero v1.11.0
-	github.com/spf13/viper v1.18.2
+	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.9.0
-	go.opentelemetry.io/otel v1.26.0
-	go.opentelemetry.io/otel/trace v1.26.0
+	go.opentelemetry.io/otel v1.27.0
+	go.opentelemetry.io/otel/trace v1.27.0
 	go.uber.org/multierr v1.11.0
 	golang.org/x/net v0.26.0
 	golang.org/x/sys v0.21.0
 	gonum.org/v1/plot v0.14.0
 	gopkg.in/mcuadros/go-syslog.v2 v2.3.0
 	istio.io/pkg v0.0.0-20231221211216-7635388a563e
-	k8s.io/api v0.30.1
-	k8s.io/apimachinery v0.30.1
-	k8s.io/client-go v0.30.1
+	k8s.io/api v0.30.2
+	k8s.io/apimachinery v0.30.2
+	k8s.io/client-go v0.30.2
 	k8s.io/kubectl v0.29.0
 	k8s.io/utils v0.0.0-20240310230437-4693a0247e57
 	sigs.k8s.io/yaml v1.4.0
@@ -72,21 +72,21 @@ require (
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/cgroups/v3 v3.0.3 // indirect
-	github.com/containerd/containerd v1.7.17 // indirect
+	github.com/containerd/containerd v1.7.18 // indirect
 	github.com/containerd/continuity v0.4.3 // indirect
 	github.com/containerd/errdefs v0.1.0 // indirect
 	github.com/containerd/fifo v1.1.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/ttrpc v1.2.4 // indirect
 	github.com/containerd/typeurl/v2 v2.1.1 // indirect
-	github.com/containers/common v0.59.0 // indirect
+	github.com/containers/common v0.59.1 // indirect
 	github.com/coreos/go-oidc v2.2.1+incompatible // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/cli v26.1.3+incompatible // indirect
-	github.com/docker/docker v26.1.3+incompatible // indirect
-	github.com/docker/docker-credential-helpers v0.8.1 // indirect
+	github.com/docker/cli v27.0.2+incompatible // indirect
+	github.com/docker/docker v27.0.0+incompatible // indirect
+	github.com/docker/docker-credential-helpers v0.8.2 // indirect
 	github.com/docker/go-connections v0.5.0 // indirect
 	github.com/docker/go-events v0.0.0-20190806004212-e31b211e4f1c // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -148,7 +148,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/locker v1.0.1 // indirect
-	github.com/moby/moby v26.1.3+incompatible // indirect
+	github.com/moby/moby v27.0.2+incompatible // indirect
 	github.com/moby/spdystream v0.2.0 // indirect
 	github.com/moby/sys/mountinfo v0.7.1 // indirect
 	github.com/moby/sys/sequential v0.5.0 // indirect
@@ -182,7 +182,7 @@ require (
 	github.com/seccomp/libseccomp-golang v0.10.0 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/spf13/cast v1.6.0 // indirect
-	github.com/spf13/cobra v1.8.0 // indirect
+	github.com/spf13/cobra v1.8.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stripe/stripe-go/v74 v74.30.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
@@ -207,9 +207,9 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.26.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.26.0 // indirect
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.26.0 // indirect
-	go.opentelemetry.io/otel/metric v1.26.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.26.0 // indirect
-	go.opentelemetry.io/otel/sdk/metric v1.26.0 // indirect
+	go.opentelemetry.io/otel/metric v1.27.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.27.0 // indirect
+	go.opentelemetry.io/otel/sdk/metric v1.27.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.2.0 // indirect
 	go.starlark.net v0.0.0-20240517230649-3792562d0b7f // indirect
 	go.uber.org/zap v1.27.0 // indirect
@@ -225,20 +225,22 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20240515191416-fc5f0ca64291 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240515191416-fc5f0ca64291 // indirect
 	google.golang.org/grpc v1.64.1 // indirect
-	google.golang.org/protobuf v1.34.1 // indirect
+	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/square/go-jose.v2 v2.6.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/apiserver v0.30.0 // indirect
-	k8s.io/cli-runtime v0.30.1 // indirect
-	k8s.io/component-base v0.30.0 // indirect
-	k8s.io/cri-api v0.30.1 // indirect
+	k8s.io/apiserver v0.30.2 // indirect
+	k8s.io/cli-runtime v0.30.2 // indirect
+	k8s.io/component-base v0.30.2 // indirect
+	k8s.io/cri-api v0.30.2 // indirect
 	k8s.io/klog/v2 v2.120.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20240430033511-f0e62f92d13f // indirect
-	sigs.k8s.io/controller-runtime v0.18.2 // indirect
+	k8s.io/kubelet v0.30.2 // indirect
+	oras.land/oras-go/v2 v2.4.0 // indirect
+	sigs.k8s.io/controller-runtime v0.18.4 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/kustomize/api v0.17.1 // indirect
 	sigs.k8s.io/kustomize/kyaml v0.17.0 // indirect
@@ -246,8 +248,3 @@ require (
 )
 
 replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6
-
-// fork of release-v0.28.1
-// 	with this fix https://github.com/inspektor-gadget/inspektor-gadget/pull/2764
-// 	until new IG version is released
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/amirmalka/inspektor-gadget v0.27.1-0.20240519124445-e8e4abb82aa3

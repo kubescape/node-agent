@@ -71,6 +71,8 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 	for _, maliciousExecPathPrefix := range maliciousExecPathPrefixes {
 		// if the exec path or the current dir is from a malicious source
 		if strings.HasPrefix(execPathDir, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.ExePath, maliciousExecPathPrefix) {
+			upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
+
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:   rule.Name(),
@@ -87,7 +89,7 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 						Gid:        &execEvent.Gid,
 						PID:        execEvent.Pid,
 						Uid:        &execEvent.Uid,
-						UpperLayer: &execEvent.UpperLayer,
+						UpperLayer: &upperLayer,
 						PPID:       execEvent.Ppid,
 						Pcomm:      execEvent.Pcomm,
 						Cwd:        execEvent.Cwd,
