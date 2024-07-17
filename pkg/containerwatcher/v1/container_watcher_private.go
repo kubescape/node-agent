@@ -21,7 +21,6 @@ const (
 )
 
 func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
-
 	// check if the container should be ignored
 	if ch.ignoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName) {
 		// avoid loops when the container is being removed

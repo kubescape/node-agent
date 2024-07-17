@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -50,6 +51,7 @@ import (
 )
 
 type RuleManager struct {
+	cfg                      config.Config
 	watchedContainerChannels maps.SafeMap[string, chan error] // key is k8sContainerID
 	ruleBindingCache         bindingcache.RuleBindingCache
 	trackedContainers        mapset.Set[string] // key is k8sContainerID
@@ -69,8 +71,9 @@ type RuleManager struct {
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string) (*RuleManager, error) {
 	return &RuleManager{
+		cfg:               cfg,
 		ctx:               ctx,
 		k8sClient:         k8sClient,
 		containerMutexes:  storageUtils.NewMapMutex[string](),
@@ -246,6 +249,11 @@ func (rm *RuleManager) deleteResources(watchedContainer *utils.WatchedContainerD
 }
 
 func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) {
+	// check if the container should be ignored
+	if rm.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+		return
+	}
+
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 
 	switch notif.Type {

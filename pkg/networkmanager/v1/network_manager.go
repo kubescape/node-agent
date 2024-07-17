@@ -76,6 +76,11 @@ func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sc
 }
 
 func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEvent) {
+	// check if the container should be ignored
+	if am.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+		return
+	}
+
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 	ctx, span := otel.Tracer("").Start(am.ctx, "NetworkManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
 	defer span.End()

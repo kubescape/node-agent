@@ -314,6 +314,11 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 }
 
 func (rm *RelevancyManager) ContainerCallback(notif containercollection.PubSubEvent) {
+	// check if the container should be ignored
+	if rm.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+		return
+	}
+
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 	// ignore pre-running containers
 	if rm.preRunningContainerIDs.Contains(notif.Container.Runtime.ContainerID) {
