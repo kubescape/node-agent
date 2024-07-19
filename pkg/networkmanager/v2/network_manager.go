@@ -2,7 +2,6 @@ package v2
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -288,18 +287,9 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 		operations := utils.CreateNetworkPatchOperations(ingress, egress, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
 
-		patch, err := json.Marshal(operations)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("NetworkManager - failed to marshal patch", helpers.Error(err),
-				helpers.String("slug", slug),
-				helpers.Int("container index", watchedContainer.ContainerIndex),
-				helpers.String("container ID", watchedContainer.ContainerID),
-				helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			return
-		}
 		// 1. try to patch object
 		var gotErr error
-		if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
+		if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, operations, watchedContainer.SyncChannel); err != nil {
 			if apierrors.IsNotFound(err) {
 				// 2a. new object
 				newObject := &v1beta1.NetworkNeighborhood{
@@ -404,16 +394,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 
 					replaceOperations = utils.AppendStatusAnnotationPatchOperations(replaceOperations, watchedContainer)
 
-					patch, err := json.Marshal(replaceOperations)
-					if err != nil {
-						logger.L().Ctx(ctx).Error("NetworkManager - failed to marshal patch", helpers.Error(err),
-							helpers.String("slug", slug),
-							helpers.Int("container index", watchedContainer.ContainerIndex),
-							helpers.String("container ID", watchedContainer.ContainerID),
-							helpers.String("k8s workload", watchedContainer.K8sContainerID))
-						return
-					}
-					if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
+					if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, replaceOperations, watchedContainer.SyncChannel); err != nil {
 						gotErr = err
 						logger.L().Ctx(ctx).Error("NetworkManager - failed to patch network neighborhood", helpers.Error(err),
 							helpers.String("slug", slug),

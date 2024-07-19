@@ -495,6 +495,7 @@ func Test_08_ApplicationProfilePatching(t *testing.T) {
 	patch, err := json.Marshal(patchOperations)
 	assert.NoError(t, err)
 
+	// TODO use Storage abstraction?
 	_, err = storageclient.ApplicationProfiles(ns.Name).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
 
 	assert.NoError(t, err)
