@@ -32,7 +32,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
@@ -239,7 +238,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 	}
 
 	// leave container name empty this way the "slug" will represent a workload
-	slug, err := names.InstanceIDToSlug(watchedContainer.InstanceID.GetName(), watchedContainer.InstanceID.GetKind(), "", watchedContainer.InstanceID.GetHashed())
+	slug, err := watchedContainer.InstanceID.GetSlug(true)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("NetworkManager - failed to get slug", helpers.Error(err),
 			helpers.String("slug", slug),
