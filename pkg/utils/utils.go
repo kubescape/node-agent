@@ -26,10 +26,8 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1/containerinstance"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1/ephemeralcontainerinstance"
+	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1/initcontainerinstance"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	v1 "k8s.io/api/core/v1"
@@ -341,13 +339,13 @@ func SetInMap(newExecMap *maps.SafeMap[string, mapset.Set[string]]) func(k strin
 func ToInstanceType(c ContainerType) helpersv1.InstanceType {
 	switch c {
 	case Container:
-		return containerinstance.InstanceType
+		return instanceidhandlerv1.Container
 	case InitContainer:
-		return initcontainerinstance.InstanceType
+		return instanceidhandlerv1.InitContainer
 	case EphemeralContainer:
-		return ephemeralcontainerinstance.InstanceType
+		return instanceidhandlerv1.EphemeralContainer
 	default:
-		return containerinstance.InstanceType
+		return instanceidhandlerv1.Container
 	}
 }
 

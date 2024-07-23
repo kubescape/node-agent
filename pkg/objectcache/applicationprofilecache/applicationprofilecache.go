@@ -10,7 +10,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -308,7 +307,7 @@ func getSlug(p *unstructured.Unstructured) (string, error) {
 
 	// a single pod can have multiple instanceIDs (because of the containers), but we only need one
 	instanceID := instanceIDs[0]
-	slug, err := names.InstanceIDToSlug(instanceID.GetName(), instanceID.GetKind(), "", instanceID.GetHashed())
+	slug, err := instanceID.GetSlug(true)
 	if err != nil {
 		return "", fmt.Errorf("failed to get slug")
 	}

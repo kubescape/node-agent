@@ -541,8 +541,8 @@ github.com/kubescape/backend v0.0.20 h1:E3nZGqWW8ELSh/n3ZRitlkmuZq33Lyx/42Lm4gpg
 github.com/kubescape/backend v0.0.20/go.mod h1:FpazfN+c3Ucuvv4jZYCnk99moSBRNMVIxl5aWCZAEBo=
 github.com/kubescape/go-logger v0.0.22 h1:gle7wH6emOiGv9ljdpVi82pWLQ3jGucrUucvil6JXHE=
 github.com/kubescape/go-logger v0.0.22/go.mod h1:x3HBpZo3cMT/WIdy18BxvVVd5D0e/PWFVk/HiwBNu3g=
-github.com/kubescape/k8s-interface v0.0.166 h1:n9rG8vUvHw7UMh+/PZHadfK4Mcj++WAaj+rvNc8kbJY=
-github.com/kubescape/k8s-interface v0.0.166/go.mod h1:oF+Yxug3Kpfu9Yr2j63wy7gwswrKXpiqI0mLk/7gF/s=
+github.com/kubescape/k8s-interface v0.0.170 h1:EtzomWoeeIWDz7QrAEsqUDpLHQwoh2m3tZITfrE/tiE=
+github.com/kubescape/k8s-interface v0.0.170/go.mod h1:VoEoHI4Va08NiGAkYzbITF50aFMT5y4fPHRb4x2LtME=
 github.com/kubescape/storage v0.0.89 h1:kYjaYqKndm3C/15MB1J4hgdmA4vbV4zCMWox2ga8O3M=
 github.com/kubescape/storage v0.0.89/go.mod h1:eLCQ7JKpR6JRjtENnN3JduvRLMOyJFtBihfdVC+1hLA=
 github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80/go.mod h1:imJHygn/1yfhB7XSJJKlFZKl/J+dCPAknuiaGOshXAs=
@@ -1398,6 +1398,8 @@ istio.io/pkg v0.0.0-20231221211216-7635388a563e h1:ZlLVbKDlCzfP0MPbWc6VRcY23d9Nd
 istio.io/pkg v0.0.0-20231221211216-7635388a563e/go.mod h1:fvmqEdHhZjYYwf6dSiIwvwc7db54kMWVTfsb91KmhzY=
 k8s.io/api v0.30.2 h1:+ZhRj+28QT4UOH+BKznu4CBgPWgkXO7XAvMcMl0qKvI=
 k8s.io/api v0.30.2/go.mod h1:ULg5g9JvOev2dG0u2hig4Z7tQ2hHIuS+m8MNZ+X6EmI=
+k8s.io/apiextensions-apiserver v0.30.2 h1:l7Eue2t6QiLHErfn2vwK4KgF4NeDgjQkCXtEbOocKIE=
+k8s.io/apiextensions-apiserver v0.30.2/go.mod h1:lsJFLYyK40iguuinsb3nt+Sj6CmodSI4ACDLep1rgjw=
 k8s.io/apimachinery v0.30.2 h1:fEMcnBj6qkzzPGSVsAZtQThU62SmQ4ZymlXRC5yFSCg=
 k8s.io/apimachinery v0.30.2/go.mod h1:iexa2somDaxdnj7bha06bhb43Zpa6eWH8N8dbqVjTUc=
 k8s.io/apiserver v0.30.2 h1:ACouHiYl1yFI2VFI3YGM+lvxgy6ir4yK2oLOsLI1/tw=
