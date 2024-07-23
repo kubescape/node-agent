@@ -9,7 +9,7 @@ RUN --mount=target=. \
     --mount=type=cache,target=/go/pkg \
     GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/node-agent .
 
-FROM gcr.io/distroless/static-debian11:debug
+FROM gcr.io/distroless/static-debian11:latest
 
 COPY --from=builder /out/node-agent /usr/bin/node-agent
 
