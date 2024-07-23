@@ -86,14 +86,17 @@ func main() {
 		defer logger.ShutdownOtel(ctx)
 	}
 
-	err = validator.CheckPrerequisites()
-	if err != nil {
-		logger.L().Ctx(ctx).Error("error during validation", helpers.Error(err))
+	// Check if we need to validate the kernel version.
+	if os.Getenv("SKIP_KERNEL_VERSION_CHECK") == "" {
+		err = validator.CheckPrerequisites()
+		if err != nil {
+			logger.L().Ctx(ctx).Error("error during validation", helpers.Error(err))
 
-		if strings.Contains(err.Error(), utils.ErrKernelVersion) {
-			os.Exit(utils.ExitCodeIncompatibleKernel)
-		} else {
-			os.Exit(utils.ExitCodeError)
+			if strings.Contains(err.Error(), utils.ErrKernelVersion) {
+				os.Exit(utils.ExitCodeIncompatibleKernel)
+			} else {
+				os.Exit(utils.ExitCodeError)
+			}
 		}
 	}
 
