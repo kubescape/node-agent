@@ -33,6 +33,7 @@ type Storage struct {
 	StorageClient              spdxv1beta1.SpdxV1beta1Interface
 	maxApplicationProfileSize  int
 	maxNetworkNeighborhoodSize int
+	maxJsonPatchOperations     int
 	namespace                  string
 }
 
@@ -79,6 +80,7 @@ func CreateStorage(namespace string) (*Storage, error) {
 		StorageClient:              clientset.SpdxV1beta1(),
 		maxApplicationProfileSize:  maxApplicationProfileSize,
 		maxNetworkNeighborhoodSize: maxNetworkNeighborhoodSize,
+		maxJsonPatchOperations:     9999,
 		namespace:                  namespace,
 	}, nil
 }

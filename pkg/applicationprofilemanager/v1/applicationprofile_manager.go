@@ -2,7 +2,6 @@ package applicationprofilemanager
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
@@ -311,18 +310,9 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			Value: runtime.GOARCH,
 		})
 
-		patch, err := json.Marshal(operations)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to marshal patch", helpers.Error(err),
-				helpers.String("slug", slug),
-				helpers.Int("container index", watchedContainer.ContainerIndex),
-				helpers.String("container ID", watchedContainer.ContainerID),
-				helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			return
-		}
 		// 1. try to patch object
 		var gotErr error
-		if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
+		if err := am.storageClient.PatchApplicationProfile(slug, namespace, operations, watchedContainer.SyncChannel); err != nil {
 			if apierrors.IsNotFound(err) {
 				// 2a. new object
 				newObject := &v1beta1.ApplicationProfile{
@@ -479,16 +469,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						})
 					}
 
-					patch, err := json.Marshal(replaceOperations)
-					if err != nil {
-						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to marshal patch", helpers.Error(err),
-							helpers.String("slug", slug),
-							helpers.Int("container index", watchedContainer.ContainerIndex),
-							helpers.String("container ID", watchedContainer.ContainerID),
-							helpers.String("k8s workload", watchedContainer.K8sContainerID))
-						return
-					}
-					if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
+					if err := am.storageClient.PatchApplicationProfile(slug, namespace, replaceOperations, watchedContainer.SyncChannel); err != nil {
 						gotErr = err
 						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to patch application profile", helpers.Error(err),
 							helpers.String("slug", slug),

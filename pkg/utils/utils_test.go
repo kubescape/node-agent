@@ -357,3 +357,42 @@ func TestTrimRuntimePrefix(t *testing.T) {
 		})
 	}
 }
+
+func TestChunkBy(t *testing.T) {
+	type testCase[T any] struct {
+		name      string
+		items     []T
+		chunkSize int
+		want      [][]T
+	}
+	tests := []testCase[string]{
+		{
+			name:      "Test with empty items",
+			chunkSize: 2,
+			want:      [][]string{nil},
+		},
+		{
+			name:      "Test with chunk size greater than items length",
+			items:     []string{"a", "b", "c"},
+			chunkSize: 4,
+			want:      [][]string{{"a", "b", "c"}},
+		},
+		{
+			name:      "Test with chunk size equal to items length",
+			items:     []string{"a", "b", "c"},
+			chunkSize: 3,
+			want:      [][]string{{"a", "b", "c"}},
+		},
+		{
+			name:      "Test with chunk size less than items length",
+			items:     []string{"a", "b", "c", "d", "e"},
+			chunkSize: 2,
+			want:      [][]string{{"a", "b"}, {"c", "d"}, {"e"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ChunkBy(tt.items, tt.chunkSize))
+		})
+	}
+}

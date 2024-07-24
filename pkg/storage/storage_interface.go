@@ -1,13 +1,14 @@
 package storage
 
 import (
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 type StorageClient interface {
 	CreateApplicationActivity(activity *v1beta1.ApplicationActivity, namespace string) error
 	CreateApplicationProfile(profile *v1beta1.ApplicationProfile, namespace string) error
-	PatchApplicationProfile(name, namespace string, patch []byte, channel chan error) error
+	PatchApplicationProfile(name, namespace string, operations []utils.PatchOperation, channel chan error) error
 	GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error)
 	CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error
 	GetFilteredSBOM(name string) (*v1beta1.SBOMSyftFiltered, error)
@@ -20,5 +21,5 @@ type StorageClient interface {
 	PatchNetworkNeighborsIngressAndEgress(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error
 	GetNetworkNeighborhood(namespace, name string) (*v1beta1.NetworkNeighborhood, error)
 	CreateNetworkNeighborhood(neighborhood *v1beta1.NetworkNeighborhood, namespace string) error
-	PatchNetworkNeighborhood(name, namespace string, patch []byte, channel chan error) error
+	PatchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, channel chan error) error
 }

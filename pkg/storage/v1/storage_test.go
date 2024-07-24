@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
@@ -208,8 +209,8 @@ func TestStorage_PatchNetworkNeighbors(t *testing.T) {
 
 func TestStorage_PatchApplicationProfile(t *testing.T) {
 	type args struct {
-		name  string
-		patch []byte
+		name       string
+		operations []utils.PatchOperation
 	}
 	tests := []struct {
 		name    string
@@ -221,38 +222,14 @@ func TestStorage_PatchApplicationProfile(t *testing.T) {
 			name: "test",
 			args: args{
 				name: storage.NginxKey,
-				patch: []byte(`[
-  {
-    "op": "add",
-    "path": "/spec/containers/0/capabilities/-",
-    "value": "SYS_ADMIN"
-  },
-  {
-    "op": "add",
-    "path": "/spec/containers/0/execs/-",
-    "value": {"path": "/usr/bin/test2"}
-  },
-  {
-    "op": "add",
-    "path": "/spec/containers/0/execs/-",
-    "value": {"path": "/usr/bin/test3"}
-  },
-  {
-    "op": "add",
-    "path": "/spec/containers/0/opens/-",
-    "value": {"path": "/usr/bin/test2"}
-  },
-  {
-    "op": "add",
-    "path": "/spec/containers/0/opens/-",
-    "value": {"path": "/usr/bin/test3"}
-  },
-  {
-    "op": "add",
-    "path": "/spec/containers/0/syscalls/-",
-    "value": "open"
-  }
-]`),
+				operations: []utils.PatchOperation{
+					{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SYS_ADMIN"},
+					{Op: "add", Path: "/spec/containers/0/execs/-", Value: v1beta1.ExecCalls{Path: "/usr/bin/test2"}},
+					{Op: "add", Path: "/spec/containers/0/execs/-", Value: v1beta1.ExecCalls{Path: "/usr/bin/test3"}},
+					{Op: "add", Path: "/spec/containers/0/opens/-", Value: v1beta1.OpenCalls{Path: "/usr/bin/test2"}},
+					{Op: "add", Path: "/spec/containers/0/opens/-", Value: v1beta1.OpenCalls{Path: "/usr/bin/test3"}},
+					{Op: "add", Path: "/spec/containers/0/syscalls/-", Value: "open"},
+				},
 			},
 			want: &v1beta1.ApplicationProfile{
 				ObjectMeta: v1.ObjectMeta{
@@ -283,8 +260,10 @@ func TestStorage_PatchApplicationProfile(t *testing.T) {
 		{
 			name: "test",
 			args: args{
-				name:  storage.NginxKey,
-				patch: []byte(`[{"op":"add","path":"/spec/initContainers","value":[{},{},{"name":"toto"}]}]`),
+				name: storage.NginxKey,
+				operations: []utils.PatchOperation{
+					{Op: "add", Path: "/spec/initContainers", Value: []v1beta1.ApplicationProfileContainer{{}, {}, {Name: "toto"}}},
+				},
 			},
 			want: &v1beta1.ApplicationProfile{
 				ObjectMeta: v1.ObjectMeta{
@@ -312,8 +291,10 @@ func TestStorage_PatchApplicationProfile(t *testing.T) {
 		{
 			name: "test",
 			args: args{
-				name:  storage.NginxKey,
-				patch: []byte(`[{"op":"add","path":"/spec/ephemeralContainers","value":[{},{},{"name":"abc"}]}]`),
+				name: storage.NginxKey,
+				operations: []utils.PatchOperation{
+					{Op: "add", Path: "/spec/ephemeralContainers", Value: []v1beta1.ApplicationProfileContainer{{}, {}, {Name: "abc"}}},
+				},
 			},
 			want: &v1beta1.ApplicationProfile{
 				ObjectMeta: v1.ObjectMeta{
@@ -365,7 +346,7 @@ func TestStorage_PatchApplicationProfile(t *testing.T) {
 				},
 			}
 			_, _ = sc.StorageClient.ApplicationProfiles("default").Create(context.Background(), existingProfile, v1.CreateOptions{})
-			if err := sc.PatchApplicationProfile(tt.args.name, "default", tt.args.patch, nil); (err != nil) != tt.wantErr {
+			if err := sc.PatchApplicationProfile(tt.args.name, "default", tt.args.operations, nil); (err != nil) != tt.wantErr {
 				t.Errorf("PatchFilteredSBOM() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			got, err := sc.StorageClient.ApplicationProfiles("default").Get(context.Background(), tt.args.name, v1.GetOptions{})

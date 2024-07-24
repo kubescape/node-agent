@@ -28,7 +28,21 @@ func (sc Storage) CreateNetworkNeighborhood(neighborhood *v1beta1.NetworkNeighbo
 	return nil
 }
 
-func (sc Storage) PatchNetworkNeighborhood(name, namespace string, patch []byte, channel chan error) error {
+func (sc Storage) PatchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, channel chan error) error {
+	// split operations into max JSON operations batches
+	for _, chunk := range utils.ChunkBy(operations, sc.maxJsonPatchOperations) {
+		if err := sc.patchNetworkNeighborhood(name, namespace, chunk, channel); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (sc Storage) patchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, channel chan error) error {
+	patch, err := json.Marshal(operations)
+	if err != nil {
+		return fmt.Errorf("marshal patch: %w", err)
+	}
 	neighborhood, err := sc.StorageClient.NetworkNeighborhoods(namespace).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
 	if err != nil {
 		return fmt.Errorf("patch application neighborhood: %w", err)
