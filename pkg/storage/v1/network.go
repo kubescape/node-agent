@@ -48,25 +48,22 @@ func (sc Storage) patchNetworkNeighborhood(name, namespace string, operations []
 		return fmt.Errorf("patch application neighborhood: %w", err)
 	}
 	// check if returned neighborhood is full
-	if s, ok := neighborhood.Annotations[helpers.StatusMetadataKey]; ok {
-		if s == helpers.TooLarge {
-			if channel != nil {
-				channel <- utils.TooLargeObjectError
-			}
+	if status, ok := neighborhood.Annotations[helpers.StatusMetadataKey]; ok && status == helpers.TooLarge {
+		if channel != nil {
+			channel <- utils.TooLargeObjectError
 		}
 		return nil
 	}
 	// check if returned profile is completed
 	if c, ok := neighborhood.Annotations[helpers.CompletionMetadataKey]; ok {
-		if s, ok := neighborhood.Annotations[helpers.StatusMetadataKey]; ok {
-			if s == helpers.Complete && c == helpers.Completed {
-				if channel != nil {
-					channel <- utils.ObjectCompleted
-				}
+		if s, ok := neighborhood.Annotations[helpers.StatusMetadataKey]; ok && s == helpers.Complete && c == helpers.Completed {
+			if channel != nil {
+				channel <- utils.ObjectCompleted
 			}
+			return nil
 		}
-		return nil
 	}
+
 	// check if returned neighborhood is too big
 	if s, ok := neighborhood.Annotations[helpers.ResourceSizeMetadataKey]; ok {
 		size, err := strconv.Atoi(s)

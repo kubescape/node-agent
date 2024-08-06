@@ -46,26 +46,25 @@ func (sc Storage) patchApplicationProfile(name, namespace string, operations []u
 	if err != nil {
 		return fmt.Errorf("patch application profile: %w", err)
 	}
+
 	// check if returned profile is full
-	if s, ok := profile.Annotations[helpers.StatusMetadataKey]; ok {
-		if s == helpers.TooLarge {
-			if channel != nil {
-				channel <- utils.TooLargeObjectError
-			}
+	if status, ok := profile.Annotations[helpers.StatusMetadataKey]; ok && status == helpers.TooLarge {
+		if channel != nil {
+			channel <- utils.TooLargeObjectError
 		}
 		return nil
 	}
+
 	// check if returned profile is completed
 	if c, ok := profile.Annotations[helpers.CompletionMetadataKey]; ok {
-		if s, ok := profile.Annotations[helpers.StatusMetadataKey]; ok {
-			if s == helpers.Complete && c == helpers.Completed {
-				if channel != nil {
-					channel <- utils.ObjectCompleted
-				}
+		if s, ok := profile.Annotations[helpers.StatusMetadataKey]; ok && s == helpers.Complete && c == helpers.Completed {
+			if channel != nil {
+				channel <- utils.ObjectCompleted
 			}
+			return nil
 		}
-		return nil
 	}
+
 	// check if returned profile is too big
 	if s, ok := profile.Annotations[helpers.ResourceSizeMetadataKey]; ok {
 		size, err := strconv.Atoi(s)
