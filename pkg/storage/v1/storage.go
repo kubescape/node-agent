@@ -60,11 +60,13 @@ func CreateStorage(namespace string) (*Storage, error) {
 	if err != nil {
 		maxApplicationProfileSize = DefaultMaxApplicationProfileSize
 	}
+	logger.L().Debug("maxApplicationProfileSize", helpers.Int("size", maxApplicationProfileSize))
 
 	maxNetworkNeighborhoodSize, err := strconv.Atoi(os.Getenv("MAX_NETWORK_NEIGHBORHOOD_SIZE"))
 	if err != nil {
 		maxNetworkNeighborhoodSize = DefaultMaxNetworkNeighborhoodSize
 	}
+	logger.L().Debug("maxNetworkNeighborhoodSize", helpers.Int("size", maxNetworkNeighborhoodSize))
 
 	// wait for storage to be ready
 	if err := backoff.RetryNotify(func() error {

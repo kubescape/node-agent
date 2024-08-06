@@ -181,17 +181,18 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 				}
 
 				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
-				return nil
+				return err
 			case errors.Is(err, utils.ContainerReachedMaxTime):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
-				return nil
+				return err
 			case errors.Is(err, utils.ObjectCompleted):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
-				return nil
+				return err
 			case errors.Is(err, utils.TooLargeObjectError):
+				logger.L().Debug("ApplicationProfileManager - object is too large")
 				watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
-				return nil
+				return err
 			}
 		}
 	}
