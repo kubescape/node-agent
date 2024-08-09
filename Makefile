@@ -10,5 +10,6 @@ binary:
 
 docker-build:
 	docker buildx build --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) .
+
 docker-push:
 	docker push $(IMAGE):$(TAG)
