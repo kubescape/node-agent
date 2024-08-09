@@ -21,8 +21,8 @@ const (
 var R1000ExecFromMaliciousSourceDescriptor = RuleDescriptor{
 	ID:          R1000ID,
 	Name:        R1000Name,
-	Description: "Detecting exec calls that are from malicious source like: /dev/shm, /run, /var/run, /proc/self",
-	Priority:    RulePriorityCritical,
+	Description: "Detecting exec calls that are from malicious source like: /dev/shm, /proc/self",
+	Priority:    RulePriorityMed,
 	Tags:        []string{"exec", "signature"},
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{utils.ExecveEventType},
@@ -61,8 +61,6 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 
 	var maliciousExecPathPrefixes = []string{
 		"/dev/shm",
-		"/run",
-		"/var/run",
 		"/proc/self",
 	}
 
