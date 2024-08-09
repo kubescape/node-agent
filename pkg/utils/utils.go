@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -15,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +30,7 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	v1 "k8s.io/api/core/v1"
@@ -35,8 +38,11 @@ import (
 
 	"github.com/prometheus/procfs"
 
+	runtimeclient "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/runtime-client"
+	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
@@ -702,4 +708,106 @@ func ChunkBy[T any](items []T, chunkSize int) [][]T {
 		}
 	}
 	return append(chunks, items)
+}
+
+// isUnixSocket checks if the given path is a Unix socket.
+func isUnixSocket(path string) (bool, error) {
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return false, err // Could not obtain the file stats
+	}
+
+	stat, ok := fileInfo.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false, fmt.Errorf("not a unix file")
+	}
+
+	// Check if the file is a socket
+	return (stat.Mode & syscall.S_IFMT) == syscall.S_IFSOCK, nil
+}
+
+func DetectContainerRuntimes(hostMount string) ([]*containerutilsTypes.RuntimeConfig, error) {
+	runtimes := map[igtypes.RuntimeName]string{
+		igtypes.RuntimeNameDocker:     runtimeclient.DockerDefaultSocketPath,
+		igtypes.RuntimeNameCrio:       runtimeclient.CrioDefaultSocketPath,
+		igtypes.RuntimeNameContainerd: runtimeclient.ContainerdDefaultSocketPath,
+		igtypes.RuntimeNamePodman:     runtimeclient.PodmanDefaultSocketPath,
+	}
+
+	detectedRuntimes := make([]*containerutilsTypes.RuntimeConfig, 0)
+
+	for runtimeName, socketPath := range runtimes {
+		// Check if the socket is available on the host mount
+		socketPath = hostMount + socketPath
+		if isSocket, err := isUnixSocket(socketPath); err == nil && isSocket {
+			logger.L().Info("Detected container runtime", helpers.String("runtime", runtimeName.String()), helpers.String("socketPath", socketPath))
+			detectedRuntimes = append(detectedRuntimes, &containerutilsTypes.RuntimeConfig{
+				Name:       runtimeName,
+				SocketPath: socketPath,
+			})
+		}
+	}
+
+	if len(detectedRuntimes) == 0 {
+		return nil, fmt.Errorf("no container runtimes detected at the following paths: %v", runtimes)
+	}
+
+	return detectedRuntimes, nil
+}
+
+func DetectContainerRuntimeViaK8sAPI(ctx context.Context, k8sClient *k8sinterface.KubernetesApi, nodeName string) (*containerutilsTypes.RuntimeConfig, error) {
+	// Get the current node
+	nodes, err := k8sClient.GetKubernetesClient().CoreV1().Nodes().List(ctx, metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("metadata.name=%s", nodeName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list nodes: %v", err)
+	}
+
+	if len(nodes.Items) == 0 {
+		return nil, fmt.Errorf("no node found with name: %s", nodeName)
+	}
+
+	node := nodes.Items[0]
+	runtimeConfig := parseRuntimeInfo(node.Status.NodeInfo.ContainerRuntimeVersion)
+	if runtimeConfig.Name == igtypes.RuntimeNameUnknown {
+		return nil, fmt.Errorf("unknown container runtime: %s", node.Status.NodeInfo.ContainerRuntimeVersion)
+	}
+
+	return runtimeConfig, nil
+}
+
+func parseRuntimeInfo(version string) *containerutilsTypes.RuntimeConfig {
+	switch {
+	case strings.HasPrefix(version, "docker://"):
+		return &containerutilsTypes.RuntimeConfig{
+			Name:            igtypes.RuntimeNameDocker,
+			SocketPath:      runtimeclient.DockerDefaultSocketPath,
+			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
+		}
+	case strings.HasPrefix(version, "containerd://"):
+		return &containerutilsTypes.RuntimeConfig{
+			Name:            igtypes.RuntimeNameContainerd,
+			SocketPath:      runtimeclient.ContainerdDefaultSocketPath,
+			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
+		}
+	case strings.HasPrefix(version, "cri-o://"):
+		return &containerutilsTypes.RuntimeConfig{
+			Name:            igtypes.RuntimeNameCrio,
+			SocketPath:      runtimeclient.CrioDefaultSocketPath,
+			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
+		}
+	case strings.HasPrefix(version, "podman://"):
+		return &containerutilsTypes.RuntimeConfig{
+			Name:            igtypes.RuntimeNamePodman,
+			SocketPath:      runtimeclient.PodmanDefaultSocketPath,
+			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
+		}
+	default:
+		return &containerutilsTypes.RuntimeConfig{
+			Name:            igtypes.RuntimeNameUnknown,
+			SocketPath:      "",
+			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
+		}
+	}
 }
