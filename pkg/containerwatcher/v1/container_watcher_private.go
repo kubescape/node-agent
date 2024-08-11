@@ -85,25 +85,28 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 	// Define the different options for the container collection instance
 	opts := []containercollection.ContainerCollectionOption{
-		containercollection.WithTracerCollection(ch.tracerCollection),
+		// Get Notifications from the container collection
+		containercollection.WithPubSub(containerEventFuncs...),
 
 		// Enrich events with OCI config information
 		containercollection.WithOCIConfigEnrichment(),
 
-		// Get containers created with ebpf (works also if hostPid=false)
-		containercollection.WithContainerFanotifyEbpf(),
-
-		// Get containers created with docker
+		// Get containers enriched with cgroup information
 		containercollection.WithCgroupEnrichment(),
 
 		// Enrich events with Linux namespaces information, it is needed for per container filtering
 		containercollection.WithLinuxNamespaceEnrichment(),
 
+		// Get containers created with container runtimes
+		containercollection.WithContainerRuntimeEnrichment(ch.runtime),
+
+		// Get containers created with ebpf (works also if hostPid=false)
+		containercollection.WithContainerFanotifyEbpf(),
+
+		containercollection.WithTracerCollection(ch.tracerCollection),
+
 		// Enrich those containers with data from the Kubernetes API
 		containercollection.WithKubernetesEnrichment(ch.nodeName, ch.k8sClient.K8SConfig),
-
-		// Get Notifications from the container collection
-		containercollection.WithPubSub(containerEventFuncs...),
 	}
 
 	// Initialize the container collection

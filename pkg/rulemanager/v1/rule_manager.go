@@ -114,7 +114,7 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 		select {
 		case <-syscallTicker.C:
 			if rm.syscallPeekFunc == nil {
-				logger.L().Error("RuleManager - syscallPeekFunc is not set", helpers.String("container ID", watchedContainer.ContainerID))
+				logger.L().Debug("RuleManager - syscallPeekFunc is not set", helpers.String("container ID", watchedContainer.ContainerID))
 				continue
 			}
 
