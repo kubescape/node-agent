@@ -12,5 +12,6 @@ const (
 	RandomXEventType
 	SymlinkEventType
 	HardlinkEventType
+	SSHEventType
 	AllEventType
 )

@@ -3,6 +3,7 @@ package rulemanager
 import (
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -60,6 +61,10 @@ func (r *RuleManagerMock) ReportSymlinkEvent(_ tracersymlinktype.Event) {
 }
 
 func (r *RuleManagerMock) ReportHardlinkEvent(_ tracerhardlinktype.Event) {
+	// noop
+}
+
+func (r *RuleManagerMock) ReportSSHEvent(_ tracersshtype.Event) {
 	// noop
 }
 
