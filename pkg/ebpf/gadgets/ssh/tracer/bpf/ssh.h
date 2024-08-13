@@ -17,7 +17,9 @@
 #define ETH_HLEN	14
 
 struct event {
+    // Keep netns at the top: networktracer depends on it
     __u32 netns;
+    
     gadget_timestamp timestamp;
     gadget_mntns_id mntns_id;
     __u32 pid;

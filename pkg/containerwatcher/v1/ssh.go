@@ -3,9 +3,10 @@ package containerwatcher
 import (
 	"fmt"
 
-	tracersshlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/tracer"
+	tracerssh "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/tracer"
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection/networktracer"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -21,6 +22,9 @@ func (ch *IGContainerWatcher) sshEventCallback(event *tracersshtype.Event) {
 		return
 	}
 
+	ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
+	ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
+
 	ch.sshWorkerChan <- event
 }
 
@@ -29,13 +33,7 @@ func (ch *IGContainerWatcher) startSshTracing() error {
 		return fmt.Errorf("adding tracer: %w", err)
 	}
 
-	// Get mount namespace map to filter by containers
-	sshMountnsmap, err := ch.tracerCollection.TracerMountNsMap(sshTraceName)
-	if err != nil {
-		return fmt.Errorf("getting sshMountnsmap: %w", err)
-	}
-
-	tracerSsh, err := tracersshlink.NewTracer(&tracersshlink.Config{MountnsMap: sshMountnsmap}, ch.containerCollection, ch.sshEventCallback)
+	tracerSsh, err := tracerssh.NewTracer()
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
@@ -45,7 +43,27 @@ func (ch *IGContainerWatcher) startSshTracing() error {
 		}
 	}()
 
+	tracerSsh.SetSocketEnricherMap(ch.socketEnricher.SocketsMap())
+	tracerSsh.SetEventHandler(ch.sshEventCallback)
+
+	err = tracerSsh.RunWorkaround()
+	if err != nil {
+		return fmt.Errorf("running workaround: %w", err)
+	}
+
 	ch.sshTracer = tracerSsh
+
+	config := &networktracer.ConnectToContainerCollectionConfig[tracersshtype.Event]{
+		Tracer:   ch.sshTracer,
+		Resolver: ch.containerCollection,
+		Selector: ch.containerSelector,
+		Base:     tracersshtype.Base,
+	}
+
+	_, err = networktracer.ConnectToContainerCollection(config)
+	if err != nil {
+		return fmt.Errorf("creating tracer: %w", err)
+	}
 
 	return nil
 }
@@ -55,6 +73,6 @@ func (ch *IGContainerWatcher) stopSshTracing() error {
 	if err := ch.tracerCollection.RemoveTracer(sshTraceName); err != nil {
 		return fmt.Errorf("removing tracer: %w", err)
 	}
-	ch.sshTracer.Stop()
+	ch.sshTracer.Close()
 	return nil
 }

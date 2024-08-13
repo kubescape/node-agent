@@ -75,11 +75,10 @@ type sshProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type sshMapSpecs struct {
-	EmptyEvent           *ebpf.MapSpec `ebpf:"empty_event"`
-	Events               *ebpf.MapSpec `ebpf:"events"`
-	GadgetHeap           *ebpf.MapSpec `ebpf:"gadget_heap"`
-	GadgetMntnsFilterMap *ebpf.MapSpec `ebpf:"gadget_mntns_filter_map"`
-	GadgetSockets        *ebpf.MapSpec `ebpf:"gadget_sockets"`
+	EmptyEvent    *ebpf.MapSpec `ebpf:"empty_event"`
+	Events        *ebpf.MapSpec `ebpf:"events"`
+	GadgetHeap    *ebpf.MapSpec `ebpf:"gadget_heap"`
+	GadgetSockets *ebpf.MapSpec `ebpf:"gadget_sockets"`
 }
 
 // sshObjects contains all objects after they have been loaded into the kernel.
@@ -101,11 +100,10 @@ func (o *sshObjects) Close() error {
 //
 // It can be passed to loadSshObjects or ebpf.CollectionSpec.LoadAndAssign.
 type sshMaps struct {
-	EmptyEvent           *ebpf.Map `ebpf:"empty_event"`
-	Events               *ebpf.Map `ebpf:"events"`
-	GadgetHeap           *ebpf.Map `ebpf:"gadget_heap"`
-	GadgetMntnsFilterMap *ebpf.Map `ebpf:"gadget_mntns_filter_map"`
-	GadgetSockets        *ebpf.Map `ebpf:"gadget_sockets"`
+	EmptyEvent    *ebpf.Map `ebpf:"empty_event"`
+	Events        *ebpf.Map `ebpf:"events"`
+	GadgetHeap    *ebpf.Map `ebpf:"gadget_heap"`
+	GadgetSockets *ebpf.Map `ebpf:"gadget_sockets"`
 }
 
 func (m *sshMaps) Close() error {
@@ -113,7 +111,6 @@ func (m *sshMaps) Close() error {
 		m.EmptyEvent,
 		m.Events,
 		m.GadgetHeap,
-		m.GadgetMntnsFilterMap,
 		m.GadgetSockets,
 	)
 }

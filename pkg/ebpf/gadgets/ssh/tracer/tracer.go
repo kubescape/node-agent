@@ -1,202 +1,109 @@
 package tracer
 
 import (
+	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
-	"net"
-	"os"
-	"syscall"
+	"net/netip"
 	"unsafe"
 
-	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/perf"
-	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/rawsock"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/networktracer"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
-	"golang.org/x/sys/unix"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type event ssh bpf/ssh.bpf.c -- -I./bpf/
 
-type Config struct {
-	MountnsMap *ebpf.Map
-}
-
 type Tracer struct {
-	config        *Config
-	enricher      gadgets.DataEnricherByMntNs
-	netEnricher   gadgets.DataEnricherByNetNs
-	eventCallback func(*types.Event)
+	*networktracer.Tracer[types.Event]
 
-	objs sshObjects
-
-	file   int
-	reader *perf.Reader
+	cancel context.CancelFunc
 }
 
-func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
-	eventCallback func(*types.Event),
-	netEnricher gadgets.DataEnricherByNetNs,
-) (*Tracer, error) {
-	t := &Tracer{
-		config:        config,
-		enricher:      enricher,
-		netEnricher:   netEnricher,
-		eventCallback: eventCallback,
-	}
+func NewTracer() (*Tracer, error) {
+	t := &Tracer{}
 
 	if err := t.install(); err != nil {
-		t.close()
-		return nil, err
+		t.Close()
+		return nil, fmt.Errorf("installing tracer: %w", err)
 	}
-
-	go t.run()
 
 	return t, nil
 }
 
-func (t *Tracer) Stop() {
-	t.close()
-}
-
-func (t *Tracer) close() {
-	if t.file != 0 {
-		syscall.Close(t.file)
-		t.file = 0
+func (t *Tracer) Close() {
+	if t.cancel != nil {
+		t.cancel()
 	}
 
-	if t.reader != nil {
-		t.reader.Close()
+	if t.Tracer != nil {
+		t.Tracer.Close()
 	}
-
-	t.objs.Close()
 }
 
 func (t *Tracer) install() error {
+	networkTracer, err := networktracer.NewTracer[types.Event]()
+	if err != nil {
+		return fmt.Errorf("creating network tracer: %w", err)
+	}
+	t.Tracer = networkTracer
+	return nil
+}
+
+func (t *Tracer) RunWorkaround() error {
+	if err := t.run(); err != nil {
+		t.Close()
+		return fmt.Errorf("running tracer: %w", err)
+	}
+	return nil
+}
+
+func (t *Tracer) run() error {
 	spec, err := loadSsh()
 	if err != nil {
 		return fmt.Errorf("loading ebpf program: %w", err)
 	}
 
-	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
-		return fmt.Errorf("loading ebpf spec: %w", err)
-	}
-
-	// Open raw socket
-	rawSockFd, err := rawsock.OpenRawSock(1)
-	if err != nil {
-		logger.L().Error("Error opening raw socket", helpers.Error(err))
-	}
-
-	// Attach BPF program to raw socket
-	if err := syscall.SetsockoptInt(rawSockFd, syscall.SOL_SOCKET, unix.SO_ATTACH_BPF, t.objs.SshDetector.FD()); err != nil {
-		logger.L().Error("Error attaching BPF program to raw socket", helpers.Error(err))
-	}
-
-	// Store the file for later cleanup
-	t.file = rawSockFd
-
-	t.reader, err = perf.NewReader(t.objs.Events, gadgets.PerfBufferPages*os.Getpagesize())
-	if err != nil {
-		return fmt.Errorf("creating perf ring buffer: %w", err)
+	if err := t.Tracer.Run(spec, types.Base, t.parseSSH); err != nil {
+		return fmt.Errorf("setting network tracer spec: %w", err)
 	}
 
 	return nil
 }
 
-func (t *Tracer) run() {
-	for {
-		record, err := t.reader.Read()
-		if err != nil {
-			if errors.Is(err, perf.ErrClosed) {
-				return
-			}
+func (t *Tracer) parseSSH(rawSample []byte, netns uint64) (*types.Event, error) {
+	bpfEvent := (*sshEvent)(unsafe.Pointer(&rawSample[0]))
 
-			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
-			t.eventCallback(types.Base(eventtypes.Err(msg)))
-			return
-		}
-
-		if record.LostSamples > 0 {
-			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
-			t.eventCallback(types.Base(eventtypes.Warn(msg)))
-			continue
-		}
-
-		bpfEvent := (*sshEvent)(unsafe.Pointer(&record.RawSample[0]))
-
-		srcIP := make(net.IP, 4)
-		dstIP := make(net.IP, 4)
-		binary.BigEndian.PutUint32(srcIP, bpfEvent.SrcIp)
-		binary.BigEndian.PutUint32(dstIP, bpfEvent.DstIp)
-
-		event := types.Event{
-			Event: eventtypes.Event{
-				Type:      eventtypes.NORMAL,
-				Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
-			},
-			WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-			WithNetNsID:   eventtypes.WithNetNsID{NetNsID: uint64(bpfEvent.Netns)},
-			SrcIP:         srcIP.String(),
-			DstIP:         dstIP.String(),
-			SrcPort:       bpfEvent.SrcPort,
-			DstPort:       bpfEvent.DstPort,
-			Pid:           bpfEvent.Pid,
-			Uid:           bpfEvent.Uid,
-			Gid:           bpfEvent.Gid,
-			Comm:          gadgets.FromCString(bpfEvent.Comm[:]),
-		}
-
-		if t.enricher != nil {
-			t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
-			t.netEnricher.EnrichByNetNs(&event.CommonData, event.NetNsID)
-		}
-
-		logger.L().Info("SSH event", helpers.Interface("event", event))
-
-		t.eventCallback(&event)
-	}
-}
-
-func (t *Tracer) Run(gadgetCtx gadgets.GadgetContext) error {
-	defer t.close()
-	if err := t.install(); err != nil {
-		return fmt.Errorf("installing tracer: %w", err)
+	srcIP := [4]byte{}
+	binary.BigEndian.PutUint32(srcIP[:], bpfEvent.SrcIp)
+	src := netip.AddrFrom4(srcIP).String()
+	dstIP := [4]byte{}
+	binary.BigEndian.PutUint32(dstIP[:], bpfEvent.DstIp)
+	dst := netip.AddrFrom4(dstIP).String()
+	event := types.Event{
+		Event: eventtypes.Event{
+			Type:      eventtypes.NORMAL,
+			Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
+		},
+		WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
+		WithNetNsID:   eventtypes.WithNetNsID{NetNsID: netns},
+		SrcIP:         src,
+		DstIP:         dst,
+		SrcPort:       bpfEvent.SrcPort,
+		DstPort:       bpfEvent.DstPort,
+		Pid:           bpfEvent.Pid,
+		Uid:           bpfEvent.Uid,
+		Gid:           bpfEvent.Gid,
+		Comm:          gadgets.FromCString(bpfEvent.Comm[:]),
 	}
 
-	go t.run()
-	gadgetcontext.WaitForTimeoutOrDone(gadgetCtx)
-
-	return nil
-}
-
-func (t *Tracer) SetMountNsMap(mountnsMap *ebpf.Map) {
-	t.config.MountnsMap = mountnsMap
-}
-
-func (t *Tracer) SetEventHandler(handler any) {
-	nh, ok := handler.(func(ev *types.Event))
-	if !ok {
-		panic("event handler invalid")
-	}
-	t.eventCallback = nh
+	return &event, nil
 }
 
 type GadgetDesc struct{}
 
 func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
-	tracer := &Tracer{
-		config: &Config{},
-	}
+	tracer := &Tracer{}
 	return tracer, nil
 }
-
-// // Helper function to convert host byte order to network byte order
-// func htons(host uint16) uint16 {
-// 	return (host&0xff)<<8 | (host&0xff00)>>8
-// }

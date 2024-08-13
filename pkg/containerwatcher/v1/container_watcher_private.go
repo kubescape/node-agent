@@ -258,6 +258,7 @@ func (ch *IGContainerWatcher) startTracers() error {
 			return err
 		}
 
+		// NOTE: SSH tracing relies on the network tracer, so it must be started after the network tracer.
 		if err := ch.startSshTracing(); err != nil {
 			logger.L().Error("error starting ssh tracing", helpers.Error(err))
 			return err

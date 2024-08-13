@@ -3,50 +3,23 @@ package ruleengine
 import (
 	"fmt"
 	"slices"
-	"strings"
-	"time"
 
+	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 
 	"github.com/kubescape/go-logger"
+
+	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 )
 
 const (
-	R1003ID              = "R1003"
-	R1003Name            = "Malicious SSH Connection"
-	MaxTimeDiffInSeconds = 2
+	R1003ID   = "R1003"
+	R1003Name = "Malicious SSH Connection"
 )
-
-var SSHRelatedFiles = []string{
-	"ssh_config",
-	"sshd_config",
-	"ssh_known_hosts",
-	"ssh_known_hosts2",
-	"ssh_config.d",
-	"sshd_config.d",
-	".ssh",
-	"authorized_keys",
-	"authorized_keys2",
-	"known_hosts",
-	"known_hosts2",
-	"id_rsa",
-	"id_rsa.pub",
-	"id_dsa",
-	"id_dsa.pub",
-	"id_ecdsa",
-	"id_ecdsa.pub",
-	"id_ed25519",
-	"id_ed25519.pub",
-	"id_xmss",
-	"id_xmss.pub",
-}
 
 var R1003MaliciousSSHConnectionRuleDescriptor = RuleDescriptor{
 	ID:          R1003ID,
@@ -55,7 +28,7 @@ var R1003MaliciousSSHConnectionRuleDescriptor = RuleDescriptor{
 	Tags:        []string{"ssh", "connection", "port", "malicious"},
 	Priority:    RulePriorityMed,
 	Requirements: &RuleRequirements{
-		EventTypes: []utils.EventType{utils.OpenEventType, utils.NetworkEventType},
+		EventTypes: []utils.EventType{utils.SSHEventType},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1003MaliciousSSHConnection()
@@ -66,17 +39,13 @@ var _ ruleengine.RuleEvaluator = (*R1003MaliciousSSHConnection)(nil)
 
 type R1003MaliciousSSHConnection struct {
 	BaseRule
-	accessRelatedFiles        bool
-	sshInitiatorPid           uint32
-	configFileAccessTimeStamp int64
-	allowedPorts              []uint16
+	allowedPorts []uint16
+	requests     maps.SafeMap[string, string] // Mapping of src IP to dst IP
 }
 
 func CreateRuleR1003MaliciousSSHConnection() *R1003MaliciousSSHConnection {
-	return &R1003MaliciousSSHConnection{accessRelatedFiles: false,
-		sshInitiatorPid:           0,
-		configFileAccessTimeStamp: 0,
-		allowedPorts:              []uint16{22},
+	return &R1003MaliciousSSHConnection{
+		allowedPorts: []uint16{22},
 	}
 }
 func (rule *R1003MaliciousSSHConnection) Name() string {
@@ -114,101 +83,48 @@ func (rule *R1003MaliciousSSHConnection) DeleteRule() {
 }
 
 func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if eventType != utils.OpenEventType && eventType != utils.NetworkEventType {
+	if eventType != utils.SSHEventType {
 		return nil
 	}
 
-	if eventType == utils.OpenEventType && !rule.accessRelatedFiles {
-		openEvent, ok := event.(*traceropentype.Event)
-		if !ok {
-			return nil
-		} else {
-			if IsSSHConfigFile(openEvent.FullPath) {
-				rule.accessRelatedFiles = true
-				rule.sshInitiatorPid = openEvent.Pid
-				rule.configFileAccessTimeStamp = int64(openEvent.Timestamp)
-			}
+	sshEvent := event.(*tracersshtype.Event)
 
+	if !slices.Contains(rule.allowedPorts, sshEvent.DstPort) {
+		// Check if the event is a response to a request we have already seen.
+		if rule.requests.Has(sshEvent.DstIP) {
 			return nil
 		}
-	} else if eventType == utils.NetworkEventType && rule.accessRelatedFiles {
-		networkEvent, ok := event.(*tracernetworktype.Event)
-		if !ok {
-			return nil
-		}
-
-		nn := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
-		if nn == nil {
-			return nil
-		}
-
-		timestampDiffInSeconds := calculateTimestampDiffInSeconds(int64(networkEvent.Timestamp), rule.configFileAccessTimeStamp)
-		if timestampDiffInSeconds > MaxTimeDiffInSeconds {
-			rule.accessRelatedFiles = false
-			rule.sshInitiatorPid = 0
-			rule.configFileAccessTimeStamp = 0
-			return nil
-		}
-		if networkEvent.Pid == rule.sshInitiatorPid && networkEvent.PktType == "OUTGOING" && networkEvent.Proto == "TCP" && !slices.Contains(rule.allowedPorts, networkEvent.Port) {
-			nnContainer, err := getContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
-			if err != nil {
-				return nil
-			}
-			for _, egress := range nnContainer.Egress {
-				for _, port := range egress.Ports {
-					if uint16(*port.Port) == networkEvent.Port {
-						return nil
-					}
-				}
-			}
-			rule.accessRelatedFiles = false
-			rule.sshInitiatorPid = 0
-			rule.configFileAccessTimeStamp = 0
-
-			ruleFailure := GenericRuleFailure{
-				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName:      rule.Name(),
-					InfectedPID:    networkEvent.Pid,
-					FixSuggestions: "If this is a legitimate action, please add the port as a parameter to the binding of this rule",
-					Severity:       R1003MaliciousSSHConnectionRuleDescriptor.Priority,
+		rule.requests.Set(sshEvent.SrcIP, sshEvent.DstIP)
+		ruleFailure := GenericRuleFailure{
+			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				AlertName:      rule.Name(),
+				InfectedPID:    sshEvent.Pid,
+				FixSuggestions: "If this is a legitimate action, please add the port as a parameter to the binding of this rule",
+				Severity:       R1003MaliciousSSHConnectionRuleDescriptor.Priority,
+			},
+			RuntimeProcessDetails: apitypes.ProcessTree{
+				ProcessTree: apitypes.Process{
+					Comm: sshEvent.Comm,
+					Gid:  &sshEvent.Gid,
+					PID:  sshEvent.Pid,
+					Uid:  &sshEvent.Uid,
 				},
-				RuntimeProcessDetails: apitypes.ProcessTree{
-					ProcessTree: apitypes.Process{
-						Comm: networkEvent.Comm,
-						Gid:  &networkEvent.Gid,
-						PID:  networkEvent.Pid,
-						Uid:  &networkEvent.Uid,
-					},
-					ContainerID: networkEvent.Runtime.ContainerID,
-				},
-				TriggerEvent: networkEvent.Event,
-				RuleAlert: apitypes.RuleAlert{
-					RuleDescription: fmt.Sprintf("SSH connection to disallowed port %d", networkEvent.Port),
-				},
-				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-					PodName: networkEvent.GetPod(),
-				},
-				RuleID: rule.ID(),
-			}
-
-			return &ruleFailure
+				ContainerID: sshEvent.Runtime.ContainerID,
+			},
+			TriggerEvent: sshEvent.Event,
+			RuleAlert: apitypes.RuleAlert{
+				RuleDescription: fmt.Sprintf("SSH connection to disallowed port %s:%d", sshEvent.DstIP, sshEvent.DstPort),
+			},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName: sshEvent.GetPod(),
+			},
+			RuleID: rule.ID(),
 		}
+
+		return &ruleFailure
 	}
 
 	return nil
-}
-
-func calculateTimestampDiffInSeconds(timestamp1 int64, timestamp2 int64) int64 {
-	return (timestamp1 - timestamp2) / int64(time.Second)
-}
-
-func IsSSHConfigFile(path string) bool {
-	for _, sshFile := range SSHRelatedFiles {
-		if strings.Contains(path, sshFile) {
-			return true
-		}
-	}
-	return false
 }
 
 func (rule *R1003MaliciousSSHConnection) Requirements() ruleengine.RuleSpec {

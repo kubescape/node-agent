@@ -1,5 +1,3 @@
-//#include "../../../../include/amd64/vmlinux.h"
-
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
@@ -11,14 +9,14 @@
 
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
-#include <bpf/bpf_core_read.h>
-
-#include "ssh.h"
 
 #include "../../../../include/macros.h"
 #include "../../../../include/buffer.h"
+
 #define GADGET_TYPE_NETWORKING
 #include "../../../../include/sockets-map.h"
+
+#include "ssh.h"
 
 
 // Events map.
@@ -38,23 +36,6 @@ struct {
 
 // we need this to make sure the compiler doesn't remove our struct.
 const struct event *unusedevent __attribute__((unused));
-
-const volatile bool gadget_filter_by_mntns = false;
-
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, gadget_mntns_id);
-	__type(value, __u32);
-	__uint(max_entries, 1024);
-} gadget_mntns_filter_map SEC(".maps");
-
-// gadget_should_discard_mntns_id returns true if events generated from the given mntns_id should
-// not be taken into consideration.
-static __always_inline bool gadget_should_discard_mntns_id(gadget_mntns_id mntns_id)
-{
-	return gadget_filter_by_mntns &&
-	       !bpf_map_lookup_elem(&gadget_mntns_filter_map, &mntns_id);
-}
 
 SEC("socket")
 int ssh_detector(struct __sk_buff *skb) {
@@ -92,7 +73,6 @@ int ssh_detector(struct __sk_buff *skb) {
 
     // Check for SSH signature using memcmp
     if (__builtin_memcmp(payload, SSH_SIGNATURE, SSH_SIG_LEN) == 0) {
-        bpf_printk("SSH packet detected\n");
         struct event *event;
         __u32 zero = 0;
         event = bpf_map_lookup_elem(&empty_event, &zero);
@@ -103,12 +83,6 @@ int ssh_detector(struct __sk_buff *skb) {
         // Enrich event with process metadata
         struct sockets_value *skb_val = gadget_socket_lookup(skb);
         if (skb_val != NULL) {
-            __u64 mntns_id = skb_val->mntns;
-            if (gadget_should_discard_mntns_id(mntns_id)) {
-                bpf_printk("Discarding event from mntns_id %llu\n", mntns_id);
-                return 0;
-            }
-
             event->netns = skb->cb[0]; // cb[0] initialized by dispatcher.bpf.c
             event->mntns_id = skb_val->mntns;
             event->pid = skb_val->pid_tgid >> 32;
@@ -122,10 +96,9 @@ int ssh_detector(struct __sk_buff *skb) {
             event->dst_port = bpf_ntohs(tcph.dest);
 
             event->timestamp = bpf_ktime_get_boot_ns();
-
         }
-
-        bpf_perf_event_output(skb, &events, BPF_F_CURRENT_CPU, &event, sizeof(struct event));
+        __u64 skb_len = skb->len;
+        bpf_perf_event_output(skb, &events, skb_len << 32 | BPF_F_CURRENT_CPU, event, sizeof(struct event));
     }
 
     return 0;
