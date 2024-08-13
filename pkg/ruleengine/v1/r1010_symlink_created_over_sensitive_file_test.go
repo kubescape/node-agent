@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"testing"
 
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 )
@@ -16,14 +18,50 @@ func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {
 		t.Errorf("Expected r to not be nil")
 	}
 
+	objCache := RuleObjectCacheMock{}
+	profile := objCache.ApplicationProfileCache().GetApplicationProfile("test")
+	if profile == nil {
+		profile = &v1beta1.ApplicationProfile{
+			Spec: v1beta1.ApplicationProfileSpec{
+				Containers: []v1beta1.ApplicationProfileContainer{
+					{
+						Name: "test",
+						Opens: []v1beta1.OpenCalls{
+							{
+								Path:  "/test",
+								Flags: []string{"O_RDONLY"},
+							},
+						},
+						Execs: []v1beta1.ExecCalls{
+							{
+								Path: "/usr/sbin/groupadd",
+								Args: []string{"test"},
+							},
+						},
+					},
+				},
+			},
+		}
+		objCache.SetApplicationProfile(profile)
+	}
+
 	// Create a symlink event
 	e := &tracersymlinktype.Event{
+		Event: eventtypes.Event{
+			CommonData: eventtypes.CommonData{
+				K8s: eventtypes.K8sMetadata{
+					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+						ContainerName: "test",
+					},
+				},
+			},
+		},
 		Comm:    "test",
 		OldPath: "test",
 		NewPath: "test",
 	}
 
-	ruleResult := r.ProcessEvent(utils.SymlinkEventType, e, &RuleObjectCacheMock{})
+	ruleResult := r.ProcessEvent(utils.SymlinkEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since symlink path is not sensitive")
@@ -34,7 +72,7 @@ func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {
 	e.OldPath = "/etc/passwd"
 	e.NewPath = "/etc/abc"
 
-	ruleResult = r.ProcessEvent(utils.SymlinkEventType, e, &RuleObjectCacheMock{})
+	ruleResult = r.ProcessEvent(utils.SymlinkEventType, e, &objCache)
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of symlink is used over sensitive file")
@@ -42,10 +80,22 @@ func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {
 	}
 
 	e.OldPath = "/etc/abc"
-	ruleResult = r.ProcessEvent(utils.SymlinkEventType, e, &RuleObjectCacheMock{})
+	ruleResult = r.ProcessEvent(utils.SymlinkEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since symlink is not used over sensitive file")
+		return
+	}
+
+	// Test with whitelisted process
+	e.Comm = "/usr/sbin/groupadd"
+	e.OldPath = "/etc/passwd"
+	e.NewPath = "/etc/abc"
+
+	ruleResult = r.ProcessEvent(utils.SymlinkEventType, e, &objCache)
+	if ruleResult != nil {
+		fmt.Printf("ruleResult: %v\n", ruleResult)
+		t.Errorf("Expected ruleResult to be nil since file is whitelisted and not sensitive")
 		return
 	}
 }

@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -87,6 +88,12 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 		return nil
 	}
 
+	if allowed, err := isHardLinkAllowed(hardlinkEvent, objCache); err != nil {
+		return nil
+	} else if allowed {
+		return nil
+	}
+
 	for _, path := range rule.additionalPaths {
 		if strings.HasPrefix(hardlinkEvent.OldPath, path) {
 			return &GenericRuleFailure{
@@ -128,4 +135,24 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) Requirements() ruleengine.Rul
 	return &RuleRequirements{
 		EventTypes: R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
+}
+
+func isHardLinkAllowed(hardlinkEvent *tracerhardlinktype.Event, objCache objectcache.ObjectCache) (bool, error) {
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(hardlinkEvent.Runtime.ContainerID)
+	if ap == nil {
+		return true, errors.New("application profile not found")
+	}
+
+	appProfileExecList, err := getContainerFromApplicationProfile(ap, hardlinkEvent.GetContainer())
+	if err != nil {
+		return true, err
+	}
+
+	for _, exec := range appProfileExecList.Execs {
+		if exec.Path == hardlinkEvent.Comm {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
