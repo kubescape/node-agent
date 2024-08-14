@@ -4,13 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"node-agent/pkg/config"
-	"node-agent/pkg/storage"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/storage"
 
 	"github.com/cenkalti/backoff/v4"
@@ -136,7 +135,7 @@ func (sc Storage) PatchNetworkNeighborsIngressAndEgress(name, namespace string, 
 }
 
 func (sc Storage) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
-  sc.modifyNameP(&networkNeighbors.Name)
+	sc.modifyNameP(&networkNeighbors.Name)
 	defer sc.revertNameP(&networkNeighbors.Name)
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Update(context.Background(), networkNeighbors, metav1.UpdateOptions{})
 
