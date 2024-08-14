@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -87,6 +88,12 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 		return nil
 	}
 
+	if allowed, err := isSymLinkAllowed(symlinkEvent, objCache); err != nil {
+		return nil
+	} else if allowed {
+		return nil
+	}
+
 	for _, path := range rule.additionalPaths {
 		if strings.HasPrefix(symlinkEvent.OldPath, path) {
 			return &GenericRuleFailure{
@@ -128,4 +135,24 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) Requirements() ruleengine.Rule
 	return &RuleRequirements{
 		EventTypes: R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
+}
+
+func isSymLinkAllowed(symlinkEvent *tracersymlinktype.Event, objCache objectcache.ObjectCache) (bool, error) {
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(symlinkEvent.Runtime.ContainerID)
+	if ap == nil {
+		return true, errors.New("application profile not found")
+	}
+
+	appProfileExecList, err := getContainerFromApplicationProfile(ap, symlinkEvent.GetContainer())
+	if err != nil {
+		return true, err
+	}
+
+	for _, exec := range appProfileExecList.Execs {
+		if exec.Path == symlinkEvent.Comm {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

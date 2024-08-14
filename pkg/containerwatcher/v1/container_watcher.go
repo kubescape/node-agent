@@ -33,6 +33,8 @@ import (
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerandomx "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/tracer"
 	tracerandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracerssh "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/tracer"
+	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
@@ -55,6 +57,7 @@ const (
 	randomxTraceName           = "trace_randomx"
 	symlinkTraceName           = "trace_symlink"
 	hardlinkTraceName          = "trace_hardlink"
+	sshTraceName               = "trace_ssh"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
@@ -63,6 +66,7 @@ const (
 	randomxWorkerPoolSize      = 1
 	symlinkWorkerPoolSize      = 1
 	hardlinkWorkerPoolSize     = 1
+	sshWorkerPoolSize          = 1
 )
 
 type IGContainerWatcher struct {
@@ -98,6 +102,7 @@ type IGContainerWatcher struct {
 	randomxTracer      *tracerandomx.Tracer
 	symlinkTracer      *tracersymlink.Tracer
 	hardlinkTracer     *tracerhardlink.Tracer
+	sshTracer          *tracerssh.Tracer
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
 
@@ -110,6 +115,7 @@ type IGContainerWatcher struct {
 	randomxWorkerPool      *ants.PoolWithFunc
 	symlinkWorkerPool      *ants.PoolWithFunc
 	hardlinkWorkerPool     *ants.PoolWithFunc
+	sshdWorkerPool         *ants.PoolWithFunc
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *tracerexectype.Event
@@ -119,6 +125,7 @@ type IGContainerWatcher struct {
 	randomxWorkerChan      chan *tracerandomxtype.Event
 	symlinkWorkerChan      chan *tracersymlinktype.Event
 	hardlinkWorkerChan     chan *tracerhardlinktype.Event
+	sshWorkerChan          chan *tracersshtype.Event
 
 	preRunningContainersIDs mapset.Set[string]
 
@@ -293,6 +300,18 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	if err != nil {
 		return nil, fmt.Errorf("creating hardlink worker pool: %w", err)
 	}
+	// Create a ssh worker pool
+	sshWorkerPool, err := ants.NewPoolWithFunc(sshWorkerPoolSize, func(i interface{}) {
+		event := i.(tracersshtype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		metrics.ReportEvent(utils.SSHEventType)
+		ruleManager.ReportSSHEvent(event)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating ssh worker pool: %w", err)
+	}
 
 	return &IGContainerWatcher{
 		// Configuration
@@ -323,6 +342,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		randomxWorkerPool:       randomxWorkerPool,
 		symlinkWorkerPool:       symlinkWorkerPool,
 		hardlinkWorkerPool:      hardlinkWorkerPool,
+		sshdWorkerPool:          sshWorkerPool,
 		metrics:                 metrics,
 		preRunningContainersIDs: preRunningContainers,
 
@@ -335,6 +355,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 5000),
 		symlinkWorkerChan:      make(chan *tracersymlinktype.Event, 1000),
 		hardlinkWorkerChan:     make(chan *tracerhardlinktype.Event, 1000),
+		sshWorkerChan:          make(chan *tracersshtype.Event, 1000),
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,

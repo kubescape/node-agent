@@ -28,6 +28,7 @@ import (
 
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 
@@ -421,6 +422,17 @@ func (rm *RuleManager) ReportHardlinkEvent(event tracerhardlinktype.Event) {
 	// list hardlink rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 	rm.processEvent(utils.HardlinkEventType, &event, rules)
+}
+
+func (rm *RuleManager) ReportSSHEvent(event tracersshtype.Event) {
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportSSHEvent event")
+		return
+	}
+
+	// list ssh rules
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+	rm.processEvent(utils.SSHEventType, &event, rules)
 }
 
 func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator) {

@@ -257,6 +257,12 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting hardlink tracing", helpers.Error(err))
 			return err
 		}
+
+		// NOTE: SSH tracing relies on the network tracer, so it must be started after the network tracer.
+		if err := ch.startSshTracing(); err != nil {
+			logger.L().Error("error starting ssh tracing", helpers.Error(err))
+			return err
+		}
 	}
 
 	return nil
@@ -320,6 +326,12 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		// Stop hardlink tracer
 		if err := ch.stopHardlinkTracing(); err != nil {
 			logger.L().Error("error stopping hardlink tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+
+		// Stop ssh tracer
+		if err := ch.stopSshTracing(); err != nil {
+			logger.L().Error("error stopping ssh tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 	}

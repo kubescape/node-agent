@@ -3,6 +3,7 @@ package rulemanager
 import (
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -11,6 +12,7 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -25,6 +27,7 @@ type RuleManagerClient interface {
 	ReportRandomxEvent(event tracerrandomxtype.Event)
 	ReportSymlinkEvent(event tracersymlinktype.Event)
 	ReportHardlinkEvent(event tracerhardlinktype.Event)
+	ReportSSHEvent(event tracersshtype.Event)
 	HasApplicableRuleBindings(namespace, name string) bool
 	HasFinalApplicationProfile(pod *v1.Pod) bool
 	IsContainerMonitored(k8sContainerID string) bool

@@ -68,6 +68,11 @@ func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event,
 		return nil
 	}
 
+	// Check if the process is a MATLAB process and ignore it.
+	if execEvent.GetContainer() == "matlab" {
+		return nil
+	}
+
 	envVars, err := utils.GetProcessEnv(int(execEvent.Pid))
 	if err != nil {
 		logger.L().Debug("Failed to get process environment variables", helpers.Error(err))
