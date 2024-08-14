@@ -3,11 +3,10 @@ package storage
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/config"
-	"node-agent/pkg/storage"
 	"reflect"
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 
