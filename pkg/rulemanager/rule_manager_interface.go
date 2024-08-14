@@ -1,7 +1,10 @@
 package rulemanager
 
 import (
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
+	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
@@ -9,15 +12,24 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+
+	v1 "k8s.io/api/core/v1"
 )
 
 type RuleManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
 	RegisterPeekFunc(peek func(mntns uint64) ([]string, error))
-	ReportCapability(k8sContainerID string, event tracercapabilitiestype.Event)
-	ReportFileExec(k8sContainerID string, event tracerexectype.Event)
-	ReportFileOpen(k8sContainerID string, event traceropentype.Event)
-	ReportNetworkEvent(k8sContainerID string, event tracernetworktype.Event)
+	ReportCapability(event tracercapabilitiestype.Event)
+	ReportFileExec(event tracerexectype.Event)
+	ReportFileOpen(event traceropentype.Event)
+	ReportNetworkEvent(event tracernetworktype.Event)
 	ReportDNSEvent(event tracerdnstype.Event)
-	ReportRandomxEvent(k8sContainerID string, event tracerrandomxtype.Event)
+	ReportRandomxEvent(event tracerrandomxtype.Event)
+	ReportSymlinkEvent(event tracersymlinktype.Event)
+	ReportHardlinkEvent(event tracerhardlinktype.Event)
+	ReportSSHEvent(event tracersshtype.Event)
+	HasApplicableRuleBindings(namespace, name string) bool
+	HasFinalApplicationProfile(pod *v1.Pod) bool
+	IsContainerMonitored(k8sContainerID string) bool
+	IsPodMonitored(namespace, pod string) bool
 }

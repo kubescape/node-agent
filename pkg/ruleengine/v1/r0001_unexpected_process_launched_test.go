@@ -3,8 +3,8 @@ package ruleengine
 import (
 	"testing"
 
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
@@ -81,4 +81,64 @@ func TestR0001UnexpectedProcessLaunched(t *testing.T) {
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since exec is not whitelisted")
 	}
+
+}
+
+func TestR0001UnexpectedProcessLaunchedArgCompare(t *testing.T) {
+	// Create a new rule
+	r := CreateRuleR0001UnexpectedProcessLaunched()
+	// Assert r is not nil
+	if r == nil {
+		t.Errorf("Expected r to not be nil")
+	}
+
+	r.SetParameters(map[string]interface{}{"enforceArgs": false})
+
+	objCache := RuleObjectCacheMock{}
+	profile := objCache.ApplicationProfileCache().GetApplicationProfile("test")
+	if profile == nil {
+		profile = &v1beta1.ApplicationProfile{}
+		profile.Spec.Containers = append(profile.Spec.Containers, v1beta1.ApplicationProfileContainer{
+			Name: "test",
+			Execs: []v1beta1.ExecCalls{
+				{
+					Path: "/test",
+					Args: []string{"test"},
+				},
+			},
+		})
+
+		objCache.SetApplicationProfile(profile)
+	}
+
+	e := &tracerexectype.Event{
+		Event: eventtypes.Event{
+			CommonData: eventtypes.CommonData{
+				K8s: eventtypes.K8sMetadata{
+					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+						ContainerName: "test",
+					},
+				},
+			},
+		},
+		ExePath: "/test",
+		Args:    []string{"/test", "something"},
+	}
+
+	// Test with whitelisted exec
+	ruleResult := r.ProcessEvent(utils.ExecveEventType, e, &objCache)
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since exec is whitelisted and args are not enforced")
+	}
+
+	// Create a new rule with enforceArgs set to true
+	r = CreateRuleR0001UnexpectedProcessLaunched()
+	r.SetParameters(map[string]interface{}{"enforceArgs": true})
+
+	// Test with whitelisted exec and enforceArgs set to true
+	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &objCache)
+	if ruleResult == nil {
+		t.Errorf("Expected ruleResult to not be nil since exec is whitelisted but args are enforced")
+	}
+
 }

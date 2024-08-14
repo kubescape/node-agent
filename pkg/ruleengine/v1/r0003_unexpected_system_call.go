@@ -2,11 +2,12 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
+
+	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -20,7 +21,7 @@ const (
 var R0003UnexpectedSystemCallRuleDescriptor = RuleDescriptor{
 	ID:          R0003ID,
 	Name:        R0003Name,
-	Description: "Detecting unexpected system calls that are not whitelisted by application profile. Every unexpected system call will be alerted only once.",
+	Description: "Detecting unexpected system calls that are not whitelisted by application profile.",
 	Tags:        []string{"syscall", "whitelisted"},
 	Priority:    RulePriorityLow,
 	Requirements: &RuleRequirements{
@@ -104,12 +105,12 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 		},
 		TriggerEvent: syscallEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleID:          rule.ID(),
 			RuleDescription: fmt.Sprintf("Unexpected system call: %s in: %s", syscallEvent.SyscallName, syscallEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName: syscallEvent.GetPod(),
 		},
+		RuleID: rule.ID(),
 	}
 
 	rule.listOfAlertedSyscalls.Add(syscallEvent.SyscallName)

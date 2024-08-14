@@ -2,10 +2,11 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/utils"
 	"testing"
 
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	"github.com/kubescape/node-agent/pkg/utils"
+
+	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 )
 
 func TestR1007XMRCryptoMining(t *testing.T) {

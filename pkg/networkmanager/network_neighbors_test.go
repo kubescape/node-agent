@@ -1,8 +1,9 @@
 package networkmanager
 
 import (
-	"node-agent/pkg/networkmanager/testdata"
 	"testing"
+
+	"github.com/kubescape/node-agent/pkg/networkmanager/testdata"
 
 	_ "embed"
 

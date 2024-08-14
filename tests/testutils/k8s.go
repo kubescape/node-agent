@@ -90,6 +90,10 @@ func (w *TestWorkload) ExecIntoPod(command []string, container string) (string, 
 	}
 	pod := pods[0]
 
+	return ExecIntoPod(pod.Name, w.Namespace, command, container)
+}
+
+func ExecIntoPod(podName, podNamespace string, command []string, container string) (string, string, error) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 
 	buf := &bytes.Buffer{}
@@ -109,9 +113,9 @@ func (w *TestWorkload) ExecIntoPod(command []string, container string) (string, 
 
 	request := k8sClient.KubernetesClient.CoreV1().RESTClient().
 		Post().
-		Namespace(pod.Namespace).
+		Namespace(podNamespace).
 		Resource("pods").
-		Name(pod.Name).
+		Name(podName).
 		SubResource("exec").
 		VersionedParams(podExecOpts, scheme.ParameterCodec)
 	exec, err := remotecommand.NewSPDYExecutor(k8sClient.K8SConfig, "POST", request.URL())
@@ -123,7 +127,7 @@ func (w *TestWorkload) ExecIntoPod(command []string, container string) (string, 
 		Stderr: errBuf,
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("%w Failed executing command %s on %v/%v", err, command, pod.Namespace, pod.Name)
+		return "", "", fmt.Errorf("%w Failed executing command %s on %v/%v", err, command, podNamespace, podName)
 	}
 
 	return buf.String(), errBuf.String(), nil
@@ -337,7 +341,7 @@ func generateRandomNamespaceName() string {
 }
 
 func CreateWorkloadsInPath(namespace, dir string) ([]TestWorkload, error) {
-	workloads := []TestWorkload{}
+	var workloads []TestWorkload
 	err := filepath.Walk(dir, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return err

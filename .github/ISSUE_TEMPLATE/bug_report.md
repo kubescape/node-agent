@@ -11,7 +11,7 @@ assignees: ''
 <!-- A clear and concise description of what the bug is. -->
 
 # Environment
-OS: ` ` <!-- the OS + version you’re running Kubescape on, e.g Ubuntu 22.04 LTS  -->
+OS: ` ` <!-- the OS + version you’re running Kubescape on, e.g. Ubuntu 22.04 LTS  -->
 Version: ` ` <!-- the version that Kubescape reports when you run `kubescape version`  -->
  
 # Steps To Reproduce

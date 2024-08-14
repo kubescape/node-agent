@@ -1,22 +1,18 @@
 package types
 
 import (
-	"node-agent/pkg/rulebindingmanager/types"
-
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager/types"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 const (
 
-	// ApplicationProfileVersion is the version of ApplicationProfile
-	// TODO: we should prbably set to v1alpha1
+	// RuleBinderVersion is the version of RuleBinder
+	// TODO: we should probably set to v1alpha1
 	RuleBinderVersion string = "v1"
-
-	// ApplicationProfileApiVersion is the api version of ApplicationProfile
-	RuleBinderApiVersion string = types.RuleBinderGroup + "/" + RuleBinderVersion
 )
 
-var RuleBindingAlertGvr schema.GroupVersionResource = schema.GroupVersionResource{
+var RuleBindingAlertGvr = schema.GroupVersionResource{
 	Group:    types.RuleBinderGroup,
 	Version:  RuleBinderVersion,
 	Resource: types.RuntimeRuleBindingAlertPlural,

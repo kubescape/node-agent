@@ -6,16 +6,15 @@ package exporters
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/malwaremanager"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 	"os"
 	"time"
 
-	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
-
 	"github.com/go-openapi/strfmt"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/prometheus/alertmanager/api/v2/client"
 	"github.com/prometheus/alertmanager/api/v2/client/alert"
 	"github.com/prometheus/alertmanager/api/v2/models"
@@ -55,7 +54,7 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 	sourceUrl := fmt.Sprintf("https://armosec.github.io/kubecop/alertviewer/?AlertMessage=%s&AlertRuleName=%s&AlertRuleID=%s&AlertFix=%s&AlertNamespace=%s&AlertPod=%s&AlertContainer=%s&AlertProcess=%s",
 		failedRule.GetRuleAlert().RuleDescription,
 		failedRule.GetBaseRuntimeAlert().AlertName,
-		failedRule.GetRuleAlert().RuleID,
+		failedRule.GetRuleId(),
 		failedRule.GetBaseRuntimeAlert().FixSuggestions,
 		failedRule.GetRuntimeAlertK8sDetails().Namespace,
 		failedRule.GetRuntimeAlertK8sDetails().PodName,
@@ -78,7 +77,7 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 			Labels: map[string]string{
 				"alertname":      "KubescapeRuleViolated",
 				"rule_name":      failedRule.GetBaseRuntimeAlert().AlertName,
-				"rule_id":        failedRule.GetRuleAlert().RuleID,
+				"rule_id":        failedRule.GetRuleId(),
 				"container_id":   failedRule.GetRuntimeAlertK8sDetails().ContainerID,
 				"container_name": failedRule.GetRuntimeAlertK8sDetails().ContainerName,
 				"namespace":      failedRule.GetRuntimeAlertK8sDetails().Namespace,

@@ -1,8 +1,8 @@
 package exporters
 
 import (
-	"node-agent/pkg/malwaremanager"
-	"node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
 )
 
 // generic exporter interface
@@ -17,8 +17,8 @@ var _ Exporter = (*ExporterMock)(nil)
 
 type ExporterMock struct{}
 
-func (e *ExporterMock) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+func (e *ExporterMock) SendRuleAlert(_ ruleengine.RuleFailure) {
 }
 
-func (e *ExporterMock) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
+func (e *ExporterMock) SendMalwareAlert(_ malwaremanager.MalwareResult) {
 }

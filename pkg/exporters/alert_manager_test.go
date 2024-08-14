@@ -6,28 +6,26 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	mmtypes "node-agent/pkg/malwaremanager/v1/types"
 	"strings"
 	"testing"
 
-	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-
-	"node-agent/pkg/ruleengine/v1"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
+	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestSendAlert(t *testing.T) {
 	// Set up a mock Alertmanager server
-	recievedData := make(chan []byte, 1)
+	receivedData := make(chan []byte, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		bodyData, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Fatalf("Failed to read request body: %v", err)
 		}
-		recievedData <- bodyData
+		receivedData <- bodyData
 	}))
 	defer server.Close()
 
@@ -52,10 +50,10 @@ func TestSendAlert(t *testing.T) {
 			RuleDescription: "Application profile is missing",
 		},
 	})
-	bytesData := <-recievedData
+	bytesData := <-receivedData
 
 	// Assert the request body is correct
-	alerts := []map[string]interface{}{}
+	var alerts []map[string]interface{}
 	if err := json.Unmarshal(bytesData, &alerts); err != nil {
 		t.Fatalf("Failed to unmarshal request body: %v", err)
 	}
@@ -77,14 +75,14 @@ func TestSendAlert(t *testing.T) {
 
 func TestSendMalwareAlert(t *testing.T) {
 	// Set up a mock Alertmanager server
-	recievedData := make(chan []byte, 1)
+	receivedData := make(chan []byte, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		bodyData, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Fatalf("Failed to read request body: %v", err)
 		}
-		recievedData <- bodyData
+		receivedData <- bodyData
 	}))
 	defer server.Close()
 	// os.Setenv("ALERTMANAGER_URL", "localhost:9093")
@@ -126,10 +124,10 @@ func TestSendMalwareAlert(t *testing.T) {
 			MalwareDescription: "testmalwaredescription",
 		},
 	})
-	bytesData := <-recievedData
+	bytesData := <-receivedData
 
 	// Assert the request body is correct
-	alerts := []map[string]interface{}{}
+	var alerts []map[string]interface{}
 	if err := json.Unmarshal(bytesData, &alerts); err != nil {
 		t.Fatalf("Failed to unmarshal request body: %v", err)
 	}

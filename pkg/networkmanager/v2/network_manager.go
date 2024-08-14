@@ -2,17 +2,17 @@ package v2
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"node-agent/pkg/config"
-	"node-agent/pkg/dnsmanager"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/networkmanager"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/storage"
-	"node-agent/pkg/utils"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/networkmanager"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"k8s.io/utils/ptr"
 
@@ -31,7 +31,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
@@ -196,17 +195,17 @@ func (nm *NetworkManager) monitorContainer(ctx context.Context, container *conta
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				}
 				nm.saveNetworkEvents(ctx, watchedContainer, container.K8s.Namespace)
-				return nil
+				return err
 			case errors.Is(err, utils.ContainerReachedMaxTime):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				nm.saveNetworkEvents(ctx, watchedContainer, container.K8s.Namespace)
-				return nil
+				return err
 			case errors.Is(err, utils.ObjectCompleted):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
-				return nil
+				return err
 			case errors.Is(err, utils.TooLargeObjectError):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
-				return nil
+				return err
 			}
 		}
 	}
@@ -222,7 +221,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 
 	// verify the container hasn't already been deleted
 	if !nm.trackedContainers.Contains(watchedContainer.K8sContainerID) {
-		logger.L().Ctx(ctx).Debug("NetworkManager - container isn't tracked, not saving profile",
+		logger.L().Debug("NetworkManager - container isn't tracked, not saving profile",
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -238,7 +237,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 	}
 
 	// leave container name empty this way the "slug" will represent a workload
-	slug, err := names.InstanceIDToSlug(watchedContainer.InstanceID.GetName(), watchedContainer.InstanceID.GetKind(), "", watchedContainer.InstanceID.GetHashed())
+	slug, err := watchedContainer.InstanceID.GetSlug(true)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("NetworkManager - failed to get slug", helpers.Error(err),
 			helpers.String("slug", slug),
@@ -288,18 +287,9 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 		operations := utils.CreateNetworkPatchOperations(ingress, egress, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
 
-		patch, err := json.Marshal(operations)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("NetworkManager - failed to marshal patch", helpers.Error(err),
-				helpers.String("slug", slug),
-				helpers.Int("container index", watchedContainer.ContainerIndex),
-				helpers.String("container ID", watchedContainer.ContainerID),
-				helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			return
-		}
 		// 1. try to patch object
 		var gotErr error
-		if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
+		if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, operations, watchedContainer.SyncChannel); err != nil {
 			if apierrors.IsNotFound(err) {
 				// 2a. new object
 				newObject := &v1beta1.NetworkNeighborhood{
@@ -341,7 +331,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				}
 			} else {
-				logger.L().Ctx(ctx).Debug("NetworkManager - failed to patch network neighborhood, will get existing one and adjust patch", helpers.Error(err),
+				logger.L().Debug("NetworkManager - failed to patch network neighborhood, will get existing one and adjust patch", helpers.Error(err),
 					helpers.String("slug", slug),
 					helpers.Int("container index", watchedContainer.ContainerIndex),
 					helpers.String("container ID", watchedContainer.ContainerID),
@@ -357,14 +347,13 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				} else {
 					var replaceOperations []utils.PatchOperation
+					containerNames := watchedContainer.ContainerNames[watchedContainer.ContainerType]
 					// check existing container
 					existingContainer := utils.GetNetworkNeighborhoodContainer(existingObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
-					var addContainer bool
 					if existingContainer == nil {
 						existingContainer = &v1beta1.NetworkNeighborhoodContainer{
-							Name: watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex],
+							Name: containerNames[watchedContainer.ContainerIndex],
 						}
-						addContainer = true
 					}
 					// update it
 					utils.EnrichNeighborhoodContainer(existingContainer, ingress, egress)
@@ -378,53 +367,34 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 						existingContainers = existingObject.Spec.EphemeralContainers
 					}
 					// replace or add container using patch
-					switch {
-					case existingContainers == nil:
-						// 3a. insert a new container slice, with the new container at the right index
-						containers := make([]v1beta1.NetworkNeighborhoodContainer, watchedContainer.ContainerIndex+1)
-						containers[watchedContainer.ContainerIndex] = *existingContainer
+					// 3a. ensure we have a container slice
+					if existingContainers == nil {
 						replaceOperations = append(replaceOperations, utils.PatchOperation{
 							Op:    "add",
 							Path:  fmt.Sprintf("/spec/%s", watchedContainer.ContainerType),
-							Value: containers,
-						})
-					case addContainer:
-						// 3b. insert a new container at the right index
-						for i := len(existingContainers); i < watchedContainer.ContainerIndex; i++ {
-							replaceOperations = append(replaceOperations, utils.PatchOperation{
-								Op:   "add",
-								Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
-								Value: v1beta1.NetworkNeighborhoodContainer{
-									Name: watchedContainer.ContainerNames[watchedContainer.ContainerType][i],
-								},
-							})
-						}
-						replaceOperations = append(replaceOperations, utils.PatchOperation{
-							Op:    "add",
-							Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
-							Value: existingContainer,
-						})
-					default:
-						// 3c. replace the existing container at the right index
-						replaceOperations = append(replaceOperations, utils.PatchOperation{
-							Op:    "replace",
-							Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
-							Value: existingContainer,
+							Value: make([]v1beta1.NetworkNeighborhoodContainer, 0),
 						})
 					}
+					// 3b. ensure the slice has all the containers
+					for i := len(existingContainers); i < len(containerNames); i++ {
+						replaceOperations = append(replaceOperations, utils.PatchOperation{
+							Op:   "add",
+							Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
+							Value: v1beta1.NetworkNeighborhoodContainer{
+								Name: containerNames[i],
+							},
+						})
+					}
+					// 3c. replace the existing container at the right index
+					replaceOperations = append(replaceOperations, utils.PatchOperation{
+						Op:    "replace",
+						Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
+						Value: existingContainer,
+					})
 
 					replaceOperations = utils.AppendStatusAnnotationPatchOperations(replaceOperations, watchedContainer)
 
-					patch, err := json.Marshal(replaceOperations)
-					if err != nil {
-						logger.L().Ctx(ctx).Error("NetworkManager - failed to marshal patch", helpers.Error(err),
-							helpers.String("slug", slug),
-							helpers.Int("container index", watchedContainer.ContainerIndex),
-							helpers.String("container ID", watchedContainer.ContainerID),
-							helpers.String("k8s workload", watchedContainer.K8sContainerID))
-						return
-					}
-					if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
+					if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, replaceOperations, watchedContainer.SyncChannel); err != nil {
 						gotErr = err
 						logger.L().Ctx(ctx).Error("NetworkManager - failed to patch network neighborhood", helpers.Error(err),
 							helpers.String("slug", slug),
@@ -502,6 +472,11 @@ func (nm *NetworkManager) waitForContainer(k8sContainerID string) error {
 }
 
 func (nm *NetworkManager) ContainerCallback(notif containercollection.PubSubEvent) {
+	// check if the container should be ignored
+	if nm.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+		return
+	}
+
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 	ctx, span := otel.Tracer("").Start(nm.ctx, "NetworkManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
 	defer span.End()
@@ -576,7 +551,7 @@ func (nm *NetworkManager) createNetworkNeighbor(networkEvent networkmanager.Netw
 	}}
 
 	if networkEvent.Destination.Kind == networkmanager.EndpointKindPod {
-		// for Pods we need to remove the default labels
+		// for Pods, we need to remove the default labels
 		neighborEntry.PodSelector = &metav1.LabelSelector{
 			MatchLabels: networkmanager.FilterLabels(networkEvent.GetDestinationPodLabels()),
 		}

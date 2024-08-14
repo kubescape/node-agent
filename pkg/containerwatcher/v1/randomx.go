@@ -3,8 +3,8 @@ package containerwatcher
 import (
 	"fmt"
 
-	tracerandomx "node-agent/pkg/ebpf/gadgets/randomx/tracer"
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracerandomx "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/tracer"
+	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
@@ -12,8 +12,11 @@ import (
 )
 
 func (ch *IGContainerWatcher) randomxEventCallback(event *tracerrandomxtype.Event) {
-	if event.Type != types.NORMAL {
-		// dropped event
+	if event.Type == types.DEBUG {
+		return
+	}
+
+	if isDroppedEvent(event.Type, event.Message) {
 		logger.L().Ctx(ch.ctx).Warning("randomx tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
@@ -32,16 +35,16 @@ func (ch *IGContainerWatcher) startRandomxTracing() error {
 		return fmt.Errorf("getting randomxMountnsmap: %w", err)
 	}
 
-	go func() {
-		for event := range ch.randomxWorkerChan {
-			ch.randomxWorkerPool.Invoke(*event)
-		}
-	}()
-
 	tracerrandomx, err := tracerandomx.NewTracer(&tracerandomx.Config{MountnsMap: randomxMountnsmap}, ch.containerCollection, ch.randomxEventCallback)
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
+	go func() {
+		for event := range ch.randomxWorkerChan {
+			_ = ch.randomxWorkerPool.Invoke(*event)
+		}
+	}()
+
 	ch.randomxTracer = tracerrandomx
 
 	return nil

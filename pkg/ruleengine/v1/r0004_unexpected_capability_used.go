@@ -2,9 +2,10 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
@@ -75,8 +76,8 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
-	for _, cap := range appProfileCapabilitiesList.Capabilities {
-		if capEvent.CapName == cap {
+	for _, capability := range appProfileCapabilitiesList.Capabilities {
+		if capEvent.CapName == capability {
 			return nil
 		}
 	}
@@ -99,12 +100,12 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		},
 		TriggerEvent: capEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleID:          rule.ID(),
 			RuleDescription: fmt.Sprintf("Unexpected capability used (capability %s used in syscall %s) in: %s", capEvent.CapName, capEvent.Syscall, capEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName: capEvent.GetPod(),
 		},
+		RuleID: rule.ID(),
 	}
 
 	return &ruleFailure

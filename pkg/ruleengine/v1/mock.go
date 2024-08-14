@@ -3,7 +3,7 @@ package ruleengine
 import (
 	corev1 "k8s.io/api/core/v1"
 
-	"node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -31,10 +31,10 @@ func (r *RuleObjectCacheMock) ApplicationProfileCache() objectcache.ApplicationP
 	return r
 }
 
-func (r *RuleObjectCacheMock) GetPodSpec(namespace, name string) *corev1.PodSpec {
+func (r *RuleObjectCacheMock) GetPodSpec(_, _ string) *corev1.PodSpec {
 	return r.podSpec
 }
-func (r *RuleObjectCacheMock) GetPodStatus(namespace, name string) *corev1.PodStatus {
+func (r *RuleObjectCacheMock) GetPodStatus(_, _ string) *corev1.PodStatus {
 	return r.podStatus
 }
 func (r *RuleObjectCacheMock) SetPodSpec(podSpec *corev1.PodSpec) {
@@ -47,6 +47,10 @@ func (r *RuleObjectCacheMock) SetPodStatus(podStatus *corev1.PodStatus) {
 
 func (r *RuleObjectCacheMock) GetApiServerIpAddress() string {
 	return ""
+}
+
+func (r *RuleObjectCacheMock) GetPods() []*corev1.Pod {
+	return []*corev1.Pod{{Spec: *r.podSpec, Status: *r.podStatus}}
 }
 
 func (r *RuleObjectCacheMock) K8sObjectCache() objectcache.K8sObjectCache {

@@ -3,9 +3,10 @@ package syfthandler
 import (
 	_ "embed"
 	"encoding/json"
-	"node-agent/pkg/storage"
-	"node-agent/pkg/utils"
 	"testing"
+
+	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"

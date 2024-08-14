@@ -3,34 +3,32 @@ package cache
 import (
 	"context"
 	"fmt"
-	"node-agent/mocks"
-	"node-agent/pkg/rulebindingmanager"
-	typesv1 "node-agent/pkg/rulebindingmanager/types/v1"
-	"node-agent/pkg/ruleengine"
 	"slices"
 	"testing"
-
-	k8sfake "k8s.io/client-go/kubernetes/fake"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/node-agent/mocks"
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
 
 func NewCacheMock(nodeName string) *RBCache {
 	return &RBCache{
-		nodeName:         nodeName,
-		allPods:          mapset.NewSet[string](),
-		k8sClient:        k8sinterface.NewKubernetesApiMock(),
-		ruleCreator:      &ruleengine.RuleCreatorMock{},
-		podToRBNames:     maps.SafeMap[string, mapset.Set[string]]{},
-		rbNameToPodNames: maps.SafeMap[string, mapset.Set[string]]{},
+		nodeName:     nodeName,
+		allPods:      mapset.NewSet[string](),
+		k8sClient:    k8sinterface.NewKubernetesApiMock(),
+		ruleCreator:  &ruleengine.RuleCreatorMock{},
+		podToRBNames: maps.SafeMap[string, mapset.Set[string]]{},
+		rbNameToPods: maps.SafeMap[string, mapset.Set[string]]{},
 	}
 }
 func TestRuntimeObjAddHandler(t *testing.T) {
@@ -197,7 +195,7 @@ func TestDeletePod(t *testing.T) {
 			setup: func(c *RBCache) {
 				c.allPods.Add("default/pod-1")
 				c.podToRBNames.Set("default/pod-1", mapset.NewSet[string]("rb-1"))
-				c.rbNameToPodNames.Set("rb-1", mapset.NewSet[string]("default/pod-1"))
+				c.rbNameToPods.Set("rb-1", mapset.NewSet[string]("default/pod-1"))
 			},
 		},
 		{
@@ -211,7 +209,7 @@ func TestDeletePod(t *testing.T) {
 			setup: func(c *RBCache) {
 				c.allPods.Add("default/pod-1")
 				c.podToRBNames.Set("default/pod-1", mapset.NewSet[string]("rb-1"))
-				c.rbNameToPodNames.Set("rb-1", mapset.NewSet[string]("default/pod-1"))
+				c.rbNameToPods.Set("rb-1", mapset.NewSet[string]("default/pod-1"))
 			},
 		},
 	}
@@ -219,9 +217,9 @@ func TestDeletePod(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &RBCache{
-				allPods:          mapset.NewSet[string](),
-				podToRBNames:     maps.SafeMap[string, mapset.Set[string]]{},
-				rbNameToPodNames: maps.SafeMap[string, mapset.Set[string]]{},
+				allPods:      mapset.NewSet[string](),
+				podToRBNames: maps.SafeMap[string, mapset.Set[string]]{},
+				rbNameToPods: maps.SafeMap[string, mapset.Set[string]]{},
 			}
 			tt.setup(c)
 
@@ -229,8 +227,8 @@ func TestDeletePod(t *testing.T) {
 
 			assert.False(t, c.allPods.Contains(tt.uniqueName))
 			assert.False(t, c.podToRBNames.Has(tt.uniqueName))
-			for _, rbName := range c.rbNameToPodNames.Keys() {
-				assert.False(t, c.rbNameToPodNames.Get(rbName).Contains(tt.uniqueName))
+			for _, rbName := range c.rbNameToPods.Keys() {
+				assert.False(t, c.rbNameToPods.Get(rbName).Contains(tt.uniqueName))
 			}
 		})
 	}
@@ -638,10 +636,10 @@ func TestDeleteRuleBinding(t *testing.T) {
 					c.rbNameToRB.Set(s, typesv1.RuntimeAlertRuleBinding{})
 					c.rbNameToRules.Set(s, []ruleengine.RuleEvaluator{&ruleengine.RuleMock{}})
 
-					if !c.rbNameToPodNames.Has(s) {
-						c.rbNameToPodNames.Set(s, mapset.NewSet[string]())
+					if !c.rbNameToPods.Has(s) {
+						c.rbNameToPods.Set(s, mapset.NewSet[string]())
 					}
-					c.rbNameToPodNames.Get(s).Add(k)
+					c.rbNameToPods.Get(s).Add(k)
 
 					if !c.podToRBNames.Has(k) {
 						c.podToRBNames.Set(k, mapset.NewSet[string]())
@@ -653,7 +651,7 @@ func TestDeleteRuleBinding(t *testing.T) {
 
 			c.deleteRuleBinding(tt.uniqueName)
 
-			assert.False(t, c.rbNameToPodNames.Has(tt.uniqueName))
+			assert.False(t, c.rbNameToPods.Has(tt.uniqueName))
 			assert.False(t, c.rbNameToRB.Has(tt.uniqueName))
 			assert.False(t, c.rbNameToRules.Has(tt.uniqueName))
 			for k, v := range tt.expectedPodToRBNames {
@@ -958,16 +956,16 @@ func TestAddRuleBinding(t *testing.T) {
 
 			c.addRuleBinding(tt.rb)
 
-			rbName := rbUniqueName(tt.rb)
+			rbName := uniqueName(tt.rb)
 
 			if tt.invalidRB {
-				assert.False(t, c.rbNameToPodNames.Has(rbName))
+				assert.False(t, c.rbNameToPods.Has(rbName))
 				assert.False(t, c.rbNameToRB.Has(rbName))
 				assert.False(t, c.rbNameToRules.Has(rbName))
 				return
 			}
 
-			assert.True(t, c.rbNameToPodNames.Has(rbName))
+			assert.True(t, c.rbNameToPods.Has(rbName))
 			assert.True(t, c.rbNameToRB.Has(rbName))
 			assert.True(t, c.rbNameToRules.Has(rbName))
 

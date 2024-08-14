@@ -2,10 +2,11 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 	"slices"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
@@ -161,7 +162,7 @@ func (rule *R1008CryptoMiningDomainCommunication) ID() string {
 func (rule *R1008CryptoMiningDomainCommunication) DeleteRule() {
 }
 
-func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.DnsEventType {
 		return nil
 	}
@@ -186,12 +187,12 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 				},
 				TriggerEvent: dnsEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
-					RuleID:          rule.ID(),
 					RuleDescription: fmt.Sprintf("Communication with a known crypto mining domain: %s in: %s", dnsEvent.DNSName, dnsEvent.GetContainer()),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 					PodName: dnsEvent.GetPod(),
 				},
+				RuleID: rule.ID(),
 			}
 
 			return &ruleFailure

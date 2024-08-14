@@ -2,8 +2,9 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/utils"
 	"testing"
+
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 )

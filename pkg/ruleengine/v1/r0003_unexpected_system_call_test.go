@@ -2,10 +2,11 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/utils"
 	"testing"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	"github.com/kubescape/node-agent/pkg/utils"
+
+	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"

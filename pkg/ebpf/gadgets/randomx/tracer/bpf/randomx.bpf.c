@@ -3,10 +3,12 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 
-#include "randomx.h"
 #include "../../../../include/mntns_filter.h"
 #include "../../../../include/macros.h"
 #include "../../../../include/buffer.h"
+#include "../../../../include/filesystem.h"
+
+#include "randomx.h"
 
 // Events map.
 struct {
@@ -14,6 +16,15 @@ struct {
 	__uint(key_size, sizeof(u32));
 	__uint(value_size, sizeof(u32));
 } events SEC(".maps");
+
+// Empty event map.
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, struct event);
+} empty_event SEC(".maps");
+
 
 // we need this to make sure the compiler doesn't remove our struct.
 const struct event *unusedevent __attribute__((unused));
@@ -53,7 +64,12 @@ static __always_inline bool has_upper_layer()
 
 SEC("tracepoint/x86_fpu/x86_fpu_regs_deactivated")
 int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx) {
-    struct event event = {};
+    struct event *event;
+    u32 zero = 0;
+    event = bpf_map_lookup_elem(&empty_event, &zero);
+    if (!event) {
+        return 0;
+    }
 
     struct task_struct *current_task = (struct task_struct*)bpf_get_current_task();
     if (!current_task) {
@@ -82,27 +98,31 @@ int tracepoint__x86_fpu_regs_deactivated(struct trace_event_raw_x86_fpu *ctx) {
     // Since kernel 5.15, the fpu struct has been changed and CO-RE isn't able to read it.
     // We need to use the bpf_probe_read_kernel helper to read the mxcsr value.
     // The old_fpu struct is used for kernels <= 5.15.
-    #if LINUX_KERNEL_VERSION <= KERNEL_VERSION(5, 15, 0)
+    if(LINUX_KERNEL_VERSION <= KERNEL_VERSION(5, 15, 0)) {
         bpf_probe_read_kernel(&mxcsr, sizeof(mxcsr), &((struct old_fpu*)fpu)->state.xsave.i387.mxcsr);
-    #else
+    } else {
         mxcsr = BPF_CORE_READ((struct fpu*)fpu, fpstate, regs.xsave.i387.mxcsr);
-    #endif
-    
+    }
     int fpcr = (mxcsr & 0x6000) >> 13;
     if (fpcr != 0) {
         __u32 ppid = BPF_CORE_READ(current_task, real_parent, pid);
         /* event data */
-        event.timestamp = bpf_ktime_get_boot_ns();
-        event.mntns_id = mntns_id;
-        event.pid = bpf_get_current_pid_tgid() >> 32;
-        event.ppid = ppid;
-        event.uid = uid;
-        event.gid = (u32)(uid_gid >> 32);
-        bpf_get_current_comm(&event.comm, sizeof(event.comm));
-        event.upper_layer = has_upper_layer();
+        event->timestamp = bpf_ktime_get_boot_ns();
+        event->mntns_id = mntns_id;
+        event->pid = bpf_get_current_pid_tgid() >> 32;
+        event->ppid = ppid;
+        event->uid = uid;
+        event->gid = (u32)(uid_gid >> 32);
+        bpf_get_current_comm(&event->comm, sizeof(event->comm));
+        event->upper_layer = has_upper_layer();
+
+        struct file *exe_file = BPF_CORE_READ(current_task, mm, exe_file);
+	    char *exepath;
+        exepath = get_path_str(&exe_file->f_path);
+	    bpf_probe_read_kernel_str(event->exepath, MAX_STRING_SIZE, exepath);
 
         /* emit event */
-        bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+        bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(struct event));
     }
 
     return 0;

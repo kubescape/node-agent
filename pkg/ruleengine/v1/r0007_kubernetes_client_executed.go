@@ -2,12 +2,13 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -112,12 +113,12 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 		},
 		TriggerEvent: event.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleID:          rule.ID(),
 			RuleDescription: fmt.Sprintf("Kubernetes client executed: %s", event.Comm),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName: event.GetPod(),
 		},
+		RuleID: rule.ID(),
 	}
 
 	return &ruleFailure
@@ -138,6 +139,9 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 	}
 
 	if slices.Contains(kubernetesClients, filepath.Base(execPath)) || slices.Contains(kubernetesClients, event.ExePath) {
+		// If the parent process  is in the upper layer, the child process is also in the upper layer.
+		upperLayer := event.UpperLayer || event.PupperLayer
+
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:   rule.Name(),
@@ -154,23 +158,24 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 					Gid:        &event.Gid,
 					PID:        event.Pid,
 					Uid:        &event.Uid,
-					UpperLayer: event.UpperLayer,
+					UpperLayer: &upperLayer,
 					PPID:       event.Ppid,
 					Pcomm:      event.Pcomm,
 					Cwd:        event.Cwd,
 					Hardlink:   event.ExePath,
+					Path:       execPath,
 					Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(event), " ")),
 				},
 				ContainerID: event.Runtime.ContainerID,
 			},
 			TriggerEvent: event.Event,
 			RuleAlert: apitypes.RuleAlert{
-				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("Kubernetes client %s was executed in: %s", execPath, event.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName: event.GetPod(),
 			},
+			RuleID: rule.ID(),
 		}
 
 		return &ruleFailure

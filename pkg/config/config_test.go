@@ -1,10 +1,10 @@
 package config
 
 import (
-	"node-agent/pkg/exporters"
 	"testing"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,11 +25,14 @@ func TestLoadConfig(t *testing.T) {
 				EnableMalwareDetection:   true,
 				EnableRelevancy:          true,
 				EnableNetworkTracing:     true,
+				EnableNodeProfile:        true,
 				InitialDelay:             2 * time.Minute,
 				MaxSniffingTime:          6 * time.Hour,
 				UpdateDataPeriod:         1 * time.Minute,
+				NodeProfileInterval:      1 * time.Minute,
 				EnablePrometheusExporter: true,
 				EnableRuntimeDetection:   true,
+				EnableSeccomp:            true,
 				Exporters: exporters.ExportersConfig{
 					SyslogExporter: "http://syslog.kubescape.svc.cluster.local:514",
 					StdoutExporter: &b,
@@ -40,7 +43,7 @@ func TestLoadConfig(t *testing.T) {
 					CsvRuleExporterPath:    "/rules",
 					CsvMalwareExporterPath: "/malware",
 					HTTPExporterConfig: &exporters.HTTPExporterConfig{
-						URL: "http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io/v1/runtimealerts",
+						URL: "http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io",
 					},
 				},
 			},

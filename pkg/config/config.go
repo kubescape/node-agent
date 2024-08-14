@@ -1,9 +1,10 @@
 package config
 
 import (
-	"node-agent/pkg/exporters"
+	"slices"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/spf13/viper"
 )
 
@@ -23,6 +24,11 @@ type Config struct {
 	EnableRuntimeDetection   bool                      `mapstructure:"runtimeDetectionEnabled"`
 	EnableNetworkTracing     bool                      `mapstructure:"networkServiceEnabled"`
 	EnableRelevancy          bool                      `mapstructure:"relevantCVEServiceEnabled"`
+	EnableNodeProfile        bool                      `mapstructure:"nodeProfileServiceEnabled"`
+	NodeProfileInterval      time.Duration             `mapstructure:"nodeProfileInterval"`
+	EnableSeccomp            bool                      `mapstructure:"seccompServiceEnabled"`
+	ExcludeNamespaces        []string                  `mapstructure:"excludeNamespaces"`
+	IncludeNamespaces        []string                  `mapstructure:"includeNamespaces"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -33,6 +39,7 @@ func LoadConfig(path string) (Config, error) {
 
 	viper.SetDefault("fullPathTracingEnabled", true)
 	viper.SetDefault("initialDelay", 2*time.Minute)
+	viper.SetDefault("nodeProfileInterval", 10*time.Minute)
 
 	viper.AutomaticEnv()
 
@@ -44,4 +51,19 @@ func LoadConfig(path string) (Config, error) {
 	var config Config
 	err = viper.Unmarshal(&config)
 	return config, err
+}
+
+func (c *Config) SkipNamespace(ns string) bool {
+	if includeNamespaces := c.IncludeNamespaces; len(includeNamespaces) > 0 {
+		if !slices.Contains(includeNamespaces, ns) {
+			// skip ns not in IncludeNamespaces
+			return true
+		}
+	} else if excludeNamespaces := c.ExcludeNamespaces; len(excludeNamespaces) > 0 {
+		if slices.Contains(excludeNamespaces, ns) {
+			// skip ns in ExcludeNamespaces
+			return true
+		}
+	}
+	return false
 }

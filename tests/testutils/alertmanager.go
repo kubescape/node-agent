@@ -18,7 +18,7 @@ type Alert struct {
 	Labels map[string]string `json:"labels"`
 }
 
-// getAlerts retrieves and filters alerts from Alertmanager
+// GetAlerts retrieves and filters alerts from Alertmanager
 func GetAlerts(namespace string) ([]Alert, error) {
 	url := alertManagerURL
 	if envURL, exists := os.LookupEnv("ALERTMANAGER_URL"); exists {
@@ -31,6 +31,23 @@ func GetAlerts(namespace string) ([]Alert, error) {
 	}
 
 	alerts = filterAlertsByLabel(alerts, "alertname", "KubescapeRuleViolated")
+	alerts = filterAlertsByLabel(alerts, "namespace", namespace)
+
+	return alerts, nil
+}
+
+func GetMalwareAlerts(namespace string) ([]Alert, error) {
+	url := alertManagerURL
+	if envURL, exists := os.LookupEnv("ALERTMANAGER_URL"); exists {
+		url = envURL
+	}
+
+	alerts, err := getActiveAlerts(url)
+	if err != nil {
+		return nil, fmt.Errorf("could not get alerts: %v", err)
+	}
+
+	alerts = filterAlertsByLabel(alerts, "alertname", "KubescapeMalwareDetected")
 	alerts = filterAlertsByLabel(alerts, "namespace", namespace)
 
 	return alerts, nil

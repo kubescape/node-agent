@@ -1,8 +1,9 @@
 package ruleengine
 
 import (
-	"node-agent/pkg/utils"
 	"testing"
+
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
@@ -18,7 +19,7 @@ func TestR0007KubernetesClientExecuted(t *testing.T) {
 		t.Errorf("Expected r to not be nil")
 	}
 
-	// Create a exec event
+	// Create an exec event
 	e := &tracerexectype.Event{
 		Event: eventtypes.Event{
 			CommonData: eventtypes.CommonData{

@@ -69,14 +69,6 @@ spec:
             capabilities:
               add:
                 - SYS_PTRACE
-          livenessProbe:
-            exec:
-              command:
-              - /bin/sh
-              - -c
-              - "echo 'PING' | nc -w 1 localhost 3310 | grep PONG || exit 1"
-            initialDelaySeconds: 50
-            periodSeconds: 10
           resources:
 {{ toYaml .Values.clamav.resources | indent 12 }}
           {{- if .Values.clamav.volumeMounts }}
@@ -99,8 +91,8 @@ spec:
             - name: KS_LOGGER_NAME
               value: "{{ .Values.logger.name }}"
             {{- if eq .Values.capabilities.malwareDetection "enable" }}
-            - name: CLAMAV_ADDRESS
-              value: "127.0.0.1:3310"
+            - name: CLAMAV_SOCKET
+              value: "/clamav/clamd.sock"
             - name: ENABLE_PROFILER
               value: "true"
             {{- end }}

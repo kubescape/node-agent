@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"node-agent/pkg/rulebindingmanager"
-	"node-agent/pkg/utils"
 	"runtime"
 	"time"
 
@@ -14,13 +12,21 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	"github.com/kubescape/node-agent/pkg/utils"
+)
+
+const (
+	MaxSniffingTimeLabel = "kubescape.io/max-sniffing-time"
 )
 
 func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
-
-	// do not trace the node-agent pod
+	// check if the container should be ignored
 	if ch.ignoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName) {
-		ch.unregisterContainer(notif.Container)
+		// avoid loops when the container is being removed
+		if notif.Type == containercollection.EventTypeAddContainer {
+			ch.unregisterContainer(notif.Container)
+		}
 		return
 	}
 
@@ -34,7 +40,18 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-		time.AfterFunc(ch.cfg.MaxSniffingTime, func() {
+
+		// Check if Pod has a label of max sniffing time
+		sniffingTime := ch.cfg.MaxSniffingTime
+		if podLabelMaxSniffingTime, ok := notif.Container.K8s.PodLabels[MaxSniffingTimeLabel]; ok {
+			if duration, err := time.ParseDuration(podLabelMaxSniffingTime); err == nil {
+				sniffingTime = duration
+			} else {
+				logger.L().Error("parsing sniffing time in label", helpers.Error(err))
+			}
+		}
+
+		time.AfterFunc(sniffingTime, func() {
 			logger.L().Info("monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 			ch.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
@@ -51,6 +68,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 	}
 }
+
 func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) error {
 	ch.ctx = ctx
 
@@ -67,25 +85,28 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 	// Define the different options for the container collection instance
 	opts := []containercollection.ContainerCollectionOption{
-		containercollection.WithTracerCollection(ch.tracerCollection),
+		// Get Notifications from the container collection
+		containercollection.WithPubSub(containerEventFuncs...),
 
 		// Enrich events with OCI config information
 		containercollection.WithOCIConfigEnrichment(),
 
-		// Get containers created with ebpf (works also if hostPid=false)
-		containercollection.WithContainerFanotifyEbpf(),
-
-		// Get containers created with docker
+		// Get containers enriched with cgroup information
 		containercollection.WithCgroupEnrichment(),
 
 		// Enrich events with Linux namespaces information, it is needed for per container filtering
 		containercollection.WithLinuxNamespaceEnrichment(),
 
+		// Get containers created with container runtimes
+		containercollection.WithContainerRuntimeEnrichment(ch.runtime),
+
+		// Get containers created with ebpf (works also if hostPid=false)
+		containercollection.WithContainerFanotifyEbpf(),
+
+		containercollection.WithTracerCollection(ch.tracerCollection),
+
 		// Enrich those containers with data from the Kubernetes API
 		containercollection.WithKubernetesEnrichment(ch.nodeName, ch.k8sClient.K8SConfig),
-
-		// Get Notifications from the container collection
-		containercollection.WithPubSub(containerEventFuncs...),
 	}
 
 	// Initialize the container collection
@@ -226,6 +247,22 @@ func (ch *IGContainerWatcher) startTracers() error {
 		} else {
 			logger.L().Warning("randomx tracing is not supported on this architecture", helpers.String("architecture", runtime.GOARCH))
 		}
+
+		if err := ch.startSymlinkTracing(); err != nil {
+			logger.L().Error("error starting symlink tracing", helpers.Error(err))
+			return err
+		}
+
+		if err := ch.startHardlinkTracing(); err != nil {
+			logger.L().Error("error starting hardlink tracing", helpers.Error(err))
+			return err
+		}
+
+		// NOTE: SSH tracing relies on the network tracer, so it must be started after the network tracer.
+		if err := ch.startSshTracing(); err != nil {
+			logger.L().Error("error starting ssh tracing", helpers.Error(err))
+			return err
+		}
 	}
 
 	return nil
@@ -279,6 +316,24 @@ func (ch *IGContainerWatcher) stopTracers() error {
 				errs = errors.Join(errs, err)
 			}
 		}
+
+		// Stop symlink tracer
+		if err := ch.stopSymlinkTracing(); err != nil {
+			logger.L().Error("error stopping symlink tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+
+		// Stop hardlink tracer
+		if err := ch.stopHardlinkTracing(); err != nil {
+			logger.L().Error("error stopping hardlink tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+
+		// Stop ssh tracer
+		if err := ch.stopSshTracing(); err != nil {
+			logger.L().Error("error stopping ssh tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
 	}
 
 	return errs
@@ -308,7 +363,7 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 		return
 	}
 
-	logger.L().Info("stopping to monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
+	logger.L().Debug("stopping to monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
 
 	ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
 
@@ -322,5 +377,10 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 }
 
 func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {
-	return name == ch.podName && namespace == ch.namespace
+	// do not trace the node-agent pod
+	if name == ch.podName && namespace == ch.namespace {
+		return true
+	}
+	// check if config excludes the namespace
+	return ch.cfg.SkipNamespace(namespace)
 }

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/storage"
+
 	"github.com/cenkalti/backoff/v4"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -34,6 +36,7 @@ type Storage struct {
 	StorageClient              spdxv1beta1.SpdxV1beta1Interface
 	maxApplicationProfileSize  int
 	maxNetworkNeighborhoodSize int
+	maxJsonPatchOperations     int
 	namespace                  string
 	multiplier                 *int // used for testing to multiply the resources by this
 }
@@ -61,11 +64,13 @@ func CreateStorage(namespace string) (*Storage, error) {
 	if err != nil {
 		maxApplicationProfileSize = DefaultMaxApplicationProfileSize
 	}
+	logger.L().Debug("maxApplicationProfileSize", helpers.Int("size", maxApplicationProfileSize))
 
 	maxNetworkNeighborhoodSize, err := strconv.Atoi(os.Getenv("MAX_NETWORK_NEIGHBORHOOD_SIZE"))
 	if err != nil {
 		maxNetworkNeighborhoodSize = DefaultMaxNetworkNeighborhoodSize
 	}
+	logger.L().Debug("maxNetworkNeighborhoodSize", helpers.Int("size", maxNetworkNeighborhoodSize))
 
 	// wait for storage to be ready
 	if err := backoff.RetryNotify(func() error {
@@ -81,6 +86,7 @@ func CreateStorage(namespace string) (*Storage, error) {
 		StorageClient:              clientset.SpdxV1beta1(),
 		maxApplicationProfileSize:  maxApplicationProfileSize,
 		maxNetworkNeighborhoodSize: maxNetworkNeighborhoodSize,
+		maxJsonPatchOperations:     9999,
 		namespace:                  namespace,
 		multiplier:                 getMultiplier(),
 	}, nil
@@ -130,9 +136,8 @@ func (sc Storage) PatchNetworkNeighborsIngressAndEgress(name, namespace string, 
 }
 
 func (sc Storage) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
-	sc.modifyNameP(&networkNeighbors.Name)
+  sc.modifyNameP(&networkNeighbors.Name)
 	defer sc.revertNameP(&networkNeighbors.Name)
-
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Update(context.Background(), networkNeighbors, metav1.UpdateOptions{})
 
 	return err
@@ -158,8 +163,8 @@ func (sc Storage) GetApplicationActivity(namespace, name string) (*v1beta1.Appli
 	return aa, err
 }
 
-func (sc Storage) CreateFilteredSBOM(sbom *v1beta1.SBOMSyftFiltered) error {
-	_, err := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Create(context.Background(), sbom, metav1.CreateOptions{})
+func (sc Storage) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error {
+	_, err := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}

@@ -3,11 +3,12 @@ package networkneighborhoodcache
 import (
 	"context"
 	"fmt"
-	"node-agent/mocks"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/watcher"
 	"slices"
 	"testing"
+
+	"github.com/kubescape/node-agent/mocks"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/watcher"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"

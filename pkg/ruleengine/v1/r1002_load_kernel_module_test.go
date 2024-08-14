@@ -2,10 +2,11 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/utils"
 	"testing"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	"github.com/kubescape/node-agent/pkg/utils"
+
+	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 )
 
 func TestR1002LoadKernelModule(t *testing.T) {
@@ -35,5 +36,15 @@ func TestR1002LoadKernelModule(t *testing.T) {
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of init_module is not allowed")
+	}
+
+	// Create a syscall event with finit_module syscall
+	r2 := CreateRuleR1002LoadKernelModule()
+	e.SyscallName = "finit_module"
+
+	ruleResult = r2.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
+	if ruleResult == nil {
+		fmt.Printf("ruleResult: %v\n", ruleResult)
+		t.Errorf("Expected ruleResult to be Failure because of finit_module is not allowed")
 	}
 }

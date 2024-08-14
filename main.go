@@ -2,43 +2,50 @@ package main
 
 import (
 	"context"
-	"strings"
-
 	"net/http"
+	_ "net/http/pprof"
 	"net/url"
-	"node-agent/internal/validator"
-	"node-agent/pkg/applicationprofilemanager"
-	applicationprofilemanagerv1 "node-agent/pkg/applicationprofilemanager/v1"
-	"node-agent/pkg/config"
-	"node-agent/pkg/containerwatcher/v1"
-	"node-agent/pkg/dnsmanager"
-	"node-agent/pkg/exporters"
-	"node-agent/pkg/filehandler/v1"
-	"node-agent/pkg/malwaremanager"
-	malwaremanagerv1 "node-agent/pkg/malwaremanager/v1"
-	"node-agent/pkg/metricsmanager"
-	metricprometheus "node-agent/pkg/metricsmanager/prometheus"
-	"node-agent/pkg/networkmanager"
-	networkmanagerv1 "node-agent/pkg/networkmanager/v1"
-	networkmanagerv2 "node-agent/pkg/networkmanager/v2"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/objectcache/applicationprofilecache"
-	"node-agent/pkg/objectcache/k8scache"
-	"node-agent/pkg/objectcache/networkneighborhoodcache"
-	objectcachev1 "node-agent/pkg/objectcache/v1"
-	"node-agent/pkg/relevancymanager"
-	relevancymanagerv1 "node-agent/pkg/relevancymanager/v1"
-	rulebinding "node-agent/pkg/rulebindingmanager"
-	rulebindingcachev1 "node-agent/pkg/rulebindingmanager/cache"
-	"node-agent/pkg/rulemanager"
-	rulemanagerv1 "node-agent/pkg/rulemanager/v1"
-	"node-agent/pkg/sbomhandler/syfthandler"
-	"node-agent/pkg/storage/v1"
-	"node-agent/pkg/utils"
-	"node-agent/pkg/watcher/dynamicwatcher"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+
+	"github.com/kubescape/node-agent/internal/validator"
+	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
+	applicationprofilemanagerv1 "github.com/kubescape/node-agent/pkg/applicationprofilemanager/v1"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher/v1"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/filehandler/v1"
+	"github.com/kubescape/node-agent/pkg/healthmanager"
+	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
+	metricprometheus "github.com/kubescape/node-agent/pkg/metricsmanager/prometheus"
+	"github.com/kubescape/node-agent/pkg/networkmanager"
+	networkmanagerv1 "github.com/kubescape/node-agent/pkg/networkmanager/v1"
+	networkmanagerv2 "github.com/kubescape/node-agent/pkg/networkmanager/v2"
+	"github.com/kubescape/node-agent/pkg/nodeprofilemanager"
+	nodeprofilemanagerv1 "github.com/kubescape/node-agent/pkg/nodeprofilemanager/v1"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache"
+	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
+	"github.com/kubescape/node-agent/pkg/objectcache/networkneighborhoodcache"
+	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
+	"github.com/kubescape/node-agent/pkg/relevancymanager"
+	relevancymanagerv1 "github.com/kubescape/node-agent/pkg/relevancymanager/v1"
+	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
+	rulemanagerv1 "github.com/kubescape/node-agent/pkg/rulemanager/v1"
+	"github.com/kubescape/node-agent/pkg/sbomhandler/syfthandler"
+	"github.com/kubescape/node-agent/pkg/seccompmanager"
+	seccompmanagerv1 "github.com/kubescape/node-agent/pkg/seccompmanager/v1"
+	"github.com/kubescape/node-agent/pkg/storage/v1"
+	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/watcher/dynamicwatcher"
+	"github.com/kubescape/node-agent/pkg/watcher/seccompprofilewatcher"
 
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -62,32 +69,34 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("load clusterData error", helpers.Error(err))
 	}
 
+	if credentials, err := beUtils.LoadCredentialsFromFile("/etc/credentials"); err != nil {
+		logger.L().Warning("failed to load credentials", helpers.Error(err))
+	} else {
+		clusterData.AccountID = credentials.Account
+		logger.L().Info("credentials loaded", helpers.Int("accountLength", len(credentials.Account)))
+	}
+
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
-		var accountId string
-		if credentials, err := beUtils.LoadCredentialsFromFile("/etc/credentials"); err != nil {
-			logger.L().Warning("failed to load credentials", helpers.Error(err))
-		} else {
-			accountId = credentials.Account
-			logger.L().Info("credentials loaded", helpers.Int("accountLength", len(credentials.Account)))
-		}
-
 		ctx = logger.InitOtel("node-agent",
 			os.Getenv("RELEASE"),
-			accountId,
+			clusterData.AccountID,
 			clusterData.ClusterName,
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
 	}
 
-	err = validator.CheckPrerequisites()
-	if err != nil {
-		logger.L().Ctx(ctx).Error("error during validation", helpers.Error(err))
+	// Check if we need to validate the kernel version.
+	if os.Getenv("SKIP_KERNEL_VERSION_CHECK") == "" {
+		err = validator.CheckPrerequisites()
+		if err != nil {
+			logger.L().Ctx(ctx).Error("error during validation", helpers.Error(err))
 
-		if strings.Contains(err.Error(), utils.ErrKernelVersion) {
-			os.Exit(utils.ExitCodeIncompatibleKernel)
-		} else {
-			os.Exit(utils.ExitCodeError)
+			if strings.Contains(err.Error(), utils.ErrKernelVersion) {
+				os.Exit(utils.ExitCodeIncompatibleKernel)
+			} else {
+				os.Exit(utils.ExitCodeError)
+			}
 		}
 	}
 
@@ -114,8 +123,17 @@ func main() {
 	}
 
 	nodeName := os.Getenv(config.NodeNameEnvVar)
+
+	// Detect the container containerRuntime of the node
+	containerRuntime, err := utils.DetectContainerRuntimeViaK8sAPI(ctx, k8sClient, nodeName)
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("error detecting the container runtime", helpers.Error(err))
+	}
+
+	logger.L().Ctx(ctx).Info("Detected container runtime", helpers.String("containerRuntime", containerRuntime.Name.String()))
+
 	// Create watchers
-	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient)
+	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, cfg.SkipNamespace)
 	// create k8sObject cache
 	k8sObjectCache, err := k8scache.NewK8sObjectCache(nodeName, k8sClient)
 	if err != nil {
@@ -126,10 +144,23 @@ func main() {
 	// Initiate pre-existing containers
 	preRunningContainersIDs := mapset.NewSet[string]() // Set of container IDs
 
+	// Create the seccomp manager
+	var seccompManager seccompmanager.SeccompManagerClient
+	if cfg.EnableSeccomp {
+		seccompManager, err = seccompmanagerv1.NewSeccompManager()
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating SeccompManager", helpers.Error(err))
+		}
+		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(k8sClient, seccompManager)
+		dWatcher.AddAdaptor(seccompWatcher)
+	} else {
+		seccompManager = seccompmanager.NewSeccompManagerMock()
+	}
+
 	// Create the application profile manager
 	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	if cfg.EnableApplicationProfile {
-		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, preRunningContainersIDs, k8sObjectCache)
+		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, preRunningContainersIDs, k8sObjectCache, seccompManager)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the application profile manager", helpers.Error(err))
 		}
@@ -180,7 +211,7 @@ func main() {
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
 
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, preRunningContainersIDs, nodeName, clusterData.ClusterName)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, nodeName, clusterData.ClusterName)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
@@ -191,6 +222,16 @@ func main() {
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
 	}
 
+	// Create the node profile manager
+	var profileManager nodeprofilemanager.NodeProfileManagerClient
+	if cfg.EnableNodeProfile {
+		// FIXME validate the HTTPExporterConfig before we use it ?
+		profileManager = nodeprofilemanagerv1.NewNodeProfileManager(cfg, *clusterData, nodeName, k8sObjectCache, relevancyManager, ruleManager)
+	} else {
+		profileManager = nodeprofilemanager.NewNodeProfileManagerMock()
+	}
+
+	// Create the malware manager
 	var malwareManager malwaremanager.MalwareManagerClient
 	if cfg.EnableMalwareDetection {
 		// create exporter
@@ -213,18 +254,26 @@ func main() {
 		networkManagerv1Client = networkmanagerv1.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName, dnsManager, preRunningContainersIDs, k8sObjectCache)
 		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
 	} else {
-		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
+		networkManagerv1Client = &networkmanagerv1.NetworkManagerMock{}
+		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerv1Client, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerv1Client, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
 
+	// Start the profileManager
+	profileManager.Start(ctx)
+
 	// Start the prometheusExporter
 	prometheusExporter.Start()
+
+	// Start the health manager
+	healthManager := healthmanager.NewHealthManager(mainHandler)
+	healthManager.Start(ctx)
 
 	// Start the container handler
 	err = mainHandler.Start(ctx)

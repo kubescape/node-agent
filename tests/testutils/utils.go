@@ -1,7 +1,7 @@
 package testutils
 
 import (
-	"fmt"
+	"errors"
 	"io"
 	"os/exec"
 )
@@ -11,10 +11,9 @@ func RunCommand(name string, args ...string) int {
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
-		if exiterr, ok := err.(*exec.ExitError); ok {
+		var exiterr *exec.ExitError
+		if errors.As(err, &exiterr) {
 			return exiterr.ExitCode()
-		} else {
-			panic(fmt.Sprintf("cmd.Wait: %v", err))
 		}
 	}
 	return 0

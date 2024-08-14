@@ -2,11 +2,12 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 	"path/filepath"
 	"strings"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -20,8 +21,8 @@ const (
 var R1000ExecFromMaliciousSourceDescriptor = RuleDescriptor{
 	ID:          R1000ID,
 	Name:        R1000Name,
-	Description: "Detecting exec calls that are from malicious source like: /dev/shm, /run, /var/run, /proc/self",
-	Priority:    RulePriorityCritical,
+	Description: "Detecting exec calls that are from malicious source like: /dev/shm, /proc/self",
+	Priority:    RulePriorityMed,
 	Tags:        []string{"exec", "signature"},
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{utils.ExecveEventType},
@@ -60,15 +61,16 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 
 	var maliciousExecPathPrefixes = []string{
 		"/dev/shm",
-		"/run",
-		"/var/run",
 		"/proc/self",
 	}
 
-	execPathDir := filepath.Dir(getExecFullPathFromEvent(execEvent))
+	execPath := getExecFullPathFromEvent(execEvent)
+	execPathDir := filepath.Dir(execPath)
 	for _, maliciousExecPathPrefix := range maliciousExecPathPrefixes {
 		// if the exec path or the current dir is from a malicious source
 		if strings.HasPrefix(execPathDir, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.ExePath, maliciousExecPathPrefix) {
+			upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
+
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:   rule.Name(),
@@ -85,23 +87,24 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 						Gid:        &execEvent.Gid,
 						PID:        execEvent.Pid,
 						Uid:        &execEvent.Uid,
-						UpperLayer: execEvent.UpperLayer,
+						UpperLayer: &upperLayer,
 						PPID:       execEvent.Ppid,
 						Pcomm:      execEvent.Pcomm,
 						Cwd:        execEvent.Cwd,
 						Hardlink:   execEvent.ExePath,
+						Path:       execPath,
 						Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 					},
 					ContainerID: execEvent.Runtime.ContainerID,
 				},
 				TriggerEvent: execEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
-					RuleID:          rule.ID(),
 					RuleDescription: fmt.Sprintf("Execution from malicious source: %s in: %s", execPathDir, execEvent.GetContainer()),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 					PodName: execEvent.GetPod(),
 				},
+				RuleID: rule.ID(),
 			}
 
 			return &ruleFailure

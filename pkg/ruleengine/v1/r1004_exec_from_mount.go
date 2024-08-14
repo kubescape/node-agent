@@ -1,11 +1,13 @@
 package ruleengine
 
 import (
+	"errors"
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 	"strings"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -58,6 +60,12 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 		return nil
 	}
 
+	// Check if the event is expected, if so return nil
+	// No application profile also returns nil
+	if whiteListed, err := isExecEventInProfile(execEvent, objCache, false); whiteListed || errors.Is(err, ProfileNotFound) {
+		return nil
+	}
+
 	mounts, err := getContainerMountPaths(execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer(), objCache.K8sObjectCache())
 	if err != nil {
 		return nil
@@ -66,6 +74,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 	for _, mount := range mounts {
 		fullPath := getExecFullPathFromEvent(execEvent)
 		if rule.isPathContained(fullPath, mount) || rule.isPathContained(execEvent.ExePath, mount) {
+			upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:   rule.Name(),
@@ -82,23 +91,24 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event in
 						Gid:        &execEvent.Gid,
 						PID:        execEvent.Pid,
 						Uid:        &execEvent.Uid,
-						UpperLayer: execEvent.UpperLayer,
+						UpperLayer: &upperLayer,
 						PPID:       execEvent.Ppid,
 						Pcomm:      execEvent.Pcomm,
 						Cwd:        execEvent.Cwd,
 						Hardlink:   execEvent.ExePath,
+						Path:       fullPath,
 						Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 					},
 					ContainerID: execEvent.Runtime.ContainerID,
 				},
 				TriggerEvent: execEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
-					RuleID:          rule.ID(),
 					RuleDescription: fmt.Sprintf("Process (%s) was executed from a mounted path (%s) in: %s", fullPath, mount, execEvent.GetContainer()),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 					PodName: execEvent.GetPod(),
 				},
+				RuleID: R1004ID,
 			}
 
 			return &ruleFailure

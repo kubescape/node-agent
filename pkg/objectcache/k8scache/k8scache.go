@@ -2,9 +2,10 @@ package k8scache
 
 import (
 	"context"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/watcher"
+
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/watcher"
 
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
@@ -22,8 +23,7 @@ var _ watcher.Adaptor = (*K8sObjectCacheImpl)(nil)
 type K8sObjectCacheImpl struct {
 	nodeName  string
 	k8sClient k8sclient.K8sClientInterface
-	podSpec   maps.SafeMap[string, *corev1.PodSpec]
-	podStatus maps.SafeMap[string, *corev1.PodStatus]
+	pods      maps.SafeMap[string, *corev1.Pod]
 
 	apiServerIpAddress string
 }
@@ -32,7 +32,7 @@ func NewK8sObjectCache(nodeName string, k8sClient k8sclient.K8sClientInterface) 
 	k := &K8sObjectCacheImpl{
 		k8sClient: k8sClient,
 		nodeName:  nodeName,
-		podSpec:   maps.SafeMap[string, *corev1.PodSpec]{},
+		pods:      maps.SafeMap[string, *corev1.Pod]{},
 	}
 
 	if err := k.setApiServerIpAddress(); err != nil {
@@ -45,18 +45,20 @@ func NewK8sObjectCache(nodeName string, k8sClient k8sclient.K8sClientInterface) 
 // GetPodSpec returns the pod spec for the given namespace and pod name, if not found returns nil
 func (k *K8sObjectCacheImpl) GetPodSpec(namespace, podName string) *corev1.PodSpec {
 	p := podKey(namespace, podName)
-	if k.podSpec.Has(p) {
-		return k.podSpec.Get(p)
+	if k.pods.Has(p) {
+		spec := k.pods.Get(p).Spec
+		return &spec
 	}
 
 	return nil
 }
 
-// GetPodSpec returns the pod spec for the given namespace and pod name, if not found returns nil
+// GetPodStatus returns the pod status for the given namespace and pod name, if not found returns nil
 func (k *K8sObjectCacheImpl) GetPodStatus(namespace, podName string) *corev1.PodStatus {
 	p := podKey(namespace, podName)
-	if k.podStatus.Has(p) {
-		return k.podStatus.Get(p)
+	if k.pods.Has(p) {
+		status := k.pods.Get(p).Status
+		return &status
 	}
 
 	return nil
@@ -66,6 +68,10 @@ func (k *K8sObjectCacheImpl) GetApiServerIpAddress() string {
 	return k.apiServerIpAddress
 }
 
+func (k *K8sObjectCacheImpl) GetPods() []*corev1.Pod {
+	return k.pods.Values()
+}
+
 func (k *K8sObjectCacheImpl) AddHandler(_ context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":
@@ -73,8 +79,7 @@ func (k *K8sObjectCacheImpl) AddHandler(_ context.Context, obj *unstructured.Uns
 		if err != nil {
 			return
 		}
-		k.podSpec.Set(podKey(pod.GetNamespace(), pod.GetName()), &pod.Spec)
-		k.podStatus.Set(podKey(pod.GetNamespace(), pod.GetName()), &pod.Status)
+		k.pods.Set(podKey(pod.GetNamespace(), pod.GetName()), pod)
 	}
 }
 
@@ -85,8 +90,7 @@ func (k *K8sObjectCacheImpl) ModifyHandler(_ context.Context, obj *unstructured.
 		if err != nil {
 			return
 		}
-		k.podSpec.Set(podKey(pod.GetNamespace(), pod.GetName()), &pod.Spec)
-		k.podStatus.Set(podKey(pod.GetNamespace(), pod.GetName()), &pod.Status)
+		k.pods.Set(podKey(pod.GetNamespace(), pod.GetName()), pod)
 	}
 }
 func (k *K8sObjectCacheImpl) DeleteHandler(_ context.Context, obj *unstructured.Unstructured) {
@@ -97,8 +101,7 @@ func (k *K8sObjectCacheImpl) DeleteHandler(_ context.Context, obj *unstructured.
 			return
 		}
 
-		k.podSpec.Delete(podKey(pod.GetNamespace(), pod.GetName()))
-		k.podStatus.Delete(podKey(pod.GetNamespace(), pod.GetName()))
+		k.pods.Delete(podKey(pod.GetNamespace(), pod.GetName()))
 	}
 }
 

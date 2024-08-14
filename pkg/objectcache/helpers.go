@@ -2,8 +2,9 @@ package objectcache
 
 import (
 	"encoding/json"
-	"strings"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -11,9 +12,6 @@ import (
 
 func UniqueName(namespace, name string) string {
 	return namespace + "/" + name
-}
-func PodUniqueName(pod *corev1.Pod) string {
-	return UniqueName(pod.GetNamespace(), pod.GetName())
 }
 
 func UnstructuredUniqueName(obj *unstructured.Unstructured) string {
@@ -39,13 +37,13 @@ func ListContainersIDs(pod *corev1.Pod) []string {
 	var containers []string
 
 	for i := range pod.Status.ContainerStatuses {
-		containers = append(containers, trimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID))
+		containers = append(containers, utils.TrimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID))
 	}
 	for i := range pod.Status.InitContainerStatuses {
-		containers = append(containers, trimRuntimePrefix(pod.Status.InitContainerStatuses[i].ContainerID))
+		containers = append(containers, utils.TrimRuntimePrefix(pod.Status.InitContainerStatuses[i].ContainerID))
 	}
 	for i := range pod.Status.EphemeralContainerStatuses {
-		containers = append(containers, trimRuntimePrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID))
+		containers = append(containers, utils.TrimRuntimePrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID))
 	}
 	return containers
 }
@@ -56,30 +54,20 @@ func ListTerminatedContainers(pod *corev1.Pod) []string {
 
 	for i := range pod.Status.ContainerStatuses {
 		if pod.Status.ContainerStatuses[i].State.Terminated != nil {
-			containers = append(containers, trimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID))
+			containers = append(containers, utils.TrimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID))
 		}
 	}
 	for i := range pod.Status.InitContainerStatuses {
 		if pod.Status.InitContainerStatuses[i].State.Terminated != nil {
-			containers = append(containers, trimRuntimePrefix(pod.Status.InitContainerStatuses[i].ContainerID))
+			containers = append(containers, utils.TrimRuntimePrefix(pod.Status.InitContainerStatuses[i].ContainerID))
 		}
 	}
 	for i := range pod.Status.EphemeralContainerStatuses {
 		if pod.Status.EphemeralContainerStatuses[i].State.Terminated != nil {
-			containers = append(containers, trimRuntimePrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID))
+			containers = append(containers, utils.TrimRuntimePrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID))
 		}
 	}
 	return containers
-}
-
-// trimRuntimePrefix removes the runtime prefix from a container ID.
-func trimRuntimePrefix(id string) string {
-	parts := strings.SplitN(id, "//", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-
-	return parts[1]
 }
 
 // GetTerminationExitCode returns the termination exit code of the container, otherwise -1
@@ -103,7 +91,7 @@ func GetTerminationExitCode(k8sObjectsCache K8sObjectCache, namespace, podName, 
 		}
 		if podStatus.ContainerStatuses[i].LastTerminationState.Terminated != nil {
 			// trim ID
-			if containerID == trimRuntimePrefix(podStatus.ContainerStatuses[i].LastTerminationState.Terminated.ContainerID) {
+			if containerID == utils.TrimRuntimePrefix(podStatus.ContainerStatuses[i].LastTerminationState.Terminated.ContainerID) {
 				return podStatus.ContainerStatuses[i].LastTerminationState.Terminated.ExitCode
 			}
 		}

@@ -3,26 +3,11 @@ package containerwatcher
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/applicationprofilemanager"
-	"node-agent/pkg/config"
-	"node-agent/pkg/containerwatcher"
-	"node-agent/pkg/dnsmanager"
-	"node-agent/pkg/malwaremanager"
-	"node-agent/pkg/metricsmanager"
-	"node-agent/pkg/networkmanager"
-	networkmanagerv1 "node-agent/pkg/networkmanager/v1"
-	"node-agent/pkg/relevancymanager"
-	rulebinding "node-agent/pkg/rulebindingmanager"
-	"node-agent/pkg/rulemanager"
-
-	"node-agent/pkg/utils"
 	"os"
-
-	tracerandomx "node-agent/pkg/ebpf/gadgets/randomx/tracer"
-	tracerandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
@@ -37,10 +22,29 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
+	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	tracerandomx "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/tracer"
+	tracerandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracerssh "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/tracer"
+	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
+	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
+	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
+	"github.com/kubescape/node-agent/pkg/networkmanager"
+	networkmanagerv1 "github.com/kubescape/node-agent/pkg/networkmanager/v1"
+	"github.com/kubescape/node-agent/pkg/relevancymanager"
+	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -51,12 +55,18 @@ const (
 	dnsTraceName               = "trace_dns"
 	openTraceName              = "trace_open"
 	randomxTraceName           = "trace_randomx"
+	symlinkTraceName           = "trace_symlink"
+	hardlinkTraceName          = "trace_hardlink"
+	sshTraceName               = "trace_ssh"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
 	networkWorkerPoolSize      = 1
 	dnsWorkerPoolSize          = 5
 	randomxWorkerPoolSize      = 1
+	symlinkWorkerPoolSize      = 1
+	hardlinkWorkerPoolSize     = 1
+	sshWorkerPoolSize          = 1
 )
 
 type IGContainerWatcher struct {
@@ -90,6 +100,9 @@ type IGContainerWatcher struct {
 	networkTracer      *tracernetwork.Tracer
 	dnsTracer          *tracerdns.Tracer
 	randomxTracer      *tracerandomx.Tracer
+	symlinkTracer      *tracersymlink.Tracer
+	hardlinkTracer     *tracerhardlink.Tracer
+	sshTracer          *tracerssh.Tracer
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
 
@@ -100,6 +113,9 @@ type IGContainerWatcher struct {
 	networkWorkerPool      *ants.PoolWithFunc
 	dnsWorkerPool          *ants.PoolWithFunc
 	randomxWorkerPool      *ants.PoolWithFunc
+	symlinkWorkerPool      *ants.PoolWithFunc
+	hardlinkWorkerPool     *ants.PoolWithFunc
+	sshdWorkerPool         *ants.PoolWithFunc
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *tracerexectype.Event
@@ -107,6 +123,9 @@ type IGContainerWatcher struct {
 	networkWorkerChan      chan *tracernetworktype.Event
 	dnsWorkerChan          chan *tracerdnstype.Event
 	randomxWorkerChan      chan *tracerandomxtype.Event
+	symlinkWorkerChan      chan *tracersymlinktype.Event
+	hardlinkWorkerChan     chan *tracerhardlinktype.Event
+	sshWorkerChan          chan *tracersshtype.Event
 
 	preRunningContainersIDs mapset.Set[string]
 
@@ -116,11 +135,14 @@ type IGContainerWatcher struct {
 
 	// cache
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify
+
+	// container runtime
+	runtime *containerutilsTypes.RuntimeConfig
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerv1Client networkmanagerv1.NetworkManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerv1Client networkmanagerv1.NetworkManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -138,7 +160,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.CapabilitiesEventType)
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
-		ruleManager.ReportCapability(k8sContainerID, event)
+		ruleManager.ReportCapability(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating capabilities worker pool: %w", err)
@@ -153,8 +175,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
-		// dropped events
-		if event.Type != types.NORMAL {
+		if isDroppedEvent(event.Type, event.Message) {
 			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
 			return
 		}
@@ -166,7 +187,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.ExecveEventType)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
-		ruleManager.ReportFileExec(k8sContainerID, event)
+		ruleManager.ReportFileExec(event)
 		malwareManager.ReportFileExec(k8sContainerID, event)
 	})
 	if err != nil {
@@ -181,8 +202,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
-		// dropped events
-		if event.Type != types.NORMAL {
+		if isDroppedEvent(event.Type, event.Message) {
 			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
 			return
 		}
@@ -195,7 +215,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
 		relevancyManager.ReportFileOpen(event.Runtime.ContainerID, k8sContainerID, path)
-		ruleManager.ReportFileOpen(k8sContainerID, event)
+		ruleManager.ReportFileOpen(event)
 		malwareManager.ReportFileOpen(k8sContainerID, event)
 	})
 	if err != nil {
@@ -210,8 +230,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
-		// dropped events
-		if event.Type != types.NORMAL {
+		if isDroppedEvent(event.Type, event.Message) {
 			networkManagerv1Client.ReportDroppedEvent(event.Runtime.ContainerID, event)
 			networkManagerClient.ReportDroppedEvent(k8sContainerID)
 			return
@@ -219,7 +238,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.NetworkEventType)
 		networkManagerv1Client.ReportNetworkEvent(event.Runtime.ContainerID, event)
 		networkManagerClient.ReportNetworkEvent(k8sContainerID, event)
-		ruleManager.ReportNetworkEvent(event.Runtime.ContainerID, event)
+		ruleManager.ReportNetworkEvent(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating network worker pool: %w", err)
@@ -252,10 +271,46 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 		metrics.ReportEvent(utils.RandomXEventType)
-		ruleManager.ReportRandomxEvent(event.Runtime.ContainerID, event)
+		ruleManager.ReportRandomxEvent(event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating randomx worker pool: %w", err)
+	}
+	// Create a symlink worker pool
+	symlinkWorkerPool, err := ants.NewPoolWithFunc(symlinkWorkerPoolSize, func(i interface{}) {
+		event := i.(tracersymlinktype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		metrics.ReportEvent(utils.SymlinkEventType)
+		ruleManager.ReportSymlinkEvent(event)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating symlink worker pool: %w", err)
+	}
+	// Create a hardlink worker pool
+	hardlinkWorkerPool, err := ants.NewPoolWithFunc(hardlinkWorkerPoolSize, func(i interface{}) {
+		event := i.(tracerhardlinktype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		metrics.ReportEvent(utils.HardlinkEventType)
+		ruleManager.ReportHardlinkEvent(event)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating hardlink worker pool: %w", err)
+	}
+	// Create a ssh worker pool
+	sshWorkerPool, err := ants.NewPoolWithFunc(sshWorkerPoolSize, func(i interface{}) {
+		event := i.(tracersshtype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		metrics.ReportEvent(utils.SSHEventType)
+		ruleManager.ReportSSHEvent(event)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating ssh worker pool: %w", err)
 	}
 
 	return &IGContainerWatcher{
@@ -285,22 +340,30 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		networkWorkerPool:       networkWorkerPool,
 		dnsWorkerPool:           dnsWorkerPool,
 		randomxWorkerPool:       randomxWorkerPool,
+		symlinkWorkerPool:       symlinkWorkerPool,
+		hardlinkWorkerPool:      hardlinkWorkerPool,
+		sshdWorkerPool:          sshWorkerPool,
 		metrics:                 metrics,
 		preRunningContainersIDs: preRunningContainers,
 
 		// Channels
 		capabilitiesWorkerChan: make(chan *tracercapabilitiestype.Event, 1000),
-		execWorkerChan:         make(chan *tracerexectype.Event, 1000),
-		openWorkerChan:         make(chan *traceropentype.Event, 100000),
-		networkWorkerChan:      make(chan *tracernetworktype.Event, 50000),
-		dnsWorkerChan:          make(chan *tracerdnstype.Event, 10000),
-		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 500),
+		execWorkerChan:         make(chan *tracerexectype.Event, 10000),
+		openWorkerChan:         make(chan *traceropentype.Event, 500000),
+		networkWorkerChan:      make(chan *tracernetworktype.Event, 500000),
+		dnsWorkerChan:          make(chan *tracerdnstype.Event, 100000),
+		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 5000),
+		symlinkWorkerChan:      make(chan *tracersymlinktype.Event, 1000),
+		hardlinkWorkerChan:     make(chan *tracerhardlinktype.Event, 1000),
+		sshWorkerChan:          make(chan *tracersshtype.Event, 1000),
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,
 
 		timeBasedContainers: mapset.NewSet[string](),
 		ruleManagedPods:     mapset.NewSet[string](),
+
+		runtime: runtime,
 	}, nil
 }
 
@@ -331,4 +394,8 @@ func (ch *IGContainerWatcher) Stop() {
 		}
 		ch.running = false
 	}
+}
+
+func (ch *IGContainerWatcher) Ready() bool {
+	return ch.running
 }

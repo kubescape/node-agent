@@ -1,13 +1,32 @@
 package ruleengine
 
 import (
+	"errors"
 	"fmt"
-	"node-agent/pkg/objectcache"
 	"path/filepath"
+	"slices"
 	"strings"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+)
+
+// SensitiveFiles is a list of sensitive files that should not be accessed by the application unexpectedly.
+var SensitiveFiles = []string{
+	"/etc/shadow",
+	"/etc/passwd",
+	"/etc/sudoers",
+	"/etc/ssh/sshd_config",
+	"/etc/ssh/ssh_config",
+	"/etc/pam.d",
+	"/etc/group",
+}
+
+var (
+	ContainerNotFound = errors.New("container not found")
+	ProfileNotFound   = errors.New("application profile not found")
 )
 
 func getExecPathFromEvent(event *tracerexectype.Event) string {
@@ -43,7 +62,7 @@ func getContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containe
 			return ap.Spec.EphemeralContainers[i], nil
 		}
 	}
-	return v1beta1.ApplicationProfileContainer{}, fmt.Errorf("container %s not found in application profile", containerName)
+	return v1beta1.ApplicationProfileContainer{}, ContainerNotFound
 }
 
 func getContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, containerName string) (v1beta1.NetworkNeighborhoodContainer, error) {
@@ -62,7 +81,7 @@ func getContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, contai
 			return nn.Spec.EphemeralContainers[i], nil
 		}
 	}
-	return v1beta1.NetworkNeighborhoodContainer{}, fmt.Errorf("container %s not found in network neighborhood profile", containerName)
+	return v1beta1.NetworkNeighborhoodContainer{}, ContainerNotFound
 }
 
 func getContainerMountPaths(namespace, podName, containerName string, k8sObjCache objectcache.K8sObjectCache) ([]string, error) {
@@ -71,7 +90,7 @@ func getContainerMountPaths(namespace, podName, containerName string, k8sObjCach
 		return []string{}, fmt.Errorf("pod spec not available for %s/%s", namespace, podName)
 	}
 
-	mountPaths := []string{}
+	var mountPaths []string
 	for _, container := range podSpec.Containers {
 		if container.Name == containerName {
 			for _, volumeMount := range container.VolumeMounts {
@@ -97,4 +116,41 @@ func getContainerMountPaths(namespace, podName, containerName string, k8sObjCach
 	}
 
 	return mountPaths, nil
+}
+
+func isExecEventInProfile(execEvent *tracerexectype.Event, objectCache objectcache.ObjectCache, compareArgs bool) (bool, error) {
+	// Check if the exec is whitelisted, if so, return nil
+	execPath := getExecPathFromEvent(execEvent)
+
+	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
+	if ap == nil {
+		return false, ProfileNotFound
+	}
+
+	appProfileExecList, err := getContainerFromApplicationProfile(ap, execEvent.GetContainer())
+	if err != nil {
+		return false, ContainerNotFound
+	}
+
+	for _, exec := range appProfileExecList.Execs {
+		if exec.Path == execPath {
+			// Either compare args false or args match
+			if !compareArgs || slices.Compare(exec.Args, execEvent.Args) == 0 {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func interfaceToStringSlice(val interface{}) ([]string, bool) {
+	sliceOfInterfaces, ok := val.([]interface{})
+	if ok {
+		sliceOfStrings := []string{}
+		for _, interfaceVal := range sliceOfInterfaces {
+			sliceOfStrings = append(sliceOfStrings, fmt.Sprintf("%v", interfaceVal))
+		}
+		return sliceOfStrings, true
+	}
+	return nil, false
 }

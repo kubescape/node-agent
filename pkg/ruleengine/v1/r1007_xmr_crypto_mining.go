@@ -2,11 +2,12 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
+
+	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
@@ -53,7 +54,7 @@ func (rule *R1007XMRCryptoMining) ID() string {
 func (rule *R1007XMRCryptoMining) DeleteRule() {
 }
 
-func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.RandomXEventType {
 		return nil
 	}
@@ -72,19 +73,21 @@ func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event 
 					Gid:        &randomXEvent.Gid,
 					PID:        randomXEvent.Pid,
 					Uid:        &randomXEvent.Uid,
-					UpperLayer: randomXEvent.UpperLayer,
+					UpperLayer: &randomXEvent.UpperLayer,
 					PPID:       randomXEvent.PPid,
+					Hardlink:   randomXEvent.ExePath,
+					Path:       randomXEvent.ExePath,
 				},
 				ContainerID: randomXEvent.Runtime.ContainerID,
 			},
 			TriggerEvent: randomXEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
-				RuleID:          rule.ID(),
-				RuleDescription: fmt.Sprintf("XMR Crypto Miner process: (%s) executed in: %s", randomXEvent.Comm, randomXEvent.GetContainer()),
+				RuleDescription: fmt.Sprintf("XMR Crypto Miner process: (%s) executed in: %s", randomXEvent.ExePath, randomXEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName: randomXEvent.GetPod(),
 			},
+			RuleID: rule.ID(),
 		}
 
 		return &ruleFailure

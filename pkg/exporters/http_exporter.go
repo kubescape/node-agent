@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"node-agent/pkg/malwaremanager"
-	"node-agent/pkg/ruleengine"
-	ruleenginev1 "node-agent/pkg/ruleengine/v1"
 	"sync"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/malwaremanager"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -37,10 +38,11 @@ type HTTPExporter struct {
 	NodeName    string `json:"nodeName"`
 	ClusterName string `json:"clusterName"`
 	httpClient  *http.Client
-	// alertCount is the number of alerts sent in the last minute, used to limit the number of alerts sent so we don't overload the system or reach the rate limit
-	alertCount      int
-	alertCountLock  sync.Mutex
-	alertCountStart time.Time
+	// alertCount is the number of alerts sent in the last minute, used to limit the number of alerts sent, so we don't overload the system or reach the rate limit
+	alertCount         int
+	alertCountLock     sync.Mutex
+	alertCountStart    time.Time
+	alertLimitNotified bool
 }
 
 type HTTPAlertsList struct {
@@ -113,10 +115,12 @@ func (exporter *HTTPExporter) sendAlertLimitReached() {
 
 func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	isLimitReached := exporter.checkAlertLimit()
-	if isLimitReached {
+	if isLimitReached && !exporter.alertLimitNotified {
 		exporter.sendAlertLimitReached()
+		exporter.alertLimitNotified = true
 		return
 	}
+
 	// populate the RuntimeAlert struct with the data from the failedRule
 	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = exporter.NodeName
@@ -129,6 +133,7 @@ func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 		BaseRuntimeAlert:       failedRule.GetBaseRuntimeAlert(),
 		RuntimeAlertK8sDetails: k8sDetails,
 		RuleAlert:              failedRule.GetRuleAlert(),
+		RuleID:                 failedRule.GetRuleId(),
 	}
 	exporter.sendInAlertList(httpAlert, failedRule.GetRuntimeProcessDetails())
 }
@@ -156,7 +161,8 @@ func (exporter *HTTPExporter) sendInAlertList(httpAlert apitypes.RuntimeAlert, p
 	bodyReader := bytes.NewReader(bodyBytes)
 
 	// send the HTTP request
-	req, err := http.NewRequest(exporter.config.Method, exporter.config.URL, bodyReader)
+	req, err := http.NewRequest(exporter.config.Method,
+		exporter.config.URL+"/v1/runtimealerts", bodyReader)
 	if err != nil {
 		logger.L().Error("failed to create HTTP request", helpers.Error(err))
 		return
@@ -185,10 +191,12 @@ func (exporter *HTTPExporter) sendInAlertList(httpAlert apitypes.RuntimeAlert, p
 
 func (exporter *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
 	isLimitReached := exporter.checkAlertLimit()
-	if isLimitReached {
+	if isLimitReached && !exporter.alertLimitNotified {
 		exporter.sendAlertLimitReached()
+		exporter.alertLimitNotified = true
 		return
 	}
+
 	k8sDetails := malwareResult.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = exporter.NodeName
 	k8sDetails.ClusterName = exporter.ClusterName
@@ -200,6 +208,7 @@ func (exporter *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.Malw
 		BaseRuntimeAlert:       malwareResult.GetBasicRuntimeAlert(),
 		RuntimeAlertK8sDetails: k8sDetails,
 		MalwareAlert:           malwareResult.GetMalwareRuntimeAlert(),
+		RuleID:                 "R3000", // Hardcoded rule ID for malware alerts.
 	}
 	exporter.sendInAlertList(httpAlert, malwareResult.GetRuntimeProcessDetails())
 }
@@ -215,6 +224,7 @@ func (exporter *HTTPExporter) checkAlertLimit() bool {
 	if time.Since(exporter.alertCountStart) > time.Minute {
 		exporter.alertCountStart = time.Now()
 		exporter.alertCount = 0
+		exporter.alertLimitNotified = false
 	}
 
 	exporter.alertCount++

@@ -2,11 +2,12 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 	"strings"
 
-	"node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
@@ -56,18 +57,6 @@ func (rule *R0002UnexpectedFileAccess) ID() string {
 	return R0002ID
 }
 
-func interfaceToStringSlice(val interface{}) ([]string, bool) {
-	sliceOfInterfaces, ok := val.([]interface{})
-	if ok {
-		sliceOfStrings := []string{}
-		for _, interfaceVal := range sliceOfInterfaces {
-			sliceOfStrings = append(sliceOfStrings, fmt.Sprintf("%v", interfaceVal))
-		}
-		return sliceOfStrings, true
-	}
-	return nil, false
-}
-
 func (rule *R0002UnexpectedFileAccess) SetParameters(parameters map[string]interface{}) {
 	rule.BaseRule.SetParameters(parameters)
 
@@ -86,7 +75,6 @@ func (rule *R0002UnexpectedFileAccess) SetParameters(parameters map[string]inter
 	} else {
 		logger.L().Warning("failed to convert ignorePrefixes to []string", helpers.String("ruleID", rule.ID()))
 	}
-
 }
 
 func (rule *R0002UnexpectedFileAccess) DeleteRule() {
@@ -168,6 +156,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 			InfectedPID: openEvent.Pid,
 			Arguments: map[string]interface{}{
 				"flags": openEvent.Flags,
+				"path":  openEvent.FullPath,
 			},
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.FullPath, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
 			Severity:       R0002UnexpectedFileAccessRuleDescriptor.Priority,
@@ -183,12 +172,12 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 		},
 		TriggerEvent: openEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleID:          rule.ID(),
 			RuleDescription: fmt.Sprintf("Unexpected file access: %s with flags %s in: %s", openEvent.FullPath, strings.Join(openEvent.Flags, ","), openEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName: openEvent.GetPod(),
 		},
+		RuleID: rule.ID(),
 	}
 
 	return &ruleFailure

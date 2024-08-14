@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -12,8 +13,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,10 +28,9 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1/containerinstance"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1/ephemeralcontainerinstance"
+	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1/initcontainerinstance"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	v1 "k8s.io/api/core/v1"
@@ -36,8 +38,11 @@ import (
 
 	"github.com/prometheus/procfs"
 
+	runtimeclient "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/runtime-client"
+	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
@@ -111,6 +116,7 @@ type WatchedContainerData struct {
 	status                                     WatchedContainerStatus
 	completionStatus                           WatchedContainerCompletionStatus
 	ParentWorkloadSelector                     *metav1.LabelSelector
+	SeccompProfilePath                         *string
 }
 
 func Between(value string, a string, b string) string {
@@ -240,6 +246,11 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 	if watchedContainer.ContainerNames == nil {
 		watchedContainer.ContainerNames = make(map[ContainerType][]string)
 	}
+	// check pod level seccomp profile (might be overridden at container level)
+	podSpec, err := wl.GetPodSpec()
+	if err == nil && podSpec.SecurityContext != nil && podSpec.SecurityContext.SeccompProfile != nil {
+		watchedContainer.SeccompProfilePath = podSpec.SecurityContext.SeccompProfile.LocalhostProfile
+	}
 	checkContainers := func(containers []v1.Container, ephemeralContainers []v1.EphemeralContainer, containerType ContainerType) {
 		var containerNames []string
 		if containerType == EphemeralContainer {
@@ -248,6 +259,9 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 				if c.Name == containerName {
 					watchedContainer.ContainerIndex = i
 					watchedContainer.ContainerType = containerType
+					if c.SecurityContext != nil && c.SecurityContext.SeccompProfile != nil {
+						watchedContainer.SeccompProfilePath = c.SecurityContext.SeccompProfile.LocalhostProfile
+					}
 				}
 			}
 		} else {
@@ -256,6 +270,9 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 				if c.Name == containerName {
 					watchedContainer.ContainerIndex = i
 					watchedContainer.ContainerType = containerType
+					if c.SecurityContext != nil && c.SecurityContext.SeccompProfile != nil {
+						watchedContainer.SeccompProfilePath = c.SecurityContext.SeccompProfile.LocalhostProfile
+					}
 				}
 			}
 		}
@@ -328,14 +345,14 @@ func SetInMap(newExecMap *maps.SafeMap[string, mapset.Set[string]]) func(k strin
 func ToInstanceType(c ContainerType) helpersv1.InstanceType {
 	switch c {
 	case Container:
-		return containerinstance.InstanceType
+		return instanceidhandlerv1.Container
 	case InitContainer:
-		return initcontainerinstance.InstanceType
+		return instanceidhandlerv1.InitContainer
 	case EphemeralContainer:
-		return ephemeralcontainerinstance.InstanceType
+		return instanceidhandlerv1.EphemeralContainer
+	default:
+		return instanceidhandlerv1.Container
 	}
-
-	return containerinstance.InstanceType
 }
 
 func GetCmdlineByPid(pid int) (*string, error) {
@@ -376,6 +393,33 @@ func GetProcessStat(pid int) (*procfs.ProcStat, error) {
 	}
 
 	return &stat, nil
+}
+
+func GetProcessEnv(pid int) (map[string]string, error) {
+	fs, err := procfs.NewFS("/proc")
+	if err != nil {
+		return nil, err
+	}
+
+	proc, err := fs.Proc(pid)
+	if err != nil {
+		return nil, err
+	}
+
+	env, err := proc.Environ()
+	if err != nil {
+		return nil, err
+	}
+
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	return envMap, nil
 }
 
 // Get the path of the file on the node.
@@ -438,7 +482,9 @@ func CalculateSHA256FileHash(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		_ = file.Close()
+	}(file)
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
@@ -457,7 +503,9 @@ func CalculateSHA1FileHash(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		_ = file.Close()
+	}(file)
 
 	hash := sha1.New()
 	if _, err := io.Copy(hash, file); err != nil {
@@ -476,7 +524,9 @@ func CalculateMD5FileHash(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		_ = file.Close()
+	}(file)
 
 	hash := md5.New()
 	if _, err := io.Copy(hash, file); err != nil {
@@ -492,19 +542,19 @@ func CalculateMD5FileHash(path string) (string, error) {
 // Creates a process tree from a process.
 // The process tree will be built from scanning the /proc filesystem.
 func CreateProcessTree(process *apitypes.Process, shimPid uint32) (*apitypes.Process, error) {
-	procfs, err := procfs.NewFS("/proc")
+	pfs, err := procfs.NewFS("/proc")
 	if err != nil {
 		return nil, err
 	}
 
-	proc, err := procfs.Proc(int(process.PID))
+	proc, err := pfs.Proc(int(process.PID))
 	if err != nil {
 		logger.L().Debug("Failed to get process", helpers.String("error", err.Error()))
 		return nil, err
 	}
 
 	// build the process tree
-	treeRoot, err := buildProcessTree(proc, &procfs, shimPid, nil)
+	treeRoot, err := buildProcessTree(proc, &pfs, shimPid, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -534,18 +584,8 @@ func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, proce
 	if err != nil {
 		return nil, err
 	} else {
-		// TODO: When (https://github.com/prometheus/procfs/pull/620) is merged, use the UID and GID as integers.
-		uid64, err := strconv.ParseUint(status.UIDs[1], 10, 32)
-		if err != nil {
-			return nil, err
-		}
-		uid = uint32(uid64)
-
-		gid64, err := strconv.ParseUint(status.GIDs[1], 10, 32)
-		if err != nil {
-			return nil, err
-		}
-		gid = uint32(gid64)
+		uid = uint32(status.UIDs[1])
+		gid = uint32(status.GIDs[1])
 	}
 
 	// Make the parent process the parent of the current process (move the current process to the parent's children).
@@ -644,4 +684,130 @@ func GetProcessFromProcessTree(process *apitypes.Process, pid uint32) *apitypes.
 	}
 
 	return nil
+}
+
+// TrimRuntimePrefix removes the runtime prefix from a container ID.
+func TrimRuntimePrefix(id string) string {
+	parts := strings.SplitN(id, "//", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+
+	return parts[1]
+}
+
+func GetContainerStatuses(podStatus v1.PodStatus) []v1.ContainerStatus {
+	return slices.Concat(podStatus.ContainerStatuses, podStatus.InitContainerStatuses, podStatus.EphemeralContainerStatuses)
+}
+
+func ChunkBy[T any](items []T, chunkSize int) [][]T {
+	var chunks [][]T
+	if chunkSize > 0 {
+		for chunkSize < len(items) {
+			items, chunks = items[chunkSize:], append(chunks, items[0:chunkSize:chunkSize])
+		}
+	}
+	return append(chunks, items)
+}
+
+// isUnixSocket checks if the given path is a Unix socket.
+func isUnixSocket(path string) (bool, error) {
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return false, err // Could not obtain the file stats
+	}
+
+	stat, ok := fileInfo.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false, fmt.Errorf("not a unix file")
+	}
+
+	// Check if the file is a socket
+	return (stat.Mode & syscall.S_IFMT) == syscall.S_IFSOCK, nil
+}
+
+func DetectContainerRuntimes(hostMount string) ([]*containerutilsTypes.RuntimeConfig, error) {
+	runtimes := map[igtypes.RuntimeName]string{
+		igtypes.RuntimeNameDocker:     runtimeclient.DockerDefaultSocketPath,
+		igtypes.RuntimeNameCrio:       runtimeclient.CrioDefaultSocketPath,
+		igtypes.RuntimeNameContainerd: runtimeclient.ContainerdDefaultSocketPath,
+		igtypes.RuntimeNamePodman:     runtimeclient.PodmanDefaultSocketPath,
+	}
+
+	detectedRuntimes := make([]*containerutilsTypes.RuntimeConfig, 0)
+
+	for runtimeName, socketPath := range runtimes {
+		// Check if the socket is available on the host mount
+		socketPath = hostMount + socketPath
+		if isSocket, err := isUnixSocket(socketPath); err == nil && isSocket {
+			logger.L().Info("Detected container runtime", helpers.String("runtime", runtimeName.String()), helpers.String("socketPath", socketPath))
+			detectedRuntimes = append(detectedRuntimes, &containerutilsTypes.RuntimeConfig{
+				Name:       runtimeName,
+				SocketPath: socketPath,
+			})
+		}
+	}
+
+	if len(detectedRuntimes) == 0 {
+		return nil, fmt.Errorf("no container runtimes detected at the following paths: %v", runtimes)
+	}
+
+	return detectedRuntimes, nil
+}
+
+func DetectContainerRuntimeViaK8sAPI(ctx context.Context, k8sClient *k8sinterface.KubernetesApi, nodeName string) (*containerutilsTypes.RuntimeConfig, error) {
+	// Get the current node
+	nodes, err := k8sClient.GetKubernetesClient().CoreV1().Nodes().List(ctx, metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("metadata.name=%s", nodeName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list nodes: %v", err)
+	}
+
+	if len(nodes.Items) == 0 {
+		return nil, fmt.Errorf("no node found with name: %s", nodeName)
+	}
+
+	node := nodes.Items[0]
+	runtimeConfig := parseRuntimeInfo(node.Status.NodeInfo.ContainerRuntimeVersion)
+	if runtimeConfig.Name == igtypes.RuntimeNameUnknown {
+		return nil, fmt.Errorf("unknown container runtime: %s", node.Status.NodeInfo.ContainerRuntimeVersion)
+	}
+
+	return runtimeConfig, nil
+}
+
+func parseRuntimeInfo(version string) *containerutilsTypes.RuntimeConfig {
+	switch {
+	case strings.HasPrefix(version, "docker://"):
+		return &containerutilsTypes.RuntimeConfig{
+			Name:            igtypes.RuntimeNameDocker,
+			SocketPath:      runtimeclient.DockerDefaultSocketPath,
+			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
+		}
+	case strings.HasPrefix(version, "containerd://"):
+		return &containerutilsTypes.RuntimeConfig{
+			Name:            igtypes.RuntimeNameContainerd,
+			SocketPath:      runtimeclient.ContainerdDefaultSocketPath,
+			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
+		}
+	case strings.HasPrefix(version, "cri-o://"):
+		return &containerutilsTypes.RuntimeConfig{
+			Name:            igtypes.RuntimeNameCrio,
+			SocketPath:      runtimeclient.CrioDefaultSocketPath,
+			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
+		}
+	case strings.HasPrefix(version, "podman://"):
+		return &containerutilsTypes.RuntimeConfig{
+			Name:            igtypes.RuntimeNamePodman,
+			SocketPath:      runtimeclient.PodmanDefaultSocketPath,
+			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
+		}
+	default:
+		return &containerutilsTypes.RuntimeConfig{
+			Name:            igtypes.RuntimeNameUnknown,
+			SocketPath:      "",
+			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
+		}
+	}
 }

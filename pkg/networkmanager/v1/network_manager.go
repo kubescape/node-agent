@@ -5,15 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"node-agent/pkg/config"
-	"node-agent/pkg/dnsmanager"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/networkmanager"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/storage"
-	"node-agent/pkg/utils"
 	"strings"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/networkmanager"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v4"
@@ -75,6 +76,11 @@ func CreateNetworkManager(ctx context.Context, cfg config.Config, k8sClient k8sc
 }
 
 func (am *NetworkManager) ContainerCallback(notif containercollection.PubSubEvent) {
+	// check if the container should be ignored
+	if am.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+		return
+	}
+
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 	ctx, span := otel.Tracer("").Start(am.ctx, "NetworkManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
 	defer span.End()
@@ -442,7 +448,7 @@ func (am *NetworkManager) generateNetworkNeighborsEntries(namespace string, netw
 		var neighborEntry v1beta1.NetworkNeighbor
 
 		if networkEvent.Destination.Kind == networkmanager.EndpointKindPod {
-			// for Pods we need to remove the default labels
+			// for Pods, we need to remove the default labels
 			neighborEntry.PodSelector = &metav1.LabelSelector{
 				MatchLabels: networkmanager.FilterLabels(networkEvent.GetDestinationPodLabels()),
 			}

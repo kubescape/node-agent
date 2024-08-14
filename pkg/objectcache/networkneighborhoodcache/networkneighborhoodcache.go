@@ -3,9 +3,10 @@ package networkneighborhoodcache
 import (
 	"context"
 	"fmt"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/watcher"
+
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/watcher"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,7 +17,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -81,7 +81,7 @@ func (nn *NetworkNeighborhoodCacheImpl) GetNetworkNeighborhood(containerID strin
 // ------------------ watcher.WatchResources methods -----------------------
 
 func (nn *NetworkNeighborhoodCacheImpl) WatchResources() []watcher.WatchResource {
-	w := []watcher.WatchResource{}
+	var w []watcher.WatchResource
 
 	// add pod
 	p := watcher.NewWatchResource(schema.GroupVersionResource{
@@ -103,6 +103,7 @@ func (nn *NetworkNeighborhoodCacheImpl) WatchResources() []watcher.WatchResource
 }
 
 // ------------------ watcher.Watcher methods -----------------------
+
 func (nn *NetworkNeighborhoodCacheImpl) AddHandler(ctx context.Context, obj *unstructured.Unstructured) {
 	switch obj.GetKind() {
 	case "Pod":
@@ -308,7 +309,7 @@ func getSlug(p *unstructured.Unstructured) (string, error) {
 
 	// a single pod can have multiple instanceIDs (because of the containers), but we only need one
 	instanceID := instanceIDs[0]
-	slug, err := names.InstanceIDToSlug(instanceID.GetName(), instanceID.GetKind(), "", instanceID.GetHashed())
+	slug, err := instanceID.GetSlug(true)
 	if err != nil {
 		return "", fmt.Errorf("failed to get slug")
 	}

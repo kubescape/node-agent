@@ -2,11 +2,12 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 
-	ruleenginetypes "node-agent/pkg/ruleengine/types"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
+
+	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
@@ -87,12 +88,12 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event i
 			},
 			TriggerEvent: syscallEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
-				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("unshare system call executed in %s", syscallEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName: syscallEvent.GetPod(),
 			},
+			RuleID: rule.ID(),
 		}
 
 		return &ruleFailure

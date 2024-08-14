@@ -1,10 +1,11 @@
 package cache
 
 import (
-	"fmt"
-	typesv1 "node-agent/pkg/rulebindingmanager/types/v1"
-	"node-agent/pkg/watcher"
 	"strings"
+
+	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
+	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/watcher"
 
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
@@ -20,18 +21,9 @@ func uniqueNameToName(n string) (string, string) {
 	}
 	return "", ""
 }
-func uniqueName(namespace, name string) string {
-	return fmt.Sprintf("%s/%s", namespace, name)
-}
-func podUniqueName(pod *corev1.Pod) string {
-	return uniqueName(pod.GetNamespace(), pod.GetName())
-}
-func rbUniqueName(rb *typesv1.RuntimeAlertRuleBinding) string {
-	return uniqueName(rb.GetNamespace(), rb.GetName())
-}
 
-func unstructuredUniqueName(obj *unstructured.Unstructured) string {
-	return uniqueName(obj.GetNamespace(), obj.GetName())
+func uniqueName(obj metav1.Object) string {
+	return utils.CreateK8sPodID(obj.GetNamespace(), obj.GetName())
 }
 
 func unstructuredToRuleBinding(obj *unstructured.Unstructured) (*typesv1.RuntimeAlertRuleBinding, error) {
@@ -41,6 +33,7 @@ func unstructuredToRuleBinding(obj *unstructured.Unstructured) (*typesv1.Runtime
 	}
 	return rb, nil
 }
+
 func unstructuredToPod(obj *unstructured.Unstructured) (*corev1.Pod, error) {
 	pod := &corev1.Pod{}
 	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, pod); err != nil {
@@ -49,8 +42,9 @@ func unstructuredToPod(obj *unstructured.Unstructured) (*corev1.Pod, error) {
 	return pod, nil
 
 }
+
 func resourcesToWatch(nodeName string) []watcher.WatchResource {
-	w := []watcher.WatchResource{}
+	var w []watcher.WatchResource
 
 	// add pod
 	p := watcher.NewWatchResource(schema.GroupVersionResource{

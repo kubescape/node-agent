@@ -1,126 +1,265 @@
 {
-    "apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
-    "kind": "ApplicationProfile",
-    "metadata": {
-        "annotations": {
-            "kubescape.io/resource-size": "85",
-            "kubescape.io/completion": "complete",
-            "kubescape.io/status": "completed"
-        },
-        "creationTimestamp": "2024-03-19T09:27:05Z",
-        "labels": {
-            "kubescape.io/instance-template-hash": "77b4fdf86c",
-            "kubescape.io/workload-api-group": "apps",
-            "kubescape.io/workload-api-version": "v1",
-            "kubescape.io/workload-kind": "Deployment",
-            "kubescape.io/workload-name": "nginx"
-        },
-        "name": "replicaset-nginx-77b4fdf86c"
+  "kind": "ApplicationProfile",
+  "apiVersion": "spdx.softwarecomposition.kubescape.io/v1beta1",
+  "metadata": {
+    "name": "replicaset-nginx-77b4fdf86c",
+    "creationTimestamp": "2024-03-19T09:27:05Z",
+    "labels": {
+      "kubescape.io/instance-template-hash": "77b4fdf86c",
+      "kubescape.io/workload-api-group": "apps",
+      "kubescape.io/workload-api-version": "v1",
+      "kubescape.io/workload-kind": "Deployment",
+      "kubescape.io/workload-name": "nginx"
     },
-    "spec": {
-        "containers": [
-            {
-                "capabilities": [
-                    "NET_BIND_SERVICE",
-                    "DAC_OVERRIDE",
-                    "CHOWN",
-                    "SETGID",
-                    "SETUID"
+    "annotations": {
+      "kubescape.io/completion": "complete",
+      "kubescape.io/resource-size": "85",
+      "kubescape.io/status": "completed"
+    }
+  },
+  "spec": {
+    "architectures": [
+      "amd64",
+      "arm64"
+    ],
+    "containers": [
+      {
+        "capabilities": [
+          "NET_BIND_SERVICE",
+          "DAC_OVERRIDE",
+          "CHOWN",
+          "SETGID",
+          "SETUID"
+        ],
+        "execs": [
+          {
+            "path": "/usr/bin/dpkg-query",
+            "args": [
+              "--show",
+              "--showformat=${Conffiles}\\n",
+              "/usr/bin/dpkg-query",
+              "nginx"
+            ]
+          },
+          {
+            "path": "/docker-entrypoint.sh",
+            "args": [
+              "-g",
+              "/docker-entrypoint.sh",
+              "daemon off;",
+              "nginx"
+            ]
+          },
+          {
+            "path": "/usr/bin/cut",
+            "args": [
+              "-d ",
+              "-f",
+              "/usr/bin/cut",
+              "3"
+            ]
+          },
+          {
+            "path": "/docker-entrypoint.d/30-tune-worker-processes.sh",
+            "args": [
+              "/docker-entrypoint.d/30-tune-worker-processes.sh"
+            ]
+          },
+          {
+            "path": "/docker-entrypoint.d/10-listen-on-ipv6-by-default.sh",
+            "args": [
+              "/docker-entrypoint.d/10-listen-on-ipv6-by-default.sh"
+            ]
+          },
+          {
+            "path": "/usr/bin/touch",
+            "args": [
+              "/etc/nginx/conf.d/default.conf",
+              "/usr/bin/touch"
+            ]
+          },
+          {
+            "path": "/usr/sbin/nginx",
+            "args": [
+              "-g",
+              "/usr/sbin/nginx",
+              "daemon off;"
+            ]
+          },
+          {
+            "path": "/usr/bin/md5sum",
+            "args": [
+              "-",
+              "-c",
+              "/usr/bin/md5sum"
+            ]
+          },
+          {
+            "path": "/usr/bin/sed",
+            "args": [
+              "-E",
+              "-i",
+              "/etc/nginx/conf.d/default.conf",
+              "/usr/bin/sed",
+              "s,listen       80;,listen       80;\\n    listen  [::]:80;,"
+            ]
+          },
+          {
+            "path": "/usr/bin/grep",
+            "args": [
+              "-q",
+              "/etc/nginx/conf.d/default.conf",
+              "/usr/bin/grep",
+              "etc/nginx/conf.d/default.conf",
+              "listen  \\[::]\\:80;"
+            ]
+          },
+          {
+            "path": "/etc/nginx/conf.d/sedzJNyeW"
+          }
+        ],
+        "opens": null,
+        "syscalls": null,
+        "seccompProfile": {
+          "path": "default/replicaset-nginx-bf5d5cf98-nginx.json",
+          "spec": {
+            "defaultAction": "SCMP_ACT_ERRNO",
+            "architectures": [
+              "SCMP_ARCH_X86_64",
+              "SCMP_ARCH_X86",
+              "SCMP_ARCH_X32"
+            ],
+            "syscalls": [
+              {
+                "names": [
+                  "accept4",
+                  "epoll_wait",
+                  "pselect6",
+                  "futex",
+                  "madvise",
+                  "epoll_ctl",
+                  "getsockname",
+                  "setsockopt",
+                  "vfork",
+                  "mmap",
+                  "arch_prctl",
+                  "sysinfo",
+                  "symlinkat",
+                  "connect",
+                  "dup3",
+                  "getcwd",
+                  "getpid",
+                  "brk",
+                  "fchdir",
+                  "pread64",
+                  "wait4",
+                  "clone3",
+                  "setuid",
+                  "write",
+                  "prctl",
+                  "munmap",
+                  "rt_sigprocmask",
+                  "rt_sigreturn",
+                  "fsetxattr",
+                  "getrandom",
+                  "ioctl",
+                  "mount",
+                  "getpeername",
+                  "gettid",
+                  "fcntl",
+                  "mkdirat",
+                  "prlimit64",
+                  "setgid",
+                  "fgetxattr",
+                  "pwrite64",
+                  "sched_yield",
+                  "uname",
+                  "openat2",
+                  "vfork",
+                  "openat",
+                  "umask",
+                  "nanosleep",
+                  "eventfd2",
+                  "getgid",
+                  "listen",
+                  "mprotect",
+                  "epoll_ctl",
+                  "fchmodat",
+                  "getegid",
+                  "epoll_pwait",
+                  "keyctl",
+                  "mkdir",
+                  "set_robust_list",
+                  "tgkill",
+                  "read",
+                  "rseq",
+                  "statfs",
+                  "unlinkat",
+                  "capset",
+                  "epoll_create",
+                  "fstatfs",
+                  "sched_getaffinity",
+                  "fchownat",
+                  "newfstatat",
+                  "sendmsg",
+                  "chown",
+                  "clone",
+                  "execve",
+                  "faccessat2",
+                  "rename",
+                  "umount2",
+                  "access",
+                  "futex",
+                  "getsockopt",
+                  "readlinkat",
+                  "dup2",
+                  "geteuid",
+                  "bind",
+                  "pipe2",
+                  "rt_sigsuspend",
+                  "fstat",
+                  "socketpair",
+                  "mmap",
+                  "set_tid_address",
+                  "setgroups",
+                  "setsid",
+                  "exit",
+                  "getuid",
+                  "io_setup",
+                  "mknodat",
+                  "unshare",
+                  "getppid",
+                  "madvise",
+                  "setsockopt",
+                  "getdents64",
+                  "lseek",
+                  "mount_setattr",
+                  "rt_sigaction",
+                  "sigaltstack",
+                  "capget",
+                  "chdir",
+                  "epoll_wait",
+                  "linkat",
+                  "exit_group",
+                  "getrlimit",
+                  "recvmsg",
+                  "socket",
+                  "fadvise64",
+                  "pivot_root",
+                  "sethostname",
+                  "utimensat",
+                  "close",
+                  "epoll_create1",
+                  "fchown",
+                  "getsockname"
                 ],
-                "execs": [
-                    {
-                        "args": [
-                            "--show",
-                            "--showformat=${Conffiles}\\n",
-                            "/usr/bin/dpkg-query",
-                            "nginx"
-                        ],
-                        "path": "/usr/bin/dpkg-query"
-                    },
-                    {
-                        "args": [
-                            "-g",
-                            "/docker-entrypoint.sh",
-                            "daemon off;",
-                            "nginx"
-                        ],
-                        "path": "/docker-entrypoint.sh"
-                    },
-                    {
-                        "args": [
-                            "-d ",
-                            "-f",
-                            "/usr/bin/cut",
-                            "3"
-                        ],
-                        "path": "/usr/bin/cut"
-                    },
-                    {
-                        "args": [
-                            "/docker-entrypoint.d/30-tune-worker-processes.sh"
-                        ],
-                        "path": "/docker-entrypoint.d/30-tune-worker-processes.sh"
-                    },
-                    {
-                        "args": [
-                            "/docker-entrypoint.d/10-listen-on-ipv6-by-default.sh"
-                        ],
-                        "path": "/docker-entrypoint.d/10-listen-on-ipv6-by-default.sh"
-                    },
-                    {
-                        "args": [
-                            "/etc/nginx/conf.d/default.conf",
-                            "/usr/bin/touch"
-                        ],
-                        "path": "/usr/bin/touch"
-                    },
-                    {
-                        "args": [
-                            "-g",
-                            "/usr/sbin/nginx",
-                            "daemon off;"
-                        ],
-                        "path": "/usr/sbin/nginx"
-                    },
-                    {
-                        "args": [
-                            "-",
-                            "-c",
-                            "/usr/bin/md5sum"
-                        ],
-                        "path": "/usr/bin/md5sum"
-                    },
-                    {
-                        "args": [
-                            "-E",
-                            "-i",
-                            "/etc/nginx/conf.d/default.conf",
-                            "/usr/bin/sed",
-                            "s,listen       80;,listen       80;\\n    listen  [::]:80;,"
-                        ],
-                        "path": "/usr/bin/sed"
-                    },
-                    {
-                        "args": [
-                            "-q",
-                            "/etc/nginx/conf.d/default.conf",
-                            "/usr/bin/grep",
-                            "etc/nginx/conf.d/default.conf",
-                            "listen  \\[::]\\:80;"
-                        ],
-                        "path": "/usr/bin/grep"
-                    },
-                    {
-                        "flags": [
-                            "O_CREAT",
-                            "O_EXCL",
-                            "O_RDWR"
-                        ],
-                        "path": "/etc/nginx/conf.d/sedzJNyeW"
-                    }
-                ]
-            }
-        ]
-    },
-    "status": {}
+                "action": "SCMP_ACT_ALLOW"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "status": {}
 }

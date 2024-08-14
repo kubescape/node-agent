@@ -2,35 +2,33 @@ package applicationprofilemanager
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"node-agent/pkg/applicationprofilemanager"
-	"node-agent/pkg/config"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/storage"
-	"node-agent/pkg/utils"
+	"runtime"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
-
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-
 	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/cenkalti/backoff/v4"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	"github.com/kubescape/k8s-interface/names"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/seccompmanager"
+	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -56,11 +54,12 @@ type ApplicationProfileManager struct {
 	storageClient            storage.StorageClient
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	preRunningContainerIDs   mapset.Set[string]
+	seccompManager           seccompmanager.SeccompManagerClient
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache) (*ApplicationProfileManager, error) {
+func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
 		cfg:                    cfg,
 		clusterName:            clusterName,
@@ -72,6 +71,7 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		trackedContainers:      mapset.NewSet[string](),
 		removedContainers:      mapset.NewSet[string](),
 		preRunningContainerIDs: preRunningContainerIDs,
+		seccompManager:         seccompManager,
 	}, nil
 }
 
@@ -181,17 +181,18 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 				}
 
 				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
-				return nil
+				return err
 			case errors.Is(err, utils.ContainerReachedMaxTime):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
-				return nil
+				return err
 			case errors.Is(err, utils.ObjectCompleted):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
-				return nil
+				return err
 			case errors.Is(err, utils.TooLargeObjectError):
+				logger.L().Debug("ApplicationProfileManager - object is too large")
 				watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
-				return nil
+				return err
 			}
 		}
 	}
@@ -219,7 +220,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	}
 
 	// leave container name empty this way the "slug" will represent a workload
-	slug, err := names.InstanceIDToSlug(watchedContainer.InstanceID.GetName(), watchedContainer.InstanceID.GetKind(), "", watchedContainer.InstanceID.GetHashed())
+	slug, err := watchedContainer.InstanceID.GetSlug(true)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get slug", helpers.Error(err),
 			helpers.String("slug", slug),
@@ -304,19 +305,15 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		// 0. calculate patch
 		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
+		operations = append(operations, utils.PatchOperation{
+			Op:    "add",
+			Path:  "/spec/architectures/-",
+			Value: runtime.GOARCH,
+		})
 
-		patch, err := json.Marshal(operations)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to marshal patch", helpers.Error(err),
-				helpers.String("slug", slug),
-				helpers.Int("container index", watchedContainer.ContainerIndex),
-				helpers.String("container ID", watchedContainer.ContainerID),
-				helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			return
-		}
 		// 1. try to patch object
 		var gotErr error
-		if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
+		if err := am.storageClient.PatchApplicationProfile(slug, namespace, operations, watchedContainer.SyncChannel); err != nil {
 			if apierrors.IsNotFound(err) {
 				// 2a. new object
 				newObject := &v1beta1.ApplicationProfile{
@@ -332,16 +329,26 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				}
 				addContainers := func(containers []v1beta1.ApplicationProfileContainer, containerNames []string) []v1beta1.ApplicationProfileContainer {
 					for _, name := range containerNames {
+						seccompProfile, err := am.seccompManager.GetSeccompProfile(name, watchedContainer.SeccompProfilePath)
+						if err != nil {
+							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
+								helpers.String("slug", slug),
+								helpers.Int("container index", watchedContainer.ContainerIndex),
+								helpers.String("container ID", watchedContainer.ContainerID),
+								helpers.String("k8s workload", watchedContainer.K8sContainerID))
+						}
 						containers = append(containers, v1beta1.ApplicationProfileContainer{
-							Name:         name,
-							Execs:        make([]v1beta1.ExecCalls, 0),
-							Opens:        make([]v1beta1.OpenCalls, 0),
-							Capabilities: make([]string, 0),
-							Syscalls:     make([]string, 0),
+							Name:           name,
+							Execs:          make([]v1beta1.ExecCalls, 0),
+							Opens:          make([]v1beta1.OpenCalls, 0),
+							Capabilities:   make([]string, 0),
+							Syscalls:       make([]string, 0),
+							SeccompProfile: seccompProfile,
 						})
 					}
 					return containers
 				}
+				newObject.Spec.Architectures = []string{runtime.GOARCH}
 				newObject.Spec.Containers = addContainers(newObject.Spec.Containers, watchedContainer.ContainerNames[utils.Container])
 				newObject.Spec.InitContainers = addContainers(newObject.Spec.InitContainers, watchedContainer.ContainerNames[utils.InitContainer])
 				newObject.Spec.EphemeralContainers = addContainers(newObject.Spec.EphemeralContainers, watchedContainer.ContainerNames[utils.EphemeralContainer])
@@ -358,7 +365,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				}
 			} else {
-				logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to patch application profile, will get existing one and adjust patch", helpers.Error(err),
+				logger.L().Debug("ApplicationProfileManager - failed to patch application profile, will get existing one and adjust patch", helpers.Error(err),
 					helpers.String("slug", slug),
 					helpers.Int("container index", watchedContainer.ContainerIndex),
 					helpers.String("container ID", watchedContainer.ContainerID),
@@ -374,20 +381,29 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				} else {
 					var replaceOperations []utils.PatchOperation
+					containerNames := watchedContainer.ContainerNames[watchedContainer.ContainerType]
 					// check existing container
 					existingContainer := utils.GetApplicationProfileContainer(existingObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
-					var addContainer bool
 					if existingContainer == nil {
-						existingContainer = &v1beta1.ApplicationProfileContainer{
-							Name:         watchedContainer.ContainerNames[watchedContainer.ContainerType][watchedContainer.ContainerIndex],
-							Execs:        make([]v1beta1.ExecCalls, 0),
-							Opens:        make([]v1beta1.OpenCalls, 0),
-							Capabilities: make([]string, 0),
-							Syscalls:     make([]string, 0),
+						name := containerNames[watchedContainer.ContainerIndex]
+						seccompProfile, err := am.seccompManager.GetSeccompProfile(name, watchedContainer.SeccompProfilePath)
+						if err != nil {
+							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
+								helpers.String("slug", slug),
+								helpers.Int("container index", watchedContainer.ContainerIndex),
+								helpers.String("container ID", watchedContainer.ContainerID),
+								helpers.String("k8s workload", watchedContainer.K8sContainerID))
 						}
-						addContainer = true
+						logger.L().Debug("ApplicationProfileManager - got seccomp profile", helpers.Interface("profile", seccompProfile))
+						existingContainer = &v1beta1.ApplicationProfileContainer{
+							Name:           containerNames[watchedContainer.ContainerIndex],
+							Execs:          make([]v1beta1.ExecCalls, 0),
+							Opens:          make([]v1beta1.OpenCalls, 0),
+							Capabilities:   make([]string, 0),
+							Syscalls:       make([]string, 0),
+							SeccompProfile: seccompProfile,
+						}
 					}
-
 					// update it
 					utils.EnrichApplicationProfileContainer(existingContainer, capabilities, observedSyscalls, execs, opens)
 					// get existing containers
@@ -400,58 +416,61 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						existingContainers = existingObject.Spec.EphemeralContainers
 					}
 					// replace or add container using patch
-					switch {
-					case existingContainers == nil:
-						// 3a. insert a new container slice, with the new container at the right index
-						containers := make([]v1beta1.ApplicationProfileContainer, watchedContainer.ContainerIndex+1)
-						containers[watchedContainer.ContainerIndex] = *existingContainer
+					// 3a. ensure we have a container slice
+					if existingContainers == nil {
 						replaceOperations = append(replaceOperations, utils.PatchOperation{
 							Op:    "add",
 							Path:  fmt.Sprintf("/spec/%s", watchedContainer.ContainerType),
-							Value: containers,
+							Value: make([]v1beta1.ApplicationProfileContainer, 0),
 						})
-					case addContainer:
-						// 3b. insert a new container at the right index
-						for i := len(existingContainers); i < watchedContainer.ContainerIndex; i++ {
-							replaceOperations = append(replaceOperations, utils.PatchOperation{
-								Op:   "add",
-								Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
-								Value: v1beta1.ApplicationProfileContainer{
-									Name:         watchedContainer.ContainerNames[watchedContainer.ContainerType][i],
-									Execs:        make([]v1beta1.ExecCalls, 0),
-									Opens:        make([]v1beta1.OpenCalls, 0),
-									Capabilities: make([]string, 0),
-									Syscalls:     make([]string, 0),
-								},
-							})
+					}
+					// 3b. ensure the slice has all the containers
+					for i := len(existingContainers); i < len(containerNames); i++ {
+						name := containerNames[i]
+						seccompProfile, err := am.seccompManager.GetSeccompProfile(name, watchedContainer.SeccompProfilePath)
+						if err != nil {
+							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
+								helpers.String("slug", slug),
+								helpers.Int("container index", watchedContainer.ContainerIndex),
+								helpers.String("container ID", watchedContainer.ContainerID),
+								helpers.String("k8s workload", watchedContainer.K8sContainerID))
 						}
 						replaceOperations = append(replaceOperations, utils.PatchOperation{
-							Op:    "add",
-							Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
-							Value: existingContainer,
-						})
-					default:
-						// 3c. replace the existing container at the right index
-						replaceOperations = append(replaceOperations, utils.PatchOperation{
-							Op:    "replace",
-							Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
-							Value: existingContainer,
+							Op:   "add",
+							Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
+							Value: v1beta1.ApplicationProfileContainer{
+								Name:           name,
+								Execs:          make([]v1beta1.ExecCalls, 0),
+								Opens:          make([]v1beta1.OpenCalls, 0),
+								Capabilities:   make([]string, 0),
+								Syscalls:       make([]string, 0),
+								SeccompProfile: seccompProfile,
+							},
 						})
 					}
+					// 3c. replace the existing container at the right index
+					replaceOperations = append(replaceOperations, utils.PatchOperation{
+						Op:    "replace",
+						Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
+						Value: existingContainer,
+					})
 
 					replaceOperations = utils.AppendStatusAnnotationPatchOperations(replaceOperations, watchedContainer)
-
-					patch, err := json.Marshal(replaceOperations)
-					if err != nil {
-						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to marshal patch", helpers.Error(err),
-							helpers.String("slug", slug),
-							helpers.Int("container index", watchedContainer.ContainerIndex),
-							helpers.String("container ID", watchedContainer.ContainerID),
-							helpers.String("k8s workload", watchedContainer.K8sContainerID))
-						return
+					if len(existingObject.Spec.Architectures) == 0 {
+						replaceOperations = append(replaceOperations, utils.PatchOperation{
+							Op:    "add",
+							Path:  "/spec/architectures",
+							Value: []string{runtime.GOARCH},
+						})
+					} else {
+						replaceOperations = append(replaceOperations, utils.PatchOperation{
+							Op:    "add",
+							Path:  "/spec/architectures/-",
+							Value: runtime.GOARCH,
+						})
 					}
 
-					if err := am.storageClient.PatchApplicationProfile(slug, namespace, patch, watchedContainer.SyncChannel); err != nil {
+					if err := am.storageClient.PatchApplicationProfile(slug, namespace, replaceOperations, watchedContainer.SyncChannel); err != nil {
 						gotErr = err
 						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to patch application profile", helpers.Error(err),
 							helpers.String("slug", slug),
@@ -551,6 +570,11 @@ func (am *ApplicationProfileManager) waitForContainer(k8sContainerID string) err
 }
 
 func (am *ApplicationProfileManager) ContainerCallback(notif containercollection.PubSubEvent) {
+	// check if the container should be ignored
+	if am.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+		return
+	}
+
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 	ctx, span := otel.Tracer("").Start(am.ctx, "ApplicationProfileManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
 	defer span.End()
@@ -588,7 +612,7 @@ func (am *ApplicationProfileManager) ReportCapability(k8sContainerID, capability
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
-	if am.savedCapabilities.Has(capability) {
+	if am.savedCapabilities.Get(k8sContainerID).ContainsOne(capability) {
 		return
 	}
 	am.toSaveCapabilities.Get(k8sContainerID).Add(capability)

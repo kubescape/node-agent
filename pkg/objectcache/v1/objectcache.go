@@ -1,7 +1,7 @@
 package objectcache
 
 import (
-	"node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 )
 
 var _ objectcache.ObjectCache = (*ObjectCacheImpl)(nil)

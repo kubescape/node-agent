@@ -11,7 +11,6 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubenameresolver"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 )
 
 func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Event) {
@@ -19,27 +18,22 @@ func (ch *IGContainerWatcher) networkEventCallback(event *tracernetworktypes.Eve
 		return
 	}
 
-	if event.Type != types.NORMAL {
-		// dropped event
-		logger.L().Ctx(ch.ctx).Warning("network tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-	} else {
+	// do not skip dropped events as their processing is done in the worker
 
-		ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
-		ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
+	ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
+	ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
 
-		if ch.kubeIPInstance != nil {
-			_ = ch.kubeIPInstance.EnrichEvent(event)
-		}
-		if ch.kubeNameInstance != nil {
-			_ = ch.kubeNameInstance.EnrichEvent(event)
-		}
+	if ch.kubeIPInstance != nil {
+		_ = ch.kubeIPInstance.EnrichEvent(event)
+	}
+	if ch.kubeNameInstance != nil {
+		_ = ch.kubeNameInstance.EnrichEvent(event)
 	}
 
 	ch.networkWorkerChan <- event
 }
 
 func (ch *IGContainerWatcher) startNetworkTracing() error {
-
 	if err := ch.tracerCollection.AddTracer(networkTraceName, ch.containerSelector); err != nil {
 		return fmt.Errorf("adding tracer: %w", err)
 	}
@@ -50,7 +44,7 @@ func (ch *IGContainerWatcher) startNetworkTracing() error {
 	}
 	go func() {
 		for event := range ch.networkWorkerChan {
-			ch.networkWorkerPool.Invoke(*event)
+			_ = ch.networkWorkerPool.Invoke(*event)
 		}
 	}()
 
@@ -78,7 +72,7 @@ func (ch *IGContainerWatcher) startNetworkTracing() error {
 
 	_, err = networktracer.ConnectToContainerCollection(config)
 	if err != nil {
-		return fmt.Errorf("creating tracer: %w", err)
+		return fmt.Errorf("connecting tracer to container collection: %w", err)
 	}
 
 	return nil
@@ -87,7 +81,7 @@ func (ch *IGContainerWatcher) startNetworkTracing() error {
 // startKubernetesResolution starts the kubeIP and kube name resolution, which are used to enrich network communication data
 func (ch *IGContainerWatcher) startKubernetesResolution() error {
 	kubeIPOp := operators.GetRaw(kubeipresolver.OperatorName).(*kubeipresolver.KubeIPResolver)
-	kubeIPOp.Init(nil)
+	_ = kubeIPOp.Init(nil)
 
 	kubeIPInstance, err := kubeIPOp.Instantiate(nil, nil, nil)
 	if err != nil {
@@ -95,17 +89,17 @@ func (ch *IGContainerWatcher) startKubernetesResolution() error {
 	}
 
 	ch.kubeIPInstance = kubeIPInstance
-	ch.kubeIPInstance.PreGadgetRun()
+	_ = ch.kubeIPInstance.PreGadgetRun()
 
 	kubeNameOp := operators.GetRaw(kubenameresolver.OperatorName).(*kubenameresolver.KubeNameResolver)
-	kubeNameOp.Init(nil)
+	_ = kubeNameOp.Init(nil)
 	kubeNameInstance, err := kubeNameOp.Instantiate(nil, nil, nil)
 	if err != nil {
 		return fmt.Errorf("creating kube name resolver: %w", err)
 	}
 
 	ch.kubeNameInstance = kubeNameInstance
-	ch.kubeNameInstance.PreGadgetRun()
+	_ = ch.kubeNameInstance.PreGadgetRun()
 
 	return nil
 }
@@ -115,8 +109,6 @@ func (ch *IGContainerWatcher) stopNetworkTracing() error {
 	if err := ch.tracerCollection.RemoveTracer(networkTraceName); err != nil {
 		return fmt.Errorf("removing tracer: %w", err)
 	}
-
 	ch.networkTracer.Close()
-
 	return nil
 }

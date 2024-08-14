@@ -1,8 +1,8 @@
 package ruleengine
 
 import (
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -61,6 +61,8 @@ type RuleFailure interface {
 	GetRuleAlert() apitypes.RuleAlert
 	// Get K8s Runtime Details
 	GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails
+	// Get Rule ID
+	GetRuleId() string
 
 	// Set Workload Details
 	SetWorkloadDetails(workloadDetails string)

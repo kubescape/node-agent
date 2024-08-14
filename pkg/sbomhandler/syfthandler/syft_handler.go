@@ -2,9 +2,10 @@ package syfthandler
 
 import (
 	"fmt"
-	"node-agent/pkg/sbomhandler"
-	"node-agent/pkg/storage"
-	"node-agent/pkg/utils"
+
+	"github.com/kubescape/node-agent/pkg/sbomhandler"
+	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 
@@ -52,18 +53,15 @@ func (sc *SyftHandler) FilterSBOM(watchedContainer *utils.WatchedContainerData, 
 	// check SBOM is complete
 	if syftData.Annotations != nil {
 		if status, ok := syftData.Annotations[helpersv1.StatusMetadataKey]; ok {
-			if status == helpersv1.Incomplete {
-				watchedContainer.SyncChannel <- utils.IncompleteSBOMError
-			}
-			// dwertent
-			if status == helpersv1.Unauthorize {
+			switch status {
+			case helpersv1.Incomplete, helpersv1.TooLarge, helpersv1.Unauthorize:
 				watchedContainer.SyncChannel <- utils.IncompleteSBOMError
 			}
 		}
 	}
 
 	if watchedContainer.SBOMSyftFiltered == nil {
-		filteredSBOMKey, err := watchedContainer.InstanceID.GetSlug()
+		filteredSBOMKey, err := watchedContainer.InstanceID.GetSlug(false)
 		if err != nil {
 			return err
 		}
@@ -206,10 +204,10 @@ func filterRelevantFilesInSBOM(watchedContainer *utils.WatchedContainerData, syf
 
 }
 
-func (sc *SyftHandler) IncrementImageUse(imageID string) {
+func (sc *SyftHandler) IncrementImageUse(_ string) {
 
 }
-func (sc *SyftHandler) DecrementImageUse(imageID string) {
+func (sc *SyftHandler) DecrementImageUse(_ string) {
 
 }
 

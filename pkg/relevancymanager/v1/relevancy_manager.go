@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"node-agent/pkg/config"
-	"node-agent/pkg/filehandler"
-	"node-agent/pkg/k8sclient"
-	"node-agent/pkg/relevancymanager"
-	"node-agent/pkg/sbomhandler"
-	"node-agent/pkg/utils"
 	"time"
+
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/filehandler"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/relevancymanager"
+	"github.com/kubescape/node-agent/pkg/sbomhandler"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/cenkalti/backoff/v4"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -31,7 +32,7 @@ import (
 
 type RelevancyManager struct {
 	cfg                      config.Config
-	watchedContainerChannels maps.SafeMap[string, chan error]
+	watchedContainerChannels maps.SafeMap[string, chan error] // key is containerID
 	ctx                      context.Context
 	fileHandler              filehandler.FileHandler
 	k8sClient                k8sclient.K8sClientInterface
@@ -193,6 +194,8 @@ func findImageID(pod workloadinterface.IWorkload, containerName string, containe
 		containerStatuses = podStatus.InitContainerStatuses
 	case utils.EphemeralContainer:
 		containerStatuses = podStatus.EphemeralContainerStatuses
+	default:
+		// noop
 	}
 
 	for i := range containerStatuses {
@@ -203,6 +206,7 @@ func findImageID(pod workloadinterface.IWorkload, containerName string, containe
 	return "", nil
 
 }
+
 func findImageTag(pod workloadinterface.IWorkload, containerName string, containerType utils.ContainerType) (string, error) {
 	var containers []v1.Container
 	var ephemeralContainers []v1.EphemeralContainer
@@ -224,6 +228,8 @@ func findImageTag(pod workloadinterface.IWorkload, containerName string, contain
 		if err != nil {
 			return "", err
 		}
+	default:
+		// noop
 
 	}
 	for i := range containers {
@@ -266,7 +272,6 @@ func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *con
 		}
 	}
 }
-
 func (rm *RelevancyManager) ContainerReachedMaxTime(containerID string) {
 	if channel := rm.watchedContainerChannels.Get(containerID); channel != nil {
 		channel <- utils.ContainerReachedMaxTime
@@ -309,6 +314,11 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 }
 
 func (rm *RelevancyManager) ContainerCallback(notif containercollection.PubSubEvent) {
+	// check if the container should be ignored
+	if rm.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+		return
+	}
+
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 	// ignore pre-running containers
 	if rm.preRunningContainerIDs.Contains(notif.Container.Runtime.ContainerID) {
@@ -355,4 +365,13 @@ func (rm *RelevancyManager) ReportFileOpen(containerID, k8sContainerID, file str
 		return
 	}
 	rm.fileHandler.AddFile(k8sContainerID, file)
+}
+
+func (rm *RelevancyManager) HasRelevancyCalculating(pod *v1.Pod) bool {
+	for _, c := range utils.GetContainerStatuses(pod.Status) {
+		if rm.watchedContainerChannels.Has(utils.TrimRuntimePrefix(c.ContainerID)) {
+			return true
+		}
+	}
+	return false
 }

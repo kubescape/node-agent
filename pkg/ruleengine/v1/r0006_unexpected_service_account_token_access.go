@@ -2,10 +2,11 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 	"strings"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
@@ -22,6 +23,8 @@ const (
 var serviceAccountTokenPathsPrefix = []string{
 	"/run/secrets/kubernetes.io/serviceaccount",
 	"/var/run/secrets/kubernetes.io/serviceaccount",
+	"/run/secrets/eks.amazonaws.com/serviceaccount",
+	"/var/run/secrets/eks.amazonaws.com/serviceaccount",
 }
 
 var R0006UnexpectedServiceAccountTokenAccessRuleDescriptor = RuleDescriptor{
@@ -132,12 +135,12 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		},
 		TriggerEvent: openEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleID:          rule.ID(),
 			RuleDescription: fmt.Sprintf("Unexpected access to service account token: %s with flags: %s in: %s", openEvent.FullPath, strings.Join(openEvent.Flags, ","), openEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName: openEvent.GetPod(),
 		},
+		RuleID: rule.ID(),
 	}
 
 	return &ruleFailure

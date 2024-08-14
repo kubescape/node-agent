@@ -1,7 +1,7 @@
 package ruleengine
 
 import (
-	"node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -16,6 +16,7 @@ type GenericRuleFailure struct {
 	TriggerEvent           igtypes.Event
 	RuleAlert              apitypes.RuleAlert
 	RuntimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails
+	RuleID                 string
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {
@@ -36,6 +37,10 @@ func (rule *GenericRuleFailure) GetRuleAlert() apitypes.RuleAlert {
 
 func (rule *GenericRuleFailure) GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails {
 	return rule.RuntimeAlertK8sDetails
+}
+
+func (rule *GenericRuleFailure) GetRuleId() string {
+	return rule.RuleID
 }
 
 func (rule *GenericRuleFailure) SetBaseRuntimeAlert(baseRuntimeAlert apitypes.BaseRuntimeAlert) {

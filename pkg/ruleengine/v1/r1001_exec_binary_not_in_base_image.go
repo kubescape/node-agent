@@ -1,11 +1,13 @@
 package ruleengine
 
 import (
+	"errors"
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 	"strings"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -50,7 +52,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) ID() string {
 func (rule *R1001ExecBinaryNotInBaseImage) DeleteRule() {
 }
 
-func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventType, event interface{}, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}
@@ -60,7 +62,13 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
-	if execEvent.UpperLayer {
+	if execEvent.UpperLayer || execEvent.PupperLayer {
+		// Check if the event is expected, if so return nil
+		// No application profile also returns nil
+		if whiteListed, err := isExecEventInProfile(execEvent, objectCache, false); whiteListed || errors.Is(err, ProfileNotFound) {
+			return nil
+		}
+		upperLayer := true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
@@ -74,23 +82,24 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 					Gid:        &execEvent.Gid,
 					PID:        execEvent.Pid,
 					Uid:        &execEvent.Uid,
-					UpperLayer: execEvent.UpperLayer,
+					UpperLayer: &upperLayer,
 					PPID:       execEvent.Ppid,
 					Pcomm:      execEvent.Pcomm,
 					Cwd:        execEvent.Cwd,
 					Hardlink:   execEvent.ExePath,
+					Path:       getExecFullPathFromEvent(execEvent),
 					Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 				},
 				ContainerID: execEvent.Runtime.ContainerID,
 			},
 			TriggerEvent: execEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
-				RuleID:          rule.ID(),
 				RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is not part of the image", execEvent.Comm, execEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName: execEvent.GetPod(),
 			},
+			RuleID: rule.ID(),
 		}
 
 		return &ruleFailure

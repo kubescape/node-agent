@@ -1,8 +1,8 @@
 package ruleengine
 
 import (
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 var _ RuleCreator = (*RuleCreatorMock)(nil)
@@ -45,7 +45,7 @@ func (rule *RuleMock) ID() string {
 func (rule *RuleMock) DeleteRule() {
 }
 
-func (rule *RuleMock) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) RuleFailure {
+func (rule *RuleMock) ProcessEvent(_ utils.EventType, _ interface{}, _ objectcache.ObjectCache) RuleFailure {
 	return nil
 }
 

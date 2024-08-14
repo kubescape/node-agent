@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/evanphx/json-patch"
+
+	jsonpatch "github.com/evanphx/json-patch"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
 )
@@ -32,7 +34,7 @@ func (sc *StorageHttpClientMock) CreateApplicationProfile(profile *v1beta1.Appli
 	return nil
 }
 
-func (sc *StorageHttpClientMock) PatchApplicationProfile(name, _ string, patchJSON []byte, _ chan error) error {
+func (sc *StorageHttpClientMock) PatchApplicationProfile(name, _ string, operations []utils.PatchOperation, _ chan error) error {
 	if len(sc.ApplicationProfiles) == 0 {
 		return errors2.NewNotFound(v1beta1.Resource("applicationprofile"), name)
 	}
@@ -40,6 +42,10 @@ func (sc *StorageHttpClientMock) PatchApplicationProfile(name, _ string, patchJS
 	lastProfile, err := json.Marshal(sc.ApplicationProfiles[len(sc.ApplicationProfiles)-1])
 	if err != nil {
 		return fmt.Errorf("marshal last profile: %w", err)
+	}
+	patchJSON, err := json.Marshal(operations)
+	if err != nil {
+		return fmt.Errorf("marshal patch: %w", err)
 	}
 	patch, err := jsonpatch.DecodePatch(patchJSON)
 	if err != nil {

@@ -1,6 +1,6 @@
 package ruleengine
 
-import "node-agent/pkg/ruleengine"
+import "github.com/kubescape/node-agent/pkg/ruleengine"
 
 var _ ruleengine.RuleCreator = (*RuleCreatorImpl)(nil)
 
@@ -18,6 +18,9 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R0005UnexpectedDomainRequestRuleDescriptor,
 			R0006UnexpectedServiceAccountTokenAccessRuleDescriptor,
 			R0007KubernetesClientExecutedDescriptor,
+			R0008ReadEnvironmentVariablesProcFSRuleDescriptor,
+			R0009EbpfProgramLoadRuleDescriptor,
+			R0010UnexpectedSensitiveFileAccessRuleDescriptor,
 			R1000ExecFromMaliciousSourceDescriptor,
 			R1001ExecBinaryNotInBaseImageRuleDescriptor,
 			R1002LoadKernelModuleRuleDescriptor,
@@ -28,6 +31,9 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R1007XMRCryptoMiningRuleDescriptor,
 			R1008CryptoMiningDomainCommunicationRuleDescriptor,
 			R1009CryptoMiningRelatedPortRuleDescriptor,
+			R1010SymlinkCreatedOverSensitiveFileRuleDescriptor,
+			R1011LdPreloadHookRuleDescriptor,
+			R1012HardlinkCreatedOverSensitiveFileRuleDescriptor,
 		},
 	}
 }

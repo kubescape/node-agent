@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"github.com/evanphx/json-patch"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
 )
@@ -39,7 +41,7 @@ func (sc *StorageHttpClientMock) CreateNetworkNeighborhood(neighborhood *v1beta1
 	return nil
 }
 
-func (sc *StorageHttpClientMock) PatchNetworkNeighborhood(name, _ string, patchJSON []byte, _ chan error) error {
+func (sc *StorageHttpClientMock) PatchNetworkNeighborhood(name, _ string, operations []utils.PatchOperation, _ chan error) error {
 	if len(sc.NetworkNeighborhoods) == 0 {
 		return errors2.NewNotFound(v1beta1.Resource("networkneighborhood"), name)
 	}
@@ -47,6 +49,10 @@ func (sc *StorageHttpClientMock) PatchNetworkNeighborhood(name, _ string, patchJ
 	lastNeighborhood, err := json.Marshal(sc.NetworkNeighborhoods[len(sc.NetworkNeighborhoods)-1])
 	if err != nil {
 		return fmt.Errorf("marshal last neighborhood: %w", err)
+	}
+	patchJSON, err := json.Marshal(operations)
+	if err != nil {
+		return fmt.Errorf("marshal patch: %w", err)
 	}
 	patch, err := jsonpatch.DecodePatch(patchJSON)
 	if err != nil {

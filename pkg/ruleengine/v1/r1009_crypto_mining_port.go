@@ -2,10 +2,11 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 	"slices"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
@@ -58,7 +59,7 @@ func (rule *R1009CryptoMiningRelatedPort) ID() string {
 func (rule *R1009CryptoMiningRelatedPort) DeleteRule() {
 }
 
-func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.NetworkEventType {
 		return nil
 	}
@@ -83,12 +84,12 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 				},
 				TriggerEvent: networkEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
-					RuleID:          rule.ID(),
 					RuleDescription: fmt.Sprintf("Communication on a commonly used crypto mining port: %d in: %s", networkEvent.Port, networkEvent.GetContainer()),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 					PodName: networkEvent.GetPod(),
 				},
+				RuleID: rule.ID(),
 			}
 
 			return &ruleFailure

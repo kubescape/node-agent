@@ -2,11 +2,12 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 	"slices"
 	"strings"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
@@ -93,6 +94,9 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:   rule.Name(),
 			InfectedPID: domainEvent.Pid,
+			Arguments: map[string]interface{}{
+				"domain": domainEvent.DNSName,
+			},
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the domain %s to the whitelist in the application profile for the Pod %s. You can use the following command: %s",
 				domainEvent.DNSName,
 				domainEvent.GetPod(),
@@ -110,12 +114,12 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		},
 		TriggerEvent: domainEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleID:          rule.ID(),
 			RuleDescription: fmt.Sprintf("Unexpected domain communication: %s from: %s", domainEvent.DNSName, domainEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName: domainEvent.GetPod(),
 		},
+		RuleID: rule.ID(),
 	}
 
 	return &ruleFailure

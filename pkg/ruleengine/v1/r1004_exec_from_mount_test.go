@@ -1,11 +1,13 @@
 package ruleengine
 
 import (
-	"node-agent/pkg/utils"
 	"testing"
+
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -24,6 +26,7 @@ func TestR1004ExecFromMount(t *testing.T) {
 						ContainerName: "test",
 					},
 				},
+				Runtime: eventtypes.BasicRuntimeMetadata{ContainerID: "test"},
 			},
 		},
 		Comm: "/test",
@@ -36,8 +39,7 @@ func TestR1004ExecFromMount(t *testing.T) {
 		t.Errorf("Expected ruleResult to be nil since test is not from a mounted path")
 	}
 
-	// Test case where path is mounted
-
+	// Test case where path is mounted, but not application profile is found
 	e.Comm = "/var/test1/test"
 	objCache := RuleObjectCacheMock{}
 	objCache.SetPodSpec(
@@ -65,7 +67,22 @@ func TestR1004ExecFromMount(t *testing.T) {
 			},
 		},
 	)
+	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since no application profile is found")
+	}
 
+	// Test case where path is mounted, with application profile
+	objCache.SetApplicationProfile(&v1beta1.ApplicationProfile{
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{
+				{
+					Name:  "test",
+					Execs: []v1beta1.ExecCalls{{Path: "/var/other/test"}},
+				},
+			},
+		},
+	})
 	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult since exec is from a mounted path")

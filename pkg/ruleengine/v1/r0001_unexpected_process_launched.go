@@ -2,11 +2,12 @@ package ruleengine
 
 import (
 	"fmt"
-	"node-agent/pkg/objectcache"
-	"node-agent/pkg/ruleengine"
-	"node-agent/pkg/utils"
 	"slices"
 	"strings"
+
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 
@@ -37,6 +38,15 @@ var _ ruleengine.RuleEvaluator = (*R0001UnexpectedProcessLaunched)(nil)
 
 type R0001UnexpectedProcessLaunched struct {
 	BaseRule
+	enforceArgs bool
+}
+
+func (rule *R0001UnexpectedProcessLaunched) SetParameters(params map[string]interface{}) {
+	if enforceArgs, ok := params["enforceArgs"].(bool); ok {
+		rule.enforceArgs = enforceArgs
+	} else {
+		rule.enforceArgs = false
+	}
 }
 
 func (rule *R0001UnexpectedProcessLaunched) Name() string {
@@ -47,7 +57,7 @@ func (rule *R0001UnexpectedProcessLaunched) ID() string {
 }
 
 func CreateRuleR0001UnexpectedProcessLaunched() *R0001UnexpectedProcessLaunched {
-	return &R0001UnexpectedProcessLaunched{}
+	return &R0001UnexpectedProcessLaunched{enforceArgs: false}
 }
 
 func (rule *R0001UnexpectedProcessLaunched) generatePatchCommand(event *tracerexectype.Event, ap *v1beta1.ApplicationProfile) string {
@@ -88,10 +98,17 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 	}
 
 	for _, execCall := range appProfileExecList.Execs {
-		if execCall.Path == execPath && slices.Compare(execCall.Args, execEvent.Args) == 0 {
-			return nil
+		if execCall.Path == execPath {
+			// if enforceArgs is set to true, we need to compare the arguments as well
+			// if not set, we only compare the path
+			if !rule.enforceArgs || slices.Compare(execCall.Args, execEvent.Args) == 0 {
+				return nil
+			}
 		}
 	}
+
+	// If the parent process  is in the upper layer, the child process is also in the upper layer.
+	upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
@@ -109,23 +126,24 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 				Gid:        &execEvent.Gid,
 				PID:        execEvent.Pid,
 				Uid:        &execEvent.Uid,
-				UpperLayer: execEvent.UpperLayer,
+				UpperLayer: &upperLayer,
 				PPID:       execEvent.Ppid,
 				Pcomm:      execEvent.Pcomm,
 				Cwd:        execEvent.Cwd,
 				Hardlink:   execEvent.ExePath,
+				Path:       getExecFullPathFromEvent(execEvent),
 				Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
 			},
 			ContainerID: execEvent.Runtime.ContainerID,
 		},
 		TriggerEvent: execEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleID:          rule.ID(),
 			RuleDescription: fmt.Sprintf("Unexpected process launched: %s in: %s", execPath, execEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName: execEvent.GetPod(),
 		},
+		RuleID: rule.ID(),
 	}
 
 	return &ruleFailure

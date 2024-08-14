@@ -1,9 +1,10 @@
 package objectcache
 
 import (
-	"node-agent/mocks"
 	"slices"
 	"testing"
+
+	"github.com/kubescape/node-agent/mocks"
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -69,40 +70,6 @@ func TestListContainers(t *testing.T) {
 			slices.Sort(got)
 			slices.Sort(tt.want)
 			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
-func TestTrimRuntimePrefix(t *testing.T) {
-	tests := []struct {
-		name string
-		id   string
-		want string
-	}{
-		{
-			name: "Test with valid runtime prefix",
-			id:   "runtime//containerID",
-			want: "containerID",
-		},
-		{
-			name: "Test with no runtime prefix",
-			id:   "containerID",
-			want: "",
-		},
-		{
-			name: "Test with docker runtime prefix",
-			id:   "docker://containerID",
-			want: "containerID",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := trimRuntimePrefix(tt.id)
-
-			if got != tt.want {
-				t.Errorf("trimRuntimePrefix() = %v, want %v", got, tt.want)
-			}
 		})
 	}
 }

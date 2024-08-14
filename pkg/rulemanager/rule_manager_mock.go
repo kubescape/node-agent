@@ -1,7 +1,10 @@
 package rulemanager
 
 import (
-	tracerrandomxtype "node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
+	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
+	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
@@ -9,6 +12,7 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	v1 "k8s.io/api/core/v1"
 )
 
 type RuleManagerMock struct {
@@ -28,23 +32,54 @@ func (r *RuleManagerMock) RegisterPeekFunc(_ func(mntns uint64) ([]string, error
 	// noop
 }
 
-func (r *RuleManagerMock) ReportCapability(_ string, _ tracercapabilitiestype.Event) {
+func (r *RuleManagerMock) ReportCapability(_ tracercapabilitiestype.Event) {
 	// noop
 }
 
-func (r *RuleManagerMock) ReportFileExec(_ string, _ tracerexectype.Event) {
+func (r *RuleManagerMock) ReportFileExec(_ tracerexectype.Event) {
 	// noop
 }
 
-func (r *RuleManagerMock) ReportFileOpen(_ string, _ traceropentype.Event) {
+func (r *RuleManagerMock) ReportFileOpen(_ traceropentype.Event) {
 	// noop
 }
-func (r *RuleManagerMock) ReportNetworkEvent(_ string, _ tracernetworktype.Event) {
+
+func (r *RuleManagerMock) ReportNetworkEvent(_ tracernetworktype.Event) {
 	// noop
 }
-func (r *RuleManagerMock) ReportDNSEvent(event tracerdnstype.Event) {
+
+func (r *RuleManagerMock) ReportDNSEvent(_ tracerdnstype.Event) {
 	// noop
 }
-func (r *RuleManagerMock) ReportRandomxEvent(_ string, _ tracerrandomxtype.Event) {
+
+func (r *RuleManagerMock) ReportRandomxEvent(_ tracerrandomxtype.Event) {
 	// noop
+}
+
+func (r *RuleManagerMock) ReportSymlinkEvent(_ tracersymlinktype.Event) {
+	// noop
+}
+
+func (r *RuleManagerMock) ReportHardlinkEvent(_ tracerhardlinktype.Event) {
+	// noop
+}
+
+func (r *RuleManagerMock) ReportSSHEvent(_ tracersshtype.Event) {
+	// noop
+}
+
+func (r *RuleManagerMock) HasApplicableRuleBindings(_, _ string) bool {
+	return false
+}
+
+func (r *RuleManagerMock) HasFinalApplicationProfile(_ *v1.Pod) bool {
+	return false
+}
+
+func (r *RuleManagerMock) IsContainerMonitored(_ string) bool {
+	return false
+}
+
+func (r *RuleManagerMock) IsPodMonitored(_, _ string) bool {
+	return false
 }

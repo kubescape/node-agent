@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"node-agent/pkg/utils"
 	"strconv"
+
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -34,31 +35,42 @@ func (sc Storage) CreateNetworkNeighborhood(neighborhood *v1beta1.NetworkNeighbo
 	return nil
 }
 
-func (sc Storage) PatchNetworkNeighborhood(name, namespace string, patch []byte, channel chan error) error {
+func (sc Storage) PatchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, channel chan error) error {
+	// split operations into max JSON operations batches
+	for _, chunk := range utils.ChunkBy(operations, sc.maxJsonPatchOperations) {
+		if err := sc.patchNetworkNeighborhood(name, namespace, chunk, channel); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (sc Storage) patchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, channel chan error) error {
+	patch, err := json.Marshal(operations)
+	if err != nil {
+		return fmt.Errorf("marshal patch: %w", err)
+	}
 	neighborhood, err := sc.StorageClient.NetworkNeighborhoods(namespace).Patch(context.Background(), sc.modifyName(name), types.JSONPatchType, patch, v1.PatchOptions{})
 	if err != nil {
 		return fmt.Errorf("patch application neighborhood: %w", err)
 	}
 	// check if returned neighborhood is full
-	if s, ok := neighborhood.Annotations[helpers.StatusMetadataKey]; ok {
-		if s == helpers.TooLarge {
-			if channel != nil {
-				channel <- utils.TooLargeObjectError
-			}
+	if status, ok := neighborhood.Annotations[helpers.StatusMetadataKey]; ok && status == helpers.TooLarge {
+		if channel != nil {
+			channel <- utils.TooLargeObjectError
 		}
 		return nil
 	}
 	// check if returned profile is completed
 	if c, ok := neighborhood.Annotations[helpers.CompletionMetadataKey]; ok {
-		if s, ok := neighborhood.Annotations[helpers.StatusMetadataKey]; ok {
-			if s == helpers.Complete && c == helpers.Completed {
-				if channel != nil {
-					channel <- utils.ObjectCompleted
-				}
+		if s, ok := neighborhood.Annotations[helpers.StatusMetadataKey]; ok && s == helpers.Complete && c == helpers.Completed {
+			if channel != nil {
+				channel <- utils.ObjectCompleted
 			}
+			return nil
 		}
-		return nil
 	}
+
 	// check if returned neighborhood is too big
 	if s, ok := neighborhood.Annotations[helpers.ResourceSizeMetadataKey]; ok {
 		size, err := strconv.Atoi(s)
