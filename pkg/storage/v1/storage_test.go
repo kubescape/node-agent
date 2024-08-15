@@ -3,8 +3,10 @@ package storage
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -352,6 +354,187 @@ func TestStorage_PatchApplicationProfile(t *testing.T) {
 			got, err := sc.StorageClient.ApplicationProfiles("default").Get(context.Background(), tt.args.name, v1.GetOptions{})
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetMultiplier(t *testing.T) {
+	tests := []struct {
+		name        string
+		envMultiply string
+		envPodName  string
+		want        *int
+	}{
+		{
+			name:        "MULTIPLY not true",
+			envMultiply: "false",
+			envPodName:  "pod-1",
+			want:        nil,
+		},
+		{
+			name:        "MULTIPLY true but pod name not properly formatted",
+			envMultiply: "true",
+			envPodName:  "pod",
+			want:        nil,
+		},
+		{
+			name:        "MULTIPLY true and pod name properly formatted",
+			envMultiply: "true",
+			envPodName:  "pod-1",
+			want:        func() *int { i := 1; return &i }(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MULTIPLY", tt.envMultiply)
+			t.Setenv(config.PodNameEnvVar, tt.envPodName)
+
+			if got := getMultiplier(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("getMultiplier() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStorage_revertNameP(t *testing.T) {
+	type fields struct {
+		multiplier int
+	}
+	type args struct {
+		n string
+	}
+	tests := []struct {
+		name   string
+		fields *fields
+		args   args
+		want   string
+	}{
+		{
+			name: "Test with multiplier",
+			fields: &fields{
+				multiplier: 5,
+			},
+			args: args{
+				n: "test-5",
+			},
+			want: "test",
+		},
+		{
+			name:   "Test without multiplier",
+			fields: nil,
+			args: args{
+				n: "test",
+			},
+			want: "test",
+		},
+		{
+			name: "Test with different multiplier",
+			fields: &fields{
+				multiplier: 6,
+			},
+			args: args{
+				n: "test-5",
+			},
+			want: "test-5",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &Storage{}
+			if tt.fields != nil {
+				sc.multiplier = &tt.fields.multiplier
+			}
+			sc.revertNameP(&tt.args.n)
+			assert.Equal(t, tt.want, tt.args.n)
+		})
+	}
+}
+
+func TestStorage_modifyNameP(t *testing.T) {
+	type fields struct {
+		multiplier int
+	}
+	type args struct {
+		n string
+	}
+	tests := []struct {
+		name   string
+		fields *fields
+		args   args
+		want   string
+	}{
+		{
+			name: "Test with multiplier",
+			fields: &fields{
+				multiplier: 5,
+			},
+			args: args{
+				n: "test",
+			},
+			want: "test-5",
+		},
+		{
+			name:   "Test without multiplier",
+			fields: nil,
+			args: args{
+				n: "test",
+			},
+			want: "test",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &Storage{}
+			if tt.fields != nil {
+				sc.multiplier = &tt.fields.multiplier
+			}
+			sc.modifyNameP(&tt.args.n)
+			assert.Equal(t, tt.want, tt.args.n)
+		})
+	}
+}
+
+func TestStorage_modifyName(t *testing.T) {
+	type fields struct {
+		multiplier int
+	}
+	type args struct {
+		n string
+	}
+	tests := []struct {
+		name   string
+		fields *fields
+		args   args
+		want   string
+	}{
+		{
+			name: "Test with multiplier",
+			fields: &fields{
+				multiplier: 5,
+			},
+			args: args{
+				n: "test",
+			},
+			want: "test-5",
+		},
+		{
+			name:   "Test without multiplier",
+			fields: nil,
+			args: args{
+				n: "test",
+			},
+			want: "test",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &Storage{}
+			if tt.fields != nil {
+				sc.multiplier = &tt.fields.multiplier
+			}
+			m := sc.modifyName(tt.args.n)
+			assert.Equal(t, tt.want, m)
 		})
 	}
 }

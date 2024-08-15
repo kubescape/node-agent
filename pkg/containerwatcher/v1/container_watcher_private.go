@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -380,6 +382,12 @@ func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {
 	// do not trace the node-agent pod
 	if name == ch.podName && namespace == ch.namespace {
 		return true
+	}
+	// do not trace the node-agent pods if MULTIPLY is set
+	if m := os.Getenv("MULTIPLY"); m == "true" {
+		if strings.HasPrefix(name, "node-agent") {
+			return true
+		}
 	}
 	// check if config excludes the namespace
 	return ch.cfg.SkipNamespace(namespace)
