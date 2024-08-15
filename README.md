@@ -3,7 +3,7 @@
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fsniffer.svg?type=shield&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fsniffer?ref=badge_shield&issueType=license)
 
 ## Prerequisites
-1. [Minikube](https://minikube.sigs.k8s.io/docs/start/)  
+1. [Minikube](https://minikube.sigs.k8s.io/docs/start/)
 Start minikube with the following command:
 ```
 minikube start
@@ -11,9 +11,9 @@ minikube start
 2. Linux kernel version 5.4 and above.
 
 
-## Running the Node Agent  
-Make sure to set the `NODE_NAME` environment variable to the name of the node you want to scan.    
-Also make sure you have the `KUBECONFIG` environment variable set to the path of your kubeconfig file.  
+## Running the Node Agent
+Make sure to set the `NODE_NAME` environment variable to the name of the node you want to scan.
+Also make sure you have the `KUBECONFIG` environment variable set to the path of your kubeconfig file.
 You can then build the binary by running:
 ```
 go build .
