@@ -107,6 +107,10 @@ func main() {
 		}()
 	}
 
+	if m := os.Getenv("MULTIPLY"); m == "true" {
+		logger.L().Info("MULTIPLY environment variable is true. Multiplying feature enabled - this is a feature for testing purposes only")
+	}
+
 	// Create clients
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageClient, err := storage.CreateStorage(clusterData.Namespace)
