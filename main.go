@@ -24,7 +24,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	metricprometheus "github.com/kubescape/node-agent/pkg/metricsmanager/prometheus"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
-	networkmanagerv1 "github.com/kubescape/node-agent/pkg/networkmanager/v1"
 	networkmanagerv2 "github.com/kubescape/node-agent/pkg/networkmanager/v2"
 	"github.com/kubescape/node-agent/pkg/nodeprofilemanager"
 	nodeprofilemanagerv1 "github.com/kubescape/node-agent/pkg/nodeprofilemanager/v1"
@@ -249,22 +248,19 @@ func main() {
 	}
 
 	// Create the network and DNS managers
-	var networkManagerv1Client networkmanagerv1.NetworkManagerClient
 	var networkManagerClient networkmanager.NetworkManagerClient
 	var dnsManagerClient dnsmanager.DNSManagerClient
 	if cfg.EnableNetworkTracing {
 		dnsManager := dnsmanager.CreateDNSManager()
 		dnsManagerClient = dnsManager
-		networkManagerv1Client = networkmanagerv1.CreateNetworkManager(ctx, cfg, k8sClient, storageClient, clusterData.ClusterName, dnsManager, preRunningContainersIDs, k8sObjectCache)
 		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
 	} else {
 		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
-		networkManagerv1Client = &networkmanagerv1.NetworkManagerMock{}
 		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerv1Client, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
