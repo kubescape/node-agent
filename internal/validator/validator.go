@@ -5,18 +5,14 @@ import (
 	"os"
 	"syscall"
 
+	"github.com/kubescape/node-agent/internal/validator/ebpf"
 	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/facette/natsort"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"golang.org/x/sys/unix"
-)
-
-const (
-	KubescapeEBPFEngineMinKernelVersionSupport = "5.4"
 )
 
 func int8ToStr(arr []int8) string {
@@ -94,10 +90,10 @@ func workaroundMounts() error {
 }
 
 func CheckPrerequisites() error {
-	// Check kernel version
-	logger.L().Debug("checking kernel version")
-	if err := checkKernelVersion(KubescapeEBPFEngineMinKernelVersionSupport); err != nil {
-		return fmt.Errorf("%s: %w", utils.ErrKernelVersion, err)
+	// Check eBPF support
+	logger.L().Debug("checking eBPF support")
+	if err := ebpf.VerifyEbpf(); err != nil {
+		return err
 	}
 	// Check environment variables
 	for _, envVar := range []string{config.NodeNameEnvVar, config.PodNameEnvVar, config.NamespaceEnvVar} {

@@ -193,7 +193,6 @@ func main() {
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
 
 	if cfg.EnableRuntimeDetection {
-
 		// create ruleBinding cache
 		ruleBindingCache := rulebindingcachev1.NewCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(ruleBindingCache)
