@@ -7,8 +7,8 @@ on:
     paths-ignore:
       - '**.md' ### Ignore running when README.MD changed.
       - '.github/workflows/*' ### Ignore running when files under path: .github/workflows/* changed.
-  
-  workflow_dispatch: 
+
+  workflow_dispatch:
 
 jobs:
   reset-run-number:
@@ -35,7 +35,7 @@ jobs:
       CGO_ENABLED: 0
       GO111MODULE: "on"
       BUILD_PLATFORM: linux/amd64,linux/arm64
-      GO_VERSION: "1.22"
+      GO_VERSION: "1.23"
       REQUIRED_TESTS: '[
                         "relevantCVEs",
                         "relevancy_enabled_stop_sniffing",
