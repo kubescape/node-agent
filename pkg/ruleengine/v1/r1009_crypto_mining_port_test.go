@@ -4,9 +4,11 @@ import (
 	"testing"
 
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 func TestR1009CryptoMiningRelatedPort(t *testing.T) {
@@ -28,9 +30,43 @@ func TestR1009CryptoMiningRelatedPort(t *testing.T) {
 		t.Errorf("Expected nil, got %v", result)
 	}
 
+	var port int32 = 3334
+
+	// Test with whitelisted port
+	objCache := RuleObjectCacheMock{}
+	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood("test")
+	if nn == nil {
+		nn = &v1beta1.NetworkNeighborhood{}
+		nn.Spec.Containers = append(nn.Spec.Containers, v1beta1.NetworkNeighborhoodContainer{
+			Name: "test",
+
+			Egress: []v1beta1.NetworkNeighbor{
+				{
+					DNS: "test.com",
+					Ports: []v1beta1.NetworkPort{
+						{
+							Port: &port,
+						},
+					},
+				},
+			},
+		})
+
+		objCache.SetNetworkNeighborhood(nn)
+	}
+
 	// Test when event meets all conditions to return a ruleFailure
 	eventType = utils.NetworkEventType
 	event = &tracernetworktype.Event{
+		Event: eventtypes.Event{
+			CommonData: eventtypes.CommonData{
+				K8s: eventtypes.K8sMetadata{
+					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+						ContainerName: "test",
+					},
+				},
+			},
+		},
 		Proto:   "TCP",
 		PktType: "OUTGOING",
 		Port:    CommonlyUsedCryptoMinersPorts[0],
@@ -39,8 +75,17 @@ func TestR1009CryptoMiningRelatedPort(t *testing.T) {
 		Pid:     1,
 		Uid:     1,
 	}
-	result = rule.ProcessEvent(eventType, event, &RuleObjectCacheMock{})
+	result = rule.ProcessEvent(eventType, event, &objCache)
 	if result == nil {
 		t.Errorf("Expected ruleFailure, got nil")
 	}
+
+	// Test when event does not meet conditions to return a ruleFailure
+	port = 3333
+	objCache.nn.Spec.Containers[0].Egress[0].Ports[0].Port = &port
+	result = rule.ProcessEvent(eventType, event, &objCache)
+	if result != nil {
+		t.Errorf("Expected nil, got %v", result)
+	}
+
 }

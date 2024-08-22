@@ -59,9 +59,33 @@ func (rule *R1009CryptoMiningRelatedPort) ID() string {
 func (rule *R1009CryptoMiningRelatedPort) DeleteRule() {
 }
 
-func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType, event interface{}, objectcache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.NetworkEventType {
 		return nil
+	}
+
+	networkEvent, ok := event.(*tracernetworktype.Event)
+	if !ok {
+		return nil
+	}
+
+	nn := objectcache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
+	if nn == nil {
+		return nil
+	}
+
+	nnContainer, err := getContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
+	if err != nil {
+		return nil
+	}
+
+	// Check if the port is in the egress list.
+	for _, nn := range nnContainer.Egress {
+		for _, port := range nn.Ports {
+			if networkEvent.Port == uint16(*port.Port) {
+				return nil
+			}
+		}
 	}
 
 	if networkEvent, ok := event.(*tracernetworktype.Event); ok {
