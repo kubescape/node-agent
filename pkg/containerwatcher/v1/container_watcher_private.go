@@ -184,6 +184,9 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 				helpers.String("containerName", runningContainers[i].K8s.ContainerName))
 
 			ch.unregisterContainer(&runningContainers[i])
+			if ch.isDnsServer(&runningContainers[i]) {
+				ch.dnsServers.Remove(&runningContainers[i])
+			}
 		}
 	case rulebindingmanager.Added:
 		// add to the list of pods that are being monitored because of rules
@@ -203,6 +206,9 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 
 			ch.preRunningContainersIDs.Add(runningContainers[i].Runtime.ContainerID)
 			ch.containerCollection.AddContainer(&runningContainers[i])
+			if ch.isDnsServer(&runningContainers[i]) {
+				ch.dnsServers.Add(&runningContainers[i])
+			}
 		}
 	}
 
