@@ -64,8 +64,10 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		if ch.isDnsServer(notif.Container) {
 			ch.dnsServers.Add(notif.Container)
 			// Also call detach here to make sure new containers are not attached.
-			if err := ch.dnsTracer.DetachContainer(notif.Container); err != nil {
-				logger.L().Warning("error detaching container", helpers.Error(err))
+			if ch.dnsTracer != nil {
+				if err := ch.dnsTracer.DetachContainer(notif.Container); err != nil {
+					logger.L().Warning("error detaching container", helpers.Error(err))
+				}
 			}
 		}
 	case containercollection.EventTypeRemoveContainer:
