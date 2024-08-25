@@ -126,16 +126,14 @@ type IGContainerWatcher struct {
 	sshWorkerChan          chan *tracersshtype.Event
 
 	preRunningContainersIDs mapset.Set[string]
-
-	timeBasedContainers mapset.Set[string] // list of containers to track based on ticker
-	ruleManagedPods     mapset.Set[string] // list of pods to track based on rules
-	metrics             metricsmanager.MetricsManager
-
+	timeBasedContainers     mapset.Set[string] // list of containers to track based on ticker
+	ruleManagedPods         mapset.Set[string] // list of pods to track based on rules
+	metrics                 metricsmanager.MetricsManager
 	// cache
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify
-
 	// container runtime
-	runtime *containerutilsTypes.RuntimeConfig
+	runtime    *containerutilsTypes.RuntimeConfig
+	dnsServers mapset.Set[*containercollection.Container]
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
@@ -354,11 +352,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,
-
-		timeBasedContainers: mapset.NewSet[string](),
-		ruleManagedPods:     mapset.NewSet[string](),
-
-		runtime: runtime,
+		timeBasedContainers:  mapset.NewSet[string](),
+		ruleManagedPods:      mapset.NewSet[string](),
+		runtime:              runtime,
+		dnsServers:           mapset.NewSet[*containercollection.Container](),
 	}, nil
 }
 

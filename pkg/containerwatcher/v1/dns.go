@@ -64,6 +64,15 @@ func (ch *IGContainerWatcher) startDNSTracing() error {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
 
+	// Detach the dns tracer from dns servers
+	for dnsServer := range ch.dnsServers.Iter() {
+		logger.L().Info("Detaching dns tracer from dns server", helpers.String("dnsServer", dnsServer.Runtime.ContainerName))
+		err := ch.dnsTracer.DetachContainer(dnsServer)
+		if err != nil {
+			return fmt.Errorf("detaching dns tracer: %w", err)
+		}
+	}
+
 	return nil
 }
 
