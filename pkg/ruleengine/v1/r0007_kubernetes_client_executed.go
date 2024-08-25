@@ -116,7 +116,8 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 			RuleDescription: fmt.Sprintf("Kubernetes client executed: %s", event.Comm),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName: event.GetPod(),
+			PodName:   event.GetPod(),
+			PodLabels: event.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
 	}
@@ -173,7 +174,8 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 				RuleDescription: fmt.Sprintf("Kubernetes client %s was executed in: %s", execPath, event.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName: event.GetPod(),
+				PodName:   event.GetPod(),
+				PodLabels: event.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
 		}

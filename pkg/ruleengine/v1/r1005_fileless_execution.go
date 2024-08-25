@@ -104,7 +104,8 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source \"%s\"", execPathDir, "/proc/self/fd"),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName: execEvent.GetPod(),
+				PodName:   execEvent.GetPod(),
+				PodLabels: execEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
 		}

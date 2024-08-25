@@ -111,7 +111,8 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 					RuleDescription: fmt.Sprintf("Communication on a commonly used crypto mining port: %d in: %s", networkEvent.Port, networkEvent.GetContainer()),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-					PodName: networkEvent.GetPod(),
+					PodName:   networkEvent.GetPod(),
+					PodLabels: networkEvent.K8s.PodLabels,
 				},
 				RuleID: rule.ID(),
 			}
