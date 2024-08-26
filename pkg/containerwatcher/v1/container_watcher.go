@@ -132,8 +132,7 @@ type IGContainerWatcher struct {
 	// cache
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify
 	// container runtime
-	runtime    *containerutilsTypes.RuntimeConfig
-	dnsServers mapset.Set[*containercollection.Container]
+	runtime *containerutilsTypes.RuntimeConfig
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
@@ -355,7 +354,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		timeBasedContainers:  mapset.NewSet[string](),
 		ruleManagedPods:      mapset.NewSet[string](),
 		runtime:              runtime,
-		dnsServers:           mapset.NewSet[*containercollection.Container](),
 	}, nil
 }
 

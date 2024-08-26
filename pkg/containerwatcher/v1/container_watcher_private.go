@@ -61,42 +61,13 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			ch.networkManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.unregisterContainer(notif.Container)
 		})
-		if ch.isDnsServer(notif.Container) {
-			ch.dnsServers.Add(notif.Container)
-			// Also call detach here to make sure new containers are not attached.
-			if ch.dnsTracer != nil {
-				if err := ch.dnsTracer.DetachContainer(notif.Container); err != nil {
-					logger.L().Warning("error detaching container", helpers.Error(err))
-				}
-			}
-		}
 	case containercollection.EventTypeRemoveContainer:
 		logger.L().Info("stop monitor on container - container has terminated",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
-		if ch.isDnsServer(notif.Container) {
-			ch.dnsServers.Remove(notif.Container)
-		}
 	}
-}
-
-func (ch *IGContainerWatcher) isDnsServer(container *containercollection.Container) bool {
-	// Check if the container is part of kube-dns, CoreDNS, or other known DNS services
-	knownDNSServices := []string{"kube-dns", "coredns", "core-dns"}
-
-	if container.K8s.Namespace == "kube-system" {
-		for _, service := range knownDNSServices {
-			if container.K8s.ContainerName == service ||
-				strings.HasPrefix(container.K8s.PodName, service) ||
-				container.K8s.PodName == service {
-				return true
-			}
-		}
-	}
-
-	return false
 }
 
 func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) error {
@@ -184,9 +155,6 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 				helpers.String("containerName", runningContainers[i].K8s.ContainerName))
 
 			ch.unregisterContainer(&runningContainers[i])
-			if ch.isDnsServer(&runningContainers[i]) {
-				ch.dnsServers.Remove(&runningContainers[i])
-			}
 		}
 	case rulebindingmanager.Added:
 		// add to the list of pods that are being monitored because of rules
@@ -206,9 +174,6 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 
 			ch.preRunningContainersIDs.Add(runningContainers[i].Runtime.ContainerID)
 			ch.containerCollection.AddContainer(&runningContainers[i])
-			if ch.isDnsServer(&runningContainers[i]) {
-				ch.dnsServers.Add(&runningContainers[i])
-			}
 		}
 	}
 
