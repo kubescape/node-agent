@@ -31,6 +31,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
+	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracerandomx "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/tracer"
 	tracerandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 	tracerssh "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/tracer"
@@ -56,7 +58,7 @@ const (
 	randomxTraceName           = "trace_randomx"
 	symlinkTraceName           = "trace_symlink"
 	hardlinkTraceName          = "trace_hardlink"
-	sshTraceName               = "trace_ssh"
+	httpTraceName              = "trace_ssh"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
@@ -101,6 +103,7 @@ type IGContainerWatcher struct {
 	symlinkTracer      *tracersymlink.Tracer
 	hardlinkTracer     *tracerhardlink.Tracer
 	sshTracer          *tracerssh.Tracer
+	httpTracer         *tracerhttp.Tracer
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
 
@@ -114,6 +117,7 @@ type IGContainerWatcher struct {
 	symlinkWorkerPool      *ants.PoolWithFunc
 	hardlinkWorkerPool     *ants.PoolWithFunc
 	sshdWorkerPool         *ants.PoolWithFunc
+	httpWorkerPool         *ants.PoolWithFunc
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *tracerexectype.Event
@@ -124,6 +128,7 @@ type IGContainerWatcher struct {
 	symlinkWorkerChan      chan *tracersymlinktype.Event
 	hardlinkWorkerChan     chan *tracerhardlinktype.Event
 	sshWorkerChan          chan *tracersshtype.Event
+	httpWorkerChan         chan *tracerhttptype.Event
 
 	preRunningContainersIDs mapset.Set[string]
 

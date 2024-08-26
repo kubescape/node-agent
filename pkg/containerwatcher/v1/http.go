@@ -3,8 +3,8 @@ package containerwatcher
 import (
 	"fmt"
 
-	tracerssh "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/tracer"
-	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
+	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
+	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection/networktracer"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 )
 
-func (ch *IGContainerWatcher) sshEventCallback(event *tracersshtype.Event) {
+func (ch *IGContainerWatcher) httpEventCallback(event *tracerhttptype.Event) {
 	if event.Type == types.DEBUG {
 		return
 	}
@@ -25,15 +25,15 @@ func (ch *IGContainerWatcher) sshEventCallback(event *tracersshtype.Event) {
 	ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
 	ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
 
-	ch.sshWorkerChan <- event
+	ch.httpWorkerChan <- event
 }
 
-func (ch *IGContainerWatcher) startSshTracing() error {
+func (ch *IGContainerWatcher) startHttpTracing() error {
 	if err := ch.tracerCollection.AddTracer(httpTraceName, ch.containerSelector); err != nil {
 		return fmt.Errorf("adding tracer: %w", err)
 	}
 
-	tracerSsh, err := tracerssh.NewTracer()
+	tracerHttp, err := tracerhttp.NewTracer()
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
@@ -43,21 +43,21 @@ func (ch *IGContainerWatcher) startSshTracing() error {
 		}
 	}()
 
-	tracerSsh.SetSocketEnricherMap(ch.socketEnricher.SocketsMap())
-	tracerSsh.SetEventHandler(ch.sshEventCallback)
+	tracerHttp.SetSocketEnricherMap(ch.socketEnricher.SocketsMap())
+	tracerHttp.SetEventHandler(ch.httpEventCallback)
 
-	err = tracerSsh.RunWorkaround()
+	err = tracerHttp.RunWorkaround()
 	if err != nil {
 		return fmt.Errorf("running workaround: %w", err)
 	}
 
-	ch.sshTracer = tracerSsh
+	ch.httpTracer = tracerHttp
 
-	config := &networktracer.ConnectToContainerCollectionConfig[tracersshtype.Event]{
-		Tracer:   ch.sshTracer,
+	config := &networktracer.ConnectToContainerCollectionConfig[tracerhttptype.Event]{
+		Tracer:   ch.httpTracer,
 		Resolver: ch.containerCollection,
 		Selector: ch.containerSelector,
-		Base:     tracersshtype.Base,
+		Base:     tracerhttptype.Base,
 	}
 
 	_, err = networktracer.ConnectToContainerCollection(config)
@@ -68,7 +68,7 @@ func (ch *IGContainerWatcher) startSshTracing() error {
 	return nil
 }
 
-func (ch *IGContainerWatcher) stopSshTracing() error {
+func (ch *IGContainerWatcher) stopHttpTracing() error {
 	// Stop ssh tracer
 	if err := ch.tracerCollection.RemoveTracer(httpTraceName); err != nil {
 		return fmt.Errorf("removing tracer: %w", err)
