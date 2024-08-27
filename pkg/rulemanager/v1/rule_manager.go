@@ -51,6 +51,11 @@ import (
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 )
 
+const (
+	// Max file size to calculate hash is 50MB.
+	maxFileSize int64 = 50 * 1024 * 1024
+)
+
 type RuleManager struct {
 	cfg                      config.Config
 	watchedContainerChannels maps.SafeMap[string, chan error] // key is k8sContainerID
@@ -470,39 +475,25 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
 
 	baseRuntimeAlert.Timestamp = time.Unix(0, int64(ruleFailure.GetTriggerEvent().Timestamp))
-
-	if baseRuntimeAlert.MD5Hash == "" && hostPath != "" {
-		md5hash, err := utils.CalculateMD5FileHash(hostPath)
+	var size int64 = 0
+	if hostPath != "" {
+		size, err = utils.GetFileSize(hostPath)
 		if err != nil {
-			md5hash = ""
+			size = 0
 		}
-		baseRuntimeAlert.MD5Hash = md5hash
 	}
 
-	if baseRuntimeAlert.SHA1Hash == "" && hostPath != "" {
-		sha1hash, err := utils.CalculateSHA1FileHash(hostPath)
-		if err != nil {
-			sha1hash = ""
-		}
-
-		baseRuntimeAlert.SHA1Hash = sha1hash
+	if baseRuntimeAlert.Size == "" && hostPath != "" && size != 0 {
+		baseRuntimeAlert.Size = humanize.Bytes(uint64(size))
 	}
 
-	if baseRuntimeAlert.SHA256Hash == "" && hostPath != "" {
-		sha256hash, err := utils.CalculateSHA256FileHash(hostPath)
-		if err != nil {
-			sha256hash = ""
-		}
-
-		baseRuntimeAlert.SHA256Hash = sha256hash
-	}
-
-	if baseRuntimeAlert.Size == "" && hostPath != "" {
-		size, err := utils.GetFileSize(hostPath)
-		if err != nil {
-			baseRuntimeAlert.Size = ""
-		} else {
-			baseRuntimeAlert.Size = humanize.Bytes(uint64(size))
+	if size != 0 && size < maxFileSize && hostPath != "" {
+		if baseRuntimeAlert.MD5Hash == "" || baseRuntimeAlert.SHA1Hash == "" {
+			sha1hash, md5hash, err := utils.CalculateFileHashes(hostPath)
+			if err == nil {
+				baseRuntimeAlert.MD5Hash = md5hash
+				baseRuntimeAlert.SHA1Hash = sha1hash
+			}
 		}
 	}
 
