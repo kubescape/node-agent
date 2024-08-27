@@ -69,7 +69,7 @@ const (
 	symlinkWorkerPoolSize      = 1
 	hardlinkWorkerPoolSize     = 1
 	sshWorkerPoolSize          = 1
-	httpWorkerPoolSize         = 2
+	httpWorkerPoolSize         = 4
 )
 
 type IGContainerWatcher struct {
@@ -371,6 +371,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		symlinkWorkerChan:      make(chan *tracersymlinktype.Event, 1000),
 		hardlinkWorkerChan:     make(chan *tracerhardlinktype.Event, 1000),
 		sshWorkerChan:          make(chan *tracersshtype.Event, 1000),
+		httpWorkerChan:         make(chan *tracerhttptype.Event, 500000),
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,

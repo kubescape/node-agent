@@ -12,7 +12,6 @@ import (
 )
 
 func (ch *IGContainerWatcher) httpEventCallback(event *tracerhttptype.Event) {
-	logger.L().Info("httpEventCallback")
 	if event.Type == types.DEBUG {
 		return
 	}
@@ -21,12 +20,10 @@ func (ch *IGContainerWatcher) httpEventCallback(event *tracerhttptype.Event) {
 		logger.L().Ctx(ch.ctx).Warning("http tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
-
 	ch.httpWorkerChan <- event
 }
 
 func (ch *IGContainerWatcher) startHttpTracing() error {
-	logger.L().Info("startHttpTracing")
 	if err := ch.tracerCollection.AddTracer(httpTraceName, ch.containerSelector); err != nil {
 		return fmt.Errorf("adding tracer: %w", err)
 	}
@@ -49,7 +46,6 @@ func (ch *IGContainerWatcher) startHttpTracing() error {
 	}()
 
 	ch.httpTracer = tracerHttp
-
 	return nil
 }
 

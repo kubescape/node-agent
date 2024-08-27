@@ -22,17 +22,6 @@ type http_snifferActiveConnectionInfo struct {
 	}
 }
 
-type http_snifferDebugEvent struct {
-	Sockfd uint32
-	Addr   struct {
-		SinFamily uint16
-		SinPort   uint16
-		SinAddr   struct{ S_addr uint32 }
-		Pad       [8]uint8
-	}
-	Message [64]int8
-}
-
 type http_snifferHttpevent struct {
 	Netns     uint32
 	_         [4]byte
@@ -131,7 +120,6 @@ type http_snifferMapSpecs struct {
 	AcceptedSocketsMap       *ebpf.MapSpec `ebpf:"accepted_sockets_map"`
 	ActiveConnectionsArgsMap *ebpf.MapSpec `ebpf:"active_connections_args_map"`
 	BufferPackets            *ebpf.MapSpec `ebpf:"buffer_packets"`
-	DebugEvents              *ebpf.MapSpec `ebpf:"debug_events"`
 	EmptyChar                *ebpf.MapSpec `ebpf:"empty_char"`
 	EventData                *ebpf.MapSpec `ebpf:"event_data"`
 	Events                   *ebpf.MapSpec `ebpf:"events"`
@@ -162,7 +150,6 @@ type http_snifferMaps struct {
 	AcceptedSocketsMap       *ebpf.Map `ebpf:"accepted_sockets_map"`
 	ActiveConnectionsArgsMap *ebpf.Map `ebpf:"active_connections_args_map"`
 	BufferPackets            *ebpf.Map `ebpf:"buffer_packets"`
-	DebugEvents              *ebpf.Map `ebpf:"debug_events"`
 	EmptyChar                *ebpf.Map `ebpf:"empty_char"`
 	EventData                *ebpf.Map `ebpf:"event_data"`
 	Events                   *ebpf.Map `ebpf:"events"`
@@ -176,7 +163,6 @@ func (m *http_snifferMaps) Close() error {
 		m.AcceptedSocketsMap,
 		m.ActiveConnectionsArgsMap,
 		m.BufferPackets,
-		m.DebugEvents,
 		m.EmptyChar,
 		m.EventData,
 		m.Events,

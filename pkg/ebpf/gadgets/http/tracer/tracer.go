@@ -16,7 +16,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go  -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type active_connection_info -type packet_buffer -type httpevent -type debug_event http_sniffer bpf/http-sniffer.c -- -I./bpf/
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go  -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type active_connection_info -type packet_buffer -type httpevent http_sniffer bpf/http-sniffer.c -- -I./bpf/
 const (
 	EVENT_TYPE_CONNECT = iota
 	EVENT_TYPE_ACCEPT
@@ -99,7 +99,7 @@ func (t *Tracer) install() error {
 	if err != nil {
 		return fmt.Errorf("creating perf ring buffer: %w", err)
 	}
-
+	logger.L().Info("Http tracing installed")
 	return nil
 }
 
@@ -109,12 +109,11 @@ func (t *Tracer) run() {
 		if err != nil {
 			if errors.Is(err, perf.ErrClosed) {
 				// nothing to do, we're done
-				return
+				continue
 			}
-
 			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
 			t.eventCallback(types.Base(eventtypes.Err(msg)))
-			return
+			continue
 		}
 
 		if record.LostSamples > 0 {
@@ -122,7 +121,6 @@ func (t *Tracer) run() {
 			t.eventCallback(types.Base(eventtypes.Warn(msg)))
 			continue
 		}
-
 		event, err := t.ParseHTTP(record.RawSample)
 		if err != nil {
 			msg := fmt.Sprintf("Error parsing sample: %s", err)

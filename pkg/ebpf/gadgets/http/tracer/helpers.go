@@ -13,6 +13,7 @@ import (
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 )
 
@@ -113,7 +114,7 @@ func (t *Tracer) ParseHTTP(rawSample []byte) (*types.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	logger.L().Info(string(bpfEvent.Buf[:]) + "- IP - " + ip.String())
 	event := types.Event{
 		Event: eventtypes.Event{
 			Type:      eventtypes.NORMAL,

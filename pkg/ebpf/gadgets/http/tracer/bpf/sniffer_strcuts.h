@@ -82,10 +82,3 @@ struct httpevent {
     __u32 other_ip;
     __u16 other_port;
 };
-
-
-struct debug_event {
-    __u32 sockfd;
-    struct sockaddr_in addr;
-    char message[64];
-};

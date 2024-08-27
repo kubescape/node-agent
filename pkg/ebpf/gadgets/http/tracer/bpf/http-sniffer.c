@@ -66,24 +66,20 @@ struct
     __type(value, char[PACKET_CHUNK_SIZE]);
 } empty_char SEC(".maps");
 
-struct
-{
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-} debug_events SEC(".maps");
-
 const struct httpevent *unusedevent __attribute__((unused));
-const struct debug_event *unusedevent2 __attribute__((unused));
 
-static __always_inline bool should_discard()
+static __always_inline int should_discard()
 {
-    struct task_struct *current_task = (struct task_struct*)bpf_get_current_task();
-    if (!current_task) {
+    u64 mntns_id;
+
+    mntns_id = gadget_get_mntns_id();
+
+    if (gadget_should_discard_mntns_id(mntns_id))
+    {
         return 1;
     }
-     u64 mntns_id = BPF_CORE_READ(current_task, nsproxy, mnt_ns, ns.inum);
-    if (gadget_should_discard_mntns_id(mntns_id)) {
-        return 1;
-    }
+
+    return 0;
 }
 
 static __always_inline __u64 generate_unique_connection_id(__u64 pid_tgid, __u32 sockfd)
@@ -114,30 +110,12 @@ static __always_inline void get_namespace_ids(u64 *mnt_ns_id, u64 *net_ns_id)
     }
 }
 
-static __always_inline int send_sock_debug_event(struct trace_event_raw_sys_enter *ctx,
-                                                 const char *msg,
-                                                 __u32 sockfd,
-                                                 struct sockaddr_in *addr)
+static __always_inline bool check_msg_peek(__u32 flags)
 {
-    struct debug_event event = {};
-
-    event.sockfd = sockfd;
-    if (addr)
-    {
-        bpf_probe_read_user(&event.addr, sizeof(event.addr), addr);
-    }
-
-    bpf_probe_read_kernel_str(event.message, sizeof(event.message), msg);
-
-    bpf_perf_event_output(ctx, &debug_events, BPF_F_CURRENT_CPU, &event, sizeof(event));
-    return 0;
+    return flags & MSG_PEEK;
 }
 
-static __always_inline bool check_msg_peek(__u32 flags)  {
-        return flags & MSG_PEEK;
-}
-
-    static __always_inline int populate_httpevent(struct httpevent *event)
+static __always_inline int populate_httpevent(struct httpevent *event)
 {
     if (!event)
         return -1;
@@ -224,7 +202,6 @@ static void inline exit_accept(struct trace_event_raw_sys_exit *ctx)
             conn_info.sockfd = sockfd;
             bpf_probe_read_user(&conn_info.addr, sizeof(conn_info.addr), (void *)args->addr_ptr);
             bpf_map_update_elem(&accepted_sockets_map, &unique_connection_id, &conn_info, BPF_ANY);
-            // send_sock_debug_event(ctx, "debug",  sockfd, (void*)args->addr_ptr);
         }
     }
     bpf_map_delete_elem(&pre_accept_args_map, &pid_tgid);
@@ -411,7 +388,9 @@ static __always_inline int process_msg(struct trace_event_raw_sys_exit *ctx, cha
 SEC("tracepoint/syscalls/sys_enter_accept")
 int sys_enter_accept(struct trace_event_raw_sys_enter *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     enter_accept(ctx);
     return 0;
 }
@@ -419,7 +398,9 @@ int sys_enter_accept(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_accept")
 int sys_exit_accept(struct trace_event_raw_sys_exit *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     exit_accept(ctx);
     return 0;
 }
@@ -427,7 +408,9 @@ int sys_exit_accept(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_accept4")
 int sys_enter_accept4(struct trace_event_raw_sys_enter *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     enter_accept(ctx);
     return 0;
 }
@@ -435,7 +418,9 @@ int sys_enter_accept4(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_accept4")
 int sys_exit_accept4(struct trace_event_raw_sys_exit *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     exit_accept(ctx);
     return 0;
 }
@@ -443,7 +428,9 @@ int sys_exit_accept4(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_close")
 int sys_enter_close(struct trace_event_raw_sys_enter *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 sockfd = (__u32)ctx->args[0];
     __u64 unique_connection_id = generate_unique_connection_id(pid_tgid, sockfd);
@@ -454,7 +441,9 @@ int sys_enter_close(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_enter_read")
 int sys_enter_read(struct trace_event_raw_sys_enter *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     pre_receive_syscalls(ctx);
     return 0;
 }
@@ -462,7 +451,9 @@ int sys_enter_read(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_read")
 int sys_exit_read(struct trace_event_raw_sys_exit *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     process_packet(ctx, "read");
     return 0;
 }
@@ -470,8 +461,11 @@ int sys_exit_read(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_recvfrom")
 int sys_enter_recvfrom(struct trace_event_raw_sys_enter *ctx)
 {
-    if (should_discard()) return 0;
-    if (check_msg_peek(ctx->args[3])) return 0;
+    if (should_discard())
+        return 0;
+
+    if (check_msg_peek(ctx->args[3]))
+        return 0;
     pre_receive_syscalls(ctx);
     return 0;
 }
@@ -479,7 +473,9 @@ int sys_enter_recvfrom(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_recvfrom")
 int sys_exit_recvfrom(struct trace_event_raw_sys_exit *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     process_packet(ctx, "recvfrom");
     return 0;
 }
@@ -487,7 +483,9 @@ int sys_exit_recvfrom(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_write")
 int syscall__probe_entry_write(struct trace_event_raw_sys_enter *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     pre_receive_syscalls(ctx);
     return 0;
 }
@@ -495,7 +493,9 @@ int syscall__probe_entry_write(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_write")
 int syscall__probe_ret_write(struct trace_event_raw_sys_exit *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     process_packet(ctx, "write");
     return 0;
 }
@@ -503,7 +503,9 @@ int syscall__probe_ret_write(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_sendto")
 int syscall__probe_entry_sendto(struct trace_event_raw_sys_enter *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     pre_receive_syscalls(ctx);
     return 0;
 }
@@ -511,7 +513,9 @@ int syscall__probe_entry_sendto(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_sendto")
 int syscall__probe_ret_sendto(struct trace_event_raw_sys_exit *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     process_packet(ctx, "sendto");
     return 0;
 }
@@ -519,7 +523,9 @@ int syscall__probe_ret_sendto(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_connect")
 int syscall__probe_entry_connect(struct trace_event_raw_sys_enter *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     enter_connect(ctx);
     return 0;
 }
@@ -527,7 +533,9 @@ int syscall__probe_entry_connect(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_connect")
 int syscall__probe_ret_connect(struct trace_event_raw_sys_exit *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     exit_connect(ctx);
     return 0;
 }
@@ -535,7 +543,9 @@ int syscall__probe_ret_connect(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_sendmsg")
 int syscall__probe_entry_sendmsg(struct trace_event_raw_sys_enter *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     pre_process_msg(ctx);
     return 0;
 }
@@ -543,7 +553,9 @@ int syscall__probe_entry_sendmsg(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_sendmsg")
 int syscall__probe_ret_sendmsg(struct trace_event_raw_sys_exit *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     process_msg(ctx, "sendmsg");
     return 0;
 }
@@ -551,8 +563,11 @@ int syscall__probe_ret_sendmsg(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_recvmsg")
 int syscall__probe_entry_recvmsg(struct trace_event_raw_sys_enter *ctx)
 {
-    if (should_discard()) return 0;
-    if (check_msg_peek(ctx->args[2])) return 0;
+    if (should_discard())
+        return 0;
+
+    if (check_msg_peek(ctx->args[2]))
+        return 0;
     pre_process_msg(ctx);
     return 0;
 }
@@ -560,7 +575,9 @@ int syscall__probe_entry_recvmsg(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_recvmsg")
 int syscall__probe_ret_recvmsg(struct trace_event_raw_sys_exit *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     process_msg(ctx, "recvmsg");
     return 0;
 }
@@ -568,7 +585,9 @@ int syscall__probe_ret_recvmsg(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_writev")
 int syscall__probe_entry_writev(struct trace_event_raw_sys_enter *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     pre_process_iovec(ctx);
     return 0;
 }
@@ -576,7 +595,9 @@ int syscall__probe_entry_writev(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_writev")
 int syscall__probe_ret_writev(struct trace_event_raw_sys_exit *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
+
     process_msg(ctx, "writev");
     return 0;
 }
@@ -584,7 +605,8 @@ int syscall__probe_ret_writev(struct trace_event_raw_sys_exit *ctx)
 SEC("tracepoint/syscalls/sys_enter_readv")
 int syscall__probe_entry_readv(struct trace_event_raw_sys_enter *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
     pre_process_iovec(ctx);
     return 0;
 }
@@ -592,7 +614,8 @@ int syscall__probe_entry_readv(struct trace_event_raw_sys_enter *ctx)
 SEC("tracepoint/syscalls/sys_exit_readv")
 int syscall__probe_ret_readv(struct trace_event_raw_sys_exit *ctx)
 {
-    if (should_discard()) return 0;
+    if (should_discard())
+        return 0;
     process_msg(ctx, "readv");
     return 0;
 }
