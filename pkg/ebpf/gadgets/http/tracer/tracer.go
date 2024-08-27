@@ -1,19 +1,22 @@
 package tracer
 
 import (
-	"context"
-	"encoding/binary"
+	"errors"
 	"fmt"
-	"net"
-	"unsafe"
+	"os"
 
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/networktracer"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/perf"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type active_connection_info -type packet_buffer -type httpevent -type debug_event http_sniffer bpf/http-sniffer.c -- -I./bpf/
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go  -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type active_connection_info -type packet_buffer -type httpevent -type debug_event http_sniffer bpf/http-sniffer.c -- -I./bpf/
 const (
 	EVENT_TYPE_CONNECT = iota
 	EVENT_TYPE_ACCEPT
@@ -22,116 +25,148 @@ const (
 	EVENT_TYPE_CLOSE
 )
 
-type Tracer struct {
-	*networktracer.Tracer[types.Event]
-
-	cancel context.CancelFunc
+type Config struct {
+	MountnsMap *ebpf.Map
 }
 
-func NewTracer() (*Tracer, error) {
-	t := &Tracer{}
+type Tracer struct {
+	config        *Config
+	enricher      gadgets.DataEnricherByMntNs
+	eventCallback func(*types.Event)
+
+	objs http_snifferObjects
+
+	httplinks []link.Link
+	reader    *perf.Reader
+}
+
+func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
+	eventCallback func(*types.Event),
+) (*Tracer, error) {
+	t := &Tracer{
+		config:        config,
+		enricher:      enricher,
+		eventCallback: eventCallback,
+	}
 
 	if err := t.install(); err != nil {
 		t.Close()
-		return nil, fmt.Errorf("installing tracer: %w", err)
+		return nil, err
 	}
+
+	go t.run()
 
 	return t, nil
 }
 
 func (t *Tracer) Close() {
-	if t.cancel != nil {
-		t.cancel()
+	for _, l := range t.httplinks {
+		gadgets.CloseLink(l)
 	}
 
-	if t.Tracer != nil {
-		t.Tracer.Close()
+	if t.reader != nil {
+		t.reader.Close()
 	}
+
+	t.objs.Close()
+
 }
 
 func (t *Tracer) install() error {
-	networkTracer, err := networktracer.NewTracer[types.Event]()
-	if err != nil {
-		return fmt.Errorf("creating network tracer: %w", err)
-	}
-	t.Tracer = networkTracer
-	return nil
-}
-
-func (t *Tracer) RunWorkaround() error {
-	if err := t.run(); err != nil {
-		t.Close()
-		return fmt.Errorf("running tracer: %w", err)
-	}
-	return nil
-}
-
-func (t *Tracer) run() error {
+	var err error
 	spec, err := loadHttp_sniffer()
 	if err != nil {
 		return fmt.Errorf("loading ebpf program: %w", err)
 	}
 
-	if err := t.Tracer.Run(spec, types.Base, t.parseHTTP); err != nil {
-		return fmt.Errorf("setting network tracer spec: %w", err)
+	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
+		return fmt.Errorf("loading ebpf spec: %w", err)
+	}
+
+	tracepoints := GetTracepointDefinitions(&t.objs.http_snifferPrograms)
+	var links []link.Link
+	for _, tp := range tracepoints {
+		l, err := AttachTracepoint(tp)
+		if err != nil {
+			logger.L().Error(fmt.Sprintf("Error attaching tracepoint: %s", err))
+		}
+		links = append(links, l)
+	}
+
+	t.httplinks = links
+
+	t.reader, err = perf.NewReader(t.objs.http_snifferMaps.Events, gadgets.PerfBufferPages*os.Getpagesize())
+	if err != nil {
+		return fmt.Errorf("creating perf ring buffer: %w", err)
 	}
 
 	return nil
 }
 
-func (t *Tracer) parseHTTP(rawSample []byte, netns uint64) (*types.Event, error) {
-	bpfEvent := (*http_snifferHttpevent)(unsafe.Pointer(&rawSample[0]))
+func (t *Tracer) run() {
+	for {
+		record, err := t.reader.Read()
+		if err != nil {
+			if errors.Is(err, perf.ErrClosed) {
+				// nothing to do, we're done
+				return
+			}
 
-	ip := make(net.IP, 4)
-	binary.LittleEndian.PutUint32(ip, bpfEvent.OtherIp)
+			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
+			t.eventCallback(types.Base(eventtypes.Err(msg)))
+			return
+		}
 
-	httpData, err := getHttpData(bpfEvent)
-	if err != nil {
-		return nil, err
+		if record.LostSamples > 0 {
+			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
+			t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			continue
+		}
+
+		event, err := t.ParseHTTP(record.RawSample)
+		if err != nil {
+			msg := fmt.Sprintf("Error parsing sample: %s", err)
+			t.eventCallback(types.Base(eventtypes.Err(msg)))
+			continue
+		}
+
+		if t.enricher != nil {
+			t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
+		}
+
+		t.eventCallback(event)
 	}
-
-	event := types.Event{
-		Event: eventtypes.Event{
-			Type:      eventtypes.NORMAL,
-			Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
-		},
-		WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-		WithNetNsID:   eventtypes.WithNetNsID{NetNsID: uint64(bpfEvent.Netns)},
-		Pid:           bpfEvent.Pid,
-		Uid:           bpfEvent.Uid,
-		Gid:           bpfEvent.Gid,
-		Syscall:       string(bpfEvent.Syscall[:]),
-		OtherPort:     bpfEvent.OtherPort,
-		OtherIp:       ip.String(),
-		Headers:       httpData,
-	}
-
-	return &event, nil
 }
 
-func getHttpData(bpfEvent *http_snifferHttpevent) (types.HTTPData, error) {
-	switch bpfEvent.Type {
-	case EVENT_TYPE_REQUEST:
-		httpData, err := parseHTTPRequest(FromCString(bpfEvent.Buf[:]))
-		if err != nil {
-			return nil, err
-		}
-		return httpData, nil
-	case EVENT_TYPE_RESPONSE:
-		httpData, err := parseHTTPResponse(FromCString(bpfEvent.Buf[:]))
-		if err != nil {
-			return nil, err
-		}
-		return httpData, nil
-	default:
-		return nil, fmt.Errorf("unknown event type: %d", bpfEvent.Type)
+func (t *Tracer) Run(gadgetCtx gadgets.GadgetContext) error {
+	defer t.Close()
+	if err := t.install(); err != nil {
+		return fmt.Errorf("installing tracer: %w", err)
 	}
 
+	go t.run()
+	gadgetcontext.WaitForTimeoutOrDone(gadgetCtx)
+
+	return nil
+}
+
+func (t *Tracer) SetMountNsMap(mountnsMap *ebpf.Map) {
+	t.config.MountnsMap = mountnsMap
+}
+
+func (t *Tracer) SetEventHandler(handler any) {
+	nh, ok := handler.(func(ev *types.Event))
+	if !ok {
+		panic("event handler invalid")
+	}
+	t.eventCallback = nh
 }
 
 type GadgetDesc struct{}
 
 func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
-	tracer := &Tracer{}
+	tracer := &Tracer{
+		config: &Config{},
+	}
 	return tracer, nil
 }

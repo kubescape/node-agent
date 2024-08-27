@@ -58,25 +58,6 @@ type http_snifferPacketBuffer struct {
 	Len    uint64
 }
 
-type http_snifferPacketMsg struct {
-	Fd       int32
-	_        [4]byte
-	IovecPtr uint64
-	Iovlen   uint64
-}
-
-type http_snifferPreAcceptArgs struct{ AddrPtr uint64 }
-
-type http_snifferPreConnectArgs struct {
-	Sockfd int32
-	Addr   struct {
-		SinFamily uint16
-		SinPort   uint16
-		SinAddr   struct{ S_addr uint32 }
-		Pad       [8]uint8
-	}
-}
-
 // loadHttp_sniffer returns the embedded CollectionSpec for http_sniffer.
 func loadHttp_sniffer() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_Http_snifferBytes)
@@ -154,6 +135,7 @@ type http_snifferMapSpecs struct {
 	EmptyChar                *ebpf.MapSpec `ebpf:"empty_char"`
 	EventData                *ebpf.MapSpec `ebpf:"event_data"`
 	Events                   *ebpf.MapSpec `ebpf:"events"`
+	GadgetSockets            *ebpf.MapSpec `ebpf:"gadget_sockets"`
 	MsgPackets               *ebpf.MapSpec `ebpf:"msg_packets"`
 	PreAcceptArgsMap         *ebpf.MapSpec `ebpf:"pre_accept_args_map"`
 }
@@ -184,6 +166,7 @@ type http_snifferMaps struct {
 	EmptyChar                *ebpf.Map `ebpf:"empty_char"`
 	EventData                *ebpf.Map `ebpf:"event_data"`
 	Events                   *ebpf.Map `ebpf:"events"`
+	GadgetSockets            *ebpf.Map `ebpf:"gadget_sockets"`
 	MsgPackets               *ebpf.Map `ebpf:"msg_packets"`
 	PreAcceptArgsMap         *ebpf.Map `ebpf:"pre_accept_args_map"`
 }
@@ -197,6 +180,7 @@ func (m *http_snifferMaps) Close() error {
 		m.EmptyChar,
 		m.EventData,
 		m.Events,
+		m.GadgetSockets,
 		m.MsgPackets,
 		m.PreAcceptArgsMap,
 	)

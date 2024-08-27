@@ -1,5 +1,4 @@
 #include "sniffer_strcuts.h"
-#include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
@@ -74,11 +73,6 @@ struct
 
 const struct httpevent *unusedevent __attribute__((unused));
 const struct debug_event *unusedevent2 __attribute__((unused));
-
-static __always_inline __u16 bpf_ntohs(__u16 netshort)
-{
-    return (netshort << 8) | (netshort >> 8);
-}
 
 static __always_inline __u64 generate_unique_connection_id(__u64 pid_tgid, __u32 sockfd)
 {
