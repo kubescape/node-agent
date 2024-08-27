@@ -135,7 +135,7 @@ type http_snifferMapSpecs struct {
 	EmptyChar                *ebpf.MapSpec `ebpf:"empty_char"`
 	EventData                *ebpf.MapSpec `ebpf:"event_data"`
 	Events                   *ebpf.MapSpec `ebpf:"events"`
-	GadgetSockets            *ebpf.MapSpec `ebpf:"gadget_sockets"`
+	GadgetMntnsFilterMap     *ebpf.MapSpec `ebpf:"gadget_mntns_filter_map"`
 	MsgPackets               *ebpf.MapSpec `ebpf:"msg_packets"`
 	PreAcceptArgsMap         *ebpf.MapSpec `ebpf:"pre_accept_args_map"`
 }
@@ -166,7 +166,7 @@ type http_snifferMaps struct {
 	EmptyChar                *ebpf.Map `ebpf:"empty_char"`
 	EventData                *ebpf.Map `ebpf:"event_data"`
 	Events                   *ebpf.Map `ebpf:"events"`
-	GadgetSockets            *ebpf.Map `ebpf:"gadget_sockets"`
+	GadgetMntnsFilterMap     *ebpf.Map `ebpf:"gadget_mntns_filter_map"`
 	MsgPackets               *ebpf.Map `ebpf:"msg_packets"`
 	PreAcceptArgsMap         *ebpf.Map `ebpf:"pre_accept_args_map"`
 }
@@ -180,7 +180,7 @@ func (m *http_snifferMaps) Close() error {
 		m.EmptyChar,
 		m.EventData,
 		m.Events,
-		m.GadgetSockets,
+		m.GadgetMntnsFilterMap,
 		m.MsgPackets,
 		m.PreAcceptArgsMap,
 	)

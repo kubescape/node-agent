@@ -57,6 +57,6 @@ func (ch *IGContainerWatcher) stopHttpTracing() error {
 	if err := ch.tracerCollection.RemoveTracer(httpTraceName); err != nil {
 		return fmt.Errorf("removing tracer: %w", err)
 	}
-	ch.sshTracer.Close()
+	ch.httpTracer.Close()
 	return nil
 }

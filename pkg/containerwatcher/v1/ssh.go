@@ -29,7 +29,7 @@ func (ch *IGContainerWatcher) sshEventCallback(event *tracersshtype.Event) {
 }
 
 func (ch *IGContainerWatcher) startSshTracing() error {
-	if err := ch.tracerCollection.AddTracer(httpTraceName, ch.containerSelector); err != nil {
+	if err := ch.tracerCollection.AddTracer(sshTraceName, ch.containerSelector); err != nil {
 		return fmt.Errorf("adding tracer: %w", err)
 	}
 
@@ -70,7 +70,7 @@ func (ch *IGContainerWatcher) startSshTracing() error {
 
 func (ch *IGContainerWatcher) stopSshTracing() error {
 	// Stop ssh tracer
-	if err := ch.tracerCollection.RemoveTracer(httpTraceName); err != nil {
+	if err := ch.tracerCollection.RemoveTracer(sshTraceName); err != nil {
 		return fmt.Errorf("removing tracer: %w", err)
 	}
 	ch.sshTracer.Close()

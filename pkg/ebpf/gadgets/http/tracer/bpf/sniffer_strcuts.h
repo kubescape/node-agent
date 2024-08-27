@@ -1,10 +1,16 @@
 #include "../../../../include/amd64/vmlinux.h"
+
+#ifdef __TARGET_ARCH_x86
+#include "../../../../include/amd64/vmlinux.h"
+#elif defined(__TARGET_ARCH_arm64)
+#include "../../../../include/arm64/vmlinux.h"
+#endif
+
 #include "../../../../include/types.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
-#define GADGET_TYPE_NETWORKING
-#include "../../../../include/sockets-map.h"
+#include "../../../../include/mntns_filter.h"
 
 #define EVENT_TYPE_CONNECT 0
 #define EVENT_TYPE_ACCEPT 1

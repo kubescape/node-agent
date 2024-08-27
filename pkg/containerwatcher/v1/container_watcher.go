@@ -58,7 +58,8 @@ const (
 	randomxTraceName           = "trace_randomx"
 	symlinkTraceName           = "trace_symlink"
 	hardlinkTraceName          = "trace_hardlink"
-	httpTraceName              = "trace_ssh"
+	sshTraceName               = "trace_ssh"
+	httpTraceName              = "trace_http"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
@@ -68,6 +69,7 @@ const (
 	symlinkWorkerPoolSize      = 1
 	hardlinkWorkerPoolSize     = 1
 	sshWorkerPoolSize          = 1
+	httpWorkerPoolSize         = 2
 )
 
 type IGContainerWatcher struct {
@@ -314,6 +316,18 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		return nil, fmt.Errorf("creating ssh worker pool: %w", err)
 	}
 
+	// Create a http worker pool
+	httpWorkerPool, err := ants.NewPoolWithFunc(httpWorkerPoolSize, func(i interface{}) {
+		event := i.(tracerhttptype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("creating http worker pool: %w", err)
+	}
+
 	return &IGContainerWatcher{
 		// Configuration
 		cfg:               cfg,
@@ -343,6 +357,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		symlinkWorkerPool:       symlinkWorkerPool,
 		hardlinkWorkerPool:      hardlinkWorkerPool,
 		sshdWorkerPool:          sshWorkerPool,
+		httpWorkerPool:          httpWorkerPool,
 		metrics:                 metrics,
 		preRunningContainersIDs: preRunningContainers,
 
