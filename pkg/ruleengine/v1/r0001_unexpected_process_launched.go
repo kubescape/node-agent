@@ -141,7 +141,8 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 			RuleDescription: fmt.Sprintf("Unexpected process launched: %s in: %s", execPath, execEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName: execEvent.GetPod(),
+			PodName:   execEvent.GetPod(),
+			PodLabels: execEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
 	}

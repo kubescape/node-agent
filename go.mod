@@ -3,7 +3,7 @@ module github.com/kubescape/node-agent
 go 1.22.5
 
 require (
-	github.com/armosec/armoapi-go v0.0.425
+	github.com/armosec/armoapi-go v0.0.439
 	github.com/armosec/utils-k8s-go v0.0.26
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cilium/ebpf v0.15.0

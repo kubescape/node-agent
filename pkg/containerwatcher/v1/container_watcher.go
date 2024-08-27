@@ -126,14 +126,11 @@ type IGContainerWatcher struct {
 	sshWorkerChan          chan *tracersshtype.Event
 
 	preRunningContainersIDs mapset.Set[string]
-
-	timeBasedContainers mapset.Set[string] // list of containers to track based on ticker
-	ruleManagedPods     mapset.Set[string] // list of pods to track based on rules
-	metrics             metricsmanager.MetricsManager
-
+	timeBasedContainers     mapset.Set[string] // list of containers to track based on ticker
+	ruleManagedPods         mapset.Set[string] // list of pods to track based on rules
+	metrics                 metricsmanager.MetricsManager
 	// cache
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify
-
 	// container runtime
 	runtime *containerutilsTypes.RuntimeConfig
 }
@@ -242,6 +239,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	// Create a dns worker pool
 	dnsWorkerPool, err := ants.NewPoolWithFunc(dnsWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerdnstype.Event)
+
+		if event.K8s.ContainerName == "" {
+			return
+		}
 
 		// ignore DNS events that are not responses
 		if event.Qr != tracerdnstype.DNSPktTypeResponse {
@@ -354,11 +355,9 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		// cache
 		ruleBindingPodNotify: ruleBindingPodNotify,
-
-		timeBasedContainers: mapset.NewSet[string](),
-		ruleManagedPods:     mapset.NewSet[string](),
-
-		runtime: runtime,
+		timeBasedContainers:  mapset.NewSet[string](),
+		ruleManagedPods:      mapset.NewSet[string](),
+		runtime:              runtime,
 	}, nil
 }
 

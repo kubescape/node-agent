@@ -117,7 +117,8 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 			RuleDescription: fmt.Sprintf("Unexpected domain communication: %s from: %s", domainEvent.DNSName, domainEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName: domainEvent.GetPod(),
+			PodName:   domainEvent.GetPod(),
+			PodLabels: domainEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
 	}

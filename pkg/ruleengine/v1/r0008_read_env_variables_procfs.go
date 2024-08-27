@@ -104,7 +104,8 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 			RuleDescription: fmt.Sprintf("Reading environment variables from procfs: %s", openEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName: openEvent.GetPod(),
+			PodName:   openEvent.GetPod(),
+			PodLabels: openEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
 	}

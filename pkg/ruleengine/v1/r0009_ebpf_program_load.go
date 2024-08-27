@@ -106,6 +106,7 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName: syscallEvent.GetPod(),
+				PodLabels: syscallEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
 		}
