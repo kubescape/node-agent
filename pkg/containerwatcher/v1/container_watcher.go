@@ -240,6 +240,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	dnsWorkerPool, err := ants.NewPoolWithFunc(dnsWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerdnstype.Event)
 
+		if event.K8s.ContainerName == "" {
+			return
+		}
+
 		// ignore DNS events that are not responses
 		if event.Qr != tracerdnstype.DNSPktTypeResponse {
 			return
