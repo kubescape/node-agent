@@ -11,12 +11,14 @@ import (
 var _ objectcache.ApplicationProfileCache = (*RuleObjectCacheMock)(nil)
 var _ objectcache.K8sObjectCache = (*RuleObjectCacheMock)(nil)
 var _ objectcache.NetworkNeighborhoodCache = (*RuleObjectCacheMock)(nil)
+var _ objectcache.DnsCache = (*RuleObjectCacheMock)(nil)
 
 type RuleObjectCacheMock struct {
 	profile   *v1beta1.ApplicationProfile
 	podSpec   *corev1.PodSpec
 	podStatus *corev1.PodStatus
 	nn        *v1beta1.NetworkNeighborhood
+	dnsCache  map[string]string
 }
 
 func (r *RuleObjectCacheMock) GetApplicationProfile(string) *v1beta1.ApplicationProfile {
@@ -67,4 +69,20 @@ func (r *RuleObjectCacheMock) GetNetworkNeighborhood(string) *v1beta1.NetworkNei
 
 func (r *RuleObjectCacheMock) SetNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood) {
 	r.nn = nn
+}
+
+func (r *RuleObjectCacheMock) DnsCache() objectcache.DnsCache {
+	return r
+}
+
+func (r *RuleObjectCacheMock) SetDnsCache(dnsCache map[string]string) {
+	r.dnsCache = dnsCache
+}
+
+func (r *RuleObjectCacheMock) ResolveIpToDomain(ip string) string {
+	if _, ok := r.dnsCache[ip]; ok {
+		return r.dnsCache[ip]
+	}
+
+	return ""
 }

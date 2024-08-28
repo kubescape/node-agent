@@ -10,13 +10,15 @@ type ObjectCacheImpl struct {
 	k  objectcache.K8sObjectCache
 	ap objectcache.ApplicationProfileCache
 	np objectcache.NetworkNeighborhoodCache
+	dc objectcache.DnsCache
 }
 
-func NewObjectCache(k objectcache.K8sObjectCache, ap objectcache.ApplicationProfileCache, np objectcache.NetworkNeighborhoodCache) *ObjectCacheImpl {
+func NewObjectCache(k objectcache.K8sObjectCache, ap objectcache.ApplicationProfileCache, np objectcache.NetworkNeighborhoodCache, dc objectcache.DnsCache) *ObjectCacheImpl {
 	return &ObjectCacheImpl{
 		k:  k,
 		ap: ap,
 		np: np,
+		dc: dc,
 	}
 }
 
@@ -29,4 +31,8 @@ func (o *ObjectCacheImpl) ApplicationProfileCache() objectcache.ApplicationProfi
 }
 func (o *ObjectCacheImpl) NetworkNeighborhoodCache() objectcache.NetworkNeighborhoodCache {
 	return o.np
+}
+
+func (o *ObjectCacheImpl) DnsCache() objectcache.DnsCache {
+	return o.dc
 }
