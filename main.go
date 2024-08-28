@@ -189,8 +189,26 @@ func main() {
 		relevancyManager = relevancymanager.CreateRelevancyManagerMock()
 	}
 
-	var ruleManager rulemanager.RuleManagerClient
+	// Create the network and DNS managers
+	var networkManagerClient networkmanager.NetworkManagerClient
+	var dnsManagerClient dnsmanager.DNSManagerClient
 	var dnsResolver dnsmanager.DNSResolver
+	if cfg.EnableNetworkTracing {
+		dnsManager := dnsmanager.CreateDNSManager()
+		dnsManagerClient = dnsManager
+		// NOTE: dnsResolver is set for threat detection.
+		dnsResolver = dnsManager
+		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
+	} else {
+		if cfg.EnableRuntimeDetection {
+			logger.L().Ctx(ctx).Fatal("Network tracing is disabled, but runtime detection is enabled. Network tracing is required for runtime detection.")
+		}
+		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
+		dnsResolver = dnsmanager.CreateDNSManagerMock()
+		networkManagerClient = networkmanager.CreateNetworkManagerMock()
+	}
+
+	var ruleManager rulemanager.RuleManagerClient
 	var objCache objectcache.ObjectCache
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
 
@@ -249,24 +267,6 @@ func main() {
 		}
 	} else {
 		malwareManager = malwaremanager.CreateMalwareManagerMock()
-	}
-
-	// Create the network and DNS managers
-	var networkManagerClient networkmanager.NetworkManagerClient
-	var dnsManagerClient dnsmanager.DNSManagerClient
-	if cfg.EnableNetworkTracing {
-		dnsManager := dnsmanager.CreateDNSManager()
-		dnsManagerClient = dnsManager
-		// NOTE: dnsResolver is set for threat detection.
-		dnsResolver = dnsManager
-		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
-	} else {
-		if cfg.EnableRuntimeDetection {
-			logger.L().Ctx(ctx).Fatal("Network tracing is disabled, but runtime detection is enabled. Network tracing is required for runtime detection.")
-		}
-		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
-		dnsResolver = dnsmanager.CreateDNSManagerMock()
-		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 	}
 
 	// Create the container handler
