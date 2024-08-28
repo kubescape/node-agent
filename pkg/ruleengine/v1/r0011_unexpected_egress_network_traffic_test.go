@@ -12,7 +12,7 @@ import (
 
 func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 	// Create a new rule
-	r := CreateRuleR0011UnexpectedNetworkTraffic()
+	r := CreateRuleR0011UnexpectedEgressNetworkTraffic()
 	// Assert r is not nil
 	if r == nil {
 		t.Errorf("Expected r to not be nil")

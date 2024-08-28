@@ -18,44 +18,44 @@ import (
 
 const (
 	R0011ID   = "R0011"
-	R0011Name = "Unexpected network traffic"
+	R0011Name = "Unexpected Egress Network Traffic"
 )
 
-var R0011UnexpectedNetworkTrafficRuleDescriptor = RuleDescriptor{
+var R0011UnexpectedEgressNetworkTrafficRuleDescriptor = RuleDescriptor{
 	ID:          R0011ID,
 	Name:        R0011Name,
-	Description: "Detecting unexpected network traffic that is not whitelisted by application profile.",
+	Description: "Detecting unexpected egress network traffic that is not whitelisted by application profile.",
 	Tags:        []string{"dns", "whitelisted", "network"},
 	Priority:    RulePriorityMed,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{utils.NetworkEventType},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
-		return CreateRuleR0011UnexpectedNetworkTraffic()
+		return CreateRuleR0011UnexpectedEgressNetworkTraffic()
 	},
 }
-var _ ruleengine.RuleEvaluator = (*R0011UnexpectedNetworkTraffic)(nil)
+var _ ruleengine.RuleEvaluator = (*R0011UnexpectedEgressNetworkTraffic)(nil)
 
-type R0011UnexpectedNetworkTraffic struct {
+type R0011UnexpectedEgressNetworkTraffic struct {
 	BaseRule
 	alertedAdresses maps.SafeMap[string, bool]
 }
 
-func CreateRuleR0011UnexpectedNetworkTraffic() *R0011UnexpectedNetworkTraffic {
-	return &R0011UnexpectedNetworkTraffic{}
+func CreateRuleR0011UnexpectedEgressNetworkTraffic() *R0011UnexpectedEgressNetworkTraffic {
+	return &R0011UnexpectedEgressNetworkTraffic{}
 }
 
-func (rule *R0011UnexpectedNetworkTraffic) Name() string {
+func (rule *R0011UnexpectedEgressNetworkTraffic) Name() string {
 	return R0011Name
 }
-func (rule *R0011UnexpectedNetworkTraffic) ID() string {
+func (rule *R0011UnexpectedEgressNetworkTraffic) ID() string {
 	return R0011ID
 }
 
-func (rule *R0011UnexpectedNetworkTraffic) DeleteRule() {
+func (rule *R0011UnexpectedEgressNetworkTraffic) DeleteRule() {
 }
 
-func (rule *R0011UnexpectedNetworkTraffic) handleNetworkEvent(networkEvent *tracernetworktype.Event, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent *tracernetworktype.Event, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	// Check if we already alerted on this address.
 	if ok := rule.alertedAdresses.Has(networkEvent.DstEndpoint.Addr); ok {
 		return nil
@@ -102,7 +102,7 @@ func (rule *R0011UnexpectedNetworkTraffic) handleNetworkEvent(networkEvent *trac
 					networkEvent.DstEndpoint.Addr,
 					networkEvent.GetPod(),
 				),
-				Severity: R0011UnexpectedNetworkTrafficRuleDescriptor.Priority,
+				Severity: R0011UnexpectedEgressNetworkTrafficRuleDescriptor.Priority,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
@@ -115,7 +115,7 @@ func (rule *R0011UnexpectedNetworkTraffic) handleNetworkEvent(networkEvent *trac
 			},
 			TriggerEvent: networkEvent.Event,
 			RuleAlert: apitypes.RuleAlert{
-				RuleDescription: fmt.Sprintf("Unexpected network communication to: %s:%d using %s from: %s", networkEvent.DstEndpoint.Addr, networkEvent.Port, networkEvent.Proto, networkEvent.GetContainer()),
+				RuleDescription: fmt.Sprintf("Unexpected egress network communication to: %s:%d using %s from: %s", networkEvent.DstEndpoint.Addr, networkEvent.Port, networkEvent.Proto, networkEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName:   networkEvent.GetPod(),
@@ -128,7 +128,7 @@ func (rule *R0011UnexpectedNetworkTraffic) handleNetworkEvent(networkEvent *trac
 	return nil
 }
 
-func (rule *R0011UnexpectedNetworkTraffic) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0011UnexpectedEgressNetworkTraffic) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.NetworkEventType {
 		return nil
 	}
@@ -141,9 +141,9 @@ func (rule *R0011UnexpectedNetworkTraffic) ProcessEvent(eventType utils.EventTyp
 
 }
 
-func (rule *R0011UnexpectedNetworkTraffic) Requirements() ruleengine.RuleSpec {
+func (rule *R0011UnexpectedEgressNetworkTraffic) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes: R0011UnexpectedNetworkTrafficRuleDescriptor.Requirements.RequiredEventTypes(),
+		EventTypes: R0011UnexpectedEgressNetworkTrafficRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }
 
