@@ -133,15 +133,12 @@ func (rule *R0011UnexpectedNetworkTraffic) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
-	if eventType == utils.NetworkEventType {
-		networkEvent, ok := event.(*tracernetworktype.Event)
-		if !ok {
-			return nil
-		}
-		return rule.handleNetworkEvent(networkEvent, objCache)
+	networkEvent, ok := event.(*tracernetworktype.Event)
+	if !ok {
+		return nil
 	}
+	return rule.handleNetworkEvent(networkEvent, objCache)
 
-	return nil
 }
 
 func (rule *R0011UnexpectedNetworkTraffic) Requirements() ruleengine.RuleSpec {
