@@ -63,7 +63,6 @@ func (rule *R0011UnexpectedNetworkTraffic) handleNetworkEvent(networkEvent *trac
 
 	// Check if the network event is outgoing and the destination is not a private IP.
 	if networkEvent.PktType == "OUTGOING" && !isPrivateIP(networkEvent.DstEndpoint.Addr) {
-
 		nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
 		if nn == nil {
 			return nil
