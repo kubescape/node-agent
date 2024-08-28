@@ -226,7 +226,6 @@ func main() {
 		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(nnc)
 
-		// NOTE: dnsResolver will be set later once we initialize the DNSManager.
 		dc := dnscache.NewDnsCache(dnsResolver)
 
 		// create object cache
