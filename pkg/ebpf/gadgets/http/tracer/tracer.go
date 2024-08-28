@@ -99,7 +99,7 @@ func (t *Tracer) install() error {
 	if err != nil {
 		return fmt.Errorf("creating perf ring buffer: %w", err)
 	}
-	logger.L().Info("Http tracing installed")
+
 	return nil
 }
 
