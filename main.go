@@ -29,6 +29,7 @@ import (
 	nodeprofilemanagerv1 "github.com/kubescape/node-agent/pkg/nodeprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache"
+	"github.com/kubescape/node-agent/pkg/objectcache/dnscache"
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	"github.com/kubescape/node-agent/pkg/objectcache/networkneighborhoodcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
@@ -189,6 +190,7 @@ func main() {
 	}
 
 	var ruleManager rulemanager.RuleManagerClient
+	var dnsResolver dnsmanager.DNSResolver
 	var objCache objectcache.ObjectCache
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
 
@@ -206,8 +208,11 @@ func main() {
 		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(nnc)
 
+		// NOTE: dnsResolver will be set later once we initialize the DNSManager.
+		dc := dnscache.NewDnsCache(dnsResolver)
+
 		// create object cache
-		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc)
+		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
 
 		// create exporter
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
@@ -252,9 +257,15 @@ func main() {
 	if cfg.EnableNetworkTracing {
 		dnsManager := dnsmanager.CreateDNSManager()
 		dnsManagerClient = dnsManager
+		// NOTE: dnsResolver is set for threat detection.
+		dnsResolver = dnsManager
 		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
 	} else {
+		if cfg.EnableRuntimeDetection {
+			logger.L().Ctx(ctx).Fatal("Network tracing is disabled, but runtime detection is enabled. Network tracing is required for runtime detection.")
+		}
 		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
+		dnsResolver = dnsmanager.CreateDNSManagerMock()
 		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 	}
 

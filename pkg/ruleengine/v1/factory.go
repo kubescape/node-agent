@@ -21,6 +21,7 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R0008ReadEnvironmentVariablesProcFSRuleDescriptor,
 			R0009EbpfProgramLoadRuleDescriptor,
 			R0010UnexpectedSensitiveFileAccessRuleDescriptor,
+			R0011UnexpectedNetworkTrafficRuleDescriptor,
 			R1000ExecFromMaliciousSourceDescriptor,
 			R1001ExecBinaryNotInBaseImageRuleDescriptor,
 			R1002LoadKernelModuleRuleDescriptor,
