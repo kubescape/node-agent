@@ -57,7 +57,7 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) DeleteRule() {
 
 func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent *tracernetworktype.Event, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	// Check if we already alerted on this endpoint.
-	endpoint := fmt.Sprintf("%s:%d", networkEvent.DstEndpoint.Addr, networkEvent.Port)
+	endpoint := fmt.Sprintf("%s:%d:%s", networkEvent.DstEndpoint.Addr, networkEvent.Port, networkEvent.Proto)
 	if ok := rule.alertedAdresses.Has(endpoint); ok {
 		return nil
 	}

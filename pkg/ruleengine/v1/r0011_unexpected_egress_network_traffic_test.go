@@ -127,4 +127,13 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since we already alerted on this port")
 	}
+
+	// Test with non-whitelisted address with nil dns cache with different port.
+	e.DstEndpoint.Addr = "5.5.5.5"
+	e.Port = 80
+	e.Proto = "UDP"
+	ruleResult = r.ProcessEvent(utils.NetworkEventType, e, &objCache)
+	if ruleResult == nil {
+		t.Errorf("Expected ruleResult to not be nil since it's a different protocol")
+	}
 }
