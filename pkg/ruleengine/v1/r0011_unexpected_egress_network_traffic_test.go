@@ -33,6 +33,7 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 		DstEndpoint: eventtypes.L3Endpoint{
 			Addr: "1.1.1.1",
 		},
+		Port: 80,
 	}
 
 	// Test with nil network neighborhood.
@@ -80,20 +81,6 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 		t.Errorf("Expected ruleResult to be nil since we are able to resolve the address")
 	}
 
-	// Test with non-whitelisted address with dns cache.
-	e.DstEndpoint.Addr = "3.3.3.3"
-	objCache.SetDnsCache(map[string]string{"3.3.3.3": "malicious.com"})
-	ruleResult = r.ProcessEvent(utils.NetworkEventType, e, &objCache)
-	if ruleResult == nil {
-		t.Errorf("Expected ruleResult to not be nil since we are not able to resolve the address")
-	}
-
-	// Test with already alerted address.
-	ruleResult = r.ProcessEvent(utils.NetworkEventType, e, &objCache)
-	if ruleResult != nil {
-		t.Errorf("Expected ruleResult to be nil since we already alerted on this address")
-	}
-
 	// Test with incoming packet.
 	e.PktType = "INCOMING"
 	ruleResult = r.ProcessEvent(utils.NetworkEventType, e, &objCache)
@@ -115,5 +102,29 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 	ruleResult = r.ProcessEvent(utils.NetworkEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since we are not able to resolve the address")
+	}
+
+	// Test with non-whitelisted address with nil dns cache with different port.
+	e.DstEndpoint.Addr = "5.5.5.5"
+	e.Port = 443
+	ruleResult = r.ProcessEvent(utils.NetworkEventType, e, &objCache)
+	if ruleResult == nil {
+		t.Errorf("Expected ruleResult to not be nil since it's not whitelisted")
+	}
+
+	// Test with non-whitelisted address with nil dns cache with different port.
+	e.DstEndpoint.Addr = "5.5.5.5"
+	e.Port = 80
+	ruleResult = r.ProcessEvent(utils.NetworkEventType, e, &objCache)
+	if ruleResult == nil {
+		t.Errorf("Expected ruleResult to not be nil since it's not whitelisted and it's different port")
+	}
+
+	// Test with non-whitelisted address with nil dns cache with different port.
+	e.DstEndpoint.Addr = "5.5.5.5"
+	e.Port = 80
+	ruleResult = r.ProcessEvent(utils.NetworkEventType, e, &objCache)
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since we already alerted on this port")
 	}
 }
