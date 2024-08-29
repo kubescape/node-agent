@@ -82,6 +82,10 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 	// Check if the port is in the egress list.
 	for _, nn := range nnContainer.Egress {
 		for _, port := range nn.Ports {
+			if port.Port == nil {
+				continue
+			}
+
 			if networkEvent.Port == uint16(*port.Port) {
 				return nil
 			}
