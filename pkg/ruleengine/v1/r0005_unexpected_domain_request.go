@@ -68,6 +68,11 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		return nil
 	}
 
+	// Only check for DNS queries.
+	if domainEvent.Qr != tracerdnstype.DNSPktTypeQuery {
+		return nil
+	}
+
 	// TODO: fix this, currently we are ignoring in-cluster communication
 	if strings.HasSuffix(domainEvent.DNSName, "svc.cluster.local.") {
 		return nil

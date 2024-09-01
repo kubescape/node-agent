@@ -30,6 +30,7 @@ func TestR0005UnexpectedDomainRequest(t *testing.T) {
 			},
 		},
 		DNSName: "test.com",
+		Qr:      tracerdnstype.DNSPktTypeQuery,
 	}
 
 	// Test with nil appProfileAccess
@@ -59,6 +60,13 @@ func TestR0005UnexpectedDomainRequest(t *testing.T) {
 	ruleResult = r.ProcessEvent(utils.DnsEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since domain is whitelisted")
+	}
+
+	// Test with response event
+	e.Qr = tracerdnstype.DNSPktTypeResponse
+	ruleResult = r.ProcessEvent(utils.DnsEventType, e, &objCache)
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since event is response")
 	}
 
 }
