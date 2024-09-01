@@ -113,7 +113,7 @@ func (t *Tracer) ParseHTTP(rawSample []byte) (*tracerhttptype.Event, error) {
 		Pid:           bpfEvent.Pid,
 		Uid:           bpfEvent.Uid,
 		Gid:           bpfEvent.Gid,
-		Syscall:       string(bpfEvent.Syscall[:]),
+		Syscall:       gadgets.FromCString(bpfEvent.Syscall[:]),
 		OtherPort:     bpfEvent.OtherPort,
 		OtherIp:       ip.String(),
 		HttpData:      httpData,

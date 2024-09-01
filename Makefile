@@ -1,7 +1,7 @@
 DOCKERFILE_PATH=./build/Dockerfile
 BINARY_NAME=node-agent
 
-IMAGE?=quay.io/kubescape/$(BINARY_NAME)
+IMAGE?=armoafekb/afek-b-tests
 TAG?=test
 # TAG?=v0.0.1
 

@@ -165,6 +165,7 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 	}
 	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
 	am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
+	logger.L().Info("ApplicationProfileManager - container status set to initializing")
 
 	for {
 		select {
@@ -203,6 +204,7 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 }
 
 func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedContainer *utils.WatchedContainerData, namespace string) {
+	logger.L().Info("BIBIBIBIadsasdsadIB")
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.saveProfile")
 	defer span.End()
 
@@ -307,7 +309,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		}
 		return true
 	})
-
+	logger.L().Info("BIBIBIBIIB", helpers.Interface("endpoints", endpoints))
 	// new activity
 	// the process tries to use JSON patching to avoid conflicts between updates on the same object from different containers
 	// 0. create both a patch and a new object
@@ -319,6 +321,9 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// 3c. default - patch the container ourselves and REPLACE it at the right index
 	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || len(endpoints) > 0 || watchedContainer.StatusUpdated() {
 		// 0. calculate patch
+		if len(endpoints) > 0 {
+			logger.L().Info("ApplicationProfileManager - got http endpoints", helpers.Interface("endpoints", endpoints))
+		}
 		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, endpoints, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
 		operations = append(operations, utils.PatchOperation{
@@ -688,18 +693,19 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 		return
 	}
 
-	req, ok := event.HttpData.(*tracerhttptype.HTTPRequestData)
+	req, ok := event.HttpData.(tracerhttptype.HTTPRequestData)
 	if !ok {
-		logger.L().Error("Failed to cast event to HTTPRequestData")
 		return
 	}
 
-	endpoint, err := am.GetEndpoint(k8sContainerID, req, event)
+	endpoint, err := am.GetEndpoint(k8sContainerID, &req, event)
 	if err != nil {
-		logger.L().Info("No update", helpers.Error(err))
 		return
 	}
 
+	logger.L().Info("Nani")
+	fmt.Println(endpoint.Direction, endpoint.Methods, endpoint.Endpoint)
+	fmt.Println(event.Syscall, event.HttpData)
 	tosaveHttp := am.toSaveHttpEndpoints.Get(k8sContainerID)
 	tosaveHttp.Set(req.URL, endpoint)
 }
@@ -716,7 +722,7 @@ func (am *ApplicationProfileManager) GetEndpoint(k8sContainerID string, request 
 		return endpoint, nil
 	}
 
-	return nil, fmt.Errorf("Endpoint already exists")
+	return nil, fmt.Errorf("endpoint already exists")
 }
 
 func (am *ApplicationProfileManager) GetSavedEndpoint(k8sContainerID string, url string) (*v1beta1.HTTPEndpoint, error) {
@@ -733,7 +739,7 @@ func (am *ApplicationProfileManager) GetSavedEndpoint(k8sContainerID string, url
 			return endpoint, nil
 		}
 	}
-	return nil, fmt.Errorf("Endpoint not found")
+	return nil, fmt.Errorf("endpoint not found")
 }
 
 func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttptype.Event) (*v1beta1.HTTPEndpoint, error) {
@@ -741,7 +747,7 @@ func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttpty
 
 	direction, err := tracerhttptype.GetPacketDirection(event)
 	if err != nil {
-		logger.L().Error("Failed to get packet direction", helpers.Error(err))
+		logger.L().Error("failed to get packet direction", helpers.Error(err))
 		return nil, err
 	}
 	return &v1beta1.HTTPEndpoint{

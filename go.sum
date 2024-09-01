@@ -557,6 +557,8 @@ github.com/kubescape/storage v0.0.107-0.20240901101630-7cd06e6147a9 h1:Qx0BMLdhh
 github.com/kubescape/storage v0.0.107-0.20240901101630-7cd06e6147a9/go.mod h1:RvMJc8iRqikiLie3PR8r68fo//vixBi+7se739o53gk=
 github.com/kubescape/storage v0.0.107-0.20240901104752-29e5c274f4aa h1:fSXcRroSwNIptkPT5eOXxljdmFXtyCVBxolmulrDdKI=
 github.com/kubescape/storage v0.0.107-0.20240901104752-29e5c274f4aa/go.mod h1:RvMJc8iRqikiLie3PR8r68fo//vixBi+7se739o53gk=
+github.com/kubescape/storage v0.0.107-0.20240901144200-d18f37ff5a21 h1:FZAmxzaKQ+HQOjUAfTcyl6EWFK3yWOCmVCz3wv7Ktf0=
+github.com/kubescape/storage v0.0.107-0.20240901144200-d18f37ff5a21/go.mod h1:RvMJc8iRqikiLie3PR8r68fo//vixBi+7se739o53gk=
 github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80/go.mod h1:imJHygn/1yfhB7XSJJKlFZKl/J+dCPAknuiaGOshXAs=
 github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de h1:9TO3cAIGXtEhnIaL+V+BEER86oLrvS+kWobKpbJuye0=
 github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de/go.mod h1:zAbeS9B/r2mtpb6U+EI2rYA5OAXxsYw6wTamcNW+zcE=
