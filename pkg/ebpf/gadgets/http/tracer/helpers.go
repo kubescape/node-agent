@@ -13,55 +13,44 @@ import (
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 )
 
-type HTTPRequestData struct {
-	Method  string
-	URL     string
-	Headers http.Header
-}
-type HTTPResponseData struct {
-	StatusCode int
-	Status     string
-	Headers    http.Header
-}
-
-func parseHTTPRequest(data []byte) (HTTPRequestData, error) {
+func parseHTTPRequest(data []byte) (tracerhttptype.HTTPRequestData, error) {
 	bufReader := bufio.NewReader(bytes.NewReader(data))
 
 	// Use http.ReadRequest to parse the HTTP request
 	req, err := http.ReadRequest(bufReader)
 	if err != nil {
-		return HTTPRequestData{}, err
+		return tracerhttptype.HTTPRequestData{}, err
 	}
 	defer req.Body.Close()
 
-	return HTTPRequestData{
+	return tracerhttptype.HTTPRequestData{
 		Method:  req.Method,
 		URL:     req.URL.String(),
 		Headers: req.Header,
 	}, nil
 }
 
-func parseHTTPResponse(data []byte) (HTTPResponseData, error) {
+func parseHTTPResponse(data []byte) (tracerhttptype.HTTPResponseData, error) {
 	bufReader := bufio.NewReader(bytes.NewReader(data))
 
 	// Read the first line to get the status
 	statusLine, err := bufReader.ReadString('\n')
 	if err != nil {
-		return HTTPResponseData{}, fmt.Errorf("error reading status line: %v", err)
+		return tracerhttptype.HTTPResponseData{}, fmt.Errorf("error reading status line: %v", err)
 	}
 
 	// Parse status line
 	parts := strings.SplitN(strings.TrimSpace(statusLine), " ", 3)
 	if len(parts) < 3 {
-		return HTTPResponseData{}, fmt.Errorf("invalid status line: %s", statusLine)
+		return tracerhttptype.HTTPResponseData{}, fmt.Errorf("invalid status line: %s", statusLine)
 	}
 
 	statusCode, err := strconv.Atoi(parts[1])
 	if err != nil {
-		return HTTPResponseData{}, fmt.Errorf("invalid status code: %v", err)
+		return tracerhttptype.HTTPResponseData{}, fmt.Errorf("invalid status code: %v", err)
 	}
 
 	// Parse headers
@@ -87,7 +76,7 @@ func parseHTTPResponse(data []byte) (HTTPResponseData, error) {
 		headers.Add(key, value)
 	}
 
-	return HTTPResponseData{
+	return tracerhttptype.HTTPResponseData{
 		StatusCode: statusCode,
 		Status:     strings.Join(parts[2:], " "),
 		Headers:    headers,
@@ -103,7 +92,7 @@ func FromCString(in []byte) []byte {
 	return in
 }
 
-func (t *Tracer) ParseHTTP(rawSample []byte) (*types.Event, error) {
+func (t *Tracer) ParseHTTP(rawSample []byte) (*tracerhttptype.Event, error) {
 	bpfEvent := (*http_snifferHttpevent)(unsafe.Pointer(&rawSample[0]))
 
 	ip := make(net.IP, 4)
@@ -114,7 +103,7 @@ func (t *Tracer) ParseHTTP(rawSample []byte) (*types.Event, error) {
 		return nil, err
 	}
 
-	event := types.Event{
+	event := tracerhttptype.Event{
 		Event: eventtypes.Event{
 			Type:      eventtypes.NORMAL,
 			Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
@@ -127,12 +116,12 @@ func (t *Tracer) ParseHTTP(rawSample []byte) (*types.Event, error) {
 		Syscall:       string(bpfEvent.Syscall[:]),
 		OtherPort:     bpfEvent.OtherPort,
 		OtherIp:       ip.String(),
-		Headers:       httpData,
+		HttpData:      httpData,
 	}
 
 	return &event, nil
 }
-func GetHttpData(bpfEvent *http_snifferHttpevent) (types.HTTPData, error) {
+func GetHttpData(bpfEvent *http_snifferHttpevent) (tracerhttptype.HTTPData, error) {
 	switch bpfEvent.Type {
 	case EVENT_TYPE_REQUEST:
 		httpData, err := parseHTTPRequest(FromCString(bpfEvent.Buf[:]))

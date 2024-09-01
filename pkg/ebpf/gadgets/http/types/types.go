@@ -1,13 +1,24 @@
 package types
 
 import (
+	"net/http"
+
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/columns"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 type HTTPData interface {
 }
-
+type HTTPRequestData struct {
+	Method  string
+	URL     string
+	Headers http.Header
+}
+type HTTPResponseData struct {
+	StatusCode int
+	Status     string
+	Headers    http.Header
+}
 type Event struct {
 	eventtypes.Event
 	eventtypes.WithMountNsID
@@ -19,7 +30,7 @@ type Event struct {
 	OtherPort uint16   `json:"other_port,omitempty" column:"other_port,template:other_port"`
 	OtherIp   string   `json:"other_ip,omitempty" column:"other_ip,template:other_ip"`
 	Syscall   string   `json:"syscall,omitempty" column:"syscall,template:syscall"`
-	Headers   HTTPData `json:"headers,omitempty" column:"headers,template:headers"`
+	HttpData  HTTPData `json:"headers,omitempty" column:"headers,template:headers"`
 }
 
 func GetColumns() *columns.Columns[Event] {

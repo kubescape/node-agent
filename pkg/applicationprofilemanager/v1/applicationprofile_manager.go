@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/config"
+	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
@@ -37,18 +38,20 @@ type ApplicationProfileManager struct {
 	cfg                      config.Config
 	clusterName              string
 	ctx                      context.Context
-	containerMutexes         storageUtils.MapMutex[string]                                   // key is k8sContainerID
-	trackedContainers        mapset.Set[string]                                              // key is k8sContainerID
-	removedContainers        mapset.Set[string]                                              // key is k8sContainerID
-	savedCapabilities        maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
-	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, []string]]           // key is k8sContainerID
-	droppedEvents            maps.SafeMap[string, bool]                                      // key is k8sContainerID
-	savedOpens               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
-	savedSyscalls            maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
-	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
-	toSaveExecs              maps.SafeMap[string, *maps.SafeMap[string, []string]]           // key is k8sContainerID
-	toSaveOpens              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
-	watchedContainerChannels maps.SafeMap[string, chan error]                                // key is ContainerID
+	containerMutexes         storageUtils.MapMutex[string]                                      // key is k8sContainerID
+	trackedContainers        mapset.Set[string]                                                 // key is k8sContainerID
+	removedContainers        mapset.Set[string]                                                 // key is k8sContainerID
+	savedCapabilities        maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
+	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, []string]]              // key is k8sContainerID
+	droppedEvents            maps.SafeMap[string, bool]                                         // key is k8sContainerID
+	savedOpens               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]]    // key is k8sContainerID
+	savedHttpEndpoints       maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.HTTPEndpoint]] // key is k8sContainerID
+	savedSyscalls            maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
+	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
+	toSaveExecs              maps.SafeMap[string, *maps.SafeMap[string, []string]]              // key is k8sContainerID
+	toSaveOpens              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]]    // key is k8sContainerID
+	toSaveHttpEndpoints      maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.HTTPEndpoint]] // key is k8sContainerID
+	watchedContainerChannels maps.SafeMap[string, chan error]                                   // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
 	k8sObjectCache           objectcache.K8sObjectCache
 	storageClient            storage.StorageClient
@@ -292,6 +295,19 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		opens[path].Append(open.ToSlice()...)
 		return true
 	})
+
+	endpoints := make(map[string]mapset.Set[*v1beta1.HTTPEndpoint])
+
+	toSaveHttpEndpoints := am.toSaveHttpEndpoints.Get(watchedContainer.K8sContainerID)
+	am.toSaveHttpEndpoints.Set(watchedContainer.K8sContainerID, new(maps.SafeMap[string, *v1beta1.HTTPEndpoint]))
+	toSaveHttpEndpoints.Range(func(path string, endpoint *v1beta1.HTTPEndpoint) bool {
+		if _, exist := endpoints[path]; !exist {
+			endpoints[path] = mapset.NewSet[*v1beta1.HTTPEndpoint]()
+		}
+		endpoints[path].Add(endpoint)
+		return true
+	})
+
 	// new activity
 	// the process tries to use JSON patching to avoid conflicts between updates on the same object from different containers
 	// 0. create both a patch and a new object
@@ -301,9 +317,9 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// 3a. the object is missing its container slice - ADD one with the container profile at the right index
 	// 3b. the object is missing the container profile - ADD the container profile at the right index
 	// 3c. default - patch the container ourselves and REPLACE it at the right index
-	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || watchedContainer.StatusUpdated() {
+	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || len(endpoints) > 0 || watchedContainer.StatusUpdated() {
 		// 0. calculate patch
-		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, endpoints, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
 		operations = append(operations, utils.PatchOperation{
 			Op:    "add",
@@ -592,6 +608,7 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.toSaveCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
 		am.toSaveExecs.Set(k8sContainerID, new(maps.SafeMap[string, []string]))
 		am.toSaveOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
+		am.toSaveHttpEndpoints.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		am.trackedContainers.Add(k8sContainerID)
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
@@ -618,7 +635,7 @@ func (am *ApplicationProfileManager) ReportCapability(k8sContainerID, capability
 	am.toSaveCapabilities.Get(k8sContainerID).Add(capability)
 }
 
-func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string, args []string) {
+func (am *ApplicationProfileManager) ReportFileExaec(k8sContainerID, path string, args []string) {
 	// skip empty path
 	if path == "" {
 		return
@@ -663,3 +680,47 @@ func (am *ApplicationProfileManager) ReportDroppedEvent(k8sContainerID string) {
 	}
 	am.droppedEvents.Set(k8sContainerID, true)
 }
+
+func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, event *tracerhttptype.Event) {
+	// Afek: Think about where to do URL filtering
+	if err := am.waitForContainer(k8sContainerID); err != nil {
+		return
+	}
+
+	req, ok := event.HttpData.(*tracerhttptype.HTTPRequestData)
+	if !ok {
+		return
+	}
+
+	saveHttp := am.toSaveHttpEndpoints.Get(k8sContainerID)
+	internal := event.OtherIp != "127.0.0.1"
+	direction := "outbound"
+	if event.Syscall == "read" || event.Syscall == "readv" || event.Syscall == "recvfrom" || event.Syscall == "recvmsg" {
+		direction = "inbound"
+	}
+
+	saveHttp.Set(req.URL, mapset.NewSet(req.Method, internal, direction, req.Headers))
+
+}
+
+/*
+	Pid       uint32   `json:"pid,omitempty" column:"pid,template:pid"`
+	Uid       uint32   `json:"uid,omitempty" column:"uid,template:uid"`
+	Gid       uint32   `json:"gid,omitempty" column:"gid,template:gid"`
+	OtherPort uint16   `json:"other_port,omitempty" column:"other_port,template:other_port"`
+	OtherIp   string   `json:"other_ip,omitempty" column:"other_ip,template:other_ip"`
+	Syscall   string   `json:"syscall,omitempty" column:"syscall,template:syscall"`
+	Headers   HTTPData `json:"headers,omitempty" column:"headers,template:headers"`
+*/
+
+/*
+type HTTPEndpoint struct {
+	Endpoint  string            `json:"endpoint,omitempty"`
+	Methods   []string          `json:"methods,omitempty"`
+	Internal  bool              `json:"internal,omitempty"`
+	Direction string            `json:"direction,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+}
+		Endpoints      []HTTPEndpoint       `json:"endpoints"`
+
+*/
