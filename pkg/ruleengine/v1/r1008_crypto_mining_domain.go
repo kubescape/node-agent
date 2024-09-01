@@ -168,6 +168,12 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 	}
 
 	if dnsEvent, ok := event.(*tracerdnstype.Event); ok {
+		// Only check for DNS queries.
+		if dnsEvent.Qr != tracerdnstype.DNSPktTypeQuery {
+			return nil
+		}
+
+		// Check if the domain is in the list of commonly used crypto miners domains.
 		if slices.Contains(commonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
