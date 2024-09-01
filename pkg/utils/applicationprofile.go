@@ -8,7 +8,7 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]mapset.Set[*v1beta1.HTTPEndpoint], containerType string, containerIndex int) []PatchOperation {
+func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, containerType string, containerIndex int) []PatchOperation {
 	var profileOperations []PatchOperation
 	// add capabilities
 	sort.Strings(capabilities)

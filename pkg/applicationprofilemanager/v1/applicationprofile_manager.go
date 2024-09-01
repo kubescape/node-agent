@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -296,15 +297,14 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		return true
 	})
 
-	endpoints := make(map[string]mapset.Set[*v1beta1.HTTPEndpoint])
+	endpoints := make(map[string]*v1beta1.HTTPEndpoint)
 
 	toSaveHttpEndpoints := am.toSaveHttpEndpoints.Get(watchedContainer.K8sContainerID)
 	am.toSaveHttpEndpoints.Set(watchedContainer.K8sContainerID, new(maps.SafeMap[string, *v1beta1.HTTPEndpoint]))
 	toSaveHttpEndpoints.Range(func(path string, endpoint *v1beta1.HTTPEndpoint) bool {
 		if _, exist := endpoints[path]; !exist {
-			endpoints[path] = mapset.NewSet[*v1beta1.HTTPEndpoint]()
+			endpoints[path] = endpoint
 		}
-		endpoints[path].Add(endpoint)
 		return true
 	})
 
@@ -605,11 +605,12 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.savedExecs.Set(k8sContainerID, new(maps.SafeMap[string, []string]))
 		am.savedOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		am.savedSyscalls.Set(k8sContainerID, mapset.NewSet[string]())
+		am.savedHttpEndpoints.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.HTTPEndpoint]))
 		am.toSaveCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
 		am.toSaveExecs.Set(k8sContainerID, new(maps.SafeMap[string, []string]))
 		am.toSaveOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
-		am.toSaveHttpEndpoints.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
-		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
+		am.toSaveHttpEndpoints.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.HTTPEndpoint]))
+		am.removedContainers.Remove(k8sContainerID)
 		am.trackedContainers.Add(k8sContainerID)
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
 
@@ -689,38 +690,64 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 
 	req, ok := event.HttpData.(*tracerhttptype.HTTPRequestData)
 	if !ok {
+		logger.L().Error("Failed to cast event to HTTPRequestData")
 		return
 	}
 
-	saveHttp := am.toSaveHttpEndpoints.Get(k8sContainerID)
-	internal := event.OtherIp != "127.0.0.1"
-	direction := "outbound"
-	if event.Syscall == "read" || event.Syscall == "readv" || event.Syscall == "recvfrom" || event.Syscall == "recvmsg" {
-		direction = "inbound"
+	endpoint, err := am.GetEndpoint(k8sContainerID, req, event)
+	if err != nil {
+		logger.L().Info("No update", helpers.Error(err))
+		return
 	}
 
-	saveHttp.Set(req.URL, mapset.NewSet(req.Method, internal, direction, req.Headers))
-
+	tosaveHttp := am.toSaveHttpEndpoints.Get(k8sContainerID)
+	tosaveHttp.Set(req.URL, endpoint)
 }
 
-/*
-	Pid       uint32   `json:"pid,omitempty" column:"pid,template:pid"`
-	Uid       uint32   `json:"uid,omitempty" column:"uid,template:uid"`
-	Gid       uint32   `json:"gid,omitempty" column:"gid,template:gid"`
-	OtherPort uint16   `json:"other_port,omitempty" column:"other_port,template:other_port"`
-	OtherIp   string   `json:"other_ip,omitempty" column:"other_ip,template:other_ip"`
-	Syscall   string   `json:"syscall,omitempty" column:"syscall,template:syscall"`
-	Headers   HTTPData `json:"headers,omitempty" column:"headers,template:headers"`
-*/
+func (am *ApplicationProfileManager) GetEndpoint(k8sContainerID string, request *tracerhttptype.HTTPRequestData, event *tracerhttptype.Event) (*v1beta1.HTTPEndpoint, error) {
+	endpoint, err := am.GetSavedEndpoint(k8sContainerID, request.URL)
+	if err != nil {
+		return GetNewEndpoint(request, event)
+	}
 
-/*
-type HTTPEndpoint struct {
-	Endpoint  string            `json:"endpoint,omitempty"`
-	Methods   []string          `json:"methods,omitempty"`
-	Internal  bool              `json:"internal,omitempty"`
-	Direction string            `json:"direction,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty"`
+	// TODO: Add headers to the endpoint
+	if !slices.Contains(endpoint.Methods, request.Method) {
+		endpoint.Methods = append(endpoint.Methods, request.Method)
+		return endpoint, nil
+	}
+
+	return nil, fmt.Errorf("Endpoint already exists")
 }
-		Endpoints      []HTTPEndpoint       `json:"endpoints"`
 
-*/
+func (am *ApplicationProfileManager) GetSavedEndpoint(k8sContainerID string, url string) (*v1beta1.HTTPEndpoint, error) {
+	savedHttpEndpoints := am.savedHttpEndpoints.Get(k8sContainerID)
+	saveHttp := am.toSaveHttpEndpoints.Get(k8sContainerID)
+
+	if savedHttpEndpoints != nil {
+		if endpoint := savedHttpEndpoints.Get(url); endpoint != nil {
+			return endpoint, nil
+		}
+	}
+	if saveHttp != nil {
+		if endpoint := saveHttp.Get(url); endpoint != nil {
+			return endpoint, nil
+		}
+	}
+	return nil, fmt.Errorf("Endpoint not found")
+}
+
+func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttptype.Event) (*v1beta1.HTTPEndpoint, error) {
+	internal := tracerhttptype.IsInternal(event.OtherIp)
+
+	direction, err := tracerhttptype.GetPacketDirection(event)
+	if err != nil {
+		logger.L().Error("Failed to get packet direction", helpers.Error(err))
+		return nil, err
+	}
+	return &v1beta1.HTTPEndpoint{
+		Endpoint:  request.URL,
+		Methods:   []string{request.Method},
+		Internal:  internal,
+		Direction: string(direction),
+		Headers:   tracerhttptype.ExtractConsistentHeaders(request.Headers)}, nil
+}

@@ -1,14 +1,52 @@
 package types
 
 import (
+	"fmt"
+	"net"
 	"net/http"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/columns"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
+// TODO: Import from storage types
+type NetworkDirection string
+
+const (
+	Inbound  NetworkDirection = "inbound"
+	Outbound NetworkDirection = "outbound"
+)
+
+var ConsistentHeaders = []string{
+	"Accept",
+	"Accept-Encoding",
+	"Accept-Language",
+	"Cache-Control",
+	"Connection",
+	"DNT",
+	"Host",
+	"Pragma",
+	"Upgrade-Insecure-Requests",
+	"User-Agent",
+}
+
+var writeSyscalls = map[string]bool{
+	"write":   true,
+	"writev":  true,
+	"sendto":  true,
+	"sendmsg": true,
+}
+
+var readSyscalls = map[string]bool{
+	"read":     true,
+	"readv":    true,
+	"recvfrom": true,
+	"recvmsg":  true,
+}
+
 type HTTPData interface {
 }
+
 type HTTPRequestData struct {
 	Method  string
 	URL     string
@@ -33,10 +71,36 @@ type Event struct {
 	HttpData  HTTPData `json:"headers,omitempty" column:"headers,template:headers"`
 }
 
-func GetColumns() *columns.Columns[Event] {
-	sshColumns := columns.MustCreateColumns[Event]()
+func GetPacketDirection(event *Event) (NetworkDirection, error) {
+	if readSyscalls[event.Syscall] {
+		return Inbound, nil
+	} else if writeSyscalls[event.Syscall] {
+		return Outbound, nil
+	} else {
+		return "", fmt.Errorf("unknown syscall %s", event.Syscall)
+	}
+}
 
-	return sshColumns
+func IsInternal(ip string) bool {
+	ipAddress := net.ParseIP(ip)
+	return ipAddress.IsPrivate()
+}
+func ExtractConsistentHeaders(headers http.Header) map[string]string {
+	result := make(map[string]string)
+
+	for _, header := range ConsistentHeaders {
+		if value := headers.Get(header); value != "" {
+			result[header] = value
+		}
+	}
+
+	return result
+}
+
+func GetColumns() *columns.Columns[Event] {
+	httpColumns := columns.MustCreateColumns[Event]()
+
+	return httpColumns
 }
 
 func Base(ev eventtypes.Event) *Event {
