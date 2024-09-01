@@ -322,8 +322,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
 		metrics.ReportEvent(utils.HTTPEventType)
-		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
+		applicationProfileManager.ReportHTTPEvent(k8sContainerID, &event)
 
 	})
 

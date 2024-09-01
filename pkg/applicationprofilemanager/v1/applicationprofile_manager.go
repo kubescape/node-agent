@@ -636,7 +636,7 @@ func (am *ApplicationProfileManager) ReportCapability(k8sContainerID, capability
 	am.toSaveCapabilities.Get(k8sContainerID).Add(capability)
 }
 
-func (am *ApplicationProfileManager) ReportFileExaec(k8sContainerID, path string, args []string) {
+func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string, args []string) {
 	// skip empty path
 	if path == "" {
 		return
@@ -748,6 +748,6 @@ func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttpty
 		Endpoint:  request.URL,
 		Methods:   []string{request.Method},
 		Internal:  internal,
-		Direction: string(direction),
+		Direction: direction,
 		Headers:   tracerhttptype.ExtractConsistentHeaders(request.Headers)}, nil
 }

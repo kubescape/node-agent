@@ -7,14 +7,7 @@ import (
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/columns"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-)
-
-// TODO: Import from storage types
-type NetworkDirection string
-
-const (
-	Inbound  NetworkDirection = "inbound"
-	Outbound NetworkDirection = "outbound"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 var ConsistentHeaders = []string{
@@ -71,11 +64,11 @@ type Event struct {
 	HttpData  HTTPData `json:"headers,omitempty" column:"headers,template:headers"`
 }
 
-func GetPacketDirection(event *Event) (NetworkDirection, error) {
+func GetPacketDirection(event *Event) (v1beta1.NetworkDirection, error) {
 	if readSyscalls[event.Syscall] {
-		return Inbound, nil
+		return v1beta1.Inbound, nil
 	} else if writeSyscalls[event.Syscall] {
-		return Outbound, nil
+		return v1beta1.Outbound, nil
 	} else {
 		return "", fmt.Errorf("unknown syscall %s", event.Syscall)
 	}
