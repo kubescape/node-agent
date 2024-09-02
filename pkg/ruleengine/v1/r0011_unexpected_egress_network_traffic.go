@@ -181,20 +181,3 @@ func isPrivateIP(ip string) bool {
 
 	return false
 }
-
-// extractDomain extracts the domain from a DNS record
-func extractDomain(dnsRecord string) string {
-	// Remove any trailing dot
-	dnsRecord = strings.TrimSuffix(dnsRecord, ".")
-
-	// Split the DNS record into parts
-	parts := strings.Split(dnsRecord, ".")
-
-	// If we have 2 or fewer parts, return the whole thing
-	if len(parts) <= 2 {
-		return dnsRecord
-	}
-
-	// For longer DNS records, return the last two parts
-	return strings.Join(parts[len(parts)-2:], ".")
-}
