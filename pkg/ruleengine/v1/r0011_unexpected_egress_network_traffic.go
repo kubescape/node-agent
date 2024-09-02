@@ -76,12 +76,8 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 
 		domain := objCache.DnsCache().ResolveIpToDomain(networkEvent.DstEndpoint.Addr)
 
-		var domains []string
-		if domain == "" {
-			domains, err = net.LookupAddr(networkEvent.DstEndpoint.Addr)
-			if err != nil {
-				domains = []string{}
-			}
+		if domain != "" {
+			return nil
 		}
 
 		// Check if the address is in the egress list and isn't in cluster.
@@ -93,20 +89,6 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 			// Check if we seen this dns name before and it's in-cluster address and in the egress list.
 			if domain != "" && (strings.HasSuffix(domain, "svc.cluster.local.") || slices.Contains(egress.DNSNames, domain)) {
 				return nil
-			}
-
-			// Check if the domain is in the egress list.
-			for _, dnsName := range domains {
-				if strings.HasSuffix(dnsName, "svc.cluster.local.") {
-					return nil
-				}
-
-				domainFromRecord := extractDomain(dnsName)
-				for _, dns := range egress.DNSNames {
-					if domainFromRecord == extractDomain(dns) {
-						return nil
-					}
-				}
 			}
 		}
 
@@ -174,6 +156,11 @@ func isPrivateIP(ip string) bool {
 	parsedIP := net.ParseIP(ip)
 	if parsedIP == nil {
 		return false
+	}
+
+	// Check if IP is localhost
+	if parsedIP.IsLoopback() {
+		return true
 	}
 
 	// Check if IP is in private IP ranges
