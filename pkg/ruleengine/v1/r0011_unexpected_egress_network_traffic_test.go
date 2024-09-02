@@ -137,3 +137,71 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 		t.Errorf("Expected ruleResult to not be nil since it's a different protocol")
 	}
 }
+
+func TestExtractDomain(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Simple domain",
+			input:    "example.com",
+			expected: "example.com",
+		},
+		{
+			name:     "Subdomain",
+			input:    "sub.example.com",
+			expected: "example.com",
+		},
+		{
+			name:     "Multiple subdomains",
+			input:    "a.b.c.example.com",
+			expected: "example.com",
+		},
+		{
+			name:     "Domain with trailing dot",
+			input:    "example.com.",
+			expected: "example.com",
+		},
+		{
+			name:     "Subdomain with trailing dot",
+			input:    "sub.example.com.",
+			expected: "example.com",
+		},
+		{
+			name:     "Single word",
+			input:    "localhost",
+			expected: "localhost",
+		},
+		{
+			name:     "Empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "Two-part domain",
+			input:    "co.uk",
+			expected: "co.uk",
+		},
+		{
+			name:     "Subdomain of two-part domain",
+			input:    "example.co.uk",
+			expected: "co.uk",
+		},
+		{
+			name:     "Multiple subdomains of two-part domain",
+			input:    "a.b.example.co.uk",
+			expected: "co.uk",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractDomain(tt.input)
+			if result != tt.expected {
+				t.Errorf("extractDomain(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
