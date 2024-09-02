@@ -7,7 +7,7 @@ import (
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/columns"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
 
 var ConsistentHeaders = []string{
@@ -64,19 +64,22 @@ type Event struct {
 	HttpData  HTTPData `json:"headers,omitempty" column:"headers,template:headers"`
 }
 
-func GetPacketDirection(event *Event) (v1beta1.NetworkDirection, error) {
+func GetPacketDirection(event *Event) (consts.NetworkDirection, error) {
 	if readSyscalls[event.Syscall] {
-		return v1beta1.Inbound, nil
+		return consts.Inbound, nil
 	} else if writeSyscalls[event.Syscall] {
-		return v1beta1.Outbound, nil
+		return consts.Outbound, nil
 	} else {
 		return "", fmt.Errorf("unknown syscall %s", event.Syscall)
 	}
 }
 
-func IsInternal(ip string) bool {
+func IsInternal(ip string) consts.IsInternal {
 	ipAddress := net.ParseIP(ip)
-	return ipAddress.IsPrivate()
+	if ipAddress.IsPrivate() {
+		return consts.True
+	}
+	return consts.False
 }
 func ExtractConsistentHeaders(headers http.Header) map[string]string {
 	result := make(map[string]string)

@@ -22,7 +22,7 @@ require (
 	github.com/kubescape/backend v0.0.20
 	github.com/kubescape/go-logger v0.0.22
 	github.com/kubescape/k8s-interface v0.0.170
-	github.com/kubescape/storage v0.0.107-0.20240901144200-d18f37ff5a21
+	github.com/kubescape/storage v0.0.107-0.20240902145027-92f49a3dec2c
 	github.com/panjf2000/ants/v2 v2.9.1
 	github.com/prometheus/alertmanager v0.27.0
 	github.com/prometheus/client_golang v1.19.1

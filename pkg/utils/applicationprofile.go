@@ -71,9 +71,9 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 		profileOperations = append(profileOperations, PatchOperation{
 			Op:    "add",
 			Path:  httpEndpoints,
-			Value: endpoint,
+			Value: *endpoint,
 		})
-		logger.L().Info("Added HTTP endpoint to profile")
+		logger.L().Debug("Added HTTP endpoint to profile")
 	}
 
 	return profileOperations
