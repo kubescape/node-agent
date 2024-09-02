@@ -17,6 +17,7 @@ type Config struct {
 	InitialDelay             time.Duration             `mapstructure:"initialDelay"`
 	MaxSniffingTime          time.Duration             `mapstructure:"maxSniffingTimePerContainer"`
 	UpdateDataPeriod         time.Duration             `mapstructure:"updateDataPeriod"`
+	MaxJitterPercentage      int                       `mapstructure:"maxJitterPercentage"`
 	EnableFullPathTracing    bool                      `mapstructure:"fullPathTracingEnabled"`
 	EnableApplicationProfile bool                      `mapstructure:"applicationProfileServiceEnabled"`
 	EnableMalwareDetection   bool                      `mapstructure:"malwareDetectionEnabled"`
@@ -40,6 +41,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("fullPathTracingEnabled", true)
 	viper.SetDefault("initialDelay", 2*time.Minute)
 	viper.SetDefault("nodeProfileInterval", 10*time.Minute)
+	viper.SetDefault("maxJitterPercentage", 5)
 
 	viper.AutomaticEnv()
 
