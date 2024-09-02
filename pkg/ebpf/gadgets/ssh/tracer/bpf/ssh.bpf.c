@@ -90,8 +90,8 @@ int ssh_detector(struct __sk_buff *skb) {
             event->gid = (__u32)(skb_val->uid_gid >> 32);
             __builtin_memcpy(&event->comm, skb_val->task, sizeof(event->comm));
 
-            event->src_ip = iph.saddr;
-            event->dst_ip = iph.daddr;
+            event->src_ip = bpf_ntohl(iph.saddr);
+            event->dst_ip = bpf_ntohl(iph.daddr);
             event->src_port = bpf_ntohs(tcph.source);
             event->dst_port = bpf_ntohs(tcph.dest);
 

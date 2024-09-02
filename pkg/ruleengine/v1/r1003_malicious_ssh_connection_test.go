@@ -32,7 +32,7 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 		SrcIP:   "1.1.1.1",
 		DstIP:   "2.2.2.2",
 		DstPort: 22,
-		SrcPort: 1234,
+		SrcPort: 33333,
 	}
 
 	failure := rule.ProcessEvent(utils.SSHEventType, sshEvent, &RuleObjectCacheMock{})
