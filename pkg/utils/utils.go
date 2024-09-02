@@ -165,11 +165,13 @@ func CreateK8sPodID(namespaceName string, podName string) string {
 	return strings.Join([]string{namespaceName, podName}, "/")
 }
 
-// AddRandomDuration adds between min and max seconds to duration
-func AddRandomDuration(min, max int, duration time.Duration) time.Duration {
-	// we don't initialize the seed, so we will get the same sequence of random numbers every time
-	randomDuration := time.Duration(rand.Intn(max+1-min)+min) * time.Second
-	return randomDuration + duration
+// AddJitter adds jitter percent to the duration
+func AddJitter(duration time.Duration, maxJitterPercentage int) time.Duration {
+	if maxJitterPercentage == 0 {
+		return duration
+	}
+	jitter := 1 + rand.Intn(maxJitterPercentage)/100
+	return duration * time.Duration(jitter)
 }
 
 func Atoi(s string) int {

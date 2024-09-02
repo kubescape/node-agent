@@ -253,7 +253,7 @@ func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *con
 			// adjust ticker after first tick
 			if !watchedContainer.InitialDelayExpired {
 				watchedContainer.InitialDelayExpired = true
-				watchedContainer.UpdateDataTicker.Reset(rm.cfg.UpdateDataPeriod)
+				watchedContainer.UpdateDataTicker.Reset(utils.AddJitter(rm.cfg.UpdateDataPeriod, rm.cfg.MaxJitterPercentage))
 			}
 			// handle collection of relevant data
 			rm.handleRelevancy(ctx, watchedContainer, container.Runtime.ContainerID)
@@ -284,7 +284,7 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:      container.Runtime.ContainerID,
-		UpdateDataTicker: time.NewTicker(rm.cfg.InitialDelay),
+		UpdateDataTicker: time.NewTicker(utils.AddJitter(rm.cfg.InitialDelay, rm.cfg.MaxJitterPercentage)),
 		SyncChannel:      make(chan error, 10),
 		K8sContainerID:   k8sContainerID,
 		RelevantRelationshipsArtifactsByIdentifier: make(map[string]bool),

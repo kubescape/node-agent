@@ -44,7 +44,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 
 		// Check if Pod has a label of max sniffing time
-		sniffingTime := ch.cfg.MaxSniffingTime
+		sniffingTime := utils.AddJitter(ch.cfg.MaxSniffingTime, ch.cfg.MaxJitterPercentage)
 		if podLabelMaxSniffingTime, ok := notif.Container.K8s.PodLabels[MaxSniffingTimeLabel]; ok {
 			if duration, err := time.ParseDuration(podLabelMaxSniffingTime); err == nil {
 				sniffingTime = duration
