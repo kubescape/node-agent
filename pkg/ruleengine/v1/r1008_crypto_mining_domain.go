@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -145,6 +146,7 @@ var _ ruleengine.RuleEvaluator = (*R1008CryptoMiningDomainCommunication)(nil)
 
 type R1008CryptoMiningDomainCommunication struct {
 	BaseRule
+	alertedDomains maps.SafeMap[string, bool]
 }
 
 func CreateRuleR1008CryptoMiningDomainCommunication() *R1008CryptoMiningDomainCommunication {
@@ -168,6 +170,10 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 	}
 
 	if dnsEvent, ok := event.(*tracerdnstype.Event); ok {
+		if rule.alertedDomains.Has(dnsEvent.DNSName) {
+			return nil
+		}
+
 		if slices.Contains(commonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
@@ -195,6 +201,8 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 				},
 				RuleID: rule.ID(),
 			}
+
+			rule.alertedDomains.Set(dnsEvent.DNSName, true)
 
 			return &ruleFailure
 		}

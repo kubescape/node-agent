@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -36,6 +37,7 @@ var _ ruleengine.RuleEvaluator = (*R0005UnexpectedDomainRequest)(nil)
 
 type R0005UnexpectedDomainRequest struct {
 	BaseRule
+	alertedDomains maps.SafeMap[string, bool]
 }
 
 func CreateRuleR0005UnexpectedDomainRequest() *R0005UnexpectedDomainRequest {
@@ -45,6 +47,7 @@ func CreateRuleR0005UnexpectedDomainRequest() *R0005UnexpectedDomainRequest {
 func (rule *R0005UnexpectedDomainRequest) Name() string {
 	return R0005Name
 }
+
 func (rule *R0005UnexpectedDomainRequest) ID() string {
 	return R0005ID
 }
@@ -65,6 +68,10 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 
 	domainEvent, ok := event.(*tracerdnstype.Event)
 	if !ok {
+		return nil
+	}
+
+	if rule.alertedDomains.Has(domainEvent.DNSName) {
 		return nil
 	}
 
@@ -122,6 +129,8 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		},
 		RuleID: rule.ID(),
 	}
+
+	rule.alertedDomains.Set(domainEvent.DNSName, true)
 
 	return &ruleFailure
 }
