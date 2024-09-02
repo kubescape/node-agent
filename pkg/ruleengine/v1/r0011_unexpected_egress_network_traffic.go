@@ -76,6 +76,14 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 
 		domain := objCache.DnsCache().ResolveIpToDomain(networkEvent.DstEndpoint.Addr)
 
+		var domains []string
+		if domain == "" {
+			domains, err = net.LookupAddr(networkEvent.DstEndpoint.Addr)
+			if err != nil {
+				domains = []string{}
+			}
+		}
+
 		// Check if the address is in the egress list and isn't in cluster.
 		for _, egress := range nnContainer.Egress {
 			if egress.IPAddress == networkEvent.DstEndpoint.Addr {
@@ -85,6 +93,16 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 			// Check if we seen this dns name before and it's in-cluster address and in the egress list.
 			if domain != "" && (strings.HasSuffix(domain, "svc.cluster.local.") || slices.Contains(egress.DNSNames, domain)) {
 				return nil
+			}
+
+			// Check if the domain is in the egress list.
+			for _, dnsName := range domains {
+				domainFromRecord := extractDomain(dnsName)
+				for _, dns := range egress.DNSNames {
+					if domainFromRecord == extractDomain(dns) {
+						return nil
+					}
+				}
 			}
 		}
 
@@ -171,4 +189,21 @@ func isPrivateIP(ip string) bool {
 	}
 
 	return false
+}
+
+// extractDomain extracts the domain from a DNS record
+func extractDomain(dnsRecord string) string {
+	// Remove any trailing dot
+	dnsRecord = strings.TrimSuffix(dnsRecord, ".")
+
+	// Split the DNS record into parts
+	parts := strings.Split(dnsRecord, ".")
+
+	// If we have 2 or fewer parts, return the whole thing
+	if len(parts) <= 2 {
+		return dnsRecord
+	}
+
+	// For longer DNS records, return the last two parts
+	return strings.Join(parts[len(parts)-2:], ".")
 }
