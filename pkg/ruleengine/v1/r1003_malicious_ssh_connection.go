@@ -76,6 +76,10 @@ func ReadPortRange() ([2]uint16, error) {
 		return [2]uint16{startPort, endPort}, fmt.Errorf("failed to convert end port: %v", err)
 	}
 
+	if startPortInt < 0 || startPortInt > 65535 || endPortInt < 0 || endPortInt > 65535 {
+		return [2]uint16{startPort, endPort}, fmt.Errorf("invalid port range")
+	}
+
 	return [2]uint16{uint16(startPortInt), uint16(endPortInt)}, nil
 }
 
