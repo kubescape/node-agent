@@ -97,6 +97,10 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 
 			// Check if the domain is in the egress list.
 			for _, dnsName := range domains {
+				if strings.HasSuffix(dnsName, "svc.cluster.local.") {
+					return nil
+				}
+
 				domainFromRecord := extractDomain(dnsName)
 				for _, dns := range egress.DNSNames {
 					if domainFromRecord == extractDomain(dns) {
