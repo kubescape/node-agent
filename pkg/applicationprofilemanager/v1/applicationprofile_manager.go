@@ -27,6 +27,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/utils/urldynamicdetector"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 	"go.opentelemetry.io/otel"
@@ -60,6 +61,7 @@ type ApplicationProfileManager struct {
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	preRunningContainerIDs   mapset.Set[string]
 	seccompManager           seccompmanager.SeccompManagerClient
+	urlAnalyzer              *urldynamicdetector.URLAnalyzer
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
@@ -77,6 +79,7 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		removedContainers:      mapset.NewSet[string](),
 		preRunningContainerIDs: preRunningContainerIDs,
 		seccompManager:         seccompManager,
+		urlAnalyzer:            urldynamicdetector.NewURLAnalyzer(),
 	}, nil
 }
 
@@ -709,20 +712,25 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 		return
 	}
 
-	endpoint, err := am.GetEndpoint(k8sContainerID, &req, event)
+	url, err := am.GetURL(&req)
 	if err != nil {
 		return
 	}
-	url := GetURL(&req)
+
+	endpoint, err := am.GetEndpoint(k8sContainerID, &req, event, url)
+	if err != nil {
+		return
+	}
+
 	tosaveHttp := am.toSaveHttpEndpoints.Get(k8sContainerID)
 	tosaveHttp.Set(url, endpoint)
 }
 
-func (am *ApplicationProfileManager) GetEndpoint(k8sContainerID string, request *tracerhttptype.HTTPRequestData, event *tracerhttptype.Event) (*v1beta1.HTTPEndpoint, error) {
-	url := GetURL(request)
+func (am *ApplicationProfileManager) GetEndpoint(k8sContainerID string, request *tracerhttptype.HTTPRequestData, event *tracerhttptype.Event, url string) (*v1beta1.HTTPEndpoint, error) {
+
 	endpoint, err := am.GetSavedEndpoint(k8sContainerID, url)
 	if err != nil {
-		return GetNewEndpoint(request, event)
+		return GetNewEndpoint(request, event, url)
 	}
 
 	if !slices.Contains(endpoint.Methods, request.Method) {
@@ -734,12 +742,12 @@ func (am *ApplicationProfileManager) GetEndpoint(k8sContainerID string, request 
 	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
 	if host, ok := request.Headers["Host"]; ok && endpoint.Headers["Host"] != host[0] {
 		logger.L().Debug("New host for", helpers.String("url", url))
-		return GetNewEndpoint(request, event)
+		return GetNewEndpoint(request, event, url)
 	}
 
 	if tracerhttphelper.HeadersAreDifferent(endpoint.Headers, headers) {
 		logger.L().Debug("New headers for", helpers.String("url", url))
-		return GetNewEndpoint(request, event)
+		return GetNewEndpoint(request, event, url)
 	}
 
 	return nil, fmt.Errorf("endpoint already exists")
@@ -762,7 +770,22 @@ func (am *ApplicationProfileManager) GetSavedEndpoint(k8sContainerID string, url
 	return nil, fmt.Errorf("endpoint not found")
 }
 
-func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttptype.Event) (*v1beta1.HTTPEndpoint, error) {
+func (am *ApplicationProfileManager) GetURL(request *tracerhttptype.HTTPRequestData) (string, error) {
+	url := request.URL
+	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
+	if host, ok := headers["Host"]; ok {
+		url = host + request.URL
+	}
+	url, err := am.urlAnalyzer.AnalyzeURL("http://" + url)
+
+	if err != nil {
+		return "", err
+	}
+
+	return url, nil
+}
+
+func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttptype.Event, url string) (*v1beta1.HTTPEndpoint, error) {
 	internal := tracerhttptype.IsInternal(event.OtherIp)
 
 	direction, err := tracerhttptype.GetPacketDirection(event)
@@ -772,7 +795,6 @@ func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttpty
 	}
 
 	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
-	url := GetURL(request)
 
 	return &v1beta1.HTTPEndpoint{
 		Endpoint:  url,
@@ -780,13 +802,4 @@ func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttpty
 		Internal:  internal,
 		Direction: direction,
 		Headers:   headers}, nil
-}
-
-func GetURL(request *tracerhttptype.HTTPRequestData) string {
-	url := request.URL
-	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
-	if host, ok := headers["Host"]; ok {
-		url = host + request.URL
-	}
-	return url
 }
