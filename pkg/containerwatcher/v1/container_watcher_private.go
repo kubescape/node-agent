@@ -236,11 +236,6 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting network tracing", helpers.Error(err))
 			return err
 		}
-
-		if err := ch.startHttpTracing(); err != nil {
-			logger.L().Error("error starting http tracing", helpers.Error(err))
-			return err
-		}
 	}
 
 	if ch.cfg.EnableRuntimeDetection {
@@ -269,6 +264,16 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting ssh tracing", helpers.Error(err))
 			return err
 		}
+	}
+
+	if ch.cfg.EnableEndpointDetection {
+		logger.L().Debug("starting http tracing")
+		if err := ch.startHttpTracing(); err != nil {
+			logger.L().Error("error starting http tracing", helpers.Error(err))
+			return err
+		}
+	} else {
+		logger.L().Debug("not starting http tracing")
 	}
 
 	return nil
@@ -312,11 +317,6 @@ func (ch *IGContainerWatcher) stopTracers() error {
 			logger.L().Error("error stopping dns tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
-		// Stop http tracer
-		if err := ch.stopHttpTracing(); err != nil {
-			logger.L().Error("error stopping http tracing", helpers.Error(err))
-			errs = errors.Join(errs, err)
-		}
 	}
 
 	if ch.cfg.EnableRuntimeDetection {
@@ -347,6 +347,13 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		}
 	}
 
+	if ch.cfg.EnableEndpointDetection {
+		// Stop http tracer
+		if err := ch.stopHttpTracing(); err != nil {
+			logger.L().Error("error stopping http tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+	}
 	return errs
 }
 
