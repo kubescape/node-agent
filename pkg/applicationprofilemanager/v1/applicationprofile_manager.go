@@ -20,6 +20,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/config"
+	tracerhttphelper "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -374,7 +375,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				newObject.Spec.EphemeralContainers = addContainers(newObject.Spec.EphemeralContainers, watchedContainer.ContainerNames[utils.EphemeralContainer])
 				// enrich container
 				newContainer := utils.GetApplicationProfileContainer(newObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
-				utils.EnrichApplicationProfileContainer(newContainer, capabilities, observedSyscalls, execs, opens)
+				utils.EnrichApplicationProfileContainer(newContainer, capabilities, observedSyscalls, execs, opens, endpoints)
 				// try to create object
 				if err := am.storageClient.CreateApplicationProfile(newObject, namespace); err != nil {
 					gotErr = err
@@ -426,7 +427,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						}
 					}
 					// update it
-					utils.EnrichApplicationProfileContainer(existingContainer, capabilities, observedSyscalls, execs, opens)
+					utils.EnrichApplicationProfileContainer(existingContainer, capabilities, observedSyscalls, execs, opens, endpoints)
 					// get existing containers
 					var existingContainers []v1beta1.ApplicationProfileContainer
 					if watchedContainer.ContainerType == utils.Container {
@@ -530,8 +531,16 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				}
 				return true
 			})
-			// record saved opens
+			// record saved endpoints
 			toSaveOpens.Range(utils.SetInMap(am.savedOpens.Get(watchedContainer.K8sContainerID)))
+			// record saved endpoints
+			toSaveHttpEndpoints.Range(func(path string, endpoint *v1beta1.HTTPEndpoint) bool {
+				if !am.savedHttpEndpoints.Get(watchedContainer.K8sContainerID).Has(path) {
+					am.savedHttpEndpoints.Get(watchedContainer.K8sContainerID).Set(path, endpoint)
+				}
+				return true
+			})
+
 			logger.L().Debug("ApplicationProfileManager - saved application profile",
 				helpers.Int("capabilities", len(capabilities)),
 				helpers.Int("execs", toSaveExecs.Len()),
@@ -704,21 +713,33 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 	if err != nil {
 		return
 	}
-
+	url := GetURL(&req)
 	tosaveHttp := am.toSaveHttpEndpoints.Get(k8sContainerID)
-	tosaveHttp.Set(req.URL, endpoint)
+	tosaveHttp.Set(url, endpoint)
 }
 
 func (am *ApplicationProfileManager) GetEndpoint(k8sContainerID string, request *tracerhttptype.HTTPRequestData, event *tracerhttptype.Event) (*v1beta1.HTTPEndpoint, error) {
-	endpoint, err := am.GetSavedEndpoint(k8sContainerID, request.URL)
+	url := GetURL(request)
+	endpoint, err := am.GetSavedEndpoint(k8sContainerID, url)
 	if err != nil {
 		return GetNewEndpoint(request, event)
 	}
 
-	// TODO: Add headers to the endpoint
 	if !slices.Contains(endpoint.Methods, request.Method) {
+		logger.L().Debug("New methods for", helpers.Error(err), helpers.String("url", url))
 		endpoint.Methods = append(endpoint.Methods, request.Method)
 		return endpoint, nil
+	}
+
+	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
+	if host, ok := request.Headers["Host"]; ok && endpoint.Headers["Host"] != host[0] {
+		logger.L().Debug("New host for", helpers.String("url", url))
+		return GetNewEndpoint(request, event)
+	}
+
+	if tracerhttphelper.HeadersAreDifferent(endpoint.Headers, headers) {
+		logger.L().Debug("New headers for", helpers.String("url", url))
+		return GetNewEndpoint(request, event)
 	}
 
 	return nil, fmt.Errorf("endpoint already exists")
@@ -749,10 +770,23 @@ func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttpty
 		logger.L().Debug("failed to get packet direction", helpers.Error(err))
 		return nil, err
 	}
+
+	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
+	url := GetURL(request)
+
 	return &v1beta1.HTTPEndpoint{
-		Endpoint:  request.URL,
+		Endpoint:  url,
 		Methods:   []string{request.Method},
 		Internal:  internal,
 		Direction: direction,
-		Headers:   tracerhttptype.ExtractConsistentHeaders(request.Headers)}, nil
+		Headers:   headers}, nil
+}
+
+func GetURL(request *tracerhttptype.HTTPRequestData) string {
+	url := request.URL
+	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
+	if host, ok := headers["Host"]; ok {
+		url = host + request.URL
+	}
+	return url
 }

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+
 	"sort"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -79,7 +80,7 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 	return profileOperations
 }
 
-func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string]) {
+func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint) {
 	// add capabilities
 	caps := mapset.NewSet(observedCapabilities...)
 	caps.Append(container.Capabilities...)
@@ -112,6 +113,11 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 			Path:  path,
 			Flags: flags,
 		})
+	}
+
+	// add endpoints
+	for _, endpoint := range endpoints {
+		container.Endpoints = append(container.Endpoints, *endpoint)
 	}
 }
 

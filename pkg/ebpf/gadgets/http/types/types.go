@@ -11,16 +11,11 @@ import (
 )
 
 var ConsistentHeaders = []string{
-	"Accept",
 	"Accept-Encoding",
 	"Accept-Language",
-	"Cache-Control",
 	"Connection",
-	"DNT",
 	"Host",
-	"Pragma",
 	"Upgrade-Insecure-Requests",
-	"User-Agent",
 }
 
 var writeSyscalls = map[string]bool{
@@ -80,17 +75,6 @@ func IsInternal(ip string) consts.IsInternal {
 		return consts.True
 	}
 	return consts.False
-}
-func ExtractConsistentHeaders(headers http.Header) map[string]string {
-	result := make(map[string]string)
-
-	for _, header := range ConsistentHeaders {
-		if value := headers.Get(header); value != "" {
-			result[header] = value
-		}
-	}
-
-	return result
 }
 
 func GetColumns() *columns.Columns[Event] {

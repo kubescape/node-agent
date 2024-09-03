@@ -25,11 +25,13 @@ func parseHTTPRequest(data []byte) (tracerhttptype.HTTPRequestData, error) {
 		return tracerhttptype.HTTPRequestData{}, err
 	}
 	defer req.Body.Close()
+	headers := req.Header.Clone() // Clone to avoid modifying the original
+	headers.Set("Host", req.Host) // Add Host to the headers map
 
 	return tracerhttptype.HTTPRequestData{
 		Method:  req.Method,
 		URL:     req.URL.String(),
-		Headers: req.Header,
+		Headers: headers,
 	}, nil
 }
 
@@ -139,4 +141,30 @@ func GetHttpData(bpfEvent *http_snifferHttpevent) (tracerhttptype.HTTPData, erro
 		return nil, fmt.Errorf("unknown event type: %d", bpfEvent.Type)
 	}
 
+}
+
+func ExtractConsistentHeaders(headers http.Header) map[string]string {
+	result := make(map[string]string)
+	for _, header := range tracerhttptype.ConsistentHeaders {
+		if value := headers.Get(header); value != "" {
+			result[header] = value
+		}
+	}
+
+	return result
+}
+
+func HeadersAreDifferent(headers1, headers2 map[string]string) bool {
+	if len(headers1) != len(headers2) {
+		return true
+	}
+
+	for key, value1 := range headers1 {
+		value2, exists := headers2[key]
+		if !exists || value1 != value2 {
+			return true
+		}
+	}
+
+	return false
 }
