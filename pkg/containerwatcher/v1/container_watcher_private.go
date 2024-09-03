@@ -385,11 +385,6 @@ func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {
 	if name == ch.podName && namespace == ch.namespace {
 		return true
 	}
-	// Filter out dns pods
-	if namespace == "kube-system" && strings.HasPrefix(name, "coredns") || strings.HasPrefix(name, "kube-dns") {
-		logger.L().Debug("ignoring dns pod", helpers.String("namespace", namespace), helpers.String("name", name))
-		return true
-	}
 	// do not trace the node-agent pods if MULTIPLY is set
 	if m := os.Getenv("MULTIPLY"); m == "true" {
 		if strings.HasPrefix(name, "node-agent") {
