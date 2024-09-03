@@ -557,6 +557,35 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	}
 }
 
+func (am *ApplicationProfileManager) AnalyzeProfileURL(ctx context.Context, watchedContainer *utils.WatchedContainerData, namespace string) {
+	slug, err := watchedContainer.InstanceID.GetSlug(true)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get slug", helpers.Error(err),
+			helpers.String("slug", slug),
+			helpers.Int("container index", watchedContainer.ContainerIndex),
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		return
+	}
+
+	existingObject, err := am.storageClient.GetApplicationProfile(namespace, slug)
+	if err != nil {
+		return
+	}
+
+	endpoints := []v1beta1.HTTPEndpoint{}
+
+	for _, container := range existingObject.Spec.Containers {
+		if container.Name == watchedContainer.ContainerID {
+			endpoints = append(endpoints, container.Endpoints...)
+			break
+		}
+	}
+	// new(maps.SafeMap[string, mapset.Set[string]])
+	url := new(maps.SafeMap[string, *v1beta1.HTTPEndpoint])
+	am.urlAnalyzer.AnalyzeURL(url, method, status, responseSize)
+}
+
 func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.startApplicationProfiling")
 	defer span.End()
