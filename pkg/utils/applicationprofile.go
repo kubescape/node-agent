@@ -6,7 +6,6 @@ import (
 	"sort"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/kubescape/go-logger"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -74,7 +73,6 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 			Path:  httpEndpoints,
 			Value: *endpoint,
 		})
-		logger.L().Debug("Added HTTP endpoint to profile")
 	}
 
 	return profileOperations

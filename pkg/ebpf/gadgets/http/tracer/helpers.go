@@ -21,14 +21,13 @@ import (
 func parseHTTPRequest(data []byte) (tracerhttptype.HTTPRequestData, error) {
 	bufReader := bufio.NewReader(bytes.NewReader(data))
 
-	// Use http.ReadRequest to parse the HTTP request
 	req, err := http.ReadRequest(bufReader)
 	if err != nil {
 		return tracerhttptype.HTTPRequestData{}, err
 	}
 	defer req.Body.Close()
-	headers := req.Header.Clone() // Clone to avoid modifying the original
-	headers.Set("Host", req.Host) // Add Host to the headers map
+	headers := req.Header.Clone()
+	headers.Set("Host", req.Host)
 
 	return tracerhttptype.HTTPRequestData{
 		Method:  req.Method,
@@ -40,13 +39,11 @@ func parseHTTPRequest(data []byte) (tracerhttptype.HTTPRequestData, error) {
 func parseHTTPResponse(data []byte) (tracerhttptype.HTTPResponseData, error) {
 	bufReader := bufio.NewReader(bytes.NewReader(data))
 
-	// Read the first line to get the status
 	statusLine, err := bufReader.ReadString('\n')
 	if err != nil {
 		return tracerhttptype.HTTPResponseData{}, fmt.Errorf("error reading status line: %v", err)
 	}
 
-	// Parse status line
 	parts := strings.SplitN(strings.TrimSpace(statusLine), " ", 3)
 	if len(parts) < 3 {
 		return tracerhttptype.HTTPResponseData{}, fmt.Errorf("invalid status line: %s", statusLine)
@@ -57,22 +54,21 @@ func parseHTTPResponse(data []byte) (tracerhttptype.HTTPResponseData, error) {
 		return tracerhttptype.HTTPResponseData{}, fmt.Errorf("invalid status code: %v", err)
 	}
 
-	// Parse headers
 	headers := make(http.Header)
 	for {
 		line, err := bufReader.ReadString('\n')
 		if err != nil {
-			break // End of headers or error
+			break
 		}
 
 		line = strings.TrimSpace(line)
 		if line == "" {
-			break // End of headers
+			break
 		}
 
 		parts := strings.SplitN(line, ":", 2)
 		if len(parts) != 2 {
-			continue // Skip invalid header lines
+			continue
 		}
 
 		key := strings.TrimSpace(parts[0])

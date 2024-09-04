@@ -64,19 +64,16 @@ func (am *ApplicationProfileManager) GetEndpoint(k8sContainerID string, request 
 	}
 
 	if !slices.Contains(endpoint.Methods, request.Method) {
-		logger.L().Debug("New methods for", helpers.Error(err), helpers.String("url", url))
 		endpoint.Methods = append(endpoint.Methods, request.Method)
 		return endpoint, nil
 	}
 
 	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
 	if host, ok := request.Headers["Host"]; ok && endpoint.Headers["Host"][0] != host[0] {
-		logger.L().Debug("New host for", helpers.String("url", url))
 		return GetNewEndpoint(request, event, url)
 	}
 
 	if tracerhttphelper.HeadersAreDifferent(endpoint.Headers, headers) {
-		logger.L().Debug("New headers for", helpers.String("url", url))
 		return GetNewEndpoint(request, event, url)
 	}
 

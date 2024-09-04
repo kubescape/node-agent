@@ -164,7 +164,6 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 	}
 	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
 	am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
-	logger.L().Info("ApplicationProfileManager - container status set to initializing")
 
 	for {
 		select {
@@ -526,7 +525,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				}
 				return true
 			})
-			// record saved endpoints
+			// record saved opens
 			toSaveOpens.Range(utils.SetInMap(am.savedOpens.Get(watchedContainer.K8sContainerID)))
 			// record saved endpoints
 			toSaveHttpEndpoints.Range(func(path string, endpoint *v1beta1.HTTPEndpoint) bool {

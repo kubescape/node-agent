@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/kubescape/go-logger"
-	hel "github.com/kubescape/go-logger/helpers"
-
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -56,7 +53,6 @@ func (sc Storage) patchApplicationProfile(name, namespace string, operations []u
 
 	profile, err := sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), sc.modifyName(name), types.JSONPatchType, patch, v1.PatchOptions{})
 	if err != nil {
-		logger.L().Error("patch application profile", hel.String("name", name), hel.String("namespace", namespace), hel.Error(err))
 		return fmt.Errorf("patch application profile: %w", err)
 	}
 
