@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"slices"
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -20,14 +19,12 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/config"
-	tracerhttphelper "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
-	"github.com/kubescape/node-agent/pkg/utils/urldynamicdetector"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 	"go.opentelemetry.io/otel"
@@ -61,7 +58,6 @@ type ApplicationProfileManager struct {
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	preRunningContainerIDs   mapset.Set[string]
 	seccompManager           seccompmanager.SeccompManagerClient
-	urlAnalyzer              *urldynamicdetector.URLAnalyzer
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
@@ -79,7 +75,6 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		removedContainers:      mapset.NewSet[string](),
 		preRunningContainerIDs: preRunningContainerIDs,
 		seccompManager:         seccompManager,
-		urlAnalyzer:            urldynamicdetector.NewURLAnalyzer(),
 	}, nil
 }
 
@@ -323,9 +318,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// 3c. default - patch the container ourselves and REPLACE it at the right index
 	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || len(endpoints) > 0 || watchedContainer.StatusUpdated() {
 		// 0. calculate patch
-		if len(endpoints) > 0 {
-			logger.L().Debug("ApplicationProfileManager - got http endpoints", helpers.Interface("endpoints", endpoints))
-		}
 		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, endpoints, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
 		operations = append(operations, utils.PatchOperation{
@@ -557,35 +549,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	}
 }
 
-func (am *ApplicationProfileManager) AnalyzeProfileURL(ctx context.Context, watchedContainer *utils.WatchedContainerData, namespace string) {
-	slug, err := watchedContainer.InstanceID.GetSlug(true)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get slug", helpers.Error(err),
-			helpers.String("slug", slug),
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
-		return
-	}
-
-	existingObject, err := am.storageClient.GetApplicationProfile(namespace, slug)
-	if err != nil {
-		return
-	}
-
-	endpoints := []v1beta1.HTTPEndpoint{}
-
-	for _, container := range existingObject.Spec.Containers {
-		if container.Name == watchedContainer.ContainerID {
-			endpoints = append(endpoints, container.Endpoints...)
-			break
-		}
-	}
-	// new(maps.SafeMap[string, mapset.Set[string]])
-	url := new(maps.SafeMap[string, *v1beta1.HTTPEndpoint])
-	am.urlAnalyzer.AnalyzeURL(url, method, status, responseSize)
-}
-
 func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.startApplicationProfiling")
 	defer span.End()
@@ -731,7 +694,6 @@ func (am *ApplicationProfileManager) ReportDroppedEvent(k8sContainerID string) {
 }
 
 func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, event *tracerhttptype.Event) {
-	// Afek: Think about where to do URL filtering
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
@@ -753,82 +715,4 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 
 	tosaveHttp := am.toSaveHttpEndpoints.Get(k8sContainerID)
 	tosaveHttp.Set(url, endpoint)
-}
-
-func (am *ApplicationProfileManager) GetEndpoint(k8sContainerID string, request *tracerhttptype.HTTPRequestData, event *tracerhttptype.Event, url string) (*v1beta1.HTTPEndpoint, error) {
-
-	endpoint, err := am.GetSavedEndpoint(k8sContainerID, url)
-	if err != nil {
-		return GetNewEndpoint(request, event, url)
-	}
-
-	if !slices.Contains(endpoint.Methods, request.Method) {
-		logger.L().Debug("New methods for", helpers.Error(err), helpers.String("url", url))
-		endpoint.Methods = append(endpoint.Methods, request.Method)
-		return endpoint, nil
-	}
-
-	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
-	if host, ok := request.Headers["Host"]; ok && endpoint.Headers["Host"] != host[0] {
-		logger.L().Debug("New host for", helpers.String("url", url))
-		return GetNewEndpoint(request, event, url)
-	}
-
-	if tracerhttphelper.HeadersAreDifferent(endpoint.Headers, headers) {
-		logger.L().Debug("New headers for", helpers.String("url", url))
-		return GetNewEndpoint(request, event, url)
-	}
-
-	return nil, fmt.Errorf("endpoint already exists")
-}
-
-func (am *ApplicationProfileManager) GetSavedEndpoint(k8sContainerID string, url string) (*v1beta1.HTTPEndpoint, error) {
-	savedHttpEndpoints := am.savedHttpEndpoints.Get(k8sContainerID)
-	saveHttp := am.toSaveHttpEndpoints.Get(k8sContainerID)
-
-	if savedHttpEndpoints != nil {
-		if endpoint := savedHttpEndpoints.Get(url); endpoint != nil {
-			return endpoint, nil
-		}
-	}
-	if saveHttp != nil {
-		if endpoint := saveHttp.Get(url); endpoint != nil {
-			return endpoint, nil
-		}
-	}
-	return nil, fmt.Errorf("endpoint not found")
-}
-
-func (am *ApplicationProfileManager) GetURL(request *tracerhttptype.HTTPRequestData) (string, error) {
-	url := request.URL
-	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
-	if host, ok := headers["Host"]; ok {
-		url = host + request.URL
-	}
-	url, err := am.urlAnalyzer.AnalyzeURL("http://" + url)
-
-	if err != nil {
-		return "", err
-	}
-
-	return url, nil
-}
-
-func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttptype.Event, url string) (*v1beta1.HTTPEndpoint, error) {
-	internal := tracerhttptype.IsInternal(event.OtherIp)
-
-	direction, err := tracerhttptype.GetPacketDirection(event)
-	if err != nil {
-		logger.L().Debug("failed to get packet direction", helpers.Error(err))
-		return nil, err
-	}
-
-	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
-
-	return &v1beta1.HTTPEndpoint{
-		Endpoint:  url,
-		Methods:   []string{request.Method},
-		Internal:  internal,
-		Direction: direction,
-		Headers:   headers}, nil
 }

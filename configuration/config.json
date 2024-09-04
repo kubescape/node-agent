@@ -6,7 +6,7 @@
   "relevantCVEServiceEnabled": true,
   "maxSniffingTimePerContainer": "6h",
   "updateDataPeriod": "1m",
-  "initialDelay": "2m",
+  "initialDelay": "1m",
   "prometheusExporterEnabled": "true",
   "runtimeDetectionEnabled": "true",
   "nodeProfileServiceEnabled": "true",

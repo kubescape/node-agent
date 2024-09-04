@@ -50,7 +50,6 @@ func (sc Storage) PatchApplicationProfile(name, namespace string, operations []u
 
 func (sc Storage) patchApplicationProfile(name, namespace string, operations []utils.PatchOperation, channel chan error) error {
 	patch, err := json.Marshal(operations)
-	logger.L().Debug("patch", hel.String("patch:", string(patch)))
 	if err != nil {
 		return fmt.Errorf("marshal patch: %w", err)
 	}

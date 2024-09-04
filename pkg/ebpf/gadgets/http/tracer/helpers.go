@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -143,25 +145,40 @@ func GetHttpData(bpfEvent *http_snifferHttpevent) (tracerhttptype.HTTPData, erro
 
 }
 
-func ExtractConsistentHeaders(headers http.Header) map[string]string {
-	result := make(map[string]string)
+func ExtractConsistentHeaders(headers http.Header) map[string][]string {
+	result := make(map[string][]string)
 	for _, header := range tracerhttptype.ConsistentHeaders {
-		if value := headers.Get(header); value != "" {
-			result[header] = value
+		if value, ok := headers[header]; ok {
+			switch typedValue := interface{}(value).(type) {
+			case []string:
+				result[header] = typedValue
+			case string:
+				result[header] = []string{typedValue}
+			default:
+				result[header] = []string{fmt.Sprint(typedValue)}
+			}
 		}
 	}
-
 	return result
 }
 
-func HeadersAreDifferent(headers1, headers2 map[string]string) bool {
+func HeadersAreDifferent(headers1, headers2 map[string][]string) bool {
 	if len(headers1) != len(headers2) {
 		return true
 	}
 
-	for key, value1 := range headers1 {
-		value2, exists := headers2[key]
-		if !exists || value1 != value2 {
+	for key, values1 := range headers1 {
+		values2, exists := headers2[key]
+		if !exists || len(values1) != len(values2) {
+			return true
+		}
+
+		// Sort both slices
+		sort.Strings(values1)
+		sort.Strings(values2)
+
+		// Compare sorted slices
+		if !reflect.DeepEqual(values1, values2) {
 			return true
 		}
 	}
