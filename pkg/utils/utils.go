@@ -56,11 +56,6 @@ var (
 	IncompleteSBOMError         = errors.New("incomplete SBOM")
 )
 
-type PackageSourceInfoData struct {
-	Exist                 bool
-	PackageSPDXIdentifier []v1beta1.ElementID
-}
-
 type ContainerType int
 
 const (

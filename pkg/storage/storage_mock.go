@@ -19,7 +19,6 @@ type StorageHttpClientMock struct {
 	NetworkNeighborhoods  []*v1beta1.NetworkNeighborhood
 	NetworkNeighborses    []*v1beta1.NetworkNeighbors
 	ImageCounters         map[string]int
-	nginxSBOMSpdxBytes    *spdxv1beta1.SBOMSPDXv2p3
 	mockSBOM              *v1beta1.SBOMSyft
 	failedOnce            bool
 }
