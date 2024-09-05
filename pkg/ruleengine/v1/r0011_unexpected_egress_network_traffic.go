@@ -171,6 +171,10 @@ func isPrivateIP(ip string) bool {
 		{net.ParseIP("10.0.0.0"), net.ParseIP("10.255.255.255")},
 		{net.ParseIP("172.16.0.0"), net.ParseIP("172.31.255.255")},
 		{net.ParseIP("192.168.0.0"), net.ParseIP("192.168.255.255")},
+		// Class D (Multicast)
+		{net.ParseIP("224.0.0.0"), net.ParseIP("239.255.255.255")},
+		// Class E (Experimental)
+		{net.ParseIP("240.0.0.0"), net.ParseIP("255.255.255.255")},
 	}
 
 	for _, r := range privateIPRanges {
