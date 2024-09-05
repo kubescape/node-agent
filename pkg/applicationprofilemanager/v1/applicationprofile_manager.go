@@ -714,4 +714,12 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 
 	tosaveHttp := am.toSaveHttpEndpoints.Get(k8sContainerID)
 	tosaveHttp.Set(url, endpoint)
+
+	saved := am.savedHttpEndpoints.Get(k8sContainerID)
+	if saved != nil {
+		if saved.Has(url) {
+			saved.Delete(url)
+		}
+	}
+
 }
