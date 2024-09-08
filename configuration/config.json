@@ -10,6 +10,7 @@
   "prometheusExporterEnabled": "true",
   "runtimeDetectionEnabled": "true",
   "nodeProfileServiceEnabled": "true",
+  "endpointDetectionEnabled": "true",
   "nodeProfileInterval": "1m",
   "seccompServiceEnabled": "true",
   "exporters": {

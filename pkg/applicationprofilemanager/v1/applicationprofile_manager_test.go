@@ -2,6 +2,7 @@ package applicationprofilemanager
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
+	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
@@ -46,6 +48,7 @@ func TestApplicationProfileManager(t *testing.T) {
 			},
 		},
 	}
+
 	// register peek function for syscall tracer
 	go am.RegisterPeekFunc(func(_ uint64) ([]string, error) {
 		return []string{"dup", "listen"}, nil
@@ -72,6 +75,35 @@ func TestApplicationProfileManager(t *testing.T) {
 	go am.ReportFileOpen("ns/pod/cont", "/etc/hosts", []string{"O_RDONLY"})
 	// report another file open
 	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"}) // duplicate - will not be reported
+
+	// report endpoint
+
+	testEvent := &tracerhttptype.Event{
+		HttpData: tracerhttptype.HTTPRequestData{Method: "GET", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}}},
+		OtherIp:  "127.0.0.1",
+		Syscall:  "recvfrom",
+	}
+
+	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
+
+	testEvent = &tracerhttptype.Event{
+		HttpData: tracerhttptype.HTTPRequestData{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}}},
+		OtherIp:  "127.0.0.1",
+		Syscall:  "recvfrom",
+	}
+
+	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
+
+	testEvent = &tracerhttptype.Event{
+		HttpData: tracerhttptype.HTTPRequestData{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}},
+		OtherIp:  "127.0.0.1",
+		Syscall:  "recvfrom",
+	}
+
+	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
+
+	time.Sleep(7 * time.Second)
+
 	// sleep more
 	time.Sleep(2 * time.Second)
 	// report container stopped
@@ -99,7 +131,19 @@ func TestApplicationProfileManager(t *testing.T) {
 	for _, expectedExec := range expectedExecs {
 		assert.Contains(t, reportedExecs, expectedExec)
 	}
+
 	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Opens)
+
+	endpoint := v1beta1.HTTPEndpoint{
+		Endpoint:  "localhost/abc",
+		Methods:   []string{"POST", "GET"},
+		Internal:  "false",
+		Direction: "inbound",
+		Headers:   map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}}
+
+	fmt.Println(storageClient.ApplicationProfiles[1].Spec.Containers[1].Endpoints)
+
+	assert.Equal(t, []v1beta1.HTTPEndpoint{endpoint}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Endpoints)
 	// check the second profile - this is a patch for execs and opens
 	sort.Strings(storageClient.ApplicationProfiles[1].Spec.Containers[0].Capabilities)
 	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Capabilities)

@@ -5,6 +5,7 @@ package tests
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path"
 	"slices"
 	"testing"
@@ -603,6 +604,44 @@ func Test_10_MalwareDetectionTest(t *testing.T) {
 	}
 
 	assert.Equal(t, len(expectedMalwares), len(malwaresDetected), "Expected %d malwares to be detected, but got %d malwares", len(expectedMalwares), len(malwaresDetected))
+}
+
+func Test_11_EndpointTest(t *testing.T) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	start := time.Now()
+	containerName := "http-test"
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+	// Create nginx deployment
+	nginx, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+	err = nginx.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
+
+	// Wait for the application profile to be created and 'ready' (not 'completed')
+	err = nginx.WaitForApplicationProfile(80, "ready")
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be 'ready': %v", err)
+	}
+
+	_, _, err := testutils.ExecIntoPod([]string{"curl", "http://127.0.0.1"}, "")
+	assert.NoErrorf(t, err, "expected no error when executing command in http container")
+	_, _, err := testutils.ExecIntoPod([]string{"curl", "http://127.0.0.1", "--data", "aaa"}, "")
+	assert.NoErrorf(t, err, "expected no error when executing command in http container")
+	for i := 0; i < 120; i++ {
+		_, _, err := testutils.ExecIntoPod([]string{"curl", fmt.Sprintf("http://127.0.0.1/users/%d", i)}, "")
+		assert.NoErrorf(t, err, "expected no error when executing command in http container")
+	}
+
+	fmt.Println(storageClient.ApplicationProfiles[0].Spec.Containers[0].Endpoints)
+	assert.NoError(t, err)
 }
 
 // func Test_10_DemoTest(t *testing.T) {
