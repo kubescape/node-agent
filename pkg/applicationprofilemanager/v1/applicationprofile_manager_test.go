@@ -2,7 +2,6 @@ package applicationprofilemanager
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -140,8 +139,6 @@ func TestApplicationProfileManager(t *testing.T) {
 		Internal:  "false",
 		Direction: "inbound",
 		Headers:   map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}}
-
-	fmt.Println(storageClient.ApplicationProfiles[1].Spec.Containers[1].Endpoints)
 
 	assert.Equal(t, []v1beta1.HTTPEndpoint{endpoint}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Endpoints)
 	// check the second profile - this is a patch for execs and opens
