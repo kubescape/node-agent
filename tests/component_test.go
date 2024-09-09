@@ -634,22 +634,25 @@ func Test_11_EndpointTest(t *testing.T) {
 	}
 
 	applicationProfile, err := endpointTraffic.GetApplicationProfile()
+
+	headers := map[string][]string{"Connection": {"close"}, "Host": {"127.0.0.1:8000"}}
+	rawJSON, err := json.Marshal(headers)
 	assert.NoError(t, err)
 
 	endpoint1 := v1beta1.HTTPEndpoint{
 		Endpoint:  "127.0.0.1/users/<dynamic>",
 		Methods:   []string{"GET"},
-		Internal:  "false",
-		Direction: "inbound",
-		Headers:   map[string][]string{"Connection": {"close"}, "Host": {"127.0.0.1:8000"}},
+		Internal:  false,
+		Direction: "outbound",
+		Headers:   rawJSON,
 	}
 
 	endpoint2 := v1beta1.HTTPEndpoint{
 		Endpoint:  "127.0.0.1/",
 		Methods:   []string{"GET", "POST"},
-		Internal:  "false",
-		Direction: "inbound",
-		Headers:   map[string][]string{"Connection": {"close"}, "Host": {"127.0.0.1:8000"}},
+		Internal:  false,
+		Direction: "outbound",
+		Headers:   rawJSON,
 	}
 
 	assert.Equal(t, []v1beta1.HTTPEndpoint{endpoint1, endpoint2}, applicationProfile.Spec.Containers[0].Endpoints)
