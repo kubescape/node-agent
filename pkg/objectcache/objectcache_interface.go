@@ -4,6 +4,7 @@ type ObjectCache interface {
 	K8sObjectCache() K8sObjectCache
 	ApplicationProfileCache() ApplicationProfileCache
 	NetworkNeighborhoodCache() NetworkNeighborhoodCache
+	DnsCache() DnsCache
 }
 
 var _ ObjectCache = (*ObjectCacheMock)(nil)
@@ -23,4 +24,8 @@ func (om *ObjectCacheMock) ApplicationProfileCache() ApplicationProfileCache {
 }
 func (om *ObjectCacheMock) NetworkNeighborhoodCache() NetworkNeighborhoodCache {
 	return &NetworkNeighborhoodCacheMock{}
+}
+
+func (om *ObjectCacheMock) DnsCache() DnsCache {
+	return &DnsCacheMock{}
 }

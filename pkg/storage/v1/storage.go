@@ -53,6 +53,9 @@ func CreateStorage(namespace string) (*Storage, error) {
 			return nil, fmt.Errorf("failed to create K8S Aggregated API Client with err: %v", err)
 		}
 	}
+	// force GRPC
+	cfg.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
+	cfg.ContentType = "application/vnd.kubernetes.protobuf"
 
 	clientset, err := versioned.NewForConfig(cfg)
 	if err != nil {

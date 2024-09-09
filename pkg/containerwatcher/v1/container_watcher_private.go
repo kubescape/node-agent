@@ -44,7 +44,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 
 		// Check if Pod has a label of max sniffing time
-		sniffingTime := ch.cfg.MaxSniffingTime
+		sniffingTime := utils.AddJitter(ch.cfg.MaxSniffingTime, ch.cfg.MaxJitterPercentage)
 		if podLabelMaxSniffingTime, ok := notif.Container.K8s.PodLabels[MaxSniffingTimeLabel]; ok {
 			if duration, err := time.ParseDuration(podLabelMaxSniffingTime); err == nil {
 				sniffingTime = duration
@@ -72,6 +72,12 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 
 func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) error {
 	ch.ctx = ctx
+
+	// This is needed when not running as gadget.
+	// https://github.com/inspektor-gadget/inspektor-gadget/blob/9a797dc046f8bc1f45e85f15db7e99dd4e5cb6e5/cmd/ig/containers/containers.go#L45-L46
+	if err := host.Init(host.Config{AutoMountFilesystems: true}); err != nil {
+		return fmt.Errorf("initializing host package: %w", err)
+	}
 
 	// Start the container collection
 	containerEventFuncs := []containercollection.FuncNotify{
@@ -213,8 +219,6 @@ func (ch *IGContainerWatcher) startTracers() error {
 	}
 
 	if ch.cfg.EnableNetworkTracing {
-		host.Init(host.Config{AutoMountFilesystems: true})
-
 		if err := ch.startKubernetesResolution(); err != nil {
 			logger.L().Error("error starting kubernetes resolution", helpers.Error(err))
 			return err

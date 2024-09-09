@@ -2,9 +2,13 @@ package ruleengine
 
 import (
 	"fmt"
+	"os"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/goradd/maps"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -39,13 +43,54 @@ var _ ruleengine.RuleEvaluator = (*R1003MaliciousSSHConnection)(nil)
 
 type R1003MaliciousSSHConnection struct {
 	BaseRule
-	allowedPorts []uint16
-	requests     maps.SafeMap[string, string] // Mapping of src IP to dst IP
+	allowedPorts       []uint16
+	ephemeralPortRange [2]uint16
+	requests           maps.SafeMap[string, string] // Mapping of src IP to dst IP
+}
+
+// ReadPortRange reads the two port numbers from /proc/sys/net/ipv4/ip_local_port_range
+func ReadPortRange() ([2]uint16, error) {
+	// Default port range
+	var startPort, endPort uint16 = 32768, 60999
+
+	// Read the contents of the file
+	data, err := os.ReadFile("/proc/sys/net/ipv4/ip_local_port_range")
+	if err != nil {
+		return [2]uint16{startPort, endPort}, fmt.Errorf("failed to read port range file: %v", err)
+	}
+
+	// Convert the data to a string and split by spaces
+	ports := strings.Fields(string(data))
+	if len(ports) != 2 {
+		return [2]uint16{startPort, endPort}, fmt.Errorf("unexpected format in port range file")
+	}
+
+	// Convert the port strings to integers
+	startPortInt, err := strconv.Atoi(ports[0])
+	if err != nil {
+		return [2]uint16{startPort, endPort}, fmt.Errorf("failed to convert start port: %v", err)
+	}
+
+	endPortInt, err := strconv.Atoi(ports[1])
+	if err != nil {
+		return [2]uint16{startPort, endPort}, fmt.Errorf("failed to convert end port: %v", err)
+	}
+
+	if startPortInt < 0 || startPortInt > 65535 || endPortInt < 0 || endPortInt > 65535 {
+		return [2]uint16{startPort, endPort}, fmt.Errorf("invalid port range")
+	}
+
+	return [2]uint16{uint16(startPortInt), uint16(endPortInt)}, nil
 }
 
 func CreateRuleR1003MaliciousSSHConnection() *R1003MaliciousSSHConnection {
+	ephemeralPorts, err := ReadPortRange()
+	if err != nil {
+		logger.L().Error("Failed to read port range, setting to default range:", helpers.Error(err))
+	}
 	return &R1003MaliciousSSHConnection{
-		allowedPorts: []uint16{22},
+		allowedPorts:       []uint16{22},
+		ephemeralPortRange: ephemeralPorts,
 	}
 }
 func (rule *R1003MaliciousSSHConnection) Name() string {
@@ -89,6 +134,33 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 
 	sshEvent := event.(*tracersshtype.Event)
 
+	// Check only outgoing packets (source port is ephemeral)
+	if sshEvent.SrcPort < rule.ephemeralPortRange[0] || sshEvent.SrcPort > rule.ephemeralPortRange[1] {
+		return nil
+	}
+
+	nn := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(sshEvent.Runtime.ContainerID)
+	if nn == nil {
+		return nil
+	}
+
+	nnContainer, err := getContainerFromNetworkNeighborhood(nn, sshEvent.GetContainer())
+	if err != nil {
+		return nil
+	}
+
+	for _, egress := range nnContainer.Egress {
+		if egress.IPAddress == sshEvent.DstIP {
+			for _, port := range egress.Ports {
+				if port.Port != nil {
+					if uint16(*port.Port) == sshEvent.DstPort {
+						return nil
+					}
+				}
+			}
+		}
+	}
+
 	if !slices.Contains(rule.allowedPorts, sshEvent.DstPort) {
 		// Check if the event is a response to a request we have already seen.
 		if rule.requests.Has(sshEvent.DstIP) {
@@ -116,7 +188,8 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 				RuleDescription: fmt.Sprintf("SSH connection to disallowed port %s:%d", sshEvent.DstIP, sshEvent.DstPort),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName: sshEvent.GetPod(),
+				PodName:   sshEvent.GetPod(),
+				PodLabels: sshEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
 		}

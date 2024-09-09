@@ -4,7 +4,8 @@ This is a walkthrough of Node Agent Runtime Detection & Response capability, in 
 2. Deploy a sample web application and attack it.
 3. Deploy fileless malware.
 4. Deploy a container with malicious image that contains malwares.
-5. See how Node Agent detects the attacks.
+5. Deploy an xmrig container to mine cryptocurrency.
+6. See how Node Agent detects the attacks.
 
 With this demo you will be able to see how Node Agent works and how it can be used to detect and prevent attacks.
 To learn more about Node Agent, see [here](https://kubescape.io/docs/).
@@ -177,6 +178,12 @@ ClamAV is an open source antivirus engine for detecting trojans, viruses, malwar
 
 Please note that Node Agent doesn't scan the images by default, you need to enable it by setting `capabilities.malwareDetection=enable` in the helm chart. See [here](https://kubescape.io/docs/) for more information.
 
+## Attack Cryptocurrency Mining
+Let's deploy an xmrig container to mine cryptocurrency and see how Node Agent detects it.
+```bash
+kubectl apply -f demo/miner/miner-pod.yaml
+```
+You can see in the logs of the node-agent that it detected the xmrig container and raised an alert. 
 
 ## Conclusion
 In this demo we saw how Node Agent can be used to detect and prevent attacks in Kubernetes.

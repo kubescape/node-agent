@@ -171,7 +171,7 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 			// adjust ticker after first tick
 			if !watchedContainer.InitialDelayExpired {
 				watchedContainer.InitialDelayExpired = true
-				watchedContainer.UpdateDataTicker.Reset(am.cfg.UpdateDataPeriod)
+				watchedContainer.UpdateDataTicker.Reset(utils.AddJitter(am.cfg.UpdateDataPeriod, am.cfg.MaxJitterPercentage))
 			}
 			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
 			am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
@@ -557,7 +557,7 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:      container.Runtime.ContainerID,
-		UpdateDataTicker: time.NewTicker(utils.AddRandomDuration(5, 10, am.cfg.InitialDelay)), // get out of sync with the relevancy manager
+		UpdateDataTicker: time.NewTicker(utils.AddJitter(am.cfg.InitialDelay, am.cfg.MaxJitterPercentage)),
 		SyncChannel:      syncChannel,
 		K8sContainerID:   k8sContainerID,
 		NsMntId:          container.Mntns,

@@ -30,6 +30,7 @@ func TestR0005UnexpectedDomainRequest(t *testing.T) {
 			},
 		},
 		DNSName: "test.com",
+		Qr:      tracerdnstype.DNSPktTypeQuery,
 	}
 
 	// Test with nil appProfileAccess
@@ -60,5 +61,4 @@ func TestR0005UnexpectedDomainRequest(t *testing.T) {
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since domain is whitelisted")
 	}
-
 }

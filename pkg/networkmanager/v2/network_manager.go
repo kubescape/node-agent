@@ -183,7 +183,7 @@ func (nm *NetworkManager) monitorContainer(ctx context.Context, container *conta
 			// adjust ticker after first tick
 			if !watchedContainer.InitialDelayExpired {
 				watchedContainer.InitialDelayExpired = true
-				watchedContainer.UpdateDataTicker.Reset(nm.cfg.UpdateDataPeriod)
+				watchedContainer.UpdateDataTicker.Reset(utils.AddJitter(nm.cfg.UpdateDataPeriod, nm.cfg.MaxJitterPercentage))
 			}
 			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
 			nm.saveNetworkEvents(ctx, watchedContainer, container.K8s.Namespace)
@@ -433,7 +433,7 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:      container.Runtime.ContainerID,
-		UpdateDataTicker: time.NewTicker(utils.AddRandomDuration(5, 10, nm.cfg.InitialDelay)), // get out of sync with the relevancy manager
+		UpdateDataTicker: time.NewTicker(utils.AddJitter(nm.cfg.InitialDelay, nm.cfg.MaxJitterPercentage)),
 		SyncChannel:      syncChannel,
 		K8sContainerID:   k8sContainerID,
 		NsMntId:          container.Mntns,

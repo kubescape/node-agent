@@ -88,4 +88,12 @@ func TestR1009CryptoMiningRelatedPort(t *testing.T) {
 		t.Errorf("Expected nil, got %v", result)
 	}
 
+	// Test with nil port in the egress list
+	port = 0
+	objCache.nn.Spec.Containers[0].Egress[0].Ports[0].Port = &port
+	result = rule.ProcessEvent(eventType, event, &objCache)
+	if result == nil {
+		t.Errorf("Expected not nil, got %v", result)
+	}
+
 }
