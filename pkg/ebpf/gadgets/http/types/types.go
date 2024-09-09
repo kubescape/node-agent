@@ -69,12 +69,9 @@ func GetPacketDirection(event *Event) (consts.NetworkDirection, error) {
 	}
 }
 
-func IsInternal(ip string) consts.IsInternal {
+func IsInternal(ip string) bool {
 	ipAddress := net.ParseIP(ip)
-	if ipAddress.IsPrivate() {
-		return consts.True
-	}
-	return consts.False
+	return ipAddress.IsPrivate()
 }
 
 func GetColumns() *columns.Columns[Event] {

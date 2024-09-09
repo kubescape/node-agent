@@ -543,8 +543,8 @@ github.com/kubescape/go-logger v0.0.22 h1:gle7wH6emOiGv9ljdpVi82pWLQ3jGucrUucvil
 github.com/kubescape/go-logger v0.0.22/go.mod h1:x3HBpZo3cMT/WIdy18BxvVVd5D0e/PWFVk/HiwBNu3g=
 github.com/kubescape/k8s-interface v0.0.170 h1:EtzomWoeeIWDz7QrAEsqUDpLHQwoh2m3tZITfrE/tiE=
 github.com/kubescape/k8s-interface v0.0.170/go.mod h1:VoEoHI4Va08NiGAkYzbITF50aFMT5y4fPHRb4x2LtME=
-github.com/kubescape/storage v0.0.107-0.20240904070248-afd4787fe0b5 h1:RqvxVY3yj5WOxCx3DzNSk7ThAZvW4n9lnJrV3YhzD3s=
-github.com/kubescape/storage v0.0.107-0.20240904070248-afd4787fe0b5/go.mod h1:RvMJc8iRqikiLie3PR8r68fo//vixBi+7se739o53gk=
+github.com/kubescape/storage v0.0.112-0.20240909133306-9055d6816ff5 h1:5TdZdtoqLlthi6MQ+i+56SgXJf2lMAvZjgRa0ehm+3Q=
+github.com/kubescape/storage v0.0.112-0.20240909133306-9055d6816ff5/go.mod h1:kAfF+eYVX5LbwN3lE3N13U5AGWQyHTdIR8h3ugQi18A=
 github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80/go.mod h1:imJHygn/1yfhB7XSJJKlFZKl/J+dCPAknuiaGOshXAs=
 github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de h1:9TO3cAIGXtEhnIaL+V+BEER86oLrvS+kWobKpbJuye0=
 github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de/go.mod h1:zAbeS9B/r2mtpb6U+EI2rYA5OAXxsYw6wTamcNW+zcE=

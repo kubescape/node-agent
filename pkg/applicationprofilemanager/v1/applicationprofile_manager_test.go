@@ -2,6 +2,7 @@ package applicationprofilemanager
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"testing"
 	"time"
@@ -133,12 +134,16 @@ func TestApplicationProfileManager(t *testing.T) {
 
 	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Opens)
 
+	headers := map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}
+	rawJSON, err := json.Marshal(headers)
+	assert.NoError(t, err)
+
 	endpoint := v1beta1.HTTPEndpoint{
 		Endpoint:  "localhost/abc",
 		Methods:   []string{"POST", "GET"},
-		Internal:  "false",
+		Internal:  false,
 		Direction: "inbound",
-		Headers:   map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}}
+		Headers:   rawJSON}
 
 	assert.Equal(t, []v1beta1.HTTPEndpoint{endpoint}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Endpoints)
 	// check the second profile - this is a patch for execs and opens

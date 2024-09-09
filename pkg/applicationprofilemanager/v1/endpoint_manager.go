@@ -1,6 +1,7 @@
 package applicationprofilemanager
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 
@@ -24,13 +25,16 @@ func (am *ApplicationProfileManager) GetEndpoint(k8sContainerID string, request 
 	}
 
 	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
-	if host, ok := request.Headers["Host"]; ok && endpoint.Headers["Host"][0] != host[0] {
-		return GetNewEndpoint(request, event, url)
-	}
+	endpointHeaders, err := endpoint.GetHeaders()
+	if err != nil {
+		if host, ok := request.Headers["Host"]; ok && endpointHeaders["Host"][0] != host[0] {
+			return GetNewEndpoint(request, event, url)
+		}
 
-	if tracerhttphelper.HeadersAreDifferent(endpoint.Headers, headers) {
-		endpoint.Headers = mergeHeaders(endpoint.Headers, headers)
-		return endpoint, nil
+		if tracerhttphelper.HeadersAreDifferent(endpointHeaders, headers) {
+			endpoint.Headers = mergeHeaders(endpointHeaders, headers)
+			return endpoint, nil
+		}
 	}
 
 	return nil, fmt.Errorf("endpoint already exists")
@@ -64,12 +68,18 @@ func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttpty
 
 	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
 
+	rawJSON, err := json.Marshal(headers)
+	if err != nil {
+		fmt.Println("Error marshaling JSON:", err)
+		return nil, err
+	}
+
 	return &v1beta1.HTTPEndpoint{
 		Endpoint:  url,
 		Methods:   []string{request.Method},
 		Internal:  internal,
 		Direction: direction,
-		Headers:   headers}, nil
+		Headers:   rawJSON}, nil
 }
 
 func (am *ApplicationProfileManager) GetURL(request *tracerhttptype.HTTPRequestData) (string, error) {
@@ -82,7 +92,7 @@ func (am *ApplicationProfileManager) GetURL(request *tracerhttptype.HTTPRequestD
 	return url, nil
 }
 
-func mergeHeaders(existing, new map[string][]string) map[string][]string {
+func mergeHeaders(existing, new map[string][]string) json.RawMessage {
 
 	for k, v := range new {
 		if _, exists := existing[k]; exists {
@@ -93,5 +103,11 @@ func mergeHeaders(existing, new map[string][]string) map[string][]string {
 		}
 	}
 
-	return existing
+	rawJSON, err := json.Marshal(existing)
+	if err != nil {
+		fmt.Println("Error marshaling JSON:", err)
+		return nil
+	}
+
+	return rawJSON
 }
