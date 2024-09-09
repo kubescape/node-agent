@@ -124,6 +124,8 @@ var commonlyUsedCryptoMinersDomains = []string{
 	"xmr.zeropool.io.",
 	"zec.antpool.com.",
 	"zergpool.com.",
+	"auto.c3pool.org.",
+	"us.monero.herominers.com.",
 }
 
 var R1008CryptoMiningDomainCommunicationRuleDescriptor = RuleDescriptor{
