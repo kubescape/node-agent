@@ -21,7 +21,6 @@ var SensitiveFiles = []string{
 	"/etc/ssh/sshd_config",
 	"/etc/ssh/ssh_config",
 	"/etc/pam.d",
-	"/etc/group",
 }
 
 var (
