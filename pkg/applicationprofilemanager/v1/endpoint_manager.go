@@ -27,8 +27,12 @@ func (am *ApplicationProfileManager) GetEndpoint(k8sContainerID string, request 
 	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
 	endpointHeaders, err := endpoint.GetHeaders()
 	if err != nil {
-		if host, ok := request.Headers["Host"]; ok && endpointHeaders["Host"][0] != host[0] {
-			return GetNewEndpoint(request, event, url)
+		if newHost, ok := request.Headers["Host"]; ok && len(newHost) > 0 {
+			if existing, ok := headers["Host"]; ok && len(existing) > 0 {
+				if existing[0] != newHost[0] {
+					return GetNewEndpoint(request, event, url)
+				}
+			}
 		}
 
 		if tracerhttphelper.HeadersAreDifferent(endpointHeaders, headers) {

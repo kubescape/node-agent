@@ -1,77 +1,77 @@
-#include "sniffer_strcuts.h"
+
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
+#include "sniffer_strcuts.h"
 
-typedef unsigned short int sa_family_t;
 
-struct
-{
+// Used to send http events to user space
+struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
 } events SEC(".maps");
 
-struct
-{
+// Used to manage pre accept connections from client
+struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
     __type(key, __u64);
     __type(value, struct pre_accept_args);
 } pre_accept_args_map SEC(".maps");
 
-struct
-{
+// Used to manage active http connections to monitor
+struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
     __type(key, __u64);
     __type(value, struct pre_connect_args);
 } active_connections_args_map SEC(".maps");
 
-struct
-{
+// Used to manage active http connections to monitor as server
+struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
     __type(key, __u64);
     __type(value, struct active_connection_info);
 } accepted_sockets_map SEC(".maps");
 
-struct
-{
+// Used to store the buffer of packets 
+struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
     __type(key, __u64);
     __type(value, struct packet_buffer);
 } buffer_packets SEC(".maps");
 
-struct
-{
+// Used to store the buffer of messages of messages type
+struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
     __type(key, __u64);
     __type(value, struct packet_msg);
 } msg_packets SEC(".maps");
 
-struct
-{
+// Used to allocate http event
+struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, 1);
     __type(key, __u32);
     __type(value, struct httpevent);
 } event_data SEC(".maps");
 
-struct
-{
+// Used to allocate string
+struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, 1);
     __type(key, __u32);
     __type(value, char[PACKET_CHUNK_SIZE]);
 } empty_char SEC(".maps");
 
+// Declared to avoid compiler deletion
 const struct httpevent *unusedevent __attribute__((unused));
 
 static __always_inline int should_discard()
 {
     u64 mntns_id;
-
     mntns_id = gadget_get_mntns_id();
 
     if (gadget_should_discard_mntns_id(mntns_id))
@@ -110,7 +110,7 @@ static __always_inline void get_namespace_ids(u64 *mnt_ns_id, u64 *net_ns_id)
     }
 }
 
-static __always_inline bool check_msg_peek(__u32 flags)
+static __always_inline bool is_msg_peek(__u32 flags)
 {
     return flags & MSG_PEEK;
 }
@@ -169,7 +169,7 @@ static void inline exit_connect(struct trace_event_raw_sys_exit *ctx)
 
         if (args)
         {
-            __u32 sockfd = (__u32)args->sockfd; // For connect, we stored the sockfd earlier
+            __u32 sockfd = (__u32)args->sockfd; // For connect, we stored the sockfd earlier.
             __u64 unique_connection_id = generate_unique_connection_id(id, sockfd);
             conn_info.sockfd = sockfd;
             bpf_probe_read_kernel(&conn_info.addr, sizeof(conn_info.addr), &args->addr);
@@ -263,7 +263,6 @@ static __always_inline int process_packet(struct trace_event_raw_sys_exit *ctx, 
         return 0;
 
     __u32 total_size = (__u32)ctx->ret;
-
     __u32 key = 0;
 
     char *buf = bpf_map_lookup_elem(&empty_char, &key);
@@ -464,7 +463,7 @@ int sys_enter_recvfrom(struct trace_event_raw_sys_enter *ctx)
     if (should_discard())
         return 0;
 
-    if (check_msg_peek(ctx->args[3]))
+    if (is_msg_peek(ctx->args[3]))
         return 0;
     pre_receive_syscalls(ctx);
     return 0;
@@ -566,7 +565,7 @@ int syscall__probe_entry_recvmsg(struct trace_event_raw_sys_enter *ctx)
     if (should_discard())
         return 0;
 
-    if (check_msg_peek(ctx->args[2]))
+    if (is_msg_peek(ctx->args[2]))
         return 0;
     pre_process_msg(ctx);
     return 0;

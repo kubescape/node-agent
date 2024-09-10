@@ -1,16 +1,10 @@
-#include "../../../../include/amd64/vmlinux.h"
-
-#ifdef __TARGET_ARCH_x86
-#include "../../../../include/amd64/vmlinux.h"
-#elif defined(__TARGET_ARCH_arm64)
-#include "../../../../include/arm64/vmlinux.h"
-#endif
-
-#include "../../../../include/types.h"
+#pragma once
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
+#include "../../../../include/types.h"
 #include "../../../../include/mntns_filter.h"
+#include "../../../../include/amd64/vmlinux.h"
 
 #define EVENT_TYPE_CONNECT 0
 #define EVENT_TYPE_ACCEPT 1
@@ -27,8 +21,6 @@
 #define MSG_PEEK 0x02
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
-
-// Maps:
 
 struct pre_accept_args {
     uint64_t addr_ptr;  // user_msghdr
@@ -77,7 +69,7 @@ struct httpevent {
 	u8   type;
 	u32  sock_fd;
 	u8   buf[MAX_DATAEVENT_BUFFER];
-	u8   syscall[MAX_SYSCALL];
+        u8   syscall[MAX_SYSCALL];
 
     __u32 other_ip;
     __u16 other_port;

@@ -119,7 +119,6 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 	}
 }
 
-// TODO make generic?
 func GetApplicationProfileContainer(object *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) *v1beta1.ApplicationProfileContainer {
 	if object == nil {
 		return nil
