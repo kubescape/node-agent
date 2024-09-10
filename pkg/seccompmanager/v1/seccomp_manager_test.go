@@ -5,9 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 //	func TestName(t *testing.T) {
@@ -56,27 +57,22 @@ import (
 func TestSeccompManager(t *testing.T) {
 	tests := []struct {
 		name    string
-		obj     *unstructured.Unstructured
+		obj     *v1beta1.SeccompProfile
 		path    string
 		wantErr assert.ErrorAssertionFunc
 	}{
 		{
 			name: "create seccomp profile",
-			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"kind": "SeccompProfile",
-					"metadata": map[string]interface{}{
-						"name":      "replicaset-nginx-77b4fdf86c",
-						"namespace": "default",
-					},
-					"spec": map[string]interface{}{
-						"containers": []map[string]interface{}{
-							{
-								"name": "nginx",
-								"path": "default/replicaset-nginx-77b4fdf86c-nginx.json",
-							},
-						},
-					},
+			obj: &v1beta1.SeccompProfile{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "replicaset-nginx-77b4fdf86c",
+					Namespace: "default",
+				},
+				Spec: v1beta1.SeccompProfileSpec{
+					Containers: []v1beta1.SingleSeccompProfile{{
+						Name: "nginx",
+						Path: "default/replicaset-nginx-77b4fdf86c-nginx.json",
+					}},
 				},
 			},
 			path:    "default/replicaset-nginx-77b4fdf86c-nginx.json",

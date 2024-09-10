@@ -6,7 +6,8 @@ import (
 
 	"istio.io/pkg/cache"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 )
 
@@ -40,11 +41,10 @@ func NewCooldownQueue() *CooldownQueue {
 
 // makeEventKey creates a unique key for an event from a watcher
 func makeEventKey(e watch.Event) string {
-	object, ok := e.Object.(*unstructured.Unstructured)
-	if !ok {
-		return ""
-	}
-	return strings.Join([]string{object.GroupVersionKind().Group, object.GroupVersionKind().Version, object.GetKind(), object.GetNamespace(), object.GetName()}, "/")
+	object := e.Object.(runtime.Object)
+	gvk := object.GetObjectKind().GroupVersionKind()
+	meta := e.Object.(metav1.Object)
+	return strings.Join([]string{gvk.Group, gvk.Version, gvk.Kind, meta.GetNamespace(), meta.GetName()}, "/")
 }
 
 func (q *CooldownQueue) Closed() bool {

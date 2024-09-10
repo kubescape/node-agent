@@ -7,10 +7,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/watcher"
 
-	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/goradd/maps"
@@ -72,35 +70,20 @@ func (k *K8sObjectCacheImpl) GetPods() []*corev1.Pod {
 	return k.pods.Values()
 }
 
-func (k *K8sObjectCacheImpl) AddHandler(_ context.Context, obj *unstructured.Unstructured) {
-	switch obj.GetKind() {
-	case "Pod":
-		pod, err := unstructuredToPod(obj)
-		if err != nil {
-			return
-		}
+func (k *K8sObjectCacheImpl) AddHandler(_ context.Context, obj runtime.Object) {
+	if pod, ok := obj.(*corev1.Pod); ok {
 		k.pods.Set(podKey(pod.GetNamespace(), pod.GetName()), pod)
 	}
 }
 
-func (k *K8sObjectCacheImpl) ModifyHandler(_ context.Context, obj *unstructured.Unstructured) {
-	switch obj.GetKind() {
-	case "Pod":
-		pod, err := unstructuredToPod(obj)
-		if err != nil {
-			return
-		}
+func (k *K8sObjectCacheImpl) ModifyHandler(_ context.Context, obj runtime.Object) {
+	if pod, ok := obj.(*corev1.Pod); ok {
 		k.pods.Set(podKey(pod.GetNamespace(), pod.GetName()), pod)
 	}
 }
-func (k *K8sObjectCacheImpl) DeleteHandler(_ context.Context, obj *unstructured.Unstructured) {
-	switch obj.GetKind() {
-	case "Pod":
-		pod, err := unstructuredToPod(obj)
-		if err != nil {
-			return
-		}
 
+func (k *K8sObjectCacheImpl) DeleteHandler(_ context.Context, obj runtime.Object) {
+	if pod, ok := obj.(*corev1.Pod); ok {
 		k.pods.Delete(podKey(pod.GetNamespace(), pod.GetName()))
 	}
 }
@@ -132,11 +115,4 @@ func (k *K8sObjectCacheImpl) setApiServerIpAddress() error {
 
 func podKey(namespace, podName string) string {
 	return namespace + "/" + podName
-}
-func unstructuredToPod(obj *unstructured.Unstructured) (*corev1.Pod, error) {
-	pod := &corev1.Pod{}
-	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, pod); err != nil {
-		return nil, err
-	}
-	return pod, nil
 }

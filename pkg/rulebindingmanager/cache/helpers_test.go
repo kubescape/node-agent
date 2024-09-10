@@ -44,64 +44,6 @@ func TestResourcesToWatch(t *testing.T) {
 	}
 }
 
-func TestUnstructuredToPod(t *testing.T) {
-	tests := []struct {
-		obj     *unstructured.Unstructured
-		name    string
-		wantErr bool
-	}{
-		{
-			name: "Test with valid pod",
-			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"apiVersion": "v1",
-					"kind":       "Pod",
-					"metadata": map[string]interface{}{
-						"name":      "pod-1",
-						"namespace": "default",
-					},
-					"spec": map[string]interface{}{
-						"containers": []interface{}{
-							map[string]interface{}{
-								"name":  "container-1",
-								"image": "image-1",
-							},
-						},
-					},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "Test with invalid pod",
-			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"apiVersion": "v1",
-					"kind":       "Pod",
-					"metadata": map[string]interface{}{
-						"name":      "pod-1",
-						"namespace": "default",
-					},
-					"spec": map[string]interface{}{
-						"containers": "invalid",
-					},
-				},
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := unstructuredToPod(tt.obj)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("unstructuredToPod() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-		})
-	}
-}
-
 func TestUnstructuredToRuleBinding(t *testing.T) {
 	tests := []struct {
 		obj     *unstructured.Unstructured

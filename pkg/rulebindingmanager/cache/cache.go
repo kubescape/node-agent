@@ -10,7 +10,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
-	"github.com/kubescape/node-agent/pkg/rulebindingmanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
@@ -20,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 var _ rulebindingmanager.RuleBindingCache = (*RBCache)(nil)
@@ -84,19 +84,13 @@ func (c *RBCache) AddNotifier(n *chan rulebindingmanager.RuleBindingNotify) {
 
 // ------------------ watcher.Watcher methods -----------------------
 
-func (c *RBCache) AddHandler(ctx context.Context, obj *unstructured.Unstructured) {
+func (c *RBCache) AddHandler(ctx context.Context, obj runtime.Object) {
 	var rbs []rulebindingmanager.RuleBindingNotify
 
-	switch obj.GetKind() {
-	case "Pod":
-		pod, err := unstructuredToPod(obj)
-		if err != nil {
-			logger.L().Error("failed to convert unstructured to pod", helpers.Error(err))
-			return
-		}
+	if pod, ok := obj.(*corev1.Pod); ok {
 		rbs = c.addPod(ctx, pod)
-	case types.RuntimeRuleBindingAlertKind:
-		ruleBinding, err := unstructuredToRuleBinding(obj)
+	} else if un, ok := obj.(*unstructured.Unstructured); ok {
+		ruleBinding, err := unstructuredToRuleBinding(un)
 		if err != nil {
 			logger.L().Error("failed to convert unstructured to rule binding", helpers.Error(err))
 			return
@@ -110,19 +104,14 @@ func (c *RBCache) AddHandler(ctx context.Context, obj *unstructured.Unstructured
 		}
 	}
 }
-func (c *RBCache) ModifyHandler(ctx context.Context, obj *unstructured.Unstructured) {
+
+func (c *RBCache) ModifyHandler(ctx context.Context, obj runtime.Object) {
 	var rbs []rulebindingmanager.RuleBindingNotify
 
-	switch obj.GetKind() {
-	case "Pod":
-		pod, err := unstructuredToPod(obj)
-		if err != nil {
-			logger.L().Error("failed to convert unstructured to pod", helpers.Error(err))
-			return
-		}
+	if pod, ok := obj.(*corev1.Pod); ok {
 		rbs = c.addPod(ctx, pod)
-	case types.RuntimeRuleBindingAlertKind:
-		ruleBinding, err := unstructuredToRuleBinding(obj)
+	} else if un, ok := obj.(*unstructured.Unstructured); ok {
+		ruleBinding, err := unstructuredToRuleBinding(un)
 		if err != nil {
 			logger.L().Error("failed to convert unstructured to rule binding", helpers.Error(err))
 			return
@@ -136,13 +125,14 @@ func (c *RBCache) ModifyHandler(ctx context.Context, obj *unstructured.Unstructu
 		}
 	}
 }
-func (c *RBCache) DeleteHandler(_ context.Context, obj *unstructured.Unstructured) {
+
+func (c *RBCache) DeleteHandler(_ context.Context, obj runtime.Object) {
 	var rbs []rulebindingmanager.RuleBindingNotify
-	switch obj.GetKind() {
-	case "Pod":
-		c.deletePod(uniqueName(obj))
-	case types.RuntimeRuleBindingAlertKind:
-		rbs = c.deleteRuleBinding(uniqueName(obj))
+
+	if pod, ok := obj.(*corev1.Pod); ok {
+		c.deletePod(uniqueName(pod))
+	} else if un, ok := obj.(*unstructured.Unstructured); ok {
+		rbs = c.deleteRuleBinding(uniqueName(un))
 	}
 
 	// notify
