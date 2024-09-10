@@ -10,7 +10,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/kubescape/node-agent/internal/validator"
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	applicationprofilemanagerv1 "github.com/kubescape/node-agent/pkg/applicationprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -44,6 +43,7 @@ import (
 	seccompmanagerv1 "github.com/kubescape/node-agent/pkg/seccompmanager/v1"
 	"github.com/kubescape/node-agent/pkg/storage/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/validator"
 	"github.com/kubescape/node-agent/pkg/watcher/dynamicwatcher"
 	"github.com/kubescape/node-agent/pkg/watcher/seccompprofilewatcher"
 

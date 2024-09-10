@@ -5,6 +5,7 @@ import (
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
@@ -12,6 +13,7 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -65,6 +67,10 @@ func (r *RuleManagerMock) ReportHardlinkEvent(_ tracerhardlinktype.Event) {
 }
 
 func (r *RuleManagerMock) ReportSSHEvent(_ tracersshtype.Event) {
+	// noop
+}
+
+func (r *RuleManagerMock) ReportEvent(_ utils.EventType, _ eventtypes.Event) {
 	// noop
 }
 

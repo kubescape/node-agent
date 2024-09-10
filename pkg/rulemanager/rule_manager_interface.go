@@ -5,6 +5,7 @@ import (
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
@@ -12,6 +13,7 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 
 	v1 "k8s.io/api/core/v1"
 )
@@ -28,6 +30,7 @@ type RuleManagerClient interface {
 	ReportSymlinkEvent(event tracersymlinktype.Event)
 	ReportHardlinkEvent(event tracerhardlinktype.Event)
 	ReportSSHEvent(event tracersshtype.Event)
+	ReportEvent(eventType utils.EventType, event eventtypes.Event)
 	HasApplicableRuleBindings(namespace, name string) bool
 	HasFinalApplicationProfile(pod *v1.Pod) bool
 	IsContainerMonitored(k8sContainerID string) bool

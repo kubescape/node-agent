@@ -267,6 +267,14 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting ssh tracing", helpers.Error(err))
 			return err
 		}
+
+		// Start third party tracers
+		for _, tracer := range ch.thirdPartyTracers {
+			if err := tracer.Start(); err != nil {
+				logger.L().Error("error starting custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+				return err
+			}
+		}
 	}
 
 	return nil
@@ -337,6 +345,14 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		if err := ch.stopSshTracing(); err != nil {
 			logger.L().Error("error stopping ssh tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
+		}
+
+		// Stop third party tracers
+		for _, tracer := range ch.thirdPartyTracers {
+			if err := tracer.Stop(); err != nil {
+				logger.L().Error("error stopping custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+				errs = errors.Join(errs, err)
+			}
 		}
 	}
 

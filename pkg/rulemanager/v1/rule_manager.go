@@ -440,6 +440,17 @@ func (rm *RuleManager) ReportSSHEvent(event tracersshtype.Event) {
 	rm.processEvent(utils.SSHEventType, &event, rules)
 }
 
+func (rm *RuleManager) ReportEvent(eventType utils.EventType, event eventtypes.Event) {
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Error("RuleManager - failed to get namespace and pod name from custom event")
+		return
+	}
+
+	// list custom rules
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+	rm.processEvent(eventType, &event, rules)
+}
+
 func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator) {
 	for _, rule := range rules {
 		if rule == nil {

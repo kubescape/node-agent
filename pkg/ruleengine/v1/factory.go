@@ -70,3 +70,7 @@ func (r *RuleCreatorImpl) CreateRuleByName(name string) ruleengine.RuleEvaluator
 func (r *RuleCreatorImpl) GetAllRuleDescriptors() []RuleDescriptor {
 	return r.ruleDescriptions
 }
+
+func (r *RuleCreatorImpl) AddRuleDescriptor(rule RuleDescriptor) {
+	r.ruleDescriptions = append(r.ruleDescriptions, rule)
+}
