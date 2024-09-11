@@ -48,7 +48,6 @@ type HTTPResponseData struct {
 type Event struct {
 	eventtypes.Event
 	eventtypes.WithMountNsID
-	eventtypes.WithNetNsID
 
 	Pid       uint32   `json:"pid,omitempty" column:"pid,template:pid"`
 	Uid       uint32   `json:"uid,omitempty" column:"uid,template:uid"`

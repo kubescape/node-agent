@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -155,28 +153,4 @@ func ExtractConsistentHeaders(headers http.Header) map[string][]string {
 		}
 	}
 	return result
-}
-
-func HeadersAreDifferent(headers1, headers2 map[string][]string) bool {
-	if len(headers1) != len(headers2) {
-		return true
-	}
-
-	for key, values1 := range headers1 {
-		values2, exists := headers2[key]
-		if !exists || len(values1) != len(values2) {
-			return true
-		}
-
-		// Sort both slices
-		sort.Strings(values1)
-		sort.Strings(values2)
-
-		// Compare sorted slices
-		if !reflect.DeepEqual(values1, values2) {
-			return true
-		}
-	}
-
-	return false
 }

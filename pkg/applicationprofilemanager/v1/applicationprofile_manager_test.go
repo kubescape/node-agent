@@ -87,7 +87,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
 
 	testEvent = &tracerhttptype.Event{
-		HttpData: tracerhttptype.HTTPRequestData{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}}},
+		HttpData: tracerhttptype.HTTPRequestData{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}},
 		OtherIp:  "127.0.0.1",
 		Syscall:  "recvfrom",
 	}
@@ -102,7 +102,7 @@ func TestApplicationProfileManager(t *testing.T) {
 
 	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
 
-	time.Sleep(7 * time.Second)
+	time.Sleep(8 * time.Second)
 
 	// sleep more
 	time.Sleep(2 * time.Second)
@@ -134,18 +134,13 @@ func TestApplicationProfileManager(t *testing.T) {
 
 	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Opens)
 
-	headers := map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}
-	rawJSON, err := json.Marshal(headers)
-	assert.NoError(t, err)
+	expectedEndpoints := GetExcpectedEndpoints(t)
+	actualEndpoints := storageClient.ApplicationProfiles[1].Spec.Containers[1].Endpoints
 
-	endpoint := v1beta1.HTTPEndpoint{
-		Endpoint:  "localhost/abc",
-		Methods:   []string{"POST", "GET"},
-		Internal:  false,
-		Direction: "inbound",
-		Headers:   rawJSON}
+	sortHTTPEndpoints(expectedEndpoints)
+	sortHTTPEndpoints(actualEndpoints)
 
-	assert.Equal(t, []v1beta1.HTTPEndpoint{endpoint}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Endpoints)
+	assert.Equal(t, expectedEndpoints, actualEndpoints)
 	// check the second profile - this is a patch for execs and opens
 	sort.Strings(storageClient.ApplicationProfiles[1].Spec.Containers[0].Capabilities)
 	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Capabilities)
@@ -154,4 +149,53 @@ func TestApplicationProfileManager(t *testing.T) {
 		{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}},
 		{Path: "/etc/hosts", Flags: []string{"O_RDONLY"}},
 	}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Opens)
+}
+
+func GetExcpectedEndpoints(t *testing.T) []v1beta1.HTTPEndpoint {
+	headers := map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}
+	rawJSON, err := json.Marshal(headers)
+	assert.NoError(t, err)
+
+	endpointPost := v1beta1.HTTPEndpoint{
+		Endpoint:  "localhost/abc",
+		Methods:   []string{"POST"},
+		Internal:  false,
+		Direction: "inbound",
+		Headers:   rawJSON}
+
+	headers = map[string][]string{"Host": {"localhost"}}
+	rawJSON, err = json.Marshal(headers)
+	assert.NoError(t, err)
+
+	endpointGet := v1beta1.HTTPEndpoint{
+		Endpoint:  "localhost/abc",
+		Methods:   []string{"GET"},
+		Internal:  false,
+		Direction: "inbound",
+		Headers:   rawJSON}
+
+	return []v1beta1.HTTPEndpoint{endpointPost, endpointGet}
+}
+
+func sortHTTPEndpoints(endpoints []v1beta1.HTTPEndpoint) {
+	sort.Slice(endpoints, func(i, j int) bool {
+		// Sort by Endpoint first
+		if endpoints[i].Endpoint != endpoints[j].Endpoint {
+			return endpoints[i].Endpoint < endpoints[j].Endpoint
+		}
+		// If Endpoints are the same, sort by the first Method
+		if len(endpoints[i].Methods) > 0 && len(endpoints[j].Methods) > 0 {
+			return endpoints[i].Methods[0] < endpoints[j].Methods[0]
+		}
+		// If Methods are empty or the same, sort by Internal
+		if endpoints[i].Internal != endpoints[j].Internal {
+			return endpoints[i].Internal
+		}
+		// If Internal is the same, sort by Direction
+		if endpoints[i].Direction != endpoints[j].Direction {
+			return string(endpoints[i].Direction) < string(endpoints[j].Direction)
+		}
+		// If all else is equal, sort by Headers
+		return string(endpoints[i].Headers) < string(endpoints[j].Headers)
+	})
 }

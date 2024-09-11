@@ -706,19 +706,12 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 		return
 	}
 
-	endpoint, err := am.GetEndpoint(k8sContainerID, &req, event, url)
+	endpoint, err := GetNewEndpoint(&req, event, url)
 	if err != nil {
 		return
 	}
 
 	tosaveHttp := am.toSaveHttpEndpoints.Get(k8sContainerID)
-	tosaveHttp.Set(url, endpoint)
-
-	saved := am.savedHttpEndpoints.Get(k8sContainerID)
-	if saved != nil {
-		if saved.Has(url) {
-			saved.Delete(url)
-		}
-	}
-
+	endpointIdentifier := CalculateHTTPEndpointHash(endpoint)
+	tosaveHttp.Set(endpointIdentifier, endpoint)
 }
