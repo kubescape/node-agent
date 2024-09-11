@@ -101,4 +101,33 @@ func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 		t.Errorf("Expected ruleResult to not be nil since file is not whitelisted and sensitive")
 	}
 
+	e.FullPath = "/tmp/blabla"
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since file is whitelisted and not sensitive")
+	}
+
+	profile = &v1beta1.ApplicationProfile{
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{
+				{
+					Name: "test",
+					Opens: []v1beta1.OpenCalls{
+						{
+							Path:  "/etc/<dynamic>",
+							Flags: []string{"O_RDONLY"},
+						},
+					},
+				},
+			},
+		},
+	}
+	objCache.SetApplicationProfile(profile)
+
+	e.FullPath = "/etc/blabla"
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since file is whitelisted and not sensitive")
+	}
+
 }
