@@ -440,7 +440,7 @@ func (rm *RuleManager) ReportSSHEvent(event tracersshtype.Event) {
 	rm.processEvent(utils.SSHEventType, &event, rules)
 }
 
-func (rm *RuleManager) ReportEvent(eventType utils.EventType, event eventtypes.Event) {
+func (rm *RuleManager) ReportEvent(eventType utils.EventType, event rulemanager.K8sEvent) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from custom event")
 		return

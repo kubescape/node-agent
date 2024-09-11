@@ -13,7 +13,6 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -70,7 +69,7 @@ func (r *RuleManagerMock) ReportSSHEvent(_ tracersshtype.Event) {
 	// noop
 }
 
-func (r *RuleManagerMock) ReportEvent(_ utils.EventType, _ eventtypes.Event) {
+func (r *RuleManagerMock) ReportEvent(_ utils.EventType, _ K8sEvent) {
 	// noop
 }
 
