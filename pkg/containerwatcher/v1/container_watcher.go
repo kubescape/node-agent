@@ -422,11 +422,12 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		sshWorkerChan:          make(chan *tracersshtype.Event, 1000),
 
 		// cache
-		ruleBindingPodNotify: ruleBindingPodNotify,
-		timeBasedContainers:  mapset.NewSet[string](),
-		ruleManagedPods:      mapset.NewSet[string](),
-		runtime:              runtime,
-		thirdPartyTracers:    mapset.NewSet[containerwatcher.CustomTracer](),
+		ruleBindingPodNotify:         ruleBindingPodNotify,
+		timeBasedContainers:          mapset.NewSet[string](),
+		ruleManagedPods:              mapset.NewSet[string](),
+		runtime:                      runtime,
+		thirdPartyTracers:            mapset.NewSet[containerwatcher.CustomTracer](),
+		thirdPartyContainerReceivers: mapset.NewSet[containerwatcher.ContainerReceiver](),
 	}, nil
 }
 
