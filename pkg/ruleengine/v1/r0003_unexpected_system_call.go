@@ -18,7 +18,7 @@ const (
 	R0003Name = "Unexpected system call"
 )
 
-var R0003UnexpectedSystemCallRuleDescriptor = RuleDescriptor{
+var R0003UnexpectedSystemCallRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0003ID,
 	Name:        R0003Name,
 	Description: "Detecting unexpected system calls that are not whitelisted by application profile.",

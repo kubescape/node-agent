@@ -17,7 +17,7 @@ const (
 	R1006Name = "Unshare System Call usage"
 )
 
-var R1006UnshareSyscallRuleDescriptor = RuleDescriptor{
+var R1006UnshareSyscallRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1006ID,
 	Name:        R1006Name,
 	Description: "Detecting Unshare System Call usage, which can be used to escape container.",

@@ -389,6 +389,11 @@ func (c *RBCache) createRule(r *typesv1.RuntimeAlertRuleBindingRule) []ruleengin
 	return []ruleengine.RuleEvaluator{}
 }
 
+// Expose the rule creator to be able to create rules from third party.
+func (c *RBCache) GetRuleCreator() ruleengine.RuleCreator {
+	return c.ruleCreator
+}
+
 func diff(a, b []rulebindingmanager.RuleBindingNotify) []rulebindingmanager.RuleBindingNotify {
 	m := make(map[string]rulebindingmanager.RuleBindingNotify)
 	diff := make([]rulebindingmanager.RuleBindingNotify, 0)

@@ -25,6 +25,9 @@ func (r *RuleCreatorMock) CreateRuleByName(name string) RuleEvaluator {
 	return &RuleMock{RuleName: name}
 }
 
+func (r *RuleCreatorMock) RegisterRule(rule RuleDescriptor) {
+}
+
 var _ RuleEvaluator = (*RuleMock)(nil)
 
 type RuleMock struct {

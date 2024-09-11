@@ -18,7 +18,7 @@ const (
 	R1001Name = "Exec Binary Not In Base Image"
 )
 
-var R1001ExecBinaryNotInBaseImageRuleDescriptor = RuleDescriptor{
+var R1001ExecBinaryNotInBaseImageRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1001ID,
 	Name:        R1001Name,
 	Description: "Detecting exec calls of binaries that are not included in the base image",

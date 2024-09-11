@@ -18,7 +18,7 @@ const (
 	R1000Name = "Exec from malicious source"
 )
 
-var R1000ExecFromMaliciousSourceDescriptor = RuleDescriptor{
+var R1000ExecFromMaliciousSourceDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1000ID,
 	Name:        R1000Name,
 	Description: "Detecting exec calls that are from malicious source like: /dev/shm, /proc/self",

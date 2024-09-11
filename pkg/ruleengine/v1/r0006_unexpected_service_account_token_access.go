@@ -27,7 +27,7 @@ var serviceAccountTokenPathsPrefix = []string{
 	"/var/run/secrets/eks.amazonaws.com/serviceaccount",
 }
 
-var R0006UnexpectedServiceAccountTokenAccessRuleDescriptor = RuleDescriptor{
+var R0006UnexpectedServiceAccountTokenAccessRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0006ID,
 	Name:        R0006Name,
 	Description: "Detecting unexpected access to service account token.",

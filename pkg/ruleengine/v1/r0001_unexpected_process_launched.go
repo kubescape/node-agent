@@ -21,7 +21,7 @@ const (
 	R0001Name = "Unexpected process launched"
 )
 
-var R0001UnexpectedProcessLaunchedRuleDescriptor = RuleDescriptor{
+var R0001UnexpectedProcessLaunchedRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0001ID,
 	Name:        R0001Name,
 	Description: "Detecting exec calls that are not whitelisted by application profile",

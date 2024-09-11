@@ -18,7 +18,7 @@ const (
 	R1004Name = "Exec from mount"
 )
 
-var R1004ExecFromMountRuleDescriptor = RuleDescriptor{
+var R1004ExecFromMountRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1004ID,
 	Name:        R1004Name,
 	Description: "Detecting exec calls from mounted paths.",

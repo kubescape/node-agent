@@ -19,7 +19,7 @@ const (
 	R0010Name = "Unexpected Sensitive File Access"
 )
 
-var R0010UnexpectedSensitiveFileAccessRuleDescriptor = RuleDescriptor{
+var R0010UnexpectedSensitiveFileAccessRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0010ID,
 	Name:        R0010Name,
 	Description: "Detecting access to sensitive files.",

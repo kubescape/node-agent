@@ -44,7 +44,7 @@ var kubernetesClients = []string{
 	"containerd-shim-runc",
 }
 
-var R0007KubernetesClientExecutedDescriptor = RuleDescriptor{
+var R0007KubernetesClientExecutedDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0007ID,
 	Name:        R0007Name,
 	Description: "Detecting exececution of kubernetes client",

@@ -17,7 +17,7 @@ const (
 	R1002Name = "Kernel Module Load"
 )
 
-var R1002LoadKernelModuleRuleDescriptor = RuleDescriptor{
+var R1002LoadKernelModuleRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1002ID,
 	Name:        R1002Name,
 	Description: "Detecting Kernel Module Load.",

@@ -17,7 +17,7 @@ const (
 	R0004Name = "Unexpected capability used"
 )
 
-var R0004UnexpectedCapabilityUsedRuleDescriptor = RuleDescriptor{
+var R0004UnexpectedCapabilityUsedRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0004ID,
 	Name:        R0004Name,
 	Description: "Detecting unexpected capabilities that are not whitelisted by application profile. Every unexpected capability is identified in context of a syscall and will be alerted only once per container.",

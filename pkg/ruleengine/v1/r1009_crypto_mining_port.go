@@ -22,7 +22,7 @@ var CommonlyUsedCryptoMinersPorts = []uint16{
 	45700, // Monero (XMR) - Stratum mining protocol (TCP). (stratum+tcp://xmr.pool.minergate.com)
 }
 
-var R1009CryptoMiningRelatedPortRuleDescriptor = RuleDescriptor{
+var R1009CryptoMiningRelatedPortRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1009ID,
 	Name:        R1009Name,
 	Description: "Detecting Crypto Miners by suspicious port usage.",

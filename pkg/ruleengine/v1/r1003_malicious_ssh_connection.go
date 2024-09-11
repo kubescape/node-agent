@@ -25,7 +25,7 @@ const (
 	R1003Name = "Malicious SSH Connection"
 )
 
-var R1003MaliciousSSHConnectionRuleDescriptor = RuleDescriptor{
+var R1003MaliciousSSHConnectionRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1003ID,
 	Name:        R1003Name,
 	Description: "Detecting ssh connection to disallowed port",

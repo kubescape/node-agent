@@ -21,7 +21,7 @@ const (
 	R1010Name = "Symlink Created Over Sensitive File"
 )
 
-var R1010SymlinkCreatedOverSensitiveFileRuleDescriptor = RuleDescriptor{
+var R1010SymlinkCreatedOverSensitiveFileRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1010ID,
 	Name:        R1010Name,
 	Description: "Detecting symlink creation over sensitive files.",

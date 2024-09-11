@@ -21,7 +21,7 @@ const (
 	R0011Name = "Unexpected Egress Network Traffic"
 )
 
-var R0011UnexpectedEgressNetworkTrafficRuleDescriptor = RuleDescriptor{
+var R0011UnexpectedEgressNetworkTrafficRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0011ID,
 	Name:        R0011Name,
 	Description: "Detecting unexpected egress network traffic that is not whitelisted by application profile.",

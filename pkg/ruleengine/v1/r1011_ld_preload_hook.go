@@ -25,7 +25,7 @@ const (
 
 var LD_PRELOAD_ENV_VARS = []string{"LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH"}
 
-var R1011LdPreloadHookRuleDescriptor = RuleDescriptor{
+var R1011LdPreloadHookRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1011ID,
 	Name:        R1011Name,
 	Description: "Detecting ld_preload hook techniques.",

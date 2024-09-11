@@ -21,7 +21,7 @@ const (
 	R1012Name = "Hardlink Created Over Sensitive File"
 )
 
-var R1012HardlinkCreatedOverSensitiveFileRuleDescriptor = RuleDescriptor{
+var R1012HardlinkCreatedOverSensitiveFileRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1012ID,
 	Name:        R1012Name,
 	Description: "Detecting hardlink creation over sensitive files.",

@@ -18,7 +18,7 @@ const (
 	R1005Name = "Fileless Execution"
 )
 
-var R1005FilelessExecutionRuleDescriptor = RuleDescriptor{
+var R1005FilelessExecutionRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1005ID,
 	Name:        R1005Name,
 	Description: "Detecting Fileless Execution",

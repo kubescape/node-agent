@@ -22,7 +22,7 @@ const (
 	R0002Name = "Unexpected file access"
 )
 
-var R0002UnexpectedFileAccessRuleDescriptor = RuleDescriptor{
+var R0002UnexpectedFileAccessRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0002ID,
 	Name:        R0002Name,
 	Description: "Detecting file access that are not whitelisted by application profile. File access is defined by the combination of path and flags",

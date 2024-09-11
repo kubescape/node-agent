@@ -17,7 +17,7 @@ const (
 	R1007Name = "XMR Crypto Mining Detection"
 )
 
-var R1007XMRCryptoMiningRuleDescriptor = RuleDescriptor{
+var R1007XMRCryptoMiningRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1007ID,
 	Name:        R1007Name,
 	Description: "Detecting XMR Crypto Miners by randomx algorithm usage.",

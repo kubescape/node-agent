@@ -20,7 +20,7 @@ const (
 	R0005Name = "Unexpected domain request"
 )
 
-var R0005UnexpectedDomainRequestRuleDescriptor = RuleDescriptor{
+var R0005UnexpectedDomainRequestRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0005ID,
 	Name:        R0005Name,
 	Description: "Detecting unexpected domain requests that are not whitelisted by application profile.",

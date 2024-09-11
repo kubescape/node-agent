@@ -17,7 +17,7 @@ const (
 	R0008Name = "Read Environment Variables from procfs"
 )
 
-var R0008ReadEnvironmentVariablesProcFSRuleDescriptor = RuleDescriptor{
+var R0008ReadEnvironmentVariablesProcFSRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0008ID,
 	Name:        R0008Name,
 	Description: "Detecting reading environment variables from procfs.",

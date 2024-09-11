@@ -5,12 +5,12 @@ import "github.com/kubescape/node-agent/pkg/ruleengine"
 var _ ruleengine.RuleCreator = (*RuleCreatorImpl)(nil)
 
 type RuleCreatorImpl struct {
-	ruleDescriptions []RuleDescriptor
+	ruleDescriptions []ruleengine.RuleDescriptor
 }
 
 func NewRuleCreator() *RuleCreatorImpl {
 	return &RuleCreatorImpl{
-		ruleDescriptions: []RuleDescriptor{
+		ruleDescriptions: []ruleengine.RuleDescriptor{
 			R0001UnexpectedProcessLaunchedRuleDescriptor,
 			R0002UnexpectedFileAccessRuleDescriptor,
 			R0003UnexpectedSystemCallRuleDescriptor,
@@ -67,10 +67,10 @@ func (r *RuleCreatorImpl) CreateRuleByName(name string) ruleengine.RuleEvaluator
 	return nil
 }
 
-func (r *RuleCreatorImpl) GetAllRuleDescriptors() []RuleDescriptor {
+func (r *RuleCreatorImpl) GetAllRuleDescriptors() []ruleengine.RuleDescriptor {
 	return r.ruleDescriptions
 }
 
-func (r *RuleCreatorImpl) AddRuleDescriptor(rule RuleDescriptor) {
+func (r *RuleCreatorImpl) RegisterRule(rule ruleengine.RuleDescriptor) {
 	r.ruleDescriptions = append(r.ruleDescriptions, rule)
 }
