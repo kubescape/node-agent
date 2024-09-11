@@ -270,7 +270,7 @@ func (ch *IGContainerWatcher) startTracers() error {
 		}
 	}
 
-	if ch.cfg.EnableEndpointDetection {
+	if ch.cfg.EnableHttpDetection {
 		logger.L().Debug("starting http tracing")
 		if err := ch.startHttpTracing(); err != nil {
 			logger.L().Error("error starting http tracing", helpers.Error(err))
@@ -351,7 +351,7 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		}
 	}
 
-	if ch.cfg.EnableEndpointDetection {
+	if ch.cfg.EnableHttpDetection {
 		// Stop http tracer
 		if err := ch.stopHttpTracing(); err != nil {
 			logger.L().Error("error stopping http tracing", helpers.Error(err))
