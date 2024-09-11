@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"sort"
 	"testing"
 	"time"
 
@@ -628,10 +629,10 @@ func Test_11_EndpointTest(t *testing.T) {
 		endpointTraffic.ExecIntoPod([]string{"wget", fmt.Sprintf("http://127.0.0.1:8000/users/%d", i)}, "")
 	}
 
-	err = endpointTraffic.WaitForApplicationProfileCompletion(80)
-	if err != nil {
-		t.Errorf("Error waiting for application profile to be completed: %v", err)
-	}
+	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000/users/123", "--header", "Connection:1234r"}, "")
+	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000/users/123", "--header", "Connection:ziz"}, "")
+
+	err = endpointTraffic.WaitForApplicationProfileCompletion(10)
 
 	applicationProfile, err := endpointTraffic.GetApplicationProfile()
 
@@ -639,23 +640,76 @@ func Test_11_EndpointTest(t *testing.T) {
 	rawJSON, err := json.Marshal(headers)
 	assert.NoError(t, err)
 
-	endpoint1 := v1beta1.HTTPEndpoint{
-		Endpoint:  "127.0.0.1/users/<dynamic>",
-		Methods:   []string{"GET"},
-		Internal:  false,
-		Direction: "outbound",
-		Headers:   rawJSON,
-	}
-
 	endpoint2 := v1beta1.HTTPEndpoint{
 		Endpoint:  "127.0.0.1/",
 		Methods:   []string{"GET", "POST"},
 		Internal:  false,
-		Direction: "outbound",
+		Direction: "inbound",
 		Headers:   rawJSON,
 	}
 
-	assert.Equal(t, []v1beta1.HTTPEndpoint{endpoint1, endpoint2}, applicationProfile.Spec.Containers[0].Endpoints)
+	headers = map[string][]string{"Host": {"127.0.0.1:8000"}, "Connection": {"1234r", "close", "ziz"}}
+	rawJSON, err = json.Marshal(headers)
+	assert.NoError(t, err)
+
+	endpoint1 := v1beta1.HTTPEndpoint{
+		Endpoint:  "127.0.0.1/users/<dynamic>",
+		Methods:   []string{"GET"},
+		Internal:  false,
+		Direction: "inbound",
+		Headers:   rawJSON,
+	}
+
+	savedEndpoints := applicationProfile.Spec.Containers[0].Endpoints
+	// Because it is both from recv and send
+	for i := range savedEndpoints {
+		savedEndpoints[i].Direction = "inbound"
+		// sort the methods and headers
+		sort.Strings(savedEndpoints[i].Methods)
+
+		headers := savedEndpoints[i].Headers
+		var headersMap map[string][]string
+		err := json.Unmarshal([]byte(headers), &headersMap)
+		if err != nil {
+			t.Errorf("Error unmarshalling headers: %v", err)
+		}
+		if headersMap["Connection"] != nil {
+			sort.Strings(headersMap["Connection"])
+			rawJSON, err = json.Marshal(headersMap)
+			assert.NoError(t, err)
+			savedEndpoints[i].Headers = rawJSON
+		}
+	}
+
+	sortHTTPEndpoints(savedEndpoints)
+
+	expectedEndpoints := []v1beta1.HTTPEndpoint{endpoint1, endpoint2}
+	sortHTTPEndpoints(expectedEndpoints)
+
+	assert.Equal(t, expectedEndpoints, savedEndpoints)
+}
+
+func sortHTTPEndpoints(endpoints []v1beta1.HTTPEndpoint) {
+	sort.Slice(endpoints, func(i, j int) bool {
+		// Sort by Endpoint first
+		if endpoints[i].Endpoint != endpoints[j].Endpoint {
+			return endpoints[i].Endpoint < endpoints[j].Endpoint
+		}
+		// If Endpoints are the same, sort by the first Method
+		if len(endpoints[i].Methods) > 0 && len(endpoints[j].Methods) > 0 {
+			return endpoints[i].Methods[0] < endpoints[j].Methods[0]
+		}
+		// If Methods are empty or the same, sort by Internal
+		if endpoints[i].Internal != endpoints[j].Internal {
+			return endpoints[i].Internal
+		}
+		// If Internal is the same, sort by Direction
+		if endpoints[i].Direction != endpoints[j].Direction {
+			return string(endpoints[i].Direction) < string(endpoints[j].Direction)
+		}
+		// If all else is equal, sort by Headers
+		return string(endpoints[i].Headers) < string(endpoints[j].Headers)
+	})
 }
 
 // func Test_10_DemoTest(t *testing.T) {
