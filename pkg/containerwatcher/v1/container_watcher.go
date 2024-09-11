@@ -6,6 +6,7 @@ import (
 	"os"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
@@ -105,6 +106,8 @@ type IGContainerWatcher struct {
 	kubeNameInstance   operators.OperatorInstance
 	// Third party tracers
 	thirdPartyTracers mapset.Set[containerwatcher.CustomTracer]
+	// Third party container receivers
+	thirdPartyContainerReceivers mapset.Set[containerwatcher.ContainerReceiver]
 
 	// Worker pools
 	capabilitiesWorkerPool *ants.PoolWithFunc
@@ -139,7 +142,7 @@ type IGContainerWatcher struct {
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]]) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -158,6 +161,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
 		ruleManager.ReportCapability(event)
+
+		// Report capabilities to event receivers
+		for receiver := range thirdPartyEventReceivers.Get(utils.CapabilitiesEventType).Iter() {
+			receiver.ReportEvent(utils.CapabilitiesEventType, &event)
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating capabilities worker pool: %w", err)
@@ -186,6 +194,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
 		ruleManager.ReportFileExec(event)
 		malwareManager.ReportFileExec(k8sContainerID, event)
+
+		// Report exec events to event receivers
+		for receiver := range thirdPartyEventReceivers.Get(utils.ExecveEventType).Iter() {
+			receiver.ReportEvent(utils.ExecveEventType, &event)
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating exec worker pool: %w", err)
@@ -214,6 +227,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		relevancyManager.ReportFileOpen(event.Runtime.ContainerID, k8sContainerID, path)
 		ruleManager.ReportFileOpen(event)
 		malwareManager.ReportFileOpen(k8sContainerID, event)
+
+		// Report open events to event receivers
+		for receiver := range thirdPartyEventReceivers.Get(utils.OpenEventType).Iter() {
+			receiver.ReportEvent(utils.OpenEventType, &event)
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating open worker pool: %w", err)
@@ -234,6 +252,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.NetworkEventType)
 		networkManagerClient.ReportNetworkEvent(k8sContainerID, event)
 		ruleManager.ReportNetworkEvent(event)
+
+		// Report network events to event receivers
+		for receiver := range thirdPartyEventReceivers.Get(utils.NetworkEventType).Iter() {
+			receiver.ReportEvent(utils.NetworkEventType, &event)
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating network worker pool: %w", err)
@@ -259,6 +282,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.DnsEventType)
 		dnsManagerClient.ReportDNSEvent(event)
 		ruleManager.ReportDNSEvent(event)
+
+		// Report DNS events to event receivers
+		for receiver := range thirdPartyEventReceivers.Get(utils.DnsEventType).Iter() {
+			receiver.ReportEvent(utils.DnsEventType, &event)
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating dns worker pool: %w", err)
@@ -271,6 +299,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		metrics.ReportEvent(utils.RandomXEventType)
 		ruleManager.ReportRandomxEvent(event)
+
+		// Report randomx events to event receivers
+		for receiver := range thirdPartyEventReceivers.Get(utils.RandomXEventType).Iter() {
+			receiver.ReportEvent(utils.RandomXEventType, &event)
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating randomx worker pool: %w", err)
@@ -283,6 +316,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		metrics.ReportEvent(utils.SymlinkEventType)
 		ruleManager.ReportSymlinkEvent(event)
+
+		// Report symlink events to event receivers
+		for receiver := range thirdPartyEventReceivers.Get(utils.SymlinkEventType).Iter() {
+			receiver.ReportEvent(utils.SymlinkEventType, &event)
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating symlink worker pool: %w", err)
@@ -295,6 +333,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		metrics.ReportEvent(utils.HardlinkEventType)
 		ruleManager.ReportHardlinkEvent(event)
+
+		// Report hardlink events to event receivers
+		for receiver := range thirdPartyEventReceivers.Get(utils.HardlinkEventType).Iter() {
+			receiver.ReportEvent(utils.HardlinkEventType, &event)
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating hardlink worker pool: %w", err)
@@ -307,6 +350,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		metrics.ReportEvent(utils.SSHEventType)
 		ruleManager.ReportSSHEvent(event)
+
+		// Report ssh events to event receivers
+		for receiver := range thirdPartyEventReceivers.Get(utils.SSHEventType).Iter() {
+			receiver.ReportEvent(utils.SSHEventType, &event)
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating ssh worker pool: %w", err)
@@ -394,6 +442,14 @@ func (ch *IGContainerWatcher) RegisterCustomTracer(tracer containerwatcher.Custo
 func (ch *IGContainerWatcher) UnregisterCustomTracer(tracer containerwatcher.CustomTracer) error {
 	ch.thirdPartyTracers.Remove(tracer)
 	return nil
+}
+
+func (ch *IGContainerWatcher) RegisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
+	ch.thirdPartyContainerReceivers.Add(receiver)
+}
+
+func (ch *IGContainerWatcher) UnregisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
+	ch.thirdPartyContainerReceivers.Remove(receiver)
 }
 
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {

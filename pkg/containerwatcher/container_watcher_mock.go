@@ -28,6 +28,10 @@ func (c ContainerWatcherMock) UnregisterCustomTracer(_ CustomTracer) error {
 	return nil
 }
 
+func (c ContainerWatcherMock) RegisterContainerReceiver(_ ContainerReceiver) {}
+
+func (c ContainerWatcherMock) UnregisterContainerReceiver(_ ContainerReceiver) {}
+
 func (c ContainerWatcherMock) GetTracerCollection() *tracercollection.TracerCollection {
 	return nil
 }

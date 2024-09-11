@@ -89,6 +89,10 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.ruleManager.ContainerCallback,
 	}
 
+	for receiver := range ch.thirdPartyContainerReceivers.Iter() {
+		containerEventFuncs = append(containerEventFuncs, receiver.ContainerCallback)
+	}
+
 	// Define the different options for the container collection instance
 	opts := []containercollection.ContainerCollectionOption{
 		// Get Notifications from the container collection
