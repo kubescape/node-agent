@@ -1,9 +1,7 @@
-
+#include "sniffer_strcuts.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
-#include "sniffer_strcuts.h"
-
 
 // Used to send http events to user space
 struct {
@@ -286,7 +284,7 @@ static __always_inline int process_packet(struct trace_event_raw_sys_exit *ctx, 
     dataevent->type = type;
     dataevent->sock_fd = packet->sockfd;
 
-    bpf_probe_read(&dataevent->syscall, sizeof(syscall), syscall);
+    bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
     bpf_probe_read_user(&dataevent->buf, MIN(total_size, MAX_DATAEVENT_BUFFER), (void *)packet->buf);
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, dataevent, sizeof(*dataevent));
     bpf_map_delete_elem(&buffer_packets, &id);
@@ -353,7 +351,7 @@ static __always_inline int process_msg(struct trace_event_raw_sys_exit *ctx, cha
         if (seg_len > PACKET_CHUNK_SIZE)
             seg_len = PACKET_CHUNK_SIZE;
 
-        char buffer[PACKET_CHUNK_SIZE];
+        char buffer[PACKET_CHUNK_SIZE] = {0};
         ret = bpf_probe_read_user(buffer, seg_len, iov.iov_base);
         if (ret < 0)
             break;
@@ -377,7 +375,7 @@ static __always_inline int process_msg(struct trace_event_raw_sys_exit *ctx, cha
                 copy_len = MAX_DATAEVENT_BUFFER;
 
             bpf_probe_read(dataevent->buf, copy_len, buffer);
-            bpf_probe_read(&dataevent->syscall, MIN(sizeof(syscall), MAX_SYSCALL), syscall);
+            bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
             bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, dataevent, sizeof(*dataevent));
         }
     }
