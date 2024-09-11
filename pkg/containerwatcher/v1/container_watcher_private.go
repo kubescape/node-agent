@@ -269,7 +269,7 @@ func (ch *IGContainerWatcher) startTracers() error {
 		}
 
 		// Start third party tracers
-		for _, tracer := range ch.thirdPartyTracers {
+		for tracer := range ch.thirdPartyTracers.Iter() {
 			if err := tracer.Start(); err != nil {
 				logger.L().Error("error starting custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
 				return err
@@ -348,7 +348,7 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		}
 
 		// Stop third party tracers
-		for _, tracer := range ch.thirdPartyTracers {
+		for tracer := range ch.thirdPartyTracers.Iter() {
 			if err := tracer.Stop(); err != nil {
 				logger.L().Error("error stopping custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
 				errs = errors.Join(errs, err)

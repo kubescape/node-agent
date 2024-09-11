@@ -104,7 +104,7 @@ type IGContainerWatcher struct {
 	kubeIPInstance     operators.OperatorInstance
 	kubeNameInstance   operators.OperatorInstance
 	// Third party tracers
-	thirdPartyTracers []containerwatcher.CustomTracer
+	thirdPartyTracers mapset.Set[containerwatcher.CustomTracer]
 
 	// Worker pools
 	capabilitiesWorkerPool *ants.PoolWithFunc
@@ -360,7 +360,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		timeBasedContainers:  mapset.NewSet[string](),
 		ruleManagedPods:      mapset.NewSet[string](),
 		runtime:              runtime,
-		thirdPartyTracers:    []containerwatcher.CustomTracer{},
+		thirdPartyTracers:    mapset.NewSet[containerwatcher.CustomTracer](),
 	}, nil
 }
 
@@ -381,26 +381,19 @@ func (ch *IGContainerWatcher) GetContainerSelector() *containercollection.Contai
 }
 
 func (ch *IGContainerWatcher) RegisterCustomTracer(tracer containerwatcher.CustomTracer) error {
-	for _, t := range ch.thirdPartyTracers {
+	for t := range ch.thirdPartyTracers.Iter() {
 		if t.Name() == tracer.Name() {
 			return fmt.Errorf("tracer with name %s already registered", tracer.Name())
 		}
 	}
 
-	ch.thirdPartyTracers = append(ch.thirdPartyTracers, tracer)
+	ch.thirdPartyTracers.Add(tracer)
 	return nil
 }
 
-func (ch *IGContainerWatcher) UnregisterCustomTracer(name string) error {
-	for i, t := range ch.thirdPartyTracers {
-		if t.Name() == name {
-			// Remove the tracer from the slice
-			ch.thirdPartyTracers = append(ch.thirdPartyTracers[:i], ch.thirdPartyTracers[i+1:]...)
-			return nil
-		}
-	}
-
-	return fmt.Errorf("tracer with name %s not found", name)
+func (ch *IGContainerWatcher) UnregisterCustomTracer(tracer containerwatcher.CustomTracer) error {
+	ch.thirdPartyTracers.Remove(tracer)
+	return nil
 }
 
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {

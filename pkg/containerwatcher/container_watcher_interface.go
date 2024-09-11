@@ -17,7 +17,7 @@ type ContainerWatcher interface {
 	GetSocketEnricher() *socketenricher.SocketEnricher
 	GetContainerSelector() *containercollection.ContainerSelector
 	RegisterCustomTracer(tracer CustomTracer) error
-	UnregisterCustomTracer(tracerName string) error
+	UnregisterCustomTracer(tracer CustomTracer) error
 }
 
 type CustomTracer interface {

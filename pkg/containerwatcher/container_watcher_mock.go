@@ -24,7 +24,7 @@ func (c ContainerWatcherMock) RegisterCustomTracer(_ CustomTracer) error {
 	return nil
 }
 
-func (c ContainerWatcherMock) UnregisterCustomTracer(_ string) error {
+func (c ContainerWatcherMock) UnregisterCustomTracer(_ CustomTracer) error {
 	return nil
 }
 
