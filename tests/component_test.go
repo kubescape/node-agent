@@ -632,7 +632,10 @@ func Test_11_EndpointTest(t *testing.T) {
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000/users/123", "--header", "Connection:1234r"}, "")
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000/users/123", "--header", "Connection:ziz"}, "")
 
-	err = endpointTraffic.WaitForApplicationProfileCompletion(10)
+	err = endpointTraffic.WaitForApplicationProfileCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
 
 	applicationProfile, err := endpointTraffic.GetApplicationProfile()
 

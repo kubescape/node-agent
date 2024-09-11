@@ -27,7 +27,7 @@ func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttpty
 	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
 	rawJSON, err := json.Marshal(headers)
 	if err != nil {
-		fmt.Println("Error marshaling JSON:", err)
+		logger.L().Error("Error marshaling JSON:", helpers.Error(err))
 		return nil, err
 	}
 
