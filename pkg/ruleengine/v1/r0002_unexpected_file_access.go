@@ -133,7 +133,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 	}
 
 	for _, open := range appProfileOpenList.Opens {
-		if open.Path == openEvent.FullPath {
+		if _, dynamic := CompareDynamic(open.Path, openEvent.FullPath); dynamic {
 			found := 0
 			for _, eventOpenFlag := range openEvent.Flags {
 				// Check that event open flag is in the open.Flags

@@ -153,3 +153,32 @@ func interfaceToStringSlice(val interface{}) ([]string, bool) {
 	}
 	return nil, false
 }
+
+func CompareDynamic(dynamicPath, regularPath string) (string, bool) {
+	const dynamic = "<dynamic>"
+
+	dynamicSegments := strings.Split(dynamicPath, "/")
+	regularSegments := strings.Split(regularPath, "/")
+
+	if len(dynamicSegments) != len(regularSegments) {
+		return regularPath, false
+	}
+
+	modified := false
+	for i := range dynamicSegments {
+		if dynamicSegments[i] == dynamic {
+			if !modified {
+				regularSegments[i] = dynamic
+				modified = true
+			}
+		} else if dynamicSegments[i] != regularSegments[i] {
+			return regularPath, false
+		}
+	}
+
+	if modified {
+		return strings.Join(regularSegments, "/"), true
+	}
+
+	return regularPath, dynamicPath == regularPath
+}

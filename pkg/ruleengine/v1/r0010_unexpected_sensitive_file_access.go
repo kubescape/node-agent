@@ -109,7 +109,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 	}
 
 	for _, open := range appProfileOpenList.Opens {
-		if open.Path == openEvent.FullPath {
+		if _, dynamic := CompareDynamic(open.Path, openEvent.FullPath); dynamic {
 			return nil
 		}
 	}
