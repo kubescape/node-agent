@@ -17,7 +17,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-type K8sEvent interface {
+type RuntimeK8sEvent interface {
 	GetNamespace() string
 	GetPod() string
 }
@@ -34,7 +34,7 @@ type RuleManagerClient interface {
 	ReportSymlinkEvent(event tracersymlinktype.Event)
 	ReportHardlinkEvent(event tracerhardlinktype.Event)
 	ReportSSHEvent(event tracersshtype.Event)
-	ReportEvent(eventType utils.EventType, event K8sEvent)
+	ReportEvent(eventType utils.EventType, event RuntimeK8sEvent)
 	HasApplicableRuleBindings(namespace, name string) bool
 	HasFinalApplicationProfile(pod *v1.Pod) bool
 	IsContainerMonitored(k8sContainerID string) bool

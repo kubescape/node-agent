@@ -69,7 +69,7 @@ func (r *RuleManagerMock) ReportSSHEvent(_ tracersshtype.Event) {
 	// noop
 }
 
-func (r *RuleManagerMock) ReportEvent(_ utils.EventType, _ K8sEvent) {
+func (r *RuleManagerMock) ReportEvent(_ utils.EventType, _ RuntimeK8sEvent) {
 	// noop
 }
 
