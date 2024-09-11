@@ -57,9 +57,7 @@ struct packet_mmsg {
     struct packet_msg msgs[MAX_MSG_COUNT];
 };
 
-struct httpevent {
-    __u32 netns;
-    
+struct httpevent {    
     gadget_timestamp timestamp;
     gadget_mntns_id mntns_id;
     __u32 pid;

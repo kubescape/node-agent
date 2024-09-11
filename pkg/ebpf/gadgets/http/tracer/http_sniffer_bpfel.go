@@ -23,8 +23,6 @@ type http_snifferActiveConnectionInfo struct {
 }
 
 type http_snifferHttpevent struct {
-	Netns     uint32
-	_         [4]byte
 	Timestamp uint64
 	MntnsId   uint64
 	Pid       uint32

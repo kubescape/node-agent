@@ -86,7 +86,7 @@ static __always_inline __u64 generate_unique_connection_id(__u64 pid_tgid, __u32
     return ((__u64)tgid << 32) | sockfd;
 }
 
-static __always_inline void get_namespace_ids(u64 *mnt_ns_id, u64 *net_ns_id)
+static __always_inline void get_namespace_ids(u64 *mnt_ns_id)
 {
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (task)
@@ -95,14 +95,9 @@ static __always_inline void get_namespace_ids(u64 *mnt_ns_id, u64 *net_ns_id)
         if (nsproxy)
         {
             struct mnt_namespace *mnt_ns = BPF_CORE_READ(nsproxy, mnt_ns);
-            struct net *net_ns = BPF_CORE_READ(nsproxy, net_ns);
             if (mnt_ns)
             {
                 *mnt_ns_id = BPF_CORE_READ(mnt_ns, ns.inum);
-            }
-            if (net_ns)
-            {
-                *net_ns_id = BPF_CORE_READ(net_ns, ns.inum);
             }
         }
     }
@@ -119,10 +114,8 @@ static __always_inline int populate_httpevent(struct httpevent *event)
         return -1;
 
     u64 mnt_ns_id = 0;
-    u64 net_ns_id = 0;
-    get_namespace_ids(&mnt_ns_id, &net_ns_id);
-
-    event->netns = net_ns_id;
+    
+    get_namespace_ids(&mnt_ns_id);
     event->mntns_id = mnt_ns_id;
 
     u64 pid_tgid = bpf_get_current_pid_tgid();

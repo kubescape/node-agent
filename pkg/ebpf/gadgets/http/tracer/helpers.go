@@ -109,7 +109,6 @@ func (t *Tracer) ParseHTTP(rawSample []byte) (*tracerhttptype.Event, error) {
 			Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
 		},
 		WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-		WithNetNsID:   eventtypes.WithNetNsID{NetNsID: uint64(bpfEvent.Netns)},
 		Pid:           bpfEvent.Pid,
 		Uid:           bpfEvent.Uid,
 		Gid:           bpfEvent.Gid,
