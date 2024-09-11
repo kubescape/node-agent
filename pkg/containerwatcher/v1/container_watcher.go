@@ -163,8 +163,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportCapability(event)
 
 		// Report capabilities to event receivers
-		for receiver := range thirdPartyEventReceivers.Get(utils.CapabilitiesEventType).Iter() {
-			receiver.ReportEvent(utils.CapabilitiesEventType, &event)
+		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.CapabilitiesEventType) {
+			for receiver := range thirdPartyEventReceivers.Get(utils.CapabilitiesEventType).Iter() {
+				receiver.ReportEvent(utils.CapabilitiesEventType, &event)
+			}
 		}
 	})
 	if err != nil {
@@ -196,8 +198,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		malwareManager.ReportFileExec(k8sContainerID, event)
 
 		// Report exec events to event receivers
-		for receiver := range thirdPartyEventReceivers.Get(utils.ExecveEventType).Iter() {
-			receiver.ReportEvent(utils.ExecveEventType, &event)
+		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.ExecveEventType) {
+			for receiver := range thirdPartyEventReceivers.Get(utils.ExecveEventType).Iter() {
+				receiver.ReportEvent(utils.ExecveEventType, &event)
+			}
 		}
 	})
 	if err != nil {
@@ -229,8 +233,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		malwareManager.ReportFileOpen(k8sContainerID, event)
 
 		// Report open events to event receivers
-		for receiver := range thirdPartyEventReceivers.Get(utils.OpenEventType).Iter() {
-			receiver.ReportEvent(utils.OpenEventType, &event)
+		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.OpenEventType) {
+			for receiver := range thirdPartyEventReceivers.Get(utils.OpenEventType).Iter() {
+				receiver.ReportEvent(utils.OpenEventType, &event)
+			}
 		}
 	})
 	if err != nil {
@@ -254,8 +260,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportNetworkEvent(event)
 
 		// Report network events to event receivers
-		for receiver := range thirdPartyEventReceivers.Get(utils.NetworkEventType).Iter() {
-			receiver.ReportEvent(utils.NetworkEventType, &event)
+		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.NetworkEventType) {
+			for receiver := range thirdPartyEventReceivers.Get(utils.NetworkEventType).Iter() {
+				receiver.ReportEvent(utils.NetworkEventType, &event)
+			}
 		}
 	})
 	if err != nil {
@@ -284,8 +292,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportDNSEvent(event)
 
 		// Report DNS events to event receivers
-		for receiver := range thirdPartyEventReceivers.Get(utils.DnsEventType).Iter() {
-			receiver.ReportEvent(utils.DnsEventType, &event)
+		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.DnsEventType) {
+			for receiver := range thirdPartyEventReceivers.Get(utils.DnsEventType).Iter() {
+				receiver.ReportEvent(utils.DnsEventType, &event)
+			}
 		}
 	})
 	if err != nil {
@@ -301,8 +311,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportRandomxEvent(event)
 
 		// Report randomx events to event receivers
-		for receiver := range thirdPartyEventReceivers.Get(utils.RandomXEventType).Iter() {
-			receiver.ReportEvent(utils.RandomXEventType, &event)
+		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.RandomXEventType) {
+			for receiver := range thirdPartyEventReceivers.Get(utils.RandomXEventType).Iter() {
+				receiver.ReportEvent(utils.RandomXEventType, &event)
+			}
 		}
 	})
 	if err != nil {
@@ -318,8 +330,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportSymlinkEvent(event)
 
 		// Report symlink events to event receivers
-		for receiver := range thirdPartyEventReceivers.Get(utils.SymlinkEventType).Iter() {
-			receiver.ReportEvent(utils.SymlinkEventType, &event)
+		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.SymlinkEventType) {
+			for receiver := range thirdPartyEventReceivers.Get(utils.SymlinkEventType).Iter() {
+				receiver.ReportEvent(utils.SymlinkEventType, &event)
+			}
 		}
 	})
 	if err != nil {
@@ -335,8 +349,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportHardlinkEvent(event)
 
 		// Report hardlink events to event receivers
-		for receiver := range thirdPartyEventReceivers.Get(utils.HardlinkEventType).Iter() {
-			receiver.ReportEvent(utils.HardlinkEventType, &event)
+		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.HardlinkEventType) {
+			for receiver := range thirdPartyEventReceivers.Get(utils.HardlinkEventType).Iter() {
+				receiver.ReportEvent(utils.HardlinkEventType, &event)
+			}
 		}
 	})
 	if err != nil {
@@ -352,8 +368,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportSSHEvent(event)
 
 		// Report ssh events to event receivers
-		for receiver := range thirdPartyEventReceivers.Get(utils.SSHEventType).Iter() {
-			receiver.ReportEvent(utils.SSHEventType, &event)
+		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.SSHEventType) {
+			for receiver := range thirdPartyEventReceivers.Get(utils.SSHEventType).Iter() {
+				receiver.ReportEvent(utils.SSHEventType, &event)
+			}
 		}
 	})
 	if err != nil {
