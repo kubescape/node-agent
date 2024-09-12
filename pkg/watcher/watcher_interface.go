@@ -3,7 +3,7 @@ package watcher
 import (
 	"context"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 type Adaptor interface {
@@ -12,35 +12,35 @@ type Adaptor interface {
 }
 
 type Watcher interface {
-	AddHandler(ctx context.Context, obj *unstructured.Unstructured)
-	ModifyHandler(ctx context.Context, obj *unstructured.Unstructured)
-	DeleteHandler(ctx context.Context, obj *unstructured.Unstructured)
+	AddHandler(ctx context.Context, obj runtime.Object)
+	ModifyHandler(ctx context.Context, obj runtime.Object)
+	DeleteHandler(ctx context.Context, obj runtime.Object)
 }
 
 var _ Watcher = &WatcherMock{}
 
 type WatcherMock struct {
-	Added   chan *unstructured.Unstructured
-	Updated chan *unstructured.Unstructured
-	Deleted chan *unstructured.Unstructured
+	Added   chan runtime.Object
+	Updated chan runtime.Object
+	Deleted chan runtime.Object
 }
 
 func NewWatcherMock() *WatcherMock {
 	return &WatcherMock{
-		Added:   make(chan *unstructured.Unstructured),
-		Updated: make(chan *unstructured.Unstructured),
-		Deleted: make(chan *unstructured.Unstructured),
+		Added:   make(chan runtime.Object),
+		Updated: make(chan runtime.Object),
+		Deleted: make(chan runtime.Object),
 	}
 }
-func (wm *WatcherMock) AddHandler(_ context.Context, obj *unstructured.Unstructured) {
+func (wm *WatcherMock) AddHandler(_ context.Context, obj runtime.Object) {
 	wm.Added <- obj
 }
 
-func (wm *WatcherMock) ModifyHandler(_ context.Context, obj *unstructured.Unstructured) {
+func (wm *WatcherMock) ModifyHandler(_ context.Context, obj runtime.Object) {
 	wm.Updated <- obj
 }
 
-func (wm *WatcherMock) DeleteHandler(_ context.Context, obj *unstructured.Unstructured) {
+func (wm *WatcherMock) DeleteHandler(_ context.Context, obj runtime.Object) {
 	wm.Deleted <- obj
 }
 

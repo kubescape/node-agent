@@ -4,28 +4,29 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/watcher"
+	v1beta1api "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 type SeccompProfileWatcherImpl struct {
-	k8sClient            k8sclient.K8sClientInterface
+	storageClient        v1beta1.SpdxV1beta1Interface
 	seccompManager       seccompmanager.SeccompManagerClient
 	groupVersionResource schema.GroupVersionResource
 }
 
 var _ watcher.Adaptor = (*SeccompProfileWatcherImpl)(nil)
 
-func NewSeccompProfileWatcher(k8sClient k8sclient.K8sClientInterface, seccompManager seccompmanager.SeccompManagerClient) *SeccompProfileWatcherImpl {
+func NewSeccompProfileWatcher(storageClient v1beta1.SpdxV1beta1Interface, seccompManager seccompmanager.SeccompManagerClient) *SeccompProfileWatcherImpl {
 	return &SeccompProfileWatcherImpl{
-		k8sClient:      k8sClient,
+		storageClient:  storageClient,
 		seccompManager: seccompManager,
 		groupVersionResource: schema.GroupVersionResource{
 			Group:    "spdx.softwarecomposition.kubescape.io",
@@ -46,8 +47,8 @@ func (sp *SeccompProfileWatcherImpl) WatchResources() []watcher.WatchResource {
 
 // ------------------ watcher.Watcher methods -----------------------
 
-func (sp *SeccompProfileWatcherImpl) AddHandler(ctx context.Context, obj *unstructured.Unstructured) {
-	if obj.GetKind() == "SeccompProfile" {
+func (sp *SeccompProfileWatcherImpl) AddHandler(ctx context.Context, obj runtime.Object) {
+	if _, ok := obj.(*v1beta1api.SeccompProfile); ok {
 		fullObj, err := sp.getFullSeccompProfile(obj)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("SeccompProfileWatcherImpl - failed to get full seccomp profile", helpers.Error(err))
@@ -59,8 +60,8 @@ func (sp *SeccompProfileWatcherImpl) AddHandler(ctx context.Context, obj *unstru
 	}
 }
 
-func (sp *SeccompProfileWatcherImpl) ModifyHandler(ctx context.Context, obj *unstructured.Unstructured) {
-	if obj.GetKind() == "SeccompProfile" {
+func (sp *SeccompProfileWatcherImpl) ModifyHandler(ctx context.Context, obj runtime.Object) {
+	if _, ok := obj.(*v1beta1api.SeccompProfile); ok {
 		fullObj, err := sp.getFullSeccompProfile(obj)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("SeccompProfileWatcherImpl - failed to get full seccomp profile", helpers.Error(err))
@@ -72,16 +73,17 @@ func (sp *SeccompProfileWatcherImpl) ModifyHandler(ctx context.Context, obj *uns
 	}
 }
 
-func (sp *SeccompProfileWatcherImpl) DeleteHandler(ctx context.Context, obj *unstructured.Unstructured) {
-	if obj.GetKind() == "SeccompProfile" {
-		if err := sp.seccompManager.DeleteSeccompProfile(obj); err != nil {
+func (sp *SeccompProfileWatcherImpl) DeleteHandler(ctx context.Context, obj runtime.Object) {
+	if _, ok := obj.(*v1beta1api.SeccompProfile); ok {
+		if err := sp.seccompManager.DeleteSeccompProfile(obj.(*v1beta1api.SeccompProfile)); err != nil {
 			logger.L().Ctx(ctx).Error("SeccompProfileWatcherImpl - failed to delete seccomp profile", helpers.Error(err))
 		}
 	}
 }
 
-func (sp *SeccompProfileWatcherImpl) getFullSeccompProfile(obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-	fullObj, err := sp.k8sClient.GetDynamicClient().Resource(sp.groupVersionResource).Namespace(obj.GetNamespace()).Get(context.Background(), obj.GetName(), metav1.GetOptions{})
+func (sp *SeccompProfileWatcherImpl) getFullSeccompProfile(obj runtime.Object) (*v1beta1api.SeccompProfile, error) {
+	meta := obj.(metav1.Object)
+	fullObj, err := sp.storageClient.SeccompProfiles(meta.GetNamespace()).Get(context.Background(), meta.GetName(), metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get full seccomp profile: %w", err)
 	}

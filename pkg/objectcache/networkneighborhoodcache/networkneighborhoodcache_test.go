@@ -6,23 +6,18 @@ import (
 	"slices"
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/node-agent/mocks"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/watcher"
-
-	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
+	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
-
 	"k8s.io/client-go/kubernetes/scheme"
-
-	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/stretchr/testify/assert"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func init() {
@@ -33,49 +28,49 @@ func init() {
 func Test_AddHandlers(t *testing.T) {
 
 	tests := []struct {
-		f      func(ap *NetworkNeighborhoodCacheImpl, ctx context.Context, obj *unstructured.Unstructured)
-		obj    *unstructured.Unstructured
+		f      func(ap *NetworkNeighborhoodCacheImpl, ctx context.Context, obj runtime.Object)
+		obj    runtime.Object
 		name   string
 		slug   string
 		length int
 	}{
 		{
 			name:   "add network neighborhood",
-			obj:    mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx),
+			obj:    mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx),
 			f:      (*NetworkNeighborhoodCacheImpl).AddHandler,
 			slug:   "default/replicaset-nginx-77b4fdf86c",
 			length: 1,
 		},
 		{
 			name:   "add pod",
-			obj:    mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
+			obj:    mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection),
 			f:      (*NetworkNeighborhoodCacheImpl).AddHandler,
 			slug:   "default/replicaset-collection-94c495554",
 			length: 6,
 		},
 		{
 			name:   "modify network neighborhood",
-			obj:    mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx),
+			obj:    mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx),
 			f:      (*NetworkNeighborhoodCacheImpl).ModifyHandler,
 			length: 1,
 		},
 		{
 			name:   "modify pod",
-			obj:    mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
+			obj:    mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection),
 			f:      (*NetworkNeighborhoodCacheImpl).ModifyHandler,
 			slug:   "default/replicaset-collection-94c495554",
 			length: 6,
 		},
 		{
 			name:   "delete network neighborhood",
-			obj:    mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx),
+			obj:    mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx),
 			f:      (*NetworkNeighborhoodCacheImpl).DeleteHandler,
 			slug:   "default/replicaset-nginx-77b4fdf86c",
 			length: 0,
 		},
 		{
 			name:   "delete pod",
-			obj:    mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
+			obj:    mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection),
 			f:      (*NetworkNeighborhoodCacheImpl).DeleteHandler,
 			slug:   "default/replicaset-collection-94c495554",
 			length: 0,
@@ -83,14 +78,14 @@ func Test_AddHandlers(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.obj.SetNamespace("default")
-			k8sClient := k8sinterface.NewKubernetesApiMock()
-			nn := NewNetworkNeighborhoodCache("", k8sClient)
+			tt.obj.(metav1.Object).SetNamespace("default")
+			storageClient := fake.NewSimpleClientset().SpdxV1beta1()
+			nn := NewNetworkNeighborhoodCache("", storageClient)
 			nn.slugToContainers.Set(tt.slug, mapset.NewSet[string]())
 
 			tt.f(nn, context.Background(), tt.obj)
 
-			switch mocks.TestKinds(tt.obj.GetKind()) {
+			switch mocks.TestKinds(tt.obj.GetObjectKind().GroupVersionKind().Kind) {
 			case mocks.TestKindNN:
 				assert.Equal(t, tt.length, nn.allNetworkNeighborhoods.Cardinality())
 			case mocks.TestKindPod:
@@ -104,17 +99,17 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 
 	// add single network neighborhood
 	tests := []struct {
-		obj            *unstructured.Unstructured
+		obj            runtime.Object
 		name           string
 		annotations    map[string]string
-		preCreatedPods []*unstructured.Unstructured // pre created pods
-		preCreatedAP   []*unstructured.Unstructured // pre created network neighborhoods
+		preCreatedPods []runtime.Object // pre created pods
+		preCreatedAP   []runtime.Object // pre created application profiles
 		shouldAdd      bool
 		shouldAddToPod bool
 	}{
 		{
 			name: "add single network neighborhood nginx",
-			obj:  mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx),
+			obj:  mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx),
 			annotations: map[string]string{
 				"kubescape.io/status":     "completed",
 				"kubescape.io/completion": "complete",
@@ -123,7 +118,7 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 		},
 		{
 			name: "add network neighborhood with partial annotation",
-			obj:  mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection),
+			obj:  mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection),
 			annotations: map[string]string{
 				"kubescape.io/status":     "completed",
 				"kubescape.io/completion": "partial",
@@ -132,7 +127,7 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 		},
 		{
 			name: "ignore single network neighborhood with incomplete annotation",
-			obj:  mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection),
+			obj:  mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection),
 			annotations: map[string]string{
 				"kubescape.io/status":     "ready",
 				"kubescape.io/completion": "complete",
@@ -141,8 +136,8 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 		},
 		{
 			name:           "add network neighborhood to pod",
-			obj:            mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection),
-			preCreatedPods: []*unstructured.Unstructured{mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection)},
+			obj:            mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection),
+			preCreatedPods: []runtime.Object{mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection)},
 			annotations: map[string]string{
 				"kubescape.io/status":     "completed",
 				"kubescape.io/completion": "complete",
@@ -152,8 +147,8 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 		},
 		{
 			name:           "add network neighborhood without pod",
-			obj:            mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection),
-			preCreatedPods: []*unstructured.Unstructured{mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx)},
+			obj:            mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection),
+			preCreatedPods: []runtime.Object{mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx)},
 			annotations: map[string]string{
 				"kubescape.io/status":     "completed",
 				"kubescape.io/completion": "complete",
@@ -165,29 +160,26 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if len(tt.annotations) != 0 {
-				tt.obj.SetAnnotations(tt.annotations)
+				tt.obj.(metav1.Object).SetAnnotations(tt.annotations)
 			}
 			namespace := fmt.Sprintf("default-%d", i)
-			k8sClient := k8sinterface.NewKubernetesApiMock()
 
 			var runtimeObjs []runtime.Object
-			tt.obj.SetNamespace(namespace)
-			runtimeObjs = append(runtimeObjs, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}})
 
 			for i := range tt.preCreatedPods {
-				tt.preCreatedPods[i].SetNamespace(namespace)
-				runtimeObjs = append(runtimeObjs, mocks.UnstructuredToRuntime(tt.preCreatedPods[i]))
+				tt.preCreatedPods[i].(metav1.Object).SetNamespace(namespace)
 			}
 			for i := range tt.preCreatedAP {
-				tt.preCreatedAP[i].SetNamespace(namespace)
-				runtimeObjs = append(runtimeObjs, mocks.UnstructuredToRuntime(tt.preCreatedAP[i]))
+				tt.preCreatedAP[i].(metav1.Object).SetNamespace(namespace)
+				runtimeObjs = append(runtimeObjs, tt.preCreatedAP[i])
 			}
 
-			runtimeObjs = append(runtimeObjs, mocks.UnstructuredToRuntime(tt.obj))
+			tt.obj.(metav1.Object).SetNamespace(namespace)
+			runtimeObjs = append(runtimeObjs, tt.obj)
 
-			k8sClient.DynamicClient = dynamicfake.NewSimpleDynamicClient(scheme.Scheme, runtimeObjs...)
+			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			nn := NewNetworkNeighborhoodCache("", k8sClient)
+			nn := NewNetworkNeighborhoodCache("", storageClient)
 
 			for i := range tt.preCreatedPods {
 				nn.addPod(tt.preCreatedPods[i])
@@ -199,7 +191,7 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 			nn.addNetworkNeighborhood(context.Background(), tt.obj)
 
 			// test if the network neighborhood is added to the cache
-			apName := objectcache.UnstructuredUniqueName(tt.obj)
+			apName := objectcache.MetaUniqueName(tt.obj.(metav1.Object))
 			if tt.shouldAdd {
 				assert.Equal(t, 1, nn.allNetworkNeighborhoods.Cardinality())
 			} else {
@@ -210,7 +202,7 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 				assert.True(t, nn.slugToContainers.Has(apName))
 				assert.True(t, nn.slugToNetworkNeighborhood.Has(apName))
 				for i := range tt.preCreatedPods {
-					p, _ := objectcache.UnstructuredToPod(tt.preCreatedPods[i])
+					p := tt.preCreatedPods[i].(*corev1.Pod)
 					for _, c := range objectcache.ListContainersIDs(p) {
 						assert.NotNil(t, nn.GetNetworkNeighborhood(c))
 					}
@@ -219,7 +211,7 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 				assert.False(t, nn.slugToContainers.Has(apName))
 				assert.False(t, nn.slugToNetworkNeighborhood.Has(apName))
 				for i := range tt.preCreatedPods {
-					p, _ := objectcache.UnstructuredToPod(tt.preCreatedPods[i])
+					p := tt.preCreatedPods[i].(*corev1.Pod)
 					for _, c := range objectcache.ListContainersIDs(p) {
 						assert.Nil(t, nn.GetNetworkNeighborhood(c))
 					}
@@ -231,7 +223,7 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 func Test_deleteNetworkNeighborhood(t *testing.T) {
 
 	tests := []struct {
-		obj          *unstructured.Unstructured
+		obj          runtime.Object
 		name         string
 		slug         string
 		slugs        []string
@@ -239,21 +231,21 @@ func Test_deleteNetworkNeighborhood(t *testing.T) {
 	}{
 		{
 			name:         "delete network neighborhood nginx",
-			obj:          mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx),
+			obj:          mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx),
 			slug:         "/replicaset-nginx-77b4fdf86c",
 			slugs:        []string{"/replicaset-nginx-77b4fdf86c"},
 			shouldDelete: true,
 		},
 		{
 			name:         "delete network neighborhood from many",
-			obj:          mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx),
+			obj:          mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx),
 			slug:         "/replicaset-nginx-77b4fdf86c",
 			slugs:        []string{"/replicaset-nginx-11111", "/replicaset-nginx-77b4fdf86c", "/replicaset-nginx-22222"},
 			shouldDelete: true,
 		},
 		{
 			name:         "ignore delete network neighborhood nginx",
-			obj:          mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection),
+			obj:          mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection),
 			slug:         "/replicaset-nginx-77b4fdf86c",
 			slugs:        []string{"/replicaset-nginx-77b4fdf86c"},
 			shouldDelete: false,
@@ -287,7 +279,7 @@ func Test_deleteNetworkNeighborhood(t *testing.T) {
 func Test_deletePod(t *testing.T) {
 
 	tests := []struct {
-		obj          *unstructured.Unstructured
+		obj          runtime.Object
 		name         string
 		containers   []string
 		slug         string
@@ -296,19 +288,19 @@ func Test_deletePod(t *testing.T) {
 	}{
 		{
 			name:         "delete pod",
-			obj:          mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx),
+			obj:          mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx),
 			containers:   []string{"b0416f7a782e62badf28e03fc9b82305cd02e9749dc24435d8592fab66349c78"},
 			shouldDelete: true,
 		},
 		{
 			name:         "pod not deleted",
-			obj:          mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx),
+			obj:          mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx),
 			containers:   []string{"blabla"},
 			shouldDelete: false,
 		},
 		{
 			name:         "delete pod with slug",
-			obj:          mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx),
+			obj:          mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx),
 			containers:   []string{"b0416f7a782e62badf28e03fc9b82305cd02e9749dc24435d8592fab66349c78"},
 			slug:         "/replicaset-nginx-77b4fdf86c",
 			otherSlugs:   []string{"1111111", "222222"},
@@ -316,7 +308,7 @@ func Test_deletePod(t *testing.T) {
 		},
 		{
 			name:         "delete pod with slug",
-			obj:          mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx),
+			obj:          mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx),
 			containers:   []string{"b0416f7a782e62badf28e03fc9b82305cd02e9749dc24435d8592fab66349c78"},
 			slug:         "/replicaset-nginx-77b4fdf86c",
 			shouldDelete: true,
@@ -432,7 +424,7 @@ func Test_GetNetworkNeighborhood(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			nn := NewNetworkNeighborhoodCache("", k8sinterface.NewKubernetesApiMock())
+			nn := NewNetworkNeighborhoodCache("", fake.NewSimpleClientset().SpdxV1beta1())
 
 			for _, c := range tt.pods {
 				nn.containerToSlug.Set(c.containerID, c.slug)
@@ -457,8 +449,8 @@ func Test_addNetworkNeighborhood_existing(t *testing.T) {
 	}
 	// add single network neighborhood
 	tests := []struct {
-		obj1         *unstructured.Unstructured
-		obj2         *unstructured.Unstructured
+		obj1         runtime.Object
+		obj2         runtime.Object
 		annotations1 map[string]string
 		annotations2 map[string]string
 		name         string
@@ -467,8 +459,8 @@ func Test_addNetworkNeighborhood_existing(t *testing.T) {
 	}{
 		{
 			name: "network neighborhood already exists",
-			obj1: mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx),
-			obj2: mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx),
+			obj1: mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx),
+			obj2: mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx),
 			pods: []podToSlug{
 				{
 					podName: "nginx-77b4fdf86c",
@@ -479,8 +471,8 @@ func Test_addNetworkNeighborhood_existing(t *testing.T) {
 		},
 		{
 			name: "remove network neighborhood",
-			obj1: mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx),
-			obj2: mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx),
+			obj1: mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx),
+			obj2: mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx),
 			pods: []podToSlug{
 				{
 					podName: "nginx-77b4fdf86c",
@@ -499,20 +491,19 @@ func Test_addNetworkNeighborhood_existing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if len(tt.annotations1) != 0 {
-				tt.obj1.SetAnnotations(tt.annotations1)
+				tt.obj1.(metav1.Object).SetAnnotations(tt.annotations1)
 			}
 			if len(tt.annotations2) != 0 {
-				tt.obj2.SetAnnotations(tt.annotations2)
+				tt.obj2.(metav1.Object).SetAnnotations(tt.annotations2)
 			}
-			k8sClient := k8sinterface.NewKubernetesApiMock()
 
 			var runtimeObjs []runtime.Object
 
-			runtimeObjs = append(runtimeObjs, mocks.UnstructuredToRuntime(tt.obj1))
+			runtimeObjs = append(runtimeObjs, tt.obj1)
 
-			k8sClient.DynamicClient = dynamicfake.NewSimpleDynamicClient(scheme.Scheme, runtimeObjs...)
+			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			nn := NewNetworkNeighborhoodCache("", k8sClient)
+			nn := NewNetworkNeighborhoodCache("", storageClient)
 
 			// add pods
 			for i := range tt.pods {
@@ -533,45 +524,19 @@ func Test_addNetworkNeighborhood_existing(t *testing.T) {
 	}
 }
 
-func Test_unstructuredToNetworkNeighborhood(t *testing.T) {
-
-	tests := []struct {
-		obj  *unstructured.Unstructured
-		name string
-	}{
-		{
-			name: "nginx network neighborhood",
-			obj:  mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx),
-		},
-		{
-			name: "collection network neighborhood",
-			obj:  mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p, err := unstructuredToNetworkNeighborhood(tt.obj)
-			assert.NoError(t, err)
-			assert.Equal(t, tt.obj.GetName(), p.GetName())
-			assert.Equal(t, tt.obj.GetLabels(), p.GetLabels())
-			assert.Equal(t, tt.obj.GetAnnotations(), p.GetAnnotations())
-		})
-	}
-}
-
 func Test_getNetworkNeighborhood(t *testing.T) {
 	type args struct {
 		name string
 	}
 	tests := []struct {
 		name    string
-		obj     *unstructured.Unstructured
+		obj     runtime.Object
 		args    args
 		wantErr bool
 	}{
 		{
 			name: "nginx network neighborhood",
-			obj:  mocks.GetUnstructured(mocks.TestKindNN, mocks.TestNginx),
+			obj:  mocks.GetRuntime(mocks.TestKindNN, mocks.TestNginx),
 			args: args{
 				name: "replicaset-nginx-77b4fdf86c",
 			},
@@ -579,7 +544,7 @@ func Test_getNetworkNeighborhood(t *testing.T) {
 		},
 		{
 			name: "collection network neighborhood",
-			obj:  mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection),
+			obj:  mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection),
 			args: args{
 				name: "replicaset-collection-94c495554",
 			},
@@ -587,7 +552,7 @@ func Test_getNetworkNeighborhood(t *testing.T) {
 		},
 		{
 			name: "collection network neighborhood",
-			obj:  mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection),
+			obj:  mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection),
 			args: args{
 				name: "replicaset-nginx-77b4fdf86c",
 			},
@@ -596,11 +561,10 @@ func Test_getNetworkNeighborhood(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			k8sClient := k8sinterface.NewKubernetesApiMock()
-			k8sClient.DynamicClient = dynamicfake.NewSimpleDynamicClient(scheme.Scheme, mocks.UnstructuredToRuntime(tt.obj))
+			storageClient := fake.NewSimpleClientset(tt.obj).SpdxV1beta1()
 
 			nn := &NetworkNeighborhoodCacheImpl{
-				k8sClient: k8sClient,
+				storageClient: storageClient,
 			}
 
 			a, err := nn.getNetworkNeighborhood("", tt.args.name)
@@ -609,8 +573,8 @@ func Test_getNetworkNeighborhood(t *testing.T) {
 				return
 			}
 			assert.NoError(t, err)
-			assert.Equal(t, tt.obj.GetName(), a.GetName())
-			assert.Equal(t, tt.obj.GetLabels(), a.GetLabels())
+			assert.Equal(t, tt.obj.(metav1.Object).GetName(), a.GetName())
+			assert.Equal(t, tt.obj.(metav1.Object).GetLabels(), a.GetLabels())
 		})
 	}
 }
@@ -638,38 +602,21 @@ func Test_WatchResources(t *testing.T) {
 func TestGetSlug(t *testing.T) {
 	tests := []struct {
 		name      string
-		obj       *unstructured.Unstructured
+		obj       runtime.Object
 		expected  string
 		expectErr bool
 	}{
 		{
 			name:      "Test with valid object",
-			obj:       mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
+			obj:       mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection),
 			expected:  "replicaset-collection-94c495554",
 			expectErr: false,
 		},
 		{
-			name: "Test with invalid object",
-			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"kind": "Unknown",
-					"metadata": map[string]interface{}{
-						"name": "unknown-1",
-					},
-				},
-			},
-			expected:  "",
-			expectErr: true,
-		},
-		{
 			name: "Test with object without instanceIDs",
-			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"apiVersion": "v1",
-					"kind":       "Pod",
-					"metadata": map[string]interface{}{
-						"name": "unknown-1",
-					},
+			obj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "unknown-1",
 				},
 			},
 			expected:  "",
@@ -679,8 +626,8 @@ func TestGetSlug(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.obj.SetNamespace("default")
-			result, err := getSlug(tt.obj)
+			tt.obj.(metav1.Object).SetNamespace("default")
+			result, err := getSlug(tt.obj.(*corev1.Pod))
 			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
@@ -695,18 +642,18 @@ func Test_addPod(t *testing.T) {
 
 	// add single network neighborhood
 	tests := []struct {
-		obj                     *unstructured.Unstructured
+		obj                     runtime.Object
 		name                    string
 		addedContainers         []string
 		ignoredContainers       []string
 		preCreatedNNAnnotations map[string]string
-		preCreatedNN            *unstructured.Unstructured // pre created network neighborhoods
+		preCreatedNN            runtime.Object // pre created network neighborhoods
 		shouldAddToNN           bool
 	}{
 		{
 			name:         "add pod with partial network neighborhood",
-			obj:          mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
-			preCreatedNN: mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection),
+			obj:          mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection),
+			preCreatedNN: mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection),
 			preCreatedNNAnnotations: map[string]string{
 				"kubescape.io/status":     "completed",
 				"kubescape.io/completion": "partial",
@@ -723,8 +670,8 @@ func Test_addPod(t *testing.T) {
 		},
 		{
 			name:         "add pod with network neighborhood",
-			obj:          mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
-			preCreatedNN: mocks.GetUnstructured(mocks.TestKindNN, mocks.TestCollection),
+			obj:          mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection),
+			preCreatedNN: mocks.GetRuntime(mocks.TestKindNN, mocks.TestCollection),
 			preCreatedNNAnnotations: map[string]string{
 				"kubescape.io/status":     "completed",
 				"kubescape.io/completion": "complete",
@@ -743,30 +690,27 @@ func Test_addPod(t *testing.T) {
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if len(tt.preCreatedNNAnnotations) != 0 {
-				tt.preCreatedNN.SetAnnotations(tt.preCreatedNNAnnotations)
+				tt.preCreatedNN.(metav1.Object).SetAnnotations(tt.preCreatedNNAnnotations)
 			}
 			namespace := fmt.Sprintf("default-%d", i)
-			k8sClient := k8sinterface.NewKubernetesApiMock()
 
 			var runtimeObjs []runtime.Object
-			tt.obj.SetNamespace(namespace)
-			runtimeObjs = append(runtimeObjs, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}})
 
-			tt.preCreatedNN.SetNamespace(namespace)
-			runtimeObjs = append(runtimeObjs, mocks.UnstructuredToRuntime(tt.preCreatedNN))
-			runtimeObjs = append(runtimeObjs, mocks.UnstructuredToRuntime(tt.obj))
+			tt.preCreatedNN.(metav1.Object).SetNamespace(namespace)
+			runtimeObjs = append(runtimeObjs, tt.preCreatedNN)
 
-			k8sClient.DynamicClient = dynamicfake.NewSimpleDynamicClient(scheme.Scheme, runtimeObjs...)
+			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			nn := NewNetworkNeighborhoodCache("", k8sClient)
+			nn := NewNetworkNeighborhoodCache("", storageClient)
 
 			nn.addNetworkNeighborhood(context.Background(), tt.preCreatedNN)
 
+			tt.obj.(metav1.Object).SetNamespace(namespace)
 			nn.addPod(tt.obj)
 
 			// test if the network neighborhood is added to the cache
 			assert.Equal(t, 1, nn.allNetworkNeighborhoods.Cardinality())
-			assert.True(t, nn.slugToContainers.Has(objectcache.UnstructuredUniqueName(tt.preCreatedNN)))
+			assert.True(t, nn.slugToContainers.Has(objectcache.MetaUniqueName(tt.preCreatedNN.(metav1.Object))))
 
 			c := nn.containerToSlug.Keys()
 			slices.Sort(c)

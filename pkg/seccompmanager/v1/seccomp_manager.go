@@ -15,10 +15,9 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	v1beta1api "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/spf13/afero"
 	"go.uber.org/multierr"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -41,11 +40,7 @@ func NewSeccompManager() (*SeccompManager, error) {
 
 var _ seccompmanager.SeccompManagerClient = (*SeccompManager)(nil)
 
-func (s *SeccompManager) AddSeccompProfile(obj *unstructured.Unstructured) error {
-	sp, err := unstructuredToSeccompProfile(obj)
-	if err != nil {
-		return fmt.Errorf("failed to convert unstructured to seccomp profile: %w", err)
-	}
+func (s *SeccompManager) AddSeccompProfile(sp *v1beta1api.SeccompProfile) error {
 	// store the profile for each container
 	var errs error
 	profilePaths := mapset.NewSet[string]()
@@ -72,11 +67,11 @@ func (s *SeccompManager) AddSeccompProfile(obj *unstructured.Unstructured) error
 		}
 		profilePaths.Add(profilePath)
 	}
-	s.profilesPaths.Set(obj.GetUID(), profilePaths)
+	s.profilesPaths.Set(sp.GetUID(), profilePaths)
 	return errs
 }
 
-func (s *SeccompManager) DeleteSeccompProfile(obj *unstructured.Unstructured) error {
+func (s *SeccompManager) DeleteSeccompProfile(obj *v1beta1api.SeccompProfile) error {
 	uid := obj.GetUID()
 	var errs error
 	for _, path := range s.profilesPaths.Get(uid).ToSlice() {
@@ -127,13 +122,4 @@ func getProfilesDir() (string, error) {
 		return "", fmt.Errorf("failed to join seccomp profiles dir: %w", err)
 	}
 	return seccompProfilesDir, nil
-}
-
-func unstructuredToSeccompProfile(obj *unstructured.Unstructured) (*v1beta1.SeccompProfile, error) {
-	sp := &v1beta1.SeccompProfile{}
-	err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, sp)
-	if err != nil {
-		return nil, err
-	}
-	return sp, nil
 }
