@@ -55,7 +55,7 @@ func (rule *R0009EbpfProgramLoad) ID() string {
 func (rule *R0009EbpfProgramLoad) DeleteRule() {
 }
 
-func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if rule.alreadyNotified {
 		return nil
 	}

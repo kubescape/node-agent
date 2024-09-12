@@ -93,7 +93,7 @@ func (rule *R0002UnexpectedFileAccess) generatePatchCommand(event *traceropentyp
 	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(), event.GetContainer(), event.FullPath, flagList)
 }
 
-func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType {
 		return nil
 	}

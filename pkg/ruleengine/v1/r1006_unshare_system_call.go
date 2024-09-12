@@ -54,7 +54,7 @@ func (rule *R1006UnshareSyscall) ID() string {
 func (rule *R1006UnshareSyscall) DeleteRule() {
 }
 
-func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if rule.alreadyNotified {
 		return nil
 	}

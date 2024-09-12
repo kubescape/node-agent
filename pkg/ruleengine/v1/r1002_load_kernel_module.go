@@ -52,7 +52,7 @@ func (rule *R1002LoadKernelModule) ID() string {
 func (rule *R1002LoadKernelModule) DeleteRule() {
 }
 
-func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if rule.alerted {
 		return nil
 	}

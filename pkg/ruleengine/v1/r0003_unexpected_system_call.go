@@ -58,7 +58,7 @@ func (rule *R0003UnexpectedSystemCall) ID() string {
 func (rule *R0003UnexpectedSystemCall) DeleteRule() {
 }
 
-func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.SyscallEventType {
 		return nil
 	}

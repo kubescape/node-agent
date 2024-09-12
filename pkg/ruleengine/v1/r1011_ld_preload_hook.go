@@ -183,7 +183,7 @@ func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *traceropentype.Event)
 	return nil
 }
 
-func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event interface{}, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType && eventType != utils.OpenEventType {
 		return nil
 	}

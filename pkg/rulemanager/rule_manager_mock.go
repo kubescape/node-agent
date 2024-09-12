@@ -24,7 +24,7 @@ func (r *RuleManagerMock) RegisterPeekFunc(_ func(mntns uint64) ([]string, error
 	// noop
 }
 
-func (r *RuleManagerMock) ReportEvent(_ utils.EventType, _ interface{}) {
+func (r *RuleManagerMock) ReportEvent(_ utils.EventType, _ utils.K8sEvent) {
 	// noop
 }
 

@@ -321,19 +321,18 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 	rm.syscallPeekFunc = peek
 }
 
-func (rm *RuleManager) ReportEvent(eventType utils.EventType, event interface{}) {
-	k8sEvent := event.(*eventtypes.Event)
-	if k8sEvent.GetNamespace() == "" || k8sEvent.GetPod() == "" {
+func (rm *RuleManager) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
+	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from custom event")
 		return
 	}
 
 	// list custom rules
-	rules := rm.ruleBindingCache.ListRulesForPod(k8sEvent.GetNamespace(), k8sEvent.GetPod())
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 	rm.processEvent(eventType, event, rules)
 }
 
-func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator) {
+func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEvent, rules []ruleengine.RuleEvaluator) {
 	for _, rule := range rules {
 		if rule == nil {
 			continue

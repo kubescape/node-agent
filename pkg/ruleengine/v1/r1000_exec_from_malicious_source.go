@@ -49,7 +49,7 @@ func (rule *R1000ExecFromMaliciousSource) ID() string {
 	return R1000ID
 }
 
-func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}

@@ -48,7 +48,7 @@ func (rule *RuleMock) ID() string {
 func (rule *RuleMock) DeleteRule() {
 }
 
-func (rule *RuleMock) ProcessEvent(_ utils.EventType, _ interface{}, _ objectcache.ObjectCache) RuleFailure {
+func (rule *RuleMock) ProcessEvent(_ utils.EventType, _ utils.K8sEvent, _ objectcache.ObjectCache) RuleFailure {
 	return nil
 }
 

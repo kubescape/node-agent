@@ -78,7 +78,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ID() string {
 func (rule *R1010SymlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
-func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.SymlinkEventType {
 		return nil
 	}

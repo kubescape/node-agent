@@ -56,7 +56,7 @@ func (rule *R0004UnexpectedCapabilityUsed) generatePatchCommand(event *tracercap
 		event.GetContainer(), event.Syscall, event.CapName)
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.CapabilitiesEventType {
 		return nil
 	}

@@ -61,7 +61,7 @@ type RuleEvaluator interface {
 	Name() string
 
 	// Rule processing
-	ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) RuleFailure
+	ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) RuleFailure
 
 	// Rule requirements
 	Requirements() RuleSpec

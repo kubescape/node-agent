@@ -76,7 +76,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ID() string {
 func (rule *R0010UnexpectedSensitiveFileAccess) DeleteRule() {
 }
 
-func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType {
 		return nil
 	}

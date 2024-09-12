@@ -421,7 +421,7 @@ func GetProcessEnv(pid int) (map[string]string, error) {
 }
 
 // Get the path of the file on the node.
-func GetHostFilePathFromEvent(event interface{}, containerPid uint32) (string, error) {
+func GetHostFilePathFromEvent(event K8sEvent, containerPid uint32) (string, error) {
 	if execEvent, ok := event.(*tracerexectype.Event); ok {
 		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, GetExecPathFromEvent(execEvent)))
 		return realPath, nil
