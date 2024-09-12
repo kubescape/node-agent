@@ -1,10 +1,5 @@
 package utils
 
-type RuntimeK8sEvent interface {
-	GetNamespace() string
-	GetPod() string
-}
-
 type EventType string
 
 const (
