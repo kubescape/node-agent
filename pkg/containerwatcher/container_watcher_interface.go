@@ -30,7 +30,7 @@ type CustomTracer interface {
 }
 
 type EventReceiver interface {
-	ReportEvent(eventType utils.EventType, event utils.RuntimeK8sEvent)
+	ReportEvent(eventType utils.EventType, event interface{})
 }
 
 type ContainerReceiver interface {
