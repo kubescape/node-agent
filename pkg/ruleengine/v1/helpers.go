@@ -11,6 +11,7 @@ import (
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
 
 // SensitiveFiles is a list of sensitive files that should not be accessed by the application unexpectedly.
@@ -155,7 +156,6 @@ func interfaceToStringSlice(val interface{}) ([]string, bool) {
 }
 
 func CompareDynamic(dynamicPath, regularPath string) (string, bool) {
-	const dynamic = "<dynamic>"
 
 	dynamicSegments := strings.Split(dynamicPath, "/")
 	regularSegments := strings.Split(regularPath, "/")
@@ -166,9 +166,9 @@ func CompareDynamic(dynamicPath, regularPath string) (string, bool) {
 
 	modified := false
 	for i := range dynamicSegments {
-		if dynamicSegments[i] == dynamic {
+		if dynamicSegments[i] == dynamicpathdetector.DynamicIdentifier {
 			if !modified {
-				regularSegments[i] = dynamic
+				regularSegments[i] = dynamicpathdetector.DynamicIdentifier
 				modified = true
 			}
 		} else if dynamicSegments[i] != regularSegments[i] {
