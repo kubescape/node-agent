@@ -169,6 +169,13 @@ func AddJitter(duration time.Duration, maxJitterPercentage int) time.Duration {
 	return duration * time.Duration(jitter)
 }
 
+// RandomDuration returns a duration between 1/2 max and max
+func RandomDuration(max int, duration time.Duration) time.Duration {
+	// we don't initialize the seed, so we will get the same sequence of random numbers every time
+	mini := max / 2
+	return time.Duration(rand.Intn(1+max-mini)+mini) * duration
+}
+
 func Atoi(s string) int {
 	i, err := strconv.Atoi(s)
 	if err != nil {

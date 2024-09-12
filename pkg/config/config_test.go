@@ -30,6 +30,7 @@ func TestLoadConfig(t *testing.T) {
 				MaxSniffingTime:          6 * time.Hour,
 				UpdateDataPeriod:         1 * time.Minute,
 				NodeProfileInterval:      1 * time.Minute,
+				MaxDelaySeconds:          30,
 				MaxJitterPercentage:      5,
 				EnablePrometheusExporter: true,
 				EnableRuntimeDetection:   true,

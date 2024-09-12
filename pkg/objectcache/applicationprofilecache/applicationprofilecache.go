@@ -3,6 +3,7 @@ package applicationprofilecache
 import (
 	"context"
 	"fmt"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -12,6 +13,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	versioned "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
@@ -52,11 +54,13 @@ type ApplicationProfileCacheImpl struct {
 	storageClient    versioned.SpdxV1beta1Interface
 	allProfiles      mapset.Set[string] // cache all the application profiles that are ready. this will enable removing from cache AP without pods that are running on the same node
 	nodeName         string
+	maxDelaySeconds  int // maximum delay in seconds before getting the full object from the storage
 }
 
-func NewApplicationProfileCache(nodeName string, storageClient versioned.SpdxV1beta1Interface) *ApplicationProfileCacheImpl {
+func NewApplicationProfileCache(nodeName string, storageClient versioned.SpdxV1beta1Interface, maxDelaySeconds int) *ApplicationProfileCacheImpl {
 	return &ApplicationProfileCacheImpl{
 		nodeName:         nodeName,
+		maxDelaySeconds:  maxDelaySeconds,
 		storageClient:    storageClient,
 		containerToSlug:  maps.SafeMap[string, string]{},
 		slugToContainers: maps.SafeMap[string, mapset.Set[string]]{},
@@ -233,18 +237,24 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 	if ap.slugToContainers.Has(apName) {
 		// get the full application profile from the storage
 		// the watch only returns the metadata
-		fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
-		if err != nil {
-			logger.L().Error("failed to get full application profile", helpers.Error(err))
-			return
-		}
-		ap.slugToAppProfile.Set(apName, fullAP)
-		for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
-			ap.containerToSlug.Set(i, apName)
-		}
-
-		logger.L().Debug("added pod to application profile cache", helpers.String("name", apName))
+		// avoid thundering herd problem by adding a random delay
+		time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
+			ap.addFullApplicationProfile(appProfile, apName)
+		})
 	}
+}
+
+func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1beta1.ApplicationProfile, apName string) {
+	fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
+	if err != nil {
+		logger.L().Error("failed to get full application profile", helpers.Error(err))
+		return
+	}
+	ap.slugToAppProfile.Set(apName, fullAP)
+	for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
+		ap.containerToSlug.Set(i, apName)
+	}
+	logger.L().Debug("added pod to application profile cache", helpers.String("name", apName))
 }
 
 func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj runtime.Object) {
