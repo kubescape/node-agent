@@ -322,7 +322,7 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 }
 
 func (rm *RuleManager) ReportEvent(eventType utils.EventType, event interface{}) {
-	k8sEvent := event.(eventtypes.Event)
+	k8sEvent := event.(*eventtypes.Event)
 	if k8sEvent.GetNamespace() == "" || k8sEvent.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from custom event")
 		return
