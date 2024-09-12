@@ -291,18 +291,15 @@ func TestDeleteHandler(t *testing.T) {
 	}
 	tests := []struct {
 		name     string
-		obj      *unstructured.Unstructured
+		obj      runtime.Object
 		expected expected
 	}{
 		{
 			name: "Test with Pod kind",
-			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"kind": "Pod",
-					"metadata": map[string]interface{}{
-						"name":      "pod-1",
-						"namespace": "default",
-					},
+			obj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-1",
+					Namespace: "default",
 				},
 			},
 			expected: expected{
@@ -334,10 +331,8 @@ func TestDeleteHandler(t *testing.T) {
 				allPods: mapset.NewSet[string](tt.expected.pod),
 			}
 			c.DeleteHandler(context.Background(), tt.obj)
-			if tt.obj.GetKind() == "Pod" {
+			if _, ok := tt.obj.(*corev1.Pod); ok {
 				assert.False(t, c.allPods.Contains(tt.expected.pod))
-			} else if tt.obj.GetKind() == "RuntimeRuleAlertBinding" {
-				assert.True(t, c.allPods.Contains(tt.expected.pod))
 			} else {
 				assert.True(t, c.allPods.Contains(tt.expected.pod))
 			}
@@ -352,20 +347,17 @@ func TestModifyHandler(t *testing.T) {
 	}
 	tests := []struct {
 		name     string
-		obj      *unstructured.Unstructured
+		obj      runtime.Object
 		expected expected
 		addedPod bool
 		addedRB  bool
 	}{
 		{
 			name: "Test with Pod kind",
-			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"kind": "Pod",
-					"metadata": map[string]interface{}{
-						"name":      "pod-1",
-						"namespace": "default",
-					},
+			obj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-1",
+					Namespace: "default",
 				},
 			},
 			addedPod: true,
@@ -464,20 +456,17 @@ func TestAddHandler(t *testing.T) {
 	}
 	tests := []struct {
 		name     string
-		obj      *unstructured.Unstructured
+		obj      runtime.Object
 		expected expected
 		addedPod bool
 		addedRB  bool
 	}{
 		{
 			name: "Test with Pod kind",
-			obj: &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"kind": "Pod",
-					"metadata": map[string]interface{}{
-						"name":      "pod-1",
-						"namespace": "default",
-					},
+			obj: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-1",
+					Namespace: "default",
 				},
 			},
 			addedPod: true,

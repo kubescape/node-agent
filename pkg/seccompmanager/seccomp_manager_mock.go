@@ -2,7 +2,7 @@ package seccompmanager
 
 import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	v1beta1api "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 type SeccompManagerMock struct {
@@ -14,11 +14,11 @@ func NewSeccompManagerMock() *SeccompManagerMock {
 
 var _ SeccompManagerClient = (*SeccompManagerMock)(nil)
 
-func (s *SeccompManagerMock) AddSeccompProfile(_ *unstructured.Unstructured) error {
+func (s *SeccompManagerMock) AddSeccompProfile(_ *v1beta1api.SeccompProfile) error {
 	return nil
 }
 
-func (s *SeccompManagerMock) DeleteSeccompProfile(_ *unstructured.Unstructured) error {
+func (s *SeccompManagerMock) DeleteSeccompProfile(_ *v1beta1api.SeccompProfile) error {
 	return nil
 }
 
