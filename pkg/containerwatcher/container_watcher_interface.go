@@ -6,7 +6,6 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -31,7 +30,7 @@ type CustomTracer interface {
 }
 
 type EventReceiver interface {
-	ReportEvent(eventType utils.EventType, event rulemanager.RuntimeK8sEvent)
+	ReportEvent(eventType utils.EventType, event utils.RuntimeK8sEvent)
 }
 
 type ContainerReceiver interface {

@@ -160,7 +160,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.CapabilitiesEventType)
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
-		ruleManager.ReportCapability(event)
+		ruleManager.ReportEvent(utils.CapabilitiesEventType, &event)
 
 		// Report capabilities to event receivers
 		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.CapabilitiesEventType) {
@@ -194,8 +194,8 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.ExecveEventType)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
-		ruleManager.ReportFileExec(event)
-		malwareManager.ReportFileExec(k8sContainerID, event)
+		ruleManager.ReportEvent(utils.ExecveEventType, &event)
+		malwareManager.ReportEvent(utils.ExecveEventType, &event)
 
 		// Report exec events to event receivers
 		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.ExecveEventType) {
@@ -229,8 +229,8 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
 		relevancyManager.ReportFileOpen(event.Runtime.ContainerID, k8sContainerID, path)
-		ruleManager.ReportFileOpen(event)
-		malwareManager.ReportFileOpen(k8sContainerID, event)
+		ruleManager.ReportEvent(utils.OpenEventType, &event)
+		malwareManager.ReportEvent(utils.OpenEventType, &event)
 
 		// Report open events to event receivers
 		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.OpenEventType) {
@@ -257,7 +257,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		metrics.ReportEvent(utils.NetworkEventType)
 		networkManagerClient.ReportNetworkEvent(k8sContainerID, event)
-		ruleManager.ReportNetworkEvent(event)
+		ruleManager.ReportEvent(utils.NetworkEventType, &event)
 
 		// Report network events to event receivers
 		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.NetworkEventType) {
@@ -289,7 +289,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		metrics.ReportEvent(utils.DnsEventType)
 		dnsManagerClient.ReportDNSEvent(event)
-		ruleManager.ReportDNSEvent(event)
+		ruleManager.ReportEvent(utils.DnsEventType, &event)
 
 		// Report DNS events to event receivers
 		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.DnsEventType) {
@@ -308,7 +308,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 		metrics.ReportEvent(utils.RandomXEventType)
-		ruleManager.ReportRandomxEvent(event)
+		ruleManager.ReportEvent(utils.RandomXEventType, &event)
 
 		// Report randomx events to event receivers
 		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.RandomXEventType) {
@@ -327,7 +327,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 		metrics.ReportEvent(utils.SymlinkEventType)
-		ruleManager.ReportSymlinkEvent(event)
+		ruleManager.ReportEvent(utils.SymlinkEventType, &event)
 
 		// Report symlink events to event receivers
 		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.SymlinkEventType) {
@@ -346,7 +346,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 		metrics.ReportEvent(utils.HardlinkEventType)
-		ruleManager.ReportHardlinkEvent(event)
+		ruleManager.ReportEvent(utils.HardlinkEventType, &event)
 
 		// Report hardlink events to event receivers
 		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.HardlinkEventType) {
@@ -365,7 +365,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 		metrics.ReportEvent(utils.SSHEventType)
-		ruleManager.ReportSSHEvent(event)
+		ruleManager.ReportEvent(utils.SSHEventType, &event)
 
 		// Report ssh events to event receivers
 		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.SSHEventType) {

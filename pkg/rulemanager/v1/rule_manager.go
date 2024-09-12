@@ -26,20 +26,11 @@ import (
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
-	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
-	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
-	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
-	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -330,117 +321,7 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 	rm.syscallPeekFunc = peek
 }
 
-func (rm *RuleManager) ReportCapability(event tracercapabilitiestype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportCapability event")
-		return
-	}
-
-	// list capability rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
-	rm.processEvent(utils.CapabilitiesEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportFileExec(event tracerexectype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileExec event")
-		return
-	}
-
-	// list exec rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	rm.processEvent(utils.ExecveEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportFileOpen(event traceropentype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileOpen event")
-		return
-	}
-
-	// list open rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
-	rm.processEvent(utils.OpenEventType, &event, rules)
-
-}
-
-func (rm *RuleManager) ReportNetworkEvent(event tracernetworktype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportNetworkEvent event")
-		return
-	}
-
-	// list network rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
-	rm.processEvent(utils.NetworkEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
-	// ignore events with empty container name
-	if event.K8s.ContainerName == "" {
-		return
-	}
-
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportDNSEvent event")
-		return
-	}
-
-	// list dns rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
-	rm.processEvent(utils.DnsEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportRandomxEvent(event tracerrandomxtype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from randomx event")
-		return
-	}
-
-	// list randomx rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
-	rm.processEvent(utils.RandomXEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportSymlinkEvent(event tracersymlinktype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportSymlinkEvent event")
-		return
-	}
-
-	// list symlink rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	rm.processEvent(utils.SymlinkEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportHardlinkEvent(event tracerhardlinktype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportHardlinkEvent event")
-		return
-	}
-
-	// list hardlink rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	rm.processEvent(utils.HardlinkEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportSSHEvent(event tracersshtype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportSSHEvent event")
-		return
-	}
-
-	// list ssh rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	rm.processEvent(utils.SSHEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportEvent(eventType utils.EventType, event rulemanager.RuntimeK8sEvent) {
+func (rm *RuleManager) ReportEvent(eventType utils.EventType, event utils.RuntimeK8sEvent) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from custom event")
 		return
