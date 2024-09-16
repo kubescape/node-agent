@@ -102,6 +102,14 @@ func TestApplicationProfileManager(t *testing.T) {
 
 	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
 
+	testEvent = &tracerhttptype.Event{
+		HttpData: tracerhttptype.HTTPRequestData{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost:123"}, "Connection": {"keep-alive"}}},
+		OtherIp:  "127.0.0.1",
+		Syscall:  "recvfrom",
+	}
+
+	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
+
 	time.Sleep(8 * time.Second)
 
 	// sleep more
@@ -157,7 +165,7 @@ func GetExcpectedEndpoints(t *testing.T) []v1beta1.HTTPEndpoint {
 	assert.NoError(t, err)
 
 	endpointPost := v1beta1.HTTPEndpoint{
-		Endpoint:  "localhost/abc",
+		Endpoint:  ":80/abc",
 		Methods:   []string{"POST"},
 		Internal:  false,
 		Direction: "inbound",
@@ -168,13 +176,24 @@ func GetExcpectedEndpoints(t *testing.T) []v1beta1.HTTPEndpoint {
 	assert.NoError(t, err)
 
 	endpointGet := v1beta1.HTTPEndpoint{
-		Endpoint:  "localhost/abc",
+		Endpoint:  ":80/abc",
 		Methods:   []string{"GET"},
 		Internal:  false,
 		Direction: "inbound",
 		Headers:   rawJSON}
 
-	return []v1beta1.HTTPEndpoint{endpointPost, endpointGet}
+	headers = map[string][]string{"Host": {"localhost:123"}, "Connection": {"keep-alive"}}
+	rawJSON, err = json.Marshal(headers)
+	assert.NoError(t, err)
+
+	endpointPort := v1beta1.HTTPEndpoint{
+		Endpoint:  ":123/abc",
+		Methods:   []string{"POST"},
+		Internal:  false,
+		Direction: "inbound",
+		Headers:   rawJSON}
+
+	return []v1beta1.HTTPEndpoint{endpointPost, endpointGet, endpointPort}
 }
 
 func sortHTTPEndpoints(endpoints []v1beta1.HTTPEndpoint) {

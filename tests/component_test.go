@@ -644,7 +644,7 @@ func Test_11_EndpointTest(t *testing.T) {
 	assert.NoError(t, err)
 
 	endpoint2 := v1beta1.HTTPEndpoint{
-		Endpoint:  "127.0.0.1/",
+		Endpoint:  ":8000/",
 		Methods:   []string{"GET", "POST"},
 		Internal:  false,
 		Direction: "inbound",
@@ -656,7 +656,7 @@ func Test_11_EndpointTest(t *testing.T) {
 	assert.NoError(t, err)
 
 	endpoint1 := v1beta1.HTTPEndpoint{
-		Endpoint:  "127.0.0.1/users/<dynamic>",
+		Endpoint:  ":8000/users/<dynamic>",
 		Methods:   []string{"GET"},
 		Internal:  false,
 		Direction: "inbound",

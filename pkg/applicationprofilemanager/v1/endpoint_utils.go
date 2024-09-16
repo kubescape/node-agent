@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 
@@ -39,14 +40,20 @@ func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttpty
 		Headers:   rawJSON}, nil
 }
 
-func (am *ApplicationProfileManager) GetURL(request *tracerhttptype.HTTPRequestData) (string, error) {
-	url := request.URL
+func (am *ApplicationProfileManager) GetEndpointIdentifier(request *tracerhttptype.HTTPRequestData) (string, error) {
+	identifier := request.URL
 	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
 	if host, ok := headers["Host"]; ok {
-		url = host[0] + request.URL
+		fmt.Println("Host", host)
+		host := host[0]
+		_, port, err := net.SplitHostPort(host)
+		if err != nil {
+			port = "80"
+		}
+		identifier = ":" + port + identifier
 	}
 
-	return url, nil
+	return identifier, nil
 }
 
 func CalculateHTTPEndpointHash(endpoint *v1beta1.HTTPEndpoint) string {
@@ -59,8 +66,6 @@ func CalculateHTTPEndpointHash(endpoint *v1beta1.HTTPEndpoint) string {
 	sort.Strings(sortedMethods)
 
 	hash.Write([]byte(strings.Join(sortedMethods, ",")))
-	hash.Write([]byte(fmt.Sprintf("%t", endpoint.Internal)))
-	hash.Write([]byte(fmt.Sprintf("%v", endpoint.Direction)))
 	hash.Write(endpoint.Headers)
 
 	return hex.EncodeToString(hash.Sum(nil))
