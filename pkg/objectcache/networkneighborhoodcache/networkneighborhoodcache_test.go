@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/node-agent/mocks"
@@ -80,7 +81,7 @@ func Test_AddHandlers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.obj.(metav1.Object).SetNamespace("default")
 			storageClient := fake.NewSimpleClientset().SpdxV1beta1()
-			nn := NewNetworkNeighborhoodCache("", storageClient)
+			nn := NewNetworkNeighborhoodCache("", storageClient, 0)
 			nn.slugToContainers.Set(tt.slug, mapset.NewSet[string]())
 
 			tt.f(nn, context.Background(), tt.obj)
@@ -179,7 +180,7 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 
 			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			nn := NewNetworkNeighborhoodCache("", storageClient)
+			nn := NewNetworkNeighborhoodCache("", storageClient, 0)
 
 			for i := range tt.preCreatedPods {
 				nn.addPod(tt.preCreatedPods[i])
@@ -189,6 +190,7 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 			}
 
 			nn.addNetworkNeighborhood(context.Background(), tt.obj)
+			time.Sleep(1 * time.Second) // add is async
 
 			// test if the network neighborhood is added to the cache
 			apName := objectcache.MetaUniqueName(tt.obj.(metav1.Object))
@@ -253,7 +255,7 @@ func Test_deleteNetworkNeighborhood(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			nn := NewNetworkNeighborhoodCache("", nil)
+			nn := NewNetworkNeighborhoodCache("", nil, 0)
 
 			nn.allNetworkNeighborhoods.Append(tt.slugs...)
 			for _, i := range tt.slugs {
@@ -316,7 +318,7 @@ func Test_deletePod(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			nn := NewNetworkNeighborhoodCache("", nil)
+			nn := NewNetworkNeighborhoodCache("", nil, 0)
 			for _, i := range tt.otherSlugs {
 				nn.slugToContainers.Set(i, mapset.NewSet[string]())
 				nn.slugToNetworkNeighborhood.Set(i, &v1beta1.NetworkNeighborhood{})
@@ -424,7 +426,7 @@ func Test_GetNetworkNeighborhood(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			nn := NewNetworkNeighborhoodCache("", fake.NewSimpleClientset().SpdxV1beta1())
+			nn := NewNetworkNeighborhoodCache("", fake.NewSimpleClientset().SpdxV1beta1(), 0)
 
 			for _, c := range tt.pods {
 				nn.containerToSlug.Set(c.containerID, c.slug)
@@ -503,7 +505,7 @@ func Test_addNetworkNeighborhood_existing(t *testing.T) {
 
 			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			nn := NewNetworkNeighborhoodCache("", storageClient)
+			nn := NewNetworkNeighborhoodCache("", storageClient, 0)
 
 			// add pods
 			for i := range tt.pods {
@@ -512,6 +514,7 @@ func Test_addNetworkNeighborhood_existing(t *testing.T) {
 			}
 
 			nn.addNetworkNeighborhood(context.Background(), tt.obj1)
+			time.Sleep(1 * time.Second) // add is async
 			nn.addNetworkNeighborhood(context.Background(), tt.obj2)
 
 			// test if the network neighborhood is added to the cache
@@ -580,7 +583,7 @@ func Test_getNetworkNeighborhood(t *testing.T) {
 }
 
 func Test_WatchResources(t *testing.T) {
-	nn := NewNetworkNeighborhoodCache("test-node", nil)
+	nn := NewNetworkNeighborhoodCache("test-node", nil, 0)
 
 	expectedPodWatchResource := watcher.NewWatchResource(schema.GroupVersionResource{
 		Group:    "",
@@ -701,9 +704,10 @@ func Test_addPod(t *testing.T) {
 
 			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			nn := NewNetworkNeighborhoodCache("", storageClient)
+			nn := NewNetworkNeighborhoodCache("", storageClient, 0)
 
 			nn.addNetworkNeighborhood(context.Background(), tt.preCreatedNN)
+			time.Sleep(1 * time.Second) // add is async
 
 			tt.obj.(metav1.Object).SetNamespace(namespace)
 			nn.addPod(tt.obj)

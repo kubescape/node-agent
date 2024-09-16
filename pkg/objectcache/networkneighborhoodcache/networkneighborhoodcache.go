@@ -3,6 +3,7 @@ package networkneighborhoodcache
 import (
 	"context"
 	"fmt"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -12,6 +13,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	versioned "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
@@ -52,11 +54,13 @@ type NetworkNeighborhoodCacheImpl struct {
 	storageClient             versioned.SpdxV1beta1Interface
 	allNetworkNeighborhoods   mapset.Set[string] // cache all the NN that are ready. this will enable removing from cache NN without pods that are running on the same node
 	nodeName                  string
+	maxDelaySeconds           int // maximum delay in seconds before getting the full object from the storage
 }
 
-func NewNetworkNeighborhoodCache(nodeName string, storageClient versioned.SpdxV1beta1Interface) *NetworkNeighborhoodCacheImpl {
+func NewNetworkNeighborhoodCache(nodeName string, storageClient versioned.SpdxV1beta1Interface, maxDelaySeconds int) *NetworkNeighborhoodCacheImpl {
 	return &NetworkNeighborhoodCacheImpl{
 		nodeName:                nodeName,
+		maxDelaySeconds:         maxDelaySeconds,
 		storageClient:           storageClient,
 		containerToSlug:         maps.SafeMap[string, string]{},
 		slugToContainers:        maps.SafeMap[string, mapset.Set[string]]{},
@@ -233,18 +237,24 @@ func (nn *NetworkNeighborhoodCacheImpl) addNetworkNeighborhood(_ context.Context
 	if nn.slugToContainers.Has(nnName) {
 		// get the full network neighborhood from the storage
 		// the watch only returns the metadata
-		fullNN, err := nn.getNetworkNeighborhood(netNeighborhood.GetNamespace(), netNeighborhood.GetName())
-		if err != nil {
-			logger.L().Error("failed to get full network neighborhood", helpers.Error(err))
-			return
-		}
-		nn.slugToNetworkNeighborhood.Set(nnName, fullNN)
-		for _, i := range nn.slugToContainers.Get(nnName).ToSlice() {
-			nn.containerToSlug.Set(i, nnName)
-		}
-
-		logger.L().Debug("added pod to network neighborhood cache", helpers.String("name", nnName))
+		// avoid thundering herd problem by adding a random delay
+		time.AfterFunc(utils.RandomDuration(nn.maxDelaySeconds, time.Second), func() {
+			nn.addFullNetworkNeighborhood(netNeighborhood, nnName)
+		})
 	}
+}
+
+func (nn *NetworkNeighborhoodCacheImpl) addFullNetworkNeighborhood(netNeighborhood *v1beta1.NetworkNeighborhood, nnName string) {
+	fullNN, err := nn.getNetworkNeighborhood(netNeighborhood.GetNamespace(), netNeighborhood.GetName())
+	if err != nil {
+		logger.L().Error("failed to get full network neighborhood", helpers.Error(err))
+		return
+	}
+	nn.slugToNetworkNeighborhood.Set(nnName, fullNN)
+	for _, i := range nn.slugToContainers.Get(nnName).ToSlice() {
+		nn.containerToSlug.Set(i, nnName)
+	}
+	logger.L().Debug("added pod to network neighborhood cache", helpers.String("name", nnName))
 }
 
 func (nn *NetworkNeighborhoodCacheImpl) deleteNetworkNeighborhood(obj runtime.Object) {
