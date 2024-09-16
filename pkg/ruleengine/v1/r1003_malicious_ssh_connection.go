@@ -89,7 +89,7 @@ func CreateRuleR1003MaliciousSSHConnection() *R1003MaliciousSSHConnection {
 		logger.L().Error("Failed to read port range, setting to default range:", helpers.Error(err))
 	}
 	return &R1003MaliciousSSHConnection{
-		allowedPorts:       []uint16{22},
+		allowedPorts:       []uint16{22, 2022},
 		ephemeralPortRange: ephemeralPorts,
 	}
 }
