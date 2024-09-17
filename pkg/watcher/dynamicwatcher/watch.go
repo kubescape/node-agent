@@ -46,6 +46,7 @@ type WatchHandler struct {
 }
 
 var errWatchClosed = errors.New("watch channel closed")
+var errNotImplemented = errors.New("not implemented")
 
 func NewWatchHandler(k8sClient k8sclient.K8sClientInterface, storageClient spdxv1beta1.SpdxV1beta1Interface, skipNamespaceFunc SkipNamespaceFunc) *WatchHandler {
 	return &WatchHandler{
@@ -144,7 +145,7 @@ func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts meta
 	case "seccompprofiles":
 		return wh.storageClient.SeccompProfiles("").Watch(context.Background(), opts)
 	}
-	return nil, errors2.NewNotFound(res.GroupResource(), "not implemented")
+	return nil, fmt.Errorf("cannot watch for resource %s: %w", res.Resource, errNotImplemented)
 }
 
 func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions, eventQueue *cooldownqueue.CooldownQueue) {
@@ -154,6 +155,8 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 		if err != nil {
 			if k8sErrors.ReasonForError(err) == metav1.StatusReasonNotFound {
 				exitFatal = false
+				return backoff.Permanent(err)
+			} else if errors.Is(err, errNotImplemented) {
 				return backoff.Permanent(err)
 			}
 			return fmt.Errorf("client resource: %w", err)
