@@ -1,6 +1,9 @@
 package applicationprofilemanager
 
-import containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+import (
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+)
 
 type ApplicationProfileManagerMock struct {
 }
@@ -34,6 +37,11 @@ func (a ApplicationProfileManagerMock) ReportFileOpen(_, _ string, _ []string) {
 func (a ApplicationProfileManagerMock) ReportDroppedEvent(_ string) {
 	// noop
 }
+
+func (a ApplicationProfileManagerMock) ReportHTTPEvent(_ string, _ *tracerhttptype.Event) {
+	// noop
+}
+
 func (a ApplicationProfileManagerMock) ContainerReachedMaxTime(_ string) {
 	// noop
 }

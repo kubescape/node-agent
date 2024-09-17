@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/config"
+	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
@@ -37,18 +38,20 @@ type ApplicationProfileManager struct {
 	cfg                      config.Config
 	clusterName              string
 	ctx                      context.Context
-	containerMutexes         storageUtils.MapMutex[string]                                   // key is k8sContainerID
-	trackedContainers        mapset.Set[string]                                              // key is k8sContainerID
-	removedContainers        mapset.Set[string]                                              // key is k8sContainerID
-	savedCapabilities        maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
-	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, []string]]           // key is k8sContainerID
-	droppedEvents            maps.SafeMap[string, bool]                                      // key is k8sContainerID
-	savedOpens               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
-	savedSyscalls            maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
-	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                        // key is k8sContainerID
-	toSaveExecs              maps.SafeMap[string, *maps.SafeMap[string, []string]]           // key is k8sContainerID
-	toSaveOpens              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]] // key is k8sContainerID
-	watchedContainerChannels maps.SafeMap[string, chan error]                                // key is ContainerID
+	containerMutexes         storageUtils.MapMutex[string]                                      // key is k8sContainerID
+	trackedContainers        mapset.Set[string]                                                 // key is k8sContainerID
+	removedContainers        mapset.Set[string]                                                 // key is k8sContainerID
+	savedCapabilities        maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
+	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, []string]]              // key is k8sContainerID
+	droppedEvents            maps.SafeMap[string, bool]                                         // key is k8sContainerID
+	savedOpens               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]]    // key is k8sContainerID
+	savedHttpEndpoints       maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.HTTPEndpoint]] // key is k8sContainerID
+	savedSyscalls            maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
+	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
+	toSaveExecs              maps.SafeMap[string, *maps.SafeMap[string, []string]]              // key is k8sContainerID
+	toSaveOpens              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]]    // key is k8sContainerID
+	toSaveHttpEndpoints      maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.HTTPEndpoint]] // key is k8sContainerID
+	watchedContainerChannels maps.SafeMap[string, chan error]                                   // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
 	k8sObjectCache           objectcache.K8sObjectCache
 	storageClient            storage.StorageClient
@@ -292,6 +295,17 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		opens[path].Append(open.ToSlice()...)
 		return true
 	})
+
+	endpoints := make(map[string]*v1beta1.HTTPEndpoint)
+
+	toSaveHttpEndpoints := am.toSaveHttpEndpoints.Get(watchedContainer.K8sContainerID)
+	am.toSaveHttpEndpoints.Set(watchedContainer.K8sContainerID, new(maps.SafeMap[string, *v1beta1.HTTPEndpoint]))
+	toSaveHttpEndpoints.Range(func(path string, endpoint *v1beta1.HTTPEndpoint) bool {
+		if _, exist := endpoints[path]; !exist {
+			endpoints[path] = endpoint
+		}
+		return true
+	})
 	// new activity
 	// the process tries to use JSON patching to avoid conflicts between updates on the same object from different containers
 	// 0. create both a patch and a new object
@@ -301,9 +315,9 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// 3a. the object is missing its container slice - ADD one with the container profile at the right index
 	// 3b. the object is missing the container profile - ADD the container profile at the right index
 	// 3c. default - patch the container ourselves and REPLACE it at the right index
-	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || watchedContainer.StatusUpdated() {
+	if len(capabilities) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || len(endpoints) > 0 || watchedContainer.StatusUpdated() {
 		// 0. calculate patch
-		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, endpoints, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
 		operations = append(operations, utils.PatchOperation{
 			Op:    "add",
@@ -344,6 +358,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							Capabilities:   make([]string, 0),
 							Syscalls:       make([]string, 0),
 							SeccompProfile: seccompProfile,
+							Endpoints:      make([]v1beta1.HTTPEndpoint, 0),
 						})
 					}
 					return containers
@@ -354,7 +369,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				newObject.Spec.EphemeralContainers = addContainers(newObject.Spec.EphemeralContainers, watchedContainer.ContainerNames[utils.EphemeralContainer])
 				// enrich container
 				newContainer := utils.GetApplicationProfileContainer(newObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
-				utils.EnrichApplicationProfileContainer(newContainer, capabilities, observedSyscalls, execs, opens)
+				utils.EnrichApplicationProfileContainer(newContainer, capabilities, observedSyscalls, execs, opens, endpoints)
 				// try to create object
 				if err := am.storageClient.CreateApplicationProfile(newObject, namespace); err != nil {
 					gotErr = err
@@ -401,11 +416,12 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							Opens:          make([]v1beta1.OpenCalls, 0),
 							Capabilities:   make([]string, 0),
 							Syscalls:       make([]string, 0),
+							Endpoints:      make([]v1beta1.HTTPEndpoint, 0),
 							SeccompProfile: seccompProfile,
 						}
 					}
 					// update it
-					utils.EnrichApplicationProfileContainer(existingContainer, capabilities, observedSyscalls, execs, opens)
+					utils.EnrichApplicationProfileContainer(existingContainer, capabilities, observedSyscalls, execs, opens, endpoints)
 					// get existing containers
 					var existingContainers []v1beta1.ApplicationProfileContainer
 					if watchedContainer.ContainerType == utils.Container {
@@ -444,6 +460,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 								Opens:          make([]v1beta1.OpenCalls, 0),
 								Capabilities:   make([]string, 0),
 								Syscalls:       make([]string, 0),
+								Endpoints:      make([]v1beta1.HTTPEndpoint, 0),
 								SeccompProfile: seccompProfile,
 							},
 						})
@@ -510,10 +527,19 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			})
 			// record saved opens
 			toSaveOpens.Range(utils.SetInMap(am.savedOpens.Get(watchedContainer.K8sContainerID)))
+			// record saved endpoints
+			toSaveHttpEndpoints.Range(func(path string, endpoint *v1beta1.HTTPEndpoint) bool {
+				if !am.savedHttpEndpoints.Get(watchedContainer.K8sContainerID).Has(path) {
+					am.savedHttpEndpoints.Get(watchedContainer.K8sContainerID).Set(path, endpoint)
+				}
+				return true
+			})
+
 			logger.L().Debug("ApplicationProfileManager - saved application profile",
 				helpers.Int("capabilities", len(capabilities)),
 				helpers.Int("execs", toSaveExecs.Len()),
 				helpers.Int("opens", toSaveOpens.Len()),
+				helpers.Int("endpoints", toSaveHttpEndpoints.Len()),
 				helpers.String("slug", slug),
 				helpers.Int("container index", watchedContainer.ContainerIndex),
 				helpers.String("container ID", watchedContainer.ContainerID),
@@ -589,10 +615,12 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.savedExecs.Set(k8sContainerID, new(maps.SafeMap[string, []string]))
 		am.savedOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		am.savedSyscalls.Set(k8sContainerID, mapset.NewSet[string]())
+		am.savedHttpEndpoints.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.HTTPEndpoint]))
 		am.toSaveCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
 		am.toSaveExecs.Set(k8sContainerID, new(maps.SafeMap[string, []string]))
 		am.toSaveOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
-		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
+		am.toSaveHttpEndpoints.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.HTTPEndpoint]))
+		am.removedContainers.Remove(k8sContainerID)
 		am.trackedContainers.Add(k8sContainerID)
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
 
@@ -662,4 +690,28 @@ func (am *ApplicationProfileManager) ReportDroppedEvent(k8sContainerID string) {
 		return
 	}
 	am.droppedEvents.Set(k8sContainerID, true)
+}
+
+func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, event *tracerhttptype.Event) {
+	if err := am.waitForContainer(k8sContainerID); err != nil {
+		return
+	}
+	req, ok := event.HttpData.(tracerhttptype.HTTPRequestData)
+	if !ok {
+		return
+	}
+
+	endpointIdentifier, err := am.GetEndpointIdentifier(&req)
+	if err != nil {
+		return
+	}
+
+	endpoint, err := GetNewEndpoint(&req, event, endpointIdentifier)
+	if err != nil {
+		return
+	}
+
+	tosaveHttp := am.toSaveHttpEndpoints.Get(k8sContainerID)
+	endpointHash := CalculateHTTPEndpointHash(endpoint)
+	tosaveHttp.Set(endpointHash, endpoint)
 }

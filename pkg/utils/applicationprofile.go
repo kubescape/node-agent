@@ -2,13 +2,15 @@ package utils
 
 import (
 	"fmt"
+
 	"sort"
 
 	mapset "github.com/deckarep/golang-set/v2"
+
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], containerType string, containerIndex int) []PatchOperation {
+func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, containerType string, containerIndex int) []PatchOperation {
 	var profileOperations []PatchOperation
 	// add capabilities
 	sort.Strings(capabilities)
@@ -63,10 +65,20 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 			},
 		})
 	}
+
+	httpEndpoints := fmt.Sprintf("/spec/%s/%d/endpoints/-", containerType, containerIndex)
+	for _, endpoint := range endpoints {
+		profileOperations = append(profileOperations, PatchOperation{
+			Op:    "add",
+			Path:  httpEndpoints,
+			Value: *endpoint,
+		})
+	}
+
 	return profileOperations
 }
 
-func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string]) {
+func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint) {
 	// add capabilities
 	caps := mapset.NewSet(observedCapabilities...)
 	caps.Append(container.Capabilities...)
@@ -100,9 +112,13 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 			Flags: flags,
 		})
 	}
+
+	// add endpoints
+	for _, endpoint := range endpoints {
+		container.Endpoints = append(container.Endpoints, *endpoint)
+	}
 }
 
-// TODO make generic?
 func GetApplicationProfileContainer(object *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) *v1beta1.ApplicationProfileContainer {
 	if object == nil {
 		return nil

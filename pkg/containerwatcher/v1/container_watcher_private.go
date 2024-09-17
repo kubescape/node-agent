@@ -196,6 +196,7 @@ func (ch *IGContainerWatcher) stopContainerCollection() {
 }
 
 func (ch *IGContainerWatcher) startTracers() error {
+
 	if ch.cfg.EnableApplicationProfile {
 		// Start syscall tracer
 		if err := ch.startSystemcallTracing(); err != nil {
@@ -281,6 +282,16 @@ func (ch *IGContainerWatcher) startTracers() error {
 		}
 	}
 
+	if ch.cfg.EnableHttpDetection {
+		logger.L().Debug("starting http tracing")
+		if err := ch.startHttpTracing(); err != nil {
+			logger.L().Error("error starting http tracing", helpers.Error(err))
+			return err
+		}
+	} else {
+		logger.L().Debug("not starting http tracing")
+	}
+
 	return nil
 }
 
@@ -360,6 +371,13 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		}
 	}
 
+	if ch.cfg.EnableHttpDetection {
+		// Stop http tracer
+		if err := ch.stopHttpTracing(); err != nil {
+			logger.L().Error("error stopping http tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+	}
 	return errs
 }
 

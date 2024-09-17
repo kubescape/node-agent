@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: endpoint-traffic
+  name: endpoint-traffic-deployment
+spec:
+  selector:
+    matchLabels:
+      app: endpoint-traffic
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: endpoint-traffic
+    spec:
+      containers:
+      - name: endpoint-traffic
+        image: docker.io/python:3.10.0-alpine
+        imagePullPolicy: Always
+        command: [ "/bin/sh", "-c", "python3 -m http.server" ]
+        ports:
+        - containerPort: 80

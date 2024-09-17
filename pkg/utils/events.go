@@ -18,5 +18,6 @@ const (
 	SymlinkEventType      EventType = "symlink"
 	HardlinkEventType     EventType = "hardlink"
 	SSHEventType          EventType = "ssh"
+	HTTPEventType         EventType = "http"
 	AllEventType          EventType = "all"
 )
