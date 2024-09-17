@@ -320,15 +320,20 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	// Create a http worker pool
 	httpWorkerPool, err := ants.NewPoolWithFunc(httpWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerhttptype.Event)
+		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
 			return
 		}
 
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
+		if isDroppedEvent(event.Type, event.Message) {
+			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
+			return
+		}
+
 		metrics.ReportEvent(utils.HTTPEventType)
 		applicationProfileManager.ReportHTTPEvent(k8sContainerID, &event)
-
 	})
 
 	if err != nil {

@@ -192,7 +192,6 @@ func (ch *IGContainerWatcher) stopContainerCollection() {
 }
 
 func (ch *IGContainerWatcher) startTracers() error {
-
 	if ch.cfg.EnableApplicationProfile {
 		// Start syscall tracer
 		if err := ch.startSystemcallTracing(); err != nil {
@@ -276,8 +275,6 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting http tracing", helpers.Error(err))
 			return err
 		}
-	} else {
-		logger.L().Debug("not starting http tracing")
 	}
 
 	return nil
