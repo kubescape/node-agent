@@ -143,7 +143,10 @@ func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts meta
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
 	case "seccompprofiles":
 		return wh.storageClient.SeccompProfiles("").Watch(context.Background(), opts)
+	default:
+		return wh.k8sClient.GetDynamicClient().Resource(res).Watch(context.Background(), opts)
 	}
+
 	return nil, errors2.NewNotFound(res.GroupResource(), "not implemented")
 }
 
