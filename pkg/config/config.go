@@ -24,6 +24,7 @@ type Config struct {
 	EnableMalwareDetection   bool                      `mapstructure:"malwareDetectionEnabled"`
 	EnablePrometheusExporter bool                      `mapstructure:"prometheusExporterEnabled"`
 	EnableRuntimeDetection   bool                      `mapstructure:"runtimeDetectionEnabled"`
+	EnableHttpDetection      bool                      `mapstructure:"httpDetectionEnabled"`
 	EnableNetworkTracing     bool                      `mapstructure:"networkServiceEnabled"`
 	EnableRelevancy          bool                      `mapstructure:"relevantCVEServiceEnabled"`
 	EnableNodeProfile        bool                      `mapstructure:"nodeProfileServiceEnabled"`

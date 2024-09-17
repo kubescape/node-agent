@@ -13,5 +13,6 @@ const (
 	SymlinkEventType
 	HardlinkEventType
 	SSHEventType
+	HTTPEventType
 	AllEventType
 )
