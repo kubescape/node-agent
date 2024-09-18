@@ -10,7 +10,7 @@ struct {
 
 // Used to manage pre accept connections from client
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct pre_accept_args);
@@ -18,7 +18,7 @@ struct {
 
 // Used to manage active http connections to monitor
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct pre_connect_args);
@@ -26,7 +26,7 @@ struct {
 
 // Used to manage active http connections to monitor as server
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct active_connection_info);
@@ -34,7 +34,7 @@ struct {
 
 // Used to store the buffer of packets 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct packet_buffer);
@@ -42,7 +42,7 @@ struct {
 
 // Used to store the buffer of messages of messages type
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct packet_msg);
