@@ -170,11 +170,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportEvent(utils.CapabilitiesEventType, &event)
 
 		// Report capabilities to event receivers
-		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.CapabilitiesEventType) {
-			for receiver := range thirdPartyEventReceivers.Get(utils.CapabilitiesEventType).Iter() {
-				receiver.ReportEvent(utils.CapabilitiesEventType, &event)
-			}
-		}
+		reportEventToThirdPartyTracers(utils.CapabilitiesEventType, &event, thirdPartyEventReceivers)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating capabilities worker pool: %w", err)
@@ -205,11 +201,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		malwareManager.ReportEvent(utils.ExecveEventType, &event)
 
 		// Report exec events to event receivers
-		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.ExecveEventType) {
-			for receiver := range thirdPartyEventReceivers.Get(utils.ExecveEventType).Iter() {
-				receiver.ReportEvent(utils.ExecveEventType, &event)
-			}
-		}
+		reportEventToThirdPartyTracers(utils.ExecveEventType, &event, thirdPartyEventReceivers)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating exec worker pool: %w", err)
@@ -240,11 +232,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		malwareManager.ReportEvent(utils.OpenEventType, &event)
 
 		// Report open events to event receivers
-		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.OpenEventType) {
-			for receiver := range thirdPartyEventReceivers.Get(utils.OpenEventType).Iter() {
-				receiver.ReportEvent(utils.OpenEventType, &event)
-			}
-		}
+		reportEventToThirdPartyTracers(utils.OpenEventType, &event, thirdPartyEventReceivers)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating open worker pool: %w", err)
@@ -267,11 +255,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportEvent(utils.NetworkEventType, &event)
 
 		// Report network events to event receivers
-		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.NetworkEventType) {
-			for receiver := range thirdPartyEventReceivers.Get(utils.NetworkEventType).Iter() {
-				receiver.ReportEvent(utils.NetworkEventType, &event)
-			}
-		}
+		reportEventToThirdPartyTracers(utils.NetworkEventType, &event, thirdPartyEventReceivers)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating network worker pool: %w", err)
@@ -299,11 +283,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportEvent(utils.DnsEventType, &event)
 
 		// Report DNS events to event receivers
-		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.DnsEventType) {
-			for receiver := range thirdPartyEventReceivers.Get(utils.DnsEventType).Iter() {
-				receiver.ReportEvent(utils.DnsEventType, &event)
-			}
-		}
+		reportEventToThirdPartyTracers(utils.DnsEventType, &event, thirdPartyEventReceivers)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating dns worker pool: %w", err)
@@ -318,11 +298,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportEvent(utils.RandomXEventType, &event)
 
 		// Report randomx events to event receivers
-		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.RandomXEventType) {
-			for receiver := range thirdPartyEventReceivers.Get(utils.RandomXEventType).Iter() {
-				receiver.ReportEvent(utils.RandomXEventType, &event)
-			}
-		}
+		reportEventToThirdPartyTracers(utils.RandomXEventType, &event, thirdPartyEventReceivers)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating randomx worker pool: %w", err)
@@ -337,11 +313,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportEvent(utils.SymlinkEventType, &event)
 
 		// Report symlink events to event receivers
-		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.SymlinkEventType) {
-			for receiver := range thirdPartyEventReceivers.Get(utils.SymlinkEventType).Iter() {
-				receiver.ReportEvent(utils.SymlinkEventType, &event)
-			}
-		}
+		reportEventToThirdPartyTracers(utils.SymlinkEventType, &event, thirdPartyEventReceivers)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating symlink worker pool: %w", err)
@@ -356,11 +328,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportEvent(utils.HardlinkEventType, &event)
 
 		// Report hardlink events to event receivers
-		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.HardlinkEventType) {
-			for receiver := range thirdPartyEventReceivers.Get(utils.HardlinkEventType).Iter() {
-				receiver.ReportEvent(utils.HardlinkEventType, &event)
-			}
-		}
+		reportEventToThirdPartyTracers(utils.HardlinkEventType, &event, thirdPartyEventReceivers)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating hardlink worker pool: %w", err)
@@ -375,11 +343,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		ruleManager.ReportEvent(utils.SSHEventType, &event)
 
 		// Report ssh events to event receivers
-		if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(utils.SSHEventType) {
-			for receiver := range thirdPartyEventReceivers.Get(utils.SSHEventType).Iter() {
-				receiver.ReportEvent(utils.SSHEventType, &event)
-			}
-		}
+		reportEventToThirdPartyTracers(utils.SSHEventType, &event, thirdPartyEventReceivers)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating ssh worker pool: %w", err)
@@ -402,6 +366,8 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		metrics.ReportEvent(utils.HTTPEventType)
 		applicationProfileManager.ReportHTTPEvent(k8sContainerID, &event)
+
+		reportEventToThirdPartyTracers(utils.HTTPEventType, &event, thirdPartyEventReceivers)
 	})
 
 	if err != nil {
@@ -534,4 +500,12 @@ func (ch *IGContainerWatcher) Stop() {
 
 func (ch *IGContainerWatcher) Ready() bool {
 	return ch.running
+}
+
+func reportEventToThirdPartyTracers(eventType utils.EventType, event utils.K8sEvent, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]]) {
+	if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(eventType) {
+		for receiver := range thirdPartyEventReceivers.Get(eventType).Iter() {
+			receiver.ReportEvent(eventType, event)
+		}
+	}
 }
