@@ -49,6 +49,7 @@ jobs:
           Test_07_RuleBindingApplyTest,
           Test_08_ApplicationProfilePatching,
           Test_10_MalwareDetectionTest,
+          Test_11_EndpointTest,
           # Test_10_DemoTest
           # Test_11_DuplicationTest
         ]
