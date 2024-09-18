@@ -18,7 +18,6 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -144,10 +143,14 @@ func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts meta
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
 	case "seccompprofiles":
 		return wh.storageClient.SeccompProfiles("").Watch(context.Background(), opts)
-	case "operatorcommands":
+	default:
+		// Make sure the resource version is not our storage, if so we panic.
+		if res.Group == kubescapeCustomResourceGroup {
+			panic("storage resources must use the storage client")
+		}
+
 		return wh.k8sClient.GetDynamicClient().Resource(res).Watch(context.Background(), opts)
 	}
-	return nil, fmt.Errorf("cannot watch for resource %s: %w", res.Resource, errNotImplemented)
 }
 
 func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions, eventQueue *cooldownqueue.CooldownQueue) {
@@ -215,10 +218,14 @@ func (wh *WatchHandler) chooseLister(res schema.GroupVersionResource, opts metav
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
 	case "seccompprofiles":
 		return wh.storageClient.SeccompProfiles("").List(context.Background(), opts)
-	case "operatorcommands":
+	default:
+		// Make sure the resource version is not our storage, if so we panic.
+		if res.Group == kubescapeCustomResourceGroup {
+			panic("storage resources must use the storage client")
+		}
+
 		return wh.k8sClient.GetDynamicClient().Resource(res).List(context.Background(), opts)
 	}
-	return nil, errors2.NewNotFound(res.GroupResource(), "not implemented")
 }
 
 func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions) (string, error) {
