@@ -21,7 +21,7 @@ const (
 	R1010Name = "Symlink Created Over Sensitive File"
 )
 
-var R1010SymlinkCreatedOverSensitiveFileRuleDescriptor = RuleDescriptor{
+var R1010SymlinkCreatedOverSensitiveFileRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1010ID,
 	Name:        R1010Name,
 	Description: "Detecting symlink creation over sensitive files.",
@@ -78,7 +78,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ID() string {
 func (rule *R1010SymlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
-func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.SymlinkEventType {
 		return nil
 	}

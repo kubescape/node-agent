@@ -25,7 +25,7 @@ const (
 	R1003Name = "Malicious SSH Connection"
 )
 
-var R1003MaliciousSSHConnectionRuleDescriptor = RuleDescriptor{
+var R1003MaliciousSSHConnectionRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1003ID,
 	Name:        R1003Name,
 	Description: "Detecting ssh connection to disallowed port",
@@ -89,7 +89,7 @@ func CreateRuleR1003MaliciousSSHConnection() *R1003MaliciousSSHConnection {
 		logger.L().Error("Failed to read port range, setting to default range:", helpers.Error(err))
 	}
 	return &R1003MaliciousSSHConnection{
-		allowedPorts:       []uint16{22},
+		allowedPorts:       []uint16{22, 2022},
 		ephemeralPortRange: ephemeralPorts,
 	}
 }
@@ -127,7 +127,7 @@ func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interfa
 func (rule *R1003MaliciousSSHConnection) DeleteRule() {
 }
 
-func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event interface{}, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.SSHEventType {
 		return nil
 	}

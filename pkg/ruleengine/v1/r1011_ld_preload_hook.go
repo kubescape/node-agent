@@ -25,7 +25,7 @@ const (
 
 var LD_PRELOAD_ENV_VARS = []string{"LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH"}
 
-var R1011LdPreloadHookRuleDescriptor = RuleDescriptor{
+var R1011LdPreloadHookRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1011ID,
 	Name:        R1011Name,
 	Description: "Detecting ld_preload hook techniques.",
@@ -183,7 +183,7 @@ func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *traceropentype.Event)
 	return nil
 }
 
-func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event interface{}, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType && eventType != utils.OpenEventType {
 		return nil
 	}

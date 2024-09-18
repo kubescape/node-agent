@@ -128,7 +128,7 @@ var commonlyUsedCryptoMinersDomains = []string{
 	"us.monero.herominers.com.",
 }
 
-var R1008CryptoMiningDomainCommunicationRuleDescriptor = RuleDescriptor{
+var R1008CryptoMiningDomainCommunicationRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1008ID,
 	Name:        R1008Name,
 	Description: "Detecting Crypto miners communication by domain",
@@ -166,7 +166,7 @@ func (rule *R1008CryptoMiningDomainCommunication) ID() string {
 func (rule *R1008CryptoMiningDomainCommunication) DeleteRule() {
 }
 
-func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.DnsEventType {
 		return nil
 	}

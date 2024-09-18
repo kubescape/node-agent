@@ -89,6 +89,10 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.ruleManager.ContainerCallback,
 	}
 
+	for receiver := range ch.thirdPartyContainerReceivers.Iter() {
+		containerEventFuncs = append(containerEventFuncs, receiver.ContainerCallback)
+	}
+
 	// Define the different options for the container collection instance
 	opts := []containercollection.ContainerCollectionOption{
 		// Get Notifications from the container collection
@@ -267,6 +271,14 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting ssh tracing", helpers.Error(err))
 			return err
 		}
+
+		// Start third party tracers
+		for tracer := range ch.thirdPartyTracers.Iter() {
+			if err := tracer.Start(); err != nil {
+				logger.L().Error("error starting custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+				return err
+			}
+		}
 	}
 
 	if ch.cfg.EnableHttpDetection {
@@ -345,6 +357,14 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		if err := ch.stopSshTracing(); err != nil {
 			logger.L().Error("error stopping ssh tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
+		}
+
+		// Stop third party tracers
+		for tracer := range ch.thirdPartyTracers.Iter() {
+			if err := tracer.Stop(); err != nil {
+				logger.L().Error("error stopping custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+				errs = errors.Join(errs, err)
+			}
 		}
 	}
 

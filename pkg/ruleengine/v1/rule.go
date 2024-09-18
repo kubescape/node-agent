@@ -16,34 +16,6 @@ const (
 	RulePrioritySystemIssue = 1000
 )
 
-type RuleDescriptor struct {
-	// Rule ID
-	ID string
-	// Rule Name
-	Name string
-	// Rule Description
-	Description string
-	// Priority
-	Priority int
-	// Tags
-	Tags []string
-	// Rule requirements
-	Requirements ruleengine.RuleSpec
-	// Create a rule function
-	RuleCreationFunc func() ruleengine.RuleEvaluator
-}
-
-func (r *RuleDescriptor) HasTags(tags []string) bool {
-	for _, tag := range tags {
-		for _, ruleTag := range r.Tags {
-			if tag == ruleTag {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 var _ ruleengine.RuleSpec = (*RuleRequirements)(nil)
 
 type RuleRequirements struct {
