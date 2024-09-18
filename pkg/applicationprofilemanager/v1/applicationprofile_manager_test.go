@@ -48,7 +48,6 @@ func TestApplicationProfileManager(t *testing.T) {
 			},
 		},
 	}
-
 	// register peek function for syscall tracer
 	go am.RegisterPeekFunc(func(_ uint64) ([]string, error) {
 		return []string{"dup", "listen"}, nil
@@ -139,7 +138,6 @@ func TestApplicationProfileManager(t *testing.T) {
 	for _, expectedExec := range expectedExecs {
 		assert.Contains(t, reportedExecs, expectedExec)
 	}
-
 	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Opens)
 
 	expectedEndpoints := GetExcpectedEndpoints(t)
