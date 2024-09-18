@@ -146,7 +146,7 @@ func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts meta
 	default:
 		// Make sure the resource version is not our storage, if so we panic.
 		if res.Group == kubescapeCustomResourceGroup {
-			panic("storage resources must use the storage client")
+			return nil, fmt.Errorf("resource must use the storage client %s: %w", res.Resource, errNotImplemented)
 		}
 
 		return wh.k8sClient.GetDynamicClient().Resource(res).Watch(context.Background(), opts)
@@ -221,7 +221,7 @@ func (wh *WatchHandler) chooseLister(res schema.GroupVersionResource, opts metav
 	default:
 		// Make sure the resource version is not our storage, if so we panic.
 		if res.Group == kubescapeCustomResourceGroup {
-			panic("storage resources must use the storage client")
+			return nil, fmt.Errorf("resource must use the storage client %s: %w", res.Resource, errNotImplemented)
 		}
 
 		return wh.k8sClient.GetDynamicClient().Resource(res).List(context.Background(), opts)
