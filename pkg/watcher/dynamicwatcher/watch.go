@@ -215,6 +215,8 @@ func (wh *WatchHandler) chooseLister(res schema.GroupVersionResource, opts metav
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
 	case "seccompprofiles":
 		return wh.storageClient.SeccompProfiles("").List(context.Background(), opts)
+	case "operatorcommands":
+		wh.k8sClient.GetDynamicClient().Resource(res).List(context.Background(), opts)
 	}
 	return nil, errors2.NewNotFound(res.GroupResource(), "not implemented")
 }
