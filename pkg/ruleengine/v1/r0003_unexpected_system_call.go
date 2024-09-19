@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -122,4 +123,8 @@ func (rule *R0003UnexpectedSystemCall) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0003UnexpectedSystemCallRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
+}
+
+func (rule *R0003UnexpectedSystemCall) CooldownConfig() *cooldown.CooldownConfig {
+	return nil
 }

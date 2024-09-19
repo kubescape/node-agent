@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -139,7 +141,8 @@ func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event,
 				PodName:   execEvent.GetPod(),
 				PodLabels: execEvent.K8s.PodLabels,
 			},
-			RuleID: rule.ID(),
+			RuleID:            rule.ID(),
+			FailureIdentifier: failureIdentifireMD5(rule.ID(), fmt.Sprintf("%s-%s-%s", execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer()), ldHookVar),
 		}
 
 		return &ruleFailure
@@ -174,7 +177,8 @@ func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *traceropentype.Event)
 				PodName:   openEvent.GetPod(),
 				PodLabels: openEvent.K8s.PodLabels,
 			},
-			RuleID: rule.ID(),
+			RuleID:            rule.ID(),
+			FailureIdentifier: failureIdentifireMD5(rule.ID(), fmt.Sprintf("%s-%s-%s", openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer()), openEvent.Path),
 		}
 
 		return &ruleFailure
@@ -210,5 +214,15 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 func (rule *R1011LdPreloadHook) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1011LdPreloadHookRuleDescriptor.Requirements.RequiredEventTypes(),
+	}
+}
+
+func (rule *R1011LdPreloadHook) CooldownConfig() *cooldown.CooldownConfig {
+	return &cooldown.CooldownConfig{
+		Threshold:        5,
+		AlertWindow:      time.Minute * 1,
+		BaseCooldown:     time.Minute * 5,
+		MaxCooldown:      time.Minute * 10,
+		CooldownIncrease: 1.5,
 	}
 }

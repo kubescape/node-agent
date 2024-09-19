@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -156,4 +157,8 @@ func isHardLinkAllowed(hardlinkEvent *tracerhardlinktype.Event, objCache objectc
 	}
 
 	return false, nil
+}
+
+func (rule *R1012HardlinkCreatedOverSensitiveFile) CooldownConfig() *cooldown.CooldownConfig {
+	return nil
 }

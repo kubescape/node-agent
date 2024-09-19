@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -113,4 +114,8 @@ func (rule *R1001ExecBinaryNotInBaseImage) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1001ExecBinaryNotInBaseImageRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
+}
+
+func (rule *R1001ExecBinaryNotInBaseImage) CooldownConfig() *cooldown.CooldownConfig {
+	return nil
 }

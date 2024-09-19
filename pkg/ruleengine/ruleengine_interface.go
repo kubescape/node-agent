@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -71,6 +72,9 @@ type RuleEvaluator interface {
 
 	// Get rule parameters
 	GetParameters() map[string]interface{}
+
+	// Cooldown configuration
+	CooldownConfig() *cooldown.CooldownConfig
 }
 
 // RuleSpec is an interface for rule requirements
@@ -92,6 +96,8 @@ type RuleFailure interface {
 	GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails
 	// Get Rule ID
 	GetRuleId() string
+	// Get Failure identifier
+	GetFailureIdentifier() string
 
 	// Set Workload Details
 	SetWorkloadDetails(workloadDetails string)

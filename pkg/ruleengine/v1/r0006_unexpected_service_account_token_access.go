@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -151,4 +152,8 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) Requirements() ruleengine.
 	return &RuleRequirements{
 		EventTypes: R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
+}
+
+func (rule *R0006UnexpectedServiceAccountTokenAccess) CooldownConfig() *cooldown.CooldownConfig {
+	return nil
 }

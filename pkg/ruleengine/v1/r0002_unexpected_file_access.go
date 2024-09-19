@@ -3,7 +3,9 @@ package ruleengine
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -177,7 +179,8 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName: openEvent.GetPod(),
 		},
-		RuleID: rule.ID(),
+		RuleID:            rule.ID(),
+		FailureIdentifier: failureIdentifireMD5(rule.ID(), fmt.Sprintf("%s-%s-%s", openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer()), openEvent.FullPath),
 	}
 
 	return &ruleFailure
@@ -190,5 +193,15 @@ func isPathContained(basepath, targetpath string) bool {
 func (rule *R0002UnexpectedFileAccess) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0002UnexpectedFileAccessRuleDescriptor.Requirements.RequiredEventTypes(),
+	}
+}
+
+func (rule *R0002UnexpectedFileAccess) CooldownConfig() *cooldown.CooldownConfig {
+	return &cooldown.CooldownConfig{
+		Threshold:        10,
+		AlertWindow:      time.Minute * 1,
+		BaseCooldown:     time.Second * 30,
+		MaxCooldown:      time.Minute * 5,
+		CooldownIncrease: 1.5,
 	}
 }

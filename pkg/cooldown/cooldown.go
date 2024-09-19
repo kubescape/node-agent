@@ -4,10 +4,9 @@ import (
 	"container/list"
 	"sync"
 	"time"
-)
 
-// AlertID represents the unique identifier for an alert
-type AlertID string
+	"github.com/goradd/maps"
+)
 
 // CooldownConfig holds the configuration for a cooldown
 type CooldownConfig struct {
@@ -29,15 +28,12 @@ type Cooldown struct {
 
 // CooldownManager manages cooldowns for different alerts
 type CooldownManager struct {
-	mu        sync.RWMutex
-	cooldowns map[AlertID]*Cooldown
+	cooldowns maps.SafeMap[string, *Cooldown]
 }
 
 // NewCooldownManager creates a new CooldownManager
 func NewCooldownManager() *CooldownManager {
-	return &CooldownManager{
-		cooldowns: make(map[AlertID]*Cooldown),
-	}
+	return &CooldownManager{}
 }
 
 // NewCooldown creates a new Cooldown with the given configuration
@@ -50,30 +46,26 @@ func NewCooldown(config CooldownConfig) *Cooldown {
 }
 
 // ConfigureCooldown sets up or updates the cooldown configuration for a specific alert
-func (cm *CooldownManager) ConfigureCooldown(alertID AlertID, config CooldownConfig) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
-	if cooldown, exists := cm.cooldowns[alertID]; exists {
+func (cm *CooldownManager) ConfigureCooldown(alertID string, config CooldownConfig) {
+	if cm.cooldowns.Has(alertID) {
+		cooldown := cm.cooldowns.Get(alertID)
 		cooldown.mu.Lock()
 		cooldown.config = config
 		cooldown.currentCooldown = config.BaseCooldown
 		cooldown.mu.Unlock()
 	} else {
-		cm.cooldowns[alertID] = NewCooldown(config)
+		cm.cooldowns.Set(alertID, NewCooldown(config))
 	}
 }
 
 // ShouldAlert determines if an alert should be triggered based on the cooldown mechanism
-func (cm *CooldownManager) ShouldAlert(alertID AlertID) bool {
-	cm.mu.RLock()
-	cooldown, exists := cm.cooldowns[alertID]
-	cm.mu.RUnlock()
-
-	if !exists {
+func (cm *CooldownManager) ShouldAlert(alertID string) bool {
+	if !cm.cooldowns.Has(alertID) {
 		// If no configuration exists, always allow the alert
 		return true
 	}
+
+	cooldown := cm.cooldowns.Get(alertID)
 
 	return cooldown.shouldAlert()
 }
@@ -120,15 +112,17 @@ func (c *Cooldown) shouldAlert() bool {
 }
 
 // ResetCooldown resets the cooldown for a specific alert
-func (cm *CooldownManager) ResetCooldown(alertID AlertID) {
-	cm.mu.RLock()
-	cooldown, exists := cm.cooldowns[alertID]
-	cm.mu.RUnlock()
-
-	if exists {
+func (cm *CooldownManager) ResetCooldown(alertID string) {
+	if cm.cooldowns.Has(alertID) {
+		cooldown := cm.cooldowns.Get(alertID)
 		cooldown.mu.Lock()
 		cooldown.alertTimes.Init() // Clear the list
 		cooldown.currentCooldown = cooldown.config.BaseCooldown
 		cooldown.mu.Unlock()
 	}
+}
+
+// HasCooldownConfig checks if a cooldown configuration exists for a specific alert
+func (cm *CooldownManager) HasCooldownConfig(alertID string) bool {
+	return cm.cooldowns.Has(alertID)
 }

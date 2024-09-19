@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -64,6 +65,7 @@ type RuleManager struct {
 	clusterName              string
 	containerIdToShimPid     maps.SafeMap[string, uint32]
 	containerIdToPid         maps.SafeMap[string, uint32]
+	cooldownManager          *cooldown.CooldownManager
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
@@ -81,6 +83,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		metrics:           metrics,
 		nodeName:          nodeName,
 		clusterName:       clusterName,
+		cooldownManager:   cooldown.NewCooldownManager(),
 	}, nil
 }
 
@@ -344,10 +347,20 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 
 		res := rule.ProcessEvent(eventType, event, rm.objectCache)
 		if res != nil {
-			res = rm.enrichRuleFailure(res)
-			res.SetWorkloadDetails(rm.podToWlid.Get(utils.CreateK8sPodID(res.GetRuntimeAlertK8sDetails().Namespace, res.GetRuntimeAlertK8sDetails().PodName)))
-			rm.exporter.SendRuleAlert(res)
-			rm.metrics.ReportRuleAlert(rule.Name())
+			if res.GetFailureIdentifier() != "" {
+				if !rm.cooldownManager.HasCooldownConfig(res.GetFailureIdentifier()) {
+					rm.cooldownManager.ConfigureCooldown(res.GetFailureIdentifier(), *rule.CooldownConfig())
+				}
+			}
+
+			if rm.cooldownManager.ShouldAlert(res.GetFailureIdentifier()) {
+				res = rm.enrichRuleFailure(res)
+				res.SetWorkloadDetails(rm.podToWlid.Get(utils.CreateK8sPodID(res.GetRuntimeAlertK8sDetails().Namespace, res.GetRuntimeAlertK8sDetails().PodName)))
+				rm.exporter.SendRuleAlert(res)
+				rm.metrics.ReportRuleAlert(rule.Name())
+			} else {
+				logger.L().Debug("RuleManager - rule is in cooldown for identifier", helpers.String("identifier", res.GetFailureIdentifier()))
+			}
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())
 	}

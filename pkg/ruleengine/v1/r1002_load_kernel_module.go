@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -105,4 +106,8 @@ func (rule *R1002LoadKernelModule) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1002LoadKernelModuleRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
+}
+
+func (rule *R1002LoadKernelModule) CooldownConfig() *cooldown.CooldownConfig {
+	return nil
 }

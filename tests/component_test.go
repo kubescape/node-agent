@@ -715,158 +715,68 @@ func sortHTTPEndpoints(endpoints []v1beta1.HTTPEndpoint) {
 	})
 }
 
-// func Test_10_DemoTest(t *testing.T) {
-// 	start := time.Now()
-// 	defer tearDownTest(t, start)
+func Test_12_Cooldown(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
 
-// 	//testutils.IncreaseNodeAgentSniffingTime("2m")
-// 	wl, err := testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app-role.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating role: %v", err)
-// 	}
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+	assert.NoError(t, wl.WaitForReady(80))
 
-// 	wl, err = testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app-role-binding.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating role binding: %v", err)
-// 	}
+	assert.NoError(t, wl.WaitForApplicationProfile(80, "ready"))
+	assert.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"))
 
-// 	wl, err = testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app-service.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating service: %v", err)
-// 	}
+	// process launched from nginx container
+	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
 
-// 	wl, err = testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating workload: %v", err)
-// 	}
-// 	assert.NoError(t, wl.WaitForReady(80))
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4"}, "")
-// 	err = wl.WaitForApplicationProfileCompletion(80)
-// 	if err != nil {
-// 		t.Errorf("Error waiting for application profile to be completed: %v", err)
-// 	}
-// 	// err = wl.WaitForNetworkNeighborhoodCompletion(80)
-// 	// if err != nil {
-// 	// 	t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
-// 	// }
+	// network activity from server container
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
 
-// 	// Do a ls command using command injection in the ping command
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;ls"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	// network activity from nginx container
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")
 
-// 	// Do a cat command using command injection in the ping command
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;cat /run/secrets/kubernetes.io/serviceaccount/token"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	err = wl.WaitForApplicationProfileCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+	err = wl.WaitForNetworkNeighborhoodCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
+	}
 
-// 	// Do an uname command using command injection in the ping command
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;uname -m | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g'"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	time.Sleep(10 * time.Second)
 
-// 	// Download kubectl
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;curl -LO \"https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl\""}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	appProfile, _ := wl.GetApplicationProfile()
+	appProfileJson, _ := json.Marshal(appProfile)
 
-// 	// Sleep for 10 seconds to wait for the kubectl download
-// 	time.Sleep(10 * time.Second)
+	t.Logf("application profile: %v", string(appProfileJson))
 
-// 	// Make kubectl executable
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;chmod +x kubectl"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	// The cooldown for LD_PRELOAD is:
+	// cooldown.CooldownConfig{
+	// 	Threshold:        5,
+	// 	AlertWindow:      time.Minute * 1,
+	// 	BaseCooldown:     time.Minute * 5,
+	// 	MaxCooldown:      time.Minute * 10,
+	// 	CooldownIncrease: 1.5,
 
-// 	// Get the pods in the cluster
-// 	output, _, err := wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;./kubectl --server https://kubernetes.default --insecure-skip-tls-verify --token $(cat /run/secrets/kubernetes.io/serviceaccount/token) get pods"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	// So we want to exec into the pod and run 6 times a binary with the LD_PRELOAD feature to trigger the cooldown.
+	// We expect to see 5 alerts and the 6th one to be ignored.
+	for i := 0; i < 6; i++ {
+		_, _, err = wl.ExecIntoPod([]string{"LD_PRELOAD=/lib/libc.so", "ls", "-l"}, "nginx")
+	}
 
-// 	// Check that the output contains the pod-ping-app pod
-// 	assert.Contains(t, output, "ping-app", "Expected output to contain 'ping-app'")
+	// Wait for the alert to be signaled
+	time.Sleep(30 * time.Second)
 
-// 	// Get the alerts and check that the alerts are generated
-// 	alerts, err := testutils.GetAlerts(wl.Namespace)
-// 	if err != nil {
-// 		t.Errorf("Error getting alerts: %v", err)
-// 	}
+	alerts, err := testutils.GetAlerts(wl.Namespace)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
 
-// 	// Validate that all alerts are signaled
-// 	expectedAlerts := map[string]bool{
-// 		"Unexpected process launched": false,
-// 		"Unexpected file access":      false,
-// 		"Kubernetes Client Executed":  false,
-// 		// "Exec from malicious source":               false,
-// 		"Exec Binary Not In Base Image":           false,
-// 		"Unexpected Service Account Token Access": false,
-// 		// "Unexpected domain request":               false,
-// 	}
-
-// 	for _, alert := range alerts {
-// 		ruleName, ruleOk := alert.Labels["rule_name"]
-// 		if ruleOk {
-// 			if _, exists := expectedAlerts[ruleName]; exists {
-// 				expectedAlerts[ruleName] = true
-// 			}
-// 		}
-// 	}
-
-// 	for ruleName, signaled := range expectedAlerts {
-// 		if !signaled {
-// 			t.Errorf("Expected alert '%s' was not signaled", ruleName)
-// 		}
-// 	}
-// }
-
-// func Test_11_DuplicationTest(t *testing.T) {
-// 	start := time.Now()
-// 	defer tearDownTest(t, start)
-
-// 	ns := testutils.NewRandomNamespace()
-// 	// wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
-// 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/ping-app.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating workload: %v", err)
-// 	}
-// 	assert.NoError(t, wl.WaitForReady(80))
-
-// 	err = wl.WaitForApplicationProfileCompletion(80)
-// 	if err != nil {
-// 		t.Errorf("Error waiting for application profile to be completed: %v", err)
-// 	}
-
-// 	// process launched from nginx container
-// 	_, _, err = wl.ExecIntoPod([]string{"ls", "-a"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
-
-// 	time.Sleep(20 * time.Second)
-
-// 	alerts, err := testutils.GetAlerts(wl.Namespace)
-// 	if err != nil {
-// 		t.Errorf("Error getting alerts: %v", err)
-// 	}
-
-// 	// Validate that unexpected process launched alert is signaled only once
-// 	count := 0
-// 	for _, alert := range alerts {
-// 		ruleName, ruleOk := alert.Labels["rule_name"]
-// 		if ruleOk {
-// 			if ruleName == "Unexpected process launched" {
-// 				count++
-// 			}
-// 		}
-// 	}
-
-// 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "ping-app")
-
-// 	assert.Equal(t, 1, count, "Expected 1 alert of type 'Unexpected process launched' but got %d", count)
-// }
+	if len(alerts) != 5 {
+		t.Errorf("Expected 5 alerts to be generated, but got %d alerts", len(alerts))
+	}
+}

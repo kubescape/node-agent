@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -156,4 +157,8 @@ func isSymLinkAllowed(symlinkEvent *tracersymlinktype.Event, objCache objectcach
 	}
 
 	return false, nil
+}
+
+func (rule *R1010SymlinkCreatedOverSensitiveFile) CooldownConfig() *cooldown.CooldownConfig {
+	return nil
 }

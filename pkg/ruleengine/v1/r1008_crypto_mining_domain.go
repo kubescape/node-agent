@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/goradd/maps"
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -217,4 +218,8 @@ func (rule *R1008CryptoMiningDomainCommunication) Requirements() ruleengine.Rule
 	return &RuleRequirements{
 		EventTypes: R1008CryptoMiningDomainCommunicationRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
+}
+
+func (rule *R1008CryptoMiningDomainCommunication) CooldownConfig() *cooldown.CooldownConfig {
+	return nil
 }

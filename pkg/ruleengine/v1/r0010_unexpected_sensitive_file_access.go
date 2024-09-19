@@ -3,7 +3,9 @@ package ruleengine
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -138,7 +140,8 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 			PodName:   openEvent.GetPod(),
 			PodLabels: openEvent.K8s.PodLabels,
 		},
-		RuleID: rule.ID(),
+		RuleID:            rule.ID(),
+		FailureIdentifier: failureIdentifireMD5(rule.ID(), fmt.Sprintf("%s-%s-%s", openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer()), openEvent.FullPath),
 	}
 
 	return &ruleFailure
@@ -147,5 +150,15 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 func (rule *R0010UnexpectedSensitiveFileAccess) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0010UnexpectedSensitiveFileAccessRuleDescriptor.Requirements.RequiredEventTypes(),
+	}
+}
+
+func (rule *R0010UnexpectedSensitiveFileAccess) CooldownConfig() *cooldown.CooldownConfig {
+	return &cooldown.CooldownConfig{
+		Threshold:        5,
+		AlertWindow:      time.Minute * 1,
+		BaseCooldown:     time.Second * 30,
+		MaxCooldown:      time.Minute * 5,
+		CooldownIncrease: 1.5,
 	}
 }

@@ -2,7 +2,9 @@ package ruleengine
 
 import (
 	"fmt"
+	"time"
 
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -105,7 +107,8 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName: capEvent.GetPod(),
 		},
-		RuleID: rule.ID(),
+		RuleID:            rule.ID(),
+		FailureIdentifier: failureIdentifireMD5(rule.ID(), fmt.Sprintf("%s-%s-%s", capEvent.GetNamespace(), capEvent.GetPod(), capEvent.GetContainer()), capEvent.CapName),
 	}
 
 	return &ruleFailure
@@ -114,5 +117,15 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 func (rule *R0004UnexpectedCapabilityUsed) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0004UnexpectedCapabilityUsedRuleDescriptor.Requirements.RequiredEventTypes(),
+	}
+}
+
+func (rule *R0004UnexpectedCapabilityUsed) CooldownConfig() *cooldown.CooldownConfig {
+	return &cooldown.CooldownConfig{
+		Threshold:        5,
+		AlertWindow:      time.Minute * 1,
+		BaseCooldown:     time.Second * 30,
+		MaxCooldown:      time.Minute * 5,
+		CooldownIncrease: 1.5,
 	}
 }

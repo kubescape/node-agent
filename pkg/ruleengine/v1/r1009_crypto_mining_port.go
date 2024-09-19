@@ -3,7 +3,9 @@ package ruleengine
 import (
 	"fmt"
 	"slices"
+	"time"
 
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -118,7 +120,8 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 					PodName:   networkEvent.GetPod(),
 					PodLabels: networkEvent.K8s.PodLabels,
 				},
-				RuleID: rule.ID(),
+				RuleID:            rule.ID(),
+				FailureIdentifier: failureIdentifireMD5(rule.ID(), fmt.Sprintf("%s-%s-%s", networkEvent.GetNamespace(), networkEvent.GetPod(), networkEvent.GetContainer()), fmt.Sprintf("%d", networkEvent.Port)),
 			}
 
 			return &ruleFailure
@@ -131,5 +134,15 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 func (rule *R1009CryptoMiningRelatedPort) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1009CryptoMiningRelatedPortRuleDescriptor.Requirements.RequiredEventTypes(),
+	}
+}
+
+func (rule *R1009CryptoMiningRelatedPort) CooldownConfig() *cooldown.CooldownConfig {
+	return &cooldown.CooldownConfig{
+		Threshold:        2,
+		AlertWindow:      time.Minute * 1,
+		BaseCooldown:     time.Second * 30,
+		MaxCooldown:      time.Minute * 30,
+		CooldownIncrease: 1.5,
 	}
 }
