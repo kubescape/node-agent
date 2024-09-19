@@ -78,7 +78,7 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 					Name: "test",
 					Opens: []v1beta1.OpenCalls{
 						{
-							Path:  "/var/log/<dynamic>",
+							Path:  "/var/log/\u22ef",
 							Flags: []string{"O_RDONLY"},
 						},
 					},
@@ -112,7 +112,7 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 	e.FullPath = "/var/log/user123/app456.log"
 	profile.Spec.Containers[0].Opens = []v1beta1.OpenCalls{
 		{
-			Path:  "/var/log/<dynamic>/<dynamic>",
+			Path:  "/var/log/\u22ef/\u22ef",
 			Flags: []string{"O_RDONLY"},
 		},
 	}
@@ -170,5 +170,4 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since file is ignored")
 	}
-
 }

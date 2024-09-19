@@ -114,7 +114,7 @@ func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 					Name: "test",
 					Opens: []v1beta1.OpenCalls{
 						{
-							Path:  "/etc/<dynamic>",
+							Path:  "/etc/\u22ef",
 							Flags: []string{"O_RDONLY"},
 						},
 					},
