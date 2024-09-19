@@ -108,6 +108,8 @@ spec:
                       - R1007
                       - R1008
                       - R1009
+                      - R1010
+                      - R1011
                       type: string
                     ruleName:
                       enum:
@@ -128,6 +130,7 @@ spec:
                       - XMR Crypto Mining Detection
                       - Crypto Mining Domain Communication
                       - Crypto Mining Related Port Communication
+                      - LD_PRELOAD Hook
                       type: string
                     ruleTags:
                       items:
