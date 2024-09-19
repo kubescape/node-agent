@@ -776,7 +776,17 @@ func Test_12_CooldownTest(t *testing.T) {
 		t.Errorf("Error getting alerts: %v", err)
 	}
 
-	if len(alerts) != 5 {
-		t.Errorf("Expected 5 alerts to be generated, but got %d alerts", len(alerts))
+	ldpreloadAlertsCount := 0
+	for _, alert := range alerts {
+		ruleName, ruleOk := alert.Labels["rule_name"]
+		if ruleOk {
+			if ruleName == "LD_PRELOAD Hook" {
+				ldpreloadAlertsCount++
+			}
+		}
+	}
+
+	if ldpreloadAlertsCount != 5 {
+		t.Errorf("Expected 5 alerts to be generated, but got %d alerts", ldpreloadAlertsCount)
 	}
 }
