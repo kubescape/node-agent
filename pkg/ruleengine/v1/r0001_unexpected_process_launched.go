@@ -21,7 +21,7 @@ const (
 	R0001Name = "Unexpected process launched"
 )
 
-var R0001UnexpectedProcessLaunchedRuleDescriptor = RuleDescriptor{
+var R0001UnexpectedProcessLaunchedRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0001ID,
 	Name:        R0001Name,
 	Description: "Detecting exec calls that are not whitelisted by application profile",
@@ -75,7 +75,7 @@ func (rule *R0001UnexpectedProcessLaunched) generatePatchCommand(event *tracerex
 		event.GetContainer(), getExecPathFromEvent(event), argList)
 }
 
-func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventType, event interface{}, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}

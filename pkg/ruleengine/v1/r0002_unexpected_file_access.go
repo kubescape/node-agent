@@ -22,7 +22,7 @@ const (
 	R0002Name = "Unexpected file access"
 )
 
-var R0002UnexpectedFileAccessRuleDescriptor = RuleDescriptor{
+var R0002UnexpectedFileAccessRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0002ID,
 	Name:        R0002Name,
 	Description: "Detecting file access that are not whitelisted by application profile. File access is defined by the combination of path and flags",
@@ -93,7 +93,7 @@ func (rule *R0002UnexpectedFileAccess) generatePatchCommand(event *traceropentyp
 	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(), event.GetContainer(), event.FullPath, flagList)
 }
 
-func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType {
 		return nil
 	}

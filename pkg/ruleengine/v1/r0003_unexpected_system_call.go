@@ -18,7 +18,7 @@ const (
 	R0003Name = "Unexpected system call"
 )
 
-var R0003UnexpectedSystemCallRuleDescriptor = RuleDescriptor{
+var R0003UnexpectedSystemCallRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0003ID,
 	Name:        R0003Name,
 	Description: "Detecting unexpected system calls that are not whitelisted by application profile.",
@@ -58,7 +58,7 @@ func (rule *R0003UnexpectedSystemCall) ID() string {
 func (rule *R0003UnexpectedSystemCall) DeleteRule() {
 }
 
-func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.SyscallEventType {
 		return nil
 	}

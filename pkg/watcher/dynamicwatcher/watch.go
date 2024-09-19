@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/node-agent/pkg/watcher/cooldownqueue"
+	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/pager"
 
@@ -19,7 +20,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 )
@@ -37,6 +37,7 @@ type SkipNamespaceFunc func(string) bool
 
 type WatchHandler struct {
 	k8sClient         k8sclient.K8sClientInterface
+	storageClient     spdxv1beta1.SpdxV1beta1Interface
 	resources         map[string]watcher.WatchResource
 	eventQueues       map[string]*cooldownqueue.CooldownQueue
 	handlers          []watcher.Watcher
@@ -44,10 +45,12 @@ type WatchHandler struct {
 }
 
 var errWatchClosed = errors.New("watch channel closed")
+var errNotImplemented = errors.New("not implemented")
 
-func NewWatchHandler(k8sClient k8sclient.K8sClientInterface, skipNamespaceFunc SkipNamespaceFunc) *WatchHandler {
+func NewWatchHandler(k8sClient k8sclient.K8sClientInterface, storageClient spdxv1beta1.SpdxV1beta1Interface, skipNamespaceFunc SkipNamespaceFunc) *WatchHandler {
 	return &WatchHandler{
 		k8sClient:         k8sClient,
+		storageClient:     storageClient,
 		resources:         make(map[string]watcher.WatchResource),
 		eventQueues:       make(map[string]*cooldownqueue.CooldownQueue),
 		skipNamespaceFunc: skipNamespaceFunc,
@@ -104,7 +107,7 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 	// process events
 	for event := range eventQueue.ResultChan {
 		// skip non-objects
-		obj, ok := event.Object.(*unstructured.Unstructured)
+		obj, ok := event.Object.(runtime.Object)
 		if !ok || obj == nil {
 			continue
 		}
@@ -128,13 +131,37 @@ func (wh *WatchHandler) Stop(_ context.Context) {
 	}
 }
 
+func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts metav1.ListOptions) (watch.Interface, error) {
+	switch res.Resource {
+	case "applicationprofiles":
+		return wh.storageClient.ApplicationProfiles("").Watch(context.Background(), opts)
+	case "networkneighborhoods":
+		return wh.storageClient.NetworkNeighborhoods("").Watch(context.Background(), opts)
+	case "pods":
+		return wh.k8sClient.GetKubernetesClient().CoreV1().Pods("").Watch(context.Background(), opts)
+	case "runtimerulealertbindings":
+		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
+	case "seccompprofiles":
+		return wh.storageClient.SeccompProfiles("").Watch(context.Background(), opts)
+	default:
+		// Make sure the resource version is not our storage, if so we panic.
+		if res.Group == kubescapeCustomResourceGroup {
+			return nil, fmt.Errorf("resource must use the storage client %s: %w", res.Resource, errNotImplemented)
+		}
+
+		return wh.k8sClient.GetDynamicClient().Resource(res).Watch(context.Background(), opts)
+	}
+}
+
 func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions, eventQueue *cooldownqueue.CooldownQueue) {
 	exitFatal := true
 	if err := backoff.RetryNotify(func() error {
-		w, err := wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), watchOpts)
+		w, err := wh.chooseWatcher(res, watchOpts)
 		if err != nil {
 			if k8sErrors.ReasonForError(err) == metav1.StatusReasonNotFound {
 				exitFatal = false
+				return backoff.Permanent(err)
+			} else if errors.Is(err, errNotImplemented) {
 				return backoff.Permanent(err)
 			}
 			return fmt.Errorf("client resource: %w", err)
@@ -158,8 +185,8 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 			if event.Type == watch.Error {
 				return fmt.Errorf("watch error: %s", event.Object)
 			}
-			pod := event.Object.(*unstructured.Unstructured)
-			if wh.skipNamespaceFunc(pod.GetNamespace()) {
+			obj := event.Object.(metav1.Object)
+			if wh.skipNamespaceFunc(obj.GetNamespace()) {
 				continue
 			}
 			eventQueue.Enqueue(event)
@@ -179,20 +206,42 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 	}
 }
 
+func (wh *WatchHandler) chooseLister(res schema.GroupVersionResource, opts metav1.ListOptions) (runtime.Object, error) {
+	switch res.Resource {
+	case "applicationprofiles":
+		return wh.storageClient.ApplicationProfiles("").List(context.Background(), opts)
+	case "networkneighborhoods":
+		return wh.storageClient.NetworkNeighborhoods("").List(context.Background(), opts)
+	case "pods":
+		return wh.k8sClient.GetKubernetesClient().CoreV1().Pods("").List(context.Background(), opts)
+	case "runtimerulealertbindings":
+		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
+	case "seccompprofiles":
+		return wh.storageClient.SeccompProfiles("").List(context.Background(), opts)
+	default:
+		// Make sure the resource version is not our storage, if so we panic.
+		if res.Group == kubescapeCustomResourceGroup {
+			return nil, fmt.Errorf("resource must use the storage client %s: %w", res.Resource, errNotImplemented)
+		}
+
+		return wh.k8sClient.GetDynamicClient().Resource(res).List(context.Background(), opts)
+	}
+}
+
 func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions) (string, error) {
 	logger.L().Debug("WatchHandler - getting existing objects from storage", helpers.String("resource", res.Resource))
 	list := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
-		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(ctx, opts)
+		return wh.chooseLister(res, opts)
 	})
 	var resourceVersion string
 	if err := list.EachListItem(context.Background(), watchOpts, func(obj runtime.Object) error {
-		pod := obj.(*unstructured.Unstructured)
-		resourceVersion = pod.GetResourceVersion()
-		if wh.skipNamespaceFunc(pod.GetNamespace()) {
+		meta := obj.(metav1.Object)
+		resourceVersion = meta.GetResourceVersion()
+		if wh.skipNamespaceFunc(meta.GetNamespace()) {
 			return nil
 		}
 		for _, handler := range wh.handlers {
-			handler.AddHandler(ctx, pod)
+			handler.AddHandler(ctx, obj)
 		}
 		return nil
 	}); err != nil {

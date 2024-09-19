@@ -21,7 +21,7 @@ const (
 	R1012Name = "Hardlink Created Over Sensitive File"
 )
 
-var R1012HardlinkCreatedOverSensitiveFileRuleDescriptor = RuleDescriptor{
+var R1012HardlinkCreatedOverSensitiveFileRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1012ID,
 	Name:        R1012Name,
 	Description: "Detecting hardlink creation over sensitive files.",
@@ -78,7 +78,7 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ID() string {
 func (rule *R1012HardlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
-func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.HardlinkEventType {
 		return nil
 	}

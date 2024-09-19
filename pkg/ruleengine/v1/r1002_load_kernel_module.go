@@ -17,7 +17,7 @@ const (
 	R1002Name = "Kernel Module Load"
 )
 
-var R1002LoadKernelModuleRuleDescriptor = RuleDescriptor{
+var R1002LoadKernelModuleRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1002ID,
 	Name:        R1002Name,
 	Description: "Detecting Kernel Module Load.",
@@ -52,7 +52,7 @@ func (rule *R1002LoadKernelModule) ID() string {
 func (rule *R1002LoadKernelModule) DeleteRule() {
 }
 
-func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if rule.alerted {
 		return nil
 	}

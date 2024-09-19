@@ -21,7 +21,7 @@ const (
 	R0011Name = "Unexpected Egress Network Traffic"
 )
 
-var R0011UnexpectedEgressNetworkTrafficRuleDescriptor = RuleDescriptor{
+var R0011UnexpectedEgressNetworkTrafficRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0011ID,
 	Name:        R0011Name,
 	Description: "Detecting unexpected egress network traffic that is not whitelisted by application profile.",
@@ -133,7 +133,7 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 	return nil
 }
 
-func (rule *R0011UnexpectedEgressNetworkTraffic) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0011UnexpectedEgressNetworkTraffic) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.NetworkEventType {
 		return nil
 	}

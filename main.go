@@ -10,7 +10,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/kubescape/node-agent/internal/validator"
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	applicationprofilemanagerv1 "github.com/kubescape/node-agent/pkg/applicationprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -44,6 +43,7 @@ import (
 	seccompmanagerv1 "github.com/kubescape/node-agent/pkg/seccompmanager/v1"
 	"github.com/kubescape/node-agent/pkg/storage/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/validator"
 	"github.com/kubescape/node-agent/pkg/watcher/dynamicwatcher"
 	"github.com/kubescape/node-agent/pkg/watcher/seccompprofilewatcher"
 
@@ -137,7 +137,7 @@ func main() {
 	logger.L().Ctx(ctx).Info("Detected container runtime", helpers.String("containerRuntime", containerRuntime.Name.String()))
 
 	// Create watchers
-	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, cfg.SkipNamespace)
+	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.StorageClient, cfg.SkipNamespace)
 	// create k8sObject cache
 	k8sObjectCache, err := k8scache.NewK8sObjectCache(nodeName, k8sClient)
 	if err != nil {
@@ -155,7 +155,7 @@ func main() {
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SeccompManager", helpers.Error(err))
 		}
-		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(k8sClient, seccompManager)
+		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(storageClient.StorageClient, seccompManager)
 		dWatcher.AddAdaptor(seccompWatcher)
 	} else {
 		seccompManager = seccompmanager.NewSeccompManagerMock()
@@ -220,10 +220,10 @@ func main() {
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
-		apc := applicationprofilecache.NewApplicationProfileCache(nodeName, k8sClient)
+		apc := applicationprofilecache.NewApplicationProfileCache(nodeName, storageClient.StorageClient, cfg.MaxDelaySeconds)
 		dWatcher.AddAdaptor(apc)
 
-		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(nodeName, k8sClient)
+		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(nodeName, storageClient.StorageClient, cfg.MaxDelaySeconds)
 		dWatcher.AddAdaptor(nnc)
 
 		dc := dnscache.NewDnsCache(dnsResolver)
@@ -269,7 +269,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime, nil)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

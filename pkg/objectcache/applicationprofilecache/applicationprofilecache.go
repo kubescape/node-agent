@@ -3,6 +3,7 @@ package applicationprofilecache
 import (
 	"context"
 	"fmt"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -11,13 +12,14 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	versioned "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -49,15 +51,17 @@ type ApplicationProfileCacheImpl struct {
 	slugToAppProfile maps.SafeMap[string, *v1beta1.ApplicationProfile] // cache the application profile
 	slugToContainers maps.SafeMap[string, mapset.Set[string]]          // cache the containerIDs that belong to the application profile, this will enable removing from cache AP without pods
 	slugToState      maps.SafeMap[string, applicationProfileState]     // cache the containerID to slug mapping, this will enable a quick lookup of the application profile
-	k8sClient        k8sclient.K8sClientInterface
+	storageClient    versioned.SpdxV1beta1Interface
 	allProfiles      mapset.Set[string] // cache all the application profiles that are ready. this will enable removing from cache AP without pods that are running on the same node
 	nodeName         string
+	maxDelaySeconds  int // maximum delay in seconds before getting the full object from the storage
 }
 
-func NewApplicationProfileCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *ApplicationProfileCacheImpl {
+func NewApplicationProfileCache(nodeName string, storageClient versioned.SpdxV1beta1Interface, maxDelaySeconds int) *ApplicationProfileCacheImpl {
 	return &ApplicationProfileCacheImpl{
 		nodeName:         nodeName,
-		k8sClient:        k8sClient,
+		maxDelaySeconds:  maxDelaySeconds,
+		storageClient:    storageClient,
 		containerToSlug:  maps.SafeMap[string, string]{},
 		slugToContainers: maps.SafeMap[string, mapset.Set[string]]{},
 		allProfiles:      mapset.NewSet[string](),
@@ -102,48 +106,42 @@ func (ap *ApplicationProfileCacheImpl) WatchResources() []watcher.WatchResource 
 
 // ------------------ watcher.Watcher methods -----------------------
 
-func (ap *ApplicationProfileCacheImpl) AddHandler(ctx context.Context, obj *unstructured.Unstructured) {
-	switch obj.GetKind() {
-	case "Pod":
-		ap.addPod(obj)
-	case "ApplicationProfile":
-		ap.addApplicationProfile(ctx, obj)
+func (ap *ApplicationProfileCacheImpl) AddHandler(ctx context.Context, obj runtime.Object) {
+	if pod, ok := obj.(*corev1.Pod); ok {
+		ap.addPod(pod)
+	} else if appProfile, ok := obj.(*v1beta1.ApplicationProfile); ok {
+		ap.addApplicationProfile(ctx, appProfile)
 	}
 }
-func (ap *ApplicationProfileCacheImpl) ModifyHandler(ctx context.Context, obj *unstructured.Unstructured) {
-	switch obj.GetKind() {
-	case "Pod":
-		ap.addPod(obj)
-	case "ApplicationProfile":
-		ap.addApplicationProfile(ctx, obj)
+
+func (ap *ApplicationProfileCacheImpl) ModifyHandler(ctx context.Context, obj runtime.Object) {
+	if pod, ok := obj.(*corev1.Pod); ok {
+		ap.addPod(pod)
+	} else if appProfile, ok := obj.(*v1beta1.ApplicationProfile); ok {
+		ap.addApplicationProfile(ctx, appProfile)
 	}
 }
-func (ap *ApplicationProfileCacheImpl) DeleteHandler(_ context.Context, obj *unstructured.Unstructured) {
-	switch obj.GetKind() {
-	case "Pod":
-		ap.deletePod(obj)
-	case "ApplicationProfile":
-		ap.deleteApplicationProfile(obj)
+
+func (ap *ApplicationProfileCacheImpl) DeleteHandler(_ context.Context, obj runtime.Object) {
+	if pod, ok := obj.(*corev1.Pod); ok {
+		ap.deletePod(pod)
+	} else if appProfile, ok := obj.(*v1beta1.ApplicationProfile); ok {
+		ap.deleteApplicationProfile(appProfile)
 	}
 }
 
 // ------------------ watch pod methods -----------------------
 
-func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
+func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
+	pod := obj.(*corev1.Pod)
 
-	slug, err := getSlug(podU)
+	slug, err := getSlug(pod)
 	if err != nil {
-		logger.L().Error("ApplicationProfileCacheImpl: failed to get slug", helpers.String("namespace", podU.GetNamespace()), helpers.String("pod", podU.GetName()), helpers.Error(err))
+		logger.L().Error("ApplicationProfileCacheImpl: failed to get slug", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod", pod.GetName()), helpers.Error(err))
 		return
 	}
 
-	uniqueSlug := objectcache.UniqueName(podU.GetNamespace(), slug)
-
-	pod, err := objectcache.UnstructuredToPod(podU)
-	if err != nil {
-		logger.L().Error("ApplicationProfileCacheImpl: failed to unmarshal pod", helpers.String("namespace", podU.GetNamespace()), helpers.String("pod", podU.GetName()), helpers.Error(err))
-		return
-	}
+	uniqueSlug := objectcache.UniqueName(pod.GetNamespace(), slug)
 
 	// in case of modified pod, remove the old containers
 	terminatedContainers := objectcache.ListTerminatedContainers(pod)
@@ -174,7 +172,7 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 		if ap.allProfiles.Contains(uniqueSlug) && !ap.slugToAppProfile.Has(uniqueSlug) {
 
 			// get the application profile
-			appProfile, err := ap.getApplicationProfile(podU.GetNamespace(), slug)
+			appProfile, err := ap.getApplicationProfile(pod.GetNamespace(), slug)
 			if err != nil {
 				logger.L().Error("failed to get application profile", helpers.Error(err))
 				continue
@@ -187,19 +185,15 @@ func (ap *ApplicationProfileCacheImpl) addPod(podU *unstructured.Unstructured) {
 
 }
 
-func (ap *ApplicationProfileCacheImpl) deletePod(obj *unstructured.Unstructured) {
-
-	pod, err := objectcache.UnstructuredToPod(obj)
-	if err != nil {
-		logger.L().Error("ApplicationProfileCacheImpl: failed to unmarshal pod", helpers.String("namespace", obj.GetNamespace()), helpers.String("pod", obj.GetName()), helpers.Error(err))
-		return
-	}
+func (ap *ApplicationProfileCacheImpl) deletePod(obj runtime.Object) {
+	pod := obj.(*corev1.Pod)
 
 	containers := objectcache.ListContainersIDs(pod)
 	for _, container := range containers {
 		ap.removeContainer(container)
 	}
 }
+
 func (ap *ApplicationProfileCacheImpl) removeContainer(containerID string) {
 
 	uniqueSlug := ap.containerToSlug.Get(containerID)
@@ -219,14 +213,10 @@ func (ap *ApplicationProfileCacheImpl) removeContainer(containerID string) {
 }
 
 // ------------------ watch application profile methods -----------------------
-func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, obj *unstructured.Unstructured) {
-	apName := objectcache.UnstructuredUniqueName(obj)
+func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, obj runtime.Object) {
+	appProfile := obj.(*v1beta1.ApplicationProfile)
+	apName := objectcache.MetaUniqueName(appProfile)
 
-	appProfile, err := unstructuredToApplicationProfile(obj)
-	if err != nil {
-		logger.L().Error("failed to unmarshal application profile", helpers.String("name", apName), helpers.Error(err))
-		return
-	}
 	apState := newApplicationProfileState(appProfile)
 	ap.slugToState.Set(apName, apState)
 
@@ -247,22 +237,28 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 	if ap.slugToContainers.Has(apName) {
 		// get the full application profile from the storage
 		// the watch only returns the metadata
-		fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
-		if err != nil {
-			logger.L().Error("failed to get full application profile", helpers.Error(err))
-			return
-		}
-		ap.slugToAppProfile.Set(apName, fullAP)
-		for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
-			ap.containerToSlug.Set(i, apName)
-		}
-
-		logger.L().Debug("added pod to application profile cache", helpers.String("name", apName))
+		// avoid thundering herd problem by adding a random delay
+		time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
+			ap.addFullApplicationProfile(appProfile, apName)
+		})
 	}
 }
 
-func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj *unstructured.Unstructured) {
-	apName := objectcache.UnstructuredUniqueName(obj)
+func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1beta1.ApplicationProfile, apName string) {
+	fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
+	if err != nil {
+		logger.L().Error("failed to get full application profile", helpers.Error(err))
+		return
+	}
+	ap.slugToAppProfile.Set(apName, fullAP)
+	for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
+		ap.containerToSlug.Set(i, apName)
+	}
+	logger.L().Debug("added pod to application profile cache", helpers.String("name", apName))
+}
+
+func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj runtime.Object) {
+	apName := objectcache.MetaUniqueName(obj.(metav1.Object))
 	ap.slugToAppProfile.Delete(apName)
 	ap.slugToState.Delete(apName)
 	ap.allProfiles.Remove(apName)
@@ -271,27 +267,19 @@ func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj *unstructure
 }
 
 func (ap *ApplicationProfileCacheImpl) getApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
-
-	u, err := ap.k8sClient.GetDynamicClient().Resource(groupVersionResource).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	return unstructuredToApplicationProfile(u)
+	return ap.storageClient.ApplicationProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func unstructuredToApplicationProfile(obj *unstructured.Unstructured) (*v1beta1.ApplicationProfile, error) {
+func getSlug(p *corev1.Pod) (string, error) {
+	// need to set APIVersion and Kind before unstructured conversion, preparing for instanceID extraction
+	p.APIVersion = "v1"
+	p.Kind = "Pod"
 
-	ap := &v1beta1.ApplicationProfile{}
-	err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, ap)
+	unstructuredObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&p)
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("failed to convert runtime object to unstructured: %w", err)
 	}
-
-	return ap, nil
-}
-
-func getSlug(p *unstructured.Unstructured) (string, error) {
-	pod := workloadinterface.NewWorkloadObj(p.Object)
+	pod := workloadinterface.NewWorkloadObj(unstructuredObj)
 	if pod == nil {
 		return "", fmt.Errorf("failed to get workload object")
 	}
@@ -312,5 +300,4 @@ func getSlug(p *unstructured.Unstructured) (string, error) {
 		return "", fmt.Errorf("failed to get slug")
 	}
 	return slug, nil
-
 }

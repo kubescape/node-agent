@@ -44,7 +44,7 @@ var kubernetesClients = []string{
 	"containerd-shim-runc",
 }
 
-var R0007KubernetesClientExecutedDescriptor = RuleDescriptor{
+var R0007KubernetesClientExecutedDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0007ID,
 	Name:        R0007Name,
 	Description: "Detecting exececution of kubernetes client",
@@ -186,7 +186,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 	return nil
 }
 
-func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType && eventType != utils.NetworkEventType {
 		return nil
 	}

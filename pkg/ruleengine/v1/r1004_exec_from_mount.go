@@ -18,7 +18,7 @@ const (
 	R1004Name = "Exec from mount"
 )
 
-var R1004ExecFromMountRuleDescriptor = RuleDescriptor{
+var R1004ExecFromMountRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1004ID,
 	Name:        R1004Name,
 	Description: "Detecting exec calls from mounted paths.",
@@ -50,7 +50,7 @@ func (rule *R1004ExecFromMount) ID() string {
 func (rule *R1004ExecFromMount) DeleteRule() {
 }
 
-func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}

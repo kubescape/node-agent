@@ -4,41 +4,15 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/mocks"
 	"github.com/kubescape/node-agent/pkg/watcher"
-
-	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-func TestUnstructuredToPod(t *testing.T) {
-
-	tests := []struct {
-		obj  *unstructured.Unstructured
-		name string
-	}{
-		{
-			name: "nginx pod",
-			obj:  mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx),
-		},
-		{
-			name: "collection pod",
-			obj:  mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p, err := unstructuredToPod(tt.obj)
-			assert.NoError(t, err)
-			assert.Equal(t, tt.obj.GetName(), p.GetName())
-			assert.Equal(t, tt.obj.GetLabels(), p.GetLabels())
-		})
-	}
-}
 func TestPodSpecKey(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -110,14 +84,14 @@ func TestK8sObjectCacheImpl_GetPodSpec(t *testing.T) {
 	}
 	tests := []struct {
 		name string
-		obj  []*unstructured.Unstructured
+		obj  []*corev1.Pod
 		args []args
 	}{
 		{
 			name: "Test with valid namespace and podName",
-			obj: []*unstructured.Unstructured{
-				mocks.GetUnstructured(mocks.TestKindPod, mocks.TestNginx),
-				mocks.GetUnstructured(mocks.TestKindPod, mocks.TestCollection),
+			obj: []*corev1.Pod{
+				mocks.GetRuntime(mocks.TestKindPod, mocks.TestNginx).(*corev1.Pod),
+				mocks.GetRuntime(mocks.TestKindPod, mocks.TestCollection).(*corev1.Pod),
 			},
 			args: []args{
 				{
@@ -154,9 +128,8 @@ func TestK8sObjectCacheImpl_GetPodSpec(t *testing.T) {
 						assert.Nil(t, spec)
 						continue
 					}
-					p, _ := unstructuredToPod(tt.obj[i])
 					assert.NotNil(t, spec)
-					assert.Equal(t, p.Spec, *spec)
+					assert.Equal(t, tt.obj[i].Spec, *spec)
 				}
 			}
 
@@ -164,7 +137,7 @@ func TestK8sObjectCacheImpl_GetPodSpec(t *testing.T) {
 			{
 				for _, obj := range tt.obj {
 					o := obj.DeepCopy()
-					o.Object["spec"] = map[string]interface{}{}
+					o.Spec = corev1.PodSpec{}
 					k.ModifyHandler(context.Background(), o)
 				}
 
@@ -175,11 +148,10 @@ func TestK8sObjectCacheImpl_GetPodSpec(t *testing.T) {
 						continue
 					}
 					o := tt.obj[i].DeepCopy()
-					o.Object["spec"] = map[string]interface{}{}
+					o.Spec = corev1.PodSpec{}
 
-					p, _ := unstructuredToPod(o)
 					assert.NotNil(t, spec)
-					assert.Equal(t, p.Spec, *spec)
+					assert.Equal(t, o.Spec, *spec)
 				}
 			}
 
@@ -198,6 +170,7 @@ func TestK8sObjectCacheImpl_GetPodSpec(t *testing.T) {
 		})
 	}
 }
+
 func TestK8sObjectCacheImpl_GetApiServerIpAddress(t *testing.T) {
 	k := &K8sObjectCacheImpl{
 		apiServerIpAddress: "127.0.0.1",
