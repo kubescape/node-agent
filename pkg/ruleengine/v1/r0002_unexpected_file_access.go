@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
@@ -133,7 +134,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 	}
 
 	for _, open := range appProfileOpenList.Opens {
-		if open.Path == openEvent.FullPath {
+		if dynamicpathdetector.CompareDynamic(open.Path, openEvent.FullPath) {
 			found := 0
 			for _, eventOpenFlag := range openEvent.Flags {
 				// Check that event open flag is in the open.Flags
