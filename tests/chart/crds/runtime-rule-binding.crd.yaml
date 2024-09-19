@@ -131,6 +131,7 @@ spec:
                       - Crypto Mining Domain Communication
                       - Crypto Mining Related Port Communication
                       - LD_PRELOAD Hook
+                      - Unexpected Sensitive File Access
                       type: string
                     ruleTags:
                       items:

@@ -730,10 +730,7 @@ func Test_12_CooldownTest(t *testing.T) {
 	assert.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"))
 
 	// process launched from nginx container
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
-
-	// network activity from server container
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
+	_, _, err = wl.ExecIntoPod([]string{"cat", "/etc/hosts"}, "nginx")
 
 	// network activity from nginx container
 	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")
@@ -754,18 +751,19 @@ func Test_12_CooldownTest(t *testing.T) {
 
 	t.Logf("application profile: %v", string(appProfileJson))
 
-	// The cooldown for LD_PRELOAD is:
+	// The cooldown for Unexpected Sensitive File Access is:
 	// cooldown.CooldownConfig{
 	// 	Threshold:        5,
 	// 	AlertWindow:      time.Minute * 1,
-	// 	BaseCooldown:     time.Minute * 5,
-	// 	MaxCooldown:      time.Minute * 10,
+	// 	BaseCooldown:     time.Second * 30,
+	// 	MaxCooldown:      time.Minute * 5,
 	// 	CooldownIncrease: 1.5,
+	// }
 
-	// So we want to exec into the pod and run 6 times a binary with the LD_PRELOAD feature to trigger the cooldown.
+	// So we want to exec into the pod and run cat 6 times on a sensitive file to trigger the cooldown.
 	// We expect to see 5 alerts and the 6th one to be ignored.
 	for i := 0; i < 6; i++ {
-		_, _, err = wl.ExecIntoPod([]string{"LD_PRELOAD=/lib/libc.so", "ls", "-l"}, "nginx")
+		_, _, err = wl.ExecIntoPod([]string{"cat", "/etc/passwd"}, "nginx")
 	}
 
 	// Wait for the alert to be signaled
@@ -776,17 +774,17 @@ func Test_12_CooldownTest(t *testing.T) {
 		t.Errorf("Error getting alerts: %v", err)
 	}
 
-	ldpreloadAlertsCount := 0
+	alertsCount := 0
 	for _, alert := range alerts {
 		ruleName, ruleOk := alert.Labels["rule_name"]
 		if ruleOk {
-			if ruleName == "LD_PRELOAD Hook" {
-				ldpreloadAlertsCount++
+			if ruleName == "Unexpected Sensitive File Access" {
+				alertsCount++
 			}
 		}
 	}
 
-	if ldpreloadAlertsCount != 5 {
-		t.Errorf("Expected 5 alerts to be generated, but got %d alerts", ldpreloadAlertsCount)
+	if alertsCount != 5 {
+		t.Errorf("Expected 5 alerts to be generated, but got %d alerts", alertsCount)
 	}
 }
