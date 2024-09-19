@@ -715,7 +715,7 @@ func sortHTTPEndpoints(endpoints []v1beta1.HTTPEndpoint) {
 	})
 }
 
-func Test_12_Cooldown(t *testing.T) {
+func Test_12_CooldownTest(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
