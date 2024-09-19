@@ -10,40 +10,40 @@ struct {
 
 // Used to manage pre accept connections from client
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct pre_accept_args);
 } pre_accept_args_map SEC(".maps");
 
 // Used to manage active http connections to monitor
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct pre_connect_args);
 } active_connections_args_map SEC(".maps");
 
 // Used to manage active http connections to monitor as server
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct active_connection_info);
 } accepted_sockets_map SEC(".maps");
 
 // Used to store the buffer of packets 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct packet_buffer);
 } buffer_packets SEC(".maps");
 
 // Used to store the buffer of messages of messages type
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct packet_msg);
 } msg_packets SEC(".maps");
@@ -128,7 +128,7 @@ static __always_inline int populate_httpevent(struct httpevent *event)
     return 0;
 }
 
-static __always_inline void enrich_ip_port(struct trace_event_raw_sys_enter *ctx, __u32 sockfd, struct httpevent *event)
+static __always_inline void enrich_ip_port(struct trace_event_raw_sys_exit *ctx, __u32 sockfd, struct httpevent *event)
 {
     __u64 id = bpf_get_current_pid_tgid();
     __u64 unique_connection_id = generate_unique_connection_id(id, sockfd);
@@ -373,6 +373,7 @@ static __always_inline int process_msg(struct trace_event_raw_sys_exit *ctx, cha
         }
     }
     bpf_map_delete_elem(&msg_packets, &id);
+    return 0;
 }
 
 SEC("tracepoint/syscalls/sys_enter_accept")
