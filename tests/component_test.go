@@ -720,7 +720,7 @@ func Test_12_CooldownTest(t *testing.T) {
 	defer tearDownTest(t, start)
 
 	ns := testutils.NewRandomNamespace()
-	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
 	if err != nil {
 		t.Errorf("Error creating workload: %v", err)
 	}
@@ -730,10 +730,7 @@ func Test_12_CooldownTest(t *testing.T) {
 	assert.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"))
 
 	// process launched from nginx container
-	_, _, err = wl.ExecIntoPod([]string{"cat", "/etc/hosts"}, "nginx")
-
-	// network activity from nginx container
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")
+	_, _, err = wl.ExecIntoPod([]string{"cat", "/etc/hosts"}, "")
 
 	err = wl.WaitForApplicationProfileCompletion(80)
 	if err != nil {
@@ -763,7 +760,10 @@ func Test_12_CooldownTest(t *testing.T) {
 	// So we want to exec into the pod and run cat 6 times on a sensitive file to trigger the cooldown.
 	// We expect to see 5 alerts and the 6th one to be ignored.
 	for i := 0; i < 6; i++ {
-		_, _, err = wl.ExecIntoPod([]string{"cat", "/etc/passwd"}, "nginx")
+		_, _, err = wl.ExecIntoPod([]string{"cat", "/etc/passwd"}, "")
+		if err != nil {
+			t.Errorf("Error executing remote command: %v", err)
+		}
 	}
 
 	// Wait for the alert to be signaled
@@ -773,6 +773,8 @@ func Test_12_CooldownTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
+
+	t.Logf("alerts: %v", alerts)
 
 	alertsCount := 0
 	for _, alert := range alerts {
