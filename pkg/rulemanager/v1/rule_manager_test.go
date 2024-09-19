@@ -27,10 +27,10 @@ func TestReportEvent(t *testing.T) {
 	}
 
 	// Create a new rule
-	reportEvent(utils.HardlinkEventType, e)
+	reportEvent(e)
 }
 
-func reportEvent(eventType utils.EventType, event utils.K8sEvent) {
+func reportEvent(event utils.K8sEvent) {
 	k8sEvent := event.(*tracerhardlinktype.Event)
 	if k8sEvent.GetNamespace() == "" || k8sEvent.GetPod() == "" {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from custom event")
