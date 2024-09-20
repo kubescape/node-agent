@@ -6,9 +6,11 @@ import (
 	"net"
 	"slices"
 	"strings"
+	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -126,7 +128,8 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 				PodName:   networkEvent.GetPod(),
 				PodLabels: networkEvent.K8s.PodLabels,
 			},
-			RuleID: rule.ID(),
+			RuleID:            rule.ID(),
+			FailureIdentifier: failureIdentifireMD5(rule.ID(), fmt.Sprintf("%s-%s-%s", networkEvent.GetNamespace(), networkEvent.GetPod(), networkEvent.GetContainer()), endpoint),
 		}
 	}
 
@@ -184,4 +187,14 @@ func isPrivateIP(ip string) bool {
 	}
 
 	return false
+}
+
+func (rule *R0011UnexpectedEgressNetworkTraffic) CooldownConfig() *cooldown.CooldownConfig {
+	return &cooldown.CooldownConfig{
+		Threshold:        20,
+		AlertWindow:      time.Minute * 1,
+		BaseCooldown:     time.Second * 30,
+		MaxCooldown:      time.Minute * 5,
+		CooldownIncrease: 1.5,
+	}
 }

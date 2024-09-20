@@ -6,9 +6,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -191,7 +193,8 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 				PodName:   sshEvent.GetPod(),
 				PodLabels: sshEvent.K8s.PodLabels,
 			},
-			RuleID: rule.ID(),
+			RuleID:            rule.ID(),
+			FailureIdentifier: fmt.Sprintf("%s-%s-%s--%s-%d", sshEvent.GetNamespace(), sshEvent.GetPod(), sshEvent.GetContainer(), sshEvent.DstIP, sshEvent.DstPort),
 		}
 
 		return &ruleFailure
@@ -203,5 +206,15 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 func (rule *R1003MaliciousSSHConnection) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1003MaliciousSSHConnectionRuleDescriptor.Requirements.RequiredEventTypes(),
+	}
+}
+
+func (rule *R1003MaliciousSSHConnection) CooldownConfig() *cooldown.CooldownConfig {
+	return &cooldown.CooldownConfig{
+		Threshold:        5,
+		AlertWindow:      time.Minute * 1,
+		BaseCooldown:     time.Second * 30,
+		MaxCooldown:      time.Minute * 30,
+		CooldownIncrease: 1.5,
 	}
 }

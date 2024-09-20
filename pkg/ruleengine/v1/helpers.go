@@ -1,6 +1,8 @@
 package ruleengine
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -152,4 +154,10 @@ func interfaceToStringSlice(val interface{}) ([]string, bool) {
 		return sliceOfStrings, true
 	}
 	return nil, false
+}
+
+func failureIdentifireMD5(eventType string, wlid string, identifier string) string {
+	// Calculate the MD5 hash of the event type, whitelist ID and identifier.
+	hash := md5.Sum([]byte(fmt.Sprintf("%s-%s-%s", eventType, wlid, identifier)))
+	return hex.EncodeToString(hash[:])
 }

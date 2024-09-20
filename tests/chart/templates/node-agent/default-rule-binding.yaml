@@ -33,3 +33,4 @@ spec:
     - ruleName: "Exec from mount"
     - ruleName: "Crypto Mining Related Port Communication"
     - ruleName: "Crypto Mining Domain Communication"
+    - ruleName: "LD_PRELOAD Hook"

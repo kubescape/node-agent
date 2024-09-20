@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -109,7 +111,8 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event ut
 					PodName:   execEvent.GetPod(),
 					PodLabels: execEvent.K8s.PodLabels,
 				},
-				RuleID: R1004ID,
+				RuleID:            R1004ID,
+				FailureIdentifier: failureIdentifireMD5(rule.ID(), fmt.Sprintf("%s-%s-%s", execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer()), fullPath),
 			}
 
 			return &ruleFailure
@@ -126,5 +129,15 @@ func (rule *R1004ExecFromMount) isPathContained(targetpath, basepath string) boo
 func (rule *R1004ExecFromMount) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1004ExecFromMountRuleDescriptor.Requirements.RequiredEventTypes(),
+	}
+}
+
+func (rule *R1004ExecFromMount) CooldownConfig() *cooldown.CooldownConfig {
+	return &cooldown.CooldownConfig{
+		Threshold:        5,
+		AlertWindow:      time.Minute * 1,
+		BaseCooldown:     time.Second * 30,
+		MaxCooldown:      time.Minute * 5,
+		CooldownIncrease: 1.5,
 	}
 }

@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"github.com/kubescape/node-agent/pkg/cooldown"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -60,6 +61,14 @@ func (rule *RuleMock) GetParameters() map[string]interface{} {
 }
 func (rule *RuleMock) SetParameters(p map[string]interface{}) {
 	rule.RuleParameters = p
+}
+
+func (rule *RuleMock) CooldownConfig() *cooldown.CooldownConfig {
+	return nil
+}
+
+func (rule *RuleMock) UniqueInstanceIdentifier() string {
+	return ""
 }
 
 var _ RuleSpec = (*RuleSpecMock)(nil)
