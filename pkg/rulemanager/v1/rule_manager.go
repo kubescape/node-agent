@@ -359,7 +359,7 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 				rm.exporter.SendRuleAlert(res)
 				rm.metrics.ReportRuleAlert(rule.Name())
 			} else {
-				logger.L().Debug("RuleManager - rule is in cooldown for identifier", helpers.String("identifier", res.GetFailureIdentifier()))
+				logger.L().Info("RuleManager - rule is in cooldown for identifier", helpers.String("identifier", res.GetFailureIdentifier()))
 			}
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())

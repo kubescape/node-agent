@@ -47,15 +47,8 @@ func NewCooldown(config CooldownConfig) *Cooldown {
 
 // ConfigureCooldown sets up or updates the cooldown configuration for a specific alert
 func (cm *CooldownManager) ConfigureCooldown(alertID string, config CooldownConfig) {
-	if cm.cooldowns.Has(alertID) {
-		cooldown := cm.cooldowns.Get(alertID)
-		cooldown.mu.Lock()
-		cooldown.config = config
-		cooldown.currentCooldown = config.BaseCooldown
-		cooldown.mu.Unlock()
-	} else {
-		cm.cooldowns.Set(alertID, NewCooldown(config))
-	}
+	cooldown := NewCooldown(config)
+	cm.cooldowns.Set(alertID, cooldown)
 }
 
 // ShouldAlert determines if an alert should be triggered based on the cooldown mechanism
@@ -85,29 +78,36 @@ func (c *Cooldown) shouldAlert() bool {
 		}
 	}
 
-	// Check if we're still in the cooldown period
+	// If we're below the threshold, always allow the alert
+	if c.alertTimes.Len() < c.config.Threshold {
+		c.alertTimes.PushBack(now)
+		c.lastAlertTime = now
+		return true
+	}
+
+	// If we're at the threshold, allow the alert but increase the cooldown
+	if c.alertTimes.Len() == c.config.Threshold {
+		c.alertTimes.PushBack(now)
+		c.lastAlertTime = now
+		c.currentCooldown = time.Duration(float64(c.config.BaseCooldown) * c.config.CooldownIncrease)
+		if c.currentCooldown > c.config.MaxCooldown {
+			c.currentCooldown = c.config.MaxCooldown
+		}
+		return true
+	}
+
+	// If we've exceeded the threshold, check if we're still in the cooldown period
 	if now.Sub(c.lastAlertTime) < c.currentCooldown {
 		return false
 	}
 
-	// Add current alert time
+	// We're past the cooldown period, allow the alert and increase the cooldown further
 	c.alertTimes.PushBack(now)
-
-	// If we've exceeded the threshold, increase the cooldown
-	if c.alertTimes.Len() > c.config.Threshold {
-		c.currentCooldown = time.Duration(float64(c.currentCooldown) * c.config.CooldownIncrease)
-		if c.currentCooldown > c.config.MaxCooldown {
-			c.currentCooldown = c.config.MaxCooldown
-		}
-	} else if c.alertTimes.Len() <= c.config.Threshold/2 {
-		// If we're below half the threshold, start decreasing the cooldown
-		c.currentCooldown = time.Duration(float64(c.currentCooldown) / c.config.CooldownIncrease)
-		if c.currentCooldown < c.config.BaseCooldown {
-			c.currentCooldown = c.config.BaseCooldown
-		}
-	}
-
 	c.lastAlertTime = now
+	c.currentCooldown = time.Duration(float64(c.currentCooldown) * c.config.CooldownIncrease)
+	if c.currentCooldown > c.config.MaxCooldown {
+		c.currentCooldown = c.config.MaxCooldown
+	}
 	return true
 }
 

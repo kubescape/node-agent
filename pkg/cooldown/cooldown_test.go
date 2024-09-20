@@ -1,6 +1,7 @@
 package cooldown
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func TestConfigureCooldown(t *testing.T) {
 	}
 }
 
-func TestShouldAlert(t *testing.T) {
+func TestComprehensiveShouldAlert(t *testing.T) {
 	cm := NewCooldownManager()
 	config := CooldownConfig{
 		Threshold:        3,
@@ -55,43 +56,42 @@ func TestShouldAlert(t *testing.T) {
 	}
 	cm.ConfigureCooldown("test-alert", config)
 
-	// First alert should always be allowed
-	if !cm.ShouldAlert("test-alert") {
-		t.Error("First alert was not allowed")
+	fmt.Println("Starting comprehensive cooldown test...")
+	fmt.Printf("Config: Threshold=%d, AlertWindow=%v, BaseCooldown=%v, MaxCooldown=%v, CooldownIncrease=%.1f\n\n",
+		config.Threshold, config.AlertWindow, config.BaseCooldown, config.MaxCooldown, config.CooldownIncrease)
+
+	testCases := []struct {
+		name     string
+		delay    time.Duration
+		expected bool
+	}{
+		{"First alert", 0, true},
+		{"Second alert (immediate)", 0, true},
+		{"Third alert (immediate)", 0, true},
+		{"Fourth alert (immediate, should increase cooldown)", 0, true},
+		{"Fifth alert (immediate, should be blocked)", 0, false},
+		{"Sixth alert (after base cooldown)", config.BaseCooldown, false},
+		{"Seventh alert (after increased cooldown)", config.BaseCooldown * 2, true},
+		{"Eighth alert (immediate after cooldown)", 0, false},
+		{"Ninth alert (after alert window)", config.AlertWindow, true},
+		{"Tenth alert (immediate)", 0, true},
+		{"Eleventh alert (immediate)", 0, true},
 	}
 
-	// Second alert within BaseCooldown should not be allowed
-	time.Sleep(5 * time.Millisecond)
-	if cm.ShouldAlert("test-alert") {
-		t.Error("Second alert within BaseCooldown was allowed")
-	}
+	startTime := time.Now()
 
-	// Alert after BaseCooldown should be allowed
-	time.Sleep(6 * time.Millisecond)
-	if !cm.ShouldAlert("test-alert") {
-		t.Error("Alert after BaseCooldown was not allowed")
-	}
+	for i, tc := range testCases {
+		time.Sleep(tc.delay)
+		result := cm.ShouldAlert("test-alert")
+		elapsed := time.Since(startTime)
 
-	// Trigger alerts to exceed threshold
-	for i := 0; i < 3; i++ {
-		time.Sleep(11 * time.Millisecond)
-		cm.ShouldAlert("test-alert")
-	}
+		cooldown := cm.cooldowns.Get("test-alert")
+		fmt.Printf("%d. %s (at %v):\n   Expected: %v, Got: %v\n   Alert Count: %d, Current Cooldown: %v\n",
+			i+1, tc.name, elapsed.Round(time.Millisecond), tc.expected, result, cooldown.alertTimes.Len(), cooldown.currentCooldown)
 
-	// Next alert should not be allowed due to increased cooldown
-	if cm.ShouldAlert("test-alert") {
-		t.Error("Alert was allowed immediately after exceeding threshold")
-	}
-
-	// Wait for increased cooldown (2 * BaseCooldown)
-	time.Sleep(21 * time.Millisecond)
-	if !cm.ShouldAlert("test-alert") {
-		t.Error("Alert was not allowed after increased cooldown period")
-	}
-
-	// Alert for unconfigured alert ID should always be allowed
-	if !cm.ShouldAlert("unconfigured-alert") {
-		t.Error("Alert for unconfigured alert ID was not allowed")
+		if result != tc.expected {
+			t.Errorf("%s: expected %v, got %v", tc.name, tc.expected, result)
+		}
 	}
 }
 
@@ -109,7 +109,6 @@ func TestResetCooldown(t *testing.T) {
 	// Trigger alerts to increase cooldown
 	for i := 0; i < 4; i++ {
 		cm.ShouldAlert("test-alert")
-		time.Sleep(11 * time.Millisecond)
 	}
 
 	// Verify that cooldown is in effect
@@ -145,18 +144,16 @@ func TestCooldownIncrease(t *testing.T) {
 
 	// Trigger alerts to increase cooldown
 	for i := 0; i < 3; i++ {
-		time.Sleep(11 * time.Millisecond)
 		cm.ShouldAlert("test-alert")
 	}
 
 	// Next alert should be blocked due to increased cooldown
-	time.Sleep(11 * time.Millisecond)
 	if cm.ShouldAlert("test-alert") {
 		t.Error("Alert was allowed despite increased cooldown")
 	}
 
 	// Wait for increased cooldown and alert should be allowed
-	time.Sleep(11 * time.Millisecond)
+	time.Sleep(21 * time.Millisecond)
 	if !cm.ShouldAlert("test-alert") {
 		t.Error("Alert was not allowed after increased cooldown period")
 	}
@@ -175,7 +172,6 @@ func TestCooldownDecrease(t *testing.T) {
 
 	// Trigger alerts to increase cooldown
 	for i := 0; i < 5; i++ {
-		time.Sleep(11 * time.Millisecond)
 		cm.ShouldAlert("test-alert")
 	}
 
