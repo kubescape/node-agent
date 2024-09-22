@@ -188,7 +188,8 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 				return fmt.Errorf("watch error: %s", event.Object)
 			}
 			obj := event.Object.(metav1.Object)
-			if wh.skipNamespaceFunc(obj.GetNamespace()) {
+			// we don't want to skip kubescape.io resources (CRDs). @amirmalka @amitschendel
+			if res.Group != "kubescape.io" && wh.skipNamespaceFunc(obj.GetNamespace()) {
 				continue
 			}
 			eventQueue.Enqueue(event)
