@@ -143,6 +143,8 @@ func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts meta
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
 	case "seccompprofiles":
 		return wh.storageClient.SeccompProfiles("").Watch(context.Background(), opts)
+	case "operatorcommands":
+		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
 	default:
 		// Make sure the resource version is not our storage, if so we panic.
 		if res.Group == kubescapeCustomResourceGroup {
@@ -218,6 +220,8 @@ func (wh *WatchHandler) chooseLister(res schema.GroupVersionResource, opts metav
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
 	case "seccompprofiles":
 		return wh.storageClient.SeccompProfiles("").List(context.Background(), opts)
+	case "operatorcommands":
+		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
 	default:
 		// Make sure the resource version is not our storage, if so we panic.
 		if res.Group == kubescapeCustomResourceGroup {
