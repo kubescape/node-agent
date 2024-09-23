@@ -19,8 +19,11 @@
 #define MAX_MSG_COUNT 20
 
 #define MSG_PEEK 0x02
+#define EINPROGRESS -115
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+
 
 struct pre_accept_args {
     uint64_t addr_ptr;  // user_msghdr

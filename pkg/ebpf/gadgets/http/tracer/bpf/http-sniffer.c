@@ -143,7 +143,7 @@ static __always_inline void enrich_ip_port(struct trace_event_raw_sys_exit *ctx,
 static void inline enter_connect(struct trace_event_raw_sys_enter *ctx)
 {
     __u64 id = bpf_get_current_pid_tgid();
-    struct pre_connect_args connect_args;
+    struct pre_connect_args connect_args = {};
     connect_args.sockfd = (int)ctx->args[0]; // socketfd to connect with
     bpf_probe_read_user(&connect_args.addr, sizeof(connect_args.addr), (void *)ctx->args[1]);
     bpf_map_update_elem(&active_connections_args_map, &id, &connect_args, BPF_ANY);
@@ -152,9 +152,9 @@ static void inline enter_connect(struct trace_event_raw_sys_enter *ctx)
 static void inline exit_connect(struct trace_event_raw_sys_exit *ctx)
 {
     __u64 id = bpf_get_current_pid_tgid();
-    struct active_connection_info conn_info;
+    struct active_connection_info conn_info = {};
 
-    if (ctx->ret == 0)
+    if (ctx->ret == 0 || ctx->ret == EINPROGRESS)
     {
         struct pre_connect_args *args = bpf_map_lookup_elem(&active_connections_args_map, &id);
 
@@ -174,7 +174,7 @@ static void inline exit_connect(struct trace_event_raw_sys_exit *ctx)
 static void inline enter_accept(struct trace_event_raw_sys_enter *ctx)
 {
     __u64 id = bpf_get_current_pid_tgid();
-    struct pre_accept_args accept_args;
+    struct pre_accept_args accept_args = {};
     accept_args.addr_ptr = (uint64_t)ctx->args[1];
     bpf_map_update_elem(&pre_accept_args_map, &id, &accept_args, BPF_ANY);
 }
@@ -182,7 +182,7 @@ static void inline enter_accept(struct trace_event_raw_sys_enter *ctx)
 static void inline exit_accept(struct trace_event_raw_sys_exit *ctx)
 {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    struct active_connection_info conn_info;
+    struct active_connection_info conn_info = {};
     if (ctx->ret >= 0)
     {
         __u32 sockfd = (__u32)ctx->ret; // new socket for accepted connection
@@ -207,7 +207,7 @@ static void inline pre_receive_syscalls(struct trace_event_raw_sys_enter *ctx)
     struct active_connection_info *conn_info = bpf_map_lookup_elem(&accepted_sockets_map, &unique_connection_id);
     if (conn_info)
     {
-        struct packet_buffer packet;
+        struct packet_buffer packet = {};
         packet.sockfd = sockfd;
         packet.buf = (__u64)ctx->args[1];
         packet.len = ctx->args[2];
@@ -295,7 +295,7 @@ static __always_inline int pre_process_msg(struct trace_event_raw_sys_enter *ctx
         struct packet_msg write_args = {};
         write_args.fd = sockfd;
 
-        struct user_msghdr msghdr;
+        struct user_msghdr msghdr = {};
         if (bpf_probe_read_user(&msghdr, sizeof(msghdr), (void *)ctx->args[1]) != 0)
         {
             return 0;
@@ -335,7 +335,7 @@ static __always_inline int process_msg(struct trace_event_raw_sys_exit *ctx, cha
     // Loop through iovec structures
     for (__u64 i = 0; i < msg->iovlen && i < 28; i++)
     {
-        struct iovec iov;
+        struct iovec iov = {};
         int ret = bpf_probe_read_user(&iov, sizeof(iov), (void *)(msg->iovec_ptr + i * sizeof(struct iovec)));
         if (ret < 0)
             break;
