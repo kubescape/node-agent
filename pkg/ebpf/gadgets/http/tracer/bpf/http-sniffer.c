@@ -154,7 +154,7 @@ static void inline exit_connect(struct trace_event_raw_sys_exit *ctx)
     __u64 id = bpf_get_current_pid_tgid();
     struct active_connection_info conn_info = {};
 
-    if (ctx->ret == 0)
+    if (ctx->ret == 0 || ctx->ret == EINPROGRESS)
     {
         struct pre_connect_args *args = bpf_map_lookup_elem(&active_connections_args_map, &id);
 
