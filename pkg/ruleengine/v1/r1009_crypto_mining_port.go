@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 	"slices"
+	"strconv"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -96,7 +97,12 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 		if networkEvent.Proto == "TCP" && networkEvent.PktType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName:      rule.Name(),
+					AlertName: rule.Name(),
+					Arguments: map[string]interface{}{
+						"port":  strconv.Itoa(int(networkEvent.Port)),
+						"proto": networkEvent.Proto,
+						"ip":    networkEvent.DstEndpoint.Addr,
+					},
 					InfectedPID:    networkEvent.Pid,
 					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 					Severity:       R1009CryptoMiningRelatedPortRuleDescriptor.Priority,

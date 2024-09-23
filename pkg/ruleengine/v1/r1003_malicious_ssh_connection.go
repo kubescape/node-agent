@@ -169,7 +169,13 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 		rule.requests.Set(sshEvent.SrcIP, sshEvent.DstIP)
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
+				AlertName: rule.Name(),
+				Arguments: map[string]interface{}{
+					"srcIP":   sshEvent.SrcIP,
+					"dstIP":   sshEvent.DstIP,
+					"dstPort": sshEvent.DstPort,
+					"srcPort": sshEvent.SrcPort,
+				},
 				InfectedPID:    sshEvent.Pid,
 				FixSuggestions: "If this is a legitimate action, please add the port as a parameter to the binding of this rule",
 				Severity:       R1003MaliciousSSHConnectionRuleDescriptor.Priority,

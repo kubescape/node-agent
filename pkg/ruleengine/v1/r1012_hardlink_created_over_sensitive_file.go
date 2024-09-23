@@ -98,7 +98,11 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 		if strings.HasPrefix(hardlinkEvent.OldPath, path) {
 			return &GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName:      rule.Name(),
+					AlertName: rule.Name(),
+					Arguments: map[string]interface{}{
+						"oldPath": hardlinkEvent.OldPath,
+						"newPath": hardlinkEvent.NewPath,
+					},
 					InfectedPID:    hardlinkEvent.Pid,
 					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 					Severity:       R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Priority,

@@ -116,6 +116,8 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 			InfectedPID: execEvent.Pid,
 			Arguments: map[string]interface{}{
 				"retval": execEvent.Retval,
+				"exec":   execPath,
+				"args":   strings.Join(execEvent.Args, ","),
 			},
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the exec call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", execPath, execEvent.GetPod(), rule.generatePatchCommand(execEvent, ap)),
 			Severity:       R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
