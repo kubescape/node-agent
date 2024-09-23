@@ -98,7 +98,11 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 		if strings.HasPrefix(symlinkEvent.OldPath, path) {
 			return &GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName:      rule.Name(),
+					AlertName: rule.Name(),
+					Arguments: map[string]interface{}{
+						"oldPath": symlinkEvent.OldPath,
+						"newPath": symlinkEvent.NewPath,
+					},
 					InfectedPID:    symlinkEvent.Pid,
 					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 					Severity:       R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,

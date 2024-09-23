@@ -111,6 +111,7 @@ func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event,
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
+				Arguments:      map[string]interface{}{"envVar": ldHookVar},
 				InfectedPID:    execEvent.Pid,
 				FixSuggestions: fmt.Sprintf("Check the environment variable %s", ldHookVar),
 				Severity:       R1011LdPreloadHookRuleDescriptor.Priority,
@@ -152,7 +153,11 @@ func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *traceropentype.Event)
 	if openEvent.FullPath == LD_PRELOAD_FILE && (openEvent.FlagsRaw&(int32(os.O_WRONLY)|int32(os.O_RDWR))) != 0 {
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
+				AlertName: rule.Name(),
+				Arguments: map[string]interface{}{
+					"path":  openEvent.FullPath,
+					"flags": strings.Join(openEvent.Flags, ","),
+				},
 				InfectedPID:    openEvent.Pid,
 				FixSuggestions: "Check the file /etc/ld.so.preload",
 				Severity:       R1011LdPreloadHookRuleDescriptor.Priority,

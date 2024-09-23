@@ -85,7 +85,11 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName:      rule.Name(),
+			AlertName: rule.Name(),
+			Arguments: map[string]interface{}{
+				"path":  openEvent.FullPath,
+				"flags": strings.Join(openEvent.Flags, ","),
+			},
 			InfectedPID:    openEvent.Pid,
 			FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 			Severity:       R0008ReadEnvironmentVariablesProcFSRuleDescriptor.Priority,
