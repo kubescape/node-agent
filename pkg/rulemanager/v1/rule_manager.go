@@ -7,41 +7,34 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/cenkalti/backoff/v4"
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/dustin/go-humanize"
+	"github.com/goradd/maps"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
-	"github.com/kubescape/node-agent/pkg/processmanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
-	"github.com/kubescape/node-agent/pkg/utils"
-
-	"github.com/armosec/utils-k8s-go/wlid"
-	"github.com/cenkalti/backoff/v4"
-	"github.com/dustin/go-humanize"
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"go.opentelemetry.io/otel"
-	corev1 "k8s.io/api/core/v1"
-
-	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
-
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-
+	"github.com/kubescape/node-agent/pkg/processmanager"
+	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
-
-	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/goradd/maps"
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
-	"github.com/kubescape/k8s-interface/workloadinterface"
-
+	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/utils"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
+	"go.opentelemetry.io/otel"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -181,31 +174,28 @@ func (rm *RuleManager) ensureInstanceID(container *containercollection.Container
 	if watchedContainer.InstanceID != nil {
 		return nil
 	}
-
 	wl, err := rm.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
 	if err != nil {
 		return fmt.Errorf("failed to get workload: %w", err)
 	}
-
 	pod := wl.(*workloadinterface.Workload)
-
-	// find instanceID
+	// fill container type, index and names
+	if watchedContainer.ContainerType == utils.Unknown {
+		if err := watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName); err != nil {
+			return fmt.Errorf("failed to set container info: %w", err)
+		}
+	}
+	// find instanceID - this has to be the last one
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {
 		return fmt.Errorf("failed to generate instanceID: %w", err)
 	}
-
 	watchedContainer.InstanceID = instanceIDs[0]
 	for i := range instanceIDs {
 		if instanceIDs[i].GetContainerName() == container.K8s.ContainerName {
 			watchedContainer.InstanceID = instanceIDs[i]
 		}
 	}
-	// find container type and index
-	if watchedContainer.ContainerType == utils.Unknown {
-		watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName)
-	}
-
 	return nil
 }
 
