@@ -60,7 +60,6 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			logger.L().Info("monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 			ch.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
-			ch.relevancyManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.networkManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.unregisterContainer(notif.Container)
 		})
@@ -86,7 +85,6 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 	containerEventFuncs := []containercollection.FuncNotify{
 		ch.containerCallback,
 		ch.applicationProfileManager.ContainerCallback,
-		ch.relevancyManager.ContainerCallback,
 		ch.networkManager.ContainerCallback,
 		ch.malwareManager.ContainerCallback,
 		ch.ruleManager.ContainerCallback,

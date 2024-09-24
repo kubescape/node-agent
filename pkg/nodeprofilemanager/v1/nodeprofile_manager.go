@@ -11,7 +11,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/nodeprofilemanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/relevancymanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -24,26 +23,24 @@ import (
 )
 
 type NodeProfileManager struct {
-	clusterData      armometadata.ClusterConfig
-	config           config.Config
-	httpClient       *http.Client
-	k8sObjectCache   objectcache.K8sObjectCache
-	nodeName         string
-	relevancyManager relevancymanager.RelevancyManagerClient
-	ruleManager      rulemanager.RuleManagerClient
+	clusterData    armometadata.ClusterConfig
+	config         config.Config
+	httpClient     *http.Client
+	k8sObjectCache objectcache.K8sObjectCache
+	nodeName       string
+	ruleManager    rulemanager.RuleManagerClient
 }
 
-func NewNodeProfileManager(config config.Config, clusterData armometadata.ClusterConfig, nodeName string, k8sObjectCache objectcache.K8sObjectCache, relevancyManager relevancymanager.RelevancyManagerClient, ruleManager rulemanager.RuleManagerClient) *NodeProfileManager {
+func NewNodeProfileManager(config config.Config, clusterData armometadata.ClusterConfig, nodeName string, k8sObjectCache objectcache.K8sObjectCache, ruleManager rulemanager.RuleManagerClient) *NodeProfileManager {
 	return &NodeProfileManager{
 		clusterData: clusterData,
 		config:      config,
 		httpClient: &http.Client{
 			Timeout: time.Duration(config.Exporters.HTTPExporterConfig.TimeoutSeconds) * time.Second,
 		},
-		k8sObjectCache:   k8sObjectCache,
-		nodeName:         nodeName,
-		relevancyManager: relevancyManager,
-		ruleManager:      ruleManager,
+		k8sObjectCache: k8sObjectCache,
+		nodeName:       nodeName,
+		ruleManager:    ruleManager,
 	}
 }
 
@@ -106,7 +103,6 @@ func (n *NodeProfileManager) getProfile() (*armotypes.NodeProfile, error) {
 			EphemeralContainers:        n.getEphemeralContainers(pod.Namespace, pod.Name, pod.Spec.EphemeralContainers, statusesMap),
 			HasFinalApplicationProfile: n.ruleManager.HasFinalApplicationProfile(pod),
 			HasApplicableRuleBindings:  n.ruleManager.HasApplicableRuleBindings(pod.Namespace, pod.Name),
-			HasRelevancyCalculating:    n.relevancyManager.HasRelevancyCalculating(pod),
 			IsKDRMonitored:             n.ruleManager.IsPodMonitored(pod.Namespace, pod.Name),
 		}
 		profile.PodStatuses = append(profile.PodStatuses, podStatus)
@@ -160,7 +156,7 @@ func (n *NodeProfileManager) getEphemeralContainers(namespace, name string, cont
 	return podContainers
 }
 
-// FIXME maybe use the ContainerVisitor from kubectl?
+// TODO rewrite with podutil.VisitContainers()
 func (n *NodeProfileManager) appendPodContainer(namespace string, name string, c v1.Container, statusesMap map[string]v1.ContainerStatus, podContainers []armotypes.PodContainer) []armotypes.PodContainer {
 	k8sContainerID := utils.CreateK8sContainerID(namespace, name, c.Name)
 	status := statusesMap[c.Name]
