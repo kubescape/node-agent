@@ -147,35 +147,6 @@ func (sc Storage) GetApplicationActivity(namespace, name string) (*v1beta1.Appli
 	return aa, err
 }
 
-func (sc Storage) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error {
-	_, err := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (sc Storage) GetFilteredSBOM(name string) (*v1beta1.SBOMSyftFiltered, error) {
-	return sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
-}
-
-func (sc Storage) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
-	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
-}
-
-func (sc Storage) PatchFilteredSBOM(name string, sbom *v1beta1.SBOMSyftFiltered) error {
-
-	bytes, err := json.Marshal(sbom)
-	if err != nil {
-		return err
-	}
-	_, err = sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Patch(context.Background(), name, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (sc Storage) IncrementImageUse(_ string) {
 	// noop
 }
