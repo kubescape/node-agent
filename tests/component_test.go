@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/node-agent/tests/testutils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1client "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -656,7 +657,7 @@ func Test_11_EndpointTest(t *testing.T) {
 	assert.NoError(t, err)
 
 	endpoint1 := v1beta1.HTTPEndpoint{
-		Endpoint:  ":8000/users/<dynamic>",
+		Endpoint:  ":8000/users/" + dynamicpathdetector.DynamicIdentifier,
 		Methods:   []string{"GET"},
 		Internal:  false,
 		Direction: "inbound",
