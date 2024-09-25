@@ -9,20 +9,18 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"unsafe"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 )
 
-func (t *Tracer) ParseHTTP(rawSample []byte) (*tracerhttptype.Event, error) {
-	bpfEvent := (*http_snifferHttpevent)(unsafe.Pointer(&rawSample[0]))
+func (t *Tracer) ParseHTTP(bpfEvent *http_snifferHttpevent) (*tracerhttptype.Event, error) {
 
 	ip := make(net.IP, 4)
 	binary.LittleEndian.PutUint32(ip, bpfEvent.OtherIp)
 
-	httpData, err := GetHttpData(bpfEvent)
+	httpData, err := GetHTTPData(bpfEvent)
 	if err != nil {
 		return nil, err
 	}
@@ -41,25 +39,26 @@ func (t *Tracer) ParseHTTP(rawSample []byte) (*tracerhttptype.Event, error) {
 		OtherIp:       ip.String(),
 		DataType:      tracerhttptype.HTTPDataType(bpfEvent.Type),
 		HttpData:      httpData,
+		Sockfd:        bpfEvent.SockFd,
 	}
 
 	return &event, nil
 }
 
-func GetHttpData(bpfEvent *http_snifferHttpevent) (tracerhttptype.HTTPData, error) {
+func GetHTTPData(bpfEvent *http_snifferHttpevent) (tracerhttptype.HTTPData, error) {
 	switch tracerhttptype.HTTPDataType(bpfEvent.Type) {
 	case tracerhttptype.Request:
-		httpData, err := parseHTTPRequest(FromCString(bpfEvent.Buf[:]))
+		data, err := parseHTTPRequest(FromCString(bpfEvent.Buf[:]))
 		if err != nil {
 			return nil, err
 		}
-		return httpData, nil
+		return data, nil
 	case tracerhttptype.Response:
-		httpData, err := parseHTTPResponse(FromCString(bpfEvent.Buf[:]))
+		data, err := parseHTTPResponse(FromCString(bpfEvent.Buf[:]))
 		if err != nil {
 			return nil, err
 		}
-		return httpData, nil
+		return data, nil
 	default:
 		return nil, fmt.Errorf("unknown event type: %d", bpfEvent.Type)
 	}

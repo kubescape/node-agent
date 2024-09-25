@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"unsafe"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"k8s.io/utils/lru"
@@ -26,7 +27,7 @@ type Config struct {
 type Tracer struct {
 	config        *Config
 	enricher      gadgets.DataEnricherByMntNs
-	eventCallback func(*types.Event)
+	eventCallback func(*types.GroupedHTTP)
 
 	objs http_snifferObjects
 
@@ -36,7 +37,7 @@ type Tracer struct {
 }
 
 func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
-	eventCallback func(*types.Event),
+	eventCallback func(*types.GroupedHTTP),
 ) (*Tracer, error) {
 	t := &Tracer{
 		config:        config,
@@ -117,19 +118,24 @@ func (t *Tracer) run() {
 			t.eventCallback(types.Base(eventtypes.Warn(msg)))
 			continue
 		}
-		event, err := t.ParseHTTP(record.RawSample)
+
+		bpfEvent := (*http_snifferHttpevent)(unsafe.Pointer(&record.RawSample[0]))
+		event, err := t.ParseHTTP(bpfEvent)
 		if err != nil {
 			msg := fmt.Sprintf("Error parsing sample: %s", err)
 			t.eventCallback(types.Base(eventtypes.Err(msg)))
 			continue
 		}
 
-		if t.enricher != nil {
-			t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
-		}
+		if grouped := t.GroupEvents(event, event.HttpData); grouped != nil {
 
-		t.GroupEvents(event)
-		t.eventCallback(event)
+			// We'll only enrich by request properties
+			if t.enricher != nil {
+				t.enricher.EnrichByMntNs(&grouped.CommonData, grouped.MountNsID)
+			}
+
+			t.eventCallback(grouped)
+		}
 	}
 }
 
@@ -150,16 +156,34 @@ func (t *Tracer) SetMountNsMap(mountnsMap *ebpf.Map) {
 }
 
 func (t *Tracer) SetEventHandler(handler any) {
-	nh, ok := handler.(func(ev *types.Event))
+	nh, ok := handler.(func(ev *types.GroupedHTTP))
 	if !ok {
 		panic("event handler invalid")
 	}
 	t.eventCallback = nh
 }
 
-func (t Tracer) GroupEvents(event *types.Event) {
-	if event.Type == types.Request {
+func (t *Tracer) GroupEvents(event *types.Event, httpData types.HTTPData) *types.GroupedHTTP {
+
+	if event.DataType == types.Request {
+		grouped := types.GroupedHTTP{
+			Request:  httpData.(*types.HTTPRequest),
+			Response: nil,
+		}
+		grouped.MountNsID = event.MountNsID
+		grouped.Event = event.Event
+		t.eventsMap.Add(event.GetUniqueIdentifier(), &grouped) // check
+
+	} else if event.DataType == types.Response {
+		if exists, ok := t.eventsMap.Get(event.GetUniqueIdentifier()); ok {
+			grouped := exists.(*types.GroupedHTTP)
+			grouped.Response = httpData.(*types.HTTPResponse)
+			t.eventsMap.Remove(event.GetUniqueIdentifier())
+			return grouped
+		}
+
 	}
+	return nil
 
 }
 

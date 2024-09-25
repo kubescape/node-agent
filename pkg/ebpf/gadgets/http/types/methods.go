@@ -19,6 +19,10 @@ func (event *Event) GetPacketDirection() (consts.NetworkDirection, error) {
 	}
 }
 
+func (event *Event) GetUniqueIdentifier() string {
+	return string(event.Pid) + string(event.Sockfd)
+}
+
 func IsInternal(ip string) bool {
 	ipAddress := net.ParseIP(ip)
 	return ipAddress.IsPrivate()
@@ -29,8 +33,8 @@ func GetColumns() *columns.Columns[Event] {
 	return httpColumns
 }
 
-func Base(ev eventtypes.Event) *Event {
-	return &Event{
+func Base(ev eventtypes.Event) *GroupedHTTP {
+	return &GroupedHTTP{
 		Event: ev,
 	}
 }

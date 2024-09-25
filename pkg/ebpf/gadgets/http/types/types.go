@@ -52,6 +52,8 @@ type HTTPResponse struct {
 }
 
 type GroupedHTTP struct {
+	eventtypes.Event
+	eventtypes.WithMountNsID
 	Request  *HTTPRequest
 	Response *HTTPResponse
 }
@@ -67,5 +69,6 @@ type Event struct {
 	OtherIp   string   `json:"other_ip,omitempty" column:"other_ip,template:other_ip"`
 	Syscall   string   `json:"syscall,omitempty" column:"syscall,template:syscall"`
 	HttpData  HTTPData `json:"headers,omitempty" column:"headers,template:headers"`
+	Sockfd    uint32   `json:"sockfd,omitempty" column:"sockfd,template:sockfd"`
 	DataType  HTTPDataType
 }
