@@ -9,18 +9,14 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
 
-func (event *Event) GetPacketDirection() (consts.NetworkDirection, error) {
-	if readSyscalls[event.Syscall] {
+func GetPacketDirection(syscall string) (consts.NetworkDirection, error) {
+	if readSyscalls[syscall] {
 		return consts.Inbound, nil
-	} else if writeSyscalls[event.Syscall] {
+	} else if writeSyscalls[syscall] {
 		return consts.Outbound, nil
 	} else {
-		return "", fmt.Errorf("unknown syscall %s", event.Syscall)
+		return "", fmt.Errorf("unknown syscall %s", syscall)
 	}
-}
-
-func (event *Event) GetUniqueIdentifier() string {
-	return string(event.Pid) + string(event.Sockfd)
 }
 
 func IsInternal(ip string) bool {
@@ -33,8 +29,8 @@ func GetColumns() *columns.Columns[Event] {
 	return httpColumns
 }
 
-func Base(ev eventtypes.Event) *GroupedHTTP {
-	return &GroupedHTTP{
+func Base(ev eventtypes.Event) *Event {
+	return &Event{
 		Event: ev,
 	}
 }

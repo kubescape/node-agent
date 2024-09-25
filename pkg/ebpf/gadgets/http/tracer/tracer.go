@@ -27,7 +27,7 @@ type Config struct {
 type Tracer struct {
 	config        *Config
 	enricher      gadgets.DataEnricherByMntNs
-	eventCallback func(*types.GroupedHTTP)
+	eventCallback func(*types.Event)
 
 	objs http_snifferObjects
 
@@ -37,7 +37,7 @@ type Tracer struct {
 }
 
 func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
-	eventCallback func(*types.GroupedHTTP),
+	eventCallback func(*types.Event),
 ) (*Tracer, error) {
 	t := &Tracer{
 		config:        config,
@@ -120,14 +120,8 @@ func (t *Tracer) run() {
 		}
 
 		bpfEvent := (*http_snifferHttpevent)(unsafe.Pointer(&record.RawSample[0]))
-		event, err := t.ParseHTTP(bpfEvent)
-		if err != nil {
-			msg := fmt.Sprintf("Error parsing sample: %s", err)
-			t.eventCallback(types.Base(eventtypes.Err(msg)))
-			continue
-		}
 
-		if grouped := t.GroupEvents(event, event.HttpData); grouped != nil {
+		if grouped := t.GroupEvents(bpfEvent); grouped != nil {
 
 			// We'll only enrich by request properties
 			if t.enricher != nil {
@@ -156,35 +150,45 @@ func (t *Tracer) SetMountNsMap(mountnsMap *ebpf.Map) {
 }
 
 func (t *Tracer) SetEventHandler(handler any) {
-	nh, ok := handler.(func(ev *types.GroupedHTTP))
+	nh, ok := handler.(func(ev *types.Event))
 	if !ok {
 		panic("event handler invalid")
 	}
 	t.eventCallback = nh
 }
 
-func (t *Tracer) GroupEvents(event *types.Event, httpData types.HTTPData) *types.GroupedHTTP {
+func (t *Tracer) GroupEvents(bpfEvent *http_snifferHttpevent) *types.Event {
+	eventType := types.HTTPDataType(bpfEvent.Type)
 
-	if event.DataType == types.Request {
-		grouped := types.GroupedHTTP{
-			Request:  httpData.(*types.HTTPRequest),
-			Response: nil,
+	if eventType == types.Request {
+
+		event, err := CreateEventFromRequest(bpfEvent)
+		if err != nil {
+			msg := fmt.Sprintf("Error parsing request: %s", err)
+			t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			return nil
 		}
-		grouped.MountNsID = event.MountNsID
-		grouped.Event = event.Event
-		t.eventsMap.Add(event.GetUniqueIdentifier(), &grouped) // check
+		t.eventsMap.Add(GetUniqueIdentifier(bpfEvent), event)
 
-	} else if event.DataType == types.Response {
-		if exists, ok := t.eventsMap.Get(event.GetUniqueIdentifier()); ok {
-			grouped := exists.(*types.GroupedHTTP)
-			grouped.Response = httpData.(*types.HTTPResponse)
-			t.eventsMap.Remove(event.GetUniqueIdentifier())
+	} else if eventType == types.Response {
+
+		if exists, ok := t.eventsMap.Get(GetUniqueIdentifier(bpfEvent)); ok {
+			grouped := exists.(*types.Event)
+			response, err := ParseHTTPResponse(FromCString(bpfEvent.Buf[:]), grouped.Request)
+			if err != nil {
+				msg := fmt.Sprintf("Error parsing response: %s", err)
+				t.eventCallback(types.Base(eventtypes.Warn(msg)))
+				return nil
+			}
+
+			grouped.Response = response
+			t.eventsMap.Remove(GetUniqueIdentifier(bpfEvent))
 			return grouped
 		}
 
 	}
-	return nil
 
+	return nil
 }
 
 type GadgetDesc struct{}
@@ -194,4 +198,7 @@ func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
 		config: &Config{},
 	}
 	return tracer, nil
+}
+func GetUniqueIdentifier(event *http_snifferHttpevent) string {
+	return string(event.Pid) + string(event.SockFd)
 }

@@ -15,16 +15,8 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func GetNewEndpoint(request *tracerhttptype.HTTPRequest, event *tracerhttptype.Event, url string) (*v1beta1.HTTPEndpoint, error) {
-	internal := tracerhttptype.IsInternal(event.OtherIp)
-
-	direction, err := event.GetPacketDirection()
-	if err != nil {
-		logger.L().Debug("failed to get packet direction", helpers.Error(err))
-		return nil, err
-	}
-
-	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
+func GetNewEndpoint(event *tracerhttptype.Event, identifier string) (*v1beta1.HTTPEndpoint, error) {
+	headers := tracerhttphelper.ExtractConsistentHeaders(event.Request.Header)
 	rawJSON, err := json.Marshal(headers)
 	if err != nil {
 		logger.L().Error("Error marshaling JSON:", helpers.Error(err))
@@ -32,16 +24,16 @@ func GetNewEndpoint(request *tracerhttptype.HTTPRequest, event *tracerhttptype.E
 	}
 
 	return &v1beta1.HTTPEndpoint{
-		Endpoint:  url,
-		Methods:   []string{request.Method},
-		Internal:  internal,
-		Direction: direction,
+		Endpoint:  identifier,
+		Methods:   []string{event.Request.Method},
+		Internal:  event.Internal,
+		Direction: event.Direction,
 		Headers:   rawJSON}, nil
 }
 
-func (am *ApplicationProfileManager) GetEndpointIdentifier(request *tracerhttptype.HTTPRequest) (string, error) {
-	identifier := request.URL
-	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
+func (am *ApplicationProfileManager) GetEndpointIdentifier(request *tracerhttptype.Event) (string, error) {
+	identifier := request.Request.URL.String()
+	headers := tracerhttphelper.ExtractConsistentHeaders(request.Request.Header)
 	if host, ok := headers["Host"]; ok {
 		host := host[0]
 		_, port, err := net.SplitHostPort(host)
