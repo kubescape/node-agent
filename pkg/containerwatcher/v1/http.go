@@ -21,7 +21,7 @@ func (ch *IGContainerWatcher) httpEventCallback(event *tracerhttptype.Event) {
 		return
 	}
 
-	if event.Response.StatusCode != 404 {
+	if event.Response == nil || event.Response.StatusCode == 404 {
 		return
 	}
 

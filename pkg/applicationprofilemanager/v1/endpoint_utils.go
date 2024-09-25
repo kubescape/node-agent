@@ -17,6 +17,7 @@ import (
 
 func GetNewEndpoint(event *tracerhttptype.Event, identifier string) (*v1beta1.HTTPEndpoint, error) {
 	headers := tracerhttphelper.ExtractConsistentHeaders(event.Request.Header)
+	headers["Host"] = []string{event.Request.Host}
 	rawJSON, err := json.Marshal(headers)
 	if err != nil {
 		logger.L().Error("Error marshaling JSON:", helpers.Error(err))
@@ -33,9 +34,7 @@ func GetNewEndpoint(event *tracerhttptype.Event, identifier string) (*v1beta1.HT
 
 func (am *ApplicationProfileManager) GetEndpointIdentifier(request *tracerhttptype.Event) (string, error) {
 	identifier := request.Request.URL.String()
-	headers := tracerhttphelper.ExtractConsistentHeaders(request.Request.Header)
-	if host, ok := headers["Host"]; ok {
-		host := host[0]
+	if host := request.Request.Host; host != "" {
 		_, port, err := net.SplitHostPort(host)
 		if err != nil {
 			port = "80"

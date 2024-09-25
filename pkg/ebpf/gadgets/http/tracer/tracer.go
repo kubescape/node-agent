@@ -127,7 +127,6 @@ func (t *Tracer) run() {
 			if t.enricher != nil {
 				t.enricher.EnrichByMntNs(&grouped.CommonData, grouped.MountNsID)
 			}
-
 			t.eventCallback(grouped)
 		}
 	}
