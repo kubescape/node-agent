@@ -1,13 +1,18 @@
 package types
 
 import (
-	"fmt"
-	"net"
 	"net/http"
 
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/columns"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
+)
+
+const MaxGroupedEventSize int = 10000
+
+type HTTPDataType int
+
+const (
+	Request  HTTPDataType = 2
+	Response HTTPDataType = 3
 )
 
 var ConsistentHeaders = []string{
@@ -35,16 +40,22 @@ var readSyscalls = map[string]bool{
 type HTTPData interface {
 }
 
-type HTTPRequestData struct {
+type HTTPRequest struct {
 	Method  string
 	URL     string
 	Headers http.Header
 }
-type HTTPResponseData struct {
+type HTTPResponse struct {
 	StatusCode int
 	Status     string
 	Headers    http.Header
 }
+
+type GroupedHTTP struct {
+	Request  *HTTPRequest
+	Response *HTTPResponse
+}
+
 type Event struct {
 	eventtypes.Event
 	eventtypes.WithMountNsID
@@ -56,31 +67,5 @@ type Event struct {
 	OtherIp   string   `json:"other_ip,omitempty" column:"other_ip,template:other_ip"`
 	Syscall   string   `json:"syscall,omitempty" column:"syscall,template:syscall"`
 	HttpData  HTTPData `json:"headers,omitempty" column:"headers,template:headers"`
-}
-
-func GetPacketDirection(event *Event) (consts.NetworkDirection, error) {
-	if readSyscalls[event.Syscall] {
-		return consts.Inbound, nil
-	} else if writeSyscalls[event.Syscall] {
-		return consts.Outbound, nil
-	} else {
-		return "", fmt.Errorf("unknown syscall %s", event.Syscall)
-	}
-}
-
-func IsInternal(ip string) bool {
-	ipAddress := net.ParseIP(ip)
-	return ipAddress.IsPrivate()
-}
-
-func GetColumns() *columns.Columns[Event] {
-	httpColumns := columns.MustCreateColumns[Event]()
-
-	return httpColumns
-}
-
-func Base(ev eventtypes.Event) *Event {
-	return &Event{
-		Event: ev,
-	}
+	DataType  HTTPDataType
 }

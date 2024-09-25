@@ -700,7 +700,7 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
-	req, ok := event.HttpData.(tracerhttptype.HTTPRequestData)
+	req, ok := event.HttpData.(tracerhttptype.HTTPRequest)
 	if !ok {
 		return
 	}

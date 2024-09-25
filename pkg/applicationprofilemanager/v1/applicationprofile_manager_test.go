@@ -78,7 +78,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	// report endpoint
 
 	testEvent := &tracerhttptype.Event{
-		HttpData: tracerhttptype.HTTPRequestData{Method: "GET", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}}},
+		HttpData: tracerhttptype.HTTPRequest{Method: "GET", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}}},
 		OtherIp:  "127.0.0.1",
 		Syscall:  "recvfrom",
 	}
@@ -86,7 +86,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
 
 	testEvent = &tracerhttptype.Event{
-		HttpData: tracerhttptype.HTTPRequestData{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}},
+		HttpData: tracerhttptype.HTTPRequest{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}},
 		OtherIp:  "127.0.0.1",
 		Syscall:  "recvfrom",
 	}
@@ -94,7 +94,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
 
 	testEvent = &tracerhttptype.Event{
-		HttpData: tracerhttptype.HTTPRequestData{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}},
+		HttpData: tracerhttptype.HTTPRequest{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}},
 		OtherIp:  "127.0.0.1",
 		Syscall:  "recvfrom",
 	}
@@ -102,7 +102,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
 
 	testEvent = &tracerhttptype.Event{
-		HttpData: tracerhttptype.HTTPRequestData{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost:123"}, "Connection": {"keep-alive"}}},
+		HttpData: tracerhttptype.HTTPRequest{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost:123"}, "Connection": {"keep-alive"}}},
 		OtherIp:  "127.0.0.1",
 		Syscall:  "recvfrom",
 	}

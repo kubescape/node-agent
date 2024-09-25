@@ -6,6 +6,7 @@ import (
 	"os"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"k8s.io/utils/lru"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -17,13 +18,6 @@ import (
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go  -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type active_connection_info -type packet_buffer -type httpevent http_sniffer bpf/http-sniffer.c -- -I./bpf/
-const (
-	EVENT_TYPE_CONNECT = iota
-	EVENT_TYPE_ACCEPT
-	EVENT_TYPE_REQUEST
-	EVENT_TYPE_RESPONSE
-	EVENT_TYPE_CLOSE
-)
 
 type Config struct {
 	MountnsMap *ebpf.Map
@@ -38,6 +32,7 @@ type Tracer struct {
 
 	httplinks []link.Link
 	reader    *perf.Reader
+	eventsMap *lru.Cache
 }
 
 func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
@@ -47,6 +42,7 @@ func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 		config:        config,
 		enricher:      enricher,
 		eventCallback: eventCallback,
+		eventsMap:     lru.New(types.MaxGroupedEventSize),
 	}
 
 	if err := t.install(); err != nil {
@@ -132,6 +128,7 @@ func (t *Tracer) run() {
 			t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
 		}
 
+		t.GroupEvents(event)
 		t.eventCallback(event)
 	}
 }
@@ -158,6 +155,12 @@ func (t *Tracer) SetEventHandler(handler any) {
 		panic("event handler invalid")
 	}
 	t.eventCallback = nh
+}
+
+func (t Tracer) GroupEvents(event *types.Event) {
+	if event.Type == types.Request {
+	}
+
 }
 
 type GadgetDesc struct{}

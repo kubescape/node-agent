@@ -15,10 +15,10 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttptype.Event, url string) (*v1beta1.HTTPEndpoint, error) {
+func GetNewEndpoint(request *tracerhttptype.HTTPRequest, event *tracerhttptype.Event, url string) (*v1beta1.HTTPEndpoint, error) {
 	internal := tracerhttptype.IsInternal(event.OtherIp)
 
-	direction, err := tracerhttptype.GetPacketDirection(event)
+	direction, err := event.GetPacketDirection()
 	if err != nil {
 		logger.L().Debug("failed to get packet direction", helpers.Error(err))
 		return nil, err
@@ -39,7 +39,7 @@ func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttpty
 		Headers:   rawJSON}, nil
 }
 
-func (am *ApplicationProfileManager) GetEndpointIdentifier(request *tracerhttptype.HTTPRequestData) (string, error) {
+func (am *ApplicationProfileManager) GetEndpointIdentifier(request *tracerhttptype.HTTPRequest) (string, error) {
 	identifier := request.URL
 	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
 	if host, ok := headers["Host"]; ok {
