@@ -84,14 +84,15 @@ func TestApplicationProfileManager(t *testing.T) {
 	request := &http.Request{
 		Method: "GET",
 		URL:    parsedURL,
-		Header: map[string][]string{
-			"Host": {"localhost"},
-		},
+		Host:   "localhost",
+
+		Header: map[string][]string{},
 	}
 
 	testEvent := &tracerhttptype.Event{
-		Request:   request,
-		Internal:  false,
+		Request:  request,
+		Internal: false,
+
 		Direction: "inbound",
 	}
 
@@ -99,9 +100,10 @@ func TestApplicationProfileManager(t *testing.T) {
 
 	request = &http.Request{
 		Method: "POST",
-		URL:    parsedURL,
+		Host:   "localhost",
+
+		URL: parsedURL,
 		Header: map[string][]string{
-			"Host":       {"localhost"},
 			"Connection": {"keep-alive"},
 		},
 	}
@@ -117,8 +119,8 @@ func TestApplicationProfileManager(t *testing.T) {
 	request = &http.Request{
 		Method: "POST",
 		URL:    parsedURL,
+		Host:   "localhost",
 		Header: map[string][]string{
-			"Host":       {"localhost"},
 			"Connection": {"keep-alive"},
 		},
 	}
@@ -134,8 +136,8 @@ func TestApplicationProfileManager(t *testing.T) {
 	request = &http.Request{
 		Method: "POST",
 		URL:    parsedURL,
+		Host:   "localhost:123",
 		Header: map[string][]string{
-			"Host":       {"localhost:123"},
 			"Connection": {"keep-alive"},
 		},
 	}
