@@ -84,12 +84,29 @@ func TestApplicationProfileManager(t *testing.T) {
 	request := &http.Request{
 		Method: "GET",
 		URL:    parsedURL,
-		Host:   "localhost",
+		Host:   "localhost:123 GMT",
 
 		Header: map[string][]string{},
 	}
 
 	testEvent := &tracerhttptype.Event{
+		Request:  request,
+		Internal: false,
+
+		Direction: "inbound",
+	}
+
+	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
+
+	request = &http.Request{
+		Method: "GET",
+		URL:    parsedURL,
+		Host:   "localhost",
+
+		Header: map[string][]string{},
+	}
+
+	testEvent = &tracerhttptype.Event{
 		Request:  request,
 		Internal: false,
 

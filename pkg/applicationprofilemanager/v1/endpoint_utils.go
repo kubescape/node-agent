@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -35,6 +37,11 @@ func GetNewEndpoint(event *tracerhttptype.Event, identifier string) (*v1beta1.HT
 func (am *ApplicationProfileManager) GetEndpointIdentifier(request *tracerhttptype.Event) (string, error) {
 	identifier := request.Request.URL.String()
 	if host := request.Request.Host; host != "" {
+
+		if !isValidHost(host) {
+			return "", fmt.Errorf("invalid host: %s", host)
+		}
+
 		_, port, err := net.SplitHostPort(host)
 		if err != nil {
 			port = "80"
@@ -58,4 +65,23 @@ func CalculateHTTPEndpointHash(endpoint *v1beta1.HTTPEndpoint) string {
 	hash.Write(endpoint.Headers)
 
 	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func isValidHost(host string) bool {
+	// Check if the host is empty
+	if host == "" {
+		return false
+	}
+
+	// Check if host contains spaces or invalid characters
+	if strings.ContainsAny(host, " \t\r\n") {
+		return false
+	}
+
+	// Parse the host using http's standard URL parser
+	if _, err := url.ParseRequestURI("http://" + host); err != nil {
+		return false
+	}
+
+	return true
 }
