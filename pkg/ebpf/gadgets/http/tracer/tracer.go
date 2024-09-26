@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"unsafe"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -198,6 +199,7 @@ func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
 	}
 	return tracer, nil
 }
+
 func GetUniqueIdentifier(event *http_snifferHttpevent) string {
-	return string(event.Pid) + string(event.SockFd)
+	return strconv.FormatUint(uint64(event.Pid), 10) + strconv.FormatUint(uint64(event.SockFd), 10)
 }
