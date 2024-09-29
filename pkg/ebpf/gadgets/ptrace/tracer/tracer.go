@@ -13,7 +13,7 @@ import (
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/lib/tracepoint/tracepointlib"
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -strip /usr/bin/llvm-strip-18 -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event ptrace bpf/ptrace_detector.c -- -I./bpf/

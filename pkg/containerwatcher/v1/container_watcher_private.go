@@ -268,6 +268,11 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting ssh tracing", helpers.Error(err))
 			return err
 		}
+
+		if err := ch.startPtraceTracing(); err != nil {
+			logger.L().Error("error starting ptrace tracing", helpers.Error(err))
+			return err
+		}
 	}
 
 	if ch.cfg.EnableHttpDetection {
@@ -345,10 +350,16 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		}
 
 		// Stop ssh tracer
-		if err := ch.stopSshTracing(); err != nil {
-			logger.L().Error("error stopping ssh tracing", helpers.Error(err))
-			errs = errors.Join(errs, err)
+		if err := ch.startSshTracing(); err != nil {
+			logger.L().Error("error starting ssh tracing", helpers.Error(err))
+			return err
 		}
+
+		if err := ch.stopPtraceTracing(); err != nil {
+			logger.L().Error("error starting ptrace tracing", helpers.Error(err))
+			return err
+		}
+
 	}
 
 	if ch.cfg.EnableHttpDetection {

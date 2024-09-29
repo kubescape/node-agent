@@ -14,6 +14,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/lib/tracepoint/tracepointlib"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go  -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type active_connection_info -type packet_buffer -type httpevent http_sniffer bpf/http-sniffer.c -- -I./bpf/
@@ -86,7 +87,7 @@ func (t *Tracer) install() error {
 	tracepoints := GetTracepointDefinitions(&t.objs.http_snifferPrograms)
 	var links []link.Link
 	for _, tp := range tracepoints {
-		l, err := AttachTracepoint(tp)
+		l, err := tracepointlib.AttachTracepoint(tp)
 		if err != nil {
 			logger.L().Error(fmt.Sprintf("Error attaching tracepoint: %s", err))
 		}
