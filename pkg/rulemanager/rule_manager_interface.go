@@ -12,6 +12,7 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
 
 	v1 "k8s.io/api/core/v1"
 )
@@ -28,6 +29,7 @@ type RuleManagerClient interface {
 	ReportSymlinkEvent(event tracersymlinktype.Event)
 	ReportHardlinkEvent(event tracerhardlinktype.Event)
 	ReportSSHEvent(event tracersshtype.Event)
+	ReportPtraceEvent(event tracerptracetype.Event)
 	HasApplicableRuleBindings(namespace, name string) bool
 	HasFinalApplicationProfile(pod *v1.Pod) bool
 	IsContainerMonitored(k8sContainerID string) bool

@@ -13,3 +13,9 @@ type Event struct {
 	Comm    string `json:"comm,omitempty" column:"comm,template:comm"`
 	ExePath string `json:"exe_path,omitempty" column:"exe_path,template:exe_path"`
 }
+
+func Base(ev eventtypes.Event) *Event {
+	return &Event{
+		Event: ev,
+	}
+}

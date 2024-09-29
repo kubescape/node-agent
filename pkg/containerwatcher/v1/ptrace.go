@@ -30,7 +30,7 @@ func (ch *IGContainerWatcher) startPtraceTracing() error {
 		return fmt.Errorf("getting ptraceMountnsmap: %w", err)
 	}
 
-	tracerPtrace, err := tracerptrace.NewTracer(&tracerptrace.Config{MountnsMap: ptraceMountnsmap}, ch.containerCollection, ch.openEventCallback)
+	tracerPtrace, err := tracerptrace.NewTracer(&tracerptrace.Config{MountnsMap: ptraceMountnsmap}, ch.containerCollection, ch.ptraceEventCallback)
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}

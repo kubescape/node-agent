@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kubescape/node-agent/pkg/ebpf/lib/tracepointlib"
+
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
@@ -12,7 +14,6 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/lib/tracepoint/tracepointlib"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
 )
 
@@ -124,7 +125,7 @@ func (t *Tracer) run() {
 
 		bpfEvent := tracepointlib.ConvertToEvent[ptraceEvent](&record)
 		event := t.parseEvent(bpfEvent)
-		t.eventCallback(&event)
+		t.eventCallback(event)
 	}
 }
 

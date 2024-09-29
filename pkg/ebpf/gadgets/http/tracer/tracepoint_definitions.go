@@ -1,6 +1,6 @@
 package tracer
 
-import "github.com/kubescape/node-agent/pkg/ebpf/gadgets/lib/tracepoint/tracepointlib"
+import "github.com/kubescape/node-agent/pkg/ebpf/lib/tracepointlib"
 
 func GetTracepointDefinitions(objs *http_snifferPrograms) []tracepointlib.TracepointInfo {
 	return []tracepointlib.TracepointInfo{
