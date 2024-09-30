@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -94,4 +96,12 @@ func FromCString(in []byte) []byte {
 		}
 	}
 	return in
+}
+
+func GetUniqueIdentifier(event *http_snifferHttpevent) string {
+	return strconv.FormatUint(uint64(event.Pid), 10) + strconv.FormatUint(uint64(event.SockFd), 10)
+}
+
+func ToTime(t eventtypes.Time) time.Time {
+	return time.Unix(int64(t), 0)
 }

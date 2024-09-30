@@ -4,11 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
+	"time"
 	"unsafe"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"k8s.io/utils/lru"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -17,6 +16,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go  -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type active_connection_info -type packet_buffer -type httpevent http_sniffer bpf/http-sniffer.c -- -I./bpf/
@@ -32,19 +32,22 @@ type Tracer struct {
 
 	objs http_snifferObjects
 
-	httplinks []link.Link
-	reader    *perf.Reader
-	eventsMap *lru.Cache
+	httplinks       []link.Link
+	reader          *perf.Reader
+	eventsMap       *utils.CacheWithKeys // Map of unique identifiers to events, thread-safe
+	timeoutDuration time.Duration
+	timeoutTicker   *time.Ticker
 }
 
 func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 	eventCallback func(*types.Event),
 ) (*Tracer, error) {
 	t := &Tracer{
-		config:        config,
-		enricher:      enricher,
-		eventCallback: eventCallback,
-		eventsMap:     lru.New(types.MaxGroupedEventSize),
+		config:          config,
+		enricher:        enricher,
+		eventCallback:   eventCallback,
+		eventsMap:       utils.NewCacheWithKeys(types.MaxGroupedEventSize),
+		timeoutDuration: 1 * time.Minute,
 	}
 
 	if err := t.install(); err != nil {
@@ -52,12 +55,20 @@ func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 		return nil, err
 	}
 
+	t.timeoutTicker = time.NewTicker(30 * time.Second)
+	go t.cleanupOldRequests()
+
 	go t.run()
 
 	return t, nil
 }
 
 func (t *Tracer) Close() {
+	// Stop the timeout ticker
+	if t.timeoutTicker != nil {
+		t.timeoutTicker.Stop()
+	}
+
 	for _, l := range t.httplinks {
 		gadgets.CloseLink(l)
 	}
@@ -67,7 +78,6 @@ func (t *Tracer) Close() {
 	}
 
 	t.objs.Close()
-
 }
 
 func (t *Tracer) install() error {
@@ -141,8 +151,60 @@ func (t *Tracer) Run(gadgetCtx gadgets.GadgetContext) error {
 
 	go t.run()
 	gadgetcontext.WaitForTimeoutOrDone(gadgetCtx)
+	go t.cleanupOldRequests()
 
 	return nil
+}
+
+func (t *Tracer) GroupEvents(bpfEvent *http_snifferHttpevent) *types.Event {
+	eventType := types.HTTPDataType(bpfEvent.Type)
+
+	if eventType == types.Request {
+
+		event, err := CreateEventFromRequest(bpfEvent)
+		if err != nil {
+			msg := fmt.Sprintf("Error parsing request: %s", err)
+			t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			return nil
+		}
+		fmt.Println("Time", ToTime(event.Timestamp))
+		t.eventsMap.Add(GetUniqueIdentifier(bpfEvent), event)
+
+	} else if eventType == types.Response {
+
+		if exists, ok := t.eventsMap.Get(GetUniqueIdentifier(bpfEvent)); ok {
+			grouped := exists.(*types.Event)
+
+			response, err := ParseHTTPResponse(FromCString(bpfEvent.Buf[:]), grouped.Request)
+			if err != nil {
+				msg := fmt.Sprintf("Error parsing response: %s", err)
+				t.eventCallback(types.Base(eventtypes.Warn(msg)))
+				return nil
+			}
+
+			grouped.Response = response
+			t.eventsMap.Remove(GetUniqueIdentifier(bpfEvent))
+			return grouped
+		}
+	}
+
+	return nil
+}
+
+func (t *Tracer) cleanupOldRequests() {
+	fmt.Println("Starting cleanupOldRequests")
+	for range t.timeoutTicker.C {
+		for _, key := range t.eventsMap.Keys() {
+			if exists, ok := t.eventsMap.Get(key); ok {
+				if event, ok := exists.(*types.Event); ok {
+					if time.Since(ToTime(event.Timestamp)) > t.timeoutDuration {
+						t.eventsMap.Remove(key)
+						logger.L().Debug(fmt.Sprintf("Removed expired request: %s", key))
+					}
+				}
+			}
+		}
+	}
 }
 
 func (t *Tracer) SetMountNsMap(mountnsMap *ebpf.Map) {
@@ -157,40 +219,6 @@ func (t *Tracer) SetEventHandler(handler any) {
 	t.eventCallback = nh
 }
 
-func (t *Tracer) GroupEvents(bpfEvent *http_snifferHttpevent) *types.Event {
-	eventType := types.HTTPDataType(bpfEvent.Type)
-
-	if eventType == types.Request {
-
-		event, err := CreateEventFromRequest(bpfEvent)
-		if err != nil {
-			msg := fmt.Sprintf("Error parsing request: %s", err)
-			t.eventCallback(types.Base(eventtypes.Warn(msg)))
-			return nil
-		}
-		t.eventsMap.Add(GetUniqueIdentifier(bpfEvent), event)
-
-	} else if eventType == types.Response {
-
-		if exists, ok := t.eventsMap.Get(GetUniqueIdentifier(bpfEvent)); ok {
-			grouped := exists.(*types.Event)
-			response, err := ParseHTTPResponse(FromCString(bpfEvent.Buf[:]), grouped.Request)
-			if err != nil {
-				msg := fmt.Sprintf("Error parsing response: %s", err)
-				t.eventCallback(types.Base(eventtypes.Warn(msg)))
-				return nil
-			}
-
-			grouped.Response = response
-			t.eventsMap.Remove(GetUniqueIdentifier(bpfEvent))
-			return grouped
-		}
-
-	}
-
-	return nil
-}
-
 type GadgetDesc struct{}
 
 func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
@@ -198,8 +226,4 @@ func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
 		config: &Config{},
 	}
 	return tracer, nil
-}
-
-func GetUniqueIdentifier(event *http_snifferHttpevent) string {
-	return strconv.FormatUint(uint64(event.Pid), 10) + strconv.FormatUint(uint64(event.SockFd), 10)
 }
