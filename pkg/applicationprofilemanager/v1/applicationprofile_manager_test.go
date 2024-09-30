@@ -3,6 +3,8 @@ package applicationprofilemanager
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/url"
 	"sort"
 	"testing"
 	"time"
@@ -77,34 +79,90 @@ func TestApplicationProfileManager(t *testing.T) {
 
 	// report endpoint
 
+	parsedURL, _ := url.Parse("/abc")
+
+	request := &http.Request{
+		Method: "GET",
+		URL:    parsedURL,
+		Host:   "localhost:123 GMT",
+
+		Header: map[string][]string{},
+	}
+
 	testEvent := &tracerhttptype.Event{
-		HttpData: tracerhttptype.HTTPRequestData{Method: "GET", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}}},
-		OtherIp:  "127.0.0.1",
-		Syscall:  "recvfrom",
+		Request:  request,
+		Internal: false,
+
+		Direction: "inbound",
 	}
 
 	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
 
+	request = &http.Request{
+		Method: "GET",
+		URL:    parsedURL,
+		Host:   "localhost",
+
+		Header: map[string][]string{},
+	}
+
 	testEvent = &tracerhttptype.Event{
-		HttpData: tracerhttptype.HTTPRequestData{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}},
-		OtherIp:  "127.0.0.1",
-		Syscall:  "recvfrom",
+		Request:  request,
+		Internal: false,
+
+		Direction: "inbound",
 	}
 
 	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
 
+	request = &http.Request{
+		Method: "POST",
+		Host:   "localhost",
+
+		URL: parsedURL,
+		Header: map[string][]string{
+			"Connection": {"keep-alive"},
+		},
+	}
+
 	testEvent = &tracerhttptype.Event{
-		HttpData: tracerhttptype.HTTPRequestData{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}},
-		OtherIp:  "127.0.0.1",
-		Syscall:  "recvfrom",
+		Request:   request,
+		Internal:  false,
+		Direction: "inbound",
 	}
 
 	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
 
+	request = &http.Request{
+		Method: "POST",
+		URL:    parsedURL,
+		Host:   "localhost",
+		Header: map[string][]string{
+			"Connection": {"keep-alive"},
+		},
+	}
+
 	testEvent = &tracerhttptype.Event{
-		HttpData: tracerhttptype.HTTPRequestData{Method: "POST", URL: "/abc", Headers: map[string][]string{"Host": {"localhost:123"}, "Connection": {"keep-alive"}}},
-		OtherIp:  "127.0.0.1",
-		Syscall:  "recvfrom",
+		Request:   request,
+		Internal:  false,
+		Direction: "inbound",
+	}
+
+	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
+
+	request = &http.Request{
+		Method: "POST",
+		URL:    parsedURL,
+		Host:   "localhost:123",
+		Header: map[string][]string{
+			"Connection": {"keep-alive"},
+		},
+	}
+
+	testEvent = &tracerhttptype.Event{
+		Request:   request,
+		Internal:  false,
+		Direction: "inbound",
 	}
 
 	go am.ReportHTTPEvent("ns/pod/cont", testEvent)

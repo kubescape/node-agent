@@ -82,8 +82,8 @@ static __always_inline int should_discard()
 
 static __always_inline __u64 generate_unique_connection_id(__u64 pid_tgid, __u32 sockfd)
 {
-    __u32 tgid = pid_tgid >> 32; // Correctly extract TGID from upper 32 bits
-    return ((__u64)tgid << 32) | sockfd;
+    __u32 pid = pid_tgid >> 32; 
+    return ((__u64)pid << 32) | sockfd;
 }
 
 static __always_inline void get_namespace_ids(u64 *mnt_ns_id)
@@ -124,6 +124,7 @@ static __always_inline int populate_httpevent(struct httpevent *event)
     u64 uid_gid = bpf_get_current_uid_gid();
     event->uid = uid_gid & 0xFFFFFFFF;
     event->gid = uid_gid >> 32;
+    event->timestamp = bpf_ktime_get_boot_ns();
 
     return 0;
 }

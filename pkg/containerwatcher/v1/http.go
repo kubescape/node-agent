@@ -20,6 +20,11 @@ func (ch *IGContainerWatcher) httpEventCallback(event *tracerhttptype.Event) {
 		logger.L().Ctx(ch.ctx).Warning("http tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
+
+	if event.Response == nil || event.Response.StatusCode == 404 {
+		return
+	}
+
 	ch.httpWorkerChan <- event
 }
 
