@@ -103,5 +103,5 @@ func GetUniqueIdentifier(event *http_snifferHttpevent) string {
 }
 
 func ToTime(t eventtypes.Time) time.Time {
-	return time.Unix(int64(t), 0)
+	return time.Unix(0, int64(t))
 }

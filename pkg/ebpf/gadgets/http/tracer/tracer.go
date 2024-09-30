@@ -171,9 +171,7 @@ func (t *Tracer) GroupEvents(bpfEvent *http_snifferHttpevent) *types.Event {
 			t.eventCallback(types.Base(eventtypes.Warn(msg)))
 			return nil
 		}
-		fmt.Println("Time", ToTime(event.Timestamp))
 		t.eventsMap.Add(GetUniqueIdentifier(bpfEvent), event)
-
 	} else if eventType == types.Response {
 		if exists, ok := t.eventsMap.Get(GetUniqueIdentifier(bpfEvent)); ok {
 			grouped := exists
@@ -195,14 +193,12 @@ func (t *Tracer) GroupEvents(bpfEvent *http_snifferHttpevent) *types.Event {
 }
 
 func (t *Tracer) cleanupOldRequests() {
-	fmt.Println("Starting cleanupOldRequests")
 	for range t.timeoutTicker.C {
 		keys := t.eventsMap.Keys()
 		for _, key := range keys {
 			if event, ok := t.eventsMap.Peek(key); ok {
 				if time.Since(ToTime(event.Timestamp)) > t.timeoutDuration {
 					t.eventsMap.Remove(key)
-					logger.L().Debug(fmt.Sprintf("Removed expired request: %s", key))
 				}
 			}
 		}
