@@ -35,8 +35,8 @@ func (ch *IGContainerWatcher) startPtraceTracing() error {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
 	go func() {
-		for event := range ch.openWorkerChan {
-			_ = ch.openWorkerPool.Invoke(*event)
+		for event := range ch.ptraceWorkerChan {
+			_ = ch.ptraceWorkerPool.Invoke(*event)
 		}
 	}()
 
