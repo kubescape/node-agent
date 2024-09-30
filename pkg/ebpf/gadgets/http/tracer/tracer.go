@@ -122,9 +122,9 @@ func (t *Tracer) run() {
 		record, err := t.reader.Read()
 		if err != nil {
 			if errors.Is(err, perf.ErrClosed) {
-				// nothing to do, we're done
-				continue
+				return
 			}
+
 			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
 			t.eventCallback(types.Base(eventtypes.Err(msg)))
 			continue
