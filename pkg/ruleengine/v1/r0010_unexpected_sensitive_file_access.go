@@ -120,7 +120,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"path":  openEvent.FullPath,
-				"flags": strings.Join(openEvent.Flags, ","),
+				"flags": openEvent.Flags,
 			},
 			InfectedPID:    openEvent.Pid,
 			FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",

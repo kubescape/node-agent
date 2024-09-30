@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -101,7 +100,7 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"dstIP": event.DstEndpoint.Addr,
-				"port":  strconv.Itoa(int(event.Port)),
+				"port":  event.Port,
 				"proto": event.Proto,
 			},
 			InfectedPID:    event.Pid,
@@ -155,7 +154,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 				InfectedPID: event.Pid,
 				Arguments: map[string]interface{}{
 					"exec": event.ExePath,
-					"args": strings.Join(event.Args, ","),
+					"args": event.Args,
 				},
 				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 				Severity:       R0007KubernetesClientExecutedDescriptor.Priority,

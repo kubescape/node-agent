@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"slices"
-	"strconv"
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -101,7 +100,7 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 				InfectedPID: networkEvent.Pid,
 				Arguments: map[string]interface{}{
 					"ip":    networkEvent.DstEndpoint.Addr,
-					"port":  strconv.Itoa(int(networkEvent.Port)),
+					"port":  networkEvent.Port,
 					"proto": networkEvent.Proto,
 				},
 				FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the IP %s to the whitelist in the application profile for the Pod %s.",

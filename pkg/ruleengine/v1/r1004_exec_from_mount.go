@@ -81,7 +81,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event ut
 					InfectedPID: execEvent.Pid,
 					Arguments: map[string]interface{}{
 						"exec": execEvent.ExePath,
-						"args": strings.Join(execEvent.Args, ","),
+						"args": execEvent.Args,
 					},
 					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
 					Severity:       R1004ExecFromMountRuleDescriptor.Priority,
