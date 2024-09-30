@@ -14,5 +14,6 @@ const (
 	HardlinkEventType
 	SSHEventType
 	HTTPEventType
+	PtraceEventType
 	AllEventType
 )

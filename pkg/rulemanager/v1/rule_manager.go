@@ -27,9 +27,11 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -427,6 +429,17 @@ func (rm *RuleManager) ReportHardlinkEvent(event tracerhardlinktype.Event) {
 	// list hardlink rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 	rm.processEvent(utils.HardlinkEventType, &event, rules)
+}
+
+func (rm *RuleManager) ReportPtraceEvent(event tracerptracetype.Event) {
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportPtraceEvent event")
+		return
+	}
+
+	// list ptrace rules
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+	rm.processEvent(utils.PtraceEventType, event, rules)
 }
 
 func (rm *RuleManager) ReportSSHEvent(event tracersshtype.Event) {

@@ -2,6 +2,8 @@ package rulemanager
 
 import (
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
@@ -65,6 +67,14 @@ func (r *RuleManagerMock) ReportHardlinkEvent(_ tracerhardlinktype.Event) {
 }
 
 func (r *RuleManagerMock) ReportSSHEvent(_ tracersshtype.Event) {
+	// noop
+}
+
+func (r *RuleManagerMock) ReportPtraceEvent(_ tracerptracetype.Event) {
+	// noop
+}
+
+func (r *RuleManagerMock) ReportHTTPEvent(_ tracerhttptype.Event) {
 	// noop
 }
 

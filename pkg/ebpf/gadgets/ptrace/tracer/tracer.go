@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kubescape/node-agent/pkg/ebpf/lib/tracepointlib"
+	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -83,16 +83,14 @@ func (t *Tracer) install() error {
 	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
 		return fmt.Errorf("loading ebpf spec: %w", err)
 	}
-
-	tracepoints := tracepointlib.TracepointInfo{"ptrace_enter": t.objs.ptracePrograms.TraceEnterPtrace}
+	
 	var links []link.Link
-	for _, tp := range tracepoints {
-		l, err := tracepointlib.AttachTracepoint(tp)
-		if err != nil {
-			logger.L().Error(fmt.Sprintf("Error attaching tracepoint: %s", err))
-		}
-		links = append(links, l)
+	tp := tracepointlib.TracepointInfo{Syscall: "ptrace_enter", ObjFunc: t.objs.ptracePrograms.TraceEnterPtrace}
+	l, err := tracepointlib.AttachTracepoint(tp)
+	if err != nil {
+		logger.L().Error(fmt.Sprintf("Error attaching tracepoint: %s", err))
 	}
+	links = append(links, l)
 
 	t.ptracelinks = links
 
