@@ -2,7 +2,6 @@ package ruleengine
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -87,10 +86,6 @@ func (rule *R1015MaliciousPtraceUsage) ProcessEvent(eventType utils.EventType, e
 		return nil
 	}
 
-	if isProcessAllowed(ptraceEvent, rule.allowedProcesses) {
-		return nil
-	}
-
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName:      rule.Name(),
@@ -125,13 +120,4 @@ func (rule *R1015MaliciousPtraceUsage) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1015MaliciousPtraceUsageRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
-}
-
-func isProcessAllowed(ptraceEvent *tracerptracetype.Event, allowedProcesses []string) bool {
-	for _, allowed := range allowedProcesses {
-		if strings.EqualFold(ptraceEvent.Comm, allowed) {
-			return true
-		}
-	}
-	return false
 }
