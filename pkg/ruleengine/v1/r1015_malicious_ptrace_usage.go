@@ -77,7 +77,6 @@ func (rule *R1015MaliciousPtraceUsage) DeleteRule() {
 }
 
 func (rule *R1015MaliciousPtraceUsage) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	fmt.Println("ProcessEvent")
 	if eventType != utils.PtraceEventType {
 		return nil
 	}
@@ -86,7 +85,6 @@ func (rule *R1015MaliciousPtraceUsage) ProcessEvent(eventType utils.EventType, e
 	if !ok {
 		return nil
 	}
-	fmt.Println("ProcessEvent", "GenericRuleFailure{")
 
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{

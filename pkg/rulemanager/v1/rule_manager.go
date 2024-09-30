@@ -436,10 +436,9 @@ func (rm *RuleManager) ReportPtraceEvent(event tracerptracetype.Event) {
 		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportPtraceEvent event")
 		return
 	}
-
 	// list ptrace rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	rm.processEvent(utils.PtraceEventType, event, rules)
+	rm.processEvent(utils.PtraceEventType, &event, rules)
 }
 
 func (rm *RuleManager) ReportSSHEvent(event tracersshtype.Event) {

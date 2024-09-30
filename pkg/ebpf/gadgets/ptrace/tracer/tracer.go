@@ -83,9 +83,9 @@ func (t *Tracer) install() error {
 	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
 		return fmt.Errorf("loading ebpf spec: %w", err)
 	}
-	
+
 	var links []link.Link
-	tp := tracepointlib.TracepointInfo{Syscall: "ptrace_enter", ObjFunc: t.objs.ptracePrograms.TraceEnterPtrace}
+	tp := tracepointlib.TracepointInfo{Syscall: "sys_enter_ptrace", ObjFunc: t.objs.ptracePrograms.TraceEnterPtrace}
 	l, err := tracepointlib.AttachTracepoint(tp)
 	if err != nil {
 		logger.L().Error(fmt.Sprintf("Error attaching tracepoint: %s", err))
@@ -108,7 +108,7 @@ func (t *Tracer) run() {
 		if err != nil {
 			if errors.Is(err, perf.ErrClosed) {
 				// nothing to do, we're done
-				continue
+				return
 			}
 			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
 			t.eventCallback(types.Base(eventtypes.Err(msg)))
@@ -152,7 +152,6 @@ func (t *Tracer) SetEventHandler(handler any) {
 }
 
 func (t *Tracer) parseEvent(bpfEvent *ptraceEvent) *types.Event {
-
 	event := types.Event{
 		Event: eventtypes.Event{
 			Type:      eventtypes.NORMAL,

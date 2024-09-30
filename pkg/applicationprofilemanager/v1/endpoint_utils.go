@@ -44,7 +44,6 @@ func (am *ApplicationProfileManager) GetEndpointIdentifier(request *tracerhttpty
 	identifier := request.URL
 	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
 	if host, ok := headers["Host"]; ok {
-		fmt.Println("Host", host)
 		host := host[0]
 		_, port, err := net.SplitHostPort(host)
 		if err != nil {

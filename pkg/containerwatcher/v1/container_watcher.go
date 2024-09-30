@@ -347,14 +347,14 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	ptraceWorkerPool, err := ants.NewPoolWithFunc(ptraceWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerptracetype.Event)
 		if event.K8s.ContainerName == "" {
+			fmt.Printf("event.K8s.ContainerName is empty")
 			return
 		}
-
 		ruleManager.ReportPtraceEvent(event)
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("creating http worker pool: %w", err)
+		return nil, fmt.Errorf("creating ptrace worker pool: %w", err)
 	}
 
 	return &IGContainerWatcher{

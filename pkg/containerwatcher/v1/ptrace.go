@@ -13,9 +13,7 @@ func (ch *IGContainerWatcher) ptraceEventCallback(event *tracerptracetype.Event)
 		return
 	}
 
-	// do not skip dropped events as their processing is done in the worker
-
-	ch.tracerWorkerChan <- event
+	ch.ptraceWorkerChan <- event
 
 }
 
