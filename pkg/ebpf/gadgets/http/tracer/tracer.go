@@ -12,11 +12,11 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
+	lru "github.com/hashicorp/golang-lru/v2"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
-	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go  -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type active_connection_info -type packet_buffer -type httpevent http_sniffer bpf/http-sniffer.c -- -I./bpf/
@@ -34,7 +34,7 @@ type Tracer struct {
 
 	httplinks       []link.Link
 	reader          *perf.Reader
-	eventsMap       *utils.CacheWithKeys // Map of unique identifiers to events, thread-safe
+	eventsMap       *lru.Cache[string, *types.Event] // Use golang-lru cache
 	timeoutDuration time.Duration
 	timeoutTicker   *time.Ticker
 }
@@ -42,11 +42,17 @@ type Tracer struct {
 func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 	eventCallback func(*types.Event),
 ) (*Tracer, error) {
+	// Create a new LRU cache with a specified size
+	cache, err := lru.New[string, *types.Event](types.MaxGroupedEventSize)
+	if err != nil {
+		return nil, fmt.Errorf("creating lru cache: %w", err)
+	}
+
 	t := &Tracer{
 		config:          config,
 		enricher:        enricher,
 		eventCallback:   eventCallback,
-		eventsMap:       utils.NewCacheWithKeys(types.MaxGroupedEventSize),
+		eventsMap:       cache,
 		timeoutDuration: 1 * time.Minute,
 	}
 
@@ -133,7 +139,6 @@ func (t *Tracer) run() {
 		bpfEvent := (*http_snifferHttpevent)(unsafe.Pointer(&record.RawSample[0]))
 
 		if grouped := t.GroupEvents(bpfEvent); grouped != nil {
-
 			// We'll only enrich by request properties
 			if t.enricher != nil {
 				t.enricher.EnrichByMntNs(&grouped.CommonData, grouped.MountNsID)
@@ -160,7 +165,6 @@ func (t *Tracer) GroupEvents(bpfEvent *http_snifferHttpevent) *types.Event {
 	eventType := types.HTTPDataType(bpfEvent.Type)
 
 	if eventType == types.Request {
-
 		event, err := CreateEventFromRequest(bpfEvent)
 		if err != nil {
 			msg := fmt.Sprintf("Error parsing request: %s", err)
@@ -171,9 +175,8 @@ func (t *Tracer) GroupEvents(bpfEvent *http_snifferHttpevent) *types.Event {
 		t.eventsMap.Add(GetUniqueIdentifier(bpfEvent), event)
 
 	} else if eventType == types.Response {
-
 		if exists, ok := t.eventsMap.Get(GetUniqueIdentifier(bpfEvent)); ok {
-			grouped := exists.(*types.Event)
+			grouped := exists
 
 			response, err := ParseHTTPResponse(FromCString(bpfEvent.Buf[:]), grouped.Request)
 			if err != nil {
@@ -195,12 +198,10 @@ func (t *Tracer) cleanupOldRequests() {
 	fmt.Println("Starting cleanupOldRequests")
 	for range t.timeoutTicker.C {
 		for _, key := range t.eventsMap.Keys() {
-			if exists, ok := t.eventsMap.Get(key); ok {
-				if event, ok := exists.(*types.Event); ok {
-					if time.Since(ToTime(event.Timestamp)) > t.timeoutDuration {
-						t.eventsMap.Remove(key)
-						logger.L().Debug(fmt.Sprintf("Removed expired request: %s", key))
-					}
+			if event, ok := t.eventsMap.Peek(key); ok {
+				if time.Since(ToTime(event.Timestamp)) > t.timeoutDuration {
+					t.eventsMap.Remove(key)
+					logger.L().Debug(fmt.Sprintf("Removed expired request: %s", key))
 				}
 			}
 		}
