@@ -82,7 +82,7 @@ static __always_inline int should_discard()
 
 static __always_inline __u64 generate_unique_connection_id(__u64 pid_tgid, __u32 sockfd)
 {
-    __u32 pid = pid_tgid & 0xFFFFFFFF;  // PID is in the lower 32 bits
+    __u32 pid = pid_tgid >> 32; 
     return ((__u64)pid << 32) | sockfd;
 }
 
