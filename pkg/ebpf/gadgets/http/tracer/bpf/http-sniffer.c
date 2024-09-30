@@ -124,6 +124,7 @@ static __always_inline int populate_httpevent(struct httpevent *event)
     u64 uid_gid = bpf_get_current_uid_gid();
     event->uid = uid_gid & 0xFFFFFFFF;
     event->gid = uid_gid >> 32;
+    event->timestamp = bpf_ktime_get_boot_ns();
 
     return 0;
 }

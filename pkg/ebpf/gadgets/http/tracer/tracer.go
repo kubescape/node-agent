@@ -197,7 +197,8 @@ func (t *Tracer) GroupEvents(bpfEvent *http_snifferHttpevent) *types.Event {
 func (t *Tracer) cleanupOldRequests() {
 	fmt.Println("Starting cleanupOldRequests")
 	for range t.timeoutTicker.C {
-		for _, key := range t.eventsMap.Keys() {
+		keys := t.eventsMap.Keys()
+		for _, key := range keys {
 			if event, ok := t.eventsMap.Peek(key); ok {
 				if time.Since(ToTime(event.Timestamp)) > t.timeoutDuration {
 					t.eventsMap.Remove(key)
