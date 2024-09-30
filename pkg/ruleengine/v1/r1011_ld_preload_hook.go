@@ -156,7 +156,7 @@ func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *traceropentype.Event)
 				AlertName: rule.Name(),
 				Arguments: map[string]interface{}{
 					"path":  openEvent.FullPath,
-					"flags": strings.Join(openEvent.Flags, ","),
+					"flags": openEvent.Flags,
 				},
 				InfectedPID:    openEvent.Pid,
 				FixSuggestions: "Check the file /etc/ld.so.preload",

@@ -3,7 +3,6 @@ package ruleengine
 import (
 	"fmt"
 	"slices"
-	"strconv"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -99,7 +98,7 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName: rule.Name(),
 					Arguments: map[string]interface{}{
-						"port":  strconv.Itoa(int(networkEvent.Port)),
+						"port":  networkEvent.Port,
 						"proto": networkEvent.Proto,
 						"ip":    networkEvent.DstEndpoint.Addr,
 					},

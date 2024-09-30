@@ -3,7 +3,6 @@ package ruleengine
 import (
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/goradd/maps"
@@ -104,9 +103,9 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 			InfectedPID: domainEvent.Pid,
 			Arguments: map[string]interface{}{
 				"domain":    domainEvent.DNSName,
-				"addresses": strings.Join(domainEvent.Addresses, ","),
+				"addresses": domainEvent.Addresses,
 				"protocol":  domainEvent.Protocol,
-				"port":      strconv.Itoa(int(domainEvent.DstPort)),
+				"port":      domainEvent.DstPort,
 			},
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the domain %s to the whitelist in the application profile for the Pod %s. You can use the following command: %s",
 				domainEvent.DNSName,
