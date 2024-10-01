@@ -19,5 +19,6 @@ const (
 	HardlinkEventType     EventType = "hardlink"
 	SSHEventType          EventType = "ssh"
 	HTTPEventType         EventType = "http"
+	PtraceEventType       EventType = "ptrace"
 	AllEventType          EventType = "all"
 )

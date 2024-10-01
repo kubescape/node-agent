@@ -19,7 +19,7 @@ const (
 	R1015Name = "Malicious Ptrace Usage"
 )
 
-var R1015MaliciousPtraceUsageRuleDescriptor = RuleDescriptor{
+var R1015MaliciousPtraceUsageRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1015ID,
 	Name:        R1015Name,
 	Description: "Detecting potentially malicious ptrace usage.",
@@ -76,7 +76,7 @@ func (rule *R1015MaliciousPtraceUsage) ID() string {
 func (rule *R1015MaliciousPtraceUsage) DeleteRule() {
 }
 
-func (rule *R1015MaliciousPtraceUsage) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1015MaliciousPtraceUsage) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.PtraceEventType {
 		return nil
 	}

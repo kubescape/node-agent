@@ -386,10 +386,9 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	ptraceWorkerPool, err := ants.NewPoolWithFunc(ptraceWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerptracetype.Event)
 		if event.K8s.ContainerName == "" {
-			fmt.Printf("event.K8s.ContainerName is empty")
 			return
 		}
-		ruleManager.ReportPtraceEvent(event)
+		ruleManager.ReportEvent(utils.PtraceEventType, &event)
 	})
 
 	if err != nil {
