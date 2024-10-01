@@ -10,40 +10,40 @@ struct {
 
 // Used to manage pre accept connections from client
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct pre_accept_args);
 } pre_accept_args_map SEC(".maps");
 
 // Used to manage active http connections to monitor
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct pre_connect_args);
 } active_connections_args_map SEC(".maps");
 
 // Used to manage active http connections to monitor as server
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct active_connection_info);
 } accepted_sockets_map SEC(".maps");
 
 // Used to store the buffer of packets 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct packet_buffer);
 } buffer_packets SEC(".maps");
 
 // Used to store the buffer of messages of messages type
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 4096);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
     __type(key, __u64);
     __type(value, struct packet_msg);
 } msg_packets SEC(".maps");
@@ -82,8 +82,8 @@ static __always_inline int should_discard()
 
 static __always_inline __u64 generate_unique_connection_id(__u64 pid_tgid, __u32 sockfd)
 {
-    __u32 tgid = pid_tgid >> 32; // Correctly extract TGID from upper 32 bits
-    return ((__u64)tgid << 32) | sockfd;
+    __u32 pid = pid_tgid >> 32; 
+    return ((__u64)pid << 32) | sockfd;
 }
 
 static __always_inline void get_namespace_ids(u64 *mnt_ns_id)
@@ -124,11 +124,12 @@ static __always_inline int populate_httpevent(struct httpevent *event)
     u64 uid_gid = bpf_get_current_uid_gid();
     event->uid = uid_gid & 0xFFFFFFFF;
     event->gid = uid_gid >> 32;
+    event->timestamp = bpf_ktime_get_boot_ns();
 
     return 0;
 }
 
-static __always_inline void enrich_ip_port(struct trace_event_raw_sys_enter *ctx, __u32 sockfd, struct httpevent *event)
+static __always_inline void enrich_ip_port(struct trace_event_raw_sys_exit *ctx, __u32 sockfd, struct httpevent *event)
 {
     __u64 id = bpf_get_current_pid_tgid();
     __u64 unique_connection_id = generate_unique_connection_id(id, sockfd);
@@ -143,7 +144,7 @@ static __always_inline void enrich_ip_port(struct trace_event_raw_sys_enter *ctx
 static void inline enter_connect(struct trace_event_raw_sys_enter *ctx)
 {
     __u64 id = bpf_get_current_pid_tgid();
-    struct pre_connect_args connect_args;
+    struct pre_connect_args connect_args = {};
     connect_args.sockfd = (int)ctx->args[0]; // socketfd to connect with
     bpf_probe_read_user(&connect_args.addr, sizeof(connect_args.addr), (void *)ctx->args[1]);
     bpf_map_update_elem(&active_connections_args_map, &id, &connect_args, BPF_ANY);
@@ -152,9 +153,9 @@ static void inline enter_connect(struct trace_event_raw_sys_enter *ctx)
 static void inline exit_connect(struct trace_event_raw_sys_exit *ctx)
 {
     __u64 id = bpf_get_current_pid_tgid();
-    struct active_connection_info conn_info;
+    struct active_connection_info conn_info = {};
 
-    if (ctx->ret == 0)
+    if (ctx->ret == 0 || ctx->ret == EINPROGRESS)
     {
         struct pre_connect_args *args = bpf_map_lookup_elem(&active_connections_args_map, &id);
 
@@ -174,7 +175,7 @@ static void inline exit_connect(struct trace_event_raw_sys_exit *ctx)
 static void inline enter_accept(struct trace_event_raw_sys_enter *ctx)
 {
     __u64 id = bpf_get_current_pid_tgid();
-    struct pre_accept_args accept_args;
+    struct pre_accept_args accept_args = {};
     accept_args.addr_ptr = (uint64_t)ctx->args[1];
     bpf_map_update_elem(&pre_accept_args_map, &id, &accept_args, BPF_ANY);
 }
@@ -182,7 +183,7 @@ static void inline enter_accept(struct trace_event_raw_sys_enter *ctx)
 static void inline exit_accept(struct trace_event_raw_sys_exit *ctx)
 {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    struct active_connection_info conn_info;
+    struct active_connection_info conn_info = {};
     if (ctx->ret >= 0)
     {
         __u32 sockfd = (__u32)ctx->ret; // new socket for accepted connection
@@ -207,7 +208,7 @@ static void inline pre_receive_syscalls(struct trace_event_raw_sys_enter *ctx)
     struct active_connection_info *conn_info = bpf_map_lookup_elem(&accepted_sockets_map, &unique_connection_id);
     if (conn_info)
     {
-        struct packet_buffer packet;
+        struct packet_buffer packet = {};
         packet.sockfd = sockfd;
         packet.buf = (__u64)ctx->args[1];
         packet.len = ctx->args[2];
@@ -295,7 +296,7 @@ static __always_inline int pre_process_msg(struct trace_event_raw_sys_enter *ctx
         struct packet_msg write_args = {};
         write_args.fd = sockfd;
 
-        struct user_msghdr msghdr;
+        struct user_msghdr msghdr = {};
         if (bpf_probe_read_user(&msghdr, sizeof(msghdr), (void *)ctx->args[1]) != 0)
         {
             return 0;
@@ -335,7 +336,7 @@ static __always_inline int process_msg(struct trace_event_raw_sys_exit *ctx, cha
     // Loop through iovec structures
     for (__u64 i = 0; i < msg->iovlen && i < 28; i++)
     {
-        struct iovec iov;
+        struct iovec iov = {};
         int ret = bpf_probe_read_user(&iov, sizeof(iov), (void *)(msg->iovec_ptr + i * sizeof(struct iovec)));
         if (ret < 0)
             break;
@@ -373,6 +374,7 @@ static __always_inline int process_msg(struct trace_event_raw_sys_exit *ctx, cha
         }
     }
     bpf_map_delete_elem(&msg_packets, &id);
+    return 0;
 }
 
 SEC("tracepoint/syscalls/sys_enter_accept")

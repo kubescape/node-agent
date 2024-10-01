@@ -89,6 +89,10 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.ruleManager.ContainerCallback,
 	}
 
+	for receiver := range ch.thirdPartyContainerReceivers.Iter() {
+		containerEventFuncs = append(containerEventFuncs, receiver.ContainerCallback)
+	}
+
 	// Define the different options for the container collection instance
 	opts := []containercollection.ContainerCollectionOption{
 		// Get Notifications from the container collection
@@ -192,7 +196,6 @@ func (ch *IGContainerWatcher) stopContainerCollection() {
 }
 
 func (ch *IGContainerWatcher) startTracers() error {
-
 	if ch.cfg.EnableApplicationProfile {
 		// Start syscall tracer
 		if err := ch.startSystemcallTracing(); err != nil {
@@ -275,14 +278,20 @@ func (ch *IGContainerWatcher) startTracers() error {
 		}
 	}
 
+	// Start third party tracers
+	for tracer := range ch.thirdPartyTracers.Iter() {
+		if err := tracer.Start(); err != nil {
+			logger.L().Error("error starting custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+			return err
+		}
+	}
+
 	if ch.cfg.EnableHttpDetection {
 		logger.L().Debug("starting http tracing")
 		if err := ch.startHttpTracing(); err != nil {
 			logger.L().Error("error starting http tracing", helpers.Error(err))
 			return err
 		}
-	} else {
-		logger.L().Debug("not starting http tracing")
 	}
 
 	return nil
@@ -360,6 +369,13 @@ func (ch *IGContainerWatcher) stopTracers() error {
 			return err
 		}
 
+		// Stop third party tracers
+		for tracer := range ch.thirdPartyTracers.Iter() {
+			if err := tracer.Stop(); err != nil {
+				logger.L().Error("error stopping custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+				errs = errors.Join(errs, err)
+			}
+		}
 	}
 
 	if ch.cfg.EnableHttpDetection {

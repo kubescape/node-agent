@@ -25,6 +25,9 @@ func (r *RuleCreatorMock) CreateRuleByName(name string) RuleEvaluator {
 	return &RuleMock{RuleName: name}
 }
 
+func (r *RuleCreatorMock) RegisterRule(rule RuleDescriptor) {
+}
+
 var _ RuleEvaluator = (*RuleMock)(nil)
 
 type RuleMock struct {
@@ -45,7 +48,7 @@ func (rule *RuleMock) ID() string {
 func (rule *RuleMock) DeleteRule() {
 }
 
-func (rule *RuleMock) ProcessEvent(_ utils.EventType, _ interface{}, _ objectcache.ObjectCache) RuleFailure {
+func (rule *RuleMock) ProcessEvent(_ utils.EventType, _ utils.K8sEvent, _ objectcache.ObjectCache) RuleFailure {
 	return nil
 }
 

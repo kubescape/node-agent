@@ -22,7 +22,7 @@ var CommonlyUsedCryptoMinersPorts = []uint16{
 	45700, // Monero (XMR) - Stratum mining protocol (TCP). (stratum+tcp://xmr.pool.minergate.com)
 }
 
-var R1009CryptoMiningRelatedPortRuleDescriptor = RuleDescriptor{
+var R1009CryptoMiningRelatedPortRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1009ID,
 	Name:        R1009Name,
 	Description: "Detecting Crypto Miners by suspicious port usage.",
@@ -59,7 +59,7 @@ func (rule *R1009CryptoMiningRelatedPort) ID() string {
 func (rule *R1009CryptoMiningRelatedPort) DeleteRule() {
 }
 
-func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType, event interface{}, objectcache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectcache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.NetworkEventType {
 		return nil
 	}
@@ -96,7 +96,12 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 		if networkEvent.Proto == "TCP" && networkEvent.PktType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName:      rule.Name(),
+					AlertName: rule.Name(),
+					Arguments: map[string]interface{}{
+						"port":  networkEvent.Port,
+						"proto": networkEvent.Proto,
+						"ip":    networkEvent.DstEndpoint.Addr,
+					},
 					InfectedPID:    networkEvent.Pid,
 					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 					Severity:       R1009CryptoMiningRelatedPortRuleDescriptor.Priority,

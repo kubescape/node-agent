@@ -15,6 +15,7 @@ data:
         "runtimeDetectionEnabled": {{ eq .Values.capabilities.runtimeDetection "enable" }},
         "networkServiceEnabled": {{ eq .Values.capabilities.networkPolicyService "enable" }},
         "malwareDetectionEnabled": {{ eq .Values.capabilities.malwareDetection "enable" }},
+        "httpDetectionEnabled": {{ eq .Values.capabilities.httpDetection "enable" }},
         "initialDelay": "{{ .Values.nodeAgent.config.learningPeriod }}",
         "updateDataPeriod": "{{ .Values.nodeAgent.config.updatePeriod }}",
         "maxDelaySeconds": "{{ .Values.nodeAgent.config.maxDelaySeconds }}",

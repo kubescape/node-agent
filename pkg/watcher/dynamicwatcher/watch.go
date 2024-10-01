@@ -18,7 +18,6 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	errors2 "k8s.io/apimachinery/pkg/api/errors"
 	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -46,6 +45,7 @@ type WatchHandler struct {
 }
 
 var errWatchClosed = errors.New("watch channel closed")
+var errNotImplemented = errors.New("not implemented")
 
 func NewWatchHandler(k8sClient k8sclient.K8sClientInterface, storageClient spdxv1beta1.SpdxV1beta1Interface, skipNamespaceFunc SkipNamespaceFunc) *WatchHandler {
 	return &WatchHandler{
@@ -143,8 +143,16 @@ func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts meta
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
 	case "seccompprofiles":
 		return wh.storageClient.SeccompProfiles("").Watch(context.Background(), opts)
+	case "operatorcommands":
+		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").Watch(context.Background(), opts)
+	default:
+		// Make sure the resource version is not our storage, if so we panic.
+		if res.Group == kubescapeCustomResourceGroup {
+			return nil, fmt.Errorf("resource must use the storage client %s: %w", res.Resource, errNotImplemented)
+		}
+
+		return wh.k8sClient.GetDynamicClient().Resource(res).Watch(context.Background(), opts)
 	}
-	return nil, errors2.NewNotFound(res.GroupResource(), "not implemented")
 }
 
 func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions, eventQueue *cooldownqueue.CooldownQueue) {
@@ -154,6 +162,8 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 		if err != nil {
 			if k8sErrors.ReasonForError(err) == metav1.StatusReasonNotFound {
 				exitFatal = false
+				return backoff.Permanent(err)
+			} else if errors.Is(err, errNotImplemented) {
 				return backoff.Permanent(err)
 			}
 			return fmt.Errorf("client resource: %w", err)
@@ -178,7 +188,8 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 				return fmt.Errorf("watch error: %s", event.Object)
 			}
 			obj := event.Object.(metav1.Object)
-			if wh.skipNamespaceFunc(obj.GetNamespace()) {
+			// we don't want to skip kubescape.io resources (CRDs). @amirmalka @amitschendel
+			if res.Group != "kubescape.io" && wh.skipNamespaceFunc(obj.GetNamespace()) {
 				continue
 			}
 			eventQueue.Enqueue(event)
@@ -210,8 +221,16 @@ func (wh *WatchHandler) chooseLister(res schema.GroupVersionResource, opts metav
 		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
 	case "seccompprofiles":
 		return wh.storageClient.SeccompProfiles("").List(context.Background(), opts)
+	case "operatorcommands":
+		return wh.k8sClient.GetDynamicClient().Resource(res).Namespace("").List(context.Background(), opts)
+	default:
+		// Make sure the resource version is not our storage, if so we panic.
+		if res.Group == kubescapeCustomResourceGroup {
+			return nil, fmt.Errorf("resource must use the storage client %s: %w", res.Resource, errNotImplemented)
+		}
+
+		return wh.k8sClient.GetDynamicClient().Resource(res).List(context.Background(), opts)
 	}
-	return nil, errors2.NewNotFound(res.GroupResource(), "not implemented")
 }
 
 func (wh *WatchHandler) getExistingStorageObjects(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions) (string, error) {

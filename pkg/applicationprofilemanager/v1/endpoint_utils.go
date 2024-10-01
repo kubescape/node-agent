@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -16,16 +17,9 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttptype.Event, url string) (*v1beta1.HTTPEndpoint, error) {
-	internal := tracerhttptype.IsInternal(event.OtherIp)
-
-	direction, err := tracerhttptype.GetPacketDirection(event)
-	if err != nil {
-		logger.L().Debug("failed to get packet direction", helpers.Error(err))
-		return nil, err
-	}
-
-	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
+func GetNewEndpoint(event *tracerhttptype.Event, identifier string) (*v1beta1.HTTPEndpoint, error) {
+	headers := tracerhttphelper.ExtractConsistentHeaders(event.Request.Header)
+	headers["Host"] = []string{event.Request.Host}
 	rawJSON, err := json.Marshal(headers)
 	if err != nil {
 		logger.L().Error("Error marshaling JSON:", helpers.Error(err))
@@ -33,18 +27,21 @@ func GetNewEndpoint(request *tracerhttptype.HTTPRequestData, event *tracerhttpty
 	}
 
 	return &v1beta1.HTTPEndpoint{
-		Endpoint:  url,
-		Methods:   []string{request.Method},
-		Internal:  internal,
-		Direction: direction,
+		Endpoint:  identifier,
+		Methods:   []string{event.Request.Method},
+		Internal:  event.Internal,
+		Direction: event.Direction,
 		Headers:   rawJSON}, nil
 }
 
-func (am *ApplicationProfileManager) GetEndpointIdentifier(request *tracerhttptype.HTTPRequestData) (string, error) {
-	identifier := request.URL
-	headers := tracerhttphelper.ExtractConsistentHeaders(request.Headers)
-	if host, ok := headers["Host"]; ok {
-		host := host[0]
+func (am *ApplicationProfileManager) GetEndpointIdentifier(request *tracerhttptype.Event) (string, error) {
+	identifier := request.Request.URL.String()
+	if host := request.Request.Host; host != "" {
+
+		if !isValidHost(host) {
+			return "", fmt.Errorf("invalid host: %s", host)
+		}
+
 		_, port, err := net.SplitHostPort(host)
 		if err != nil {
 			port = "80"
@@ -68,4 +65,23 @@ func CalculateHTTPEndpointHash(endpoint *v1beta1.HTTPEndpoint) string {
 	hash.Write(endpoint.Headers)
 
 	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func isValidHost(host string) bool {
+	// Check if the host is empty
+	if host == "" {
+		return false
+	}
+
+	// Check if host contains spaces or invalid characters
+	if strings.ContainsAny(host, " \t\r\n") {
+		return false
+	}
+
+	// Parse the host using http's standard URL parser
+	if _, err := url.ParseRequestURI("http://" + host); err != nil {
+		return false
+	}
+
+	return true
 }

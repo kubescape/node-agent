@@ -17,7 +17,7 @@ const (
 	R1007Name = "XMR Crypto Mining Detection"
 )
 
-var R1007XMRCryptoMiningRuleDescriptor = RuleDescriptor{
+var R1007XMRCryptoMiningRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1007ID,
 	Name:        R1007Name,
 	Description: "Detecting XMR Crypto Miners by randomx algorithm usage.",
@@ -54,7 +54,7 @@ func (rule *R1007XMRCryptoMining) ID() string {
 func (rule *R1007XMRCryptoMining) DeleteRule() {
 }
 
-func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.RandomXEventType {
 		return nil
 	}

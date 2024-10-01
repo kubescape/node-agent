@@ -1,19 +1,9 @@
 package rulemanager
 
 import (
-	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
-	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
-	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
-	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
-	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -34,47 +24,7 @@ func (r *RuleManagerMock) RegisterPeekFunc(_ func(mntns uint64) ([]string, error
 	// noop
 }
 
-func (r *RuleManagerMock) ReportCapability(_ tracercapabilitiestype.Event) {
-	// noop
-}
-
-func (r *RuleManagerMock) ReportFileExec(_ tracerexectype.Event) {
-	// noop
-}
-
-func (r *RuleManagerMock) ReportFileOpen(_ traceropentype.Event) {
-	// noop
-}
-
-func (r *RuleManagerMock) ReportNetworkEvent(_ tracernetworktype.Event) {
-	// noop
-}
-
-func (r *RuleManagerMock) ReportDNSEvent(_ tracerdnstype.Event) {
-	// noop
-}
-
-func (r *RuleManagerMock) ReportRandomxEvent(_ tracerrandomxtype.Event) {
-	// noop
-}
-
-func (r *RuleManagerMock) ReportSymlinkEvent(_ tracersymlinktype.Event) {
-	// noop
-}
-
-func (r *RuleManagerMock) ReportHardlinkEvent(_ tracerhardlinktype.Event) {
-	// noop
-}
-
-func (r *RuleManagerMock) ReportSSHEvent(_ tracersshtype.Event) {
-	// noop
-}
-
-func (r *RuleManagerMock) ReportPtraceEvent(_ tracerptracetype.Event) {
-	// noop
-}
-
-func (r *RuleManagerMock) ReportHTTPEvent(_ tracerhttptype.Event) {
+func (r *RuleManagerMock) ReportEvent(_ utils.EventType, _ utils.K8sEvent) {
 	// noop
 }
 

@@ -20,7 +20,7 @@ const (
 	R0005Name = "Unexpected domain request"
 )
 
-var R0005UnexpectedDomainRequestRuleDescriptor = RuleDescriptor{
+var R0005UnexpectedDomainRequestRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0005ID,
 	Name:        R0005Name,
 	Description: "Detecting unexpected domain requests that are not whitelisted by application profile.",
@@ -61,7 +61,7 @@ func (rule *R0005UnexpectedDomainRequest) generatePatchCommand(event *tracerdnst
 		event.GetContainer(), event.DNSName)
 }
 
-func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.DnsEventType {
 		return nil
 	}
@@ -102,7 +102,10 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 			AlertName:   rule.Name(),
 			InfectedPID: domainEvent.Pid,
 			Arguments: map[string]interface{}{
-				"domain": domainEvent.DNSName,
+				"domain":    domainEvent.DNSName,
+				"addresses": domainEvent.Addresses,
+				"protocol":  domainEvent.Protocol,
+				"port":      domainEvent.DstPort,
 			},
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the domain %s to the whitelist in the application profile for the Pod %s. You can use the following command: %s",
 				domainEvent.DNSName,

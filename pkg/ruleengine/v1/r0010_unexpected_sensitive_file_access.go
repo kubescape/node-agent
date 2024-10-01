@@ -7,6 +7,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
@@ -19,7 +20,7 @@ const (
 	R0010Name = "Unexpected Sensitive File Access"
 )
 
-var R0010UnexpectedSensitiveFileAccessRuleDescriptor = RuleDescriptor{
+var R0010UnexpectedSensitiveFileAccessRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0010ID,
 	Name:        R0010Name,
 	Description: "Detecting access to sensitive files.",
@@ -76,7 +77,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ID() string {
 func (rule *R0010UnexpectedSensitiveFileAccess) DeleteRule() {
 }
 
-func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType {
 		return nil
 	}
@@ -109,14 +110,18 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 	}
 
 	for _, open := range appProfileOpenList.Opens {
-		if open.Path == openEvent.FullPath {
+		if dynamicpathdetector.CompareDynamic(open.Path, openEvent.FullPath) {
 			return nil
 		}
 	}
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName:      rule.Name(),
+			AlertName: rule.Name(),
+			Arguments: map[string]interface{}{
+				"path":  openEvent.FullPath,
+				"flags": openEvent.Flags,
+			},
 			InfectedPID:    openEvent.Pid,
 			FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 			Severity:       R0010UnexpectedSensitiveFileAccessRuleDescriptor.Priority,

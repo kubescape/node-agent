@@ -18,6 +18,6 @@ spec:
       - name: endpoint-traffic
         image: docker.io/python:3.10.0-alpine
         imagePullPolicy: Always
-        command: [ "/bin/sh", "-c", "python3 -m http.server" ]
+        command: [ "/bin/sh", "-c", "mkdir -p users && for i in $(seq 0 104); do touch users/$i; done && python3 -m http.server" ]
         ports:
         - containerPort: 80

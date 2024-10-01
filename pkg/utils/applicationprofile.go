@@ -2,11 +2,9 @@ package utils
 
 import (
 	"fmt"
-
 	"sort"
 
 	mapset "github.com/deckarep/golang-set/v2"
-
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -119,6 +117,7 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 	}
 }
 
+// TODO make generic?
 func GetApplicationProfileContainer(object *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) *v1beta1.ApplicationProfileContainer {
 	if object == nil {
 		return nil

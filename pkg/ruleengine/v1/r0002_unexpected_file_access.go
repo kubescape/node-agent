@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
@@ -22,7 +23,7 @@ const (
 	R0002Name = "Unexpected file access"
 )
 
-var R0002UnexpectedFileAccessRuleDescriptor = RuleDescriptor{
+var R0002UnexpectedFileAccessRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0002ID,
 	Name:        R0002Name,
 	Description: "Detecting file access that are not whitelisted by application profile. File access is defined by the combination of path and flags",
@@ -93,7 +94,7 @@ func (rule *R0002UnexpectedFileAccess) generatePatchCommand(event *traceropentyp
 	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(), event.GetContainer(), event.FullPath, flagList)
 }
 
-func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.OpenEventType {
 		return nil
 	}
@@ -133,7 +134,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 	}
 
 	for _, open := range appProfileOpenList.Opens {
-		if open.Path == openEvent.FullPath {
+		if dynamicpathdetector.CompareDynamic(open.Path, openEvent.FullPath) {
 			found := 0
 			for _, eventOpenFlag := range openEvent.Flags {
 				// Check that event open flag is in the open.Flags

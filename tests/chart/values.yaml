@@ -11,6 +11,7 @@ capabilities:
   networkPolicyService: enable
   runtimeDetection: enable
   malwareDetection: enable
+  httpDetection: enable
 
 configurations:
   persistence: enable
