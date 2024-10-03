@@ -529,8 +529,6 @@ github.com/json-iterator/go v1.1.12/go.mod h1:e30LSqwooZae/UwlEbR2852Gd8hjQvJoHm
 github.com/jstemmer/go-junit-report v0.0.0-20190106144839-af01ea7f8024/go.mod h1:6v2b51hI/fHJwM22ozAgKL4VKDeJcHhJFhtBdhmNjmU=
 github.com/jstemmer/go-junit-report v0.9.1/go.mod h1:Brl9GWCQeLvo8nXZwPNNblvFj/XSXhF0NWZEnDohbsk=
 github.com/julienschmidt/httprouter v1.2.0/go.mod h1:SYymIcj16QtmaHHD7aYtjjsJG7VTCxuUUipMqKk8s4w=
-github.com/kinbiko/jsonassert v1.1.1 h1:DB12divY+YB+cVpHULLuKePSi6+ui4M/shHSzJISkSE=
-github.com/kinbiko/jsonassert v1.1.1/go.mod h1:NO4lzrogohtIdNUNzx8sdzB55M4R4Q1bsrWVdqQ7C+A=
 github.com/kisielk/errcheck v1.5.0/go.mod h1:pFxgyoBC7bSaBwPgfKdkLd5X25qrDl4LWUI2bnpBCr8=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/klauspost/compress v1.17.9 h1:6KIumPrER1LHsvBVuDa0r5xaG0Es51mhhB9BQB2qeMA=
@@ -551,10 +549,10 @@ github.com/kubescape/backend v0.0.20 h1:E3nZGqWW8ELSh/n3ZRitlkmuZq33Lyx/42Lm4gpg
 github.com/kubescape/backend v0.0.20/go.mod h1:FpazfN+c3Ucuvv4jZYCnk99moSBRNMVIxl5aWCZAEBo=
 github.com/kubescape/go-logger v0.0.23 h1:5xh+Nm8eGImhFbtippRKLaFgsvlKE1ufvQhNM2P/570=
 github.com/kubescape/go-logger v0.0.23/go.mod h1:Ayg7g769c7sXVB+P3fkJmbsJpoEmMmaUf9jeo+XuC3U=
-github.com/kubescape/k8s-interface v0.0.170 h1:EtzomWoeeIWDz7QrAEsqUDpLHQwoh2m3tZITfrE/tiE=
-github.com/kubescape/k8s-interface v0.0.170/go.mod h1:VoEoHI4Va08NiGAkYzbITF50aFMT5y4fPHRb4x2LtME=
-github.com/kubescape/storage v0.0.119 h1:7qCSxMRfuCG35H3o832q69hBA06KKHyyLVW76nFy5YA=
-github.com/kubescape/storage v0.0.119/go.mod h1:DAR1CmSDhRRBK26nNU4MrVpRAst5nN7IuPuvcnw9XeI=
+github.com/kubescape/k8s-interface v0.0.176 h1:o8vKztPZtVff06qRK9H9h2M8auD7sQfbY36X0oFG9ws=
+github.com/kubescape/k8s-interface v0.0.176/go.mod h1:1jA1z5uLLyVkGxWjlT9WibUvcE+chK4g9Hrxg+GajP4=
+github.com/kubescape/storage v0.0.127 h1:yMY9I/s1hz0bz2O0wrE9T0Rr9sIXgaMZQ5EsBIh/qdM=
+github.com/kubescape/storage v0.0.127/go.mod h1:Gkd2FkRb2pkSAvd4ezg/IKIGFame3EMTLdX//t8iA7o=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80/go.mod h1:imJHygn/1yfhB7XSJJKlFZKl/J+dCPAknuiaGOshXAs=

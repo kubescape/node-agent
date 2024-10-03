@@ -21,11 +21,10 @@ require (
 	github.com/goradd/maps v0.1.5
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/inspektor-gadget/inspektor-gadget v0.32.1-0.20240910080600-c7396e29cbf6
-	github.com/kinbiko/jsonassert v1.1.1
 	github.com/kubescape/backend v0.0.20
 	github.com/kubescape/go-logger v0.0.23
-	github.com/kubescape/k8s-interface v0.0.170
-	github.com/kubescape/storage v0.0.119
+	github.com/kubescape/k8s-interface v0.0.176
+	github.com/kubescape/storage v0.0.127
 	github.com/panjf2000/ants/v2 v2.9.1
 	github.com/prometheus/alertmanager v0.27.0
 	github.com/prometheus/client_golang v1.20.3
