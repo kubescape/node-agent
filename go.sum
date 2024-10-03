@@ -188,8 +188,8 @@ github.com/containerd/ttrpc v1.2.5 h1:IFckT1EFQoFBMG4c3sMdT8EP3/aKfumK1msY+Ze4oL
 github.com/containerd/ttrpc v1.2.5/go.mod h1:YCXHsb32f+Sq5/72xHubdiJRQY9inL4a4ZQrAbN1q9o=
 github.com/containerd/typeurl/v2 v2.1.1 h1:3Q4Pt7i8nYwy2KmQWIw2+1hTvwTE/6w9FqcttATPO/4=
 github.com/containerd/typeurl/v2 v2.1.1/go.mod h1:IDp2JFvbwZ31H8dQbEIY7sDl2L3o3HZj1hsSQlywkQ0=
-github.com/containers/common v0.60.2 h1:utcwp2YkO8c0mNlwRxsxfOiqfj157FRrBjxgjR6f+7o=
-github.com/containers/common v0.60.2/go.mod h1:I0upBi1qJX3QmzGbUOBN1LVP6RvkKhd3qQpZbQT+Q54=
+github.com/containers/common v0.60.4 h1:H5+LAMHPZEqX6vVNOQ+IguVsaFl8kbO/SZ/VPXjxhy0=
+github.com/containers/common v0.60.4/go.mod h1:I0upBi1qJX3QmzGbUOBN1LVP6RvkKhd3qQpZbQT+Q54=
 github.com/coreos/go-oidc v2.2.1+incompatible h1:mh48q/BqXqgjVHpy2ZY7WnWAbenxRjsz9N1i1YxjHAk=
 github.com/coreos/go-oidc v2.2.1+incompatible/go.mod h1:CgnwVTmzoESiwO9qyAFEMiHoZ1nMCKZlZ9V6mm3/LKc=
 github.com/coreos/go-semver v0.3.0/go.mod h1:nnelYz7RCh+5ahJtPPxZlU+153eP4D4r3EedlOD2RNk=
