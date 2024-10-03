@@ -789,3 +789,28 @@ func decodeConfigz(respBody []byte) (*kubeletconfigv1beta1.KubeletConfiguration,
 
 	return &configz.ComponentConfig, nil
 }
+
+func DiskUsage(path string) int64 {
+	var s int64
+	dir, err := os.Open(path)
+	if err != nil {
+		fmt.Println(err)
+		return s
+	}
+	defer dir.Close()
+
+	files, err := dir.Readdir(-1)
+	if err != nil {
+		fmt.Println(err)
+		return s
+	}
+
+	for _, f := range files {
+		if f.IsDir() {
+			s += DiskUsage(filepath.Join(path, f.Name()))
+		} else {
+			s += f.Size()
+		}
+	}
+	return s
+}
