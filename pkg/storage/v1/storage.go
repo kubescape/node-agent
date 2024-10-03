@@ -159,8 +159,20 @@ func (sc Storage) GetFilteredSBOM(name string) (*v1beta1.SBOMSyftFiltered, error
 	return sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
+func (sc Storage) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
+	return sc.StorageClient.SBOMSyfts(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
+}
+
 func (sc Storage) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
+}
+
+func (sc Storage) GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error) {
+	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{ResourceVersion: "metadata"})
+}
+
+func (sc Storage) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
+	return sc.StorageClient.SBOMSyfts(sc.namespace).Update(context.Background(), SBOM, metav1.UpdateOptions{})
 }
 
 func (sc Storage) PatchFilteredSBOM(name string, sbom *v1beta1.SBOMSyftFiltered) error {
@@ -190,6 +202,7 @@ func (sc Storage) modifyName(n string) string {
 	}
 	return n
 }
+
 func (sc Storage) modifyNameP(n *string) {
 	if sc.multiplier != nil {
 		*n = fmt.Sprintf("%s-%d", *n, *sc.multiplier)
@@ -201,6 +214,7 @@ func (sc Storage) revertNameP(n *string) {
 		*n = strings.TrimSuffix(*n, fmt.Sprintf("-%d", *sc.multiplier))
 	}
 }
+
 func getMultiplier() *int {
 	if m := os.Getenv("MULTIPLY"); m != "true" {
 		return nil

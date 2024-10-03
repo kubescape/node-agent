@@ -12,7 +12,10 @@ type StorageClient interface {
 	GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error)
 	CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error
 	GetFilteredSBOM(name string) (*v1beta1.SBOMSyftFiltered, error)
+	CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error)
 	GetSBOM(name string) (*v1beta1.SBOMSyft, error)
+	GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error)
+	ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error)
 	IncrementImageUse(imageID string)
 	DecrementImageUse(imageID string)
 	GetNetworkNeighbors(namespace, name string) (*v1beta1.NetworkNeighbors, error)
