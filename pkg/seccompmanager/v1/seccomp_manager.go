@@ -117,7 +117,7 @@ func getProfilesDir() (string, error) {
 		kubeletRoot = "/var/lib/kubelet"
 	}
 	// use securejoin to join the two, add seccomp and store in seccompProfilesDir
-	seccompProfilesDir, err := securejoin.SecureJoin(filepath.Join(hostRoot, kubeletRoot), "seccomp")
+	seccompProfilesDir, err := securejoin.SecureJoin(hostRoot, filepath.Join(kubeletRoot, "seccomp"))
 	if err != nil {
 		return "", fmt.Errorf("failed to join seccomp profiles dir: %w", err)
 	}

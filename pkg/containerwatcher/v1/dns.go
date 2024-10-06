@@ -32,7 +32,7 @@ func (ch *IGContainerWatcher) startDNSTracing() error {
 		return fmt.Errorf("adding tracer: %w", err)
 	}
 
-	tracerDns, err := tracerdns.NewTracer()
+	tracerDns, err := tracerdns.NewTracer(&tracerdns.Config{})
 	if err != nil {
 		return fmt.Errorf("creating tracer: %w", err)
 	}
