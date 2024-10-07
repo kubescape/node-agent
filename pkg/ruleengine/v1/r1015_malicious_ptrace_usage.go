@@ -43,7 +43,7 @@ type R1015MaliciousPtraceUsage struct {
 
 func CreateRuleR1015MaliciousPtraceUsage() *R1015MaliciousPtraceUsage {
 	return &R1015MaliciousPtraceUsage{
-		allowedProcesses: []string{"processA", "processB"}, // Example allowed processes
+		allowedProcesses: []string{},
 	}
 }
 

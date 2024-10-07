@@ -9,7 +9,7 @@ import (
 )
 
 func (ch *IGContainerWatcher) ptraceEventCallback(event *tracerptracetype.Event) {
-	if event.Type == types.DEBUG {
+	if event.Type != types.NORMAL {
 		return
 	}
 
@@ -44,10 +44,9 @@ func (ch *IGContainerWatcher) startPtraceTracing() error {
 }
 
 func (ch *IGContainerWatcher) stopPtraceTracing() error {
-	// Stop open tracer
 	if err := ch.tracerCollection.RemoveTracer(ptraceTraceName); err != nil {
 		return fmt.Errorf("removing tracer: %w", err)
 	}
-	ch.openTracer.Stop()
+	ch.ptraceTracer.Close()
 	return nil
 }
