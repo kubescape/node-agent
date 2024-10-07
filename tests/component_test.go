@@ -715,6 +715,49 @@ func sortHTTPEndpoints(endpoints []v1beta1.HTTPEndpoint) {
 	})
 }
 
+func Test_12_PtraceTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	t.Log("Creating namespace")
+	ns := testutils.NewRandomNamespace()
+
+	endpointTraffic, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/endpoint-traffic.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	t.Log("Waiting for all workloads to be ready")
+	err = endpointTraffic.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
+
+	t.Log("All workloads are ready")
+
+	t.Log("Waiting for all application profiles to be completed")
+	err = endpointTraffic.WaitForApplicationProfileCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+
+	_, _, err = endpointTraffic.ExecIntoPod([]string{"/home/ptrace"}, "")
+	assert.NoError(t, err)
+	// wait for 1 minute for the alerts to be generated
+	time.Sleep(1 * time.Minute)
+
+	if err != nil {
+		t.Errorf("Error getting pods with restarts: %v", err)
+	}
+
+	alerts, err := testutils.GetAlerts(ns.Name)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	assert.Equal(t, 0, len(alerts), "Expected no alerts to be generated, but got %d alerts", len(alerts))
+}
+
 // func Test_10_DemoTest(t *testing.T) {
 // 	start := time.Now()
 // 	defer tearDownTest(t, start)

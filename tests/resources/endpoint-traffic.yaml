@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: endpoint-traffic
-        image: docker.io/python:3.10.0-alpine
+        image: armoafekb/afek-b-tests:ptrace_test
         imagePullPolicy: Always
         command: [ "/bin/sh", "-c", "mkdir -p users && for i in $(seq 0 104); do touch users/$i; done && python3 -m http.server" ]
         ports:
