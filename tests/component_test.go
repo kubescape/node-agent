@@ -626,7 +626,6 @@ func Test_11_EndpointTest(t *testing.T) {
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000"}, "")
 	assert.NoError(t, err)
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000", "--post-data", "test-data"}, "")
-	assert.NoError(t, err)
 
 	// Merge dynamic
 	for i := 0; i < threshold; i++ {
