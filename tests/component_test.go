@@ -697,7 +697,10 @@ func Test_11_EndpointTest(t *testing.T) {
 
 	for _, savedEndpoint := range savedEndpoints {
 		if endpoint := getEndpoint(expectedEndpoints, savedEndpoint); endpoint != nil {
-			assert.Equal(t, *endpoint, savedEndpoint)
+			e := *endpoint
+			sort.Strings(e.Methods)
+			sort.Strings(savedEndpoint.Methods)
+			assert.Equal(t, e, savedEndpoint)
 		} else {
 			// Until upgrading helm chart with new storage version
 			fmt.Printf("Endpoint %v not found in the saved endpoints", savedEndpoint)
