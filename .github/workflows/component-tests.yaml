@@ -98,6 +98,7 @@ jobs:
         run: |
           cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=component
       - name: Print storage logs
+        if: always()
         run: |
           kubectl logs $(kubectl get pods -n kubescape -o name | grep storage) -n kubescape
 
