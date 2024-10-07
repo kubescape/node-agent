@@ -668,10 +668,15 @@ func Test_11_EndpointTest(t *testing.T) {
 		Headers:   rawJSON,
 	}
 
+	e3: = endpoint1
+	e3.Direction = "outbound"
+
+	e4 := endpoint2
+	e4.Direction = "outbound"
+
 	savedEndpoints := applicationProfile.Spec.Containers[0].Endpoints
 	// Because it is both from recv and send
 	for i := range savedEndpoints {
-		savedEndpoints[i].Direction = "inbound"
 		// sort the methods and headers
 		sort.Strings(savedEndpoints[i].Methods)
 
@@ -691,7 +696,7 @@ func Test_11_EndpointTest(t *testing.T) {
 
 	sortHTTPEndpoints(savedEndpoints)
 
-	expectedEndpoints := []v1beta1.HTTPEndpoint{endpoint1, endpoint2}
+	expectedEndpoints := []v1beta1.HTTPEndpoint{endpoint1, endpoint2, e3, e4}
 	sortHTTPEndpoints(expectedEndpoints)
 
 	assert.Equal(t, expectedEndpoints, savedEndpoints)
