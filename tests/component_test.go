@@ -622,13 +622,18 @@ func Test_11_EndpointTest(t *testing.T) {
 
 	assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
 
+	// Merge methods
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000"}, "")
 	assert.NoError(t, err)
-	endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000", "--post-data", "test-data"}, "")
+	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000", "--post-data", "test-data"}, "")
+	assert.NoError(t, err)
+
+	// Merge dynamic
 	for i := 0; i < threshold; i++ {
 		endpointTraffic.ExecIntoPod([]string{"wget", fmt.Sprintf("http://127.0.0.1:8000/users/%d", i)}, "")
 	}
 
+	// Merge headers
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000/users/99", "--header", "Connection:1234r"}, "")
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000/users/12", "--header", "Connection:ziz"}, "")
 
