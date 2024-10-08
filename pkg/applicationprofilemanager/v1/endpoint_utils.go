@@ -64,6 +64,8 @@ func CalculateHTTPEndpointHash(endpoint *v1beta1.HTTPEndpoint) string {
 	hash.Write([]byte(strings.Join(sortedMethods, ",")))
 	hash.Write(endpoint.Headers)
 
+	hash.Write([]byte(endpoint.Direction))
+
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
