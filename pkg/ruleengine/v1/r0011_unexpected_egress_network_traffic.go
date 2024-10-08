@@ -163,6 +163,11 @@ func isPrivateIP(ip string) bool {
 		return true
 	}
 
+	// Check if IP is metadata server
+	if parsedIP.Equal(net.ParseIP("169.254.169.254")) {
+		return true
+	}
+
 	// Check if IP is in private IP ranges
 	privateIPRanges := []struct {
 		start net.IP
