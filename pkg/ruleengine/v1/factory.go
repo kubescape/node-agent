@@ -35,6 +35,7 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R1011LdPreloadHookRuleDescriptor,
 			R1012HardlinkCreatedOverSensitiveFileRuleDescriptor,
 			R1013CryptoMiningFilesAccessRuleDescriptor,
+			R1014CryptoMinerDetectedRuleDescriptor,
 		},
 	}
 }

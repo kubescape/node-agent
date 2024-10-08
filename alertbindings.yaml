@@ -1,0 +1,66 @@
+apiVersion: kubescape.io/v1
+kind: RuntimeRuleAlertBinding
+metadata:
+  annotations:
+    meta.helm.sh/release-name: kubescape
+    meta.helm.sh/release-namespace: kubescape
+  creationTimestamp: "2024-10-06T15:22:55Z"
+  generation: 1
+  labels:
+    app: node-agent
+    app.kubernetes.io/component: node-agent
+    app.kubernetes.io/instance: kubescape
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: kubescape-operator
+    app.kubernetes.io/version: 1.22.4
+    helm.sh/chart: kubescape-operator-1.22.4
+    kubescape.io/ignore: "true"
+    tier: ks-control-plane
+  name: all-rules-all-pods
+  resourceVersion: "523"
+  uid: 9f730a8e-9ce4-4725-a27c-3cca940e71a9
+spec:
+  namespaceSelector:
+    matchExpressions:
+    - key: kubernetes.io/metadata.name
+      operator: NotIn
+      values:
+      - kubescape
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - kubeconfig
+      - gmp-system
+      - gmp-public
+  rules:
+  - ruleName: Unexpected process launched
+  - parameters:
+      ignoreMounts: true
+      ignorePrefixes:
+      - /proc
+      - /run/secrets/kubernetes.io/serviceaccount
+      - /var/run/secrets/kubernetes.io/serviceaccount
+      - /tmp
+    ruleName: Unexpected file access
+  - ruleName: Unexpected system call
+  - ruleName: Unexpected capability used
+  - ruleName: Unexpected domain request
+  - ruleName: Unexpected Service Account Token Access
+  - ruleName: Kubernetes Client Executed
+  - ruleName: Exec from malicious source
+  - ruleName: Kernel Module Load
+  - ruleName: Exec Binary Not In Base Image
+  - ruleName: Malicious SSH Connection
+  - ruleName: Fileless Execution
+  - ruleName: XMR Crypto Mining Detection
+  - ruleName: Exec from mount
+  - ruleName: Crypto Mining Related Port Communication
+  - ruleName: Crypto Mining Domain Communication
+  - ruleName: Read Environment Variables from procfs
+  - ruleName: eBPF Program Load
+  - ruleName: Symlink Created Over Sensitive File
+  - ruleName: Unexpected Sensitive File Access
+  - ruleName: Hardlink Created Over Sensitive File
+  - ruleName: Exec to pod
+  - ruleName: Port forward
+  - ruleName: Unexpected Egress Network Traffic
