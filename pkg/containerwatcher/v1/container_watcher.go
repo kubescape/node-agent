@@ -34,12 +34,15 @@ import (
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	tracerptrace "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer"
+	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
 	tracerandomx "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/tracer"
 	tracerandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 	tracerssh "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/tracer"
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
@@ -56,6 +59,7 @@ const (
 	networkTraceName           = "trace_network"
 	dnsTraceName               = "trace_dns"
 	openTraceName              = "trace_open"
+	ptraceTraceName            = "trace_ptrace"
 	randomxTraceName           = "trace_randomx"
 	symlinkTraceName           = "trace_symlink"
 	hardlinkTraceName          = "trace_hardlink"
@@ -64,6 +68,7 @@ const (
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
+	ptraceWorkerPoolSize       = 1
 	networkWorkerPoolSize      = 1
 	dnsWorkerPoolSize          = 5
 	randomxWorkerPoolSize      = 1
@@ -99,6 +104,7 @@ type IGContainerWatcher struct {
 	capabilitiesTracer *tracercapabilities.Tracer
 	execTracer         *tracerexec.Tracer
 	openTracer         *traceropen.Tracer
+	ptraceTracer       *tracerptrace.Tracer
 	syscallTracer      *tracerseccomp.Tracer
 	networkTracer      *tracernetwork.Tracer
 	dnsTracer          *tracerdns.Tracer
@@ -118,6 +124,7 @@ type IGContainerWatcher struct {
 	capabilitiesWorkerPool *ants.PoolWithFunc
 	execWorkerPool         *ants.PoolWithFunc
 	openWorkerPool         *ants.PoolWithFunc
+	ptraceWorkerPool       *ants.PoolWithFunc
 	networkWorkerPool      *ants.PoolWithFunc
 	dnsWorkerPool          *ants.PoolWithFunc
 	randomxWorkerPool      *ants.PoolWithFunc
@@ -129,6 +136,7 @@ type IGContainerWatcher struct {
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *tracerexectype.Event
 	openWorkerChan         chan *traceropentype.Event
+	ptraceWorkerChan       chan *tracerptracetype.Event
 	networkWorkerChan      chan *tracernetworktype.Event
 	dnsWorkerChan          chan *tracerdnstype.Event
 	randomxWorkerChan      chan *tracerandomxtype.Event
@@ -374,6 +382,19 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		return nil, fmt.Errorf("creating http worker pool: %w", err)
 	}
 
+	// Create a ptrace worker pool
+	ptraceWorkerPool, err := ants.NewPoolWithFunc(ptraceWorkerPoolSize, func(i interface{}) {
+		event := i.(tracerptracetype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		ruleManager.ReportEvent(utils.PtraceEventType, &event)
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("creating ptrace worker pool: %w", err)
+	}
+
 	return &IGContainerWatcher{
 		// Configuration
 		cfg:               cfg,
@@ -404,6 +425,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		hardlinkWorkerPool:      hardlinkWorkerPool,
 		sshdWorkerPool:          sshWorkerPool,
 		httpWorkerPool:          httpWorkerPool,
+		ptraceWorkerPool:        ptraceWorkerPool,
 		metrics:                 metrics,
 		preRunningContainersIDs: preRunningContainers,
 
@@ -411,6 +433,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		capabilitiesWorkerChan: make(chan *tracercapabilitiestype.Event, 1000),
 		execWorkerChan:         make(chan *tracerexectype.Event, 10000),
 		openWorkerChan:         make(chan *traceropentype.Event, 500000),
+		ptraceWorkerChan:       make(chan *tracerptracetype.Event, 1000),
 		networkWorkerChan:      make(chan *tracernetworktype.Event, 500000),
 		dnsWorkerChan:          make(chan *tracerdnstype.Event, 100000),
 		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 5000),

@@ -1,19 +1,9 @@
 package tracer
 
-import (
-	"fmt"
+import tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
 
-	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/link"
-)
-
-type TracepointInfo struct {
-	Syscall string
-	ObjFunc interface{}
-}
-
-func GetTracepointDefinitions(objs *http_snifferPrograms) []TracepointInfo {
-	return []TracepointInfo{
+func GetTracepointDefinitions(objs *http_snifferPrograms) []tracepointlib.TracepointInfo {
+	return []tracepointlib.TracepointInfo{
 		{"sys_enter_accept", objs.SysEnterAccept},
 		{"sys_enter_accept4", objs.SysEnterAccept4},
 		{"sys_exit_accept", objs.SysExitAccept},
@@ -38,12 +28,4 @@ func GetTracepointDefinitions(objs *http_snifferPrograms) []TracepointInfo {
 		{"sys_enter_readv", objs.SyscallProbeEntryReadv},
 		{"sys_exit_readv", objs.SyscallProbeRetReadv},
 	}
-}
-
-func AttachTracepoint(tracepoint TracepointInfo) (link.Link, error) {
-	l, err := link.Tracepoint("syscalls", tracepoint.Syscall, tracepoint.ObjFunc.(*ebpf.Program), nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to attach tracepoint %s: %v", tracepoint.Syscall, err)
-	}
-	return l, nil
 }
