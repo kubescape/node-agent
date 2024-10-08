@@ -49,10 +49,10 @@ static __always_inline void populate_event(struct event* event) {
 }
 
 SEC("tracepoint/syscalls/sys_enter_ptrace")
-int trace_enter_ptrace(struct syscalls_enter_ptrace_args *ctx)
+int trace_enter_ptrace(struct trace_event_raw_sys_enter *ctx)
 {
-    long request = ctx->request;
-    long pid = ctx->pid;
+    long request = (long)ctx->args[0];
+    long pid = (long)ctx->args[1];
     
     if (should_discard()) {
         return 0;

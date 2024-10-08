@@ -23,18 +23,6 @@
 #define PTRACE_POKEDATA 5
 #endif
 
-struct syscalls_enter_ptrace_args {
-    __u16 common_type;
-    __u8 common_flags;
-    __u8 common_preempt_count;
-    __s32 common_pid;
-
-    __s32 __syscall_nr;
-    __u64 request;
-    __u64 pid;
-    __u64 addr;
-    __u64 data;
-};  
 
 struct event {
     gadget_timestamp timestamp;
