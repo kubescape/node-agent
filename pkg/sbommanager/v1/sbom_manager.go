@@ -68,6 +68,7 @@ type imageInfo struct {
 }
 
 func (s *SbomManager) getImageLayers(imageID string) ([]imagedigest.Digest, error) {
+	res, err := s.imageServiceClient.PullImage(context.Background(), &runtime.PullImageRequest{})
 	status, err := s.imageServiceClient.ImageStatus(context.Background(), &runtime.ImageStatusRequest{
 		Image:   &runtime.ImageSpec{Image: imageID},
 		Verbose: true,
@@ -100,6 +101,7 @@ func (s *SbomManager) getMountedVolumes(pid string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mounts: %w", err)
 	}
+	logger.L().Info("got mounts", helpers.Interface("mounts", mounts))
 	for _, option := range strings.Split(mounts[0].VFSOptions, ",") {
 		if strings.HasPrefix(option, "lowerdir=") {
 			return strings.Split(option[9:], ":"), nil
@@ -167,13 +169,14 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 		helpers.String("rootFS", rootFS),
 		helpers.Interface("layers", layers))
 	// create the SBOM
-	logger.L().Debug("generating SBOM",
-		helpers.String("imageName", imageName))
+	logger.L().Info("getting SBOM source",
+		helpers.String("userInput", rootFS))
 	// FIXME: seem to pull image
-	src, err := syft.GetSource(context.Background(), imageName, syft.DefaultGetSourceConfig().WithBasePath(rootFS))
+	src, err := syft.GetSource(context.Background(), rootFS, syft.DefaultGetSourceConfig())
 	if err != nil {
 		logger.L().Error("Failed to get source",
 			helpers.Error(err),
+			helpers.String("userInput", rootFS),
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
@@ -183,22 +186,25 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	cfg := syft.DefaultCreateSBOMConfig()
 	cfg.ToolName = "syft"
 	cfg.ToolVersion = s.version
-	syftSBOM, err := syft.CreateSBOM(context.Background(), src, cfg)
-	if err != nil {
-		logger.L().Error("Failed to generate SBOM",
-			helpers.Error(err),
-			helpers.String("namespace", notif.Container.K8s.Namespace),
-			helpers.String("pod", notif.Container.K8s.PodName),
-			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("pid", pid))
-		return
-	}
-	logger.L().Info("SbomManager got SBOM",
-		helpers.String("namespace", notif.Container.K8s.Namespace),
-		helpers.String("pod", notif.Container.K8s.PodName),
-		helpers.String("container", notif.Container.K8s.ContainerName),
-		helpers.String("pid", pid),
-		helpers.Interface("sbom", syftSBOM))
+	logger.L().Info("creating SBOM",
+		helpers.String("imageName", imageName),
+		helpers.Interface("src", src))
+	//syftSBOM, err := syft.CreateSBOM(context.Background(), src, cfg)
+	//if err != nil {
+	//	logger.L().Error("Failed to generate SBOM",
+	//		helpers.Error(err),
+	//		helpers.String("namespace", notif.Container.K8s.Namespace),
+	//		helpers.String("pod", notif.Container.K8s.PodName),
+	//		helpers.String("container", notif.Container.K8s.ContainerName),
+	//		helpers.String("pid", pid))
+	//	return
+	//}
+	//logger.L().Info("SbomManager got SBOM",
+	//	helpers.String("namespace", notif.Container.K8s.Namespace),
+	//	helpers.String("pod", notif.Container.K8s.PodName),
+	//	helpers.String("container", notif.Container.K8s.ContainerName),
+	//	helpers.String("pid", pid),
+	//	helpers.Interface("sbom", syftSBOM))
 	// match package names with image layers
 	//packages := syftSBOM.Artifacts
 	//var j int

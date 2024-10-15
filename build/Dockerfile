@@ -12,6 +12,7 @@ RUN --mount=target=. \
 FROM gcr.io/distroless/static-debian12:debug
 
 COPY --from=builder /out/node-agent /usr/bin/node-agent
+COPY syft /usr/bin/syft
 
 ARG image_version
 ENV RELEASE=$image_version
