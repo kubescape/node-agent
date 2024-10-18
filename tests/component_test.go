@@ -12,16 +12,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/tests/testutils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1client "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 func tearDownTest(t *testing.T, startTime time.Time) {
@@ -430,8 +431,11 @@ func Test_07_RuleBindingApplyTest(t *testing.T) {
 //}
 
 func Test_08_ApplicationProfilePatching(t *testing.T) {
-	k8sClient := k8sinterface.NewKubernetesApi()
-	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+	config, err := clientcmd.BuildConfigFromFlags("", "/home/mbertschy/.kube/config")
+	require.NoError(t, err)
+	config.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
+	config.ContentType = "application/vnd.kubernetes.protobuf"
+	storageclient := spdxv1beta1client.NewForConfigOrDie(config)
 
 	t.Log("Creating namespace")
 	ns := testutils.NewRandomNamespace()
@@ -470,7 +474,7 @@ func Test_08_ApplicationProfilePatching(t *testing.T) {
 		Status: v1beta1.ApplicationProfileStatus{},
 	}
 
-	_, err := storageclient.ApplicationProfiles(ns.Name).Create(context.TODO(), applicationProfile, metav1.CreateOptions{})
+	_, err = storageclient.ApplicationProfiles(ns.Name).Create(context.TODO(), applicationProfile, metav1.CreateOptions{})
 	assert.NoError(t, err)
 
 	// patch the application profile
@@ -500,8 +504,11 @@ func Test_08_ApplicationProfilePatching(t *testing.T) {
 
 	// TODO use Storage abstraction?
 	_, err = storageclient.ApplicationProfiles(ns.Name).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
-
 	assert.NoError(t, err)
+
+	ap, err := storageclient.ApplicationProfiles(ns.Name).Get(context.Background(), name, metav1.GetOptions{})
+	assert.NoError(t, err)
+	fmt.Println(string(ap.Spec.Containers[0].Execs))
 }
 
 func Test_09_FalsePositiveTest(t *testing.T) {

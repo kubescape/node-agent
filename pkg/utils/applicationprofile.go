@@ -90,17 +90,17 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 	sort.Strings(container.Syscalls)
 
 	// add execs
-	for _, pathAndArgs := range execs {
-		path := pathAndArgs[0]
-		var args []string
-		if len(pathAndArgs) > 1 {
-			args = pathAndArgs[1:]
-		}
-		container.Execs = append(container.Execs, v1beta1.ExecCalls{
-			Path: path,
-			Args: args,
-		})
-	}
+	//for _, pathAndArgs := range execs {
+	//	path := pathAndArgs[0]
+	//	var args []string
+	//	if len(pathAndArgs) > 1 {
+	//		args = pathAndArgs[1:]
+	//	}
+	//	container.Execs = append(container.Execs, v1beta1.ExecCalls{
+	//		Path: path,
+	//		Args: args,
+	//	})
+	//}
 	// add opens
 	for path, open := range opens {
 		flags := open.ToSlice()

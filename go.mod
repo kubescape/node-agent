@@ -260,3 +260,4 @@ require (
 )
 
 replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6
+replace github.com/kubescape/storage => ../storage
