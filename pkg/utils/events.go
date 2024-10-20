@@ -1,8 +1,15 @@
 package utils
 
+import "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+
 type K8sEvent interface {
 	GetPod() string
 	GetNamespace() string
+}
+
+type EnrichEvent interface {
+	types.Event
+	GetPID() int
 }
 
 type EventType string
