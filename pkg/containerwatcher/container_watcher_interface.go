@@ -38,5 +38,5 @@ type ContainerReceiver interface {
 }
 
 type ThirdPartyEnricher interface {
-	Enrich(eventType utils.EventType, event utils.K8sEvent) error
+	Enrich(event utils.EnrichEvent)
 }
