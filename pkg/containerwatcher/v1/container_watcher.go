@@ -119,6 +119,8 @@ type IGContainerWatcher struct {
 	thirdPartyTracers mapset.Set[containerwatcher.CustomTracer]
 	// Third party container receivers
 	thirdPartyContainerReceivers mapset.Set[containerwatcher.ContainerReceiver]
+	// Third party enricher
+	thirdPartyEnricher *containerwatcher.ThirdPartyEnricher
 
 	// Worker pools
 	capabilitiesWorkerPool *ants.PoolWithFunc
@@ -202,6 +204,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if len(event.Args) > 0 {
 			path = event.Args[0]
 		}
+
 		metrics.ReportEvent(utils.ExecveEventType)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
@@ -347,6 +350,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+
 		metrics.ReportEvent(utils.SSHEventType)
 		ruleManager.ReportEvent(utils.SSHEventType, &event)
 

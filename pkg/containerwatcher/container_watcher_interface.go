@@ -36,3 +36,7 @@ type EventReceiver interface {
 type ContainerReceiver interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
 }
+
+type ThirdPartyEnricher interface {
+	Enrich(eventType utils.EventType, event utils.K8sEvent) error
+}
