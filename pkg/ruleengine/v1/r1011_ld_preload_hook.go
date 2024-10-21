@@ -11,7 +11,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
@@ -150,7 +149,7 @@ func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *events.ExecEvent, k8s
 	return nil
 }
 
-func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *traceropentype.Event) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *events.OpenEvent) ruleengine.RuleFailure {
 	if openEvent.FullPath == LD_PRELOAD_FILE && (openEvent.FlagsRaw&(int32(os.O_WRONLY)|int32(os.O_RDWR))) != 0 {
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
@@ -172,7 +171,7 @@ func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *traceropentype.Event)
 				},
 				ContainerID: openEvent.Runtime.ContainerID,
 			},
-			TriggerEvent: openEvent.Event,
+			TriggerEvent: openEvent.Event.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is opening the file %s", openEvent.Comm, openEvent.GetContainer(), openEvent.Path),
 			},
@@ -181,6 +180,7 @@ func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *traceropentype.Event)
 				PodLabels: openEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
+			extra:  openEvent.GetExtra(),
 		}
 
 		return &ruleFailure
@@ -202,7 +202,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 
 		return rule.handleExecEvent(execEvent, objectCache.K8sObjectCache())
 	} else if eventType == utils.OpenEventType {
-		openEvent, ok := event.(*traceropentype.Event)
+		openEvent, ok := event.(*events.OpenEvent)
 		if !ok {
 			return nil
 		}

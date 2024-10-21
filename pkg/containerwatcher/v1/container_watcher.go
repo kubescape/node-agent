@@ -205,19 +205,15 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 
 		execEvent := &events.ExecEvent{Event: event}
-
 		if thirdPartyEnricher != nil {
 			thirdPartyEnricher.Enrich(execEvent)
-			ruleManager.ReportEvent(utils.ExecveEventType, execEvent)
-		} else {
-			ruleManager.ReportEvent(utils.ExecveEventType, execEvent)
 		}
 
+		ruleManager.ReportEvent(utils.ExecveEventType, execEvent)
+		malwareManager.ReportEvent(utils.ExecveEventType, execEvent)
 		metrics.ReportEvent(utils.ExecveEventType)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
-
-		malwareManager.ReportEvent(utils.ExecveEventType, &event)
 
 		// Report exec events to event receivers
 		reportEventToThirdPartyTracers(utils.ExecveEventType, &event, thirdPartyEventReceivers)
@@ -248,16 +244,13 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		if thirdPartyEnricher != nil {
 			thirdPartyEnricher.Enrich(openEvent)
-			ruleManager.ReportEvent(utils.ExecveEventType, openEvent)
-		} else {
-			ruleManager.ReportEvent(utils.ExecveEventType, openEvent)
 		}
 
 		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
 		relevancyManager.ReportFileOpen(event.Runtime.ContainerID, k8sContainerID, path)
-		ruleManager.ReportEvent(utils.OpenEventType, &event)
-		malwareManager.ReportEvent(utils.OpenEventType, &event)
+		ruleManager.ReportEvent(utils.OpenEventType, openEvent)
+		malwareManager.ReportEvent(utils.OpenEventType, openEvent)
 
 		// Report open events to event receivers
 		reportEventToThirdPartyTracers(utils.OpenEventType, &event, thirdPartyEventReceivers)

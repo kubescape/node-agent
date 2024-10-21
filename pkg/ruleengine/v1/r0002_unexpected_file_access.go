@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -99,10 +100,12 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 		return nil
 	}
 
-	openEvent, ok := event.(*traceropentype.Event)
+	fullEvent, ok := event.(*events.OpenEvent)
 	if !ok {
 		return nil
 	}
+
+	openEvent := fullEvent.Event
 
 	// Check if path is ignored
 	for _, prefix := range rule.ignorePrefixes {
@@ -159,7 +162,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 				"flags": openEvent.Flags,
 				"path":  openEvent.FullPath,
 			},
-			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.FullPath, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
+			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.FullPath, openEvent.GetPod(), rule.generatePatchCommand(&openEvent, ap)),
 			Severity:       R0002UnexpectedFileAccessRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
@@ -179,6 +182,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 			PodName: openEvent.GetPod(),
 		},
 		RuleID: rule.ID(),
+		extra:  fullEvent.GetExtra(),
 	}
 
 	return &ruleFailure

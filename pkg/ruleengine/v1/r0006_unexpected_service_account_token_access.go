@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -81,10 +82,12 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		return nil
 	}
 
-	openEvent, ok := event.(*traceropentype.Event)
+	fullEvent, ok := event.(*events.OpenEvent)
 	if !ok {
 		return nil
 	}
+
+	openEvent := fullEvent.Event
 
 	shouldCheckEvent := false
 
@@ -125,7 +128,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 				"flags": openEvent.Flags,
 			},
 			InfectedPID:    openEvent.Pid,
-			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.FullPath, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
+			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.FullPath, openEvent.GetPod(), rule.generatePatchCommand(&openEvent, ap)),
 			Severity:       R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
@@ -146,6 +149,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 			PodLabels: openEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
+		extra:  fullEvent.GetExtra(),
 	}
 
 	return &ruleFailure
