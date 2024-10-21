@@ -141,6 +141,7 @@ func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *events.ExecEvent, k8s
 				PodLabels: execEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
+			extra:  execEvent.GetExtra(),
 		}
 
 		return &ruleFailure

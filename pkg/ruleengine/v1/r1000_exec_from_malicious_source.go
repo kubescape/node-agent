@@ -106,6 +106,7 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 					PodLabels: execEvent.K8s.PodLabels,
 				},
 				RuleID: rule.ID(),
+				extra:  execEvent.GetExtra(),
 			}
 
 			return &ruleFailure

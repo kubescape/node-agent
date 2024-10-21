@@ -13,6 +13,10 @@ func (event *ExecEvent) SetExtra(extra interface{}) {
 	event.extra = extra
 }
 
+func (event *ExecEvent) GetExtra() interface{} {
+	return event.extra
+}
+
 func (event *ExecEvent) GetPID() int {
 	return int(event.Pid)
 }

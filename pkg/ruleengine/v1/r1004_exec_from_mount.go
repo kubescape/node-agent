@@ -111,6 +111,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event ut
 					PodLabels: execEvent.K8s.PodLabels,
 				},
 				RuleID: R1004ID,
+				extra:  execEvent.GetExtra(),
 			}
 
 			return &ruleFailure

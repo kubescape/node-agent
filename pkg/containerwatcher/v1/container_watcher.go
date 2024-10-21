@@ -244,6 +244,15 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			path = event.FullPath
 		}
 
+		openEvent := &events.OpenEvent{Event: event}
+
+		if thirdPartyEnricher != nil {
+			thirdPartyEnricher.Enrich(openEvent)
+			ruleManager.ReportEvent(utils.ExecveEventType, openEvent)
+		} else {
+			ruleManager.ReportEvent(utils.ExecveEventType, openEvent)
+		}
+
 		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
 		relevancyManager.ReportFileOpen(event.Runtime.ContainerID, k8sContainerID, path)
@@ -349,6 +358,10 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 		metrics.ReportEvent(utils.HardlinkEventType)
 		ruleManager.ReportEvent(utils.HardlinkEventType, &event)
+
+		if thirdPartyEnricher != nil {
+			thirdPartyEnricher.Enrich(&event)
+		}
 
 		// Report hardlink events to event receivers
 		reportEventToThirdPartyTracers(utils.HardlinkEventType, &event, thirdPartyEventReceivers)
