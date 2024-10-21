@@ -206,7 +206,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		execEvent := &events.ExecEvent{Event: event}
 
- 		if thirdPartyEnricher != nil {
+		if thirdPartyEnricher != nil {
 			thirdPartyEnricher.Enrich(execEvent)
 			ruleManager.ReportEvent(utils.ExecveEventType, execEvent)
 		} else {
@@ -330,12 +330,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 
 		if thirdPartyEnricher != nil {
-			fmt.Println("Enriching symlink event")
 			thirdPartyEnricher.Enrich(&event)
 		}
+
 		metrics.ReportEvent(utils.SymlinkEventType)
 		ruleManager.ReportEvent(utils.SymlinkEventType, &event)
-
 		// Report symlink events to event receivers
 		reportEventToThirdPartyTracers(utils.SymlinkEventType, &event, thirdPartyEventReceivers)
 	})
