@@ -18,6 +18,7 @@ type Event struct {
 	ExePath    string `json:"exe_path,omitempty" column:"exe_path,template:exe_path"`
 	OldPath    string `json:"oldpath,omitempty" column:"oldpath,template:oldpath"`
 	NewPath    string `json:"newpath,omitempty" column:"newpath,template:newpath"`
+	extra      interface{}
 }
 
 func GetColumns() *columns.Columns[Event] {
@@ -30,4 +31,12 @@ func Base(ev eventtypes.Event) *Event {
 	return &Event{
 		Event: ev,
 	}
+}
+
+func (event *Event) SetExtra(extra interface{}) {
+	event.extra = extra
+}
+
+func (event *Event) GetPID() int {
+	return int(event.Pid)
 }

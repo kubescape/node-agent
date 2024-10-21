@@ -93,7 +93,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 	} else if allowed {
 		return nil
 	}
-
+	fmt.Println("GetExtra", symlinkEvent.GetExtra())
 	for _, path := range rule.additionalPaths {
 		if strings.HasPrefix(symlinkEvent.OldPath, path) {
 			return &GenericRuleFailure{
@@ -129,6 +129,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 					PodLabels: symlinkEvent.K8s.PodLabels,
 				},
 				RuleID: rule.ID(),
+				extra:  symlinkEvent.GetExtra(),
 			}
 		}
 	}

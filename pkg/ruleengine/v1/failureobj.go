@@ -17,6 +17,7 @@ type GenericRuleFailure struct {
 	RuleAlert              apitypes.RuleAlert
 	RuntimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails
 	RuleID                 string
+	extra                  interface{}
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {

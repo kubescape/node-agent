@@ -5,12 +5,12 @@ import (
 	"os"
 	"strings"
 
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -62,7 +62,7 @@ func (rule *R1011LdPreloadHook) ID() string {
 func (rule *R1011LdPreloadHook) DeleteRule() {
 }
 
-func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event, k8sObjCache objectcache.K8sObjectCache) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *events.ExecEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.RuleFailure {
 	// Java is a special case, we don't want to alert on it because it uses LD_LIBRARY_PATH.
 	if execEvent.Comm == JAVA_COMM {
 		return nil
@@ -128,11 +128,11 @@ func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event,
 					Cwd:        execEvent.Cwd,
 					Hardlink:   execEvent.ExePath,
 					Path:       getExecFullPathFromEvent(execEvent),
-					Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+					Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 				},
 				ContainerID: execEvent.Runtime.ContainerID,
 			},
-			TriggerEvent: execEvent.Event,
+			TriggerEvent: execEvent.Event.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is using the environment variable %s", execEvent.Comm, execEvent.GetContainer(), fmt.Sprintf("%s=%s", ldHookVar, envVars[ldHookVar])),
 			},
@@ -194,7 +194,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 	}
 
 	if eventType == utils.ExecveEventType {
-		execEvent, ok := event.(*tracerexectype.Event)
+		execEvent, ok := event.(*events.ExecEvent)
 		if !ok {
 			return nil
 		}

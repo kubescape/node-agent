@@ -6,12 +6,12 @@ import (
 	"slices"
 	"strings"
 
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 
 	"github.com/kubescape/go-logger"
@@ -130,7 +130,7 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 	return &ruleFailure
 }
 
-func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype.Event, ap *v1beta1.ApplicationProfile) *GenericRuleFailure {
+func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *events.ExecEvent, ap *v1beta1.ApplicationProfile) *GenericRuleFailure {
 	whitelistedExecs, err := getContainerFromApplicationProfile(ap, event.GetContainer())
 	if err != nil {
 		logger.L().Error("Failed to get container from application profile", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
@@ -171,11 +171,11 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 					Cwd:        event.Cwd,
 					Hardlink:   event.ExePath,
 					Path:       execPath,
-					Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(event), " ")),
+					Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(&event.Event), " ")),
 				},
 				ContainerID: event.Runtime.ContainerID,
 			},
-			TriggerEvent: event.Event,
+			TriggerEvent: event.Event.Event,
 			RuleAlert: apitypes.RuleAlert{
 				RuleDescription: fmt.Sprintf("Kubernetes client %s was executed in: %s", execPath, event.GetContainer()),
 			},
@@ -198,7 +198,7 @@ func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventTyp
 	}
 
 	if eventType == utils.ExecveEventType {
-		execEvent, ok := event.(*tracerexectype.Event)
+		execEvent, ok := event.(*events.ExecEvent)
 		if !ok {
 			return nil
 		}

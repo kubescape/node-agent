@@ -30,6 +30,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
@@ -42,7 +43,6 @@ import (
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
-
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
@@ -204,10 +204,19 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			path = event.Args[0]
 		}
 
+		execEvent := &events.ExecEvent{Event: event}
+
+		if thirdPartyEnricher != nil {
+			thirdPartyEnricher.Enrich(execEvent)
+			ruleManager.ReportEvent(utils.ExecveEventType, execEvent)
+		} else {
+			ruleManager.ReportEvent(utils.ExecveEventType, execEvent)
+		}
+
 		metrics.ReportEvent(utils.ExecveEventType)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
-		ruleManager.ReportEvent(utils.ExecveEventType, &event)
+
 		malwareManager.ReportEvent(utils.ExecveEventType, &event)
 
 		// Report exec events to event receivers
@@ -320,7 +329,9 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 
-		thirdPartyEnricher.Enrich(&event)
+		if thirdPartyEnricher != nil {
+			thirdPartyEnricher.Enrich(&event)
+		}
 		metrics.ReportEvent(utils.SymlinkEventType)
 		ruleManager.ReportEvent(utils.SymlinkEventType, &event)
 
