@@ -3,6 +3,7 @@ package applicationprofilecache
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -13,7 +14,6 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	versioned "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
@@ -47,24 +47,31 @@ func newApplicationProfileState(ap *v1beta1.ApplicationProfile) applicationProfi
 }
 
 type ApplicationProfileCacheImpl struct {
-	containerToSlug  maps.SafeMap[string, string]                      // cache the containerID to slug mapping, this will enable a quick lookup of the application profile
-	slugToAppProfile maps.SafeMap[string, *v1beta1.ApplicationProfile] // cache the application profile
-	slugToContainers maps.SafeMap[string, mapset.Set[string]]          // cache the containerIDs that belong to the application profile, this will enable removing from cache AP without pods
-	slugToState      maps.SafeMap[string, applicationProfileState]     // cache the containerID to slug mapping, this will enable a quick lookup of the application profile
-	storageClient    versioned.SpdxV1beta1Interface
-	allProfiles      mapset.Set[string] // cache all the application profiles that are ready. this will enable removing from cache AP without pods that are running on the same node
-	nodeName         string
-	maxDelaySeconds  int // maximum delay in seconds before getting the full object from the storage
+	containerToSlug      maps.SafeMap[string, string]                      // cache the containerID to slug mapping, this will enable a quick lookup of the application profile
+	slugToAppProfile     maps.SafeMap[string, *v1beta1.ApplicationProfile] // cache the application profile
+	slugToContainers     maps.SafeMap[string, mapset.Set[string]]          // cache the containerIDs that belong to the application profile, this will enable removing from cache AP without pods
+	slugToState          maps.SafeMap[string, applicationProfileState]     // cache the containerID to slug mapping, this will enable a quick lookup of the application profile
+	storageClient        versioned.SpdxV1beta1Interface
+	allProfiles          mapset.Set[string] // cache all the application profiles that are ready. this will enable removing from cache AP without pods that are running on the same node
+	nodeName             string
+	maxDelaySeconds      int // maximum delay in seconds before getting the full object from the storage
+	userManagedProfiles  maps.SafeMap[string, *v1beta1.ApplicationProfile]
+	pendingMergeProfiles maps.SafeMap[string, *v1beta1.ApplicationProfile]
+	mergeWaitGroup       sync.WaitGroup
+	mergeTimeout         time.Duration
 }
 
 func NewApplicationProfileCache(nodeName string, storageClient versioned.SpdxV1beta1Interface, maxDelaySeconds int) *ApplicationProfileCacheImpl {
 	return &ApplicationProfileCacheImpl{
-		nodeName:         nodeName,
-		maxDelaySeconds:  maxDelaySeconds,
-		storageClient:    storageClient,
-		containerToSlug:  maps.SafeMap[string, string]{},
-		slugToContainers: maps.SafeMap[string, mapset.Set[string]]{},
-		allProfiles:      mapset.NewSet[string](),
+		nodeName:             nodeName,
+		maxDelaySeconds:      maxDelaySeconds,
+		storageClient:        storageClient,
+		containerToSlug:      maps.SafeMap[string, string]{},
+		slugToContainers:     maps.SafeMap[string, mapset.Set[string]]{},
+		allProfiles:          mapset.NewSet[string](),
+		userManagedProfiles:  maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
+		pendingMergeProfiles: maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
+		mergeTimeout:         time.Duration(maxDelaySeconds) * time.Second,
 	}
 
 }
@@ -213,16 +220,34 @@ func (ap *ApplicationProfileCacheImpl) removeContainer(containerID string) {
 }
 
 // ------------------ watch application profile methods -----------------------
-func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, obj runtime.Object) {
+func (ap *ApplicationProfileCacheImpl) addApplicationProfile(ctx context.Context, obj runtime.Object) {
 	appProfile := obj.(*v1beta1.ApplicationProfile)
 	apName := objectcache.MetaUniqueName(appProfile)
 
+	isUserManaged := appProfile.Annotations["kubescape.io/managed-by"] == "User"
+
+	if isUserManaged {
+		ap.handleUserManagedProfile(ctx, appProfile, apName)
+	} else {
+		ap.handleNormalProfile(appProfile, apName)
+	}
+}
+
+func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(ctx context.Context, appProfile *v1beta1.ApplicationProfile, apName string) {
+	ap.userManagedProfiles.Set(apName, appProfile)
+
+	if normalProfile := ap.slugToAppProfile.Get(apName); normalProfile != nil {
+		ap.mergeProfiles(normalProfile, appProfile)
+	} else {
+		ap.pendingMergeProfiles.Set(apName, appProfile)
+		ap.waitForNormalProfile(ctx, apName)
+	}
+}
+
+func (ap *ApplicationProfileCacheImpl) handleNormalProfile(appProfile *v1beta1.ApplicationProfile, apName string) {
 	apState := newApplicationProfileState(appProfile)
 	ap.slugToState.Set(apName, apState)
 
-	// the cache holds only completed application profiles.
-	// check if the application profile is completed
-	// if status was completed and now is not (e.g. mode changed from complete to partial), remove from cache
 	if apState.status != helpersv1.Completed {
 		if ap.slugToAppProfile.Has(apName) {
 			ap.slugToAppProfile.Delete(apName)
@@ -231,17 +256,99 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(_ context.Context, 
 		return
 	}
 
-	// add to the cache
 	ap.allProfiles.Add(apName)
 
-	if ap.slugToContainers.Has(apName) {
-		// get the full application profile from the storage
-		// the watch only returns the metadata
-		// avoid thundering herd problem by adding a random delay
-		time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
-			ap.addFullApplicationProfile(appProfile, apName)
-		})
+	if userManagedProfile := ap.userManagedProfiles.Get(apName); userManagedProfile != nil {
+		ap.mergeProfiles(appProfile, userManagedProfile)
+	} else if pendingProfile := ap.pendingMergeProfiles.Get(apName); pendingProfile != nil {
+		ap.mergeProfiles(appProfile, pendingProfile)
+		ap.pendingMergeProfiles.Delete(apName)
+	} else {
+		ap.addFullApplicationProfile(appProfile, apName)
 	}
+}
+
+func (ap *ApplicationProfileCacheImpl) mergeProfiles(normalProfile, userManagedProfile *v1beta1.ApplicationProfile) {
+	mergedProfile := ap.performMerge(normalProfile, userManagedProfile)
+	ap.slugToAppProfile.Set(objectcache.MetaUniqueName(mergedProfile), mergedProfile)
+
+	if ap.slugToContainers.Has(objectcache.MetaUniqueName(mergedProfile)) {
+		for _, containerID := range ap.slugToContainers.Get(objectcache.MetaUniqueName(mergedProfile)).ToSlice() {
+			ap.containerToSlug.Set(containerID, objectcache.MetaUniqueName(mergedProfile))
+		}
+	}
+
+	logger.L().Debug("Merged user-managed profile with normal profile",
+		helpers.String("name", mergedProfile.GetName()),
+		helpers.String("namespace", mergedProfile.GetNamespace()))
+}
+
+func (ap *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedProfile *v1beta1.ApplicationProfile) *v1beta1.ApplicationProfile {
+	mergedProfile := normalProfile.DeepCopy()
+
+	// Merge spec
+	mergedProfile.Spec.Containers = ap.mergeContainers(mergedProfile.Spec.Containers, userManagedProfile.Spec.Containers)
+	mergedProfile.Spec.InitContainers = ap.mergeContainers(mergedProfile.Spec.InitContainers, userManagedProfile.Spec.InitContainers)
+	mergedProfile.Spec.EphemeralContainers = ap.mergeContainers(mergedProfile.Spec.EphemeralContainers, userManagedProfile.Spec.EphemeralContainers)
+
+	// Remove the user-managed annotation
+	delete(mergedProfile.Annotations, "kubescape.io/managed-by")
+
+	return mergedProfile
+}
+
+func (ap *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.ApplicationProfileContainer) []v1beta1.ApplicationProfileContainer {
+	containerMap := make(map[string]*v1beta1.ApplicationProfileContainer)
+
+	for i := range normalContainers {
+		containerMap[normalContainers[i].Name] = &normalContainers[i]
+	}
+
+	for _, userContainer := range userManagedContainers {
+		if normalContainer, exists := containerMap[userContainer.Name]; exists {
+			ap.mergeContainer(normalContainer, &userContainer)
+		} else {
+			normalContainers = append(normalContainers, userContainer)
+		}
+	}
+
+	return normalContainers
+}
+
+func (ap *ApplicationProfileCacheImpl) mergeContainer(normalContainer, userContainer *v1beta1.ApplicationProfileContainer) {
+	normalContainer.Capabilities = append(normalContainer.Capabilities, userContainer.Capabilities...)
+	normalContainer.Execs = append(normalContainer.Execs, userContainer.Execs...)
+	normalContainer.Opens = append(normalContainer.Opens, userContainer.Opens...)
+	normalContainer.Syscalls = append(normalContainer.Syscalls, userContainer.Syscalls...)
+	normalContainer.Endpoints = append(normalContainer.Endpoints, userContainer.Endpoints...)
+}
+
+func (ap *ApplicationProfileCacheImpl) waitForNormalProfile(ctx context.Context, apName string) {
+	ap.mergeWaitGroup.Add(1)
+	go func() {
+		defer ap.mergeWaitGroup.Done()
+		timer := time.NewTimer(ap.mergeTimeout)
+		defer timer.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				logger.L().Warning("Timeout waiting for normal profile", helpers.String("name", apName))
+				ap.pendingMergeProfiles.Delete(apName)
+				return
+			default:
+				if normalProfile := ap.slugToAppProfile.Get(apName); normalProfile != nil {
+					userManagedProfile := ap.pendingMergeProfiles.Get(apName)
+					ap.mergeProfiles(normalProfile, userManagedProfile)
+					ap.pendingMergeProfiles.Delete(apName)
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}()
 }
 
 func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1beta1.ApplicationProfile, apName string) {
