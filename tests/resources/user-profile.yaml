@@ -8,10 +8,16 @@ spec:
   containers:
   - name: nginx
     execs:
-    - ls  # Allow ls command for nginx container
+    - path: ls
+      args:
+      - "-l"
   - name: server
     execs:
-    - ls            # Allow ls command for server container
-    - /bin/grpc_health_probe  # Allow health probe for server container
+    - path: ls
+      args:
+      - "-l"
+    - path: /bin/grpc_health_probe
+      args:
+      - "-addr=:9555"
   initContainers: []
   ephemeralContainers: []
