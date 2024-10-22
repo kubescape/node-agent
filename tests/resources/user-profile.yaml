@@ -2,6 +2,7 @@ apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
 kind: ApplicationProfile
 metadata:
   name: {name}
+  namespace: {namespace}
   annotations:
     kubescape.io/managed-by: User  # This marks it as a user-managed profile
 spec:

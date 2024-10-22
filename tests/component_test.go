@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"slices"
 	"sort"
@@ -727,102 +728,94 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
 
+	// PHASE 1: Setup workload and initial profile
 	ns := testutils.NewRandomNamespace()
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
-	if err != nil {
-		t.Errorf("Error creating workload: %v", err)
-	}
-	assert.NoError(t, wl.WaitForReady(80))
+	require.NoError(t, err, "Failed to create workload")
+	require.NoError(t, wl.WaitForReady(80), "Workload failed to be ready")
+	require.NoError(t, wl.WaitForApplicationProfile(80, "ready"), "Application profile not ready")
 
-	// Wait for initial profile creation
-	assert.NoError(t, wl.WaitForApplicationProfile(80, "ready"))
-
-	// Execute commands to generate initial profile
+	// Generate initial profile data
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
 	require.NoError(t, err, "Failed to exec into nginx container")
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "server")
 	require.NoError(t, err, "Failed to exec into server container")
 
-	// Wait for profile completion
-	err = wl.WaitForApplicationProfileCompletion(80)
-	require.NoError(t, err, "Error waiting for application profile completion")
+	require.NoError(t, wl.WaitForApplicationProfileCompletion(80), "Profile failed to complete")
+	time.Sleep(10 * time.Second) // Allow profile processing
 
-	// Give time for the profile to be fully processed
-	time.Sleep(10 * time.Second)
+	// Log initial profile state
+	initialProfile, err := wl.GetApplicationProfile()
+	require.NoError(t, err, "Failed to get initial profile")
+	initialProfileJSON, _ := json.Marshal(initialProfile)
+	t.Logf("Initial application profile:\n%s", string(initialProfileJSON))
 
-	// Get the initial profile for reference
-	appProfile, err := wl.GetApplicationProfile()
-	require.NoError(t, err, "Failed to get application profile")
-	appProfileJson, _ := json.Marshal(appProfile)
-	t.Logf("Initial application profile: %v", string(appProfileJson))
+	// PHASE 2: Verify initial alerts
+	t.Log("Testing initial alert generation...")
+	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
+	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: alert
+	time.Sleep(30 * time.Second)                   // Wait for alert generation
 
-	// Execute test commands that should trigger alerts
-	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // should be allowed (in profile)
-	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // should trigger alert (not in profile)
+	initialAlerts, err := testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Failed to get initial alerts")
+	testutils.AssertContains(t, initialAlerts, "Unexpected process launched", "ls", "server")
+	testutils.AssertNotContains(t, initialAlerts, "Unexpected process launched", "ls", "nginx")
 
-	// Wait for alerts to be generated
-	time.Sleep(30 * time.Second)
-
-	// Verify initial alerts
-	alerts, err := testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Error getting alerts")
-
-	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "server")
-	testutils.AssertNotContains(t, alerts, "Unexpected process launched", "ls", "nginx")
-
-	// Create and apply user-managed profile
+	// PHASE 3: Apply user-managed profile
+	t.Log("Applying user-managed profile...")
 	userProfileBytes, err := os.ReadFile(path.Join(utils.CurrentDir(), "resources/user-profile.yaml"))
 	require.NoError(t, err, "Failed to read user profile template")
 
-	// Use ug- prefix for user-managed profile
-	userProfileContent := strings.Replace(string(userProfileBytes), "{name}", fmt.Sprintf("ug-%s", appProfile.Name), 1)
-	t.Logf("Applying user profile:\n%s", userProfileContent)
+	// Replace both name and namespace placeholders
+	userProfileContent := string(userProfileBytes)
+	userProfileContent = strings.Replace(userProfileContent, "{name}", fmt.Sprintf("ug-%s", initialProfile.Name), 1)
+	userProfileContent = strings.Replace(userProfileContent, "{namespace}", initialProfile.Namespace, 1)
 
+	t.Logf("User profile content:\n%s", userProfileContent)
+
+	// Create and apply the user profile
 	tmpFile, err := os.CreateTemp("", "user-profile-*.yaml")
 	require.NoError(t, err, "Failed to create temp file")
 	defer os.Remove(tmpFile.Name())
 
-	_, err = tmpFile.WriteString(userProfileContent)
-	require.NoError(t, err, "Failed to write to temp file")
-	err = tmpFile.Close()
-	require.NoError(t, err, "Failed to close temp file")
+	err = os.WriteFile(tmpFile.Name(), []byte(userProfileContent), 0644)
+	require.NoError(t, err, "Failed to write user profile to file")
 
-	// Apply user profile
-	exitCode := testutils.RunCommand("kubectl", "apply", "-f", tmpFile.Name())
-	assert.Equal(t, 0, exitCode, "Failed to apply user profile")
+	output, err := exec.Command("kubectl", "apply", "-f", tmpFile.Name()).CombinedOutput()
+	if err != nil {
+		t.Fatalf("Failed to apply user profile: %v\nOutput: %s", err, string(output))
+	}
 
-	// Wait for profile merge to complete
-	time.Sleep(10 * time.Second)
+	// PHASE 4: Verify merged profile behavior
+	t.Log("Verifying merged profile behavior...")
+	time.Sleep(15 * time.Second) // Allow merge to complete
 
-	// Get merged profile for verification
+	// Log merged profile state
 	mergedProfile, err := wl.GetApplicationProfile()
 	require.NoError(t, err, "Failed to get merged profile")
-	mergedProfileJson, _ := json.Marshal(mergedProfile)
-	t.Logf("Merged application profile: %v", string(mergedProfileJson))
+	mergedProfileJSON, _ := json.Marshal(mergedProfile)
+	t.Logf("Merged application profile:\n%s", string(mergedProfileJSON))
 
-	// Execute same commands - should not generate new alerts after merge
+	// Test merged profile behavior
 	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
 	wl.ExecIntoPod([]string{"ls", "-l"}, "server")
+	time.Sleep(10 * time.Second) // Wait for potential alerts
 
-	// Wait for potential alerts
-	time.Sleep(10 * time.Second)
+	// Verify alert counts
+	finalAlerts, err := testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Failed to get final alerts")
 
-	// Verify no new alerts were generated
-	newAlerts, err := testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Error getting alerts")
-
-	// Count alerts by rule name
-	alertsCount := map[string]int{}
-	for _, alert := range newAlerts {
+	alertCounts := make(map[string]int)
+	for _, alert := range finalAlerts {
 		if ruleName, ok := alert.Labels["rule_name"]; ok {
-			alertsCount[ruleName]++
+			alertCounts[ruleName]++
 		}
 	}
 
-	// Verify alert counts haven't increased significantly
-	for ruleName, count := range alertsCount {
+	// Check for unexpected increase in alerts
+	for ruleName, count := range alertCounts {
 		if count > 2 && ruleName == "Unexpected process launched" {
-			t.Errorf("Alert '%s' was signaled %d times after merge, expected ≤ 2", ruleName, count)
+			t.Errorf("Unexpected number of alerts for '%s': got %d, expected ≤ 2", ruleName, count)
 		}
 	}
 }
