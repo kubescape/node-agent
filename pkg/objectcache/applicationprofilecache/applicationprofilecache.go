@@ -336,15 +336,19 @@ func (ap *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedPr
 }
 
 func (ap *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.ApplicationProfileContainer) []v1beta1.ApplicationProfileContainer {
-	containerMap := make(map[string]*v1beta1.ApplicationProfileContainer)
+	// Create a map to store containers by name
+	containerMap := make(map[string]int) // map name to index in slice
 
+	// Store indices of normal containers
 	for i := range normalContainers {
-		containerMap[normalContainers[i].Name] = &normalContainers[i]
+		containerMap[normalContainers[i].Name] = i
 	}
 
+	// Merge or append user containers
 	for _, userContainer := range userManagedContainers {
-		if normalContainer, exists := containerMap[userContainer.Name]; exists {
-			ap.mergeContainer(normalContainer, &userContainer)
+		if idx, exists := containerMap[userContainer.Name]; exists {
+			// Directly modify the container in the slice
+			ap.mergeContainer(&normalContainers[idx], &userContainer)
 		} else {
 			normalContainers = append(normalContainers, userContainer)
 		}
