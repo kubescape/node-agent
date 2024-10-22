@@ -82,7 +82,7 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 	baseProfileUniqueName := objectcache.UniqueName(appProfile.GetNamespace(), baseProfileName)
 
 	// Store the user-managed profile temporarily
-	ap.userManagedProfiles.Set(baseProfileUniqueName, appProfile)
+	ap.userManagedProfiles.Set(baseProfileUniqueName, appProfile.DeepCopy())
 
 	// If we have the base profile cached, fetch a fresh copy and merge
 	if ap.slugToAppProfile.Has(baseProfileUniqueName) {
