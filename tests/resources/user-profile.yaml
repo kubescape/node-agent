@@ -3,6 +3,7 @@ kind: ApplicationProfile
 metadata:
   name: {name}
   namespace: {namespace}
+  resourceVersion: "1"  # Start with "1" for new resources
   annotations:
     kubescape.io/managed-by: User
 spec:
