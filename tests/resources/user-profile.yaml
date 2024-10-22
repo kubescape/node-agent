@@ -18,8 +18,8 @@ spec:
     execs:
     - path: /usr/bin/ls
       args:
-      - "/usr/bin/ls"
-      - "-l"
+      - /usr/bin/ls
+      - -l
     seccompProfile:
       spec:
         defaultAction: ""
@@ -33,8 +33,8 @@ spec:
     execs:
     - path: /usr/bin/ls
       args:
-      - "/usr/bin/ls"
-      - "-l"
+      - /usr/bin/ls
+      - -l
     - path: /bin/grpc_health_probe
       args:
       - "-addr=:9555"
