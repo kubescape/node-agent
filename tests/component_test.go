@@ -738,6 +738,8 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	// Generate initial profile data
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
 	require.NoError(t, err, "Failed to exec into nginx container")
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
+	require.NoError(t, err, "Failed to exec into server container")
 
 	require.NoError(t, wl.WaitForApplicationProfileCompletion(80), "Profile failed to complete")
 	time.Sleep(10 * time.Second) // Allow profile processing
@@ -764,21 +766,10 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	userProfileBytes, err := os.ReadFile(path.Join(utils.CurrentDir(), "resources/user-profile.yaml"))
 	require.NoError(t, err, "Failed to read user profile template")
 
-	// Extract required values from initial profile
-	workloadName := initialProfile.Labels["kubescape.io/workload-name"]
-	if workloadName == "" {
-		workloadName = strings.TrimPrefix(initialProfile.Name, "replicaset-")
-		workloadName = strings.TrimSuffix(workloadName, "-"+initialProfile.Labels["kubescape.io/instance-template-hash"])
-	}
-
 	// Create replacements map with properly quoted values
 	replacements := map[string]string{
-		"{name}":             fmt.Sprintf("ug-%s", initialProfile.Name),
-		"{namespace}":        initialProfile.Namespace,
-		"{hash}":             initialProfile.Labels["kubescape.io/instance-template-hash"],
-		"{workload-name}":    workloadName,
-		"{resource-version}": initialProfile.ResourceVersion,
-		"{wlid}":             fmt.Sprintf("wlid://cluster/%s/deployment-%s", initialProfile.Namespace, workloadName),
+		"{name}":      fmt.Sprintf("ug-%s", initialProfile.Name),
+		"{namespace}": initialProfile.Namespace,
 	}
 
 	userProfileContent := string(userProfileBytes)

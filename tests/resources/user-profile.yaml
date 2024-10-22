@@ -5,16 +5,6 @@ metadata:
   namespace: {namespace}
   annotations:
     kubescape.io/managed-by: User
-    kubescape.io/resource-size: "1"
-    kubescape.io/wlid: {wlid}
-  labels:
-    kubescape.io/instance-template-hash: {hash}
-    kubescape.io/workload-api-group: "apps"
-    kubescape.io/workload-api-version: "v1"
-    kubescape.io/workload-kind: "Deployment"
-    kubescape.io/workload-name: {workload-name}
-    kubescape.io/workload-namespace: "{namespace}"
-    kubescape.io/workload-resource-version: {resource-version}
 spec:
   architectures: ["amd64"]
   containers:
