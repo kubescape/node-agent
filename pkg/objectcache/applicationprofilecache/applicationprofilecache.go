@@ -84,6 +84,14 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 	// Store the user-managed profile temporarily
 	ap.userManagedProfiles.Set(baseProfileUniqueName, appProfile.DeepCopy())
 
+	// For debugging purposes print the execs of the user-managed profile
+	for _, container := range appProfile.Spec.Containers {
+		logger.L().Debug("user-managed execs", helpers.String("container", container.Name), helpers.String("execs", fmt.Sprintf("%v", container.Execs)))
+	}
+
+	// Print the user-managed profile
+	logger.L().Debug("added user-managed profile to cache", helpers.Interface("profile", appProfile))
+
 	// If we have the base profile cached, fetch a fresh copy and merge
 	if ap.slugToAppProfile.Has(baseProfileUniqueName) {
 		// Fetch fresh base profile from cluster
@@ -322,17 +330,7 @@ func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1b
 }
 
 func (ap *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedProfile *v1beta1.ApplicationProfile) *v1beta1.ApplicationProfile {
-	logger.L().Debug("starting profile merge",
-		helpers.String("normal-name", normalProfile.Name),
-		helpers.String("user-name", userManagedProfile.Name))
-
-	// Make a deep copy first
 	mergedProfile := normalProfile.DeepCopy()
-
-	// Log container counts
-	logger.L().Debug("container counts",
-		helpers.Int("normal-containers", len(mergedProfile.Spec.Containers)),
-		helpers.Int("user-containers", len(userManagedProfile.Spec.Containers)))
 
 	// Merge spec
 	mergedProfile.Spec.Containers = ap.mergeContainers(mergedProfile.Spec.Containers, userManagedProfile.Spec.Containers)
@@ -340,31 +338,10 @@ func (ap *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedPr
 	mergedProfile.Spec.EphemeralContainers = ap.mergeContainers(mergedProfile.Spec.EphemeralContainers, userManagedProfile.Spec.EphemeralContainers)
 
 	// Remove the user-managed annotation
-	if mergedProfile.Annotations == nil {
-		mergedProfile.Annotations = make(map[string]string)
-	}
 	delete(mergedProfile.Annotations, "kubescape.io/managed-by")
-
-	// Log final container counts
-	logger.L().Debug("final container counts",
-		helpers.Int("merged-containers", len(mergedProfile.Spec.Containers)))
 
 	return mergedProfile
 }
-
-// func (ap *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedProfile *v1beta1.ApplicationProfile) *v1beta1.ApplicationProfile {
-// 	mergedProfile := normalProfile.DeepCopy()
-
-// 	// Merge spec
-// 	mergedProfile.Spec.Containers = ap.mergeContainers(mergedProfile.Spec.Containers, userManagedProfile.Spec.Containers)
-// 	mergedProfile.Spec.InitContainers = ap.mergeContainers(mergedProfile.Spec.InitContainers, userManagedProfile.Spec.InitContainers)
-// 	mergedProfile.Spec.EphemeralContainers = ap.mergeContainers(mergedProfile.Spec.EphemeralContainers, userManagedProfile.Spec.EphemeralContainers)
-
-// 	// Remove the user-managed annotation
-// 	delete(mergedProfile.Annotations, "kubescape.io/managed-by")
-
-// 	return mergedProfile
-// }
 
 func (ap *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.ApplicationProfileContainer) []v1beta1.ApplicationProfileContainer {
 	// Create a map to store containers by name
@@ -389,58 +366,12 @@ func (ap *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userMan
 }
 
 func (ap *ApplicationProfileCacheImpl) mergeContainer(normalContainer, userContainer *v1beta1.ApplicationProfileContainer) {
-	logger.L().Debug("merging container",
-		helpers.String("container", normalContainer.Name),
-		helpers.Int("current-execs", len(normalContainer.Execs)),
-		helpers.Int("user-execs", len(userContainer.Execs)))
-
-	// Create new slices and copy existing content
-	newCapabilities := make([]string, len(normalContainer.Capabilities))
-	copy(newCapabilities, normalContainer.Capabilities)
-	newExecs := make([]v1beta1.ExecCalls, len(normalContainer.Execs))
-	copy(newExecs, normalContainer.Execs)
-	newOpens := make([]v1beta1.OpenCalls, len(normalContainer.Opens))
-	copy(newOpens, normalContainer.Opens)
-	newSyscalls := make([]string, len(normalContainer.Syscalls))
-	copy(newSyscalls, normalContainer.Syscalls)
-	newEndpoints := make([]v1beta1.HTTPEndpoint, len(normalContainer.Endpoints))
-	copy(newEndpoints, normalContainer.Endpoints)
-
-	// Append new content to the new slices
-	newCapabilities = append(newCapabilities, userContainer.Capabilities...)
-	newExecs = append(newExecs, userContainer.Execs...)
-	newOpens = append(newOpens, userContainer.Opens...)
-	newSyscalls = append(newSyscalls, userContainer.Syscalls...)
-	newEndpoints = append(newEndpoints, userContainer.Endpoints...)
-
-	// Assign new slices back to container
-	normalContainer.Capabilities = newCapabilities
-	normalContainer.Execs = newExecs
-	normalContainer.Opens = newOpens
-	normalContainer.Syscalls = newSyscalls
-	normalContainer.Endpoints = newEndpoints
-
-	logger.L().Debug("after merge",
-		helpers.String("container", normalContainer.Name),
-		helpers.Int("final-execs", len(normalContainer.Execs)))
-
-	// Log individual execs for verification
-	for i, exec := range normalContainer.Execs {
-		logger.L().Debug("exec entry",
-			helpers.String("container", normalContainer.Name),
-			helpers.Int("index", i),
-			helpers.String("path", exec.Path),
-			helpers.String("args", fmt.Sprintf("%v", exec.Args)))
-	}
+	normalContainer.Capabilities = append(normalContainer.Capabilities, userContainer.Capabilities...)
+	normalContainer.Execs = append(normalContainer.Execs, userContainer.Execs...)
+	normalContainer.Opens = append(normalContainer.Opens, userContainer.Opens...)
+	normalContainer.Syscalls = append(normalContainer.Syscalls, userContainer.Syscalls...)
+	normalContainer.Endpoints = append(normalContainer.Endpoints, userContainer.Endpoints...)
 }
-
-// func (ap *ApplicationProfileCacheImpl) mergeContainer(normalContainer, userContainer *v1beta1.ApplicationProfileContainer) {
-// 	normalContainer.Capabilities = append(normalContainer.Capabilities, userContainer.Capabilities...)
-// 	normalContainer.Execs = append(normalContainer.Execs, userContainer.Execs...)
-// 	normalContainer.Opens = append(normalContainer.Opens, userContainer.Opens...)
-// 	normalContainer.Syscalls = append(normalContainer.Syscalls, userContainer.Syscalls...)
-// 	normalContainer.Endpoints = append(normalContainer.Endpoints, userContainer.Endpoints...)
-// }
 
 func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj runtime.Object) {
 	appProfile := obj.(*v1beta1.ApplicationProfile)
