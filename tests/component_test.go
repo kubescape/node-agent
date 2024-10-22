@@ -764,13 +764,14 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	userProfileBytes, err := os.ReadFile(path.Join(utils.CurrentDir(), "resources/user-profile.yaml"))
 	require.NoError(t, err, "Failed to read user profile template")
 
-	// Extract workload name from initial profile
-	workloadName := ""
-	if initialProfile.Labels != nil {
-		workloadName = initialProfile.Labels["kubescape.io/workload-name"]
+	// Extract required values from initial profile
+	workloadName := initialProfile.Labels["kubescape.io/workload-name"]
+	if workloadName == "" {
+		workloadName = strings.TrimPrefix(initialProfile.Name, "replicaset-")
+		workloadName = strings.TrimSuffix(workloadName, "-"+initialProfile.Labels["kubescape.io/instance-template-hash"])
 	}
 
-	// Replace all placeholders in the template
+	// Create replacements map with properly quoted values
 	replacements := map[string]string{
 		"{name}":             fmt.Sprintf("ug-%s", initialProfile.Name),
 		"{namespace}":        initialProfile.Namespace,
