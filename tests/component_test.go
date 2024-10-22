@@ -766,10 +766,26 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	userProfileBytes, err := os.ReadFile(path.Join(utils.CurrentDir(), "resources/user-profile.yaml"))
 	require.NoError(t, err, "Failed to read user profile template")
 
-	// Replace both name and namespace placeholders
+	// Extract workload name from initial profile
+	workloadName := ""
+	if initialProfile.Labels != nil {
+		workloadName = initialProfile.Labels["kubescape.io/workload-name"]
+	}
+
+	// Replace all placeholders in the template
+	replacements := map[string]string{
+		"{name}":             fmt.Sprintf("ug-%s", initialProfile.Name),
+		"{namespace}":        initialProfile.Namespace,
+		"{hash}":             initialProfile.Labels["kubescape.io/instance-template-hash"],
+		"{workload-name}":    workloadName,
+		"{resource-version}": initialProfile.ResourceVersion,
+		"{wlid}":             fmt.Sprintf("wlid://cluster/%s/deployment-%s", initialProfile.Namespace, workloadName),
+	}
+
 	userProfileContent := string(userProfileBytes)
-	userProfileContent = strings.Replace(userProfileContent, "{name}", fmt.Sprintf("ug-%s", initialProfile.Name), 1)
-	userProfileContent = strings.Replace(userProfileContent, "{namespace}", initialProfile.Namespace, 1)
+	for placeholder, value := range replacements {
+		userProfileContent = strings.Replace(userProfileContent, placeholder, value, 1)
+	}
 
 	t.Logf("User profile content:\n%s", userProfileContent)
 
