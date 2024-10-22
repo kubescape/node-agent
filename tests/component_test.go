@@ -720,158 +720,109 @@ func getEndpoint(endpoints []v1beta1.HTTPEndpoint, endpoint v1beta1.HTTPEndpoint
 
 }
 
-// func Test_10_DemoTest(t *testing.T) {
-// 	start := time.Now()
-// 	defer tearDownTest(t, start)
+func Test_12_MergingProfilesTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
 
-// 	//testutils.IncreaseNodeAgentSniffingTime("2m")
-// 	wl, err := testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app-role.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating role: %v", err)
-// 	}
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+	assert.NoError(t, wl.WaitForReady(80))
 
-// 	wl, err = testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app-role-binding.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating role binding: %v", err)
-// 	}
+	assert.NoError(t, wl.WaitForApplicationProfile(80, "ready"))
+	assert.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"))
 
-// 	wl, err = testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app-service.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating service: %v", err)
-// 	}
+	// process launched from nginx container
+	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
 
-// 	wl, err = testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating workload: %v", err)
-// 	}
-// 	assert.NoError(t, wl.WaitForReady(80))
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4"}, "")
-// 	err = wl.WaitForApplicationProfileCompletion(80)
-// 	if err != nil {
-// 		t.Errorf("Error waiting for application profile to be completed: %v", err)
-// 	}
-// 	// err = wl.WaitForNetworkNeighborhoodCompletion(80)
-// 	// if err != nil {
-// 	// 	t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
-// 	// }
+	// network activity from server container
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
 
-// 	// Do a ls command using command injection in the ping command
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;ls"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	// network activity from nginx container
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")
 
-// 	// Do a cat command using command injection in the ping command
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;cat /run/secrets/kubernetes.io/serviceaccount/token"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	err = wl.WaitForApplicationProfileCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+	err = wl.WaitForNetworkNeighborhoodCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
+	}
 
-// 	// Do an uname command using command injection in the ping command
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;uname -m | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g'"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	time.Sleep(10 * time.Second)
 
-// 	// Download kubectl
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;curl -LO \"https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl\""}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	appProfile, _ := wl.GetApplicationProfile()
+	appProfileJson, _ := json.Marshal(appProfile)
 
-// 	// Sleep for 10 seconds to wait for the kubectl download
-// 	time.Sleep(10 * time.Second)
+	t.Logf("application profile: %v", string(appProfileJson))
 
-// 	// Make kubectl executable
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;chmod +x kubectl"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")                                           // no alert expected
+	wl.ExecIntoPod([]string{"ls", "-l"}, "server")                                          // alert expected
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // no alert expected
+	_, _, err = wl.ExecIntoPod([]string{"curl", "ebpf.io", "-m", "2"}, "nginx")             // alert expected
 
-// 	// Get the pods in the cluster
-// 	output, _, err := wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;./kubectl --server https://kubernetes.default --insecure-skip-tls-verify --token $(cat /run/secrets/kubernetes.io/serviceaccount/token) get pods"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	// Wait for the alert to be signaled
+	time.Sleep(30 * time.Second)
 
-// 	// Check that the output contains the pod-ping-app pod
-// 	assert.Contains(t, output, "ping-app", "Expected output to contain 'ping-app'")
+	alerts, err := testutils.GetAlerts(wl.Namespace)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
 
-// 	// Get the alerts and check that the alerts are generated
-// 	alerts, err := testutils.GetAlerts(wl.Namespace)
-// 	if err != nil {
-// 		t.Errorf("Error getting alerts: %v", err)
-// 	}
+	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "server")
+	testutils.AssertNotContains(t, alerts, "Unexpected process launched", "ls", "nginx")
 
-// 	// Validate that all alerts are signaled
-// 	expectedAlerts := map[string]bool{
-// 		"Unexpected process launched": false,
-// 		"Unexpected file access":      false,
-// 		"Kubernetes Client Executed":  false,
-// 		// "Exec from malicious source":               false,
-// 		"Exec Binary Not In Base Image":           false,
-// 		"Unexpected Service Account Token Access": false,
-// 		// "Unexpected domain request":               false,
-// 	}
+	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx")
+	testutils.AssertNotContains(t, alerts, "Unexpected domain request", "wget", "server")
 
-// 	for _, alert := range alerts {
-// 		ruleName, ruleOk := alert.Labels["rule_name"]
-// 		if ruleOk {
-// 			if _, exists := expectedAlerts[ruleName]; exists {
-// 				expectedAlerts[ruleName] = true
-// 			}
-// 		}
-// 	}
+	// check network neighborhood
+	nn, _ := wl.GetNetworkNeighborhood()
+	testutils.AssertNetworkNeighborhoodContains(t, nn, "nginx", []string{"kubernetes.io."}, []string{})
+	testutils.AssertNetworkNeighborhoodNotContains(t, nn, "server", []string{"kubernetes.io."}, []string{})
 
-// 	for ruleName, signaled := range expectedAlerts {
-// 		if !signaled {
-// 			t.Errorf("Expected alert '%s' was not signaled", ruleName)
-// 		}
-// 	}
-// }
+	testutils.AssertNetworkNeighborhoodContains(t, nn, "server", []string{"ebpf.io."}, []string{})
+	testutils.AssertNetworkNeighborhoodNotContains(t, nn, "nginx", []string{"ebpf.io."}, []string{})
 
-// func Test_11_DuplicationTest(t *testing.T) {
-// 	start := time.Now()
-// 	defer tearDownTest(t, start)
+	// Apply user profile with the same workload and check if the profiles are merged and that the alerts are no longer generated.
+	// The user profile will contain the exec calls from the nginx container and the network activity from the server container.
+	// Which will cause the alerts to not be generated (whitelist).
 
-// 	ns := testutils.NewRandomNamespace()
-// 	// wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
-// 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/ping-app.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating workload: %v", err)
-// 	}
-// 	assert.NoError(t, wl.WaitForReady(80))
+	// Apply user profile
+	exitCode := testutils.RunCommand("kubectl", "apply", "-f", path.Join(utils.CurrentDir(), "resources/user-profile.yaml"))
+	assert.Equal(t, 0, exitCode, "Error applying user profile")
 
-// 	err = wl.WaitForApplicationProfileCompletion(80)
-// 	if err != nil {
-// 		t.Errorf("Error waiting for application profile to be completed: %v", err)
-// 	}
+	// Sleep for 5 seconds to allow the profile to be applied
+	time.Sleep(5 * time.Second)
 
-// 	// process launched from nginx container
-// 	_, _, err = wl.ExecIntoPod([]string{"ls", "-a"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	// Check if the alerts are no longer generated
+	// Trigger the same exec calls and network activity
+	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // no alert expected
+	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // no alert expected
+	// _, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // no alert expected
+	// _, _, err = wl.ExecIntoPod([]string{"curl", "ebpf.io", "-m", "2"}, "nginx")             // no alert expected
 
-// 	time.Sleep(20 * time.Second)
+	// Wait for the alert to be signaled
+	time.Sleep(5 * time.Second)
+	alerts, err = testutils.GetAlerts(wl.Namespace)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
 
-// 	alerts, err := testutils.GetAlerts(wl.Namespace)
-// 	if err != nil {
-// 		t.Errorf("Error getting alerts: %v", err)
-// 	}
+	// Check the count of each alert type if it's bigger than 2, it means that the alerts are still being generated
+	alertsCount := map[string]int{}
+	for _, alert := range alerts {
+		ruleName, ruleOk := alert.Labels["rule_name"]
+		if ruleOk {
+			alertsCount[ruleName]++
+		}
+	}
 
-// 	// Validate that unexpected process launched alert is signaled only once
-// 	count := 0
-// 	for _, alert := range alerts {
-// 		ruleName, ruleOk := alert.Labels["rule_name"]
-// 		if ruleOk {
-// 			if ruleName == "Unexpected process launched" {
-// 				count++
-// 			}
-// 		}
-// 	}
-
-// 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "ping-app")
-
-// 	assert.Equal(t, 1, count, "Expected 1 alert of type 'Unexpected process launched' but got %d", count)
-// }
+	for ruleName, count := range alertsCount {
+		if count > 2 {
+			t.Errorf("Expected no alerts to be generated, but got %d alerts of type '%s'", count, ruleName)
+		}
+	}
+}

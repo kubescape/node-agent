@@ -1,0 +1,17 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ApplicationProfile
+metadata:
+  name: multiple-containers-deployment
+  annotations:
+    kubescape.io/managed-by: User  # This marks it as a user-managed profile
+spec:
+  containers:
+  - name: nginx
+    execs:
+    - ls  # Allow ls command for nginx container
+  - name: server
+    execs:
+    - ls            # Allow ls command for server container
+    - /bin/grpc_health_probe  # Allow health probe for server container
+  initContainers: []
+  ephemeralContainers: []
