@@ -146,13 +146,9 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(obj runtime.Object)
 
 func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string) *v1beta1.ApplicationProfile {
 	if s := ap.containerToSlug.Get(containerID); s != "" {
-		// Check if there's a user-managed version first
-		userManagedSlug := "ug-" + s
-		if profile := ap.slugToAppProfile.Get(userManagedSlug); profile != nil {
-			return profile
-		}
 		return ap.slugToAppProfile.Get(s)
 	}
+
 	return nil
 }
 
