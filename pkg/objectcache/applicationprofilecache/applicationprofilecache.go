@@ -14,6 +14,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	versioned "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
@@ -59,21 +60,40 @@ type ApplicationProfileCacheImpl struct {
 	pendingMergeProfiles maps.SafeMap[string, *v1beta1.ApplicationProfile]
 	mergeWaitGroup       sync.WaitGroup
 	mergeTimeout         time.Duration
+	testMode             bool
 }
 
-func NewApplicationProfileCache(nodeName string, storageClient versioned.SpdxV1beta1Interface, maxDelaySeconds int) *ApplicationProfileCacheImpl {
-	return &ApplicationProfileCacheImpl{
+type CacheOption func(*ApplicationProfileCacheImpl)
+
+// Option to enable test mode
+func WithTestMode() CacheOption {
+	return func(a *ApplicationProfileCacheImpl) {
+		a.testMode = true
+	}
+}
+
+func NewApplicationProfileCache(nodeName string, storageClient versioned.SpdxV1beta1Interface, maxDelaySeconds int, opts ...CacheOption) *ApplicationProfileCacheImpl {
+	cache := &ApplicationProfileCacheImpl{
 		nodeName:             nodeName,
 		maxDelaySeconds:      maxDelaySeconds,
 		storageClient:        storageClient,
 		containerToSlug:      maps.SafeMap[string, string]{},
+		slugToAppProfile:     maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
 		slugToContainers:     maps.SafeMap[string, mapset.Set[string]]{},
+		slugToState:          maps.SafeMap[string, applicationProfileState]{},
 		allProfiles:          mapset.NewSet[string](),
 		userManagedProfiles:  maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
 		pendingMergeProfiles: maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
-		mergeTimeout:         time.Duration(maxDelaySeconds) * time.Second,
+		mergeTimeout:         time.Minute * 1,
+		testMode:             false,
 	}
 
+	// Apply options
+	for _, opt := range opts {
+		opt(cache)
+	}
+
+	return cache
 }
 
 // ------------------ objectcache.ApplicationProfileCache methods -----------------------
@@ -224,23 +244,12 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(ctx context.Context
 	appProfile := obj.(*v1beta1.ApplicationProfile)
 	apName := objectcache.MetaUniqueName(appProfile)
 
-	isUserManaged := appProfile.Annotations["kubescape.io/managed-by"] == "User"
+	isUserManaged := appProfile.Annotations != nil && appProfile.Annotations["kubescape.io/managed-by"] == "User"
 
 	if isUserManaged {
 		ap.handleUserManagedProfile(ctx, appProfile, apName)
 	} else {
 		ap.handleNormalProfile(appProfile, apName)
-	}
-}
-
-func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(ctx context.Context, appProfile *v1beta1.ApplicationProfile, apName string) {
-	ap.userManagedProfiles.Set(apName, appProfile)
-
-	if normalProfile := ap.slugToAppProfile.Get(apName); normalProfile != nil {
-		ap.mergeProfiles(normalProfile, appProfile)
-	} else {
-		ap.pendingMergeProfiles.Set(apName, appProfile)
-		ap.waitForNormalProfile(ctx, apName)
 	}
 }
 
@@ -259,12 +268,91 @@ func (ap *ApplicationProfileCacheImpl) handleNormalProfile(appProfile *v1beta1.A
 	ap.allProfiles.Add(apName)
 
 	if userManagedProfile := ap.userManagedProfiles.Get(apName); userManagedProfile != nil {
-		ap.mergeProfiles(appProfile, userManagedProfile)
+		if ap.testMode {
+			fullProfile, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
+			if err != nil {
+				logger.L().Error("failed to get full application profile", helpers.Error(err))
+				return
+			}
+			ap.mergeProfiles(fullProfile, userManagedProfile)
+		} else {
+			time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
+				fullProfile, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
+				if err != nil {
+					logger.L().Error("failed to get full application profile", helpers.Error(err))
+					return
+				}
+				ap.mergeProfiles(fullProfile, userManagedProfile)
+			})
+		}
 	} else if pendingProfile := ap.pendingMergeProfiles.Get(apName); pendingProfile != nil {
-		ap.mergeProfiles(appProfile, pendingProfile)
-		ap.pendingMergeProfiles.Delete(apName)
+		if ap.testMode {
+			fullProfile, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
+			if err != nil {
+				logger.L().Error("failed to get full application profile", helpers.Error(err))
+				return
+			}
+			ap.mergeProfiles(fullProfile, pendingProfile)
+			ap.pendingMergeProfiles.Delete(apName)
+		} else {
+			time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
+				fullProfile, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
+				if err != nil {
+					logger.L().Error("failed to get full application profile", helpers.Error(err))
+					return
+				}
+				ap.mergeProfiles(fullProfile, pendingProfile)
+				ap.pendingMergeProfiles.Delete(apName)
+			})
+		}
 	} else {
-		ap.addFullApplicationProfile(appProfile, apName)
+		if ap.slugToContainers.Has(apName) {
+			if ap.testMode {
+				// Sync mode execution for testing
+				fullProfile, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
+				if err != nil {
+					logger.L().Error("failed to get full application profile", helpers.Error(err))
+					return
+				}
+				ap.slugToAppProfile.Set(apName, fullProfile)
+				for _, containerID := range ap.slugToContainers.Get(apName).ToSlice() {
+					ap.containerToSlug.Set(containerID, apName)
+				}
+			} else {
+				// Async delay to get the full object from the storage.
+				time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
+					ap.addFullApplicationProfile(appProfile, apName)
+				})
+			}
+		}
+	}
+}
+
+func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1beta1.ApplicationProfile, apName string) {
+	fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
+	if err != nil {
+		logger.L().Error("failed to get full application profile", helpers.Error(err))
+		return
+	}
+
+	if ap.slugToContainers.Has(apName) {
+		ap.slugToAppProfile.Set(apName, fullAP)
+		for _, containerID := range ap.slugToContainers.Get(apName).ToSlice() {
+			ap.containerToSlug.Set(containerID, apName)
+		}
+		logger.L().Debug("added pod to application profile cache", helpers.String("name", apName))
+	}
+}
+
+func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(ctx context.Context, appProfile *v1beta1.ApplicationProfile, apName string) {
+	ap.userManagedProfiles.Set(apName, appProfile)
+
+	if ap.slugToAppProfile.Has(apName) {
+		normalProfile := ap.slugToAppProfile.Get(apName)
+		ap.mergeProfiles(normalProfile, appProfile)
+	} else {
+		ap.pendingMergeProfiles.Set(apName, appProfile)
+		ap.waitForNormalProfile(ctx, apName)
 	}
 }
 
@@ -349,19 +437,6 @@ func (ap *ApplicationProfileCacheImpl) waitForNormalProfile(ctx context.Context,
 			}
 		}
 	}()
-}
-
-func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1beta1.ApplicationProfile, apName string) {
-	fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
-	if err != nil {
-		logger.L().Error("failed to get full application profile", helpers.Error(err))
-		return
-	}
-	ap.slugToAppProfile.Set(apName, fullAP)
-	for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
-		ap.containerToSlug.Set(i, apName)
-	}
-	logger.L().Debug("added pod to application profile cache", helpers.String("name", apName))
 }
 
 func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj runtime.Object) {
