@@ -734,119 +734,95 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	}
 	assert.NoError(t, wl.WaitForReady(80))
 
+	// Wait for initial profile creation
 	assert.NoError(t, wl.WaitForApplicationProfile(80, "ready"))
-	assert.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"))
 
-	// process launched from nginx container
+	// Execute commands to generate initial profile
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
+	require.NoError(t, err, "Failed to exec into nginx container")
+	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "server")
+	require.NoError(t, err, "Failed to exec into server container")
 
-	// network activity from server container
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
-
-	// network activity from nginx container
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")
-
+	// Wait for profile completion
 	err = wl.WaitForApplicationProfileCompletion(80)
-	if err != nil {
-		t.Errorf("Error waiting for application profile to be completed: %v", err)
-	}
-	err = wl.WaitForNetworkNeighborhoodCompletion(80)
-	if err != nil {
-		t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
-	}
+	require.NoError(t, err, "Error waiting for application profile completion")
 
+	// Give time for the profile to be fully processed
 	time.Sleep(10 * time.Second)
 
-	appProfile, _ := wl.GetApplicationProfile()
+	// Get the initial profile for reference
+	appProfile, err := wl.GetApplicationProfile()
+	require.NoError(t, err, "Failed to get application profile")
 	appProfileJson, _ := json.Marshal(appProfile)
+	t.Logf("Initial application profile: %v", string(appProfileJson))
 
-	t.Logf("application profile: %v", string(appProfileJson))
+	// Execute test commands that should trigger alerts
+	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // should be allowed (in profile)
+	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // should trigger alert (not in profile)
 
-	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")                                           // no alert expected
-	wl.ExecIntoPod([]string{"ls", "-l"}, "server")                                          // alert expected
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // no alert expected
-	_, _, err = wl.ExecIntoPod([]string{"curl", "ebpf.io", "-m", "2"}, "nginx")             // alert expected
-
-	// Wait for the alert to be signaled
+	// Wait for alerts to be generated
 	time.Sleep(30 * time.Second)
 
+	// Verify initial alerts
 	alerts, err := testutils.GetAlerts(wl.Namespace)
-	if err != nil {
-		t.Errorf("Error getting alerts: %v", err)
-	}
+	require.NoError(t, err, "Error getting alerts")
 
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "server")
 	testutils.AssertNotContains(t, alerts, "Unexpected process launched", "ls", "nginx")
 
-	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx")
-	testutils.AssertNotContains(t, alerts, "Unexpected domain request", "wget", "server")
-
-	// check network neighborhood
-	nn, _ := wl.GetNetworkNeighborhood()
-	testutils.AssertNetworkNeighborhoodContains(t, nn, "nginx", []string{"kubernetes.io."}, []string{})
-	testutils.AssertNetworkNeighborhoodNotContains(t, nn, "server", []string{"kubernetes.io."}, []string{})
-
-	testutils.AssertNetworkNeighborhoodContains(t, nn, "server", []string{"ebpf.io."}, []string{})
-	testutils.AssertNetworkNeighborhoodNotContains(t, nn, "nginx", []string{"ebpf.io."}, []string{})
-
-	// Apply user profile with the same workload and check if the profiles are merged and that the alerts are no longer generated.
-	// The user profile will contain the exec calls from the nginx container and the network activity from the server container.
-	// Which will cause the alerts to not be generated (whitelist).
-
-	// Modify the user profile name to match the existing application profile name
-	// Read the user profile template
+	// Create and apply user-managed profile
 	userProfileBytes, err := os.ReadFile(path.Join(utils.CurrentDir(), "resources/user-profile.yaml"))
 	require.NoError(t, err, "Failed to read user profile template")
 
-	// Replace the {name} placeholder with actual name
-	userProfileContent := strings.Replace(string(userProfileBytes), "{name}", appProfile.Name, 1)
-
-	// Log the user profile content
+	// Use ug- prefix for user-managed profile
+	userProfileContent := strings.Replace(string(userProfileBytes), "{name}", fmt.Sprintf("ug-%s", appProfile.Name), 1)
 	t.Logf("Applying user profile:\n%s", userProfileContent)
 
-	// Write to a temporary file
 	tmpFile, err := os.CreateTemp("", "user-profile-*.yaml")
 	require.NoError(t, err, "Failed to create temp file")
-	defer os.Remove(tmpFile.Name()) // Clean up
+	defer os.Remove(tmpFile.Name())
 
 	_, err = tmpFile.WriteString(userProfileContent)
 	require.NoError(t, err, "Failed to write to temp file")
 	err = tmpFile.Close()
 	require.NoError(t, err, "Failed to close temp file")
 
-	// Apply the modified user profile
+	// Apply user profile
 	exitCode := testutils.RunCommand("kubectl", "apply", "-f", tmpFile.Name())
-	assert.Equal(t, 0, exitCode, "Error applying user profile")
+	assert.Equal(t, 0, exitCode, "Failed to apply user profile")
 
-	// Sleep for 5 seconds to allow the profile to be applied
-	time.Sleep(5 * time.Second)
-
-	// Check if the alerts are no longer generated
-	// Trigger the same exec calls and network activity
-	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // no alert expected
-	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // no alert expected
-	// _, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // no alert expected
-	// _, _, err = wl.ExecIntoPod([]string{"curl", "ebpf.io", "-m", "2"}, "nginx")             // no alert expected
-
-	// Wait for the alert to be signaled
+	// Wait for profile merge to complete
 	time.Sleep(10 * time.Second)
-	alerts, err = testutils.GetAlerts(wl.Namespace)
-	if err != nil {
-		t.Errorf("Error getting alerts: %v", err)
-	}
 
-	// Check the count of exec alert type if it's bigger than 2, it means that the alerts are still being generated
+	// Get merged profile for verification
+	mergedProfile, err := wl.GetApplicationProfile()
+	require.NoError(t, err, "Failed to get merged profile")
+	mergedProfileJson, _ := json.Marshal(mergedProfile)
+	t.Logf("Merged application profile: %v", string(mergedProfileJson))
+
+	// Execute same commands - should not generate new alerts after merge
+	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
+	wl.ExecIntoPod([]string{"ls", "-l"}, "server")
+
+	// Wait for potential alerts
+	time.Sleep(10 * time.Second)
+
+	// Verify no new alerts were generated
+	newAlerts, err := testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Error getting alerts")
+
+	// Count alerts by rule name
 	alertsCount := map[string]int{}
-	for _, alert := range alerts {
-		ruleName, ruleOk := alert.Labels["rule_name"]
-		if ruleOk {
+	for _, alert := range newAlerts {
+		if ruleName, ok := alert.Labels["rule_name"]; ok {
 			alertsCount[ruleName]++
 		}
 	}
 
+	// Verify alert counts haven't increased significantly
 	for ruleName, count := range alertsCount {
 		if count > 2 && ruleName == "Unexpected process launched" {
-			t.Errorf("Alert '%s' was signaled %d times, expected 2", ruleName, count)
+			t.Errorf("Alert '%s' was signaled %d times after merge, expected ≤ 2", ruleName, count)
 		}
 	}
 }

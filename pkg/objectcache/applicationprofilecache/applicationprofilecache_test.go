@@ -766,7 +766,7 @@ func Test_MergeApplicationProfiles(t *testing.T) {
 			},
 			userProfile: &v1beta1.ApplicationProfile{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-profile",
+					Name:      "ug-test-profile", // Added ug- prefix
 					Namespace: "default",
 					Annotations: map[string]string{
 						"kubescape.io/managed-by": "User",
@@ -788,7 +788,7 @@ func Test_MergeApplicationProfiles(t *testing.T) {
 			},
 			expectedMerged: &v1beta1.ApplicationProfile{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-profile",
+					Name:      "test-profile", // Keeps original name without ug- prefix
 					Namespace: "default",
 				},
 				Spec: v1beta1.ApplicationProfileSpec{
@@ -844,7 +844,7 @@ func Test_MergeApplicationProfiles(t *testing.T) {
 			},
 			userProfile: &v1beta1.ApplicationProfile{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-profile",
+					Name:      "ug-test-profile", // Added ug- prefix
 					Namespace: "default",
 					Annotations: map[string]string{
 						"kubescape.io/managed-by": "User",
@@ -871,7 +871,7 @@ func Test_MergeApplicationProfiles(t *testing.T) {
 			},
 			expectedMerged: &v1beta1.ApplicationProfile{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-profile",
+					Name:      "test-profile", // Keeps original name without ug- prefix
 					Namespace: "default",
 				},
 				Spec: v1beta1.ApplicationProfileSpec{
@@ -921,7 +921,7 @@ func Test_MergeApplicationProfiles(t *testing.T) {
 			},
 			userProfile: &v1beta1.ApplicationProfile{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-profile",
+					Name:      "ug-test-profile", // Added ug- prefix
 					Namespace: "default",
 					Annotations: map[string]string{
 						"kubescape.io/managed-by": "User",
@@ -945,7 +945,7 @@ func Test_MergeApplicationProfiles(t *testing.T) {
 			},
 			expectedMerged: &v1beta1.ApplicationProfile{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-profile",
+					Name:      "test-profile", // Keeps original name without ug- prefix
 					Namespace: "default",
 				},
 				Spec: v1beta1.ApplicationProfileSpec{
