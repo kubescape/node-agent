@@ -758,6 +758,15 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 
 	initialAlerts, err := testutils.GetAlerts(wl.Namespace)
 	require.NoError(t, err, "Failed to get initial alerts")
+
+	// Record initial alert count
+	initialAlertCount := 0
+	for _, alert := range initialAlerts {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+			initialAlertCount++
+		}
+	}
+
 	testutils.AssertContains(t, initialAlerts, "Unexpected process launched", "ls", "server")
 	testutils.AssertNotContains(t, initialAlerts, "Unexpected process launched", "ls", "nginx")
 
@@ -805,19 +814,23 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	finalAlerts, err := testutils.GetAlerts(wl.Namespace)
 	require.NoError(t, err, "Failed to get final alerts")
 
-	alertCounts := make(map[string]int)
+	// Only count new alerts (after the initial count)
+	newAlertCount := 0
 	for _, alert := range finalAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok {
-			alertCounts[ruleName]++
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+			newAlertCount++
 		}
 	}
 
-	// Check for unexpected increase in alerts
-	for ruleName, count := range alertCounts {
-		if count > 1 && ruleName == "Unexpected process launched" {
-			// Print all alerts for debugging
-			t.Logf("Final alerts:\n%v", finalAlerts)
-			t.Errorf("Unexpected number of alerts for '%s': got %d, expected ≤ 1", ruleName, count)
+	t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, newAlertCount)
+
+	if newAlertCount > initialAlertCount {
+		t.Logf("Full alert details:")
+		for _, alert := range finalAlerts {
+			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+				t.Logf("Alert: %+v", alert)
+			}
 		}
+		t.Errorf("New alerts were generated after merge (Initial: %d, Final: %d)", initialAlertCount, newAlertCount)
 	}
 }
