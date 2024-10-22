@@ -1,7 +1,7 @@
 apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
 kind: ApplicationProfile
 metadata:
-  name: multiple-containers-deployment
+  name: {name}
   annotations:
     kubescape.io/managed-by: User  # This marks it as a user-managed profile
 spec:

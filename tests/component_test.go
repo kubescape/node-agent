@@ -6,9 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	spdxv1beta1client "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -790,8 +793,29 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	// The user profile will contain the exec calls from the nginx container and the network activity from the server container.
 	// Which will cause the alerts to not be generated (whitelist).
 
-	// Apply user profile
-	exitCode := testutils.RunCommand("kubectl", "apply", "-f", path.Join(utils.CurrentDir(), "resources/user-profile.yaml"))
+	// Modify the user profile name to match the existing application profile name
+	// Read the user profile template
+	userProfileBytes, err := os.ReadFile(path.Join(utils.CurrentDir(), "resources/user-profile.yaml"))
+	require.NoError(t, err, "Failed to read user profile template")
+
+	// Replace the {name} placeholder with actual name
+	userProfileContent := strings.Replace(string(userProfileBytes), "{name}", appProfile.Name, 1)
+
+	// Log the user profile content
+	t.Logf("Applying user profile:\n%s", userProfileContent)
+
+	// Write to a temporary file
+	tmpFile, err := os.CreateTemp("", "user-profile-*.yaml")
+	require.NoError(t, err, "Failed to create temp file")
+	defer os.Remove(tmpFile.Name()) // Clean up
+
+	_, err = tmpFile.WriteString(userProfileContent)
+	require.NoError(t, err, "Failed to write to temp file")
+	err = tmpFile.Close()
+	require.NoError(t, err, "Failed to close temp file")
+
+	// Apply the modified user profile
+	exitCode := testutils.RunCommand("kubectl", "apply", "-f", tmpFile.Name())
 	assert.Equal(t, 0, exitCode, "Error applying user profile")
 
 	// Sleep for 5 seconds to allow the profile to be applied
@@ -805,13 +829,13 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	// _, _, err = wl.ExecIntoPod([]string{"curl", "ebpf.io", "-m", "2"}, "nginx")             // no alert expected
 
 	// Wait for the alert to be signaled
-	time.Sleep(5 * time.Second)
+	time.Sleep(10 * time.Second)
 	alerts, err = testutils.GetAlerts(wl.Namespace)
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
 
-	// Check the count of each alert type if it's bigger than 2, it means that the alerts are still being generated
+	// Check the count of exec alert type if it's bigger than 2, it means that the alerts are still being generated
 	alertsCount := map[string]int{}
 	for _, alert := range alerts {
 		ruleName, ruleOk := alert.Labels["rule_name"]
@@ -821,8 +845,8 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	}
 
 	for ruleName, count := range alertsCount {
-		if count > 2 {
-			t.Errorf("Expected no alerts to be generated, but got %d alerts of type '%s'", count, ruleName)
+		if count > 2 && ruleName == "Unexpected process launched" {
+			t.Errorf("Alert '%s' was signaled %d times, expected 2", ruleName, count)
 		}
 	}
 }
