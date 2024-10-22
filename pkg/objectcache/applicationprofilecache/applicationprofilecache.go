@@ -346,6 +346,15 @@ func (ap *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userMan
 func (ap *ApplicationProfileCacheImpl) mergeContainer(normalContainer, userContainer *v1beta1.ApplicationProfileContainer) {
 	normalContainer.Capabilities = append(normalContainer.Capabilities, userContainer.Capabilities...)
 	normalContainer.Execs = append(normalContainer.Execs, userContainer.Execs...)
+
+	for _, exec := range userContainer.Execs {
+		logger.L().Debug("merged exec call", helpers.String("path", exec.Path))
+	}
+
+	for _, exec := range normalContainer.Execs {
+		logger.L().Debug("final exec call", helpers.String("path", exec.Path))
+	}
+
 	normalContainer.Opens = append(normalContainer.Opens, userContainer.Opens...)
 	normalContainer.Syscalls = append(normalContainer.Syscalls, userContainer.Syscalls...)
 	normalContainer.Endpoints = append(normalContainer.Endpoints, userContainer.Endpoints...)
