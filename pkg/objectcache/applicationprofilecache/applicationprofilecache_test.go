@@ -81,7 +81,7 @@ func Test_AddHandlers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.obj.(metav1.Object).SetNamespace("default")
 			storageClient := fake.NewSimpleClientset().SpdxV1beta1()
-			ap := NewApplicationProfileCache("", storageClient, 0, WithTestMode())
+			ap := NewApplicationProfileCache("", storageClient, 0)
 			ap.slugToContainers.Set(tt.slug, mapset.NewSet[string]())
 
 			tt.f(ap, context.Background(), tt.obj)
@@ -180,16 +180,16 @@ func Test_addApplicationProfile(t *testing.T) {
 
 			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			ap := NewApplicationProfileCache("", storageClient, 0, WithTestMode())
+			ap := NewApplicationProfileCache("", storageClient, 0)
 
 			for i := range tt.preCreatedPods {
 				ap.addPod(tt.preCreatedPods[i])
 			}
 			for i := range tt.preCreatedAP {
-				ap.addApplicationProfile(context.Background(), tt.preCreatedAP[i])
+				ap.addApplicationProfile(tt.preCreatedAP[i])
 			}
 
-			ap.addApplicationProfile(context.Background(), tt.obj)
+			ap.addApplicationProfile(tt.obj)
 			time.Sleep(1 * time.Second) // add is async
 
 			// test if the application profile is added to the cache
@@ -255,7 +255,7 @@ func Test_deleteApplicationProfile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ap := NewApplicationProfileCache("", nil, 0, WithTestMode())
+			ap := NewApplicationProfileCache("", nil, 0)
 
 			ap.allProfiles.Append(tt.slugs...)
 			for _, i := range tt.slugs {
@@ -318,7 +318,7 @@ func Test_deletePod(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ap := NewApplicationProfileCache("", nil, 0, WithTestMode())
+			ap := NewApplicationProfileCache("", nil, 0)
 			for _, i := range tt.otherSlugs {
 				ap.slugToContainers.Set(i, mapset.NewSet[string]())
 				ap.slugToAppProfile.Set(i, &v1beta1.ApplicationProfile{})
@@ -426,7 +426,7 @@ func Test_GetApplicationProfile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ap := NewApplicationProfileCache("", fake.NewSimpleClientset().SpdxV1beta1(), 0, WithTestMode())
+			ap := NewApplicationProfileCache("", fake.NewSimpleClientset().SpdxV1beta1(), 0)
 
 			for _, c := range tt.pods {
 				ap.containerToSlug.Set(c.containerID, c.slug)
@@ -505,7 +505,7 @@ func Test_addApplicationProfile_existing(t *testing.T) {
 
 			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			ap := NewApplicationProfileCache("", storageClient, 0, WithTestMode())
+			ap := NewApplicationProfileCache("", storageClient, 0)
 
 			// add pods
 			for i := range tt.pods {
@@ -513,9 +513,9 @@ func Test_addApplicationProfile_existing(t *testing.T) {
 				ap.slugToContainers.Set(tt.pods[i].slug, mapset.NewSet(tt.pods[i].podName))
 			}
 
-			ap.addApplicationProfile(context.Background(), tt.obj1)
+			ap.addApplicationProfile(tt.obj1)
 			time.Sleep(1 * time.Second) // add is async
-			ap.addApplicationProfile(context.Background(), tt.obj2)
+			ap.addApplicationProfile(tt.obj2)
 
 			// test if the application profile is added to the cache
 			if tt.storeInCache {
@@ -583,7 +583,7 @@ func Test_getApplicationProfile(t *testing.T) {
 }
 
 func Test_WatchResources(t *testing.T) {
-	ap := NewApplicationProfileCache("test-node", nil, 0, WithTestMode())
+	ap := NewApplicationProfileCache("test-node", nil, 0)
 
 	expectedPodWatchResource := watcher.NewWatchResource(schema.GroupVersionResource{
 		Group:    "",
@@ -704,9 +704,9 @@ func Test_addPod(t *testing.T) {
 
 			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			ap := NewApplicationProfileCache("", storageClient, 0, WithTestMode())
+			ap := NewApplicationProfileCache("", storageClient, 0)
 
-			ap.addApplicationProfile(context.Background(), tt.preCreatedAP)
+			ap.addApplicationProfile(tt.preCreatedAP)
 			time.Sleep(1 * time.Second) // add is async
 
 			tt.obj.(metav1.Object).SetNamespace(namespace)
@@ -972,7 +972,7 @@ func Test_MergeApplicationProfiles(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cache := NewApplicationProfileCache("test-node", nil, 0, WithTestMode())
+			cache := NewApplicationProfileCache("test-node", nil, 0)
 			merged := cache.performMerge(tt.normalProfile, tt.userProfile)
 
 			// Verify object metadata
