@@ -738,8 +738,6 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	// Generate initial profile data
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
 	require.NoError(t, err, "Failed to exec into nginx container")
-	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "server")
-	require.NoError(t, err, "Failed to exec into server container")
 
 	require.NoError(t, wl.WaitForApplicationProfileCompletion(80), "Profile failed to complete")
 	time.Sleep(10 * time.Second) // Allow profile processing
@@ -830,8 +828,8 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 
 	// Check for unexpected increase in alerts
 	for ruleName, count := range alertCounts {
-		if count > 2 && ruleName == "Unexpected process launched" {
-			t.Errorf("Unexpected number of alerts for '%s': got %d, expected ≤ 2", ruleName, count)
+		if count > 1 && ruleName == "Unexpected process launched" {
+			t.Errorf("Unexpected number of alerts for '%s': got %d, expected ≤ 1", ruleName, count)
 		}
 	}
 }
