@@ -96,8 +96,18 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 			return
 		}
 
+		// Print the execs for debugging
+		for _, container := range freshBaseProfile.Spec.Containers {
+			logger.L().Debug("before execs", helpers.String("container", container.Name), helpers.String("execs", fmt.Sprintf("%v", container.Execs)))
+		}
+
 		mergedProfile := ap.performMerge(freshBaseProfile, appProfile)
 		ap.slugToAppProfile.Set(baseProfileUniqueName, mergedProfile)
+
+		// Print the execs for debugging
+		for _, container := range mergedProfile.Spec.Containers {
+			logger.L().Debug("merged execs", helpers.String("container", container.Name), helpers.String("execs", fmt.Sprintf("%v", container.Execs)))
+		}
 
 		// Clean up the user-managed profile after successful merge
 		ap.userManagedProfiles.Delete(baseProfileUniqueName)
@@ -346,7 +356,6 @@ func (ap *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userMan
 func (ap *ApplicationProfileCacheImpl) mergeContainer(normalContainer, userContainer *v1beta1.ApplicationProfileContainer) {
 	normalContainer.Capabilities = append(normalContainer.Capabilities, userContainer.Capabilities...)
 	normalContainer.Execs = append(normalContainer.Execs, userContainer.Execs...)
-
 	normalContainer.Opens = append(normalContainer.Opens, userContainer.Opens...)
 	normalContainer.Syscalls = append(normalContainer.Syscalls, userContainer.Syscalls...)
 	normalContainer.Endpoints = append(normalContainer.Endpoints, userContainer.Endpoints...)
