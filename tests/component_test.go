@@ -796,16 +796,10 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	t.Log("Verifying merged profile behavior...")
 	time.Sleep(15 * time.Second) // Allow merge to complete
 
-	// Log merged profile state
-	mergedProfile, err := wl.GetApplicationProfile()
-	require.NoError(t, err, "Failed to get merged profile")
-	mergedProfileJSON, _ := json.Marshal(mergedProfile)
-	t.Logf("Merged application profile:\n%s", string(mergedProfileJSON))
-
 	// Test merged profile behavior
-	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
-	wl.ExecIntoPod([]string{"ls", "-l"}, "server")
-	time.Sleep(10 * time.Second) // Wait for potential alerts
+	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
+	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: no alert (user profile should suppress alert)
+	time.Sleep(10 * time.Second)                   // Wait for potential alerts
 
 	// Verify alert counts
 	finalAlerts, err := testutils.GetAlerts(wl.Namespace)
@@ -821,6 +815,8 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	// Check for unexpected increase in alerts
 	for ruleName, count := range alertCounts {
 		if count > 1 && ruleName == "Unexpected process launched" {
+			// Print all alerts for debugging
+			t.Logf("Final alerts:\n%v", finalAlerts)
 			t.Errorf("Unexpected number of alerts for '%s': got %d, expected ≤ 1", ruleName, count)
 		}
 	}
