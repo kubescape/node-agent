@@ -128,9 +128,6 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 		// Clean up the user-managed profile after successful merge
 		ap.userManagedProfiles.Delete(baseProfileUniqueName)
 
-		// Update the cached AP with the merged profile
-		ap.slugToAppProfile.Set(baseProfileUniqueName, mergedProfile)
-
 		logger.L().Debug("merged user-managed profile with fresh base profile",
 			helpers.String("name", baseProfileName),
 			helpers.String("namespace", appProfile.GetNamespace()))

@@ -32,9 +32,9 @@ spec:
     syscalls: []
     endpoints: []
     execs:
-    - path: /usr/bin/ls
+    - path: /bin/ls
       args:
-      - /usr/bin/ls
+      - /bin/ls
       - -l
     - path: /bin/grpc_health_probe
       args:

@@ -799,8 +799,8 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 					Name: "server",
 					Execs: []v1beta1.ExecCalls{
 						{
-							Path: "/usr/bin/ls",
-							Args: []string{"/usr/bin/ls", "-l"},
+							Path: "/bin/ls",
+							Args: []string{"/bin/ls", "-l"},
 						},
 						{
 							Path: "/bin/grpc_health_probe",
