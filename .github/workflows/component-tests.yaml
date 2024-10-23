@@ -50,6 +50,7 @@ jobs:
           Test_08_ApplicationProfilePatching,
           Test_10_MalwareDetectionTest,
           Test_11_EndpointTest,
+          Test_12_MergingProfilesTest,
           # Test_10_DemoTest
           # Test_11_DuplicationTest
         ]
