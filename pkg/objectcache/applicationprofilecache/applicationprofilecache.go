@@ -91,11 +91,6 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 	// Store the user-managed profile temporarily
 	ap.userManagedProfiles.Set(baseProfileUniqueName, fullAP)
 
-	// For debugging purposes print the execs of the user-managed profile
-	for _, container := range fullAP.Spec.Containers {
-		logger.L().Debug("user-managed execs", helpers.String("container", container.Name), helpers.String("execs", fmt.Sprintf("%v", container.Execs)))
-	}
-
 	// Print the user-managed profile
 	logger.L().Debug("added user-managed profile to cache", helpers.Interface("profile", fullAP))
 
@@ -112,18 +107,8 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 			return
 		}
 
-		// Print the execs for debugging
-		for _, container := range freshBaseProfile.Spec.Containers {
-			logger.L().Debug("before execs", helpers.String("container", container.Name), helpers.String("execs", fmt.Sprintf("%v", container.Execs)))
-		}
-
 		mergedProfile := ap.performMerge(freshBaseProfile, fullAP)
 		ap.slugToAppProfile.Set(baseProfileUniqueName, mergedProfile)
-
-		// Print the execs for debugging
-		for _, container := range mergedProfile.Spec.Containers {
-			logger.L().Debug("merged execs", helpers.String("container", container.Name), helpers.String("execs", fmt.Sprintf("%v", container.Execs)))
-		}
 
 		// Clean up the user-managed profile after successful merge
 		ap.userManagedProfiles.Delete(baseProfileUniqueName)

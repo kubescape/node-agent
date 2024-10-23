@@ -832,7 +832,7 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 
 	// PHASE 4: Verify merged profile behavior
 	t.Log("Verifying merged profile behavior...")
-	time.Sleep(15 * time.Second) // Allow merge to complete
+	time.Sleep(5 * time.Second) // Allow merge to complete
 
 	// Test merged profile behavior
 	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
@@ -861,5 +861,54 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 			}
 		}
 		t.Errorf("New alerts were generated after merge (Initial: %d, Final: %d)", initialAlertCount, newAlertCount)
+	}
+
+	// PHASE 5: Check PATCH (removing the ls command from the user profile of the server container and triggering an alert)
+	t.Log("Patching user profile to remove ls command from server container...")
+	patchOperations := []utils.PatchOperation{
+		{Op: "remove", Path: "/spec/containers/1/execs/0"},
+	}
+
+	patch, err := json.Marshal(patchOperations)
+	require.NoError(t, err, "Failed to marshal patch operations")
+
+	_, err = storageClient.ApplicationProfiles(ns.Name).Patch(context.Background(), userProfile.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
+	require.NoError(t, err, "Failed to patch user profile")
+
+	// Verify patched profile behavior
+	time.Sleep(5 * time.Second) // Allow merge to complete
+
+	// Log the profile that was patched
+	patchedProfile, err := wl.GetApplicationProfile()
+	require.NoError(t, err, "Failed to get patched profile")
+	t.Logf("Patched application profile:\n%v", patchedProfile)
+
+	// Test patched profile behavior
+	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
+	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: alert (ls command removed from user profile)
+	time.Sleep(10 * time.Second)                   // Wait for potential alerts
+
+	// Verify alert counts
+	finalAlerts, err = testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Failed to get final alerts")
+
+	// Only count new alerts (after the initial count)
+	newAlertCount = 0
+	for _, alert := range finalAlerts {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+			newAlertCount++
+		}
+	}
+
+	t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, newAlertCount)
+
+	if newAlertCount <= initialAlertCount {
+		t.Logf("Full alert details:")
+		for _, alert := range finalAlerts {
+			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+				t.Logf("Alert: %+v", alert)
+			}
+		}
+		t.Errorf("New alerts were not generated after patch (Initial: %d, Final: %d)", initialAlertCount, newAlertCount)
 	}
 }
