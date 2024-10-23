@@ -91,9 +91,6 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 	// Store the user-managed profile temporarily
 	ap.userManagedProfiles.Set(baseProfileUniqueName, fullAP)
 
-	// Print the user-managed profile
-	logger.L().Debug("added user-managed profile to cache", helpers.Interface("profile", fullAP))
-
 	// If we have the base profile cached, fetch a fresh copy and merge.
 	// If the base profile is not cached yet, the merge will be attempted when it's added.
 	if ap.slugToAppProfile.Has(baseProfileUniqueName) {
