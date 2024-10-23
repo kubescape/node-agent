@@ -832,7 +832,7 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 
 	// PHASE 4: Verify merged profile behavior
 	t.Log("Verifying merged profile behavior...")
-	time.Sleep(5 * time.Second) // Allow merge to complete
+	time.Sleep(15 * time.Second) // Allow merge to complete
 
 	// Test merged profile behavior
 	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
@@ -876,7 +876,7 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	require.NoError(t, err, "Failed to patch user profile")
 
 	// Verify patched profile behavior
-	time.Sleep(5 * time.Second) // Allow merge to complete
+	time.Sleep(15 * time.Second) // Allow merge to complete
 
 	// Log the profile that was patched
 	patchedProfile, err := wl.GetApplicationProfile()
