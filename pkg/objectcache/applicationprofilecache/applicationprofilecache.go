@@ -81,8 +81,15 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 	baseProfileName := strings.TrimPrefix(appProfile.GetName(), "ug-")
 	baseProfileUniqueName := objectcache.UniqueName(appProfile.GetNamespace(), baseProfileName)
 
+	// Get the full user managed profile from the storage
+	fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
+	if err != nil {
+		logger.L().Error("failed to get full application profile", helpers.Error(err))
+		return
+	}
+
 	// Store the user-managed profile temporarily
-	ap.userManagedProfiles.Set(baseProfileUniqueName, appProfile.DeepCopy())
+	ap.userManagedProfiles.Set(baseProfileUniqueName, fullAP)
 
 	// For debugging purposes print the execs of the user-managed profile
 	for _, container := range appProfile.Spec.Containers {
