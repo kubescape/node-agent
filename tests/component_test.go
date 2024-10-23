@@ -6,12 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
 	"path"
 	"slices"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -772,34 +769,66 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 
 	// PHASE 3: Apply user-managed profile
 	t.Log("Applying user-managed profile...")
-	userProfileBytes, err := os.ReadFile(path.Join(utils.CurrentDir(), "resources/user-profile.yaml"))
-	require.NoError(t, err, "Failed to read user profile template")
-
-	// Create replacements map with properly quoted values
-	replacements := map[string]string{
-		"{name}":      fmt.Sprintf("ug-%s", initialProfile.Name),
-		"{namespace}": initialProfile.Namespace,
+	// Create the user-managed profile
+	userProfile := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("ug-%s", initialProfile.Name),
+			Namespace: initialProfile.Namespace,
+			Annotations: map[string]string{
+				"kubescape.io/managed-by": "User",
+			},
+		},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Architectures: []string{"amd64"},
+			Containers: []v1beta1.ApplicationProfileContainer{
+				{
+					Name: "nginx",
+					Execs: []v1beta1.ExecCalls{
+						{
+							Path: "/usr/bin/ls",
+							Args: []string{"/usr/bin/ls", "-l"},
+						},
+					},
+					SeccompProfile: v1beta1.SingleSeccompProfile{
+						Spec: v1beta1.SingleSeccompProfileSpec{
+							DefaultAction: "",
+						},
+					},
+				},
+				{
+					Name: "server",
+					Execs: []v1beta1.ExecCalls{
+						{
+							Path: "/usr/bin/ls",
+							Args: []string{"/usr/bin/ls", "-l"},
+						},
+						{
+							Path: "/bin/grpc_health_probe",
+							Args: []string{"-addr=:9555"},
+						},
+					},
+					SeccompProfile: v1beta1.SingleSeccompProfile{
+						Spec: v1beta1.SingleSeccompProfileSpec{
+							DefaultAction: "",
+						},
+					},
+				},
+			},
+		},
 	}
 
-	userProfileContent := string(userProfileBytes)
-	for placeholder, value := range replacements {
-		userProfileContent = strings.Replace(userProfileContent, placeholder, value, 1)
-	}
+	// Log the profile we're about to create
+	userProfileJSON, err := json.MarshalIndent(userProfile, "", "  ")
+	require.NoError(t, err, "Failed to marshal user profile")
+	t.Logf("Creating user profile:\n%s", string(userProfileJSON))
 
-	t.Logf("User profile content:\n%s", userProfileContent)
+	// Get k8s client
+	k8sClient := k8sinterface.NewKubernetesApi()
 
-	// Create and apply the user profile
-	tmpFile, err := os.CreateTemp("", "user-profile-*.yaml")
-	require.NoError(t, err, "Failed to create temp file")
-	defer os.Remove(tmpFile.Name())
-
-	err = os.WriteFile(tmpFile.Name(), []byte(userProfileContent), 0644)
-	require.NoError(t, err, "Failed to write user profile to file")
-
-	output, err := exec.Command("kubectl", "apply", "-f", tmpFile.Name()).CombinedOutput()
-	if err != nil {
-		t.Fatalf("Failed to apply user profile: %v\nOutput: %s", err, string(output))
-	}
+	// Create the user-managed profile
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+	_, err = storageClient.ApplicationProfiles(ns.Name).Create(context.Background(), userProfile, metav1.CreateOptions{})
+	require.NoError(t, err, "Failed to create user profile")
 
 	// PHASE 4: Verify merged profile behavior
 	t.Log("Verifying merged profile behavior...")
