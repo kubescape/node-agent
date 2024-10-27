@@ -941,11 +941,11 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 
 	// PHASE 2: Verify initial alerts
 	t.Log("Testing initial alert generation...")
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")   // Expected: no alert (original rule)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "example.com", "-m", "2"}, "server")          // Expected: alert (not allowed)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")         // Expected: no alert (original rule)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "github.com", "-T", "2", "-t", "1"}, "nginx") // Expected: alert (not allowed)
-	time.Sleep(30 * time.Second)                                                              // Wait for alert generation
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")     // Expected: no alert (original rule)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (not allowed)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")           // Expected: no alert (original rule)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")              // Expected: alert (not allowed)
+	time.Sleep(30 * time.Second)                                                                // Wait for alert generation
 
 	initialAlerts, err := testutils.GetAlerts(wl.Namespace)
 	require.NoError(t, err, "Failed to get initial alerts")
@@ -959,9 +959,9 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	}
 
 	// Verify initial alerts
-	testutils.AssertContains(t, initialAlerts, "Unexpected domain request", "curl", "server")
+	testutils.AssertContains(t, initialAlerts, "Unexpected domain request", "wget", "server")
 	testutils.AssertNotContains(t, initialAlerts, "Unexpected domain request", "wget", "server")
-	testutils.AssertContains(t, initialAlerts, "Unexpected domain request", "wget", "nginx")
+	testutils.AssertContains(t, initialAlerts, "Unexpected domain request", "curl", "nginx")
 	testutils.AssertNotContains(t, initialAlerts, "Unexpected domain request", "curl", "nginx")
 
 	// PHASE 3: Apply user-managed network neighborhood
@@ -1039,11 +1039,11 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	t.Log("Verifying merged network neighborhood behavior...")
 	time.Sleep(15 * time.Second) // Allow merge to complete
 
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")   // Expected: no alert (original)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "example.com", "-m", "2"}, "server")          // Expected: no alert (user added)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")         // Expected: no alert (original)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "github.com", "-T", "2", "-t", "1"}, "nginx") // Expected: no alert (user added)
-	time.Sleep(30 * time.Second)                                                              // Wait for potential alerts
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")     // Expected: no alert (original)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")           // Expected: no alert (original)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")              // Expected: no alert (user added)
+	time.Sleep(30 * time.Second)                                                                // Wait for potential alerts
 
 	mergedAlerts, err := testutils.GetAlerts(wl.Namespace)
 	require.NoError(t, err, "Failed to get alerts after merge")
@@ -1083,11 +1083,11 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	time.Sleep(15 * time.Second) // Allow merge to complete
 
 	// Test alerts after patch
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")   // Expected: no alert
-	_, _, err = wl.ExecIntoPod([]string{"curl", "example.com", "-m", "2"}, "server")          // Expected: alert (removed)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")         // Expected: no alert
-	_, _, err = wl.ExecIntoPod([]string{"wget", "github.com", "-T", "2", "-t", "1"}, "nginx") // Expected: no alert
-	time.Sleep(30 * time.Second)                                                              // Wait for alerts
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")     // Expected: no alert
+	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")           // Expected: no alert
+	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")              // Expected: no alert
+	time.Sleep(30 * time.Second)                                                                // Wait for alerts
 
 	finalAlerts, err := testutils.GetAlerts(wl.Namespace)
 	require.NoError(t, err, "Failed to get final alerts")
