@@ -51,6 +51,7 @@ jobs:
           Test_10_MalwareDetectionTest,
           Test_11_EndpointTest,
           Test_12_MergingProfilesTest,
+          Test_13_MergingNetworkNeighborhoodTest,
           # Test_10_DemoTest
           # Test_11_DuplicationTest
         ]

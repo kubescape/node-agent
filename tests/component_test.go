@@ -980,7 +980,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 					Egress: []v1beta1.NetworkNeighbor{
 						{
 							Identifier: "nginx-github",
-							Type:       "dns",
+							Type:       "external",
 							DNSNames:   []string{"github.com."},
 							Ports: []v1beta1.NetworkPort{
 								{
@@ -1002,7 +1002,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 					Egress: []v1beta1.NetworkNeighbor{
 						{
 							Identifier: "server-example",
-							Type:       "dns",
+							Type:       "external",
 							DNSNames:   []string{"example.com."},
 							Ports: []v1beta1.NetworkPort{
 								{
