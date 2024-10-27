@@ -960,9 +960,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 
 	// Verify initial alerts
 	testutils.AssertContains(t, initialAlerts, "Unexpected domain request", "wget", "server")
-	testutils.AssertNotContains(t, initialAlerts, "Unexpected domain request", "wget", "server")
 	testutils.AssertContains(t, initialAlerts, "Unexpected domain request", "curl", "nginx")
-	testutils.AssertNotContains(t, initialAlerts, "Unexpected domain request", "curl", "nginx")
 
 	// PHASE 3: Apply user-managed network neighborhood
 	t.Log("Applying user-managed network neighborhood...")
