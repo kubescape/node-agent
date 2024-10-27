@@ -52,8 +52,6 @@ jobs:
           Test_11_EndpointTest,
           Test_12_MergingProfilesTest,
           Test_13_MergingNetworkNeighborhoodTest,
-          # Test_10_DemoTest
-          # Test_11_DuplicationTest
         ]
     steps:
       - name: Checkout code

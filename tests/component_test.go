@@ -941,10 +941,10 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 
 	// PHASE 2: Verify initial alerts
 	t.Log("Testing initial alert generation...")
-	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")   // Expected: no alert
-	_, _, err = wl.ExecIntoPod([]string{"curl", "example.com", "-m", "2"}, "server")          // Expected: alert
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")         // Expected: no alert
-	_, _, err = wl.ExecIntoPod([]string{"wget", "github.com", "-T", "2", "-t", "1"}, "nginx") // Expected: alert
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")   // Expected: no alert (original rule)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "example.com", "-m", "2"}, "server")          // Expected: alert (not allowed)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")         // Expected: no alert (original rule)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "github.com", "-T", "2", "-t", "1"}, "nginx") // Expected: alert (not allowed)
 	time.Sleep(30 * time.Second)                                                              // Wait for alert generation
 
 	initialAlerts, err := testutils.GetAlerts(wl.Namespace)
@@ -958,6 +958,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 		}
 	}
 
+	// Verify initial alerts
 	testutils.AssertContains(t, initialAlerts, "Unexpected domain request", "curl", "server")
 	testutils.AssertNotContains(t, initialAlerts, "Unexpected domain request", "wget", "server")
 	testutils.AssertContains(t, initialAlerts, "Unexpected domain request", "wget", "nginx")
@@ -974,6 +975,11 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 			},
 		},
 		Spec: v1beta1.NetworkNeighborhoodSpec{
+			LabelSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app": "multiple-containers-app",
+				},
+			},
 			Containers: []v1beta1.NetworkNeighborhoodContainer{
 				{
 					Name: "nginx",
@@ -984,12 +990,12 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 							DNSNames:   []string{"github.com."},
 							Ports: []v1beta1.NetworkPort{
 								{
-									Name:     "http",
+									Name:     "TCP-80",
 									Protocol: "TCP",
 									Port:     ptr(int32(80)),
 								},
 								{
-									Name:     "https",
+									Name:     "TCP-443",
 									Protocol: "TCP",
 									Port:     ptr(int32(443)),
 								},
@@ -1006,12 +1012,12 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 							DNSNames:   []string{"example.com."},
 							Ports: []v1beta1.NetworkPort{
 								{
-									Name:     "http",
+									Name:     "TCP-80",
 									Protocol: "TCP",
 									Port:     ptr(int32(80)),
 								},
 								{
-									Name:     "https",
+									Name:     "TCP-443",
 									Protocol: "TCP",
 									Port:     ptr(int32(443)),
 								},
@@ -1023,55 +1029,46 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 		},
 	}
 
-	// Log the network neighborhood we're about to create
-	userNNJSON, err := json.MarshalIndent(userNN, "", "  ")
-	require.NoError(t, err, "Failed to marshal user network neighborhood")
-	t.Logf("Creating user network neighborhood:\n%s", string(userNNJSON))
-
-	// Get k8s client
+	// Create user-managed network neighborhood
 	k8sClient := k8sinterface.NewKubernetesApi()
-
-	// Create the user-managed network neighborhood
 	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
 	_, err = storageClient.NetworkNeighborhoods(ns.Name).Create(context.Background(), userNN, metav1.CreateOptions{})
 	require.NoError(t, err, "Failed to create user network neighborhood")
 
-	// PHASE 4: Verify merged network neighborhood behavior
+	// PHASE 4: Verify merged behavior (no new alerts)
 	t.Log("Verifying merged network neighborhood behavior...")
 	time.Sleep(15 * time.Second) // Allow merge to complete
 
-	// Test merged network neighborhood behavior
 	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")   // Expected: no alert (original)
 	_, _, err = wl.ExecIntoPod([]string{"curl", "example.com", "-m", "2"}, "server")          // Expected: no alert (user added)
 	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")         // Expected: no alert (original)
 	_, _, err = wl.ExecIntoPod([]string{"wget", "github.com", "-T", "2", "-t", "1"}, "nginx") // Expected: no alert (user added)
-	time.Sleep(10 * time.Second)                                                              // Wait for potential alerts
+	time.Sleep(30 * time.Second)                                                              // Wait for potential alerts
 
-	// Verify alert counts
-	finalAlerts, err := testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Failed to get final alerts")
+	mergedAlerts, err := testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Failed to get alerts after merge")
 
-	// Only count new alerts (after the initial count)
+	// Count new alerts after merge
 	newAlertCount := 0
-	for _, alert := range finalAlerts {
+	for _, alert := range mergedAlerts {
 		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" {
 			newAlertCount++
 		}
 	}
 
-	t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, newAlertCount)
+	t.Logf("Alert counts - Initial: %d, After merge: %d", initialAlertCount, newAlertCount)
 
 	if newAlertCount > initialAlertCount {
 		t.Logf("Full alert details:")
-		for _, alert := range finalAlerts {
+		for _, alert := range mergedAlerts {
 			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" {
 				t.Logf("Alert: %+v", alert)
 			}
 		}
-		t.Errorf("New alerts were generated after merge (Initial: %d, Final: %d)", initialAlertCount, newAlertCount)
+		t.Errorf("New alerts were generated after merge (Initial: %d, After merge: %d)", initialAlertCount, newAlertCount)
 	}
 
-	// PHASE 5: Check PATCH (removing example.com from the server container and triggering an alert)
+	// PHASE 5: Remove permission via patch and verify alerts return
 	t.Log("Patching user network neighborhood to remove example.com from server container...")
 	patchOperations := []utils.PatchOperation{
 		{Op: "remove", Path: "/spec/containers/1/egress/0"},
@@ -1083,43 +1080,36 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	_, err = storageClient.NetworkNeighborhoods(ns.Name).Patch(context.Background(), userNN.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
 	require.NoError(t, err, "Failed to patch user network neighborhood")
 
-	// Verify patched network neighborhood behavior
 	time.Sleep(15 * time.Second) // Allow merge to complete
 
-	// Log the network neighborhood that was patched
-	patchedNN, err := wl.GetNetworkNeighborhood()
-	require.NoError(t, err, "Failed to get patched network neighborhood")
-	t.Logf("Patched network neighborhood:\n%v", patchedNN)
-
-	// Test patched network neighborhood behavior
+	// Test alerts after patch
 	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")   // Expected: no alert
 	_, _, err = wl.ExecIntoPod([]string{"curl", "example.com", "-m", "2"}, "server")          // Expected: alert (removed)
 	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")         // Expected: no alert
 	_, _, err = wl.ExecIntoPod([]string{"wget", "github.com", "-T", "2", "-t", "1"}, "nginx") // Expected: no alert
-	time.Sleep(10 * time.Second)                                                              // Wait for potential alerts
+	time.Sleep(30 * time.Second)                                                              // Wait for alerts
 
-	// Verify alert counts
-	finalAlerts, err = testutils.GetAlerts(wl.Namespace)
+	finalAlerts, err := testutils.GetAlerts(wl.Namespace)
 	require.NoError(t, err, "Failed to get final alerts")
 
-	// Only count new alerts (after the initial count)
-	newAlertCount = 0
+	// Count final alerts
+	finalAlertCount := 0
 	for _, alert := range finalAlerts {
 		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" {
-			newAlertCount++
+			finalAlertCount++
 		}
 	}
 
-	t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, newAlertCount)
+	t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, finalAlertCount)
 
-	if newAlertCount <= initialAlertCount {
+	if finalAlertCount <= initialAlertCount {
 		t.Logf("Full alert details:")
 		for _, alert := range finalAlerts {
 			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" {
 				t.Logf("Alert: %+v", alert)
 			}
 		}
-		t.Errorf("New alerts were not generated after patch (Initial: %d, Final: %d)", initialAlertCount, newAlertCount)
+		t.Errorf("New alerts were not generated after patch (Initial: %d, Final: %d)", initialAlertCount, finalAlertCount)
 	}
 }
 
