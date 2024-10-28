@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -19,6 +21,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -273,4 +276,22 @@ func sortHTTPEndpoints(endpoints []v1beta1.HTTPEndpoint) {
 		// If all else is equal, sort by Headers
 		return string(endpoints[i].Headers) < string(endpoints[j].Headers)
 	})
+}
+
+func BenchmarkReportFileOpen(b *testing.B) {
+	savedOpens := maps.SafeMap[string, mapset.Set[string]]{}
+	savedOpens.Set("/proc/"+dynamicpathdetector.DynamicIdentifier+"/foo/bar", mapset.NewSet("O_LARGEFILE", "O_RDONLY"))
+	paths := []string{"/proc/12345/foo/bar", "/bin/ls", "/etc/passwd"}
+	flags := []string{"O_CLOEXEC", "O_RDONLY"}
+	for i := 0; i < b.N; i++ {
+		for _, path := range paths {
+			if strings.HasPrefix(path, "/proc/") {
+				path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
+			}
+			if savedOpens.Has(path) && savedOpens.Get(path).Contains(flags...) {
+				continue
+			}
+		}
+	}
+	b.ReportAllocs()
 }

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -26,6 +28,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -33,6 +36,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+const OpenDynamicThreshold = 50
+
+var procRegex = regexp.MustCompile(`^/proc/\d+`)
 
 type ApplicationProfileManager struct {
 	cfg                      config.Config
@@ -538,7 +545,34 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				return true
 			})
 			// record saved opens
-			toSaveOpens.Range(utils.SetInMap(am.savedOpens.Get(watchedContainer.K8sContainerID)))
+			savedOpens := am.savedOpens.Get(watchedContainer.K8sContainerID)
+			toSaveOpens.Range(utils.SetInMap(savedOpens))
+			// use a dynamic path detector to compress opens
+			analyzer := dynamicpathdetector.NewPathAnalyzer(OpenDynamicThreshold)
+			keys := savedOpens.Keys()
+			// first pass to learn the opens
+			for _, path := range keys {
+				_, _ = dynamicpathdetector.AnalyzeOpen(path, analyzer)
+			}
+			// second pass to compress the opens
+			for _, path := range keys {
+				result, err := dynamicpathdetector.AnalyzeOpen(path, analyzer)
+				if err != nil {
+					continue
+				}
+				if result != path {
+					// path becomes compressed
+					// we avoid a lock by using Pop to remove path and retrieve its flags
+					pathFlags := savedOpens.Pop(path)
+					if savedOpens.Has(result) {
+						// merge flags
+						savedOpens.Get(result).Append(pathFlags.ToSlice()...)
+					} else {
+						// create new entry
+						savedOpens.Set(result, pathFlags)
+					}
+				}
+			}
 			logger.L().Debug("ApplicationProfileManager - saved application profile",
 				helpers.Int("capabilities", len(capabilities)),
 				helpers.Int("endpoints", toSaveEndpoints.Len()),
@@ -674,6 +708,11 @@ func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string,
 func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID, path string, flags []string) {
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
+	}
+	// deduplicate /proc/1234/* into /proc/.../* (quite a common case)
+	// we perform it here instead of waiting for compression
+	if strings.HasPrefix(path, "/proc/") {
+		path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
 	}
 	// check if we already have this open
 	savedOpens := am.savedOpens.Get(k8sContainerID)
