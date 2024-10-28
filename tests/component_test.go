@@ -1084,7 +1084,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	_, err = storageClient.NetworkNeighborhoods(ns.Name).Patch(context.Background(), userNN.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
 	require.NoError(t, err, "Failed to patch user network neighborhood")
 
-	time.Sleep(15 * time.Second) // Allow merge to complete
+	time.Sleep(20 * time.Second) // Allow merge to complete
 
 	// Test alerts after patch
 	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // Expected: no alert
@@ -1097,7 +1097,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
 	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
 	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	time.Sleep(2 * time.Second)                                                                    // Wait for alerts
+	time.Sleep(2 * time.Second)                                                                     // Wait for alerts
 	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
 	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")               // Expected: no alert
 	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")                  // Expected: no alert
