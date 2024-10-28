@@ -60,7 +60,7 @@ type ApplicationProfileCacheImpl struct {
 }
 
 func NewApplicationProfileCache(nodeName string, storageClient versioned.SpdxV1beta1Interface, maxDelaySeconds int) *ApplicationProfileCacheImpl {
-	cache := &ApplicationProfileCacheImpl{
+	return &ApplicationProfileCacheImpl{
 		nodeName:            nodeName,
 		maxDelaySeconds:     maxDelaySeconds,
 		storageClient:       storageClient,
@@ -71,8 +71,6 @@ func NewApplicationProfileCache(nodeName string, storageClient versioned.SpdxV1b
 		allProfiles:         mapset.NewSet[string](),
 		userManagedProfiles: maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
 	}
-
-	return cache
 }
 
 // ------------------ objectcache.ApplicationProfileCache methods -----------------------
@@ -82,14 +80,14 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 	baseProfileUniqueName := objectcache.UniqueName(appProfile.GetNamespace(), baseProfileName)
 
 	// Get the full user managed profile from the storage
-	fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
+	userManagedProfile, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
 	if err != nil {
 		logger.L().Error("failed to get full application profile", helpers.Error(err))
 		return
 	}
 
 	// Store the user-managed profile temporarily
-	ap.userManagedProfiles.Set(baseProfileUniqueName, fullAP)
+	ap.userManagedProfiles.Set(baseProfileUniqueName, userManagedProfile)
 
 	// If we have the base profile cached, fetch a fresh copy and merge.
 	// If the base profile is not cached yet, the merge will be attempted when it's added.
@@ -104,7 +102,7 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 			return
 		}
 
-		mergedProfile := ap.performMerge(freshBaseProfile, fullAP)
+		mergedProfile := ap.performMerge(freshBaseProfile, userManagedProfile)
 		ap.slugToAppProfile.Set(baseProfileUniqueName, mergedProfile)
 
 		// Clean up the user-managed profile after successful merge
@@ -120,11 +118,7 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(obj runtime.Object)
 	appProfile := obj.(*v1beta1.ApplicationProfile)
 	apName := objectcache.MetaUniqueName(appProfile)
 
-	isUserManaged := appProfile.Annotations != nil &&
-		appProfile.Annotations["kubescape.io/managed-by"] == "User" &&
-		strings.HasPrefix(appProfile.GetName(), "ug-")
-
-	if isUserManaged {
+	if isUserManagedProfile(appProfile) {
 		ap.handleUserManagedProfile(appProfile)
 		return
 	}
@@ -325,31 +319,29 @@ func (ap *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedPr
 	mergedProfile.Spec.InitContainers = ap.mergeContainers(mergedProfile.Spec.InitContainers, userManagedProfile.Spec.InitContainers)
 	mergedProfile.Spec.EphemeralContainers = ap.mergeContainers(mergedProfile.Spec.EphemeralContainers, userManagedProfile.Spec.EphemeralContainers)
 
-	// Remove the user-managed annotation
-	delete(mergedProfile.Annotations, "kubescape.io/managed-by")
-
 	return mergedProfile
 }
 
 func (ap *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.ApplicationProfileContainer) []v1beta1.ApplicationProfileContainer {
-	// Create a map to store containers by name
-	containerMap := make(map[string]int) // map name to index in slice
-
-	// Store indices of normal containers
-	for i := range normalContainers {
-		containerMap[normalContainers[i].Name] = i
+	if len(userManagedContainers) != len(normalContainers) {
+		// If the number of containers don't match, we can't merge
+		logger.L().Error("failed to merge user-managed profile with base profile",
+			helpers.Int("normalContainers len", len(normalContainers)),
+			helpers.Int("userManagedContainers len", len(userManagedContainers)),
+			helpers.String("reason", "number of containers don't match"))
+		return normalContainers
 	}
 
-	// Merge or append user containers
-	for _, userContainer := range userManagedContainers {
-		if idx, exists := containerMap[userContainer.Name]; exists {
-			// Directly modify the container in the slice
-			ap.mergeContainer(&normalContainers[idx], &userContainer)
-		} else {
-			normalContainers = append(normalContainers, userContainer)
+	// Assuming the normalContainers are already in the correct Pod order
+	// We'll merge user containers at their corresponding positions
+	for i := range normalContainers {
+		for _, userContainer := range userManagedContainers {
+			if normalContainers[i].Name == userContainer.Name {
+				ap.mergeContainer(&normalContainers[i], &userContainer)
+				break
+			}
 		}
 	}
-
 	return normalContainers
 }
 
@@ -365,11 +357,7 @@ func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj runtime.Obje
 	appProfile := obj.(*v1beta1.ApplicationProfile)
 	apName := objectcache.MetaUniqueName(appProfile)
 
-	isUserManaged := appProfile.Annotations != nil &&
-		appProfile.Annotations["kubescape.io/managed-by"] == "User" &&
-		strings.HasPrefix(appProfile.GetName(), "ug-")
-
-	if isUserManaged {
+	if isUserManagedProfile(appProfile) {
 		// For user-managed profiles, we need to use the base name for cleanup
 		baseProfileName := strings.TrimPrefix(appProfile.GetName(), "ug-")
 		baseProfileUniqueName := objectcache.UniqueName(appProfile.GetNamespace(), baseProfileName)
@@ -445,4 +433,10 @@ func (ap *ApplicationProfileCacheImpl) cleanupOrphanedUserManagedProfiles() {
 		}
 		return true
 	})
+}
+
+func isUserManagedProfile(appProfile *v1beta1.ApplicationProfile) bool {
+	return appProfile.Annotations != nil &&
+		appProfile.Annotations["kubescape.io/managed-by"] == "User" &&
+		strings.HasPrefix(appProfile.GetName(), "ug-")
 }

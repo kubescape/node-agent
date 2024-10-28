@@ -86,14 +86,14 @@ func (nn *NetworkNeighborhoodCacheImpl) handleUserManagedNN(netNeighborhood *v1b
 	baseNNUniqueName := objectcache.UniqueName(netNeighborhood.GetNamespace(), baseNNName)
 
 	// Get the full user managed network neighborhood from the storage
-	fullNN, err := nn.getNetworkNeighborhood(netNeighborhood.GetNamespace(), netNeighborhood.GetName())
+	userManagedNN, err := nn.getNetworkNeighborhood(netNeighborhood.GetNamespace(), netNeighborhood.GetName())
 	if err != nil {
 		logger.L().Error("failed to get full network neighborhood", helpers.Error(err))
 		return
 	}
 
 	// Store the user-managed network neighborhood temporarily
-	nn.userManagedNetworkNeighborhood.Set(baseNNUniqueName, fullNN)
+	nn.userManagedNetworkNeighborhood.Set(baseNNUniqueName, userManagedNN)
 
 	// If we have the base network neighborhood cached, fetch a fresh copy and merge.
 	// If the base network neighborhood is not cached yet, the merge will be attempted when it's added.
@@ -108,7 +108,7 @@ func (nn *NetworkNeighborhoodCacheImpl) handleUserManagedNN(netNeighborhood *v1b
 			return
 		}
 
-		mergedNN := nn.performMerge(freshBaseNN, fullNN)
+		mergedNN := nn.performMerge(freshBaseNN, userManagedNN)
 		nn.slugToNetworkNeighborhood.Set(baseNNUniqueName, mergedNN)
 
 		// Clean up the user-managed network neighborhood after successful merge
@@ -142,31 +142,20 @@ func (nn *NetworkNeighborhoodCacheImpl) performMerge(normalNN, userManagedNN *v1
 		userManagedNN.Spec.LabelSelector.MatchExpressions...,
 	)
 
-	// Remove the user-managed annotation
-	delete(mergedNN.Annotations, "kubescape.io/managed-by")
-
 	return mergedNN
 }
 
 func (nn *NetworkNeighborhoodCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.NetworkNeighborhoodContainer) []v1beta1.NetworkNeighborhoodContainer {
-	// Create a map to store containers by name
-	containerMap := make(map[string]int) // map name to index in slice
-
-	// Store indices of normal containers
+	// Assuming the normalContainers are already in the correct Pod order
+	// We'll merge user containers at their corresponding positions
 	for i := range normalContainers {
-		containerMap[normalContainers[i].Name] = i
-	}
-
-	// Merge or append user containers
-	for _, userContainer := range userManagedContainers {
-		if idx, exists := containerMap[userContainer.Name]; exists {
-			// Directly modify the container in the slice
-			nn.mergeContainer(&normalContainers[idx], &userContainer)
-		} else {
-			normalContainers = append(normalContainers, userContainer)
+		for _, userContainer := range userManagedContainers {
+			if normalContainers[i].Name == userContainer.Name {
+				nn.mergeContainer(&normalContainers[i], &userContainer)
+				break
+			}
 		}
 	}
-
 	return normalContainers
 }
 
@@ -429,11 +418,7 @@ func (nn *NetworkNeighborhoodCacheImpl) addNetworkNeighborhood(_ context.Context
 	netNeighborhood := obj.(*v1beta1.NetworkNeighborhood)
 	nnName := objectcache.MetaUniqueName(netNeighborhood)
 
-	isUserManaged := netNeighborhood.Annotations != nil &&
-		netNeighborhood.Annotations["kubescape.io/managed-by"] == "User" &&
-		strings.HasPrefix(netNeighborhood.GetName(), "ug-")
-
-	if isUserManaged {
+	if isUserManagedNN(netNeighborhood) {
 		nn.handleUserManagedNN(netNeighborhood)
 		return
 	}
@@ -485,11 +470,7 @@ func (nn *NetworkNeighborhoodCacheImpl) deleteNetworkNeighborhood(obj runtime.Ob
 	netNeighborhood := obj.(*v1beta1.NetworkNeighborhood)
 	nnName := objectcache.MetaUniqueName(netNeighborhood)
 
-	isUserManaged := netNeighborhood.Annotations != nil &&
-		netNeighborhood.Annotations["kubescape.io/managed-by"] == "User" &&
-		strings.HasPrefix(netNeighborhood.GetName(), "ug-")
-
-	if isUserManaged {
+	if isUserManagedNN(netNeighborhood) {
 		// For user-managed network neighborhoods, we need to use the base name for cleanup
 		baseNNName := strings.TrimPrefix(netNeighborhood.GetName(), "ug-")
 		baseNNUniqueName := objectcache.UniqueName(netNeighborhood.GetNamespace(), baseNNName)
@@ -563,4 +544,10 @@ func getSlug(p *corev1.Pod) (string, error) {
 		return "", fmt.Errorf("failed to get slug")
 	}
 	return slug, nil
+}
+
+func isUserManagedNN(nn *v1beta1.NetworkNeighborhood) bool {
+	return nn.Annotations != nil &&
+		nn.Annotations["kubescape.io/managed-by"] == "User" &&
+		strings.HasPrefix(nn.GetName(), "ug-")
 }
