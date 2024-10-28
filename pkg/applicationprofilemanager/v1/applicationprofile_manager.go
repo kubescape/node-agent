@@ -675,17 +675,26 @@ func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID, path string,
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
+
+	newFlagsSet := mapset.NewSet(flags...)
+
 	// check if we already have this open
 	savedOpens := am.savedOpens.Get(k8sContainerID)
 	if savedOpens.Has(path) && savedOpens.Get(path).Contains(flags...) {
 		return
 	}
+
 	// add to open map
 	openMap := am.toSaveOpens.Get(k8sContainerID)
 	if openMap.Has(path) {
-		openMap.Get(path).Append(flags...)
+		existingFlags := openMap.Get(path)
+		// Only add the new flags that we haven't seen before
+		newFlags := newFlagsSet.Difference(existingFlags)
+		if !newFlags.IsEmpty() {
+			existingFlags.Append(newFlags.ToSlice()...)
+		}
 	} else {
-		openMap.Set(path, mapset.NewSet[string](flags...))
+		openMap.Set(path, mapset.NewSet(flags...))
 	}
 }
 
