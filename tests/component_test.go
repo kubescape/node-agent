@@ -1009,7 +1009,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 						{
 							Identifier: "server-example",
 							Type:       "external",
-							DNSNames:   []string{"httpforever.com."},
+							DNSNames:   []string{"info.cern.ch."},
 							Ports: []v1beta1.NetworkPort{
 								{
 									Name:     "TCP-80",
@@ -1041,13 +1041,13 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 
 	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // Expected: no alert (original)
 	// Try multiple times to ensure alert is removed
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")               // Expected: no alert (original)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")                  // Expected: no alert (user added)
-	time.Sleep(30 * time.Second)                                                                    // Wait for potential alerts
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")            // Expected: no alert (original)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")               // Expected: no alert (user added)
+	time.Sleep(30 * time.Second)                                                                 // Wait for potential alerts
 
 	mergedAlerts, err := testutils.GetAlerts(wl.Namespace)
 	require.NoError(t, err, "Failed to get alerts after merge")
@@ -1073,7 +1073,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	}
 
 	// PHASE 5: Remove permission via patch and verify alerts return
-	t.Log("Patching user network neighborhood to remove httpforever.com from server container...")
+	t.Log("Patching user network neighborhood to remove info.cern.ch from server container...")
 	patchOperations := []utils.PatchOperation{
 		{Op: "remove", Path: "/spec/containers/1/egress/0"},
 	}
@@ -1089,19 +1089,14 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	// Test alerts after patch
 	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // Expected: no alert
 	// Try multiple times to ensure alert is removed
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	time.Sleep(2 * time.Second)                                                                     // Wait for alerts
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	time.Sleep(2 * time.Second)                                                                     // Wait for alerts
-	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")               // Expected: no alert
-	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")                  // Expected: no alert
-	time.Sleep(30 * time.Second)                                                                    // Wait for alerts
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")            // Expected: no alert
+	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")               // Expected: no alert
+	time.Sleep(30 * time.Second)                                                                 // Wait for alerts
 
 	finalAlerts, err := testutils.GetAlerts(wl.Namespace)
 	require.NoError(t, err, "Failed to get final alerts")
