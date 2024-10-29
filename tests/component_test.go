@@ -955,7 +955,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	// Record initial alert count
 	initialAlertCount := 0
 	for _, alert := range initialAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
 			initialAlertCount++
 		}
 	}
@@ -1055,7 +1055,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	// Count new alerts after merge
 	newAlertCount := 0
 	for _, alert := range mergedAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
 			newAlertCount++
 		}
 	}
@@ -1065,7 +1065,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	if newAlertCount > initialAlertCount {
 		t.Logf("Full alert details:")
 		for _, alert := range mergedAlerts {
-			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" {
+			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
 				t.Logf("Alert: %+v", alert)
 			}
 		}
@@ -1104,7 +1104,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	// Count final alerts
 	finalAlertCount := 0
 	for _, alert := range finalAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
 			finalAlertCount++
 		}
 	}
@@ -1114,7 +1114,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	if finalAlertCount <= initialAlertCount {
 		t.Logf("Full alert details:")
 		for _, alert := range finalAlerts {
-			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" {
+			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
 				t.Logf("Alert: %+v", alert)
 			}
 		}
