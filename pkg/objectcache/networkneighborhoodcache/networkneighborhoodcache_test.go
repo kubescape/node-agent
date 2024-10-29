@@ -734,3 +734,243 @@ func Test_addPod(t *testing.T) {
 		})
 	}
 }
+
+func Test_performMerge(t *testing.T) {
+	tests := []struct {
+		name            string
+		baseNN          *v1beta1.NetworkNeighborhood
+		userNN          *v1beta1.NetworkNeighborhood
+		expectedResult  *v1beta1.NetworkNeighborhood
+		validateResults func(*testing.T, *v1beta1.NetworkNeighborhood)
+	}{
+		{
+			name: "merge basic network neighbors",
+			baseNN: &v1beta1.NetworkNeighborhood{
+				Spec: v1beta1.NetworkNeighborhoodSpec{
+					Containers: []v1beta1.NetworkNeighborhoodContainer{
+						{
+							Name: "container1",
+							Ingress: []v1beta1.NetworkNeighbor{
+								{
+									Identifier: "ingress1",
+									Type:       "http",
+									DNSNames:   []string{"example.com"},
+									Ports: []v1beta1.NetworkPort{
+										{Name: "http", Protocol: "TCP", Port: ptr(int32(80))},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			userNN: &v1beta1.NetworkNeighborhood{
+				Spec: v1beta1.NetworkNeighborhoodSpec{
+					Containers: []v1beta1.NetworkNeighborhoodContainer{
+						{
+							Name: "container1",
+							Ingress: []v1beta1.NetworkNeighbor{
+								{
+									Identifier: "ingress2",
+									Type:       "https",
+									DNSNames:   []string{"secure.example.com"},
+									Ports: []v1beta1.NetworkPort{
+										{Name: "https", Protocol: "TCP", Port: ptr(int32(443))},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			validateResults: func(t *testing.T, result *v1beta1.NetworkNeighborhood) {
+				assert.Len(t, result.Spec.Containers, 1)
+				assert.Len(t, result.Spec.Containers[0].Ingress, 2)
+
+				// Verify both ingress rules are present
+				ingressIdentifiers := []string{
+					result.Spec.Containers[0].Ingress[0].Identifier,
+					result.Spec.Containers[0].Ingress[1].Identifier,
+				}
+				assert.Contains(t, ingressIdentifiers, "ingress1")
+				assert.Contains(t, ingressIdentifiers, "ingress2")
+			},
+		},
+		{
+			name: "merge label selectors",
+			baseNN: &v1beta1.NetworkNeighborhood{
+				Spec: v1beta1.NetworkNeighborhoodSpec{
+					LabelSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app": "base",
+						},
+					},
+					Containers: []v1beta1.NetworkNeighborhoodContainer{
+						{
+							Name: "container1",
+							Egress: []v1beta1.NetworkNeighbor{
+								{
+									Identifier: "egress1",
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"role": "db",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			userNN: &v1beta1.NetworkNeighborhood{
+				Spec: v1beta1.NetworkNeighborhoodSpec{
+					LabelSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"env": "prod",
+						},
+					},
+					Containers: []v1beta1.NetworkNeighborhoodContainer{
+						{
+							Name: "container1",
+							Egress: []v1beta1.NetworkNeighbor{
+								{
+									Identifier: "egress1",
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"version": "v1",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			validateResults: func(t *testing.T, result *v1beta1.NetworkNeighborhood) {
+				// Verify merged label selectors
+				assert.Equal(t, "base", result.Spec.LabelSelector.MatchLabels["app"])
+				assert.Equal(t, "prod", result.Spec.LabelSelector.MatchLabels["env"])
+
+				// Verify merged pod selector in egress rule
+				container := result.Spec.Containers[0]
+				podSelector := container.Egress[0].PodSelector
+				assert.Equal(t, "db", podSelector.MatchLabels["role"])
+				assert.Equal(t, "v1", podSelector.MatchLabels["version"])
+			},
+		},
+		{
+			name: "merge network ports",
+			baseNN: &v1beta1.NetworkNeighborhood{
+				Spec: v1beta1.NetworkNeighborhoodSpec{
+					Containers: []v1beta1.NetworkNeighborhoodContainer{
+						{
+							Name: "container1",
+							Egress: []v1beta1.NetworkNeighbor{
+								{
+									Identifier: "egress1",
+									Ports: []v1beta1.NetworkPort{
+										{Name: "http", Protocol: "TCP", Port: ptr(int32(80))},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			userNN: &v1beta1.NetworkNeighborhood{
+				Spec: v1beta1.NetworkNeighborhoodSpec{
+					Containers: []v1beta1.NetworkNeighborhoodContainer{
+						{
+							Name: "container1",
+							Egress: []v1beta1.NetworkNeighbor{
+								{
+									Identifier: "egress1",
+									Ports: []v1beta1.NetworkPort{
+										{Name: "http", Protocol: "TCP", Port: ptr(int32(8080))}, // Override existing port
+										{Name: "https", Protocol: "TCP", Port: ptr(int32(443))}, // Add new port
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			validateResults: func(t *testing.T, result *v1beta1.NetworkNeighborhood) {
+				container := result.Spec.Containers[0]
+				ports := container.Egress[0].Ports
+
+				// Verify ports are properly merged
+				assert.Len(t, ports, 2)
+
+				// Find HTTP port - should be updated to 8080
+				for _, port := range ports {
+					if port.Name == "http" {
+						assert.Equal(t, int32(8080), *port.Port)
+					}
+					if port.Name == "https" {
+						assert.Equal(t, int32(443), *port.Port)
+					}
+				}
+			},
+		},
+		{
+			name: "merge DNS names",
+			baseNN: &v1beta1.NetworkNeighborhood{
+				Spec: v1beta1.NetworkNeighborhoodSpec{
+					Containers: []v1beta1.NetworkNeighborhoodContainer{
+						{
+							Name: "container1",
+							Egress: []v1beta1.NetworkNeighbor{
+								{
+									Identifier: "egress1",
+									DNSNames:   []string{"example.com", "api.example.com"},
+								},
+							},
+						},
+					},
+				},
+			},
+			userNN: &v1beta1.NetworkNeighborhood{
+				Spec: v1beta1.NetworkNeighborhoodSpec{
+					Containers: []v1beta1.NetworkNeighborhoodContainer{
+						{
+							Name: "container1",
+							Egress: []v1beta1.NetworkNeighbor{
+								{
+									Identifier: "egress1",
+									DNSNames:   []string{"api.example.com", "admin.example.com"},
+								},
+							},
+						},
+					},
+				},
+			},
+			validateResults: func(t *testing.T, result *v1beta1.NetworkNeighborhood) {
+				container := result.Spec.Containers[0]
+				dnsNames := container.Egress[0].DNSNames
+
+				// Verify DNS names are properly merged and deduplicated
+				assert.Len(t, dnsNames, 3)
+				assert.Contains(t, dnsNames, "example.com")
+				assert.Contains(t, dnsNames, "api.example.com")
+				assert.Contains(t, dnsNames, "admin.example.com")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nn := NewNetworkNeighborhoodCache("test-node", nil, 0)
+			result := nn.performMerge(tt.baseNN, tt.userNN)
+
+			if tt.validateResults != nil {
+				tt.validateResults(t, result)
+			}
+		})
+	}
+}
+
+// Helper function to create pointer to int32
+func ptr(i int32) *int32 {
+	return &i
+}

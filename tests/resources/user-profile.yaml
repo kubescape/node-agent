@@ -1,0 +1,47 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1beta1
+kind: ApplicationProfile
+metadata:
+  name: {name}
+  namespace: {namespace}
+  resourceVersion: "1"  # Start with "1" for new resources
+  annotations:
+    kubescape.io/managed-by: User
+spec:
+  architectures: ["amd64"]
+  containers:
+  - name: nginx
+    imageID: ""
+    imageTag: ""
+    capabilities: []
+    opens: []
+    syscalls: []
+    endpoints: []
+    execs:
+    - path: /usr/bin/ls
+      args:
+      - /usr/bin/ls
+      - -l
+    seccompProfile:
+      spec:
+        defaultAction: ""
+  - name: server
+    imageID: ""
+    imageTag: ""
+    capabilities: []
+    opens: []
+    syscalls: []
+    endpoints: []
+    execs:
+    - path: /bin/ls
+      args:
+      - /bin/ls
+      - -l
+    - path: /bin/grpc_health_probe
+      args:
+      - "-addr=:9555"
+    seccompProfile:
+      spec:
+        defaultAction: ""
+  initContainers: []
+  ephemeralContainers: []
+status: {}

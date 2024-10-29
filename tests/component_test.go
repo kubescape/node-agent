@@ -19,6 +19,7 @@ import (
 	spdxv1beta1client "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -720,158 +721,407 @@ func getEndpoint(endpoints []v1beta1.HTTPEndpoint, endpoint v1beta1.HTTPEndpoint
 
 }
 
-// func Test_10_DemoTest(t *testing.T) {
-// 	start := time.Now()
-// 	defer tearDownTest(t, start)
+func Test_12_MergingProfilesTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
 
-// 	//testutils.IncreaseNodeAgentSniffingTime("2m")
-// 	wl, err := testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app-role.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating role: %v", err)
-// 	}
+	// PHASE 1: Setup workload and initial profile
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
+	require.NoError(t, err, "Failed to create workload")
+	require.NoError(t, wl.WaitForReady(80), "Workload failed to be ready")
+	require.NoError(t, wl.WaitForApplicationProfile(80, "ready"), "Application profile not ready")
 
-// 	wl, err = testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app-role-binding.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating role binding: %v", err)
-// 	}
+	// Generate initial profile data
+	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
+	require.NoError(t, err, "Failed to exec into nginx container")
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
+	require.NoError(t, err, "Failed to exec into server container")
 
-// 	wl, err = testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app-service.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating service: %v", err)
-// 	}
+	require.NoError(t, wl.WaitForApplicationProfileCompletion(80), "Profile failed to complete")
+	time.Sleep(10 * time.Second) // Allow profile processing
 
-// 	wl, err = testutils.NewTestWorkload("default", path.Join(utils.CurrentDir(), "resources/ping-app.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating workload: %v", err)
-// 	}
-// 	assert.NoError(t, wl.WaitForReady(80))
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4"}, "")
-// 	err = wl.WaitForApplicationProfileCompletion(80)
-// 	if err != nil {
-// 		t.Errorf("Error waiting for application profile to be completed: %v", err)
-// 	}
-// 	// err = wl.WaitForNetworkNeighborhoodCompletion(80)
-// 	// if err != nil {
-// 	// 	t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
-// 	// }
+	// Log initial profile state
+	initialProfile, err := wl.GetApplicationProfile()
+	require.NoError(t, err, "Failed to get initial profile")
+	initialProfileJSON, _ := json.Marshal(initialProfile)
+	t.Logf("Initial application profile:\n%s", string(initialProfileJSON))
 
-// 	// Do a ls command using command injection in the ping command
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;ls"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	// PHASE 2: Verify initial alerts
+	t.Log("Testing initial alert generation...")
+	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
+	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: alert
+	time.Sleep(30 * time.Second)                   // Wait for alert generation
 
-// 	// Do a cat command using command injection in the ping command
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;cat /run/secrets/kubernetes.io/serviceaccount/token"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	initialAlerts, err := testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Failed to get initial alerts")
 
-// 	// Do an uname command using command injection in the ping command
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;uname -m | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g'"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	// Record initial alert count
+	initialAlertCount := 0
+	for _, alert := range initialAlerts {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+			initialAlertCount++
+		}
+	}
 
-// 	// Download kubectl
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;curl -LO \"https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl\""}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	testutils.AssertContains(t, initialAlerts, "Unexpected process launched", "ls", "server")
+	testutils.AssertNotContains(t, initialAlerts, "Unexpected process launched", "ls", "nginx")
 
-// 	// Sleep for 10 seconds to wait for the kubectl download
-// 	time.Sleep(10 * time.Second)
+	// PHASE 3: Apply user-managed profile
+	t.Log("Applying user-managed profile...")
+	// Create the user-managed profile
+	userProfile := &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("ug-%s", initialProfile.Name),
+			Namespace: initialProfile.Namespace,
+			Annotations: map[string]string{
+				"kubescape.io/managed-by": "User",
+			},
+		},
+		Spec: v1beta1.ApplicationProfileSpec{
+			Architectures: []string{"amd64"},
+			Containers: []v1beta1.ApplicationProfileContainer{
+				{
+					Name: "nginx",
+					Execs: []v1beta1.ExecCalls{
+						{
+							Path: "/usr/bin/ls",
+							Args: []string{"/usr/bin/ls", "-l"},
+						},
+					},
+					SeccompProfile: v1beta1.SingleSeccompProfile{
+						Spec: v1beta1.SingleSeccompProfileSpec{
+							DefaultAction: "",
+						},
+					},
+				},
+				{
+					Name: "server",
+					Execs: []v1beta1.ExecCalls{
+						{
+							Path: "/bin/ls",
+							Args: []string{"/bin/ls", "-l"},
+						},
+						{
+							Path: "/bin/grpc_health_probe",
+							Args: []string{"-addr=:9555"},
+						},
+					},
+					SeccompProfile: v1beta1.SingleSeccompProfile{
+						Spec: v1beta1.SingleSeccompProfileSpec{
+							DefaultAction: "",
+						},
+					},
+				},
+			},
+		},
+	}
 
-// 	// Make kubectl executable
-// 	_, _, err = wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;chmod +x kubectl"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	// Log the profile we're about to create
+	userProfileJSON, err := json.MarshalIndent(userProfile, "", "  ")
+	require.NoError(t, err, "Failed to marshal user profile")
+	t.Logf("Creating user profile:\n%s", string(userProfileJSON))
 
-// 	// Get the pods in the cluster
-// 	output, _, err := wl.ExecIntoPod([]string{"sh", "-c", "ping 1.1.1.1 -c 4;./kubectl --server https://kubernetes.default --insecure-skip-tls-verify --token $(cat /run/secrets/kubernetes.io/serviceaccount/token) get pods"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	// Get k8s client
+	k8sClient := k8sinterface.NewKubernetesApi()
 
-// 	// Check that the output contains the pod-ping-app pod
-// 	assert.Contains(t, output, "ping-app", "Expected output to contain 'ping-app'")
+	// Create the user-managed profile
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+	_, err = storageClient.ApplicationProfiles(ns.Name).Create(context.Background(), userProfile, metav1.CreateOptions{})
+	require.NoError(t, err, "Failed to create user profile")
 
-// 	// Get the alerts and check that the alerts are generated
-// 	alerts, err := testutils.GetAlerts(wl.Namespace)
-// 	if err != nil {
-// 		t.Errorf("Error getting alerts: %v", err)
-// 	}
+	// PHASE 4: Verify merged profile behavior
+	t.Log("Verifying merged profile behavior...")
+	time.Sleep(15 * time.Second) // Allow merge to complete
 
-// 	// Validate that all alerts are signaled
-// 	expectedAlerts := map[string]bool{
-// 		"Unexpected process launched": false,
-// 		"Unexpected file access":      false,
-// 		"Kubernetes Client Executed":  false,
-// 		// "Exec from malicious source":               false,
-// 		"Exec Binary Not In Base Image":           false,
-// 		"Unexpected Service Account Token Access": false,
-// 		// "Unexpected domain request":               false,
-// 	}
+	// Test merged profile behavior
+	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
+	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: no alert (user profile should suppress alert)
+	time.Sleep(10 * time.Second)                   // Wait for potential alerts
 
-// 	for _, alert := range alerts {
-// 		ruleName, ruleOk := alert.Labels["rule_name"]
-// 		if ruleOk {
-// 			if _, exists := expectedAlerts[ruleName]; exists {
-// 				expectedAlerts[ruleName] = true
-// 			}
-// 		}
-// 	}
+	// Verify alert counts
+	finalAlerts, err := testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Failed to get final alerts")
 
-// 	for ruleName, signaled := range expectedAlerts {
-// 		if !signaled {
-// 			t.Errorf("Expected alert '%s' was not signaled", ruleName)
-// 		}
-// 	}
-// }
+	// Only count new alerts (after the initial count)
+	newAlertCount := 0
+	for _, alert := range finalAlerts {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+			newAlertCount++
+		}
+	}
 
-// func Test_11_DuplicationTest(t *testing.T) {
-// 	start := time.Now()
-// 	defer tearDownTest(t, start)
+	t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, newAlertCount)
 
-// 	ns := testutils.NewRandomNamespace()
-// 	// wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
-// 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/ping-app.yaml"))
-// 	if err != nil {
-// 		t.Errorf("Error creating workload: %v", err)
-// 	}
-// 	assert.NoError(t, wl.WaitForReady(80))
+	if newAlertCount > initialAlertCount {
+		t.Logf("Full alert details:")
+		for _, alert := range finalAlerts {
+			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+				t.Logf("Alert: %+v", alert)
+			}
+		}
+		t.Errorf("New alerts were generated after merge (Initial: %d, Final: %d)", initialAlertCount, newAlertCount)
+	}
 
-// 	err = wl.WaitForApplicationProfileCompletion(80)
-// 	if err != nil {
-// 		t.Errorf("Error waiting for application profile to be completed: %v", err)
-// 	}
+	// PHASE 5: Check PATCH (removing the ls command from the user profile of the server container and triggering an alert)
+	t.Log("Patching user profile to remove ls command from server container...")
+	patchOperations := []utils.PatchOperation{
+		{Op: "remove", Path: "/spec/containers/1/execs/0"},
+	}
 
-// 	// process launched from nginx container
-// 	_, _, err = wl.ExecIntoPod([]string{"ls", "-a"}, "ping-app")
-// 	if err != nil {
-// 		t.Errorf("Error executing remote command: %v", err)
-// 	}
+	patch, err := json.Marshal(patchOperations)
+	require.NoError(t, err, "Failed to marshal patch operations")
 
-// 	time.Sleep(20 * time.Second)
+	_, err = storageClient.ApplicationProfiles(ns.Name).Patch(context.Background(), userProfile.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
+	require.NoError(t, err, "Failed to patch user profile")
 
-// 	alerts, err := testutils.GetAlerts(wl.Namespace)
-// 	if err != nil {
-// 		t.Errorf("Error getting alerts: %v", err)
-// 	}
+	// Verify patched profile behavior
+	time.Sleep(15 * time.Second) // Allow merge to complete
 
-// 	// Validate that unexpected process launched alert is signaled only once
-// 	count := 0
-// 	for _, alert := range alerts {
-// 		ruleName, ruleOk := alert.Labels["rule_name"]
-// 		if ruleOk {
-// 			if ruleName == "Unexpected process launched" {
-// 				count++
-// 			}
-// 		}
-// 	}
+	// Log the profile that was patched
+	patchedProfile, err := wl.GetApplicationProfile()
+	require.NoError(t, err, "Failed to get patched profile")
+	t.Logf("Patched application profile:\n%v", patchedProfile)
 
-// 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "ping-app")
+	// Test patched profile behavior
+	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
+	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: alert (ls command removed from user profile)
+	time.Sleep(10 * time.Second)                   // Wait for potential alerts
 
-// 	assert.Equal(t, 1, count, "Expected 1 alert of type 'Unexpected process launched' but got %d", count)
-// }
+	// Verify alert counts
+	finalAlerts, err = testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Failed to get final alerts")
+
+	// Only count new alerts (after the initial count)
+	newAlertCount = 0
+	for _, alert := range finalAlerts {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+			newAlertCount++
+		}
+	}
+
+	t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, newAlertCount)
+
+	if newAlertCount <= initialAlertCount {
+		t.Logf("Full alert details:")
+		for _, alert := range finalAlerts {
+			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+				t.Logf("Alert: %+v", alert)
+			}
+		}
+		t.Errorf("New alerts were not generated after patch (Initial: %d, Final: %d)", initialAlertCount, newAlertCount)
+	}
+}
+
+func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	// PHASE 1: Setup workload and initial network neighborhood
+	ns := testutils.NewRandomNamespace()
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
+	require.NoError(t, err, "Failed to create workload")
+	require.NoError(t, wl.WaitForReady(80), "Workload failed to be ready")
+	require.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"), "Network neighborhood not ready")
+
+	// Generate initial network data
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
+	require.NoError(t, err, "Failed to exec wget in server container")
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")
+	require.NoError(t, err, "Failed to exec curl in nginx container")
+
+	require.NoError(t, wl.WaitForNetworkNeighborhoodCompletion(80), "Network neighborhood failed to complete")
+	time.Sleep(10 * time.Second) // Allow network neighborhood processing
+
+	// Log initial network neighborhood state
+	initialNN, err := wl.GetNetworkNeighborhood()
+	require.NoError(t, err, "Failed to get initial network neighborhood")
+	initialNNJSON, _ := json.Marshal(initialNN)
+	t.Logf("Initial network neighborhood:\n%s", string(initialNNJSON))
+
+	// PHASE 2: Verify initial alerts
+	t.Log("Testing initial alert generation...")
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")         // Expected: no alert (original rule)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (not allowed)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (not allowed)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "httpforever.com", "-T", "2", "-t", "1"}, "server") // Expected: alert (not allowed)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")               // Expected: no alert (original rule)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")                  // Expected: alert (not allowed)
+	time.Sleep(30 * time.Second)                                                                    // Wait for alert generation
+
+	initialAlerts, err := testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Failed to get initial alerts")
+
+	// Record initial alert count
+	initialAlertCount := 0
+	for _, alert := range initialAlerts {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
+			initialAlertCount++
+		}
+	}
+
+	// Verify initial alerts
+	testutils.AssertContains(t, initialAlerts, "Unexpected domain request", "wget", "server")
+	testutils.AssertContains(t, initialAlerts, "Unexpected domain request", "curl", "nginx")
+
+	// PHASE 3: Apply user-managed network neighborhood
+	t.Log("Applying user-managed network neighborhood...")
+	userNN := &v1beta1.NetworkNeighborhood{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("ug-%s", initialNN.Name),
+			Namespace: initialNN.Namespace,
+			Annotations: map[string]string{
+				"kubescape.io/managed-by": "User",
+			},
+		},
+		Spec: v1beta1.NetworkNeighborhoodSpec{
+			LabelSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app": "multiple-containers-app",
+				},
+			},
+			Containers: []v1beta1.NetworkNeighborhoodContainer{
+				{
+					Name: "nginx",
+					Egress: []v1beta1.NetworkNeighbor{
+						{
+							Identifier: "nginx-github",
+							Type:       "external",
+							DNSNames:   []string{"github.com."},
+							Ports: []v1beta1.NetworkPort{
+								{
+									Name:     "TCP-80",
+									Protocol: "TCP",
+									Port:     ptr(int32(80)),
+								},
+								{
+									Name:     "TCP-443",
+									Protocol: "TCP",
+									Port:     ptr(int32(443)),
+								},
+							},
+						},
+					},
+				},
+				{
+					Name: "server",
+					Egress: []v1beta1.NetworkNeighbor{
+						{
+							Identifier: "server-example",
+							Type:       "external",
+							DNSNames:   []string{"info.cern.ch."},
+							Ports: []v1beta1.NetworkPort{
+								{
+									Name:     "TCP-80",
+									Protocol: "TCP",
+									Port:     ptr(int32(80)),
+								},
+								{
+									Name:     "TCP-443",
+									Protocol: "TCP",
+									Port:     ptr(int32(443)),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Create user-managed network neighborhood
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageClient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+	_, err = storageClient.NetworkNeighborhoods(ns.Name).Create(context.Background(), userNN, metav1.CreateOptions{})
+	require.NoError(t, err, "Failed to create user network neighborhood")
+
+	// PHASE 4: Verify merged behavior (no new alerts)
+	t.Log("Verifying merged network neighborhood behavior...")
+	time.Sleep(15 * time.Second) // Allow merge to complete
+
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // Expected: no alert (original)
+	// Try multiple times to ensure alert is removed
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: no alert (user added)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")            // Expected: no alert (original)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")               // Expected: no alert (user added)
+	time.Sleep(30 * time.Second)                                                                 // Wait for potential alerts
+
+	mergedAlerts, err := testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Failed to get alerts after merge")
+
+	// Count new alerts after merge
+	newAlertCount := 0
+	for _, alert := range mergedAlerts {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
+			newAlertCount++
+		}
+	}
+
+	t.Logf("Alert counts - Initial: %d, After merge: %d", initialAlertCount, newAlertCount)
+
+	if newAlertCount > initialAlertCount {
+		t.Logf("Full alert details:")
+		for _, alert := range mergedAlerts {
+			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
+				t.Logf("Alert: %+v", alert)
+			}
+		}
+		t.Errorf("New alerts were generated after merge (Initial: %d, After merge: %d)", initialAlertCount, newAlertCount)
+	}
+
+	// PHASE 5: Remove permission via patch and verify alerts return
+	t.Log("Patching user network neighborhood to remove info.cern.ch from server container...")
+	patchOperations := []utils.PatchOperation{
+		{Op: "remove", Path: "/spec/containers/1/egress/0"},
+	}
+
+	patch, err := json.Marshal(patchOperations)
+	require.NoError(t, err, "Failed to marshal patch operations")
+
+	_, err = storageClient.NetworkNeighborhoods(ns.Name).Patch(context.Background(), userNN.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
+	require.NoError(t, err, "Failed to patch user network neighborhood")
+
+	time.Sleep(20 * time.Second) // Allow merge to complete
+
+	// Test alerts after patch
+	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // Expected: no alert
+	// Try multiple times to ensure alert is removed
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
+	_, _, err = wl.ExecIntoPod([]string{"wget", "info.cern.ch", "-T", "2", "-t", "1"}, "server") // Expected: alert (removed)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "kubernetes.io", "-m", "2"}, "nginx")            // Expected: no alert
+	_, _, err = wl.ExecIntoPod([]string{"curl", "github.com", "-m", "2"}, "nginx")               // Expected: no alert
+	time.Sleep(30 * time.Second)                                                                 // Wait for alerts
+
+	finalAlerts, err := testutils.GetAlerts(wl.Namespace)
+	require.NoError(t, err, "Failed to get final alerts")
+
+	// Count final alerts
+	finalAlertCount := 0
+	for _, alert := range finalAlerts {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
+			finalAlertCount++
+		}
+	}
+
+	t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, finalAlertCount)
+
+	if finalAlertCount <= initialAlertCount {
+		t.Logf("Full alert details:")
+		for _, alert := range finalAlerts {
+			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected domain request" && alert.Labels["container_name"] == "server" {
+				t.Logf("Alert: %+v", alert)
+			}
+		}
+		t.Errorf("New alerts were not generated after patch (Initial: %d, Final: %d)", initialAlertCount, finalAlertCount)
+	}
+}
+
+func ptr(i int32) *int32 {
+	return &i
+}

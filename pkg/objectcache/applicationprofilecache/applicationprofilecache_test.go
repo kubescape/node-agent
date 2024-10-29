@@ -186,10 +186,10 @@ func Test_addApplicationProfile(t *testing.T) {
 				ap.addPod(tt.preCreatedPods[i])
 			}
 			for i := range tt.preCreatedAP {
-				ap.addApplicationProfile(context.Background(), tt.preCreatedAP[i])
+				ap.addApplicationProfile(tt.preCreatedAP[i])
 			}
 
-			ap.addApplicationProfile(context.Background(), tt.obj)
+			ap.addApplicationProfile(tt.obj)
 			time.Sleep(1 * time.Second) // add is async
 
 			// test if the application profile is added to the cache
@@ -513,9 +513,9 @@ func Test_addApplicationProfile_existing(t *testing.T) {
 				ap.slugToContainers.Set(tt.pods[i].slug, mapset.NewSet(tt.pods[i].podName))
 			}
 
-			ap.addApplicationProfile(context.Background(), tt.obj1)
+			ap.addApplicationProfile(tt.obj1)
 			time.Sleep(1 * time.Second) // add is async
-			ap.addApplicationProfile(context.Background(), tt.obj2)
+			ap.addApplicationProfile(tt.obj2)
 
 			// test if the application profile is added to the cache
 			if tt.storeInCache {
@@ -706,7 +706,7 @@ func Test_addPod(t *testing.T) {
 
 			ap := NewApplicationProfileCache("", storageClient, 0)
 
-			ap.addApplicationProfile(context.Background(), tt.preCreatedAP)
+			ap.addApplicationProfile(tt.preCreatedAP)
 			time.Sleep(1 * time.Second) // add is async
 
 			tt.obj.(metav1.Object).SetNamespace(namespace)
@@ -730,6 +730,205 @@ func Test_addPod(t *testing.T) {
 				for i := range tt.ignoredContainers {
 					assert.Nil(t, ap.GetApplicationProfile(tt.ignoredContainers[i]))
 				}
+			}
+		})
+	}
+}
+
+func Test_MergeApplicationProfiles(t *testing.T) {
+	tests := []struct {
+		name           string
+		normalProfile  *v1beta1.ApplicationProfile
+		userProfile    *v1beta1.ApplicationProfile
+		expectedMerged *v1beta1.ApplicationProfile
+	}{
+		{
+			name: "merge profiles with overlapping containers",
+			normalProfile: &v1beta1.ApplicationProfile{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-profile",
+					Namespace: "default",
+				},
+				Spec: v1beta1.ApplicationProfileSpec{
+					Containers: []v1beta1.ApplicationProfileContainer{
+						{
+							Name: "container1",
+							Capabilities: []string{
+								"NET_ADMIN",
+							},
+							Syscalls: []string{
+								"open",
+							},
+							Opens: []v1beta1.OpenCalls{
+								{
+									Path: "/etc/config",
+								},
+							},
+						},
+					},
+				},
+			},
+			userProfile: &v1beta1.ApplicationProfile{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ug-test-profile", // Added ug- prefix
+					Namespace: "default",
+					Annotations: map[string]string{
+						"kubescape.io/managed-by": "User",
+					},
+				},
+				Spec: v1beta1.ApplicationProfileSpec{
+					Containers: []v1beta1.ApplicationProfileContainer{
+						{
+							Name: "container1",
+							Capabilities: []string{
+								"SYS_ADMIN",
+							},
+							Syscalls: []string{
+								"write",
+							},
+							Opens: []v1beta1.OpenCalls{
+								{
+									Path: "/etc/secret",
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedMerged: &v1beta1.ApplicationProfile{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-profile", // Keeps original name without ug- prefix
+					Namespace: "default",
+				},
+				Spec: v1beta1.ApplicationProfileSpec{
+					Containers: []v1beta1.ApplicationProfileContainer{
+						{
+							Name: "container1",
+							Capabilities: []string{
+								"NET_ADMIN",
+								"SYS_ADMIN",
+							},
+							Syscalls: []string{
+								"open",
+								"write",
+							},
+							Opens: []v1beta1.OpenCalls{
+								{
+									Path: "/etc/config",
+								},
+								{
+									Path: "/etc/secret",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "merge profiles with init containers",
+			normalProfile: &v1beta1.ApplicationProfile{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-profile",
+					Namespace: "default",
+				},
+				Spec: v1beta1.ApplicationProfileSpec{
+					InitContainers: []v1beta1.ApplicationProfileContainer{
+						{
+							Name: "init1",
+							Execs: []v1beta1.ExecCalls{
+								{
+									Path: "mount",
+								},
+							},
+						},
+					},
+				},
+			},
+			userProfile: &v1beta1.ApplicationProfile{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ug-test-profile", // Added ug- prefix
+					Namespace: "default",
+					Annotations: map[string]string{
+						"kubescape.io/managed-by": "User",
+					},
+				},
+				Spec: v1beta1.ApplicationProfileSpec{
+					InitContainers: []v1beta1.ApplicationProfileContainer{
+						{
+							Name: "init1",
+							Execs: []v1beta1.ExecCalls{
+								{
+									Path: "chmod",
+								},
+							},
+							Syscalls: []string{
+								"chmod",
+							},
+						},
+					},
+				},
+			},
+			expectedMerged: &v1beta1.ApplicationProfile{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-profile", // Keeps original name without ug- prefix
+					Namespace: "default",
+				},
+				Spec: v1beta1.ApplicationProfileSpec{
+					InitContainers: []v1beta1.ApplicationProfileContainer{
+						{
+							Name: "init1",
+							Execs: []v1beta1.ExecCalls{
+								{
+									Path: "mount",
+								},
+								{
+									Path: "chmod",
+								},
+							},
+							Syscalls: []string{
+								"chmod",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cache := NewApplicationProfileCache("test-node", nil, 0)
+			merged := cache.performMerge(tt.normalProfile, tt.userProfile)
+
+			// Verify object metadata
+			assert.Equal(t, tt.expectedMerged.Name, merged.Name)
+			assert.Equal(t, tt.expectedMerged.Namespace, merged.Namespace)
+
+			// Verify user-managed annotation is removed
+			_, hasAnnotation := merged.Annotations["kubescape.io/managed-by"]
+			assert.False(t, hasAnnotation)
+
+			// Verify containers
+			assert.Equal(t, len(tt.expectedMerged.Spec.Containers), len(merged.Spec.Containers))
+			for i, container := range tt.expectedMerged.Spec.Containers {
+				assert.Equal(t, container.Name, merged.Spec.Containers[i].Name)
+				assert.ElementsMatch(t, container.Capabilities, merged.Spec.Containers[i].Capabilities)
+				assert.ElementsMatch(t, container.Syscalls, merged.Spec.Containers[i].Syscalls)
+				assert.ElementsMatch(t, container.Opens, merged.Spec.Containers[i].Opens)
+				assert.ElementsMatch(t, container.Execs, merged.Spec.Containers[i].Execs)
+				assert.ElementsMatch(t, container.Endpoints, merged.Spec.Containers[i].Endpoints)
+			}
+
+			// Verify init containers
+			assert.Equal(t, len(tt.expectedMerged.Spec.InitContainers), len(merged.Spec.InitContainers))
+			for i, container := range tt.expectedMerged.Spec.InitContainers {
+				assert.Equal(t, container.Name, merged.Spec.InitContainers[i].Name)
+				assert.ElementsMatch(t, container.Capabilities, merged.Spec.InitContainers[i].Capabilities)
+				assert.ElementsMatch(t, container.Syscalls, merged.Spec.InitContainers[i].Syscalls)
+				assert.ElementsMatch(t, container.Opens, merged.Spec.InitContainers[i].Opens)
+				assert.ElementsMatch(t, container.Execs, merged.Spec.InitContainers[i].Execs)
+				assert.ElementsMatch(t, container.Endpoints, merged.Spec.InitContainers[i].Endpoints)
 			}
 		})
 	}
