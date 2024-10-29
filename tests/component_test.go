@@ -1037,7 +1037,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 
 	// PHASE 4: Verify merged behavior (no new alerts)
 	t.Log("Verifying merged network neighborhood behavior...")
-	time.Sleep(15 * time.Second) // Allow merge to complete
+	time.Sleep(25 * time.Second) // Allow merge to complete
 
 	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // Expected: no alert (original)
 	// Try multiple times to ensure alert is removed
