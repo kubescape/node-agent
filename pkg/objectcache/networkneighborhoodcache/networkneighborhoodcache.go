@@ -146,6 +146,14 @@ func (nn *NetworkNeighborhoodCacheImpl) performMerge(normalNN, userManagedNN *v1
 }
 
 func (nn *NetworkNeighborhoodCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.NetworkNeighborhoodContainer) []v1beta1.NetworkNeighborhoodContainer {
+	if len(userManagedContainers) != len(normalContainers) {
+		logger.L().Error("user-managed containers count does not match normal containers count",
+			helpers.Int("userManagedCount", len(userManagedContainers)),
+			helpers.Int("normalCount", len(normalContainers)),
+			helpers.String("reason", "number of containers don't match"))
+		return normalContainers
+	}
+
 	// Assuming the normalContainers are already in the correct Pod order
 	// We'll merge user containers at their corresponding positions
 	for i := range normalContainers {
