@@ -148,7 +148,6 @@ func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string)
 	if s := ap.containerToSlug.Get(containerID); s != "" {
 		return ap.slugToAppProfile.Get(s)
 	}
-
 	return nil
 }
 

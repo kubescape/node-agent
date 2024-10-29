@@ -69,17 +69,9 @@ func NewNetworkNeighborhoodCache(nodeName string, storageClient versioned.SpdxV1
 		allNetworkNeighborhoods:        mapset.NewSet[string](),
 		userManagedNetworkNeighborhood: maps.SafeMap[string, *v1beta1.NetworkNeighborhood]{},
 	}
-
 }
 
 // ------------------ objectcache.NetworkNeighborhoodCache methods -----------------------
-
-func (nn *NetworkNeighborhoodCacheImpl) GetNetworkNeighborhood(containerID string) *v1beta1.NetworkNeighborhood {
-	if s := nn.containerToSlug.Get(containerID); s != "" {
-		return nn.slugToNetworkNeighborhood.Get(s)
-	}
-	return nil
-}
 
 func (nn *NetworkNeighborhoodCacheImpl) handleUserManagedNN(netNeighborhood *v1beta1.NetworkNeighborhood) {
 	baseNNName := strings.TrimPrefix(netNeighborhood.GetName(), "ug-")
@@ -120,171 +112,40 @@ func (nn *NetworkNeighborhoodCacheImpl) handleUserManagedNN(netNeighborhood *v1b
 	}
 }
 
-func (nn *NetworkNeighborhoodCacheImpl) performMerge(normalNN, userManagedNN *v1beta1.NetworkNeighborhood) *v1beta1.NetworkNeighborhood {
-	mergedNN := normalNN.DeepCopy()
+func (nn *NetworkNeighborhoodCacheImpl) addNetworkNeighborhood(_ context.Context, obj runtime.Object) {
+	netNeighborhood := obj.(*v1beta1.NetworkNeighborhood)
+	nnName := objectcache.MetaUniqueName(netNeighborhood)
 
-	// Merge spec containers
-	mergedNN.Spec.Containers = nn.mergeContainers(mergedNN.Spec.Containers, userManagedNN.Spec.Containers)
-	mergedNN.Spec.InitContainers = nn.mergeContainers(mergedNN.Spec.InitContainers, userManagedNN.Spec.InitContainers)
-	mergedNN.Spec.EphemeralContainers = nn.mergeContainers(mergedNN.Spec.EphemeralContainers, userManagedNN.Spec.EphemeralContainers)
-
-	// Merge LabelSelector
-	if userManagedNN.Spec.LabelSelector.MatchLabels != nil {
-		if mergedNN.Spec.LabelSelector.MatchLabels == nil {
-			mergedNN.Spec.LabelSelector.MatchLabels = make(map[string]string)
-		}
-		for k, v := range userManagedNN.Spec.LabelSelector.MatchLabels {
-			mergedNN.Spec.LabelSelector.MatchLabels[k] = v
-		}
+	if isUserManagedNN(netNeighborhood) {
+		nn.handleUserManagedNN(netNeighborhood)
+		return
 	}
-	mergedNN.Spec.LabelSelector.MatchExpressions = append(
-		mergedNN.Spec.LabelSelector.MatchExpressions,
-		userManagedNN.Spec.LabelSelector.MatchExpressions...,
-	)
 
-	return mergedNN
+	nnState := newNetworkNeighborhoodState(netNeighborhood)
+	nn.slugToState.Set(nnName, nnState)
+
+	if nnState.status != helpersv1.Completed {
+		if nn.slugToNetworkNeighborhood.Has(nnName) {
+			nn.slugToNetworkNeighborhood.Delete(nnName)
+			nn.allNetworkNeighborhoods.Remove(nnName)
+		}
+		return
+	}
+
+	nn.allNetworkNeighborhoods.Add(nnName)
+
+	if nn.slugToContainers.Has(nnName) {
+		time.AfterFunc(utils.RandomDuration(nn.maxDelaySeconds, time.Second), func() {
+			nn.addFullNetworkNeighborhood(netNeighborhood, nnName)
+		})
+	}
 }
 
-func (nn *NetworkNeighborhoodCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.NetworkNeighborhoodContainer) []v1beta1.NetworkNeighborhoodContainer {
-	if len(userManagedContainers) != len(normalContainers) {
-		logger.L().Error("user-managed containers count does not match normal containers count",
-			helpers.Int("userManagedCount", len(userManagedContainers)),
-			helpers.Int("normalCount", len(normalContainers)),
-			helpers.String("reason", "number of containers don't match"))
-		return normalContainers
+func (nn *NetworkNeighborhoodCacheImpl) GetNetworkNeighborhood(containerID string) *v1beta1.NetworkNeighborhood {
+	if s := nn.containerToSlug.Get(containerID); s != "" {
+		return nn.slugToNetworkNeighborhood.Get(s)
 	}
-
-	// Assuming the normalContainers are already in the correct Pod order
-	// We'll merge user containers at their corresponding positions
-	for i := range normalContainers {
-		for _, userContainer := range userManagedContainers {
-			if normalContainers[i].Name == userContainer.Name {
-				nn.mergeContainer(&normalContainers[i], &userContainer)
-				break
-			}
-		}
-	}
-	return normalContainers
-}
-
-func (nn *NetworkNeighborhoodCacheImpl) mergeContainer(normalContainer, userContainer *v1beta1.NetworkNeighborhoodContainer) {
-	// Merge ingress rules
-	normalContainer.Ingress = nn.mergeNetworkNeighbors(normalContainer.Ingress, userContainer.Ingress)
-
-	// Merge egress rules
-	normalContainer.Egress = nn.mergeNetworkNeighbors(normalContainer.Egress, userContainer.Egress)
-}
-
-func (nn *NetworkNeighborhoodCacheImpl) mergeNetworkNeighbors(normalNeighbors, userNeighbors []v1beta1.NetworkNeighbor) []v1beta1.NetworkNeighbor {
-	// Use map to track existing neighbors by identifier
-	neighborMap := make(map[string]int)
-	for i, neighbor := range normalNeighbors {
-		neighborMap[neighbor.Identifier] = i
-	}
-
-	// Merge or append user neighbors
-	for _, userNeighbor := range userNeighbors {
-		if idx, exists := neighborMap[userNeighbor.Identifier]; exists {
-			// Merge existing neighbor
-			normalNeighbors[idx] = nn.mergeNetworkNeighbor(normalNeighbors[idx], userNeighbor)
-		} else {
-			// Append new neighbor
-			normalNeighbors = append(normalNeighbors, userNeighbor)
-		}
-	}
-
-	return normalNeighbors
-}
-
-func (nn *NetworkNeighborhoodCacheImpl) mergeNetworkNeighbor(normal, user v1beta1.NetworkNeighbor) v1beta1.NetworkNeighbor {
-	merged := normal.DeepCopy()
-
-	// Merge DNS names (removing duplicates)
-	dnsNamesSet := make(map[string]struct{})
-	for _, dns := range normal.DNSNames {
-		dnsNamesSet[dns] = struct{}{}
-	}
-	for _, dns := range user.DNSNames {
-		dnsNamesSet[dns] = struct{}{}
-	}
-	merged.DNSNames = make([]string, 0, len(dnsNamesSet))
-	for dns := range dnsNamesSet {
-		merged.DNSNames = append(merged.DNSNames, dns)
-	}
-
-	// Merge ports based on patchMergeKey (name)
-	merged.Ports = nn.mergeNetworkPorts(merged.Ports, user.Ports)
-
-	// Merge pod selector if provided
-	if user.PodSelector != nil {
-		if merged.PodSelector == nil {
-			merged.PodSelector = &metav1.LabelSelector{}
-		}
-		if user.PodSelector.MatchLabels != nil {
-			if merged.PodSelector.MatchLabels == nil {
-				merged.PodSelector.MatchLabels = make(map[string]string)
-			}
-			for k, v := range user.PodSelector.MatchLabels {
-				merged.PodSelector.MatchLabels[k] = v
-			}
-		}
-		merged.PodSelector.MatchExpressions = append(
-			merged.PodSelector.MatchExpressions,
-			user.PodSelector.MatchExpressions...,
-		)
-	}
-
-	// Merge namespace selector if provided
-	if user.NamespaceSelector != nil {
-		if merged.NamespaceSelector == nil {
-			merged.NamespaceSelector = &metav1.LabelSelector{}
-		}
-		if user.NamespaceSelector.MatchLabels != nil {
-			if merged.NamespaceSelector.MatchLabels == nil {
-				merged.NamespaceSelector.MatchLabels = make(map[string]string)
-			}
-			for k, v := range user.NamespaceSelector.MatchLabels {
-				merged.NamespaceSelector.MatchLabels[k] = v
-			}
-		}
-		merged.NamespaceSelector.MatchExpressions = append(
-			merged.NamespaceSelector.MatchExpressions,
-			user.NamespaceSelector.MatchExpressions...,
-		)
-	}
-
-	// Take the user's IP address if provided
-	if user.IPAddress != "" {
-		merged.IPAddress = user.IPAddress
-	}
-
-	// Take the user's type if provided
-	if user.Type != "" {
-		merged.Type = user.Type
-	}
-
-	return *merged
-}
-
-func (nn *NetworkNeighborhoodCacheImpl) mergeNetworkPorts(normalPorts, userPorts []v1beta1.NetworkPort) []v1beta1.NetworkPort {
-	// Use map to track existing ports by name (patchMergeKey)
-	portMap := make(map[string]int)
-	for i, port := range normalPorts {
-		portMap[port.Name] = i
-	}
-
-	// Merge or append user ports
-	for _, userPort := range userPorts {
-		if idx, exists := portMap[userPort.Name]; exists {
-			// Update existing port
-			normalPorts[idx] = userPort
-		} else {
-			// Append new port
-			normalPorts = append(normalPorts, userPort)
-		}
-	}
-
-	return normalPorts
+	return nil
 }
 
 // ------------------ watcher.Adaptor methods -----------------------
@@ -422,34 +283,6 @@ func (nn *NetworkNeighborhoodCacheImpl) removeContainer(containerID string) {
 }
 
 // ------------------ watch network neighborhood methods -----------------------
-func (nn *NetworkNeighborhoodCacheImpl) addNetworkNeighborhood(_ context.Context, obj runtime.Object) {
-	netNeighborhood := obj.(*v1beta1.NetworkNeighborhood)
-	nnName := objectcache.MetaUniqueName(netNeighborhood)
-
-	if isUserManagedNN(netNeighborhood) {
-		nn.handleUserManagedNN(netNeighborhood)
-		return
-	}
-
-	nnState := newNetworkNeighborhoodState(netNeighborhood)
-	nn.slugToState.Set(nnName, nnState)
-
-	if nnState.status != helpersv1.Completed {
-		if nn.slugToNetworkNeighborhood.Has(nnName) {
-			nn.slugToNetworkNeighborhood.Delete(nnName)
-			nn.allNetworkNeighborhoods.Remove(nnName)
-		}
-		return
-	}
-
-	nn.allNetworkNeighborhoods.Add(nnName)
-
-	if nn.slugToContainers.Has(nnName) {
-		time.AfterFunc(utils.RandomDuration(nn.maxDelaySeconds, time.Second), func() {
-			nn.addFullNetworkNeighborhood(netNeighborhood, nnName)
-		})
-	}
-}
 
 func (nn *NetworkNeighborhoodCacheImpl) addFullNetworkNeighborhood(netNeighborhood *v1beta1.NetworkNeighborhood, nnName string) {
 	fullNN, err := nn.getNetworkNeighborhood(netNeighborhood.GetNamespace(), netNeighborhood.GetName())
@@ -472,6 +305,174 @@ func (nn *NetworkNeighborhoodCacheImpl) addFullNetworkNeighborhood(netNeighborho
 		nn.containerToSlug.Set(i, nnName)
 	}
 	logger.L().Debug("added pod to network neighborhood cache", helpers.String("name", nnName))
+}
+
+func (nn *NetworkNeighborhoodCacheImpl) performMerge(normalNN, userManagedNN *v1beta1.NetworkNeighborhood) *v1beta1.NetworkNeighborhood {
+	mergedNN := normalNN.DeepCopy()
+
+	// Merge spec containers
+	mergedNN.Spec.Containers = nn.mergeContainers(mergedNN.Spec.Containers, userManagedNN.Spec.Containers)
+	mergedNN.Spec.InitContainers = nn.mergeContainers(mergedNN.Spec.InitContainers, userManagedNN.Spec.InitContainers)
+	mergedNN.Spec.EphemeralContainers = nn.mergeContainers(mergedNN.Spec.EphemeralContainers, userManagedNN.Spec.EphemeralContainers)
+
+	// Merge LabelSelector
+	if userManagedNN.Spec.LabelSelector.MatchLabels != nil {
+		if mergedNN.Spec.LabelSelector.MatchLabels == nil {
+			mergedNN.Spec.LabelSelector.MatchLabels = make(map[string]string)
+		}
+		for k, v := range userManagedNN.Spec.LabelSelector.MatchLabels {
+			mergedNN.Spec.LabelSelector.MatchLabels[k] = v
+		}
+	}
+	mergedNN.Spec.LabelSelector.MatchExpressions = append(
+		mergedNN.Spec.LabelSelector.MatchExpressions,
+		userManagedNN.Spec.LabelSelector.MatchExpressions...,
+	)
+
+	return mergedNN
+}
+
+func (nn *NetworkNeighborhoodCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.NetworkNeighborhoodContainer) []v1beta1.NetworkNeighborhoodContainer {
+	if len(userManagedContainers) != len(normalContainers) {
+		// If the number of containers don't match, we can't merge
+		logger.L().Error("failed to merge user-managed profile with base profile",
+			helpers.Int("normalContainers len", len(normalContainers)),
+			helpers.Int("userManagedContainers len", len(userManagedContainers)),
+			helpers.String("reason", "number of containers don't match"))
+		return normalContainers
+	}
+
+	// Assuming the normalContainers are already in the correct Pod order
+	// We'll merge user containers at their corresponding positions
+	for i := range normalContainers {
+		for _, userContainer := range userManagedContainers {
+			if normalContainers[i].Name == userContainer.Name {
+				nn.mergeContainer(&normalContainers[i], &userContainer)
+				break
+			}
+		}
+	}
+	return normalContainers
+}
+
+func (nn *NetworkNeighborhoodCacheImpl) mergeContainer(normalContainer, userContainer *v1beta1.NetworkNeighborhoodContainer) {
+	// Merge ingress rules
+	normalContainer.Ingress = nn.mergeNetworkNeighbors(normalContainer.Ingress, userContainer.Ingress)
+
+	// Merge egress rules
+	normalContainer.Egress = nn.mergeNetworkNeighbors(normalContainer.Egress, userContainer.Egress)
+}
+
+func (nn *NetworkNeighborhoodCacheImpl) mergeNetworkNeighbors(normalNeighbors, userNeighbors []v1beta1.NetworkNeighbor) []v1beta1.NetworkNeighbor {
+	// Use map to track existing neighbors by identifier
+	neighborMap := make(map[string]int)
+	for i, neighbor := range normalNeighbors {
+		neighborMap[neighbor.Identifier] = i
+	}
+
+	// Merge or append user neighbors
+	for _, userNeighbor := range userNeighbors {
+		if idx, exists := neighborMap[userNeighbor.Identifier]; exists {
+			// Merge existing neighbor
+			normalNeighbors[idx] = nn.mergeNetworkNeighbor(normalNeighbors[idx], userNeighbor)
+		} else {
+			// Append new neighbor
+			normalNeighbors = append(normalNeighbors, userNeighbor)
+		}
+	}
+
+	return normalNeighbors
+}
+
+func (nn *NetworkNeighborhoodCacheImpl) mergeNetworkNeighbor(normal, user v1beta1.NetworkNeighbor) v1beta1.NetworkNeighbor {
+	merged := normal.DeepCopy()
+
+	// Merge DNS names (removing duplicates)
+	dnsNamesSet := make(map[string]struct{})
+	for _, dns := range normal.DNSNames {
+		dnsNamesSet[dns] = struct{}{}
+	}
+	for _, dns := range user.DNSNames {
+		dnsNamesSet[dns] = struct{}{}
+	}
+	merged.DNSNames = make([]string, 0, len(dnsNamesSet))
+	for dns := range dnsNamesSet {
+		merged.DNSNames = append(merged.DNSNames, dns)
+	}
+
+	// Merge ports based on patchMergeKey (name)
+	merged.Ports = nn.mergeNetworkPorts(merged.Ports, user.Ports)
+
+	// Merge pod selector if provided
+	if user.PodSelector != nil {
+		if merged.PodSelector == nil {
+			merged.PodSelector = &metav1.LabelSelector{}
+		}
+		if user.PodSelector.MatchLabels != nil {
+			if merged.PodSelector.MatchLabels == nil {
+				merged.PodSelector.MatchLabels = make(map[string]string)
+			}
+			for k, v := range user.PodSelector.MatchLabels {
+				merged.PodSelector.MatchLabels[k] = v
+			}
+		}
+		merged.PodSelector.MatchExpressions = append(
+			merged.PodSelector.MatchExpressions,
+			user.PodSelector.MatchExpressions...,
+		)
+	}
+
+	// Merge namespace selector if provided
+	if user.NamespaceSelector != nil {
+		if merged.NamespaceSelector == nil {
+			merged.NamespaceSelector = &metav1.LabelSelector{}
+		}
+		if user.NamespaceSelector.MatchLabels != nil {
+			if merged.NamespaceSelector.MatchLabels == nil {
+				merged.NamespaceSelector.MatchLabels = make(map[string]string)
+			}
+			for k, v := range user.NamespaceSelector.MatchLabels {
+				merged.NamespaceSelector.MatchLabels[k] = v
+			}
+		}
+		merged.NamespaceSelector.MatchExpressions = append(
+			merged.NamespaceSelector.MatchExpressions,
+			user.NamespaceSelector.MatchExpressions...,
+		)
+	}
+
+	// Take the user's IP address if provided
+	if user.IPAddress != "" {
+		merged.IPAddress = user.IPAddress
+	}
+
+	// Take the user's type if provided
+	if user.Type != "" {
+		merged.Type = user.Type
+	}
+
+	return *merged
+}
+
+func (nn *NetworkNeighborhoodCacheImpl) mergeNetworkPorts(normalPorts, userPorts []v1beta1.NetworkPort) []v1beta1.NetworkPort {
+	// Use map to track existing ports by name (patchMergeKey)
+	portMap := make(map[string]int)
+	for i, port := range normalPorts {
+		portMap[port.Name] = i
+	}
+
+	// Merge or append user ports
+	for _, userPort := range userPorts {
+		if idx, exists := portMap[userPort.Name]; exists {
+			// Update existing port
+			normalPorts[idx] = userPort
+		} else {
+			// Append new port
+			normalPorts = append(normalPorts, userPort)
+		}
+	}
+
+	return normalPorts
 }
 
 func (nn *NetworkNeighborhoodCacheImpl) deleteNetworkNeighborhood(obj runtime.Object) {
@@ -499,23 +500,6 @@ func (nn *NetworkNeighborhoodCacheImpl) deleteNetworkNeighborhood(obj runtime.Ob
 
 	// Clean up any orphaned user-managed network neighborhoods
 	nn.cleanupOrphanedUserManagedNNs()
-}
-
-// Add cleanup method for orphaned user-managed network neighborhoods
-func (nn *NetworkNeighborhoodCacheImpl) cleanupOrphanedUserManagedNNs() {
-	nn.userManagedNetworkNeighborhood.Range(func(key string, value *v1beta1.NetworkNeighborhood) bool {
-		if nn.slugToNetworkNeighborhood.Has(key) {
-			// If base network neighborhood exists but merge didn't happen for some reason,
-			// attempt merge again and cleanup
-			if baseNN := nn.slugToNetworkNeighborhood.Get(key); baseNN != nil {
-				mergedNN := nn.performMerge(baseNN, value)
-				nn.slugToNetworkNeighborhood.Set(key, mergedNN)
-				nn.userManagedNetworkNeighborhood.Delete(key)
-				logger.L().Debug("cleaned up orphaned user-managed network neighborhood", helpers.String("name", key))
-			}
-		}
-		return true
-	})
 }
 
 func (nn *NetworkNeighborhoodCacheImpl) getNetworkNeighborhood(namespace, name string) (*v1beta1.NetworkNeighborhood, error) {
@@ -552,6 +536,23 @@ func getSlug(p *corev1.Pod) (string, error) {
 		return "", fmt.Errorf("failed to get slug")
 	}
 	return slug, nil
+}
+
+// Add cleanup method for orphaned user-managed network neighborhoods
+func (nn *NetworkNeighborhoodCacheImpl) cleanupOrphanedUserManagedNNs() {
+	nn.userManagedNetworkNeighborhood.Range(func(key string, value *v1beta1.NetworkNeighborhood) bool {
+		if nn.slugToNetworkNeighborhood.Has(key) {
+			// If base network neighborhood exists but merge didn't happen for some reason,
+			// attempt merge again and cleanup
+			if baseNN := nn.slugToNetworkNeighborhood.Get(key); baseNN != nil {
+				mergedNN := nn.performMerge(baseNN, value)
+				nn.slugToNetworkNeighborhood.Set(key, mergedNN)
+				nn.userManagedNetworkNeighborhood.Delete(key)
+				logger.L().Debug("cleaned up orphaned user-managed network neighborhood", helpers.String("name", key))
+			}
+		}
+		return true
+	})
 }
 
 func isUserManagedNN(nn *v1beta1.NetworkNeighborhood) bool {
