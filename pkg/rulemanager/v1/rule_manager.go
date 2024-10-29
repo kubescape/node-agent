@@ -437,11 +437,13 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 		runtimeProcessDetails.ProcessTree.Path = path
 	}
 
+	// TODO: Avoid Race condition where the tree is not populated yet.
 	tree, err := rm.processManager.GetProcessTreeForPID(ruleFailure.GetRuntimeProcessDetails().ContainerID, int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID))
 	if err == nil {
 		runtimeProcessDetails.ProcessTree = tree
 	} else if rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeProcessDetails().ContainerID) {
 		logger.L().Debug("RuleManager - failed to get process tree, trying to get process tree from shim",
+			helpers.Error(err),
 			helpers.String("container ID", ruleFailure.GetRuntimeProcessDetails().ContainerID))
 		shimPid := rm.containerIdToShimPid.Get(ruleFailure.GetRuntimeProcessDetails().ContainerID)
 		tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree, shimPid)
