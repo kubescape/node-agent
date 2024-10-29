@@ -42,6 +42,7 @@ import (
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+	"github.com/kubescape/node-agent/pkg/processmanager"
 
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -153,11 +154,13 @@ type IGContainerWatcher struct {
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify
 	// container runtime
 	runtime *containerutilsTypes.RuntimeConfig
+	// process manager
+	processManager processmanager.ProcessManagerClient
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]]) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]], processManager processmanager.ProcessManagerClient) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -449,6 +452,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		runtime:                      runtime,
 		thirdPartyTracers:            mapset.NewSet[containerwatcher.CustomTracer](),
 		thirdPartyContainerReceivers: mapset.NewSet[containerwatcher.ContainerReceiver](),
+		processManager:               processManager,
 	}, nil
 }
 
@@ -494,9 +498,13 @@ func (ch *IGContainerWatcher) UnregisterContainerReceiver(receiver containerwatc
 
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	if !ch.running {
-
 		if err := ch.startContainerCollection(ctx); err != nil {
 			return fmt.Errorf("setting up container collection: %w", err)
+		}
+
+		if err := ch.processManager.PopulateInitialProcesses(); err != nil {
+			ch.stopContainerCollection()
+			return fmt.Errorf("populating initial processes: %w", err)
 		}
 
 		if err := ch.startTracers(); err != nil {

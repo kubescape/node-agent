@@ -19,6 +19,10 @@ func (p *ProcessManagerMock) GetProcessTreeForPID(containerID string, pid int) (
 	return apitypes.Process{}, nil
 }
 
+func (p *ProcessManagerMock) PopulateInitialProcesses() error {
+	return nil
+}
+
 func (p *ProcessManagerMock) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
 	// no-op
 }

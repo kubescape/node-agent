@@ -11,6 +11,8 @@ import (
 // The manager is responsible for maintaining the process tree for all containers.
 type ProcessManagerClient interface {
 	GetProcessTreeForPID(containerID string, pid int) (apitypes.Process, error)
+	// PopulateInitialProcesses is called to populate the initial process tree (parsed from /proc) for all containers.
+	PopulateInitialProcesses() error
 
 	// ReportEvent will be called to report new exec events to the process manager.
 	ReportEvent(eventType utils.EventType, event utils.K8sEvent)

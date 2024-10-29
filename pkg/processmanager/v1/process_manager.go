@@ -37,7 +37,7 @@ func CreateProcessManager(ctx context.Context) *ProcessManager {
 	return pm
 }
 
-func (p *ProcessManager) InitialProcScan() error {
+func (p *ProcessManager) PopulateInitialProcesses() error {
 	if len(p.containerIdToShimPid.Keys()) == 0 {
 		return nil
 	}
@@ -258,6 +258,9 @@ func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sE
 		Gid:        &execEvent.Gid,
 		Hardlink:   execEvent.ExePath,
 		UpperLayer: &execEvent.UpperLayer,
+		Path:       execEvent.ExePath,
+		Cwd:        execEvent.Cwd,
+		Pcomm:      execEvent.Pcomm,
 		Cmdline:    strings.Join(execEvent.Args, " "),
 	}
 
