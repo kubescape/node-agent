@@ -19,128 +19,167 @@ import (
 
 const (
 	cleanupInterval = 1 * time.Minute
-	maxTreeDepth    = 50 // Prevent infinite recursion
+	maxTreeDepth    = 50
 )
 
-// ProcessManager manages container processes and their relationships
 type ProcessManager struct {
-	containerIdToShimPid maps.SafeMap[string, uint32]           // containerID -> shim pid
-	processTree          maps.SafeMap[uint32, apitypes.Process] // pid -> process
+	containerIdToShimPid maps.SafeMap[string, uint32]
+	processTree          maps.SafeMap[uint32, apitypes.Process]
+	// For testing purposes we allow to override the function that gets process info from /proc.
+	getProcessFromProc func(pid int) (apitypes.Process, error)
 }
 
-// CreateProcessManager creates a new ProcessManager instance
 func CreateProcessManager(ctx context.Context) *ProcessManager {
-	pm := &ProcessManager{}
-
-	// // Do initial process scan during initialization
-	// if err := pm.initialProcScan(); err != nil {
-	// 	logger.L().Warning("Failed initial process scan", helpers.Error(err))
-	// }
-
-	// Start cleanup routine
+	pm := &ProcessManager{
+		getProcessFromProc: getProcessFromProc,
+	}
 	go pm.startCleanupRoutine(ctx)
-
 	return pm
 }
 
-// InitialProcScan performs a one-time scan of /proc to build the initial process tree
-// Only processes that are descendants of existing container shims will be added
 func (p *ProcessManager) InitialProcScan() error {
-	// If we have no shims registered, nothing to do
 	if len(p.containerIdToShimPid.Keys()) == 0 {
 		return nil
 	}
 
 	fs, err := procfs.NewFS("/proc")
 	if err != nil {
-		return fmt.Errorf("failed to open procfs: %v", err)
+		return fmt.Errorf("failed to open procfs: %w", err)
 	}
 
 	procs, err := fs.AllProcs()
 	if err != nil {
-		return fmt.Errorf("failed to read all procs: %v", err)
+		return fmt.Errorf("failed to read all procs: %w", err)
 	}
 
-	// First pass: collect all processes
-	tempProcesses := make(map[uint32]apitypes.Process)
+	tempProcesses := make(map[uint32]apitypes.Process, len(procs))
+	shimPIDs := make(map[uint32]struct{})
+
+	p.containerIdToShimPid.Range(func(_ string, shimPID uint32) bool {
+		shimPIDs[shimPID] = struct{}{}
+		return true
+	})
+
+	// First collect all processes
 	for _, proc := range procs {
 		if process, err := p.getProcessFromProc(proc.PID); err == nil {
 			tempProcesses[process.PID] = process
 		}
 	}
 
-	// Second pass: identify shim descendants and build relationships
-	shimDescendants := make(map[uint32]bool)
+	// Then build relationships and add to tree
 	for pid, process := range tempProcesses {
-		// Check if this process is a descendant of any registered shim
-		if p.isDescendantOfShim(pid, make(map[uint32]bool)) {
-			shimDescendants[pid] = true
-
-			// Also mark all ancestors up to the shim as descendants
-			currentPID := process.PPID
-			visited := make(map[uint32]bool)
-			for currentPID != 0 && !visited[currentPID] {
-				visited[currentPID] = true
-				if proc, exists := tempProcesses[currentPID]; exists {
-					shimDescendants[currentPID] = true
-					currentPID = proc.PPID
-				} else {
-					break
-				}
+		if p.isDescendantOfShim(pid, process.PPID, shimPIDs, tempProcesses) {
+			if parent, exists := tempProcesses[process.PPID]; exists {
+				parent.Children = append(parent.Children, process)
+				tempProcesses[process.PPID] = parent
 			}
+			p.processTree.Set(pid, process)
 		}
 	}
-
-	// Final pass: add only shim-related processes and build relationships
-	for pid, process := range tempProcesses {
-		if !shimDescendants[pid] {
-			continue // Skip processes not related to shims
-		}
-
-		// If parent exists and is also a shim descendant, update parent's children
-		if parent, exists := tempProcesses[process.PPID]; exists && shimDescendants[process.PPID] {
-			parent.Children = append(parent.Children, process)
-			tempProcesses[process.PPID] = parent
-		}
-
-		// Add process to the tree
-		p.processTree.Set(pid, process)
-	}
-
-	logger.L().Debug("Initial process scan completed",
-		helpers.Int("total_processes", len(tempProcesses)),
-		helpers.Int("shim_related_processes", len(shimDescendants)))
 
 	return nil
 }
 
-// addProcess adds a process to the tree and updates relationships
+func (p *ProcessManager) isDescendantOfShim(pid uint32, ppid uint32, shimPIDs map[uint32]struct{}, processes map[uint32]apitypes.Process) bool {
+	visited := make(map[uint32]bool)
+	currentPID := pid
+	for depth := 0; depth < maxTreeDepth; depth++ {
+		if currentPID == 0 || visited[currentPID] {
+			return false
+		}
+		visited[currentPID] = true
+
+		if _, isShim := shimPIDs[ppid]; isShim {
+			return true
+		}
+
+		process, exists := processes[ppid]
+		if !exists {
+			return false
+		}
+		currentPID = ppid
+		ppid = process.PPID
+	}
+	return false
+}
+
+func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent) {
+	containerID := notif.Container.Runtime.BasicRuntimeMetadata.ContainerID
+
+	switch notif.Type {
+	case containercollection.EventTypeAddContainer:
+		containerPID := uint32(notif.Container.Pid)
+		if process, err := p.getProcessFromProc(int(containerPID)); err == nil {
+			shimPID := process.PPID
+			p.containerIdToShimPid.Set(containerID, shimPID)
+			p.addProcess(process)
+		} else {
+			logger.L().Warning("Failed to get container process info",
+				helpers.String("containerID", containerID),
+				helpers.Error(err))
+		}
+
+	case containercollection.EventTypeRemoveContainer:
+		if shimPID, exists := p.containerIdToShimPid.Load(containerID); exists {
+			p.removeProcessesUnderShim(shimPID)
+			p.containerIdToShimPid.Delete(containerID)
+		}
+	}
+}
+
+func (p *ProcessManager) removeProcessesUnderShim(shimPID uint32) {
+	var pidsToRemove []uint32
+
+	p.processTree.Range(func(pid uint32, process apitypes.Process) bool {
+		currentPID := pid
+		visited := make(map[uint32]bool)
+
+		for currentPID != 0 && !visited[currentPID] {
+			visited[currentPID] = true
+			if proc, exists := p.processTree.Load(currentPID); exists {
+				if proc.PPID == shimPID {
+					pidsToRemove = append(pidsToRemove, pid)
+					break
+				}
+				currentPID = proc.PPID
+			} else {
+				break
+			}
+		}
+		return true
+	})
+
+	// Remove in reverse order to handle parent-child relationships
+	for i := len(pidsToRemove) - 1; i >= 0; i-- {
+		p.removeProcess(pidsToRemove[i])
+	}
+}
+
 func (p *ProcessManager) addProcess(process apitypes.Process) {
-	// Add the process to the tree
 	p.processTree.Set(process.PID, process)
 
-	// Update parent's children list if parent exists
 	if parent, exists := p.processTree.Load(process.PPID); exists {
-		// Create new children slice to avoid modifying existing one
 		newChildren := make([]apitypes.Process, 0, len(parent.Children)+1)
-		// Add existing children, excluding any old version of this process
+		hasProcess := false
 		for _, child := range parent.Children {
-			if child.PID != process.PID {
+			if child.PID == process.PID {
+				hasProcess = true
+				newChildren = append(newChildren, process)
+			} else {
 				newChildren = append(newChildren, child)
 			}
 		}
-		// Add the new process
-		newChildren = append(newChildren, process)
+		if !hasProcess {
+			newChildren = append(newChildren, process)
+		}
 		parent.Children = newChildren
 		p.processTree.Set(parent.PID, parent)
 	}
 }
 
-// removeProcess removes a process and updates relationships
 func (p *ProcessManager) removeProcess(pid uint32) {
-	// Get the process before removing it
 	if process, exists := p.processTree.Load(pid); exists {
-		// Update parent's children list
 		if parent, exists := p.processTree.Load(process.PPID); exists {
 			newChildren := make([]apitypes.Process, 0, len(parent.Children))
 			for _, child := range parent.Children {
@@ -152,50 +191,77 @@ func (p *ProcessManager) removeProcess(pid uint32) {
 			p.processTree.Set(parent.PID, parent)
 		}
 
-		// Reassign children to nearest living ancestor
 		for _, child := range process.Children {
-			if newProcess, exists := p.processTree.Load(child.PID); exists {
-				newProcess.PPID = process.PPID
-				p.addProcess(newProcess) // This will update the new parent's children list
+			if childProcess, exists := p.processTree.Load(child.PID); exists {
+				childProcess.PPID = process.PPID
+				p.addProcess(childProcess)
 			}
 		}
 
-		// Finally remove the process
 		p.processTree.Delete(pid)
 	}
 }
 
-// isDescendantOfShim checks if a process is a descendant of any container shim
-func (p *ProcessManager) isDescendantOfShim(pid uint32, visited map[uint32]bool) bool {
-	if pid == 0 || len(visited) > maxTreeDepth {
-		return false
+func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid int) (apitypes.Process, error) {
+	if !p.containerIdToShimPid.Has(containerID) {
+		return apitypes.Process{}, fmt.Errorf("container ID %s not found", containerID)
 	}
 
-	if visited[pid] {
-		return false // Avoid cycles
-	}
-	visited[pid] = true
-
-	// Check if this pid is a shim
-	isShim := false
-	p.containerIdToShimPid.Range(func(_ string, shimPid uint32) bool {
-		if shimPid == pid {
-			isShim = true
-			return false // Stop ranging
+	targetPID := uint32(pid)
+	if !p.processTree.Has(targetPID) {
+		process, err := p.getProcessFromProc(pid)
+		if err != nil {
+			return apitypes.Process{}, fmt.Errorf("process %d not found: %v", pid, err)
 		}
-		return true
-	})
-
-	if isShim {
-		return true
+		p.addProcess(process)
 	}
 
-	// Check parent if process exists
-	if process, exists := p.processTree.Load(pid); exists {
-		return p.isDescendantOfShim(process.PPID, visited)
+	result := p.processTree.Get(targetPID)
+	currentPID := result.PPID
+	seen := make(map[uint32]bool)
+
+	for currentPID != p.containerIdToShimPid.Get(containerID) && currentPID != 0 {
+		if seen[currentPID] {
+			break
+		}
+		seen[currentPID] = true
+
+		if p.processTree.Has(currentPID) {
+			parent := p.processTree.Get(currentPID)
+			parentCopy := parent
+			parentCopy.Children = []apitypes.Process{result}
+			result = parentCopy
+			currentPID = parent.PPID
+		} else {
+			break
+		}
 	}
 
-	return false
+	return result, nil
+}
+
+func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
+	if eventType != utils.ExecveEventType {
+		return
+	}
+
+	execEvent, ok := event.(*tracerexectype.Event)
+	if !ok {
+		return
+	}
+
+	process := apitypes.Process{
+		PID:        uint32(execEvent.Pid),
+		PPID:       uint32(execEvent.Ppid),
+		Comm:       execEvent.Comm,
+		Uid:        &execEvent.Uid,
+		Gid:        &execEvent.Gid,
+		Hardlink:   execEvent.ExePath,
+		UpperLayer: &execEvent.UpperLayer,
+		Cmdline:    strings.Join(execEvent.Args, " "),
+	}
+
+	p.addProcess(process)
 }
 
 func (p *ProcessManager) startCleanupRoutine(ctx context.Context) {
@@ -213,7 +279,6 @@ func (p *ProcessManager) startCleanupRoutine(ctx context.Context) {
 }
 
 func (p *ProcessManager) cleanup() {
-	// First pass: identify dead processes
 	deadPids := make(map[uint32]bool)
 	p.processTree.Range(func(pid uint32, _ apitypes.Process) bool {
 		if !isProcessAlive(int(pid)) {
@@ -222,149 +287,12 @@ func (p *ProcessManager) cleanup() {
 		return true
 	})
 
-	// Second pass: remove dead processes and update relationships
 	for pid := range deadPids {
 		p.removeProcess(pid)
 	}
 }
 
-func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent) {
-	switch notif.Type {
-	case containercollection.EventTypeAddContainer:
-		containerID := notif.Container.Runtime.ContainerID
-		shimPID := uint32(notif.Container.Pid)
-
-		// Store the shim PID
-		p.containerIdToShimPid.Set(containerID, shimPID)
-
-		// If the shim process isn't in our tree yet (might have started after initial scan),
-		// add it directly
-		if !p.processTree.Has(shimPID) {
-			if process, err := p.getProcessFromProc(int(shimPID)); err == nil {
-				p.addProcess(process)
-			} else {
-				logger.L().Debug("Failed to get shim process info",
-					helpers.String("containerID", containerID),
-					helpers.Error(err))
-			}
-		}
-
-	case containercollection.EventTypeRemoveContainer:
-		containerID := notif.Container.Runtime.ContainerID
-
-		// Get shim PID before removing the mapping
-		if shimPID, exists := p.containerIdToShimPid.Load(containerID); exists {
-			// Remove all descendants of this shim
-			descendants := make(map[uint32]bool)
-			p.processTree.Range(func(pid uint32, process apitypes.Process) bool {
-				if p.isDescendantOfShim(pid, make(map[uint32]bool)) {
-					descendants[pid] = true
-				}
-				return true
-			})
-
-			// Remove descendants in reverse order (children before parents)
-			for pid := range descendants {
-				p.removeProcess(pid)
-			}
-
-			// Finally remove the shim itself
-			p.removeProcess(shimPID)
-		}
-
-		// Remove the container mapping
-		p.containerIdToShimPid.Delete(containerID)
-	}
-}
-
-func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid int) (apitypes.Process, error) {
-	if !p.containerIdToShimPid.Has(containerID) {
-		return apitypes.Process{}, fmt.Errorf("container ID %s not found", containerID)
-	}
-
-	shimPID := p.containerIdToShimPid.Get(containerID)
-	targetPID := uint32(pid)
-
-	// If process doesn't exist in our tree, try to fetch it
-	if !p.processTree.Has(targetPID) {
-		// Only fetch if it's a descendant of our shim
-		if process, err := p.getProcessFromProc(int(targetPID)); err == nil {
-			p.addProcess(process)
-		} else {
-			return apitypes.Process{}, fmt.Errorf("process %d not found: %v", pid, err)
-		}
-	}
-
-	// Build process tree from target up to shim
-	processes := make([]apitypes.Process, 0)
-	currentPID := targetPID
-	seen := make(map[uint32]bool)
-
-	// Collect all processes up to shim
-	for currentPID != 0 && currentPID != shimPID {
-		if seen[currentPID] {
-			break // Avoid cycles
-		}
-		seen[currentPID] = true
-
-		if proc, exists := p.processTree.Load(currentPID); exists {
-			processes = append([]apitypes.Process{proc}, processes...) // Prepend
-			currentPID = proc.PPID
-		} else {
-			break
-		}
-	}
-
-	// No processes found or invalid tree
-	if len(processes) == 0 {
-		return apitypes.Process{}, fmt.Errorf("could not build process tree for pid %d", pid)
-	}
-
-	// Build the tree structure
-	result := processes[0]
-	current := &result
-
-	// Link processes together
-	for i := 1; i < len(processes); i++ {
-		child := processes[i]
-		current.Children = []apitypes.Process{child}
-		current = &current.Children[0]
-	}
-
-	// Add the target process as the final leaf if it's not already in the chain
-	if current.PID != targetPID {
-		if targetProc, exists := p.processTree.Load(targetPID); exists {
-			current.Children = []apitypes.Process{targetProc}
-		}
-	}
-
-	return result, nil
-}
-
-func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
-	if eventType != utils.ExecveEventType {
-		return
-	}
-
-	execEvent, ok := event.(*tracerexectype.Event)
-	if !ok {
-		return
-	}
-
-	// Create new process from event
-	process := apitypes.Process{
-		PID:     execEvent.Pid,
-		PPID:    execEvent.Ppid,
-		Comm:    execEvent.Comm,
-		Uid:     &execEvent.Uid,
-		Gid:     &execEvent.Gid,
-		Cmdline: strings.Join(execEvent.Args, " "),
-	}
-
-	p.addProcess(process)
-}
-
-func (p *ProcessManager) getProcessFromProc(pid int) (apitypes.Process, error) {
+func getProcessFromProc(pid int) (apitypes.Process, error) {
 	proc, err := procfs.NewProc(pid)
 	if err != nil {
 		return apitypes.Process{}, fmt.Errorf("failed to get process info: %v", err)
@@ -375,7 +303,6 @@ func (p *ProcessManager) getProcessFromProc(pid int) (apitypes.Process, error) {
 		return apitypes.Process{}, fmt.Errorf("failed to get process stat: %v", err)
 	}
 
-	// Get process details
 	var uid, gid uint32
 	if status, err := proc.NewStatus(); err == nil {
 		if len(status.UIDs) > 1 {
@@ -386,20 +313,13 @@ func (p *ProcessManager) getProcessFromProc(pid int) (apitypes.Process, error) {
 		}
 	}
 
-	cmdline, err := proc.CmdLine()
-	if err != nil {
-		cmdline = []string{stat.Comm} // Fallback to comm if cmdline fails
+	cmdline, _ := proc.CmdLine()
+	if len(cmdline) == 0 {
+		cmdline = []string{stat.Comm}
 	}
 
-	cwd, err := proc.Cwd()
-	if err != nil {
-		cwd = "" // Empty string if we can't get cwd
-	}
-
-	path, err := proc.Executable()
-	if err != nil {
-		path = "" // Empty string if we can't get executable path
-	}
+	cwd, _ := proc.Cwd()
+	path, _ := proc.Executable()
 
 	return apitypes.Process{
 		PID:     uint32(pid),
