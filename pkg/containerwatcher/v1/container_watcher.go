@@ -206,6 +206,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			path = event.Args[0]
 		}
 		metrics.ReportEvent(utils.ExecveEventType)
+		processManager.ReportEvent(utils.ExecveEventType, &event)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
 		ruleManager.ReportEvent(utils.ExecveEventType, &event)
