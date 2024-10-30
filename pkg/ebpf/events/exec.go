@@ -17,6 +17,6 @@ func (event *ExecEvent) GetExtra() interface{} {
 	return event.extra
 }
 
-func (event *ExecEvent) GetPID() int {
-	return int(event.Pid)
+func (event *ExecEvent) GetPID() uint64 {
+	return (uint64(event.Pid) << 32) | uint64(event.Tid)
 }
