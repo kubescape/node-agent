@@ -291,6 +291,7 @@ func (p *ProcessManager) cleanup() {
 	})
 
 	for pid := range deadPids {
+		logger.L().Debug("Removing dead process", helpers.Int("pid", int(pid)))
 		p.removeProcess(pid)
 	}
 }
