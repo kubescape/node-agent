@@ -912,3 +912,135 @@ func TestRemoveProcessesUnderShim(t *testing.T) {
 		})
 	}
 }
+
+func TestIsDescendantOfShim(t *testing.T) {
+	tests := []struct {
+		name        string
+		processes   map[uint32]apitypes.Process
+		shimPIDs    map[uint32]struct{}
+		pid         uint32
+		ppid        uint32
+		expected    bool
+		description string
+	}{
+		{
+			name: "direct_child_of_shim",
+			processes: map[uint32]apitypes.Process{
+				100: {PID: 100, PPID: 1, Comm: "shim"},
+				200: {PID: 200, PPID: 100, Comm: "child"},
+			},
+			shimPIDs: map[uint32]struct{}{
+				100: {},
+			},
+			pid:         200,
+			ppid:        100,
+			expected:    true,
+			description: "Process is a direct child of shim",
+		},
+		{
+			name: "indirect_descendant",
+			processes: map[uint32]apitypes.Process{
+				100: {PID: 100, PPID: 1, Comm: "shim"},
+				200: {PID: 200, PPID: 100, Comm: "parent"},
+				300: {PID: 300, PPID: 200, Comm: "child"},
+			},
+			shimPIDs: map[uint32]struct{}{
+				100: {},
+			},
+			pid:         300,
+			ppid:        200,
+			expected:    true,
+			description: "Process is an indirect descendant of shim",
+		},
+		{
+			name: "not_a_descendant",
+			processes: map[uint32]apitypes.Process{
+				100: {PID: 100, PPID: 1, Comm: "shim"},
+				200: {PID: 200, PPID: 2, Comm: "unrelated"},
+			},
+			shimPIDs: map[uint32]struct{}{
+				100: {},
+			},
+			pid:         200,
+			ppid:        2,
+			expected:    false,
+			description: "Process is not a descendant of any shim",
+		},
+		{
+			name: "circular_reference",
+			processes: map[uint32]apitypes.Process{
+				100: {PID: 100, PPID: 1, Comm: "shim"},
+				200: {PID: 200, PPID: 300, Comm: "circular1"},
+				300: {PID: 300, PPID: 200, Comm: "circular2"},
+			},
+			shimPIDs: map[uint32]struct{}{
+				100: {},
+			},
+			pid:         200,
+			ppid:        300,
+			expected:    false,
+			description: "Process is part of a circular reference",
+		},
+		{
+			name: "process_chain_exceeds_max_depth",
+			processes: func() map[uint32]apitypes.Process {
+				// Create a chain where the target process is maxTreeDepth + 1 steps away from any shim
+				procs := map[uint32]apitypes.Process{
+					1: {PID: 1, PPID: 0, Comm: "init"}, // init process
+					2: {PID: 2, PPID: 1, Comm: "shim"}, // shim process
+				}
+				// Create a chain starting far from the shim
+				currentPPID := uint32(100) // Start with a different base to avoid conflicts
+				targetPID := uint32(100 + maxTreeDepth + 1)
+
+				// Build the chain backwards from target to base
+				for pid := targetPID; pid > currentPPID; pid-- {
+					procs[pid] = apitypes.Process{
+						PID:  pid,
+						PPID: pid - 1,
+						Comm: fmt.Sprintf("process-%d", pid),
+					}
+				}
+				// Add the base process that's not connected to shim
+				procs[currentPPID] = apitypes.Process{
+					PID:  currentPPID,
+					PPID: currentPPID - 1,
+					Comm: fmt.Sprintf("process-%d", currentPPID),
+				}
+				return procs
+			}(),
+			shimPIDs: map[uint32]struct{}{
+				2: {}, // Shim PID
+			},
+			pid:         uint32(100 + maxTreeDepth + 1), // Target process at the end of chain
+			ppid:        uint32(100 + maxTreeDepth),     // Its immediate parent
+			expected:    false,
+			description: "Process chain exceeds maximum allowed depth",
+		},
+		{
+			name: "multiple_shims",
+			processes: map[uint32]apitypes.Process{
+				100: {PID: 100, PPID: 1, Comm: "shim1"},
+				101: {PID: 101, PPID: 1, Comm: "shim2"},
+				200: {PID: 200, PPID: 100, Comm: "child1"},
+				201: {PID: 201, PPID: 101, Comm: "child2"},
+			},
+			shimPIDs: map[uint32]struct{}{
+				100: {},
+				101: {},
+			},
+			pid:         200,
+			ppid:        100,
+			expected:    true,
+			description: "Multiple shims in the system",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pm := &ProcessManager{}
+			result := pm.isDescendantOfShim(tc.pid, tc.ppid, tc.shimPIDs, tc.processes)
+			assert.Equal(t, tc.expected, result, tc.description)
+		})
+	}
+}
