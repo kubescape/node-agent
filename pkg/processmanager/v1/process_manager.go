@@ -37,6 +37,9 @@ func CreateProcessManager(ctx context.Context) *ProcessManager {
 	return pm
 }
 
+// PopulateInitialProcesses scans the /proc filesystem to build the initial process tree
+// for all registered container shim processes. It establishes parent-child relationships
+// between processes and adds them to the process tree if they are descendants of a shim.
 func (p *ProcessManager) PopulateInitialProcesses() error {
 	if len(p.containerIdToShimPid.Keys()) == 0 {
 		return nil
@@ -81,6 +84,9 @@ func (p *ProcessManager) PopulateInitialProcesses() error {
 	return nil
 }
 
+// isDescendantOfShim checks if a process with the given PID is a descendant of any
+// registered shim process. It traverses the process tree upwards until it either finds
+// a shim process or reaches the maximum tree depth to prevent infinite loops.
 func (p *ProcessManager) isDescendantOfShim(pid uint32, ppid uint32, shimPIDs map[uint32]struct{}, processes map[uint32]apitypes.Process) bool {
 	visited := make(map[uint32]bool)
 	currentPID := pid
@@ -104,6 +110,9 @@ func (p *ProcessManager) isDescendantOfShim(pid uint32, ppid uint32, shimPIDs ma
 	return false
 }
 
+// ContainerCallback handles container lifecycle events (creation and removal).
+// For new containers, it identifies the container's shim process and adds it to the tracking system.
+// For removed containers, it cleans up the associated processes from the process tree.
 func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	containerID := notif.Container.Runtime.BasicRuntimeMetadata.ContainerID
 
@@ -128,6 +137,9 @@ func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent
 	}
 }
 
+// removeProcessesUnderShim removes all processes that are descendants of the specified
+// shim process PID from the process tree. This is typically called when a container
+// is being removed.
 func (p *ProcessManager) removeProcessesUnderShim(shimPID uint32) {
 	var pidsToRemove []uint32
 
@@ -156,6 +168,9 @@ func (p *ProcessManager) removeProcessesUnderShim(shimPID uint32) {
 	}
 }
 
+// addProcess adds or updates a process in the process tree and maintains the
+// parent-child relationships between processes. If the process already exists
+// with a different parent, it updates the relationships accordingly.
 func (p *ProcessManager) addProcess(process apitypes.Process) {
 	// First, check if the process already exists and has a different parent
 	if existingProc, exists := p.processTree.Load(process.PID); exists && existingProc.PPID != process.PPID {
@@ -195,6 +210,9 @@ func (p *ProcessManager) addProcess(process apitypes.Process) {
 	}
 }
 
+// removeProcess removes a process from the process tree and updates the parent-child
+// relationships. Children of the removed process are reassigned to their grandparent
+// to maintain the process hierarchy.
 func (p *ProcessManager) removeProcess(pid uint32) {
 	if process, exists := p.processTree.Load(pid); exists {
 		if parent, exists := p.processTree.Load(process.PPID); exists {
@@ -219,6 +237,9 @@ func (p *ProcessManager) removeProcess(pid uint32) {
 	}
 }
 
+// GetProcessTreeForPID retrieves the process tree for a specific PID within a container.
+// It returns the process and all its ancestors up to the container's shim process.
+// If the process is not in the tree, it attempts to fetch it from /proc.
 func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid int) (apitypes.Process, error) {
 	if !p.containerIdToShimPid.Has(containerID) {
 		return apitypes.Process{}, fmt.Errorf("container ID %s not found", containerID)
@@ -257,6 +278,9 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid int) (apit
 	return result, nil
 }
 
+// ReportEvent handles process execution events from the system.
+// It specifically processes execve events to track new process creations
+// and updates the process tree accordingly.
 func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
 	if eventType != utils.ExecveEventType {
 		return
@@ -284,6 +308,10 @@ func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sE
 	p.addProcess(process)
 }
 
+// startCleanupRoutine starts a goroutine that periodically runs the cleanup
+// function to remove dead processes from the process tree. It continues until
+// the context is cancelled.
+// TODO: Register eBPF tracer to get process exit events and remove dead processes immediately.
 func (p *ProcessManager) startCleanupRoutine(ctx context.Context) {
 	ticker := time.NewTicker(cleanupInterval)
 	defer ticker.Stop()
@@ -298,6 +326,8 @@ func (p *ProcessManager) startCleanupRoutine(ctx context.Context) {
 	}
 }
 
+// cleanup removes dead processes from the process tree by checking if each
+// process in the tree is still alive in the system.
 func (p *ProcessManager) cleanup() {
 	deadPids := make(map[uint32]bool)
 	p.processTree.Range(func(pid uint32, _ apitypes.Process) bool {
@@ -313,6 +343,9 @@ func (p *ProcessManager) cleanup() {
 	}
 }
 
+// getProcessFromProc retrieves process information from the /proc filesystem
+// for a given PID. It collects various process attributes such as command line,
+// working directory, and user/group IDs.
 func getProcessFromProc(pid int) (apitypes.Process, error) {
 	proc, err := procfs.NewProc(pid)
 	if err != nil {
@@ -354,6 +387,8 @@ func getProcessFromProc(pid int) (apitypes.Process, error) {
 	}, nil
 }
 
+// isProcessAlive checks if a process with the given PID is still running
+// by attempting to read its information from the /proc filesystem.
 func isProcessAlive(pid int) bool {
 	proc, err := procfs.NewProc(pid)
 	if err != nil {
