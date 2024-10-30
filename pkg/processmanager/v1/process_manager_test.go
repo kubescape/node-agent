@@ -831,3 +831,84 @@ func TestProcessReparenting(t *testing.T) {
 		assert.Equal(t, shimPID, grandchild.PPID, "Grandchild should be reparented to shim")
 	})
 }
+
+func TestRemoveProcessesUnderShim(t *testing.T) {
+	tests := []struct {
+		name         string
+		initialTree  map[uint32]apitypes.Process
+		shimPID      uint32
+		expectedTree map[uint32]apitypes.Process
+		description  string
+	}{
+		{
+			name: "simple_process_tree",
+			initialTree: map[uint32]apitypes.Process{
+				100: {PID: 100, PPID: 1, Comm: "shim", Children: []apitypes.Process{}},     // shim process
+				200: {PID: 200, PPID: 100, Comm: "parent", Children: []apitypes.Process{}}, // direct child of shim
+				201: {PID: 201, PPID: 200, Comm: "child1", Children: []apitypes.Process{}}, // child of parent
+				202: {PID: 202, PPID: 200, Comm: "child2", Children: []apitypes.Process{}}, // another child of parent
+			},
+			shimPID: 100,
+			expectedTree: map[uint32]apitypes.Process{
+				100: {PID: 100, PPID: 1, Comm: "shim", Children: []apitypes.Process{}}, // only shim remains
+			},
+			description: "Should remove all processes under shim including children of children",
+		},
+		{
+			name:         "empty_tree",
+			initialTree:  map[uint32]apitypes.Process{},
+			shimPID:      100,
+			expectedTree: map[uint32]apitypes.Process{},
+			description:  "Should handle empty process tree gracefully",
+		},
+		{
+			name: "orphaned_processes",
+			initialTree: map[uint32]apitypes.Process{
+				100: {PID: 100, PPID: 1, Comm: "shim", Children: []apitypes.Process{}},     // shim process
+				200: {PID: 200, PPID: 100, Comm: "parent", Children: []apitypes.Process{}}, // direct child of shim
+				201: {PID: 201, PPID: 999, Comm: "orphan", Children: []apitypes.Process{}}, // orphaned process (parent doesn't exist)
+			},
+			shimPID: 100,
+			expectedTree: map[uint32]apitypes.Process{
+				100: {PID: 100, PPID: 1, Comm: "shim", Children: []apitypes.Process{}},     // shim remains
+				201: {PID: 201, PPID: 999, Comm: "orphan", Children: []apitypes.Process{}}, // orphan unaffected
+			},
+			description: "Should handle orphaned processes correctly",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create process manager with test data
+			pm := &ProcessManager{}
+
+			// Populate initial process tree
+			for pid, process := range tc.initialTree {
+				pm.processTree.Set(pid, process)
+			}
+
+			// Call the function under test
+			pm.removeProcessesUnderShim(tc.shimPID)
+
+			// Verify results
+			assert.Equal(t, len(tc.expectedTree), len(pm.processTree.Keys()),
+				"Process tree size mismatch after removal")
+
+			// Check each expected process
+			for pid, expectedProcess := range tc.expectedTree {
+				actualProcess, exists := pm.processTree.Load(pid)
+				assert.True(t, exists, "Expected process %d not found in tree", pid)
+				assert.Equal(t, expectedProcess, actualProcess,
+					"Process %d details don't match expected values", pid)
+			}
+
+			// Verify no unexpected processes remain
+			pm.processTree.Range(func(pid uint32, process apitypes.Process) bool {
+				_, shouldExist := tc.expectedTree[pid]
+				assert.True(t, shouldExist,
+					"Unexpected process %d found in tree", pid)
+				return true
+			})
+		})
+	}
+}
