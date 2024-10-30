@@ -303,6 +303,7 @@ func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sE
 		Cwd:        execEvent.Cwd,
 		Pcomm:      execEvent.Pcomm,
 		Cmdline:    strings.Join(execEvent.Args, " "),
+		Children:   []apitypes.Process{},
 	}
 
 	p.addProcess(process)
@@ -376,14 +377,15 @@ func getProcessFromProc(pid int) (apitypes.Process, error) {
 	path, _ := proc.Executable()
 
 	return apitypes.Process{
-		PID:     uint32(pid),
-		PPID:    uint32(stat.PPID),
-		Comm:    stat.Comm,
-		Uid:     &uid,
-		Gid:     &gid,
-		Cmdline: strings.Join(cmdline, " "),
-		Cwd:     cwd,
-		Path:    path,
+		PID:      uint32(pid),
+		PPID:     uint32(stat.PPID),
+		Comm:     stat.Comm,
+		Uid:      &uid,
+		Gid:      &gid,
+		Cmdline:  strings.Join(cmdline, " "),
+		Cwd:      cwd,
+		Path:     path,
+		Children: []apitypes.Process{},
 	}, nil
 }
 
