@@ -157,8 +157,25 @@ func (p *ProcessManager) removeProcessesUnderShim(shimPID uint32) {
 }
 
 func (p *ProcessManager) addProcess(process apitypes.Process) {
+	// First, check if the process already exists and has a different parent
+	if existingProc, exists := p.processTree.Load(process.PID); exists && existingProc.PPID != process.PPID {
+		// Remove from old parent's children list
+		if oldParent, exists := p.processTree.Load(existingProc.PPID); exists {
+			newChildren := make([]apitypes.Process, 0, len(oldParent.Children))
+			for _, child := range oldParent.Children {
+				if child.PID != process.PID {
+					newChildren = append(newChildren, child)
+				}
+			}
+			oldParent.Children = newChildren
+			p.processTree.Set(oldParent.PID, oldParent)
+		}
+	}
+
+	// Update the process in the tree
 	p.processTree.Set(process.PID, process)
 
+	// Update new parent's children list
 	if parent, exists := p.processTree.Load(process.PPID); exists {
 		newChildren := make([]apitypes.Process, 0, len(parent.Children)+1)
 		hasProcess := false

@@ -583,3 +583,251 @@ func TestRaceConditions(t *testing.T) {
 		return true
 	})
 }
+
+func TestDuplicateProcessHandling(t *testing.T) {
+	pm, addMockProcess := setupTestProcessManager(t)
+
+	containerID := "test-container"
+	shimPID := uint32(999)
+	containerPID := uint32(1000)
+
+	// Setup container
+	addMockProcess(int(containerPID), shimPID, "container-main")
+	pm.ContainerCallback(containercollection.PubSubEvent{
+		Type: containercollection.EventTypeAddContainer,
+		Container: &containercollection.Container{
+			Runtime: containercollection.RuntimeMetadata{
+				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
+					ContainerID: containerID,
+				},
+			},
+			Pid: containerPID,
+		},
+	})
+
+	t.Run("update process with same parent", func(t *testing.T) {
+		// First add a parent process
+		parentEvent := &tracerexectype.Event{
+			Pid:  1001,
+			Ppid: containerPID,
+			Comm: "parent-process",
+			Args: []string{"parent-process", "--initial"},
+		}
+		pm.ReportEvent(utils.ExecveEventType, parentEvent)
+
+		// Add child process
+		childEvent := &tracerexectype.Event{
+			Pid:  1002,
+			Ppid: 1001,
+			Comm: "child-process",
+			Args: []string{"child-process", "--initial"},
+		}
+		pm.ReportEvent(utils.ExecveEventType, childEvent)
+
+		// Verify initial state
+		parent, exists := pm.processTree.Load(1001)
+		require.True(t, exists)
+		assert.Equal(t, "parent-process", parent.Comm)
+		assert.Equal(t, "parent-process --initial", parent.Cmdline)
+		assert.Len(t, parent.Children, 1)
+		assert.Equal(t, uint32(1002), parent.Children[0].PID)
+
+		// Add same child process again with different arguments
+		updatedChildEvent := &tracerexectype.Event{
+			Pid:  1002,
+			Ppid: 1001,
+			Comm: "child-process",
+			Args: []string{"child-process", "--updated"},
+		}
+		pm.ReportEvent(utils.ExecveEventType, updatedChildEvent)
+
+		// Verify the process was updated
+		updatedChild, exists := pm.processTree.Load(1002)
+		require.True(t, exists)
+		assert.Equal(t, "child-process --updated", updatedChild.Cmdline)
+
+		// Verify parent's children list was updated
+		updatedParent, exists := pm.processTree.Load(1001)
+		require.True(t, exists)
+		assert.Len(t, updatedParent.Children, 1)
+		assert.Equal(t, "child-process --updated", updatedParent.Children[0].Cmdline)
+	})
+
+	t.Run("update process with different parent", func(t *testing.T) {
+		// Move process to different parent
+		differentParentEvent := &tracerexectype.Event{
+			Pid:  1002,
+			Ppid: containerPID,
+			Comm: "child-process",
+			Args: []string{"child-process", "--new-parent"},
+		}
+		pm.ReportEvent(utils.ExecveEventType, differentParentEvent)
+
+		// Verify process was updated with new parent
+		movedChild, exists := pm.processTree.Load(1002)
+		require.True(t, exists)
+		assert.Equal(t, containerPID, movedChild.PPID)
+		assert.Equal(t, "child-process --new-parent", movedChild.Cmdline)
+
+		// Verify old parent no longer has the child
+		oldParent, exists := pm.processTree.Load(1001)
+		require.True(t, exists)
+		assert.Empty(t, oldParent.Children, "Old parent should have no children")
+
+		// Verify new parent has the child
+		containerProcess, exists := pm.processTree.Load(containerPID)
+		require.True(t, exists)
+		hasChild := false
+		for _, child := range containerProcess.Children {
+			if child.PID == 1002 {
+				hasChild = true
+				assert.Equal(t, "child-process --new-parent", child.Cmdline)
+			}
+		}
+		assert.True(t, hasChild, "New parent should have the child")
+	})
+}
+
+func TestProcessReparenting(t *testing.T) {
+	pm, addMockProcess := setupTestProcessManager(t)
+
+	containerID := "test-container"
+	shimPID := uint32(999)
+	containerPID := uint32(1000)
+
+	// Setup container
+	addMockProcess(int(containerPID), shimPID, "container-main")
+	pm.ContainerCallback(containercollection.PubSubEvent{
+		Type: containercollection.EventTypeAddContainer,
+		Container: &containercollection.Container{
+			Runtime: containercollection.RuntimeMetadata{
+				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
+					ContainerID: containerID,
+				},
+			},
+			Pid: containerPID,
+		},
+	})
+
+	t.Run("reparent to nearest living ancestor", func(t *testing.T) {
+		// Create a chain of processes:
+		// shim -> grandparent -> parent -> child
+
+		// Create grandparent process
+		grandparentPID := uint32(2000)
+		grandparentEvent := &tracerexectype.Event{
+			Pid:  grandparentPID,
+			Ppid: shimPID,
+			Comm: "grandparent",
+			Args: []string{"grandparent"},
+		}
+		pm.ReportEvent(utils.ExecveEventType, grandparentEvent)
+
+		// Create parent process
+		parentPID := uint32(2001)
+		parentEvent := &tracerexectype.Event{
+			Pid:  parentPID,
+			Ppid: grandparentPID,
+			Comm: "parent",
+			Args: []string{"parent"},
+		}
+		pm.ReportEvent(utils.ExecveEventType, parentEvent)
+
+		// Create child process
+		childPID := uint32(2002)
+		childEvent := &tracerexectype.Event{
+			Pid:  childPID,
+			Ppid: parentPID,
+			Comm: "child",
+			Args: []string{"child"},
+		}
+		pm.ReportEvent(utils.ExecveEventType, childEvent)
+
+		// Verify initial hierarchy
+		child, exists := pm.processTree.Load(childPID)
+		require.True(t, exists)
+		assert.Equal(t, parentPID, child.PPID)
+
+		parent, exists := pm.processTree.Load(parentPID)
+		require.True(t, exists)
+		assert.Equal(t, grandparentPID, parent.PPID)
+
+		// When parent dies, child should be reparented to grandparent
+		pm.removeProcess(parentPID)
+
+		// Verify child was reparented to grandparent
+		child, exists = pm.processTree.Load(childPID)
+		require.True(t, exists)
+		assert.Equal(t, grandparentPID, child.PPID, "Child should be reparented to grandparent")
+
+		// Verify grandparent has the child in its children list
+		grandparent, exists := pm.processTree.Load(grandparentPID)
+		require.True(t, exists)
+		hasChild := false
+		for _, c := range grandparent.Children {
+			if c.PID == childPID {
+				hasChild = true
+				break
+			}
+		}
+		assert.True(t, hasChild, "Grandparent should have the reparented child")
+
+		// Now if grandparent dies too, child should be reparented to shim
+		pm.removeProcess(grandparentPID)
+
+		child, exists = pm.processTree.Load(childPID)
+		require.True(t, exists)
+		assert.Equal(t, shimPID, child.PPID, "Child should be reparented to shim when grandparent dies")
+	})
+
+	t.Run("reparent multiple children", func(t *testing.T) {
+		// Create a parent with multiple children
+		parentPID := uint32(3000)
+		parentEvent := &tracerexectype.Event{
+			Pid:  parentPID,
+			Ppid: shimPID,
+			Comm: "parent",
+			Args: []string{"parent"},
+		}
+		pm.ReportEvent(utils.ExecveEventType, parentEvent)
+
+		// Create several children
+		childPIDs := []uint32{3001, 3002, 3003}
+		for _, pid := range childPIDs {
+			childEvent := &tracerexectype.Event{
+				Pid:  pid,
+				Ppid: parentPID,
+				Comm: fmt.Sprintf("child-%d", pid),
+				Args: []string{"child"},
+			}
+			pm.ReportEvent(utils.ExecveEventType, childEvent)
+		}
+
+		// Create a subprocess under one of the children
+		grandchildPID := uint32(3004)
+		grandchildEvent := &tracerexectype.Event{
+			Pid:  grandchildPID,
+			Ppid: childPIDs[0],
+			Comm: "grandchild",
+			Args: []string{"grandchild"},
+		}
+		pm.ReportEvent(utils.ExecveEventType, grandchildEvent)
+
+		// When parent dies, all direct children should be reparented to shim
+		pm.removeProcess(parentPID)
+
+		// Verify all children were reparented to shim
+		for _, childPID := range childPIDs {
+			child, exists := pm.processTree.Load(childPID)
+			require.True(t, exists)
+			assert.Equal(t, shimPID, child.PPID, "Child should be reparented to shim")
+		}
+
+		// When first child dies, its grandchild should be reparented to shim too
+		pm.removeProcess(childPIDs[0])
+
+		grandchild, exists := pm.processTree.Load(grandchildPID)
+		require.True(t, exists)
+		assert.Equal(t, shimPID, grandchild.PPID, "Grandchild should be reparented to shim")
+	})
+}
