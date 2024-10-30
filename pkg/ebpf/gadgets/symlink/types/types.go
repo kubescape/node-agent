@@ -10,6 +10,7 @@ type Event struct {
 	eventtypes.WithMountNsID
 
 	Pid        uint32 `json:"pid,omitempty" column:"pid,template:pid"`
+	Tid        uint32 `json:"tid,omitempty" column:"tid,template:tid"`
 	PPid       uint32 `json:"ppid,omitempty" column:"ppid,template:ppid"`
 	Uid        uint32 `json:"uid,omitempty" column:"uid,template:uid"`
 	Gid        uint32 `json:"gid,omitempty" column:"gid,template:gid"`
@@ -29,8 +30,8 @@ func (event *Event) GetExtra() interface{} {
 	return event.extra
 }
 
-func (event *Event) GetPID() int {
-	return int(event.Pid)
+func (event *Event) GetPID() uint64 {
+	return (uint64(event.Pid) << 32) | uint64(event.Tid)
 }
 
 func GetColumns() *columns.Columns[Event] {

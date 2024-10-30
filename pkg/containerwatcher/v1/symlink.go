@@ -5,6 +5,7 @@ import (
 
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+	"golang.org/x/sys/unix"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
@@ -14,6 +15,14 @@ import (
 func (ch *IGContainerWatcher) symlinkEventCallback(event *tracersymlinktype.Event) {
 	if event.Type == types.DEBUG {
 		return
+	}
+
+	if ch.thirdPartyEnricher != nil {
+		syscalls := []uint64{unix.SYS_SYMLINKAT, unix.SYS_SYMLINK}
+		ch.thirdPartyEnricher.Enrich(event, syscalls)
+		if event.GetExtra() != nil {
+				fmt.Println("GetExtra", event.GetExtra())
+		}
 	}
 
 	if isDroppedEvent(event.Type, event.Message) {

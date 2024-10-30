@@ -38,5 +38,5 @@ type ContainerReceiver interface {
 }
 
 type ThirdPartyEnricher interface {
-	Enrich(event utils.EnrichEvent)
+	Enrich(event utils.EnrichEvent, syscall []uint64)
 }

@@ -9,7 +9,7 @@ type K8sEvent interface {
 
 type EnrichEvent interface {
 	GetBaseEvent() *types.Event
-	GetPID() int
+	GetPID() uint64
 	SetExtra(extra interface{})
 }
 
