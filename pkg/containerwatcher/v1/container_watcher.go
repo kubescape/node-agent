@@ -502,6 +502,7 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			return fmt.Errorf("setting up container collection: %w", err)
 		}
 
+		// We want to populate the initial processes before starting the tracers but after retrieving the shims.
 		if err := ch.processManager.PopulateInitialProcesses(); err != nil {
 			ch.stopContainerCollection()
 			return fmt.Errorf("populating initial processes: %w", err)
