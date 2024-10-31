@@ -6,6 +6,8 @@ import (
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	"golang.org/x/sys/unix"
 )
 
 func (ch *IGContainerWatcher) openEventCallback(event *traceropentype.Event) {
@@ -13,10 +15,15 @@ func (ch *IGContainerWatcher) openEventCallback(event *traceropentype.Event) {
 		return
 	}
 
-	// do not skip dropped events as their processing is done in the worker
-
+	openEvent := &events.OpenEvent{Event: *event}
+	if ch.thirdPartyEnricher != nil {
+		ch.thirdPartyEnricher.Enrich(openEvent, []uint64{unix.SYS_OPEN, unix.SYS_OPENAT})
+		if openEvent.GetExtra() != nil {
+			fmt.Println("openEventCallback GetExtra", openEvent.GetExtra())
+		}
+	}
 	if event.Err > -1 && event.FullPath != "" {
-		ch.openWorkerChan <- event
+		ch.openWorkerChan <- openEvent
 	}
 }
 

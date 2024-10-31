@@ -19,7 +19,6 @@ func (ch *IGContainerWatcher) symlinkEventCallback(event *tracersymlinktype.Even
 
 	if ch.thirdPartyEnricher != nil {
 		syscalls := []uint64{unix.SYS_SYMLINKAT, unix.SYS_SYMLINK}
-		fmt.Println("symlinkEventCallback syscalls", syscalls)
 		ch.thirdPartyEnricher.Enrich(event, syscalls)
 		if event.GetExtra() != nil {
 			fmt.Println("symlinkEventCallback GetExtra", event.GetExtra())

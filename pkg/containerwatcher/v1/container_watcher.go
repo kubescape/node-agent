@@ -18,7 +18,6 @@ import (
 	tracernetwork "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/tracer"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
@@ -136,7 +135,7 @@ type IGContainerWatcher struct {
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *events.ExecEvent
-	openWorkerChan         chan *traceropentype.Event
+	openWorkerChan         chan *events.OpenEvent
 	ptraceWorkerChan       chan *tracerptracetype.Event
 	networkWorkerChan      chan *tracernetworktype.Event
 	dnsWorkerChan          chan *tracerdnstype.Event
@@ -219,7 +218,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	}
 	// Create an open worker pool
 	openWorkerPool, err := ants.NewPoolWithFunc(openWorkerPoolSize, func(i interface{}) {
-		event := i.(traceropentype.Event)
+		event := i.(events.OpenEvent)
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
 			return
@@ -236,17 +235,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			path = event.FullPath
 		}
 
-		openEvent := &events.OpenEvent{Event: event}
-
-		if thirdPartyEnricher != nil {
-			// thirdPartyEnricher.Enrich(openEvent)
-		}
-
 		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
 		relevancyManager.ReportFileOpen(event.Runtime.ContainerID, k8sContainerID, path)
-		ruleManager.ReportEvent(utils.OpenEventType, openEvent)
-		malwareManager.ReportEvent(utils.OpenEventType, openEvent)
+		ruleManager.ReportEvent(utils.OpenEventType, &event)
+		malwareManager.ReportEvent(utils.OpenEventType, &event)
 
 		// Report open events to event receivers
 		reportEventToThirdPartyTracers(utils.OpenEventType, &event, thirdPartyEventReceivers)
@@ -442,7 +435,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		// Channels
 		capabilitiesWorkerChan: make(chan *tracercapabilitiestype.Event, 1000),
 		execWorkerChan:         make(chan *events.ExecEvent, 10000),
-		openWorkerChan:         make(chan *traceropentype.Event, 500000),
+		openWorkerChan:         make(chan *events.OpenEvent, 500000),
 		ptraceWorkerChan:       make(chan *tracerptracetype.Event, 1000),
 		networkWorkerChan:      make(chan *tracernetworktype.Event, 500000),
 		dnsWorkerChan:          make(chan *tracerdnstype.Event, 100000),

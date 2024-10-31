@@ -13,8 +13,8 @@ func (event *OpenEvent) SetExtra(extra interface{}) {
 	event.extra = extra
 }
 
-func (event *OpenEvent) GetPID() int {
-	return int(event.Pid)
+func (event *OpenEvent) GetPID() uint64 {
+	return (uint64(event.Pid) << 32) | uint64(event.Tid)
 }
 
 func (event *OpenEvent) GetExtra() interface{} {
