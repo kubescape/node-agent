@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -97,15 +98,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 		return nil
 	}
 
-	isSensitive := false
-	for _, path := range rule.additionalPaths {
-		if strings.HasPrefix(openEvent.FullPath, path) {
-			isSensitive = true
-			break
-		}
-	}
-
-	if !isSensitive {
+	if !isSensitivePath(openEvent.FullPath, rule.additionalPaths) {
 		return nil
 	}
 
@@ -153,4 +146,31 @@ func (rule *R0010UnexpectedSensitiveFileAccess) Requirements() ruleengine.RuleSp
 	return &RuleRequirements{
 		EventTypes: R0010UnexpectedSensitiveFileAccessRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
+}
+
+// isSensitivePath checks if a given path matches or is within any sensitive paths
+func isSensitivePath(fullPath string, paths []string) bool {
+	// Clean the path to handle "..", "//", etc.
+	fullPath = filepath.Clean(fullPath)
+
+	for _, sensitivePath := range paths {
+		sensitivePath = filepath.Clean(sensitivePath)
+
+		// Check if the path exactly matches
+		if fullPath == sensitivePath {
+			return true
+		}
+
+		// Check if the path is a directory that contains sensitive files
+		if strings.HasPrefix(sensitivePath, fullPath+"/") {
+			return true
+		}
+
+		// Check if the path is within a sensitive directory
+		if strings.HasPrefix(fullPath, sensitivePath+"/") {
+			return true
+		}
+	}
+
+	return false
 }

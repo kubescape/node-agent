@@ -32,6 +32,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	"github.com/kubescape/node-agent/pkg/objectcache/networkneighborhoodcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
+	"github.com/kubescape/node-agent/pkg/processmanager"
+	processmanagerv1 "github.com/kubescape/node-agent/pkg/processmanager/v1"
 	"github.com/kubescape/node-agent/pkg/relevancymanager"
 	relevancymanagerv1 "github.com/kubescape/node-agent/pkg/relevancymanager/v1"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
@@ -193,26 +195,27 @@ func main() {
 	var networkManagerClient networkmanager.NetworkManagerClient
 	var dnsManagerClient dnsmanager.DNSManagerClient
 	var dnsResolver dnsmanager.DNSResolver
-	if cfg.EnableNetworkTracing {
+	if cfg.EnableNetworkTracing || cfg.EnableRuntimeDetection {
 		dnsManager := dnsmanager.CreateDNSManager()
 		dnsManagerClient = dnsManager
 		// NOTE: dnsResolver is set for threat detection.
 		dnsResolver = dnsManager
 		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
 	} else {
-		if cfg.EnableRuntimeDetection {
-			logger.L().Ctx(ctx).Fatal("Network tracing is disabled, but runtime detection is enabled. Network tracing is required for runtime detection.")
-		}
 		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
 		dnsResolver = dnsmanager.CreateDNSManagerMock()
 		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 	}
 
 	var ruleManager rulemanager.RuleManagerClient
+	var processManager processmanager.ProcessManagerClient
 	var objCache objectcache.ObjectCache
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
 
 	if cfg.EnableRuntimeDetection {
+		// create the process manager
+		processManager = processmanagerv1.CreateProcessManager(ctx)
+
 		// create ruleBinding cache
 		ruleBindingCache := rulebindingcachev1.NewCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(ruleBindingCache)
@@ -235,7 +238,7 @@ func main() {
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
 
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, nodeName, clusterData.ClusterName)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, nodeName, clusterData.ClusterName, processManager)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
@@ -244,6 +247,7 @@ func main() {
 		ruleManager = rulemanager.CreateRuleManagerMock()
 		objCache = objectcache.NewObjectCacheMock()
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
+		processManager = processmanager.CreateProcessManagerMock()
 	}
 
 	// Create the node profile manager
@@ -269,7 +273,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime, nil)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime, nil, processManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

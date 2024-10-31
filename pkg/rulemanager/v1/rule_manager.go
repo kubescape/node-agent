@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/processmanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -64,11 +65,12 @@ type RuleManager struct {
 	clusterName              string
 	containerIdToShimPid     maps.SafeMap[string, uint32]
 	containerIdToPid         maps.SafeMap[string, uint32]
+	processManager           processmanager.ProcessManagerClient
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		ctx:               ctx,
@@ -81,6 +83,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		metrics:           metrics,
 		nodeName:          nodeName,
 		clusterName:       clusterName,
+		processManager:    processManager,
 	}, nil
 }
 
@@ -353,8 +356,13 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 	}
 }
 func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
-	path, err := utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
-	hostPath := ""
+	var err error
+	var path string
+	var hostPath string
+	if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path == "" {
+		path, err = utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
+	}
+
 	if err != nil {
 		if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path != "" {
 			hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", rm.containerIdToPid.Get(ruleFailure.GetTriggerEvent().Runtime.ContainerID), ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path))
@@ -392,52 +400,30 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
 	runtimeProcessDetails := ruleFailure.GetRuntimeProcessDetails()
-	if runtimeProcessDetails.ProcessTree.Cmdline == "" {
-		commandLine, err := utils.GetCmdlineByPid(int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID))
+
+	err = backoff.Retry(func() error {
+		tree, err := rm.processManager.GetProcessTreeForPID(
+			ruleFailure.GetRuntimeProcessDetails().ContainerID,
+			int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID),
+		)
 		if err != nil {
-			runtimeProcessDetails.ProcessTree.Cmdline = ""
-		} else {
-			runtimeProcessDetails.ProcessTree.Cmdline = *commandLine
+			return err
 		}
-	}
+		runtimeProcessDetails.ProcessTree = tree
+		return nil
+	}, backoff.NewExponentialBackOff(
+		backoff.WithInitialInterval(50*time.Millisecond),
+		backoff.WithMaxInterval(200*time.Millisecond),
+		backoff.WithMaxElapsedTime(500*time.Millisecond),
+	))
 
-	if runtimeProcessDetails.ProcessTree.PPID == 0 {
-		parent, err := utils.GetProcessStat(int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID))
-		if err != nil {
-			runtimeProcessDetails.ProcessTree.PPID = 0
-		} else {
-			runtimeProcessDetails.ProcessTree.PPID = uint32(parent.PPID)
-		}
+	if err != nil && rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeProcessDetails().ContainerID) {
+		logger.L().Debug("RuleManager - failed to get process tree, trying to get process tree from shim",
+			helpers.Error(err),
+			helpers.String("container ID", ruleFailure.GetRuntimeProcessDetails().ContainerID))
 
-		if runtimeProcessDetails.ProcessTree.Pcomm == "" {
-			if err == nil {
-				runtimeProcessDetails.ProcessTree.Pcomm = parent.Comm
-			} else {
-				runtimeProcessDetails.ProcessTree.Pcomm = ""
-			}
-		}
-	}
-
-	if runtimeProcessDetails.ProcessTree.PID == 0 {
-		runtimeProcessDetails.ProcessTree.PID = ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID
-	}
-
-	if runtimeProcessDetails.ProcessTree.Comm == "" {
-		comm, err := utils.GetCommFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
-		if err != nil {
-			comm = ""
-		}
-		runtimeProcessDetails.ProcessTree.Comm = comm
-	}
-
-	if runtimeProcessDetails.ProcessTree.Path == "" && path != "" {
-		runtimeProcessDetails.ProcessTree.Path = path
-	}
-
-	if rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeProcessDetails().ContainerID) {
-		shimPid := rm.containerIdToShimPid.Get(ruleFailure.GetRuntimeProcessDetails().ContainerID)
-		tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree, shimPid)
-		if err == nil {
+		if tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree,
+			rm.containerIdToShimPid.Get(ruleFailure.GetRuntimeProcessDetails().ContainerID)); err == nil {
 			runtimeProcessDetails.ProcessTree = *tree
 		}
 	}
