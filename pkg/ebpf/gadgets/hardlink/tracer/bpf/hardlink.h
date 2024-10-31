@@ -17,6 +17,7 @@ struct event {
     gadget_timestamp timestamp;
     gadget_mntns_id mntns_id;
     __u32 pid;
+    __u32 tid;
     __u32 ppid;
     __u32 uid;
     __u32 gid;
