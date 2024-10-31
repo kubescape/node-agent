@@ -34,15 +34,14 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 
-	if !ch.preRunningContainersIDs.Contains(notif.Container.Runtime.ContainerID) {
-		// container is not in preRunningContainersIDs, it is a new container
-		ch.timeBasedContainers.Add(notif.Container.Runtime.ContainerID)
-	}
-
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-
+		if ch.running {
+			ch.timeBasedContainers.Add(notif.Container.Runtime.ContainerID)
+		} else {
+			ch.preRunningContainersIDs.Add(notif.Container.Runtime.ContainerID)
+		}
 		// Check if Pod has a label of max sniffing time
 		sniffingTime := utils.AddJitter(ch.cfg.MaxSniffingTime, ch.cfg.MaxJitterPercentage)
 		if podLabelMaxSniffingTime, ok := notif.Container.K8s.PodLabels[MaxSniffingTimeLabel]; ok {
@@ -131,7 +130,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 	return nil
 }
 
-func (ch *IGContainerWatcher) startRunningContainers() error {
+func (ch *IGContainerWatcher) startRunningContainers() {
 	k8sClient, err := containercollection.NewK8sClient(ch.nodeName)
 	if err != nil {
 		logger.L().Fatal("creating IG Kubernetes client", helpers.Error(err))
@@ -140,7 +139,6 @@ func (ch *IGContainerWatcher) startRunningContainers() error {
 	for n := range *ch.ruleBindingPodNotify {
 		ch.addRunningContainers(k8sClient, &n)
 	}
-	return nil
 }
 
 func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *rulebindingmanager.RuleBindingNotify) {
