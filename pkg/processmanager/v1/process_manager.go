@@ -375,11 +375,29 @@ func getProcessFromProc(pid int) (apitypes.Process, error) {
 
 	cwd, _ := proc.Cwd()
 	path, _ := proc.Executable()
+	pcomm := func() string {
+		if stat.PPID <= 0 {
+			return ""
+		}
+
+		parentProc, err := procfs.NewProc(stat.PPID)
+		if err != nil {
+			return ""
+		}
+
+		parentStat, err := parentProc.Stat()
+		if err != nil {
+			return ""
+		}
+
+		return parentStat.Comm
+	}()
 
 	return apitypes.Process{
 		PID:      uint32(pid),
 		PPID:     uint32(stat.PPID),
 		Comm:     stat.Comm,
+		Pcomm:    pcomm,
 		Uid:      &uid,
 		Gid:      &gid,
 		Cmdline:  strings.Join(cmdline, " "),
