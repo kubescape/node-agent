@@ -184,7 +184,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *events.ExecEve
 				PodLabels: event.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
-			extra:  event.GetExtra(),
+			Extra:  event.GetExtra(),
 		}
 
 		return &ruleFailure

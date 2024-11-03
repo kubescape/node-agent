@@ -101,7 +101,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 				PodLabels: execEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
-			extra:  execEvent.GetExtra(),
+			Extra:  execEvent.GetExtra(),
 		}
 
 		return &ruleFailure

@@ -149,7 +149,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 			PodLabels: openEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
-		extra:  fullEvent.GetExtra(),
+		Extra:  fullEvent.GetExtra(),
 	}
 
 	return &ruleFailure

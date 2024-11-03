@@ -182,7 +182,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 			PodName: openEvent.GetPod(),
 		},
 		RuleID: rule.ID(),
-		extra:  fullEvent.GetExtra(),
+		Extra:  fullEvent.GetExtra(),
 	}
 
 	return &ruleFailure

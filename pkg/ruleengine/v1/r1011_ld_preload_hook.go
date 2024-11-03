@@ -140,7 +140,7 @@ func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *events.ExecEvent, k8s
 				PodLabels: execEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
-			extra:  execEvent.GetExtra(),
+			Extra:  execEvent.GetExtra(),
 		}
 
 		return &ruleFailure
@@ -180,7 +180,7 @@ func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *events.OpenEvent) rul
 				PodLabels: openEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
-			extra:  openEvent.GetExtra(),
+			Extra:  openEvent.GetExtra(),
 		}
 
 		return &ruleFailure

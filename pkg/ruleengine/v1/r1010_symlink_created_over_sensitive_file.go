@@ -129,7 +129,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 					PodLabels: symlinkEvent.K8s.PodLabels,
 				},
 				RuleID: rule.ID(),
-				extra:  symlinkEvent.GetExtra(),
+				Extra:  symlinkEvent.GetExtra(),
 			}
 		}
 	}

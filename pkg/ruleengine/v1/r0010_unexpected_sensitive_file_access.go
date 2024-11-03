@@ -146,7 +146,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 			PodLabels: openEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
-		extra:  fullEvent.GetExtra(),
+		Extra:  fullEvent.GetExtra(),
 	}
 
 	return &ruleFailure

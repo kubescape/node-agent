@@ -146,7 +146,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 			PodLabels: execEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
-		extra: execEvent.GetExtra(),
+		Extra:  execEvent.GetExtra(),
 	}
 
 	return &ruleFailure

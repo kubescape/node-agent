@@ -2,6 +2,7 @@ package types
 
 import (
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
 )
 
 type SyscallEvent struct {
@@ -14,4 +15,8 @@ type SyscallEvent struct {
 	Gid  uint32 `json:"gid" column:"gid,template:gid,hide"`
 
 	SyscallName string `json:"syscallName,omitempty" column:"syscallName"`
+}
+
+type Enricher interface {
+	EnrichRuleFailure(rule ruleengine.RuleFailure)
 }

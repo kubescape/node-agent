@@ -114,7 +114,7 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 			PodLabels: openEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
-		extra:  fullEvent.GetExtra(),
+		Extra:  fullEvent.GetExtra(),
 	}
 
 	return &ruleFailure
