@@ -779,7 +779,7 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 	endpointMap.Set(endpointHash, endpoint)
 }
 
-func (am *ApplicationProfileManager) ReportRulePolicy(k8sContainerID string, ruleId string, process string, allowedContainer bool) {
+func (am *ApplicationProfileManager) ReportRulePolicy(k8sContainerID, ruleId, allowedProcess string, allowedContainer bool) {
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
@@ -788,7 +788,7 @@ func (am *ApplicationProfileManager) ReportRulePolicy(k8sContainerID string, rul
 	if policy := savedPolicies.Get(ruleId); policy != nil {
 		if policy.AllowedContainer {
 			return
-		} else if slices.Contains(policy.AllowedProcesses, process) {
+		} else if slices.Contains(policy.AllowedProcesses, allowedProcess) {
 			return
 		}
 
@@ -796,7 +796,7 @@ func (am *ApplicationProfileManager) ReportRulePolicy(k8sContainerID string, rul
 		if allowedContainer {
 			policy.AllowedContainer = allowedContainer
 		} else {
-			policy.AllowedProcesses = append(policy.AllowedProcesses, process)
+			policy.AllowedProcesses = append(policy.AllowedProcesses, allowedProcess)
 		}
 		rulePolicyMap.Set(ruleId, policy)
 	}

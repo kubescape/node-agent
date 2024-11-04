@@ -49,6 +49,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/networkmanager"
 	"github.com/kubescape/node-agent/pkg/relevancymanager"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/panjf2000/ants/v2"
@@ -321,8 +322,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
 		metrics.ReportEvent(utils.SymlinkEventType)
 		ruleManager.ReportEvent(utils.SymlinkEventType, &event)
+		applicationProfileManager.ReportRulePolicy(k8sContainerID, ruleengine.R1010ID, event.Comm, false)
 
 		// Report symlink events to event receivers
 		reportEventToThirdPartyTracers(utils.SymlinkEventType, &event, thirdPartyEventReceivers)
@@ -336,9 +340,12 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
 		metrics.ReportEvent(utils.HardlinkEventType)
 		ruleManager.ReportEvent(utils.HardlinkEventType, &event)
-
+		applicationProfileManager.ReportRulePolicy(k8sContainerID, ruleengine.R1012ID, event.Comm, false)
 		// Report hardlink events to event receivers
 		reportEventToThirdPartyTracers(utils.HardlinkEventType, &event, thirdPartyEventReceivers)
 	})
