@@ -262,3 +262,5 @@ require (
 replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6
 
 replace github.com/goradd/maps => github.com/matthyx/maps v0.0.0-20241029072232-2f5d83d608a7
+
+replace github.com/kubescape/storage => github.com/kubescape/storage v0.0.128-0.20241104095737-2142149b0f10

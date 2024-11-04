@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -54,10 +55,12 @@ type ApplicationProfileManager struct {
 	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, []string]]              // key is k8sContainerID
 	savedOpens               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]]    // key is k8sContainerID
 	savedSyscalls            maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
+	savedRulePolicies        maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.RulePolicy]]   // key is k8sContainerID
 	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
 	toSaveEndpoints          maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.HTTPEndpoint]] // key is k8sContainerID
 	toSaveExecs              maps.SafeMap[string, *maps.SafeMap[string, []string]]              // key is k8sContainerID
 	toSaveOpens              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]]    // key is k8sContainerID
+	toSaveRulePolicies       maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.RulePolicy]]   // key is k8sContainerID
 	watchedContainerChannels maps.SafeMap[string, chan error]                                   // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
 	k8sObjectCache           objectcache.K8sObjectCache
@@ -141,13 +144,17 @@ func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.Wat
 	watchedContainer.UpdateDataTicker.Stop()
 	am.trackedContainers.Remove(watchedContainer.K8sContainerID)
 	am.savedCapabilities.Delete(watchedContainer.K8sContainerID)
+	am.savedEndpoints.Delete(watchedContainer.K8sContainerID)
 	am.savedExecs.Delete(watchedContainer.K8sContainerID)
 	am.droppedEvents.Delete(watchedContainer.K8sContainerID)
 	am.savedOpens.Delete(watchedContainer.K8sContainerID)
 	am.savedSyscalls.Delete(watchedContainer.K8sContainerID)
+	am.savedRulePolicies.Delete(watchedContainer.K8sContainerID)
 	am.toSaveCapabilities.Delete(watchedContainer.K8sContainerID)
+	am.toSaveEndpoints.Delete(watchedContainer.K8sContainerID)
 	am.toSaveExecs.Delete(watchedContainer.K8sContainerID)
 	am.toSaveOpens.Delete(watchedContainer.K8sContainerID)
+	am.toSaveRulePolicies.Delete(watchedContainer.K8sContainerID)
 	am.watchedContainerChannels.Delete(watchedContainer.ContainerID)
 }
 func (am *ApplicationProfileManager) ContainerReachedMaxTime(containerID string) {
@@ -311,6 +318,18 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		opens[path].Append(open.ToSlice()...)
 		return true
 	})
+
+	// get rule policies
+	rulePolicies := make(map[string]v1beta1.RulePolicy)
+	toSaveRulePolicies := am.toSaveRulePolicies.Get(watchedContainer.K8sContainerID)
+	// point IG to a new rule policies map
+	am.toSaveRulePolicies.Set(watchedContainer.K8sContainerID, new(maps.SafeMap[string, *v1beta1.RulePolicy]))
+	// prepare rule policies map
+	toSaveRulePolicies.Range(func(ruleIdentifier string, rulePolicy *v1beta1.RulePolicy) bool {
+		rulePolicies[ruleIdentifier] = *rulePolicy
+		return true
+	})
+
 	// new activity
 	// the process tries to use JSON patching to avoid conflicts between updates on the same object from different containers
 	// 0. create both a patch and a new object
@@ -322,7 +341,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// 3c. default - patch the container ourselves and REPLACE it at the right index
 	if len(capabilities) > 0 || len(endpoints) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || watchedContainer.StatusUpdated() {
 		// 0. calculate patch
-		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, endpoints, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, endpoints, rulePolicies, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
 		operations = append(operations, utils.PatchOperation{
 			Op:    "add",
@@ -363,6 +382,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							Opens:          make([]v1beta1.OpenCalls, 0),
 							Capabilities:   make([]string, 0),
 							Syscalls:       make([]string, 0),
+							PolicyByRuleId: make(map[string]v1beta1.RulePolicy),
 							SeccompProfile: seccompProfile,
 						})
 					}
@@ -422,6 +442,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							Opens:          make([]v1beta1.OpenCalls, 0),
 							Capabilities:   make([]string, 0),
 							Syscalls:       make([]string, 0),
+							PolicyByRuleId: make(map[string]v1beta1.RulePolicy),
 							SeccompProfile: seccompProfile,
 						}
 					}
@@ -466,6 +487,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 								Opens:          make([]v1beta1.OpenCalls, 0),
 								Capabilities:   make([]string, 0),
 								Syscalls:       make([]string, 0),
+								PolicyByRuleId: make(map[string]v1beta1.RulePolicy),
 								SeccompProfile: seccompProfile,
 							},
 						})
@@ -654,10 +676,12 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.savedExecs.Set(k8sContainerID, new(maps.SafeMap[string, []string]))
 		am.savedOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
 		am.savedSyscalls.Set(k8sContainerID, mapset.NewSet[string]())
+		am.savedRulePolicies.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.RulePolicy]))
 		am.toSaveCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
 		am.toSaveEndpoints.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.HTTPEndpoint]))
 		am.toSaveExecs.Set(k8sContainerID, new(maps.SafeMap[string, []string]))
 		am.toSaveOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
+		am.toSaveRulePolicies.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.RulePolicy]))
 		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		am.trackedContainers.Add(k8sContainerID)
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
@@ -753,4 +777,27 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 	endpointMap := am.toSaveEndpoints.Get(k8sContainerID)
 	endpointHash := CalculateHTTPEndpointHash(endpoint)
 	endpointMap.Set(endpointHash, endpoint)
+}
+
+func (am *ApplicationProfileManager) ReportRulePolicy(k8sContainerID string, ruleId string, process string, allowedContainer bool) {
+	if err := am.waitForContainer(k8sContainerID); err != nil {
+		return
+	}
+
+	savedPolicies := am.savedRulePolicies.Get(k8sContainerID)
+	if policy := savedPolicies.Get(ruleId); policy != nil {
+		if policy.AllowedContainer {
+			return
+		} else if slices.Contains(policy.AllowedProcesses, process) {
+			return
+		}
+
+		rulePolicyMap := am.toSaveRulePolicies.Get(k8sContainerID)
+		if allowedContainer {
+			policy.AllowedContainer = allowedContainer
+		} else {
+			policy.AllowedProcesses = append(policy.AllowedProcesses, process)
+		}
+		rulePolicyMap.Set(ruleId, policy)
+	}
 }

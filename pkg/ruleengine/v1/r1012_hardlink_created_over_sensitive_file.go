@@ -88,8 +88,8 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 		return nil
 	}
 
-	if allowed, err := isHardLinkAllowed(hardlinkEvent, objCache); err != nil {
-		return nil
+	if allowed, err := isAllowed(&hardlinkEvent.Event, objCache, hardlinkEvent.Comm, R1012ID); err != nil {
+		logger.L().Error("failed to check if hardlink is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 	} else if allowed {
 		return nil
 	}
