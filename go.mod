@@ -259,6 +259,8 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 )
 
-replace github.com/inspektor-gadget/inspektor-gadget => /home/afek/Projects/Armo/poc/inspektor-gadget
+replace github.com/inspektor-gadget/inspektor-gadget => /home/afek/Projects/Armo/poc/armo/inspektor-gadget
 
 replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6
+
+replace github.com/goradd/maps => github.com/matthyx/maps v0.0.0-20241029072232-2f5d83d608a7
