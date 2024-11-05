@@ -106,3 +106,7 @@ type RuleFailure interface {
 	// Set K8s Runtime Details
 	SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails)
 }
+
+type RuleCondition interface {
+	EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) bool
+}

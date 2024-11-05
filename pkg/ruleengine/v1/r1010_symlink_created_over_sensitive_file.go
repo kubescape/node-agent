@@ -1,7 +1,6 @@
 package ruleengine
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -79,14 +78,11 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
 func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if eventType != utils.SymlinkEventType {
+	if !rule.EvaluateRule(eventType, event, objCache.K8sObjectCache()) {
 		return nil
 	}
 
-	symlinkEvent, ok := event.(*tracersymlinktype.Event)
-	if !ok {
-		return nil
-	}
+	symlinkEvent, _ := event.(*tracersymlinktype.Event)
 
 	if allowed, err := isAllowed(&symlinkEvent.Event, objCache, symlinkEvent.Comm, R1012ID); err != nil {
 		logger.L().Error("failed to check if symlink is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
@@ -136,28 +132,17 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 	return nil
 }
 
+func (rule *R1010SymlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) bool {
+	if eventType != utils.SymlinkEventType {
+		return false
+	}
+
+	_, ok := event.(*tracersymlinktype.Event)
+	return ok
+}
+
 func (rule *R1010SymlinkCreatedOverSensitiveFile) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
-}
-
-func isSymLinkAllowed(symlinkEvent *tracersymlinktype.Event, objCache objectcache.ObjectCache) (bool, error) {
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(symlinkEvent.Runtime.ContainerID)
-	if ap == nil {
-		return true, errors.New("application profile not found")
-	}
-
-	appProfileExecList, err := getContainerFromApplicationProfile(ap, symlinkEvent.GetContainer())
-	if err != nil {
-		return true, err
-	}
-
-	for _, exec := range appProfileExecList.Execs {
-		if exec.Path == symlinkEvent.Comm {
-			return true, nil
-		}
-	}
-
-	return false, nil
 }

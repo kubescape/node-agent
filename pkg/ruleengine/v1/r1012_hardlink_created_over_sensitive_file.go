@@ -1,7 +1,6 @@
 package ruleengine
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -79,14 +78,12 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
 func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if eventType != utils.HardlinkEventType {
+
+	if !rule.EvaluateRule(eventType, event, objCache.K8sObjectCache()) {
 		return nil
 	}
 
-	hardlinkEvent, ok := event.(*tracerhardlinktype.Event)
-	if !ok {
-		return nil
-	}
+	hardlinkEvent, _ := event.(*tracerhardlinktype.Event)
 
 	if allowed, err := isAllowed(&hardlinkEvent.Event, objCache, hardlinkEvent.Comm, R1012ID); err != nil {
 		logger.L().Error("failed to check if hardlink is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
@@ -136,28 +133,16 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 	return nil
 }
 
+func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) bool {
+	if eventType != utils.HardlinkEventType {
+		return false
+	}
+	_, ok := event.(*tracerhardlinktype.Event)
+	return ok
+}
+
 func (rule *R1012HardlinkCreatedOverSensitiveFile) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
-}
-
-func isHardLinkAllowed(hardlinkEvent *tracerhardlinktype.Event, objCache objectcache.ObjectCache) (bool, error) {
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(hardlinkEvent.Runtime.ContainerID)
-	if ap == nil {
-		return true, errors.New("application profile not found")
-	}
-
-	appProfileExecList, err := getContainerFromApplicationProfile(ap, hardlinkEvent.GetContainer())
-	if err != nil {
-		return true, err
-	}
-
-	for _, exec := range appProfileExecList.Execs {
-		if exec.Path == hardlinkEvent.Comm {
-			return true, nil
-		}
-	}
-
-	return false, nil
 }
