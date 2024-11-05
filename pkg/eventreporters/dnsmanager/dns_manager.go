@@ -19,7 +19,7 @@ func CreateDNSManager() *DNSManager {
 	return &DNSManager{}
 }
 
-func (dm *DNSManager) ReportDNSEvent(dnsEvent tracerdnstype.Event) {
+func (dm *DNSManager) ReportEvent(dnsEvent tracerdnstype.Event) {
 
 	if len(dnsEvent.Addresses) > 0 {
 		for _, address := range dnsEvent.Addresses {

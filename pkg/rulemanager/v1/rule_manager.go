@@ -504,3 +504,23 @@ func (rm *RuleManager) IsContainerMonitored(k8sContainerID string) bool {
 func (rm *RuleManager) IsPodMonitored(namespace, pod string) bool {
 	return rm.podToWlid.Has(utils.CreateK8sPodID(namespace, pod))
 }
+
+func (rm *RuleManager) EvaluateRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string {
+	results := []string{}
+
+	creator := rm.ruleBindingCache.GetRuleCreator()
+	rules := creator.CreateRulesByEventType(eventType)
+
+	for _, rule := range rules {
+		rule, ok := rule.(ruleengine.RuleCondition)
+		if !ok {
+			continue
+		}
+
+		if rule.EvaluateRule(eventType, event, rm.objectCache.K8sObjectCache()) {
+			results = append(results, rule.ID())
+		}
+	}
+
+	return results
+}

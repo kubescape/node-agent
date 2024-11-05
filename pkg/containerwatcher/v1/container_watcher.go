@@ -29,7 +29,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
@@ -42,11 +41,12 @@ import (
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
-	"github.com/kubescape/node-agent/pkg/processmanager"
-
+	"github.com/kubescape/node-agent/pkg/eventreporters/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
+	"github.com/kubescape/node-agent/pkg/processmanager"
 	"github.com/kubescape/node-agent/pkg/relevancymanager"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
@@ -169,6 +169,9 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	if err != nil {
 		return nil, fmt.Errorf("creating tracer collection: %w", err)
 	}
+
+	rulePolicyReporter := rulepolicy.NewRulePolicyReporter(ruleManager, applicationProfileManager)
+
 	// Create a capabilities worker pool
 	capabilitiesWorkerPool, err := ants.NewPoolWithFunc(capabilitiesWorkerPoolSize, func(i interface{}) {
 		event := i.(tracercapabilitiestype.Event)
@@ -176,6 +179,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+
 		metrics.ReportEvent(utils.CapabilitiesEventType)
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
@@ -292,7 +296,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 
 		metrics.ReportEvent(utils.DnsEventType)
-		dnsManagerClient.ReportDNSEvent(event)
+		dnsManagerClient.ReportEvent(event)
 		ruleManager.ReportEvent(utils.DnsEventType, &event)
 
 		// Report DNS events to event receivers
@@ -326,7 +330,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		metrics.ReportEvent(utils.SymlinkEventType)
 		ruleManager.ReportEvent(utils.SymlinkEventType, &event)
-		applicationProfileManager.ReportRulePolicy(k8sContainerID, ruleengine.R1010ID, event.Comm, false)
+		rulePolicyReporter.ReportEvent(utils.SymlinkEventType, &event, k8sContainerID, event.Comm)
 
 		// Report symlink events to event receivers
 		reportEventToThirdPartyTracers(utils.SymlinkEventType, &event, thirdPartyEventReceivers)
@@ -350,7 +354,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		reportEventToThirdPartyTracers(utils.HardlinkEventType, &event, thirdPartyEventReceivers)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("creating hardlink worker pool: %w", err)
+		return nil, fmt.Errorf("creati hardlink worker pool: %w", err)
 	}
 	// Create a ssh worker pool
 	sshWorkerPool, err := ants.NewPoolWithFunc(sshWorkerPoolSize, func(i interface{}) {
