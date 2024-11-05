@@ -765,7 +765,7 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 		return
 	}
 
-	endpointIdentifier, err := am.GetEndpointIdentifier(event)
+	endpointIdentifier, err := GetEndpointIdentifier(event)
 	if err != nil {
 		return
 	}
@@ -786,19 +786,36 @@ func (am *ApplicationProfileManager) ReportRulePolicy(k8sContainerID, ruleId, al
 	}
 
 	savedPolicies := am.savedRulePolicies.Get(k8sContainerID)
-	if policy := savedPolicies.Get(ruleId); policy != nil {
-		if policy.AllowedContainer {
-			return
-		} else if slices.Contains(policy.AllowedProcesses, allowedProcess) {
-			return
-		}
+	savedPolicy := savedPolicies.Get(ruleId)
 
-		rulePolicyMap := am.toSaveRulePolicies.Get(k8sContainerID)
-		if allowedContainer {
-			policy.AllowedContainer = allowedContainer
-		} else {
-			policy.AllowedProcesses = append(policy.AllowedProcesses, allowedProcess)
-		}
-		rulePolicyMap.Set(ruleId, policy)
+	toBeSavedPolicies := am.toSaveRulePolicies.Get(k8sContainerID)
+	toBeSavedPolicy := toBeSavedPolicies.Get(ruleId)
+
+	newPolicy := &v1beta1.RulePolicy{
+		AllowedContainer: allowedContainer,
+		AllowedProcesses: []string{allowedProcess},
 	}
+
+	if IsPolicyIncluded(savedPolicy, newPolicy) {
+		return
+	}
+
+	if IsPolicyIncluded(toBeSavedPolicy, newPolicy) {
+		return
+	}
+
+	var finalPolicy *v1beta1.RulePolicy
+	if toBeSavedPolicy != nil {
+		finalPolicy = toBeSavedPolicy
+		if allowedContainer {
+			finalPolicy.AllowedContainer = true
+		}
+		if allowedProcess != "" && !slices.Contains(finalPolicy.AllowedProcesses, allowedProcess) {
+			finalPolicy.AllowedProcesses = append(finalPolicy.AllowedProcesses, allowedProcess)
+		}
+	} else {
+		finalPolicy = newPolicy
+	}
+
+	toBeSavedPolicies.Set(ruleId, finalPolicy)
 }

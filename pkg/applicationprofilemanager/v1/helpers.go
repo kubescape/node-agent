@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 
@@ -34,7 +35,7 @@ func GetNewEndpoint(event *tracerhttptype.Event, identifier string) (*v1beta1.HT
 		Headers:   rawJSON}, nil
 }
 
-func (am *ApplicationProfileManager) GetEndpointIdentifier(request *tracerhttptype.Event) (string, error) {
+func GetEndpointIdentifier(request *tracerhttptype.Event) (string, error) {
 	identifier := request.Request.URL.String()
 	if host := request.Request.Host; host != "" {
 
@@ -70,19 +71,34 @@ func CalculateHTTPEndpointHash(endpoint *v1beta1.HTTPEndpoint) string {
 }
 
 func isValidHost(host string) bool {
-	// Check if the host is empty
 	if host == "" {
 		return false
 	}
 
-	// Check if host contains spaces or invalid characters
 	if strings.ContainsAny(host, " \t\r\n") {
 		return false
 	}
 
-	// Parse the host using http's standard URL parser
 	if _, err := url.ParseRequestURI("http://" + host); err != nil {
 		return false
+	}
+
+	return true
+}
+
+func IsPolicyIncluded(existingPolicy, newPolicy *v1beta1.RulePolicy) bool {
+	if existingPolicy == nil {
+		return false
+	}
+
+	if newPolicy.AllowedContainer && !existingPolicy.AllowedContainer {
+		return false
+	}
+
+	for _, newProcess := range newPolicy.AllowedProcesses {
+		if !slices.Contains(existingPolicy.AllowedProcesses, newProcess) {
+			return false
+		}
 	}
 
 	return true
