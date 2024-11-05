@@ -1,6 +1,9 @@
 package ruleengine
 
-import "github.com/kubescape/node-agent/pkg/ruleengine"
+import (
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/utils"
+)
 
 var _ ruleengine.RuleCreator = (*RuleCreatorImpl)(nil)
 
@@ -74,4 +77,23 @@ func (r *RuleCreatorImpl) GetAllRuleDescriptors() []ruleengine.RuleDescriptor {
 
 func (r *RuleCreatorImpl) RegisterRule(rule ruleengine.RuleDescriptor) {
 	r.ruleDescriptions = append(r.ruleDescriptions, rule)
+}
+
+func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []ruleengine.RuleEvaluator {
+	var rules []ruleengine.RuleEvaluator
+	for _, rule := range r.ruleDescriptions {
+		if containsEventType(rule.Requirements.RequiredEventTypes(), eventType) {
+			rules = append(rules, rule.RuleCreationFunc())
+		}
+	}
+	return rules
+}
+
+func containsEventType(eventTypes []utils.EventType, eventType utils.EventType) bool {
+	for _, et := range eventTypes {
+		if et == eventType {
+			return true
+		}
+	}
+	return false
 }

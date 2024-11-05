@@ -35,6 +35,7 @@ var R1010SymlinkCreatedOverSensitiveFileRuleDescriptor = ruleengine.RuleDescript
 		return CreateRuleR1010SymlinkCreatedOverSensitiveFile()
 	},
 }
+
 var _ ruleengine.RuleEvaluator = (*R1010SymlinkCreatedOverSensitiveFile)(nil)
 
 type R1010SymlinkCreatedOverSensitiveFile struct {
