@@ -74,12 +74,14 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 	}
 
 	// add rule policies
-	rulePoliciesPath := fmt.Sprintf("/spec/%s/%d/policybyruleid/-", containerType, containerIndex)
-	profileOperations = append(profileOperations, PatchOperation{
-		Op:    "add",
-		Path:  rulePoliciesPath,
-		Value: rulePolicies,
-	})
+	if len(rulePolicies) != 0 {
+		rulePoliciesPath := fmt.Sprintf("/spec/%s/%d/policybyruleid/-", containerType, containerIndex)
+		profileOperations = append(profileOperations, PatchOperation{
+			Op:    "add",
+			Path:  rulePoliciesPath,
+			Value: rulePolicies,
+		})
+	}
 
 	return profileOperations
 }

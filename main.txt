@@ -1,0 +1,8 @@
+=== RUN   TestApplicationProfileManager
+ApplicationProfileManager - start monitor on container &{preRunning false} &{container index 1} &{container ID 5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400} &{k8s workload ns/pod/cont}
+[error] ApplicationProfileManager - failed to create application profile. error: first time fail; slug: pod-pod; container index: 1; container ID: 5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400; k8s workload: ns/pod/cont
+ApplicationProfileManager - saved application profile &{capabilities 1} &{endpoints 0} &{execs 4} &{opens 1} &{slug pod-pod} &{container index 1} &{container ID 5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400} &{k8s workload ns/pod/cont}
+ApplicationProfileManager - saved application profile &{capabilities 0} &{endpoints 3} &{execs 0} &{opens 1} &{slug pod-pod} &{container index 1} &{container ID 5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400} &{k8s workload ns/pod/cont}
+--- PASS: TestApplicationProfileManager (27.00s)
+PASS
+ok  	github.com/kubescape/node-agent/pkg/applicationprofilemanager/v1	27.026s
