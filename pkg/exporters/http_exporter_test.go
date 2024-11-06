@@ -33,7 +33,7 @@ func TestSendRuleAlert(t *testing.T) {
 	// Create an HTTPExporter with the mock server URL
 	exporter, err := InitHTTPExporter(HTTPExporterConfig{
 		URL: server.URL,
-	}, "", "")
+	}, "", "", nil)
 	assert.NoError(t, err)
 
 	// Create a mock rule failure
@@ -96,7 +96,7 @@ func TestSendRuleAlertRateReached(t *testing.T) {
 	exporter, err := InitHTTPExporter(HTTPExporterConfig{
 		URL:                server.URL,
 		MaxAlertsPerMinute: 1,
-	}, "", "")
+	}, "", "", nil)
 	assert.NoError(t, err)
 
 	// Create a mock rule failure
@@ -162,7 +162,7 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 	// Create an HTTPExporter with the mock server URL
 	exporter, err := InitHTTPExporter(HTTPExporterConfig{
 		URL: server.URL,
-	}, "", "")
+	}, "", "", nil)
 	assert.NoError(t, err)
 
 	// Create a mock malware description
@@ -234,13 +234,13 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 
 func TestValidateHTTPExporterConfig(t *testing.T) {
 	// Test case: URL is empty
-	_, err := InitHTTPExporter(HTTPExporterConfig{}, "", "")
+	_, err := InitHTTPExporter(HTTPExporterConfig{}, "", "", nil)
 	assert.Error(t, err)
 
 	// Test case: URL is not empty
 	exp, err := InitHTTPExporter(HTTPExporterConfig{
 		URL: "http://localhost:9093",
-	}, "cluster", "node")
+	}, "cluster", "node", nil)
 	assert.NoError(t, err)
 	assert.Equal(t, "POST", exp.config.Method)
 	assert.Equal(t, 5, exp.config.TimeoutSeconds)
@@ -258,7 +258,7 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 		Headers: map[string]string{
 			"Authorization": "Bearer token",
 		},
-	}, "", "")
+	}, "", "", nil)
 	assert.NoError(t, err)
 	assert.Equal(t, "PUT", exp.config.Method)
 	assert.Equal(t, 2, exp.config.TimeoutSeconds)
@@ -269,6 +269,6 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 	_, err = InitHTTPExporter(HTTPExporterConfig{
 		URL:    "http://localhost:9093",
 		Method: "DELETE",
-	}, "", "")
+	}, "", "", nil)
 	assert.Error(t, err)
 }

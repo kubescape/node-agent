@@ -3,6 +3,7 @@ package exporters
 import (
 	"os"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 
@@ -27,7 +28,7 @@ type ExporterBus struct {
 }
 
 // InitExporters initializes all exporters.
-func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName string) *ExporterBus {
+func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName string, cloudMetadata *armotypes.CloudMetadata) *ExporterBus {
 	var exporters []Exporter
 	for _, url := range exportersConfig.AlertManagerExporterUrls {
 		alertMan := InitAlertManagerExporter(url)
@@ -35,7 +36,7 @@ func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName
 			exporters = append(exporters, alertMan)
 		}
 	}
-	stdoutExp := InitStdoutExporter(exportersConfig.StdoutExporter)
+	stdoutExp := InitStdoutExporter(exportersConfig.StdoutExporter, cloudMetadata)
 	if stdoutExp != nil {
 		exporters = append(exporters, stdoutExp)
 	}
@@ -54,7 +55,7 @@ func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName
 		}
 	}
 	if exportersConfig.HTTPExporterConfig != nil {
-		httpExp, err := InitHTTPExporter(*exportersConfig.HTTPExporterConfig, clusterName, nodeName)
+		httpExp, err := InitHTTPExporter(*exportersConfig.HTTPExporterConfig, clusterName, nodeName, cloudMetadata)
 		if err != nil {
 			logger.L().Error("failed to initialize http exporter", helpers.Error(err))
 		}
