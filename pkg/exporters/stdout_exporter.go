@@ -3,6 +3,7 @@ package exporters
 import (
 	"os"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 
@@ -10,10 +11,11 @@ import (
 )
 
 type StdoutExporter struct {
-	logger *log.Logger
+	logger        *log.Logger
+	cloudmetadata *apitypes.CloudMetadata
 }
 
-func InitStdoutExporter(useStdout *bool) *StdoutExporter {
+func InitStdoutExporter(useStdout *bool, cloudmetadata *apitypes.CloudMetadata) *StdoutExporter {
 	if useStdout == nil {
 		useStdout = new(bool)
 		*useStdout = os.Getenv("STDOUT_ENABLED") != "false"
@@ -27,7 +29,8 @@ func InitStdoutExporter(useStdout *bool) *StdoutExporter {
 	logger.SetOutput(os.Stderr)
 
 	return &StdoutExporter{
-		logger: logger,
+		logger:        logger,
+		cloudmetadata: cloudmetadata,
 	}
 }
 
@@ -39,6 +42,7 @@ func (exporter *StdoutExporter) SendRuleAlert(failedRule ruleengine.RuleFailure)
 		"RuntimeProcessDetails": failedRule.GetRuntimeProcessDetails(),
 		"RuntimeK8sDetails":     failedRule.GetRuntimeAlertK8sDetails(),
 		"RuleID":                failedRule.GetRuleId(),
+		"CloudMetadata":         exporter.cloudmetadata,
 	}).Error(failedRule.GetBaseRuntimeAlert().AlertName)
 }
 
@@ -50,5 +54,6 @@ func (exporter *StdoutExporter) SendMalwareAlert(malwareResult malwaremanager.Ma
 		"RuntimeProcessDetails": malwareResult.GetRuntimeProcessDetails(),
 		"RuntimeK8sDetails":     malwareResult.GetRuntimeAlertK8sDetails(),
 		"RuleID":                "R3000",
+		"CloudMetadata":         exporter.cloudmetadata,
 	}).Error(malwareResult.GetBasicRuntimeAlert().AlertName)
 }

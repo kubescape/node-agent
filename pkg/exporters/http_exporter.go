@@ -43,6 +43,7 @@ type HTTPExporter struct {
 	alertCountLock     sync.Mutex
 	alertCountStart    time.Time
 	alertLimitNotified bool
+	cloudMetadata      *apitypes.CloudMetadata
 }
 
 type HTTPAlertsList struct {
@@ -52,8 +53,9 @@ type HTTPAlertsList struct {
 }
 
 type HTTPAlertsListSpec struct {
-	Alerts      []apitypes.RuntimeAlert `json:"alerts"`
-	ProcessTree apitypes.ProcessTree    `json:"processTree"`
+	Alerts        []apitypes.RuntimeAlert `json:"alerts"`
+	ProcessTree   apitypes.ProcessTree    `json:"processTree"`
+	CloudMetadata apitypes.CloudMetadata  `json:"cloudMetadata"`
 }
 
 func (config *HTTPExporterConfig) Validate() error {
@@ -78,7 +80,7 @@ func (config *HTTPExporterConfig) Validate() error {
 }
 
 // InitHTTPExporter initializes an HTTPExporter with the given URL, headers, timeout, and method
-func InitHTTPExporter(config HTTPExporterConfig, clusterName string, nodeName string) (*HTTPExporter, error) {
+func InitHTTPExporter(config HTTPExporterConfig, clusterName string, nodeName string, cloudMetadata *apitypes.CloudMetadata) (*HTTPExporter, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
@@ -90,6 +92,7 @@ func InitHTTPExporter(config HTTPExporterConfig, clusterName string, nodeName st
 		httpClient: &http.Client{
 			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
 		},
+		cloudMetadata: cloudMetadata,
 	}, nil
 }
 
@@ -141,9 +144,17 @@ func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 func (exporter *HTTPExporter) sendInAlertList(httpAlert apitypes.RuntimeAlert, processTree apitypes.ProcessTree) {
 	// create the HTTPAlertsListSpec struct
 	// TODO: accumulate alerts and send them in a batch
+	var cloudMetadata apitypes.CloudMetadata
+	if exporter.cloudMetadata == nil {
+		cloudMetadata = apitypes.CloudMetadata{}
+	} else {
+		cloudMetadata = *exporter.cloudMetadata
+	}
+
 	httpAlertsListSpec := HTTPAlertsListSpec{
-		Alerts:      []apitypes.RuntimeAlert{httpAlert},
-		ProcessTree: processTree,
+		Alerts:        []apitypes.RuntimeAlert{httpAlert},
+		ProcessTree:   processTree,
+		CloudMetadata: cloudMetadata,
 	}
 	// create the HTTPAlertsList struct
 	httpAlertsList := HTTPAlertsList{
