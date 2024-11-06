@@ -48,6 +48,7 @@ func (sc Storage) patchApplicationProfile(name, namespace string, operations []u
 	if err != nil {
 		return fmt.Errorf("marshal patch: %w", err)
 	}
+
 	profile, err := sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), sc.modifyName(name), types.JSONPatchType, patch, v1.PatchOptions{})
 	if err != nil {
 		return fmt.Errorf("patch application profile: %w", err)

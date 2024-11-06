@@ -84,7 +84,7 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 	return profileOperations
 }
 
-func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint) {
+func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, rulePolicies map[string]v1beta1.RulePolicy) {
 	// add capabilities
 	caps := mapset.NewSet(observedCapabilities...)
 	caps.Append(container.Capabilities...)
@@ -123,6 +123,20 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 	for _, endpoint := range endpoints {
 		container.Endpoints = append(container.Endpoints, *endpoint)
 	}
+
+	// add rule policies
+	for ruleID, policy := range rulePolicies {
+		if container.PolicyByRuleId == nil {
+			container.PolicyByRuleId = make(map[string]v1beta1.RulePolicy)
+		}
+		if existingPolicy, ok := container.PolicyByRuleId[ruleID]; ok {
+			policy = MergePolicy(existingPolicy, policy)
+			container.PolicyByRuleId[ruleID] = policy
+		} else {
+			container.PolicyByRuleId[ruleID] = policy
+		}
+	}
+
 }
 
 // TODO make generic?
@@ -145,4 +159,25 @@ func GetApplicationProfileContainer(object *v1beta1.ApplicationProfile, containe
 		}
 	}
 	return nil
+}
+
+func MergePolicy(policy1, policy2 v1beta1.RulePolicy) v1beta1.RulePolicy {
+	mergedPolicy := v1beta1.RulePolicy{
+		AllowedContainer: policy1.AllowedContainer || policy2.AllowedContainer,
+	}
+
+	processMap := make(map[string]struct{})
+
+	for _, process := range policy1.AllowedProcesses {
+		processMap[process] = struct{}{}
+	}
+	for _, process := range policy2.AllowedProcesses {
+		processMap[process] = struct{}{}
+	}
+
+	for process := range processMap {
+		mergedPolicy.AllowedProcesses = append(mergedPolicy.AllowedProcesses, process)
+	}
+
+	return mergedPolicy
 }
