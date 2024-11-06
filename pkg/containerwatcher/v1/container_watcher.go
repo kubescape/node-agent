@@ -49,7 +49,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	"github.com/kubescape/node-agent/pkg/relevancymanager"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/panjf2000/ants/v2"
@@ -216,6 +215,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
 		ruleManager.ReportEvent(utils.ExecveEventType, &event)
 		malwareManager.ReportEvent(utils.ExecveEventType, &event)
+		rulePolicyReporter.ReportEvent(utils.ExecveEventType, &event, k8sContainerID, event.Comm)
 
 		// Report exec events to event receivers
 		reportEventToThirdPartyTracers(utils.ExecveEventType, &event, thirdPartyEventReceivers)
@@ -349,7 +349,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		metrics.ReportEvent(utils.HardlinkEventType)
 		ruleManager.ReportEvent(utils.HardlinkEventType, &event)
-		applicationProfileManager.ReportRulePolicy(k8sContainerID, ruleengine.R1012ID, event.Comm, false)
+		rulePolicyReporter.ReportEvent(utils.HardlinkEventType, &event, k8sContainerID, event.Comm)
 		// Report hardlink events to event receivers
 		reportEventToThirdPartyTracers(utils.HardlinkEventType, &event, thirdPartyEventReceivers)
 	})

@@ -85,7 +85,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 
 	symlinkEvent, _ := event.(*tracersymlinktype.Event)
 
-	if allowed, err := isAllowed(&symlinkEvent.Event, objCache, symlinkEvent.Comm, R1012ID); err != nil {
+	if allowed, err := isAllowed(&symlinkEvent.Event, objCache, symlinkEvent.Comm, R1010ID); err != nil {
 		logger.L().Error("failed to check if symlink is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 	} else if allowed {
 		return nil
