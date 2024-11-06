@@ -295,3 +295,165 @@ func BenchmarkReportFileOpen(b *testing.B) {
 	}
 	b.ReportAllocs()
 }
+
+func TestReportRulePolicy(t *testing.T) {
+	// Setup common test environment
+	cfg := config.Config{
+		InitialDelay:     1 * time.Second,
+		MaxSniffingTime:  5 * time.Minute,
+		UpdateDataPeriod: 1 * time.Second,
+	}
+	ctx := context.TODO()
+	k8sClient := &k8sclient.K8sClientMock{}
+	storageClient := &storage.StorageHttpClientMock{}
+	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
+	seccompManagerMock := &seccompmanager.SeccompManagerMock{}
+
+	tests := []struct {
+		name             string
+		k8sContainerID   string
+		ruleID           string
+		allowedProcess   string
+		allowedContainer bool
+		existingSaved    *v1beta1.RulePolicy
+		existingToSave   *v1beta1.RulePolicy
+		expectedPolicy   *v1beta1.RulePolicy
+		shouldSet        bool
+	}{
+		{
+			name:             "New policy with process",
+			k8sContainerID:   "ns/pod/cont",
+			ruleID:           "rule1",
+			allowedProcess:   "process1",
+			allowedContainer: false,
+			existingSaved:    nil,
+			existingToSave:   nil,
+			expectedPolicy: &v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process1"},
+			},
+			shouldSet: true,
+		},
+		{
+			name:             "New policy with container allowed",
+			k8sContainerID:   "ns/pod/cont",
+			ruleID:           "rule2",
+			allowedProcess:   "",
+			allowedContainer: true,
+			existingSaved:    nil,
+			existingToSave:   nil,
+			expectedPolicy: &v1beta1.RulePolicy{
+				AllowedContainer: true,
+				AllowedProcesses: []string{""},
+			},
+			shouldSet: true,
+		},
+		{
+			name:             "Merge with existing toBeSaved policy - new process",
+			k8sContainerID:   "ns/pod/cont",
+			ruleID:           "rule3",
+			allowedProcess:   "process2",
+			allowedContainer: false,
+			existingToSave: &v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process1"},
+			},
+			expectedPolicy: &v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process1", "process2"},
+			},
+			shouldSet: true,
+		},
+		{
+			name:             "Merge with existing toBeSaved policy - enable container",
+			k8sContainerID:   "ns/pod/cont",
+			ruleID:           "rule4",
+			allowedProcess:   "",
+			allowedContainer: true,
+			existingToSave: &v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process1"},
+			},
+			expectedPolicy: &v1beta1.RulePolicy{
+				AllowedContainer: true,
+				AllowedProcesses: []string{"process1"},
+			},
+			shouldSet: true,
+		},
+		{
+			name:             "Skip if policy already in saved",
+			k8sContainerID:   "ns/pod/cont",
+			ruleID:           "rule5",
+			allowedProcess:   "process1",
+			allowedContainer: false,
+			existingSaved: &v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process1"},
+			},
+			shouldSet: false,
+		},
+		{
+			name:             "Skip if policy already in toBeSaved",
+			k8sContainerID:   "ns/pod/cont",
+			ruleID:           "rule6",
+			allowedProcess:   "process1",
+			allowedContainer: false,
+			existingToSave: &v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process1"},
+			},
+			shouldSet: false,
+		},
+		{
+			name:             "Deduplicate processes",
+			k8sContainerID:   "ns/pod/cont",
+			ruleID:           "rule7",
+			allowedProcess:   "process1",
+			allowedContainer: false,
+			existingToSave: &v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process1", "process2"},
+			},
+			expectedPolicy: &v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process1", "process2"},
+			},
+			shouldSet: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, mapset.NewSet[string](), k8sObjectCacheMock, seccompManagerMock)
+			assert.NoError(t, err)
+
+			am.savedRulePolicies.Set(tt.k8sContainerID, new(maps.SafeMap[string, *v1beta1.RulePolicy]))
+			am.toSaveRulePolicies.Set(tt.k8sContainerID, new(maps.SafeMap[string, *v1beta1.RulePolicy]))
+			am.trackedContainers.Add(tt.k8sContainerID)
+
+			if tt.existingSaved != nil {
+				am.savedRulePolicies.Get(tt.k8sContainerID).Set(tt.ruleID, tt.existingSaved)
+			}
+			if tt.existingToSave != nil {
+				am.toSaveRulePolicies.Get(tt.k8sContainerID).Set(tt.ruleID, tt.existingToSave)
+			}
+
+			am.ReportRulePolicy(tt.k8sContainerID, tt.ruleID, tt.allowedProcess, tt.allowedContainer)
+
+			if tt.shouldSet {
+				resultPolicy := am.toSaveRulePolicies.Get(tt.k8sContainerID).Get(tt.ruleID)
+				assert.NotNil(t, resultPolicy)
+				assert.Equal(t, tt.expectedPolicy.AllowedContainer, resultPolicy.AllowedContainer)
+				assert.ElementsMatch(t, tt.expectedPolicy.AllowedProcesses, resultPolicy.AllowedProcesses)
+			} else {
+				resultPolicy := am.toSaveRulePolicies.Get(tt.k8sContainerID).Get(tt.ruleID)
+				if tt.existingToSave != nil {
+					assert.Equal(t, tt.existingToSave.AllowedContainer, resultPolicy.AllowedContainer)
+					assert.ElementsMatch(t, tt.existingToSave.AllowedProcesses, resultPolicy.AllowedProcesses)
+				} else {
+					assert.Nil(t, resultPolicy)
+				}
+			}
+		})
+	}
+}

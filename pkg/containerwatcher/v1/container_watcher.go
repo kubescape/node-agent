@@ -354,7 +354,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		reportEventToThirdPartyTracers(utils.HardlinkEventType, &event, thirdPartyEventReceivers)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("creati hardlink worker pool: %w", err)
+		return nil, fmt.Errorf("creating hardlink worker pool: %w", err)
 	}
 	// Create a ssh worker pool
 	sshWorkerPool, err := ants.NewPoolWithFunc(sshWorkerPoolSize, func(i interface{}) {
