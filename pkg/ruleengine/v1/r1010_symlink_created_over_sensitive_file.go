@@ -87,50 +87,45 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 
 	if allowed, err := isAllowed(&symlinkEvent.Event, objCache, symlinkEvent.Comm, R1010ID); err != nil {
 		logger.L().Error("failed to check if symlink is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
+		return nil
 	} else if allowed {
 		return nil
 	}
 
-	for _, path := range rule.additionalPaths {
-		if strings.HasPrefix(symlinkEvent.OldPath, path) {
-			return &GenericRuleFailure{
-				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName: rule.Name(),
-					Arguments: map[string]interface{}{
-						"oldPath": symlinkEvent.OldPath,
-						"newPath": symlinkEvent.NewPath,
-					},
-					InfectedPID:    symlinkEvent.Pid,
-					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-					Severity:       R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
-				},
-				RuntimeProcessDetails: apitypes.ProcessTree{
-					ProcessTree: apitypes.Process{
-						Comm:       symlinkEvent.Comm,
-						PPID:       symlinkEvent.PPid,
-						PID:        symlinkEvent.Pid,
-						UpperLayer: &symlinkEvent.UpperLayer,
-						Uid:        &symlinkEvent.Uid,
-						Gid:        &symlinkEvent.Gid,
-						Hardlink:   symlinkEvent.ExePath,
-						Path:       symlinkEvent.ExePath,
-					},
-					ContainerID: symlinkEvent.Runtime.ContainerID,
-				},
-				TriggerEvent: symlinkEvent.Event,
-				RuleAlert: apitypes.RuleAlert{
-					RuleDescription: fmt.Sprintf("Symlink created over sensitive file: %s - %s in: %s", symlinkEvent.OldPath, symlinkEvent.NewPath, symlinkEvent.GetContainer()),
-				},
-				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-					PodName:   symlinkEvent.GetPod(),
-					PodLabels: symlinkEvent.K8s.PodLabels,
-				},
-				RuleID: rule.ID(),
-			}
-		}
+	return &GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: rule.Name(),
+			Arguments: map[string]interface{}{
+				"oldPath": symlinkEvent.OldPath,
+				"newPath": symlinkEvent.NewPath,
+			},
+			InfectedPID:    symlinkEvent.Pid,
+			FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
+			Severity:       R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				Comm:       symlinkEvent.Comm,
+				PPID:       symlinkEvent.PPid,
+				PID:        symlinkEvent.Pid,
+				UpperLayer: &symlinkEvent.UpperLayer,
+				Uid:        &symlinkEvent.Uid,
+				Gid:        &symlinkEvent.Gid,
+				Hardlink:   symlinkEvent.ExePath,
+				Path:       symlinkEvent.ExePath,
+			},
+			ContainerID: symlinkEvent.Runtime.ContainerID,
+		},
+		TriggerEvent: symlinkEvent.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: fmt.Sprintf("Symlink created over sensitive file: %s - %s in: %s", symlinkEvent.OldPath, symlinkEvent.NewPath, symlinkEvent.GetContainer()),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName:   symlinkEvent.GetPod(),
+			PodLabels: symlinkEvent.K8s.PodLabels,
+		},
+		RuleID: rule.ID(),
 	}
-
-	return nil
 }
 
 func (rule *R1010SymlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) bool {
@@ -138,8 +133,18 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.E
 		return false
 	}
 
-	_, ok := event.(*tracersymlinktype.Event)
-	return ok
+	symlinkEvent, ok := event.(*tracersymlinktype.Event)
+	if !ok {
+		return false
+	}
+
+	for _, path := range rule.additionalPaths {
+		if strings.HasPrefix(symlinkEvent.OldPath, path) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (rule *R1010SymlinkCreatedOverSensitiveFile) Requirements() ruleengine.RuleSpec {
