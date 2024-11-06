@@ -76,6 +76,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 
 		if allowed, err := isAllowed(&execEvent.Event, objectCache, execEvent.Comm, R1011ID); err != nil {
 			logger.L().Error("failed to check if ld_preload is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
+			return nil
 		} else if allowed {
 			return nil
 		}
@@ -89,6 +90,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 
 		if allowed, err := isAllowed(&openEvent.Event, objectCache, openEvent.Comm, R1011ID); err != nil {
 			logger.L().Error("failed to check if ld_preload is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
+			return nil
 		} else if allowed {
 			return nil
 		}
