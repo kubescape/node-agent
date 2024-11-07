@@ -2,11 +2,8 @@ package dnsmanager
 
 import (
 	"net"
-	"sync"
 	"testing"
-	"time"
 
-	"github.com/goradd/maps"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 )
 
@@ -58,22 +55,13 @@ func TestResolveIPAddress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a properly initialized DNSManager
-			dm := &DNSManager{
-				addressToDomainMap: maps.SafeMap[string, string]{},
-				lookupCache:        &sync.Map{},
-				failureCache:       &sync.Map{},
-				cleanupTicker:      time.NewTicker(cleanupInterval),
-			}
+			dm := CreateDNSManager()
 
 			dm.ReportDNSEvent(tt.dnsEvent)
 			got, ok := dm.ResolveIPAddress(tt.ipAddr)
 			if got != tt.want || ok != tt.wantOk {
 				t.Errorf("ResolveIPAddress() got = %v, ok = %v, want = %v, wantOk = %v", got, ok, tt.want, tt.wantOk)
 			}
-
-			// Cleanup
-			dm.cleanupTicker.Stop()
 		})
 	}
 }
@@ -103,13 +91,7 @@ func TestResolveIPAddressFallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a properly initialized DNSManager
-			dm := &DNSManager{
-				addressToDomainMap: maps.SafeMap[string, string]{},
-				lookupCache:        &sync.Map{},
-				failureCache:       &sync.Map{},
-				cleanupTicker:      time.NewTicker(cleanupInterval),
-			}
+			dm := CreateDNSManager()
 
 			// Perform the actual DNS lookup
 			addresses, err := net.LookupIP(tt.dnsEvent.DNSName)
@@ -127,9 +109,59 @@ func TestResolveIPAddressFallback(t *testing.T) {
 			if got != tt.want || ok != tt.wantOk {
 				t.Errorf("ResolveIPAddress() got = %v, ok = %v, want = %v, wantOk = %v", got, ok, tt.want, tt.wantOk)
 			}
-
-			// Cleanup
-			dm.cleanupTicker.Stop()
 		})
+	}
+}
+
+func TestCacheFallbackBehavior(t *testing.T) {
+	dm := CreateDNSManager()
+
+	// Test successful DNS lookup caching
+	event := tracerdnstype.Event{
+		DNSName: "test.com",
+		Addresses: []string{
+			"1.2.3.4",
+		},
+	}
+	dm.ReportDNSEvent(event)
+
+	// Check if the lookup is cached
+	cached, found := dm.lookupCache.Get(event.DNSName)
+	if !found {
+		t.Error("Expected DNS lookup to be cached")
+	}
+
+	entry, ok := cached.(cacheEntry)
+	if !ok {
+		t.Error("Cached entry is not of type cacheEntry")
+	}
+	if len(entry.addresses) != 1 || entry.addresses[0] != "1.2.3.4" {
+		t.Error("Cached addresses do not match expected values")
+	}
+
+	// Test failed lookup caching
+	failEvent := tracerdnstype.Event{
+		DNSName: "nonexistent.local",
+	}
+	dm.ReportDNSEvent(failEvent)
+
+	// Check if the failure is cached
+	_, found = dm.failureCache.Get(failEvent.DNSName)
+	if !found {
+		t.Error("Expected failed DNS lookup to be cached")
+	}
+
+	// Test cache hit behavior
+	hitCount := 0
+	for i := 0; i < 5; i++ {
+		if cached, found := dm.lookupCache.Get(event.DNSName); found {
+			entry := cached.(cacheEntry)
+			if len(entry.addresses) > 0 {
+				hitCount++
+			}
+		}
+	}
+	if hitCount != 5 {
+		t.Errorf("Expected 5 cache hits, got %d", hitCount)
 	}
 }
