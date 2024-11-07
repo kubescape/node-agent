@@ -198,7 +198,7 @@ func main() {
 	var dnsManagerClient dnsmanager.DNSManagerClient
 	var dnsResolver dnsmanager.DNSResolver
 	if cfg.EnableNetworkTracing || cfg.EnableRuntimeDetection {
-		dnsManager := dnsmanager.CreateDNSManager()
+		dnsManager := dnsmanager.CreateDNSManager(ctx)
 		dnsManagerClient = dnsManager
 		// NOTE: dnsResolver is set for threat detection.
 		dnsResolver = dnsManager
