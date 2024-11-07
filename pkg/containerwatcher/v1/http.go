@@ -11,6 +11,11 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 )
 
+const (
+	StatusOK         = 200
+	StatusBadRequest = 300
+)
+
 func (ch *IGContainerWatcher) httpEventCallback(event *tracerhttptype.Event) {
 	if event.Type == types.DEBUG {
 		return
@@ -21,7 +26,7 @@ func (ch *IGContainerWatcher) httpEventCallback(event *tracerhttptype.Event) {
 		return
 	}
 
-	if event.Response == nil || event.Response.StatusCode == 404 {
+	if event.Response == nil || (event.Response.StatusCode < StatusOK || event.Response.StatusCode >= StatusBadRequest) {
 		return
 	}
 
