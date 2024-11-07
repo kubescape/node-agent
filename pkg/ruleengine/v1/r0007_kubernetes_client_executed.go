@@ -153,7 +153,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 				AlertName:   rule.Name(),
 				InfectedPID: event.Pid,
 				Arguments: map[string]interface{}{
-					"exec": event.ExePath,
+					"exec": execPath,
 					"args": event.Args,
 				},
 				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",

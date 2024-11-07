@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 
+	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -34,6 +35,7 @@ var _ ruleengine.RuleEvaluator = (*R0004UnexpectedCapabilityUsed)(nil)
 
 type R0004UnexpectedCapabilityUsed struct {
 	BaseRule
+	alertedCapabilities maps.SafeMap[string, bool]
 }
 
 func CreateRuleR0004UnexpectedCapabilityUsed() *R0004UnexpectedCapabilityUsed {
@@ -76,6 +78,10 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
+	if rule.alertedCapabilities.Has(capEvent.CapName) {
+		return nil
+	}
+
 	for _, capability := range appProfileCapabilitiesList.Capabilities {
 		if capEvent.CapName == capability {
 			return nil
@@ -111,6 +117,8 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		},
 		RuleID: rule.ID(),
 	}
+
+	rule.alertedCapabilities.Set(capEvent.CapName, true)
 
 	return &ruleFailure
 }

@@ -3,25 +3,14 @@ package ruleengine
 import (
 	"testing"
 
-	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/utils"
-
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
-	// Create a new rule
-	r := CreateRuleR0010UnexpectedSensitiveFileAccess()
-	// Assert r is not nil
-	if r == nil {
-		t.Errorf("Expected r to not be nil")
-	}
-
-	// Create a file access event
-	e := &traceropentype.Event{
+func createTestEvent(path string, flags []string) *traceropentype.Event {
+	return &traceropentype.Event{
 		Event: eventtypes.Event{
 			CommonData: eventtypes.CommonData{
 				K8s: eventtypes.K8sMetadata{
@@ -31,103 +20,127 @@ func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 				},
 			},
 		},
-		Path:     "/test",
-		FullPath: "/test",
-		Flags:    []string{"O_RDONLY"},
+		Path:     path,
+		FullPath: path,
+		Flags:    flags,
 	}
+}
 
-	// Test with nil appProfileAccess
-	ruleResult := r.ProcessEvent(utils.OpenEventType, e, &objectcache.ObjectCacheMock{})
-	if ruleResult != nil {
-		t.Errorf("Expected ruleResult to not be nil since no appProfile")
-	}
-
-	// Test with whitelisted file
-	objCache := RuleObjectCacheMock{}
-	profile := objCache.ApplicationProfileCache().GetApplicationProfile("test")
-	if profile == nil {
-		profile = &v1beta1.ApplicationProfile{
-			Spec: v1beta1.ApplicationProfileSpec{
-				Containers: []v1beta1.ApplicationProfileContainer{
-					{
-						Name: "test",
-						Opens: []v1beta1.OpenCalls{
-							{
-								Path:  "/test",
-								Flags: []string{"O_RDONLY"},
-							},
-						},
-					},
-				},
-			},
+func createTestProfile(containerName string, paths []string, flags []string) *v1beta1.ApplicationProfile {
+	opens := make([]v1beta1.OpenCalls, len(paths))
+	for i, path := range paths {
+		opens[i] = v1beta1.OpenCalls{
+			Path:  path,
+			Flags: flags,
 		}
-		objCache.SetApplicationProfile(profile)
-	}
-	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
-	if ruleResult != nil {
-		t.Errorf("Expected ruleResult to be nil since file is whitelisted and not sensitive")
 	}
 
-	// Test with non whitelisted file, but not sensitive
-	e.FullPath = "/var/test1"
-	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
-	if ruleResult != nil {
-		t.Errorf("Expected ruleResult to be nil since file is not whitelisted and not sensitive")
-	}
-
-	// Test with sensitive file that is whitelisted
-	e.FullPath = "/etc/shadow"
-	profile.Spec.Containers[0].Opens[0].Path = "/etc/shadow"
-	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
-	if ruleResult != nil {
-		t.Errorf("Expected ruleResult to be nil since file is whitelisted and sensitive")
-	}
-
-	// Test with sensitive file, but not whitelisted
-	e.FullPath = "/etc/shadow"
-	profile.Spec.Containers[0].Opens[0].Path = "/test"
-	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
-	if ruleResult == nil {
-		t.Errorf("Expected ruleResult to not be nil since file is not whitelisted and sensitive")
-	}
-
-	// Test with sensitive file that originates from additionalPaths parameter
-	e.FullPath = "/etc/blabla"
-	profile.Spec.Containers[0].Opens[0].Path = "/test"
-	additionalPaths := []interface{}{"/etc/blabla"}
-	r.SetParameters(map[string]interface{}{"additionalPaths": additionalPaths})
-	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
-	if ruleResult == nil {
-		t.Errorf("Expected ruleResult to not be nil since file is not whitelisted and sensitive")
-	}
-
-	e.FullPath = "/tmp/blabla"
-	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
-	if ruleResult != nil {
-		t.Errorf("Expected ruleResult to be nil since file is whitelisted and not sensitive")
-	}
-
-	profile = &v1beta1.ApplicationProfile{
+	return &v1beta1.ApplicationProfile{
 		Spec: v1beta1.ApplicationProfileSpec{
 			Containers: []v1beta1.ApplicationProfileContainer{
 				{
-					Name: "test",
-					Opens: []v1beta1.OpenCalls{
-						{
-							Path:  "/etc/\u22ef",
-							Flags: []string{"O_RDONLY"},
-						},
-					},
+					Name:  containerName,
+					Opens: opens,
 				},
 			},
 		},
 	}
-	objCache.SetApplicationProfile(profile)
+}
 
-	e.FullPath = "/etc/blabla"
-	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
-	if ruleResult != nil {
-		t.Errorf("Expected ruleResult to be nil since file is whitelisted and not sensitive")
+func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
+	tests := []struct {
+		name            string
+		event           *traceropentype.Event
+		profile         *v1beta1.ApplicationProfile
+		additionalPaths []interface{}
+		expectAlert     bool
+		description     string
+	}{
+		{
+			name:        "No application profile",
+			event:       createTestEvent("/test", []string{"O_RDONLY"}),
+			profile:     nil,
+			expectAlert: false,
+			description: "Should not alert when no application profile is present",
+		},
+		{
+			name:        "Whitelisted non-sensitive file",
+			event:       createTestEvent("/test", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/test"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert for whitelisted non-sensitive file",
+		},
+		{
+			name:        "Non-whitelisted non-sensitive file",
+			event:       createTestEvent("/var/test1", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/test"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert for non-whitelisted non-sensitive file",
+		},
+		{
+			name:        "Whitelisted sensitive file",
+			event:       createTestEvent("/etc/shadow", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/etc/shadow"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert for whitelisted sensitive file",
+		},
+		{
+			name:        "Non-whitelisted sensitive file",
+			event:       createTestEvent("/etc/shadow", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/test"}, []string{"O_RDONLY"}),
+			expectAlert: true,
+			description: "Should alert for non-whitelisted sensitive file",
+		},
+		{
+			name:            "Additional sensitive path",
+			event:           createTestEvent("/etc/custom-sensitive", []string{"O_RDONLY"}),
+			profile:         createTestProfile("test", []string{"/test"}, []string{"O_RDONLY"}),
+			additionalPaths: []interface{}{"/etc/custom-sensitive"},
+			expectAlert:     true,
+			description:     "Should alert for non-whitelisted file in additional sensitive paths",
+		},
+		{
+			name:        "Wildcard path match",
+			event:       createTestEvent("/etc/blabla", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/etc/\u22ef"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert when path matches wildcard pattern",
+		},
+		{
+			name:        "Path traversal attempt",
+			event:       createTestEvent("/etc/shadow/../passwd", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/test"}, []string{"O_RDONLY"}),
+			expectAlert: true,
+			description: "Should alert for path traversal attempts",
+		},
 	}
 
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rule := CreateRuleR0010UnexpectedSensitiveFileAccess()
+			if rule == nil {
+				t.Fatal("Expected rule to not be nil")
+			}
+
+			objCache := &RuleObjectCacheMock{}
+			if tt.profile != nil {
+				objCache.SetApplicationProfile(tt.profile)
+			}
+
+			if tt.additionalPaths != nil {
+				rule.SetParameters(map[string]interface{}{
+					"additionalPaths": tt.additionalPaths,
+				})
+			}
+
+			result := rule.ProcessEvent(utils.OpenEventType, tt.event, objCache)
+
+			if tt.expectAlert && result == nil {
+				t.Errorf("%s: expected alert but got none", tt.description)
+			}
+			if !tt.expectAlert && result != nil {
+				t.Errorf("%s: expected no alert but got one", tt.description)
+			}
+		})
+	}
 }

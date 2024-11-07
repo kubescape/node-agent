@@ -63,7 +63,8 @@ else
 		if [ -S "/tmp/clamd.sock" ]; then
 			unlink "/tmp/clamd.sock"
 		fi
-		clamd --foreground &
+		# Run clamd in the foreground but redirecting output to stdout and stderr to /dev/null
+		clamd --foreground > /dev/null 2>&1 &
 		while [ ! -S "/run/clamav/clamd.sock" ] && [ ! -S "/tmp/clamd.sock" ]; do
 			if [ "${_timeout:=0}" -gt "${CLAMD_STARTUP_TIMEOUT:=1800}" ]; then
 				echo

@@ -13,7 +13,7 @@ import (
 
 const (
 	StatusOK         = 200
-	StatusBadRequest = 400
+	StatusBadRequest = 300
 )
 
 func (ch *IGContainerWatcher) httpEventCallback(event *tracerhttptype.Event) {
