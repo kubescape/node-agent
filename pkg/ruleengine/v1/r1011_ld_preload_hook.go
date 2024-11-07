@@ -243,9 +243,10 @@ func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *tracerexectype.Event,
 				}
 			}
 		}
+		return true
 	}
 
-	return true
+	return false
 }
 
 func (rule *R1011LdPreloadHook) shouldAlertOpen(openEvent *traceropentype.Event) bool {

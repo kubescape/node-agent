@@ -75,7 +75,7 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 
 	// add rule policies
 	if len(rulePolicies) != 0 {
-		rulePoliciesPath := fmt.Sprintf("/spec/%s/%d/policybyruleid/-", containerType, containerIndex)
+		rulePoliciesPath := fmt.Sprintf("/spec/%s/%d/rulePolicies/-", containerType, containerIndex)
 		profileOperations = append(profileOperations, PatchOperation{
 			Op:    "add",
 			Path:  rulePoliciesPath,
@@ -132,7 +132,7 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 			container.PolicyByRuleId = make(map[string]v1beta1.RulePolicy)
 		}
 		if existingPolicy, ok := container.PolicyByRuleId[ruleID]; ok {
-			policy = MergePolicy(existingPolicy, policy)
+			policy = MergePolicies(existingPolicy, policy)
 			container.PolicyByRuleId[ruleID] = policy
 		} else {
 			container.PolicyByRuleId[ruleID] = policy
@@ -163,21 +163,21 @@ func GetApplicationProfileContainer(object *v1beta1.ApplicationProfile, containe
 	return nil
 }
 
-func MergePolicy(policy1, policy2 v1beta1.RulePolicy) v1beta1.RulePolicy {
+func MergePolicies(primary, secondary v1beta1.RulePolicy) v1beta1.RulePolicy {
 	mergedPolicy := v1beta1.RulePolicy{
-		AllowedContainer: policy1.AllowedContainer || policy2.AllowedContainer,
+		AllowedContainer: primary.AllowedContainer || secondary.AllowedContainer,
 	}
 
-	processMap := make(map[string]struct{})
+	processes := mapset.NewSet[string]()
 
-	for _, process := range policy1.AllowedProcesses {
-		processMap[process] = struct{}{}
+	for _, process := range primary.AllowedProcesses {
+		processes.Add(process)
 	}
-	for _, process := range policy2.AllowedProcesses {
-		processMap[process] = struct{}{}
+	for _, process := range secondary.AllowedProcesses {
+		processes.Add(process)
 	}
 
-	for process := range processMap {
+	for process := range processes.Iter() {
 		mergedPolicy.AllowedProcesses = append(mergedPolicy.AllowedProcesses, process)
 	}
 

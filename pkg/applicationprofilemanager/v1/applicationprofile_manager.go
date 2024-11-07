@@ -595,6 +595,15 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					}
 				}
 			}
+
+			// record saved rule policies
+			toSaveRulePolicies.Range(func(ruleIdentifier string, rulePolicy *v1beta1.RulePolicy) bool {
+				if !am.savedRulePolicies.Get(watchedContainer.K8sContainerID).Has(ruleIdentifier) {
+					am.savedRulePolicies.Get(watchedContainer.K8sContainerID).Set(ruleIdentifier, rulePolicy)
+				}
+				return true
+			})
+
 			logger.L().Debug("ApplicationProfileManager - saved application profile",
 				helpers.Int("capabilities", len(capabilities)),
 				helpers.Int("endpoints", toSaveEndpoints.Len()),
