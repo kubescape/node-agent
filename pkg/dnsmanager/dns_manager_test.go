@@ -5,8 +5,9 @@ import (
 	"sync"
 	"testing"
 
+	"math/rand/v2"
+
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	"golang.org/x/exp/rand"
 )
 
 func TestResolveIPAddress(t *testing.T) {
@@ -202,7 +203,7 @@ func TestConcurrentAccess(t *testing.T) {
 				// Randomly choose between writing and reading
 				if rand.Float32() < 0.5 {
 					// Write operation
-					event := testEvents[rand.Intn(len(testEvents))]
+					event := testEvents[rand.IntN(len(testEvents))]
 					dm.ReportDNSEvent(event)
 				} else {
 					// Read operation
