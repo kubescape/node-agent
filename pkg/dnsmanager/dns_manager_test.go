@@ -2,9 +2,11 @@ package dnsmanager
 
 import (
 	"net"
+	"sync"
 	"testing"
 
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
+	"golang.org/x/exp/rand"
 )
 
 func TestResolveIPAddress(t *testing.T) {
@@ -163,5 +165,70 @@ func TestCacheFallbackBehavior(t *testing.T) {
 	}
 	if hitCount != 5 {
 		t.Errorf("Expected 5 cache hits, got %d", hitCount)
+	}
+}
+
+func TestConcurrentAccess(t *testing.T) {
+	dm := CreateDNSManager()
+	const numGoroutines = 100
+	const numOperations = 1000
+
+	// Create a wait group to synchronize goroutines
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	// Create some test data
+	testEvents := []tracerdnstype.Event{
+		{
+			DNSName:   "test1.com",
+			Addresses: []string{"1.1.1.1", "2.2.2.2"},
+		},
+		{
+			DNSName:   "test2.com",
+			Addresses: []string{"3.3.3.3", "4.4.4.4"},
+		},
+		{
+			DNSName:   "test3.com",
+			Addresses: []string{"5.5.5.5", "6.6.6.6"},
+		},
+	}
+
+	// Launch multiple goroutines to concurrently access the cache
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+
+			for j := 0; j < numOperations; j++ {
+				// Randomly choose between writing and reading
+				if rand.Float32() < 0.5 {
+					// Write operation
+					event := testEvents[rand.Intn(len(testEvents))]
+					dm.ReportDNSEvent(event)
+				} else {
+					// Read operation
+					if cached, found := dm.lookupCache.Get("test1.com"); found {
+						entry := cached.(cacheEntry)
+						// Verify the slice hasn't been modified
+						if len(entry.addresses) != 2 {
+							t.Errorf("Unexpected number of addresses: %d", len(entry.addresses))
+						}
+					}
+				}
+			}
+		}()
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+
+	// Verify final state
+	for _, event := range testEvents {
+		if cached, found := dm.lookupCache.Get(event.DNSName); found {
+			entry := cached.(cacheEntry)
+			if len(entry.addresses) != len(event.Addresses) {
+				t.Errorf("Cache entry for %s has wrong number of addresses: got %d, want %d",
+					event.DNSName, len(entry.addresses), len(event.Addresses))
+			}
+		}
 	}
 }
