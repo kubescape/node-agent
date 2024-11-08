@@ -140,16 +140,19 @@ func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.Wat
 	// delete resources
 	watchedContainer.UpdateDataTicker.Stop()
 	am.trackedContainers.Remove(watchedContainer.K8sContainerID)
-	am.savedCapabilities.Delete(watchedContainer.K8sContainerID)
-	am.savedExecs.Delete(watchedContainer.K8sContainerID)
 	am.droppedEvents.Delete(watchedContainer.K8sContainerID)
+	am.savedCapabilities.Delete(watchedContainer.K8sContainerID)
+	am.savedEndpoints.Delete(watchedContainer.K8sContainerID)
+	am.savedExecs.Delete(watchedContainer.K8sContainerID)
 	am.savedOpens.Delete(watchedContainer.K8sContainerID)
 	am.savedSyscalls.Delete(watchedContainer.K8sContainerID)
 	am.toSaveCapabilities.Delete(watchedContainer.K8sContainerID)
+	am.toSaveEndpoints.Delete(watchedContainer.K8sContainerID)
 	am.toSaveExecs.Delete(watchedContainer.K8sContainerID)
 	am.toSaveOpens.Delete(watchedContainer.K8sContainerID)
 	am.watchedContainerChannels.Delete(watchedContainer.ContainerID)
 }
+
 func (am *ApplicationProfileManager) ContainerReachedMaxTime(containerID string) {
 	if channel := am.watchedContainerChannels.Get(containerID); channel != nil {
 		channel <- utils.ContainerReachedMaxTime
