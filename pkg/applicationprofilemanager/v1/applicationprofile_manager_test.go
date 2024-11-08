@@ -29,7 +29,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	cfg := config.Config{
 		InitialDelay:     1 * time.Second,
 		MaxSniffingTime:  5 * time.Minute,
-		UpdateDataPeriod: 1 * time.Second,
+		UpdateDataPeriod: 5 * time.Second,
 	}
 	ctx := context.TODO()
 	k8sClient := &k8sclient.K8sClientMock{}
