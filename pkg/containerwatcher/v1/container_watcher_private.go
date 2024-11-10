@@ -201,11 +201,7 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting seccomp tracing", helpers.Error(err))
 			return err
 		}
-		// Start capabilities tracer
-		if err := ch.startCapabilitiesTracing(); err != nil {
-			logger.L().Error("error starting capabilities tracing", helpers.Error(err))
-			return err
-		}
+		logger.L().Info("Started syscall tracing")
 	}
 	if ch.cfg.EnableRelevancy || ch.cfg.EnableApplicationProfile {
 		// Start exec tracer
@@ -213,11 +209,13 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting exec tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started exec tracing")
 		// Start open tracer
 		if err := ch.startOpenTracing(); err != nil {
 			logger.L().Error("error starting open tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started open tracing")
 	}
 
 	if ch.cfg.EnableNetworkTracing {
@@ -237,20 +235,29 @@ func (ch *IGContainerWatcher) startTracers() error {
 			// not failing on dns tracing error
 			logger.L().Error("error starting dns tracing", helpers.Error(err))
 		}
+		logger.L().Info("Started dns tracing")
 
 		if err := ch.startNetworkTracing(); err != nil {
 			logger.L().Error("error starting network tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started network tracing")
 	}
 
 	if ch.cfg.EnableRuntimeDetection {
+		// Start capabilities tracer
+		if err := ch.startCapabilitiesTracing(); err != nil {
+			logger.L().Error("error starting capabilities tracing", helpers.Error(err))
+			return err
+		}
+		logger.L().Info("Started capabilities tracing")
 		// The randomx tracing is only supported on amd64 architecture.
 		if runtime.GOARCH == "amd64" {
 			if err := ch.startRandomxTracing(); err != nil {
 				logger.L().Error("error starting randomx tracing", helpers.Error(err))
 				return err
 			}
+			logger.L().Info("Started randomx tracing")
 		} else {
 			logger.L().Warning("randomx tracing is not supported on this architecture", helpers.String("architecture", runtime.GOARCH))
 		}
@@ -259,22 +266,26 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting symlink tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started symlink tracing")
 
 		if err := ch.startHardlinkTracing(); err != nil {
 			logger.L().Error("error starting hardlink tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started hardlink tracing")
 
 		// NOTE: SSH tracing relies on the network tracer, so it must be started after the network tracer.
 		if err := ch.startSshTracing(); err != nil {
 			logger.L().Error("error starting ssh tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started ssh tracing")
 
 		if err := ch.startPtraceTracing(); err != nil {
 			logger.L().Error("error starting ptrace tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started ptrace tracing")
 
 		// Start third party tracers
 		for tracer := range ch.thirdPartyTracers.Iter() {
@@ -282,15 +293,16 @@ func (ch *IGContainerWatcher) startTracers() error {
 				logger.L().Error("error starting custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
 				return err
 			}
+			logger.L().Info("Started custom tracer", helpers.String("tracer", tracer.Name()))
 		}
 	}
 
 	if ch.cfg.EnableHttpDetection {
-		logger.L().Debug("starting http tracing")
 		if err := ch.startHttpTracing(); err != nil {
 			logger.L().Error("error starting http tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started http tracing")
 	}
 
 	return nil
@@ -298,7 +310,7 @@ func (ch *IGContainerWatcher) startTracers() error {
 
 func (ch *IGContainerWatcher) stopTracers() error {
 	var errs error
-	if ch.cfg.EnableApplicationProfile {
+	if ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
 		// Stop capabilities tracer
 		if err := ch.stopCapabilitiesTracing(); err != nil {
 			logger.L().Error("error stopping capabilities tracing", helpers.Error(err))
@@ -310,7 +322,7 @@ func (ch *IGContainerWatcher) stopTracers() error {
 			errs = errors.Join(errs, err)
 		}
 	}
-	if ch.cfg.EnableRelevancy || ch.cfg.EnableApplicationProfile {
+	if ch.cfg.EnableRelevancy || ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
 		// Stop exec tracer
 		if err := ch.stopExecTracing(); err != nil {
 			logger.L().Error("error stopping exec tracing", helpers.Error(err))
@@ -323,7 +335,7 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		}
 	}
 
-	if ch.cfg.EnableNetworkTracing {
+	if ch.cfg.EnableNetworkTracing || ch.cfg.EnableRuntimeDetection {
 		// Stop network tracer
 		if err := ch.stopNetworkTracing(); err != nil {
 			logger.L().Error("error stopping network tracing", helpers.Error(err))
