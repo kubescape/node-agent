@@ -8,6 +8,11 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
+const (
+	ProcessAllowed   = "processAllowed"
+	ContainerAllowed = "containerAllowed"
+)
+
 func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, rulePolicies map[string]v1beta1.RulePolicy, containerType string, containerIndex int) []PatchOperation {
 	var profileOperations []PatchOperation
 	// add capabilities
@@ -74,14 +79,7 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 	}
 
 	// add rule policies
-	if len(rulePolicies) != 0 {
-		rulePoliciesPath := fmt.Sprintf("/spec/%s/%d/rulePolicies/-", containerType, containerIndex)
-		profileOperations = append(profileOperations, PatchOperation{
-			Op:    "add",
-			Path:  rulePoliciesPath,
-			Value: rulePolicies,
-		})
-	}
+	profileOperations = append(profileOperations, createRulePolicyOperations(rulePolicies, containerType, containerIndex)...)
 
 	return profileOperations
 }
@@ -182,4 +180,32 @@ func MergePolicies(primary, secondary v1beta1.RulePolicy) v1beta1.RulePolicy {
 	}
 
 	return mergedPolicy
+}
+
+func createRulePolicyOperations(rulePolicies map[string]v1beta1.RulePolicy, containerType string, containerIndex int) []PatchOperation {
+	var profileOperations []PatchOperation
+
+	if len(rulePolicies) == 0 {
+		return profileOperations
+	}
+
+	for ruleID, policy := range rulePolicies {
+		if len(policy.AllowedProcesses) != 0 {
+			for _, process := range policy.AllowedProcesses {
+				profileOperations = append(profileOperations, PatchOperation{
+					Op:    "add",
+					Path:  fmt.Sprintf("/spec/%s/%d/rulePolicies/%s/%s/-", containerType, containerIndex, ruleID, ProcessAllowed),
+					Value: process,
+				})
+			}
+		} else if policy.AllowedContainer {
+			profileOperations = append(profileOperations, PatchOperation{
+				Op:    "add",
+				Path:  fmt.Sprintf("/spec/%s/%d/rulePolicies/%s/%s", containerType, containerIndex, ruleID, ContainerAllowed),
+				Value: policy.AllowedContainer,
+			})
+		}
+	}
+
+	return profileOperations
 }
