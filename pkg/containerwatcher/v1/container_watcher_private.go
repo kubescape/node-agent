@@ -438,8 +438,8 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 }
 
 func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {
-	// do not trace the node-agent pod
-	if name == ch.podName && namespace == ch.namespace {
+	// do not trace any of our pods
+	if namespace == ch.namespace {
 		return true
 	}
 	// do not trace the node-agent pods if MULTIPLY is set

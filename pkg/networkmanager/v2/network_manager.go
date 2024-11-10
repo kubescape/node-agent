@@ -6,23 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/dnsmanager"
-	"github.com/kubescape/node-agent/pkg/k8sclient"
-	"github.com/kubescape/node-agent/pkg/networkmanager"
-	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/storage"
-	"github.com/kubescape/node-agent/pkg/utils"
-
-	"k8s.io/utils/ptr"
-
-	"github.com/cenkalti/backoff/v4"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
-
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-
 	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/cenkalti/backoff/v4"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/google/uuid"
 	"github.com/goradd/maps"
@@ -31,12 +16,24 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/networkmanager"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storageUtils "github.com/kubescape/storage/pkg/utils"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+	"istio.io/pkg/cache"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 type NetworkManager struct {
@@ -46,8 +43,8 @@ type NetworkManager struct {
 	containerMutexes         storageUtils.MapMutex[string]                                 // key is k8sContainerID
 	trackedContainers        mapset.Set[string]                                            // key is k8sContainerID
 	removedContainers        mapset.Set[string]                                            // key is k8sContainerID
-	droppedEvents            maps.SafeMap[string, bool]                                    // key is k8sContainerID
-	savedEvents              maps.SafeMap[string, mapset.Set[networkmanager.NetworkEvent]] // key is k8sContainerID
+	droppedEventsContainers  mapset.Set[string]                                            // key is k8sContainerID
+	savedEvents              maps.SafeMap[string, cache.ExpiringCache]                     // key is k8sContainerID
 	toSaveEvents             maps.SafeMap[string, mapset.Set[networkmanager.NetworkEvent]] // key is k8sContainerID
 	watchedContainerChannels maps.SafeMap[string, chan error]                              // key is ContainerID
 	k8sClient                k8sclient.K8sClientInterface
@@ -61,17 +58,18 @@ var _ networkmanager.NetworkManagerClient = (*NetworkManager)(nil)
 
 func CreateNetworkManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, dnsResolverClient dnsmanager.DNSResolver, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache) *NetworkManager {
 	return &NetworkManager{
-		cfg:                    cfg,
-		clusterName:            clusterName,
-		ctx:                    ctx,
-		dnsResolverClient:      dnsResolverClient,
-		k8sClient:              k8sClient,
-		k8sObjectCache:         k8sObjectCache,
-		storageClient:          storageClient,
-		containerMutexes:       storageUtils.NewMapMutex[string](),
-		trackedContainers:      mapset.NewSet[string](),
-		removedContainers:      mapset.NewSet[string](),
-		preRunningContainerIDs: preRunningContainerIDs,
+		cfg:                     cfg,
+		clusterName:             clusterName,
+		ctx:                     ctx,
+		dnsResolverClient:       dnsResolverClient,
+		k8sClient:               k8sClient,
+		k8sObjectCache:          k8sObjectCache,
+		storageClient:           storageClient,
+		containerMutexes:        storageUtils.NewMapMutex[string](),
+		trackedContainers:       mapset.NewSet[string](),
+		removedContainers:       mapset.NewSet[string](),
+		droppedEventsContainers: mapset.NewSet[string](),
+		preRunningContainerIDs:  preRunningContainerIDs,
 	}
 }
 
@@ -135,11 +133,12 @@ func (nm *NetworkManager) deleteResources(watchedContainer *utils.WatchedContain
 	// delete resources
 	watchedContainer.UpdateDataTicker.Stop()
 	nm.trackedContainers.Remove(watchedContainer.K8sContainerID)
-	nm.droppedEvents.Delete(watchedContainer.K8sContainerID)
+	nm.droppedEventsContainers.Remove(watchedContainer.K8sContainerID)
 	nm.savedEvents.Delete(watchedContainer.K8sContainerID)
 	nm.toSaveEvents.Delete(watchedContainer.K8sContainerID)
 	nm.watchedContainerChannels.Delete(watchedContainer.ContainerID)
 }
+
 func (nm *NetworkManager) ContainerReachedMaxTime(containerID string) {
 	if channel := nm.watchedContainerChannels.Get(containerID); channel != nil {
 		channel <- utils.ContainerReachedMaxTime
@@ -250,7 +249,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 	// sleep for container index second to desynchronize the profiles saving
 	time.Sleep(time.Duration(watchedContainer.ContainerIndex) * time.Second)
 
-	if droppedEvents := nm.droppedEvents.Get(watchedContainer.K8sContainerID); droppedEvents {
+	if nm.droppedEventsContainers.ContainsOne(watchedContainer.K8sContainerID) {
 		watchedContainer.SetStatus(utils.WatchedContainerStatusMissingRuntime)
 	}
 
@@ -413,7 +412,11 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 			watchedContainer.ResetStatusUpdatedFlag()
 
 			// record saved events
-			nm.savedEvents.Get(watchedContainer.K8sContainerID).Append(toSaveEvents.ToSlice()...)
+			savedEvents := nm.savedEvents.Get(watchedContainer.K8sContainerID)
+			toSaveEvents.Each(func(event networkmanager.NetworkEvent) bool {
+				savedEvents.Set(event, nil)
+				return false
+			})
 			logger.L().Debug("NetworkManager - saved neighborhood",
 				helpers.Int("events", toSaveEvents.Cardinality()),
 				helpers.String("slug", slug),
@@ -489,8 +492,7 @@ func (nm *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 				helpers.String("k8s workload", k8sContainerID))
 			return
 		}
-		nm.droppedEvents.Set(k8sContainerID, false)
-		nm.savedEvents.Set(k8sContainerID, mapset.NewSet[networkmanager.NetworkEvent]())
+		nm.savedEvents.Set(k8sContainerID, cache.NewTTL(5*nm.cfg.UpdateDataPeriod, nm.cfg.UpdateDataPeriod))
 		nm.toSaveEvents.Set(k8sContainerID, mapset.NewSet[networkmanager.NetworkEvent]())
 		nm.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		nm.trackedContainers.Add(k8sContainerID)
@@ -526,18 +528,14 @@ func (nm *NetworkManager) ReportNetworkEvent(k8sContainerID string, event tracer
 	networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
 
 	// skip if we already saved this event
-	savedEvents := nm.savedEvents.Get(k8sContainerID)
-	if savedEvents.Contains(networkEvent) {
+	if _, ok := nm.savedEvents.Get(k8sContainerID).Get(networkEvent); ok {
 		return
 	}
 	nm.toSaveEvents.Get(k8sContainerID).Add(networkEvent)
 }
 
 func (nm *NetworkManager) ReportDroppedEvent(k8sContainerID string) {
-	if err := nm.waitForContainer(k8sContainerID); err != nil {
-		return
-	}
-	nm.droppedEvents.Set(k8sContainerID, true)
+	nm.droppedEventsContainers.Add(k8sContainerID)
 }
 
 func (nm *NetworkManager) createNetworkNeighbor(networkEvent networkmanager.NetworkEvent, namespace string) *v1beta1.NetworkNeighbor {
