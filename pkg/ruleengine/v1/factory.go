@@ -88,6 +88,13 @@ func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []ru
 	}
 	return rules
 }
+func (r *RuleCreatorImpl) GetAllRuleIDs() []string {
+	var ruleIDs []string
+	for _, rule := range r.ruleDescriptions {
+		ruleIDs = append(ruleIDs, rule.ID)
+	}
+	return ruleIDs
+}
 
 func containsEventType(eventTypes []utils.EventType, eventType utils.EventType) bool {
 	for _, et := range eventTypes {

@@ -177,7 +177,9 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
 	}
 	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
-	am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
+
+	initOps := GetInitOperations(watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+	am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, initOps)
 
 	for {
 		select {
@@ -188,7 +190,7 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 				watchedContainer.UpdateDataTicker.Reset(utils.AddJitter(am.cfg.UpdateDataPeriod, am.cfg.MaxJitterPercentage))
 			}
 			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
-			am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
+			am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, nil)
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
@@ -197,11 +199,11 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				}
 
-				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
+				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, nil)
 				return err
 			case errors.Is(err, utils.ContainerReachedMaxTime):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
-				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace)
+				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, nil)
 				return err
 			case errors.Is(err, utils.ObjectCompleted):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
@@ -215,7 +217,7 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 	}
 }
 
-func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedContainer *utils.WatchedContainerData, namespace string) {
+func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedContainer *utils.WatchedContainerData, namespace string, initalizeOperations []utils.PatchOperation) {
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.saveProfile")
 	defer span.End()
 
@@ -339,9 +341,13 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// 3a. the object is missing its container slice - ADD one with the container profile at the right index
 	// 3b. the object is missing the container profile - ADD the container profile at the right index
 	// 3c. default - patch the container ourselves and REPLACE it at the right index
-	if len(capabilities) > 0 || len(endpoints) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || watchedContainer.StatusUpdated() {
+	if len(capabilities) > 0 || len(endpoints) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || len(initalizeOperations) > 0 || watchedContainer.StatusUpdated() {
 		// 0. calculate patch
 		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, endpoints, rulePolicies, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+		if len(initalizeOperations) > 0 {
+			operations = append(operations, initalizeOperations...)
+		}
+
 		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
 		operations = append(operations, utils.PatchOperation{
 			Op:    "add",
@@ -610,6 +616,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				helpers.Int("execs", toSaveExecs.Len()),
 				helpers.Int("opens", toSaveOpens.Len()),
 				helpers.Int("rule policies", toSaveRulePolicies.Len()),
+				helpers.Int("init operations", len(initalizeOperations)),
 				helpers.String("slug", slug),
 				helpers.Int("container index", watchedContainer.ContainerIndex),
 				helpers.String("container ID", watchedContainer.ContainerID),
