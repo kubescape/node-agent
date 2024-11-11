@@ -1,15 +1,16 @@
 # NodeAgent
+[![Version](https://img.shields.io/github/v/release/kubescape/node-agent)](https://github.com/kubescape/node-agent/releases)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kubescape/node-agent/badge)](https://securityscorecards.dev/viewer/?uri=github.com/kubescape/node-agent)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fsniffer.svg?type=shield&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fsniffer?ref=badge_shield&issueType=license)
+[![Stars](https://img.shields.io/github/stars/kubescape/node-agent?style=social)](https://github.com/kubescape/node-agent/stargazers)
 
-## Prerequisites
-1. [Minikube](https://minikube.sigs.k8s.io/docs/start/)
-Start minikube with the following command:
-```
-minikube start
-```
-2. Linux kernel version 5.4 and above.
+NodeAgent is a component of Kubescape that enables node-level security scanning and monitoring.
+It uses eBPF technology to monitor the system and provides real-time security insights.
 
+## Running Node Agent in Kubernetes
+This is the recommended way to run the Node Agent.
+You can run the Node Agent in a Kubernetes cluster as part of Kubescape by using helm.
+Please refer to the [docs](https://kubescape.io/docs/) for more information.
 
 ## Running the Node Agent
 Make sure to set the `NODE_NAME` environment variable to the name of the node you want to scan.
@@ -23,13 +24,9 @@ Then run the binarty with root privileges:
 sudo ./node-agent
 ```
 
-## Running Node Agent in Kubernetes
-You can run the Node Agent in a Kubernetes cluster as part of Kubescape by using helm.
-Please refer to the [docs](https://kubescape.io/docs/) for more information.
-
-## Limitations:
-1. This feature is using eBPF technology that is implemented only on linux.
-2. the linux kernel version that supported it 5.4 and above.
+## System Requirements
+1. The node agent uses eBPF, so make sure your system supports it.
+2. It uses `CO-RE`, so make sure your kernel version is 5.4 or higher.
 
 
 ## Debugging

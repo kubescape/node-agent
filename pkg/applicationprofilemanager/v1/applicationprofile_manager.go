@@ -34,11 +34,10 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"istio.io/pkg/cache"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
-
-const OpenDynamicThreshold = 50
 
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
 
@@ -49,11 +48,11 @@ type ApplicationProfileManager struct {
 	containerMutexes         storageUtils.MapMutex[string]                                      // key is k8sContainerID
 	trackedContainers        mapset.Set[string]                                                 // key is k8sContainerID
 	removedContainers        mapset.Set[string]                                                 // key is k8sContainerID
-	droppedEvents            maps.SafeMap[string, bool]                                         // key is k8sContainerID
-	savedCapabilities        maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
-	savedEndpoints           maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.HTTPEndpoint]] // key is k8sContainerID
-	savedExecs               maps.SafeMap[string, *maps.SafeMap[string, []string]]              // key is k8sContainerID
-	savedOpens               maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]]    // key is k8sContainerID
+	droppedEventsContainers  mapset.Set[string]                                                 // key is k8sContainerID
+	savedCapabilities        maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
+	savedEndpoints           maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
+	savedExecs               maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
+	savedOpens               maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
 	savedSyscalls            maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
 	savedRulePolicies        maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.RulePolicy]]   // key is k8sContainerID
 	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
@@ -74,17 +73,18 @@ var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationP
 
 func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
-		cfg:                    cfg,
-		clusterName:            clusterName,
-		ctx:                    ctx,
-		k8sClient:              k8sClient,
-		k8sObjectCache:         k8sObjectCache,
-		storageClient:          storageClient,
-		containerMutexes:       storageUtils.NewMapMutex[string](),
-		trackedContainers:      mapset.NewSet[string](),
-		removedContainers:      mapset.NewSet[string](),
-		preRunningContainerIDs: preRunningContainerIDs,
-		seccompManager:         seccompManager,
+		cfg:                     cfg,
+		clusterName:             clusterName,
+		ctx:                     ctx,
+		k8sClient:               k8sClient,
+		k8sObjectCache:          k8sObjectCache,
+		storageClient:           storageClient,
+		containerMutexes:        storageUtils.NewMapMutex[string](),
+		trackedContainers:       mapset.NewSet[string](),
+		removedContainers:       mapset.NewSet[string](),
+		droppedEventsContainers: mapset.NewSet[string](),
+		preRunningContainerIDs:  preRunningContainerIDs,
+		seccompManager:          seccompManager,
 	}, nil
 }
 
@@ -143,10 +143,10 @@ func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.Wat
 	// delete resources
 	watchedContainer.UpdateDataTicker.Stop()
 	am.trackedContainers.Remove(watchedContainer.K8sContainerID)
+	am.droppedEventsContainers.Remove(watchedContainer.K8sContainerID)
 	am.savedCapabilities.Delete(watchedContainer.K8sContainerID)
 	am.savedEndpoints.Delete(watchedContainer.K8sContainerID)
 	am.savedExecs.Delete(watchedContainer.K8sContainerID)
-	am.droppedEvents.Delete(watchedContainer.K8sContainerID)
 	am.savedOpens.Delete(watchedContainer.K8sContainerID)
 	am.savedSyscalls.Delete(watchedContainer.K8sContainerID)
 	am.savedRulePolicies.Delete(watchedContainer.K8sContainerID)
@@ -157,6 +157,7 @@ func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.Wat
 	am.toSaveRulePolicies.Delete(watchedContainer.K8sContainerID)
 	am.watchedContainerChannels.Delete(watchedContainer.ContainerID)
 }
+
 func (am *ApplicationProfileManager) ContainerReachedMaxTime(containerID string) {
 	if channel := am.watchedContainerChannels.Get(containerID); channel != nil {
 		channel <- utils.ContainerReachedMaxTime
@@ -252,7 +253,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// sleep for container index second to desynchronize the profiles saving
 	time.Sleep(time.Duration(watchedContainer.ContainerIndex) * time.Second)
 
-	if droppedEvents := am.droppedEvents.Get(watchedContainer.K8sContainerID); droppedEvents {
+	if am.droppedEventsContainers.ContainsOne(watchedContainer.K8sContainerID) {
 		watchedContainer.SetStatus(utils.WatchedContainerStatusMissingRuntime)
 	}
 
@@ -557,50 +558,32 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 			// record saved syscalls
 			am.savedSyscalls.Get(watchedContainer.K8sContainerID).Append(toSaveSyscalls...)
 			// record saved capabilities
-			am.savedCapabilities.Get(watchedContainer.K8sContainerID).Append(capabilities...)
+			savedCapabilities := am.savedCapabilities.Get(watchedContainer.K8sContainerID)
+			for _, capability := range capabilities {
+				savedCapabilities.Set(capability, nil)
+			}
 			// record saved endpoints
+			savedEndpoints := am.savedEndpoints.Get(watchedContainer.K8sContainerID)
 			toSaveEndpoints.Range(func(path string, endpoint *v1beta1.HTTPEndpoint) bool {
-				if !am.savedEndpoints.Get(watchedContainer.K8sContainerID).Has(path) {
-					am.savedEndpoints.Get(watchedContainer.K8sContainerID).Set(path, endpoint)
-				}
+				savedEndpoints.Set(path, endpoint)
 				return true
 			})
 			// record saved execs
+			savedExecs := am.savedExecs.Get(watchedContainer.K8sContainerID)
 			toSaveExecs.Range(func(uniqueExecIdentifier string, v []string) bool {
-				if !am.savedExecs.Get(watchedContainer.K8sContainerID).Has(uniqueExecIdentifier) {
-					am.savedExecs.Get(watchedContainer.K8sContainerID).Set(uniqueExecIdentifier, v)
-				}
+				savedExecs.Set(uniqueExecIdentifier, v)
 				return true
 			})
 			// record saved opens
 			savedOpens := am.savedOpens.Get(watchedContainer.K8sContainerID)
-			toSaveOpens.Range(utils.SetInMap(savedOpens))
-			// use a dynamic path detector to compress opens
-			analyzer := dynamicpathdetector.NewPathAnalyzer(OpenDynamicThreshold)
-			keys := savedOpens.Keys()
-			// first pass to learn the opens
-			for _, path := range keys {
-				_, _ = dynamicpathdetector.AnalyzeOpen(path, analyzer)
-			}
-			// second pass to compress the opens
-			for _, path := range keys {
-				result, err := dynamicpathdetector.AnalyzeOpen(path, analyzer)
-				if err != nil {
-					continue
+			toSaveOpens.Range(func(path string, newOpens mapset.Set[string]) bool {
+				if oldOpens, ok := savedOpens.Get(path); ok {
+					oldOpens.(mapset.Set[string]).Append(newOpens.ToSlice()...)
+				} else {
+					savedOpens.Set(path, newOpens)
 				}
-				if result != path {
-					// path becomes compressed
-					// we avoid a lock by using Pop to remove path and retrieve its flags
-					pathFlags := savedOpens.Pop(path)
-					if savedOpens.Has(result) {
-						// merge flags
-						savedOpens.Get(result).Append(pathFlags.ToSlice()...)
-					} else {
-						// create new entry
-						savedOpens.Set(result, pathFlags)
-					}
-				}
-			}
+				return true
+			})
 
 			// record saved rule policies
 			toSaveRulePolicies.Range(func(ruleIdentifier string, rulePolicy *v1beta1.RulePolicy) bool {
@@ -687,11 +670,10 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		if am.watchedContainerChannels.Has(notif.Container.Runtime.ContainerID) {
 			return
 		}
-		am.savedCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
-		am.droppedEvents.Set(k8sContainerID, false)
-		am.savedEndpoints.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.HTTPEndpoint]))
-		am.savedExecs.Set(k8sContainerID, new(maps.SafeMap[string, []string]))
-		am.savedOpens.Set(k8sContainerID, new(maps.SafeMap[string, mapset.Set[string]]))
+		am.savedCapabilities.Set(k8sContainerID, cache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
+		am.savedEndpoints.Set(k8sContainerID, cache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
+		am.savedExecs.Set(k8sContainerID, cache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
+		am.savedOpens.Set(k8sContainerID, cache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
 		am.savedSyscalls.Set(k8sContainerID, mapset.NewSet[string]())
 		am.savedRulePolicies.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.RulePolicy]))
 		am.toSaveCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
@@ -719,9 +701,11 @@ func (am *ApplicationProfileManager) ReportCapability(k8sContainerID, capability
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
-	if am.savedCapabilities.Get(k8sContainerID).ContainsOne(capability) {
+	// check if we already have this capability
+	if _, ok := am.savedCapabilities.Get(k8sContainerID).Get(capability); ok {
 		return
 	}
+	// add to capability map
 	am.toSaveCapabilities.Get(k8sContainerID).Add(capability)
 }
 
@@ -735,15 +719,12 @@ func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string,
 	}
 	// check if we already have this exec
 	// we use a SHA256 hash of the exec to identify it uniquely (path + args, in the order they were provided)
-	savedExecs := am.savedExecs.Get(k8sContainerID)
 	execIdentifier := utils.CalculateSHA256FileExecHash(path, args)
-	if savedExecs.Has(execIdentifier) {
+	if _, ok := am.savedExecs.Get(k8sContainerID).Get(execIdentifier); ok {
 		return
 	}
-
 	// add to exec map, first element is the path, the rest are the args
-	execMap := am.toSaveExecs.Get(k8sContainerID)
-	execMap.Set(execIdentifier, append([]string{path}, args...))
+	am.toSaveExecs.Get(k8sContainerID).Set(execIdentifier, append([]string{path}, args...))
 }
 
 func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID, path string, flags []string) {
@@ -756,8 +737,7 @@ func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID, path string,
 		path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
 	}
 	// check if we already have this open
-	savedOpens := am.savedOpens.Get(k8sContainerID)
-	if savedOpens.Has(path) && savedOpens.Get(path).Contains(flags...) {
+	if opens, ok := am.savedOpens.Get(k8sContainerID).Get(path); ok && opens.(mapset.Set[string]).Contains(flags...) {
 		return
 	}
 	// add to open map
@@ -770,10 +750,7 @@ func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID, path string,
 }
 
 func (am *ApplicationProfileManager) ReportDroppedEvent(k8sContainerID string) {
-	if err := am.waitForContainer(k8sContainerID); err != nil {
-		return
-	}
-	am.droppedEvents.Set(k8sContainerID, true)
+	am.droppedEventsContainers.Add(k8sContainerID)
 }
 
 func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, event *tracerhttptype.Event) {
@@ -783,17 +760,21 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 
 	endpointIdentifier, err := GetEndpointIdentifier(event)
 	if err != nil {
+		logger.L().Ctx(am.ctx).Warning("ApplicationProfileManager - failed to get endpoint identifier", helpers.Error(err))
 		return
 	}
-
 	endpoint, err := GetNewEndpoint(event, endpointIdentifier)
 	if err != nil {
+		logger.L().Ctx(am.ctx).Warning("ApplicationProfileManager - failed to get new endpoint", helpers.Error(err))
 		return
 	}
-
-	endpointMap := am.toSaveEndpoints.Get(k8sContainerID)
+	// check if we already have this endpoint
 	endpointHash := CalculateHTTPEndpointHash(endpoint)
-	endpointMap.Set(endpointHash, endpoint)
+	if _, ok := am.savedEndpoints.Get(k8sContainerID).Get(endpointHash); ok {
+		return
+	}
+	// add to endpoint map
+	am.toSaveEndpoints.Get(k8sContainerID).Set(endpointHash, endpoint)
 }
 
 func (am *ApplicationProfileManager) ReportRulePolicy(k8sContainerID, ruleId, allowedProcess string, allowedContainer bool) {

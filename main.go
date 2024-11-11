@@ -10,8 +10,10 @@ import (
 	"strings"
 	"syscall"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	applicationprofilemanagerv1 "github.com/kubescape/node-agent/pkg/applicationprofilemanager/v1"
+	cloudmetadata "github.com/kubescape/node-agent/pkg/cloudmetadata"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher/v1"
 	"github.com/kubescape/node-agent/pkg/eventreporters/dnsmanager"
@@ -211,6 +213,14 @@ func main() {
 	var processManager processmanager.ProcessManagerClient
 	var objCache objectcache.ObjectCache
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
+	var cloudMetadata *apitypes.CloudMetadata
+
+	if cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
+		cloudMetadata, err = cloudmetadata.GetCloudMetadata(ctx, k8sClient, nodeName)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("error getting cloud metadata", helpers.Error(err))
+		}
+	}
 
 	if cfg.EnableRuntimeDetection {
 		// create the process manager
@@ -235,7 +245,7 @@ func main() {
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
 
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName, cloudMetadata)
 
 		// create runtimeDetection managers
 		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, nodeName, clusterData.ClusterName, processManager)
@@ -263,7 +273,7 @@ func main() {
 	var malwareManager malwaremanager.MalwareManagerClient
 	if cfg.EnableMalwareDetection {
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName, cloudMetadata)
 		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, nodeName, clusterData.ClusterName, exporter, prometheusExporter)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
