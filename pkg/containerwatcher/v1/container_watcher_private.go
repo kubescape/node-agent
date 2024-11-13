@@ -34,17 +34,16 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 
-	if !ch.preRunningContainersIDs.Contains(notif.Container.Runtime.ContainerID) {
-		// container is not in preRunningContainersIDs, it is a new container
-		ch.timeBasedContainers.Add(notif.Container.Runtime.ContainerID)
-	}
-
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-
+		if ch.running {
+			ch.timeBasedContainers.Add(notif.Container.Runtime.ContainerID)
+		} else {
+			ch.preRunningContainersIDs.Add(notif.Container.Runtime.ContainerID)
+		}
 		// Check if Pod has a label of max sniffing time
-		sniffingTime := ch.cfg.MaxSniffingTime
+		sniffingTime := utils.AddJitter(ch.cfg.MaxSniffingTime, ch.cfg.MaxJitterPercentage)
 		if podLabelMaxSniffingTime, ok := notif.Container.K8s.PodLabels[MaxSniffingTimeLabel]; ok {
 			if duration, err := time.ParseDuration(podLabelMaxSniffingTime); err == nil {
 				sniffingTime = duration
@@ -73,6 +72,12 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) error {
 	ch.ctx = ctx
 
+	// This is needed when not running as gadget.
+	// https://github.com/inspektor-gadget/inspektor-gadget/blob/9a797dc046f8bc1f45e85f15db7e99dd4e5cb6e5/cmd/ig/containers/containers.go#L45-L46
+	if err := host.Init(host.Config{AutoMountFilesystems: true}); err != nil {
+		return fmt.Errorf("initializing host package: %w", err)
+	}
+
 	// Start the container collection
 	containerEventFuncs := []containercollection.FuncNotify{
 		ch.containerCallback,
@@ -81,6 +86,11 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.networkManager.ContainerCallback,
 		ch.malwareManager.ContainerCallback,
 		ch.ruleManager.ContainerCallback,
+		ch.processManager.ContainerCallback,
+	}
+
+	for receiver := range ch.thirdPartyContainerReceivers.Iter() {
+		containerEventFuncs = append(containerEventFuncs, receiver.ContainerCallback)
 	}
 
 	// Define the different options for the container collection instance
@@ -120,7 +130,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 	return nil
 }
 
-func (ch *IGContainerWatcher) startRunningContainers() error {
+func (ch *IGContainerWatcher) startRunningContainers() {
 	k8sClient, err := containercollection.NewK8sClient(ch.nodeName)
 	if err != nil {
 		logger.L().Fatal("creating IG Kubernetes client", helpers.Error(err))
@@ -129,7 +139,6 @@ func (ch *IGContainerWatcher) startRunningContainers() error {
 	for n := range *ch.ruleBindingPodNotify {
 		ch.addRunningContainers(k8sClient, &n)
 	}
-	return nil
 }
 
 func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *rulebindingmanager.RuleBindingNotify) {
@@ -192,11 +201,7 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting seccomp tracing", helpers.Error(err))
 			return err
 		}
-		// Start capabilities tracer
-		if err := ch.startCapabilitiesTracing(); err != nil {
-			logger.L().Error("error starting capabilities tracing", helpers.Error(err))
-			return err
-		}
+		logger.L().Info("Started syscall tracing")
 	}
 	if ch.cfg.EnableRelevancy || ch.cfg.EnableApplicationProfile {
 		// Start exec tracer
@@ -204,16 +209,16 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting exec tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started exec tracing")
 		// Start open tracer
 		if err := ch.startOpenTracing(); err != nil {
 			logger.L().Error("error starting open tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started open tracing")
 	}
 
 	if ch.cfg.EnableNetworkTracing {
-		host.Init(host.Config{AutoMountFilesystems: true})
-
 		if err := ch.startKubernetesResolution(); err != nil {
 			logger.L().Error("error starting kubernetes resolution", helpers.Error(err))
 			return err
@@ -230,20 +235,29 @@ func (ch *IGContainerWatcher) startTracers() error {
 			// not failing on dns tracing error
 			logger.L().Error("error starting dns tracing", helpers.Error(err))
 		}
+		logger.L().Info("Started dns tracing")
 
 		if err := ch.startNetworkTracing(); err != nil {
 			logger.L().Error("error starting network tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started network tracing")
 	}
 
 	if ch.cfg.EnableRuntimeDetection {
+		// Start capabilities tracer
+		if err := ch.startCapabilitiesTracing(); err != nil {
+			logger.L().Error("error starting capabilities tracing", helpers.Error(err))
+			return err
+		}
+		logger.L().Info("Started capabilities tracing")
 		// The randomx tracing is only supported on amd64 architecture.
 		if runtime.GOARCH == "amd64" {
 			if err := ch.startRandomxTracing(); err != nil {
 				logger.L().Error("error starting randomx tracing", helpers.Error(err))
 				return err
 			}
+			logger.L().Info("Started randomx tracing")
 		} else {
 			logger.L().Warning("randomx tracing is not supported on this architecture", helpers.String("architecture", runtime.GOARCH))
 		}
@@ -252,17 +266,43 @@ func (ch *IGContainerWatcher) startTracers() error {
 			logger.L().Error("error starting symlink tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started symlink tracing")
 
 		if err := ch.startHardlinkTracing(); err != nil {
 			logger.L().Error("error starting hardlink tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started hardlink tracing")
 
 		// NOTE: SSH tracing relies on the network tracer, so it must be started after the network tracer.
 		if err := ch.startSshTracing(); err != nil {
 			logger.L().Error("error starting ssh tracing", helpers.Error(err))
 			return err
 		}
+		logger.L().Info("Started ssh tracing")
+
+		if err := ch.startPtraceTracing(); err != nil {
+			logger.L().Error("error starting ptrace tracing", helpers.Error(err))
+			return err
+		}
+		logger.L().Info("Started ptrace tracing")
+
+		// Start third party tracers
+		for tracer := range ch.thirdPartyTracers.Iter() {
+			if err := tracer.Start(); err != nil {
+				logger.L().Error("error starting custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+				return err
+			}
+			logger.L().Info("Started custom tracer", helpers.String("tracer", tracer.Name()))
+		}
+	}
+
+	if ch.cfg.EnableHttpDetection {
+		if err := ch.startHttpTracing(); err != nil {
+			logger.L().Error("error starting http tracing", helpers.Error(err))
+			return err
+		}
+		logger.L().Info("Started http tracing")
 	}
 
 	return nil
@@ -270,7 +310,7 @@ func (ch *IGContainerWatcher) startTracers() error {
 
 func (ch *IGContainerWatcher) stopTracers() error {
 	var errs error
-	if ch.cfg.EnableApplicationProfile {
+	if ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
 		// Stop capabilities tracer
 		if err := ch.stopCapabilitiesTracing(); err != nil {
 			logger.L().Error("error stopping capabilities tracing", helpers.Error(err))
@@ -282,7 +322,7 @@ func (ch *IGContainerWatcher) stopTracers() error {
 			errs = errors.Join(errs, err)
 		}
 	}
-	if ch.cfg.EnableRelevancy || ch.cfg.EnableApplicationProfile {
+	if ch.cfg.EnableRelevancy || ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
 		// Stop exec tracer
 		if err := ch.stopExecTracing(); err != nil {
 			logger.L().Error("error stopping exec tracing", helpers.Error(err))
@@ -295,7 +335,7 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		}
 	}
 
-	if ch.cfg.EnableNetworkTracing {
+	if ch.cfg.EnableNetworkTracing || ch.cfg.EnableRuntimeDetection {
 		// Stop network tracer
 		if err := ch.stopNetworkTracing(); err != nil {
 			logger.L().Error("error stopping network tracing", helpers.Error(err))
@@ -331,11 +371,32 @@ func (ch *IGContainerWatcher) stopTracers() error {
 
 		// Stop ssh tracer
 		if err := ch.stopSshTracing(); err != nil {
-			logger.L().Error("error stopping ssh tracing", helpers.Error(err))
+			logger.L().Error("error starting ssh tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
+		}
+
+		// Stop ptrace tracer
+		if err := ch.stopPtraceTracing(); err != nil {
+			logger.L().Error("error starting ptrace tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+
+		// Stop third party tracers
+		for tracer := range ch.thirdPartyTracers.Iter() {
+			if err := tracer.Stop(); err != nil {
+				logger.L().Error("error stopping custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+				errs = errors.Join(errs, err)
+			}
 		}
 	}
 
+	if ch.cfg.EnableHttpDetection {
+		// Stop http tracer
+		if err := ch.stopHttpTracing(); err != nil {
+			logger.L().Error("error stopping http tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+	}
 	return errs
 }
 
@@ -377,8 +438,8 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 }
 
 func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {
-	// do not trace the node-agent pod
-	if name == ch.podName && namespace == ch.namespace {
+	// do not trace any of our pods
+	if namespace == ch.namespace {
 		return true
 	}
 	// do not trace the node-agent pods if MULTIPLY is set

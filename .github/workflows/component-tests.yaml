@@ -43,14 +43,15 @@ jobs:
           Test_01_BasicAlertTest,
           Test_02_AllAlertsFromMaliciousApp,
           Test_03_BasicLoadActivities,
-          Test_04_MemoryLeak,
+          # Test_04_MemoryLeak,
           Test_05_MemoryLeak_10K_Alerts,
           Test_06_KillProcessInTheMiddle,
           Test_07_RuleBindingApplyTest,
           Test_08_ApplicationProfilePatching,
           Test_10_MalwareDetectionTest,
-          # Test_10_DemoTest
-          # Test_11_DuplicationTest
+          Test_11_EndpointTest,
+          Test_12_MergingProfilesTest,
+          Test_13_MergingNetworkNeighborhoodTest,
         ]
     steps:
       - name: Checkout code
@@ -96,7 +97,12 @@ jobs:
       - name: Run test
         run: |
           cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=component
-      # - name: Upload plot images
+      - name: Print storage logs
+        if: always()
+        run: |
+          kubectl logs $(kubectl get pods -n kubescape -o name | grep storage) -n kubescape
+
+      # - name: Upload plot images 
       #   if: always()
       #   uses: actions/upload-artifact@v2
       #   with:

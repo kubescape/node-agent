@@ -21,7 +21,7 @@ const (
 	R1010Name = "Symlink Created Over Sensitive File"
 )
 
-var R1010SymlinkCreatedOverSensitiveFileRuleDescriptor = RuleDescriptor{
+var R1010SymlinkCreatedOverSensitiveFileRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1010ID,
 	Name:        R1010Name,
 	Description: "Detecting symlink creation over sensitive files.",
@@ -78,7 +78,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ID() string {
 func (rule *R1010SymlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
-func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.SymlinkEventType {
 		return nil
 	}
@@ -98,7 +98,11 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 		if strings.HasPrefix(symlinkEvent.OldPath, path) {
 			return &GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName:      rule.Name(),
+					AlertName: rule.Name(),
+					Arguments: map[string]interface{}{
+						"oldPath": symlinkEvent.OldPath,
+						"newPath": symlinkEvent.NewPath,
+					},
 					InfectedPID:    symlinkEvent.Pid,
 					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 					Severity:       R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
@@ -121,7 +125,8 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 					RuleDescription: fmt.Sprintf("Symlink created over sensitive file: %s - %s in: %s", symlinkEvent.OldPath, symlinkEvent.NewPath, symlinkEvent.GetContainer()),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-					PodName: symlinkEvent.GetPod(),
+					PodName:   symlinkEvent.GetPod(),
+					PodLabels: symlinkEvent.K8s.PodLabels,
 				},
 				RuleID: rule.ID(),
 			}

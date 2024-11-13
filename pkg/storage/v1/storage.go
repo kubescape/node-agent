@@ -26,18 +26,14 @@ import (
 )
 
 const (
-	DefaultMaxApplicationProfileSize  = 10000
-	DefaultMaxNetworkNeighborhoodSize = 1000
-	KubeConfig                        = "KUBECONFIG"
+	KubeConfig = "KUBECONFIG"
 )
 
 type Storage struct {
-	StorageClient              spdxv1beta1.SpdxV1beta1Interface
-	maxApplicationProfileSize  int
-	maxNetworkNeighborhoodSize int
-	maxJsonPatchOperations     int
-	namespace                  string
-	multiplier                 *int // used for testing to multiply the resources by this
+	StorageClient          spdxv1beta1.SpdxV1beta1Interface
+	maxJsonPatchOperations int
+	namespace              string
+	multiplier             *int // used for testing to multiply the resources by this
 }
 
 var _ storage.StorageClient = (*Storage)(nil)
@@ -53,23 +49,14 @@ func CreateStorage(namespace string) (*Storage, error) {
 			return nil, fmt.Errorf("failed to create K8S Aggregated API Client with err: %v", err)
 		}
 	}
+	// force GRPC
+	cfg.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
+	cfg.ContentType = "application/vnd.kubernetes.protobuf"
 
 	clientset, err := versioned.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create K8S Aggregated API Client with err: %v", err)
 	}
-
-	maxApplicationProfileSize, err := strconv.Atoi(os.Getenv("MAX_APPLICATION_PROFILE_SIZE"))
-	if err != nil {
-		maxApplicationProfileSize = DefaultMaxApplicationProfileSize
-	}
-	logger.L().Debug("maxApplicationProfileSize", helpers.Int("size", maxApplicationProfileSize))
-
-	maxNetworkNeighborhoodSize, err := strconv.Atoi(os.Getenv("MAX_NETWORK_NEIGHBORHOOD_SIZE"))
-	if err != nil {
-		maxNetworkNeighborhoodSize = DefaultMaxNetworkNeighborhoodSize
-	}
-	logger.L().Debug("maxNetworkNeighborhoodSize", helpers.Int("size", maxNetworkNeighborhoodSize))
 
 	// wait for storage to be ready
 	if err := backoff.RetryNotify(func() error {
@@ -82,12 +69,10 @@ func CreateStorage(namespace string) (*Storage, error) {
 	}
 
 	return &Storage{
-		StorageClient:              clientset.SpdxV1beta1(),
-		maxApplicationProfileSize:  maxApplicationProfileSize,
-		maxNetworkNeighborhoodSize: maxNetworkNeighborhoodSize,
-		maxJsonPatchOperations:     9999,
-		namespace:                  namespace,
-		multiplier:                 getMultiplier(),
+		StorageClient:          clientset.SpdxV1beta1(),
+		maxJsonPatchOperations: 9999,
+		namespace:              namespace,
+		multiplier:             getMultiplier(),
 	}, nil
 }
 
@@ -134,7 +119,7 @@ func (sc Storage) PatchNetworkNeighborsIngressAndEgress(name, namespace string, 
 	return nil
 }
 
-func (sc Storage) PatchNetworkNeighborsMatchLabels(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
+func (sc Storage) PatchNetworkNeighborsMatchLabels(_, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
 	sc.modifyNameP(&networkNeighbors.Name)
 	defer sc.revertNameP(&networkNeighbors.Name)
 	_, err := sc.StorageClient.NetworkNeighborses(namespace).Update(context.Background(), networkNeighbors, metav1.UpdateOptions{})

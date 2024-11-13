@@ -5,16 +5,20 @@ import (
 	"time"
 
 	"istio.io/pkg/cache"
-
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 )
 
-var (
-	DefaultExpiration = 5 * time.Second
-	EvictionInterval  = 1 * time.Second
+const (
+	defaultExpiration = 5 * time.Second
+	evictionInterval  = 1 * time.Second
 )
 
+// CooldownQueue is a queue that lets clients put events into it with a cooldown
+//
+// When a client puts an event into a queue, it waits for a cooldown period before
+// the event is forwarded to the consumer. If and event for the same key is put into the queue
+// again before the cooldown period is over, the event is overridden and the cooldown period is reset.
 type CooldownQueue struct {
 	closed     bool
 	seenEvents cache.ExpiringCache
@@ -30,7 +34,7 @@ func NewCooldownQueue() *CooldownQueue {
 	callback := func(key, value any) {
 		events <- value.(watch.Event)
 	}
-	c := cache.NewTTLWithCallback(DefaultExpiration, EvictionInterval, callback)
+	c := cache.NewTTLWithCallback(defaultExpiration, evictionInterval, callback)
 	return &CooldownQueue{
 		seenEvents: c,
 		innerChan:  events,
@@ -40,11 +44,9 @@ func NewCooldownQueue() *CooldownQueue {
 
 // makeEventKey creates a unique key for an event from a watcher
 func makeEventKey(e watch.Event) string {
-	object, ok := e.Object.(*unstructured.Unstructured)
-	if !ok {
-		return ""
-	}
-	return strings.Join([]string{object.GroupVersionKind().Group, object.GroupVersionKind().Version, object.GetKind(), object.GetNamespace(), object.GetName()}, "/")
+	gvk := e.Object.GetObjectKind().GroupVersionKind()
+	meta := e.Object.(metav1.Object)
+	return strings.Join([]string{gvk.Group, gvk.Version, gvk.Kind, meta.GetNamespace(), meta.GetName()}, "/")
 }
 
 func (q *CooldownQueue) Closed() bool {

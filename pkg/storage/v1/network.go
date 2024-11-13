@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
-
-	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -68,35 +66,6 @@ func (sc Storage) patchNetworkNeighborhood(name, namespace string, operations []
 				channel <- utils.ObjectCompleted
 			}
 			return nil
-		}
-	}
-
-	// check if returned neighborhood is too big
-	if s, ok := neighborhood.Annotations[helpers.ResourceSizeMetadataKey]; ok {
-		size, err := strconv.Atoi(s)
-		if err != nil {
-			return fmt.Errorf("parse size: %w", err)
-		}
-		if size > sc.maxNetworkNeighborhoodSize {
-			// add annotation to indicate that the neighborhood is full
-			annotationOperations := []utils.PatchOperation{
-				{
-					Op:    "replace",
-					Path:  "/metadata/annotations/" + utils.EscapeJSONPointerElement(helpers.StatusMetadataKey),
-					Value: helpers.TooLarge,
-				},
-			}
-			annotationsPatch, err := json.Marshal(annotationOperations)
-			if err != nil {
-				return fmt.Errorf("create patch for annotations: %w", err)
-			}
-			_, err = sc.StorageClient.NetworkNeighborhoods(namespace).Patch(context.Background(), sc.modifyName(name), types.JSONPatchType, annotationsPatch, v1.PatchOptions{})
-			if err != nil {
-				return fmt.Errorf("patch application neighborhood annotations: %w", err)
-			}
-			if channel != nil {
-				channel <- utils.TooLargeObjectError
-			}
 		}
 	}
 	return nil

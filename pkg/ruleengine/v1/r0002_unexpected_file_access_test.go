@@ -70,6 +70,58 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 		t.Errorf("Expected ruleResult to be nil since file is whitelisted")
 	}
 
+	e.FullPath = "/var/log/app123.log"
+	profile = &v1beta1.ApplicationProfile{
+		Spec: v1beta1.ApplicationProfileSpec{
+			Containers: []v1beta1.ApplicationProfileContainer{
+				{
+					Name: "test",
+					Opens: []v1beta1.OpenCalls{
+						{
+							Path:  "/var/log/\u22ef",
+							Flags: []string{"O_RDONLY"},
+						},
+					},
+				},
+			},
+		},
+	}
+	objCache.SetApplicationProfile(profile)
+	r.SetParameters(map[string]interface{}{"ignoreMounts": false, "ignorePrefixes": []interface{}{}})
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since file matches dynamic path in profile")
+	}
+
+	// Test with dynamic path but different flags
+	e.Flags = []string{"O_WRONLY"}
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
+	if ruleResult == nil {
+		t.Errorf("Expected ruleResult to not be nil since flag is not whitelisted for dynamic path")
+	}
+
+	// Test with dynamic path but non-matching file
+	e.FullPath = "/var/log/different_directory/app123.log"
+	e.Flags = []string{"O_RDONLY"}
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
+	if ruleResult == nil {
+		t.Errorf("Expected ruleResult to not be nil since file does not match dynamic path structure")
+	}
+
+	// Test with multiple dynamic segments
+	e.FullPath = "/var/log/user123/app456.log"
+	profile.Spec.Containers[0].Opens = []v1beta1.OpenCalls{
+		{
+			Path:  "/var/log/\u22ef/\u22ef",
+			Flags: []string{"O_RDONLY"},
+		},
+	}
+	objCache.SetApplicationProfile(profile)
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since file matches multiple dynamic segments in profile")
+	}
+
 	// Test with whitelisted file, but different flags
 	e.Flags = []string{"O_WRONLY"}
 	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)

@@ -11,6 +11,7 @@ capabilities:
   networkPolicyService: enable
   runtimeDetection: enable
   malwareDetection: enable
+  httpDetection: enable
 
 configurations:
   persistence: enable
@@ -32,7 +33,7 @@ storage:
   name: "storage"
   image:
     repository: quay.io/kubescape/storage
-    tag: v0.0.79
+    tag: v0.0.121
     pullPolicy: IfNotPresent
   cleanupInterval: "6h"
   labels:
@@ -57,6 +58,7 @@ nodeAgent:
     maxLearningPeriod: 2m
     learningPeriod: 1m
     updatePeriod: 30s
+    maxDelaySeconds: 1
     prometheusExporter: enable
     httpExporterConfig: {}
     alertManagerExporterUrls: [

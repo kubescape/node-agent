@@ -18,7 +18,7 @@ const (
 	R1005Name = "Fileless Execution"
 )
 
-var R1005FilelessExecutionRuleDescriptor = RuleDescriptor{
+var R1005FilelessExecutionRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1005ID,
 	Name:        R1005Name,
 	Description: "Detecting Fileless Execution",
@@ -54,7 +54,7 @@ func (rule *R1005FilelessExecution) ID() string {
 func (rule *R1005FilelessExecution) DeleteRule() {
 }
 
-func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType == utils.ExecveEventType {
 		return rule.handleExecveEvent(event.(*tracerexectype.Event))
 	}
@@ -104,7 +104,8 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *tracerexectype.
 				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source \"%s\"", execPathDir, "/proc/self/fd"),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName: execEvent.GetPod(),
+				PodName:   execEvent.GetPod(),
+				PodLabels: execEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
 		}

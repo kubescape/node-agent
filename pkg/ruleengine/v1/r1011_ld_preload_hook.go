@@ -25,7 +25,7 @@ const (
 
 var LD_PRELOAD_ENV_VARS = []string{"LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH"}
 
-var R1011LdPreloadHookRuleDescriptor = RuleDescriptor{
+var R1011LdPreloadHookRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1011ID,
 	Name:        R1011Name,
 	Description: "Detecting ld_preload hook techniques.",
@@ -111,6 +111,7 @@ func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event,
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				AlertName:      rule.Name(),
+				Arguments:      map[string]interface{}{"envVar": ldHookVar},
 				InfectedPID:    execEvent.Pid,
 				FixSuggestions: fmt.Sprintf("Check the environment variable %s", ldHookVar),
 				Severity:       R1011LdPreloadHookRuleDescriptor.Priority,
@@ -136,7 +137,8 @@ func (rule *R1011LdPreloadHook) handleExecEvent(execEvent *tracerexectype.Event,
 				RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is using the environment variable %s", execEvent.Comm, execEvent.GetContainer(), fmt.Sprintf("%s=%s", ldHookVar, envVars[ldHookVar])),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName: execEvent.GetPod(),
+				PodName:   execEvent.GetPod(),
+				PodLabels: execEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
 		}
@@ -151,7 +153,11 @@ func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *traceropentype.Event)
 	if openEvent.FullPath == LD_PRELOAD_FILE && (openEvent.FlagsRaw&(int32(os.O_WRONLY)|int32(os.O_RDWR))) != 0 {
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
+				AlertName: rule.Name(),
+				Arguments: map[string]interface{}{
+					"path":  openEvent.FullPath,
+					"flags": openEvent.Flags,
+				},
 				InfectedPID:    openEvent.Pid,
 				FixSuggestions: "Check the file /etc/ld.so.preload",
 				Severity:       R1011LdPreloadHookRuleDescriptor.Priority,
@@ -170,7 +176,8 @@ func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *traceropentype.Event)
 				RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is opening the file %s", openEvent.Comm, openEvent.GetContainer(), openEvent.Path),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName: openEvent.GetPod(),
+				PodName:   openEvent.GetPod(),
+				PodLabels: openEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
 		}
@@ -181,7 +188,7 @@ func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *traceropentype.Event)
 	return nil
 }
 
-func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event interface{}, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType && eventType != utils.OpenEventType {
 		return nil
 	}

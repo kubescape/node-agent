@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: k8s-miner-deployment
-  namespace: kubescape
+  namespace: default
 spec:
   replicas: 1
   selector:
@@ -18,8 +18,4 @@ spec:
       containers:
       - name: k8s-miner
         image: docker.io/amitschendel/crypto-miner-1
-        imagePullPolicy: IfNotPresent
-        resources:
-          requests:
-            memory: "3Gi"
-            cpu: "3"
+        imagePullPolicy: Always

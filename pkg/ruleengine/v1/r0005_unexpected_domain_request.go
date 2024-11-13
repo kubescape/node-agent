@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -19,7 +20,7 @@ const (
 	R0005Name = "Unexpected domain request"
 )
 
-var R0005UnexpectedDomainRequestRuleDescriptor = RuleDescriptor{
+var R0005UnexpectedDomainRequestRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0005ID,
 	Name:        R0005Name,
 	Description: "Detecting unexpected domain requests that are not whitelisted by application profile.",
@@ -36,6 +37,7 @@ var _ ruleengine.RuleEvaluator = (*R0005UnexpectedDomainRequest)(nil)
 
 type R0005UnexpectedDomainRequest struct {
 	BaseRule
+	alertedDomains maps.SafeMap[string, bool]
 }
 
 func CreateRuleR0005UnexpectedDomainRequest() *R0005UnexpectedDomainRequest {
@@ -45,6 +47,7 @@ func CreateRuleR0005UnexpectedDomainRequest() *R0005UnexpectedDomainRequest {
 func (rule *R0005UnexpectedDomainRequest) Name() string {
 	return R0005Name
 }
+
 func (rule *R0005UnexpectedDomainRequest) ID() string {
 	return R0005ID
 }
@@ -58,13 +61,17 @@ func (rule *R0005UnexpectedDomainRequest) generatePatchCommand(event *tracerdnst
 		event.GetContainer(), event.DNSName)
 }
 
-func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.DnsEventType {
 		return nil
 	}
 
 	domainEvent, ok := event.(*tracerdnstype.Event)
 	if !ok {
+		return nil
+	}
+
+	if rule.alertedDomains.Has(domainEvent.DNSName) {
 		return nil
 	}
 
@@ -95,7 +102,10 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 			AlertName:   rule.Name(),
 			InfectedPID: domainEvent.Pid,
 			Arguments: map[string]interface{}{
-				"domain": domainEvent.DNSName,
+				"domain":    domainEvent.DNSName,
+				"addresses": domainEvent.Addresses,
+				"protocol":  domainEvent.Protocol,
+				"port":      domainEvent.DstPort,
 			},
 			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the domain %s to the whitelist in the application profile for the Pod %s. You can use the following command: %s",
 				domainEvent.DNSName,
@@ -105,10 +115,14 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
-				Comm: domainEvent.Comm,
-				Gid:  &domainEvent.Gid,
-				PID:  domainEvent.Pid,
-				Uid:  &domainEvent.Uid,
+				Comm:  domainEvent.Comm,
+				Gid:   &domainEvent.Gid,
+				PID:   domainEvent.Pid,
+				Uid:   &domainEvent.Uid,
+				Pcomm: domainEvent.Pcomm,
+				Path:  domainEvent.Exepath,
+				Cwd:   domainEvent.Cwd,
+				PPID:  domainEvent.Ppid,
 			},
 			ContainerID: domainEvent.Runtime.ContainerID,
 		},
@@ -117,10 +131,13 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 			RuleDescription: fmt.Sprintf("Unexpected domain communication: %s from: %s", domainEvent.DNSName, domainEvent.GetContainer()),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName: domainEvent.GetPod(),
+			PodName:   domainEvent.GetPod(),
+			PodLabels: domainEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
 	}
+
+	rule.alertedDomains.Set(domainEvent.DNSName, true)
 
 	return &ruleFailure
 }

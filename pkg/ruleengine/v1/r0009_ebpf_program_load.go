@@ -18,7 +18,7 @@ const (
 	R0009Name = "eBPF Program Load"
 )
 
-var R0009EbpfProgramLoadRuleDescriptor = RuleDescriptor{
+var R0009EbpfProgramLoadRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0009ID,
 	Name:        R0009Name,
 	Description: "Detecting eBPF program load.",
@@ -55,7 +55,7 @@ func (rule *R0009EbpfProgramLoad) ID() string {
 func (rule *R0009EbpfProgramLoad) DeleteRule() {
 }
 
-func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if rule.alreadyNotified {
 		return nil
 	}
@@ -88,7 +88,10 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 		rule.alreadyNotified = true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
+				AlertName: rule.Name(),
+				Arguments: map[string]interface{}{
+					"syscall": syscallEvent.SyscallName,
+				},
 				InfectedPID:    syscallEvent.Pid,
 				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
 				Severity:       R0009EbpfProgramLoadRuleDescriptor.Priority,
@@ -105,7 +108,8 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 				RuleDescription: fmt.Sprintf("bpf system call executed in %s", syscallEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName: syscallEvent.GetPod(),
+				PodName:   syscallEvent.GetPod(),
+				PodLabels: syscallEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
 		}

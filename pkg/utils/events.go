@@ -1,17 +1,24 @@
 package utils
 
-type EventType int
+type K8sEvent interface {
+	GetPod() string
+	GetNamespace() string
+}
+
+type EventType string
 
 const (
-	ExecveEventType EventType = iota
-	OpenEventType
-	CapabilitiesEventType
-	DnsEventType
-	NetworkEventType
-	SyscallEventType
-	RandomXEventType
-	SymlinkEventType
-	HardlinkEventType
-	SSHEventType
-	AllEventType
+	ExecveEventType       EventType = "exec"
+	OpenEventType         EventType = "open"
+	CapabilitiesEventType EventType = "capabilities"
+	DnsEventType          EventType = "dns"
+	NetworkEventType      EventType = "network"
+	SyscallEventType      EventType = "syscall"
+	RandomXEventType      EventType = "randomx"
+	SymlinkEventType      EventType = "symlink"
+	HardlinkEventType     EventType = "hardlink"
+	SSHEventType          EventType = "ssh"
+	HTTPEventType         EventType = "http"
+	PtraceEventType       EventType = "ptrace"
+	AllEventType          EventType = "all"
 )

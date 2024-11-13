@@ -18,7 +18,7 @@ const (
 	R1000Name = "Exec from malicious source"
 )
 
-var R1000ExecFromMaliciousSourceDescriptor = RuleDescriptor{
+var R1000ExecFromMaliciousSourceDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1000ID,
 	Name:        R1000Name,
 	Description: "Detecting exec calls that are from malicious source like: /dev/shm, /proc/self",
@@ -49,7 +49,7 @@ func (rule *R1000ExecFromMaliciousSource) ID() string {
 	return R1000ID
 }
 
-func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType, event interface{}, _ objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}
@@ -102,7 +102,8 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 					RuleDescription: fmt.Sprintf("Execution from malicious source: %s in: %s", execPathDir, execEvent.GetContainer()),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-					PodName: execEvent.GetPod(),
+					PodName:   execEvent.GetPod(),
+					PodLabels: execEvent.K8s.PodLabels,
 				},
 				RuleID: rule.ID(),
 			}

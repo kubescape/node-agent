@@ -17,11 +17,40 @@ const (
 	RulePrioritySystemIssue = 1000
 )
 
+type RuleDescriptor struct {
+	// Rule ID
+	ID string
+	// Rule Name
+	Name string
+	// Rule Description
+	Description string
+	// Priority
+	Priority int
+	// Tags
+	Tags []string
+	// Rule requirements
+	Requirements RuleSpec
+	// Create a rule function
+	RuleCreationFunc func() RuleEvaluator
+}
+
+func (r *RuleDescriptor) HasTags(tags []string) bool {
+	for _, tag := range tags {
+		for _, ruleTag := range r.Tags {
+			if tag == ruleTag {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // RuleCreator is an interface for creating rules by tags, IDs, and names
 type RuleCreator interface {
 	CreateRulesByTags(tags []string) []RuleEvaluator
 	CreateRuleByID(id string) RuleEvaluator
 	CreateRuleByName(name string) RuleEvaluator
+	RegisterRule(rule RuleDescriptor)
 }
 
 type RuleEvaluator interface {
@@ -32,7 +61,7 @@ type RuleEvaluator interface {
 	Name() string
 
 	// Rule processing
-	ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) RuleFailure
+	ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) RuleFailure
 
 	// Rule requirements
 	Requirements() RuleSpec

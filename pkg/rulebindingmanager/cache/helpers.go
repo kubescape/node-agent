@@ -9,7 +9,6 @@ import (
 
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -32,15 +31,6 @@ func unstructuredToRuleBinding(obj *unstructured.Unstructured) (*typesv1.Runtime
 		return nil, err
 	}
 	return rb, nil
-}
-
-func unstructuredToPod(obj *unstructured.Unstructured) (*corev1.Pod, error) {
-	pod := &corev1.Pod{}
-	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, pod); err != nil {
-		return nil, err
-	}
-	return pod, nil
-
 }
 
 func resourcesToWatch(nodeName string) []watcher.WatchResource {

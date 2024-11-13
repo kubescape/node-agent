@@ -10,9 +10,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/kubescape/node-agent/internal/validator"
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	applicationprofilemanagerv1 "github.com/kubescape/node-agent/pkg/applicationprofilemanager/v1"
+	cloudmetadata "github.com/kubescape/node-agent/pkg/cloudmetadata"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher/v1"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
@@ -29,9 +30,12 @@ import (
 	nodeprofilemanagerv1 "github.com/kubescape/node-agent/pkg/nodeprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache"
+	"github.com/kubescape/node-agent/pkg/objectcache/dnscache"
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	"github.com/kubescape/node-agent/pkg/objectcache/networkneighborhoodcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
+	"github.com/kubescape/node-agent/pkg/processmanager"
+	processmanagerv1 "github.com/kubescape/node-agent/pkg/processmanager/v1"
 	"github.com/kubescape/node-agent/pkg/relevancymanager"
 	relevancymanagerv1 "github.com/kubescape/node-agent/pkg/relevancymanager/v1"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
@@ -43,6 +47,7 @@ import (
 	seccompmanagerv1 "github.com/kubescape/node-agent/pkg/seccompmanager/v1"
 	"github.com/kubescape/node-agent/pkg/storage/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/validator"
 	"github.com/kubescape/node-agent/pkg/watcher/dynamicwatcher"
 	"github.com/kubescape/node-agent/pkg/watcher/seccompprofilewatcher"
 
@@ -136,7 +141,7 @@ func main() {
 	logger.L().Ctx(ctx).Info("Detected container runtime", helpers.String("containerRuntime", containerRuntime.Name.String()))
 
 	// Create watchers
-	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, cfg.SkipNamespace)
+	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.StorageClient, cfg.SkipNamespace)
 	// create k8sObject cache
 	k8sObjectCache, err := k8scache.NewK8sObjectCache(nodeName, k8sClient)
 	if err != nil {
@@ -154,7 +159,7 @@ func main() {
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SeccompManager", helpers.Error(err))
 		}
-		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(k8sClient, seccompManager)
+		seccompWatcher := seccompprofilewatcher.NewSeccompProfileWatcher(storageClient.StorageClient, seccompManager)
 		dWatcher.AddAdaptor(seccompWatcher)
 	} else {
 		seccompManager = seccompmanager.NewSeccompManagerMock()
@@ -188,11 +193,39 @@ func main() {
 		relevancyManager = relevancymanager.CreateRelevancyManagerMock()
 	}
 
+	// Create the network and DNS managers
+	var networkManagerClient networkmanager.NetworkManagerClient
+	var dnsManagerClient dnsmanager.DNSManagerClient
+	var dnsResolver dnsmanager.DNSResolver
+	if cfg.EnableNetworkTracing || cfg.EnableRuntimeDetection {
+		dnsManager := dnsmanager.CreateDNSManager()
+		dnsManagerClient = dnsManager
+		// NOTE: dnsResolver is set for threat detection.
+		dnsResolver = dnsManager
+		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
+	} else {
+		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
+		dnsResolver = dnsmanager.CreateDNSManagerMock()
+		networkManagerClient = networkmanager.CreateNetworkManagerMock()
+	}
+
 	var ruleManager rulemanager.RuleManagerClient
+	var processManager processmanager.ProcessManagerClient
 	var objCache objectcache.ObjectCache
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
+	var cloudMetadata *apitypes.CloudMetadata
+
+	if cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
+		cloudMetadata, err = cloudmetadata.GetCloudMetadata(ctx, k8sClient, nodeName)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("error getting cloud metadata", helpers.Error(err))
+		}
+	}
 
 	if cfg.EnableRuntimeDetection {
+		// create the process manager
+		processManager = processmanagerv1.CreateProcessManager(ctx)
+
 		// create ruleBinding cache
 		ruleBindingCache := rulebindingcachev1.NewCache(nodeName, k8sClient)
 		dWatcher.AddAdaptor(ruleBindingCache)
@@ -200,20 +233,22 @@ func main() {
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
-		apc := applicationprofilecache.NewApplicationProfileCache(nodeName, k8sClient)
+		apc := applicationprofilecache.NewApplicationProfileCache(nodeName, storageClient.StorageClient, cfg.MaxDelaySeconds)
 		dWatcher.AddAdaptor(apc)
 
-		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(nodeName, k8sClient)
+		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(nodeName, storageClient.StorageClient, cfg.MaxDelaySeconds)
 		dWatcher.AddAdaptor(nnc)
 
+		dc := dnscache.NewDnsCache(dnsResolver)
+
 		// create object cache
-		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc)
+		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
 
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName, cloudMetadata)
 
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, nodeName, clusterData.ClusterName)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, nodeName, clusterData.ClusterName, processManager)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
@@ -222,6 +257,7 @@ func main() {
 		ruleManager = rulemanager.CreateRuleManagerMock()
 		objCache = objectcache.NewObjectCacheMock()
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
+		processManager = processmanager.CreateProcessManagerMock()
 	}
 
 	// Create the node profile manager
@@ -237,7 +273,7 @@ func main() {
 	var malwareManager malwaremanager.MalwareManagerClient
 	if cfg.EnableMalwareDetection {
 		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName)
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, nodeName, cloudMetadata)
 		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, nodeName, clusterData.ClusterName, exporter, prometheusExporter)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
@@ -246,20 +282,8 @@ func main() {
 		malwareManager = malwaremanager.CreateMalwareManagerMock()
 	}
 
-	// Create the network and DNS managers
-	var networkManagerClient networkmanager.NetworkManagerClient
-	var dnsManagerClient dnsmanager.DNSManagerClient
-	if cfg.EnableNetworkTracing {
-		dnsManager := dnsmanager.CreateDNSManager()
-		dnsManagerClient = dnsManager
-		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
-	} else {
-		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
-		networkManagerClient = networkmanager.CreateNetworkManagerMock()
-	}
-
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime, nil, processManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

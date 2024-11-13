@@ -2,19 +2,26 @@ package applicationprofilemanager
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/url"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
+	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -22,7 +29,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	cfg := config.Config{
 		InitialDelay:     1 * time.Second,
 		MaxSniffingTime:  5 * time.Minute,
-		UpdateDataPeriod: 1 * time.Second,
+		UpdateDataPeriod: 5 * time.Second,
 	}
 	ctx := context.TODO()
 	k8sClient := &k8sclient.K8sClientMock{}
@@ -72,6 +79,99 @@ func TestApplicationProfileManager(t *testing.T) {
 	go am.ReportFileOpen("ns/pod/cont", "/etc/hosts", []string{"O_RDONLY"})
 	// report another file open
 	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"}) // duplicate - will not be reported
+
+	// report endpoint
+
+	parsedURL, _ := url.Parse("/abc")
+
+	request := &http.Request{
+		Method: "GET",
+		URL:    parsedURL,
+		Host:   "localhost:123 GMT",
+
+		Header: map[string][]string{},
+	}
+
+	testEvent := &tracerhttptype.Event{
+		Request:  request,
+		Internal: false,
+
+		Direction: "inbound",
+	}
+
+	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
+
+	request = &http.Request{
+		Method: "GET",
+		URL:    parsedURL,
+		Host:   "localhost",
+
+		Header: map[string][]string{},
+	}
+
+	testEvent = &tracerhttptype.Event{
+		Request:  request,
+		Internal: false,
+
+		Direction: "inbound",
+	}
+
+	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
+
+	request = &http.Request{
+		Method: "POST",
+		Host:   "localhost",
+
+		URL: parsedURL,
+		Header: map[string][]string{
+			"Connection": {"keep-alive"},
+		},
+	}
+
+	testEvent = &tracerhttptype.Event{
+		Request:   request,
+		Internal:  false,
+		Direction: "inbound",
+	}
+
+	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
+
+	request = &http.Request{
+		Method: "POST",
+		URL:    parsedURL,
+		Host:   "localhost",
+		Header: map[string][]string{
+			"Connection": {"keep-alive"},
+		},
+	}
+
+	testEvent = &tracerhttptype.Event{
+		Request:   request,
+		Internal:  false,
+		Direction: "inbound",
+	}
+
+	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
+
+	request = &http.Request{
+		Method: "POST",
+		URL:    parsedURL,
+		Host:   "localhost:123",
+		Header: map[string][]string{
+			"Connection": {"keep-alive"},
+		},
+	}
+
+	testEvent = &tracerhttptype.Event{
+		Request:   request,
+		Internal:  false,
+		Direction: "inbound",
+	}
+
+	go am.ReportHTTPEvent("ns/pod/cont", testEvent)
+
+	time.Sleep(8 * time.Second)
+
 	// sleep more
 	time.Sleep(2 * time.Second)
 	// report container stopped
@@ -100,6 +200,14 @@ func TestApplicationProfileManager(t *testing.T) {
 		assert.Contains(t, reportedExecs, expectedExec)
 	}
 	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Opens)
+
+	expectedEndpoints := GetExcpectedEndpoints(t)
+	actualEndpoints := storageClient.ApplicationProfiles[1].Spec.Containers[1].Endpoints
+
+	sortHTTPEndpoints(expectedEndpoints)
+	sortHTTPEndpoints(actualEndpoints)
+
+	assert.Equal(t, expectedEndpoints, actualEndpoints)
 	// check the second profile - this is a patch for execs and opens
 	sort.Strings(storageClient.ApplicationProfiles[1].Spec.Containers[0].Capabilities)
 	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Capabilities)
@@ -108,4 +216,82 @@ func TestApplicationProfileManager(t *testing.T) {
 		{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}},
 		{Path: "/etc/hosts", Flags: []string{"O_RDONLY"}},
 	}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Opens)
+}
+
+func GetExcpectedEndpoints(t *testing.T) []v1beta1.HTTPEndpoint {
+	headers := map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}
+	rawJSON, err := json.Marshal(headers)
+	assert.NoError(t, err)
+
+	endpointPost := v1beta1.HTTPEndpoint{
+		Endpoint:  ":80/abc",
+		Methods:   []string{"POST"},
+		Internal:  false,
+		Direction: "inbound",
+		Headers:   rawJSON}
+
+	headers = map[string][]string{"Host": {"localhost"}}
+	rawJSON, err = json.Marshal(headers)
+	assert.NoError(t, err)
+
+	endpointGet := v1beta1.HTTPEndpoint{
+		Endpoint:  ":80/abc",
+		Methods:   []string{"GET"},
+		Internal:  false,
+		Direction: "inbound",
+		Headers:   rawJSON}
+
+	headers = map[string][]string{"Host": {"localhost:123"}, "Connection": {"keep-alive"}}
+	rawJSON, err = json.Marshal(headers)
+	assert.NoError(t, err)
+
+	endpointPort := v1beta1.HTTPEndpoint{
+		Endpoint:  ":123/abc",
+		Methods:   []string{"POST"},
+		Internal:  false,
+		Direction: "inbound",
+		Headers:   rawJSON}
+
+	return []v1beta1.HTTPEndpoint{endpointPost, endpointGet, endpointPort}
+}
+
+func sortHTTPEndpoints(endpoints []v1beta1.HTTPEndpoint) {
+	sort.Slice(endpoints, func(i, j int) bool {
+		// Sort by Endpoint first
+		if endpoints[i].Endpoint != endpoints[j].Endpoint {
+			return endpoints[i].Endpoint < endpoints[j].Endpoint
+		}
+		// If Endpoints are the same, sort by the first Method
+		if len(endpoints[i].Methods) > 0 && len(endpoints[j].Methods) > 0 {
+			return endpoints[i].Methods[0] < endpoints[j].Methods[0]
+		}
+		// If Methods are empty or the same, sort by Internal
+		if endpoints[i].Internal != endpoints[j].Internal {
+			return endpoints[i].Internal
+		}
+		// If Internal is the same, sort by Direction
+		if endpoints[i].Direction != endpoints[j].Direction {
+			return string(endpoints[i].Direction) < string(endpoints[j].Direction)
+		}
+		// If all else is equal, sort by Headers
+		return string(endpoints[i].Headers) < string(endpoints[j].Headers)
+	})
+}
+
+func BenchmarkReportFileOpen(b *testing.B) {
+	savedOpens := maps.SafeMap[string, mapset.Set[string]]{}
+	savedOpens.Set("/proc/"+dynamicpathdetector.DynamicIdentifier+"/foo/bar", mapset.NewSet("O_LARGEFILE", "O_RDONLY"))
+	paths := []string{"/proc/12345/foo/bar", "/bin/ls", "/etc/passwd"}
+	flags := []string{"O_CLOEXEC", "O_RDONLY"}
+	for i := 0; i < b.N; i++ {
+		for _, path := range paths {
+			if strings.HasPrefix(path, "/proc/") {
+				path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
+			}
+			if savedOpens.Has(path) && savedOpens.Get(path).Contains(flags...) {
+				continue
+			}
+		}
+	}
+	b.ReportAllocs()
 }

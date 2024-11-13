@@ -51,7 +51,7 @@ var _ nodeprofilemanager.NodeProfileManagerClient = (*NodeProfileManager)(nil)
 
 func (n *NodeProfileManager) Start(ctx context.Context) {
 	go func() {
-		time.Sleep(n.config.InitialDelay)
+		time.Sleep(utils.AddJitter(n.config.InitialDelay, n.config.MaxJitterPercentage))
 		for {
 			time.Sleep(n.config.NodeProfileInterval)
 			profile, err := n.getProfile()

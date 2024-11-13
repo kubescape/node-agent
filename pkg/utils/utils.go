@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"math/rand"
 	"os"
@@ -54,11 +55,6 @@ var (
 	TooLargeObjectError         = errors.New("object is too large")
 	IncompleteSBOMError         = errors.New("incomplete SBOM")
 )
-
-type PackageSourceInfoData struct {
-	Exist                 bool
-	PackageSPDXIdentifier []v1beta1.ElementID
-}
 
 type ContainerType int
 
@@ -164,11 +160,20 @@ func CreateK8sPodID(namespaceName string, podName string) string {
 	return strings.Join([]string{namespaceName, podName}, "/")
 }
 
-// AddRandomDuration adds between min and max seconds to duration
-func AddRandomDuration(min, max int, duration time.Duration) time.Duration {
+// AddJitter adds jitter percent to the duration
+func AddJitter(duration time.Duration, maxJitterPercentage int) time.Duration {
+	if maxJitterPercentage == 0 {
+		return duration
+	}
+	jitter := 1 + rand.Intn(maxJitterPercentage)/100
+	return duration * time.Duration(jitter)
+}
+
+// RandomDuration returns a duration between 1/2 max and max
+func RandomDuration(max int, duration time.Duration) time.Duration {
 	// we don't initialize the seed, so we will get the same sequence of random numbers every time
-	randomDuration := time.Duration(rand.Intn(max+1-min)+min) * time.Second
-	return randomDuration + duration
+	mini := max / 2
+	return time.Duration(rand.Intn(1+max-mini)+mini) * duration
 }
 
 func Atoi(s string) int {
@@ -423,7 +428,7 @@ func GetProcessEnv(pid int) (map[string]string, error) {
 }
 
 // Get the path of the file on the node.
-func GetHostFilePathFromEvent(event interface{}, containerPid uint32) (string, error) {
+func GetHostFilePathFromEvent(event K8sEvent, containerPid uint32) (string, error) {
 	if execEvent, ok := event.(*tracerexectype.Event); ok {
 		realPath := filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", containerPid, GetExecPathFromEvent(execEvent)))
 		return realPath, nil
@@ -476,67 +481,34 @@ func CalculateSHA256FileExecHash(path string, args []string) string {
 	return hex.EncodeToString(hashInBytes)
 }
 
-// Calculate the SHA256 hash of the given file.
-func CalculateSHA256FileHash(path string) (string, error) {
+// CalculateFileHashes calculates both SHA1 and MD5 hashes of the given file.
+func CalculateFileHashes(path string) (sha1Hash string, md5Hash string, err error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer func(file *os.File) {
 		_ = file.Close()
 	}(file)
 
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
+	sha1Hash256 := sha1.New()
+	md5Hash256 := md5.New()
+
+	multiWriter := io.MultiWriter(sha1Hash256, md5Hash256)
+
+	if _, err := io.Copy(multiWriter, file); err != nil {
+		return "", "", err
 	}
 
-	hashInBytes := hash.Sum(nil)
-	hashString := hex.EncodeToString(hashInBytes)
+	sha1HashString := hashToString(sha1Hash256)
+	md5HashString := hashToString(md5Hash256)
 
-	return hashString, nil
+	return sha1HashString, md5HashString, nil
 }
 
-// Calculate the SHA1 hash of the given file.
-func CalculateSHA1FileHash(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func(file *os.File) {
-		_ = file.Close()
-	}(file)
-
-	hash := sha1.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
-
-	hashInBytes := hash.Sum(nil)
-	hashString := hex.EncodeToString(hashInBytes)
-
-	return hashString, nil
-}
-
-// Calculate the MD5 hash of the given file.
-func CalculateMD5FileHash(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func(file *os.File) {
-		_ = file.Close()
-	}(file)
-
-	hash := md5.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
-
-	hashInBytes := hash.Sum(nil)
-	hashString := hex.EncodeToString(hashInBytes)
-
-	return hashString, nil
+// hashToString converts a hash.Hash to a hexadecimal string.
+func hashToString(h hash.Hash) string {
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Creates a process tree from a process.

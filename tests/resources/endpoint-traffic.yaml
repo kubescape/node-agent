@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: endpoint-traffic
+  name: endpoint-traffic-deployment
+spec:
+  selector:
+    matchLabels:
+      app: endpoint-traffic
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: endpoint-traffic
+    spec:
+      containers:
+      - name: endpoint-traffic
+        image: armoafekb/afek-b-tests:ptrace_test
+        imagePullPolicy: Always
+        # Create a volume mount for the script
+        volumeMounts:
+        - name: server-script
+          mountPath: /app
+        command: ["/bin/sh"]
+        args: ["-c", "echo '$(SERVER_SCRIPT)' > /app/server.py && python3 /app/server.py"]
+        ports:
+        - containerPort: 80
+        env:
+        - name: SERVER_SCRIPT
+          value: |
+            from http.server import HTTPServer, BaseHTTPRequestHandler
+            class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    self.send_response(200)
+                    self.send_header("Content-type", "text/plain")
+                    self.end_headers()
+                    self.wfile.write(b"GET request received successfully")
+                def do_POST(self):
+                    content_length = int(self.headers["Content-Length"])
+                    post_data = self.rfile.read(content_length)
+                    print(f"Received POST data: {post_data.decode()}")
+                    self.send_response(200)
+                    self.send_header("Content-type", "text/plain")
+                    self.end_headers()
+                    self.wfile.write(b"POST request received successfully")
+            def run_server(port=80):
+                server_address = ("", port)
+                httpd = HTTPServer(server_address, SimpleHTTPRequestHandler)
+                print(f"Server running on port {port}")
+                httpd.serve_forever()
+            if __name__ == "__main__":  
+                run_server()
+      volumes:
+      - name: server-script
+        emptyDir: {}

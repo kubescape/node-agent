@@ -44,7 +44,7 @@ var kubernetesClients = []string{
 	"containerd-shim-runc",
 }
 
-var R0007KubernetesClientExecutedDescriptor = RuleDescriptor{
+var R0007KubernetesClientExecutedDescriptor = ruleengine.RuleDescriptor{
 	ID:          R0007ID,
 	Name:        R0007Name,
 	Description: "Detecting exececution of kubernetes client",
@@ -97,7 +97,12 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName:      rule.Name(),
+			AlertName: rule.Name(),
+			Arguments: map[string]interface{}{
+				"dstIP": event.DstEndpoint.Addr,
+				"port":  event.Port,
+				"proto": event.Proto,
+			},
 			InfectedPID:    event.Pid,
 			FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 			Severity:       R0007KubernetesClientExecutedDescriptor.Priority,
@@ -116,7 +121,8 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 			RuleDescription: fmt.Sprintf("Kubernetes client executed: %s", event.Comm),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName: event.GetPod(),
+			PodName:   event.GetPod(),
+			PodLabels: event.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
 	}
@@ -147,7 +153,8 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 				AlertName:   rule.Name(),
 				InfectedPID: event.Pid,
 				Arguments: map[string]interface{}{
-					"hardlink": event.ExePath,
+					"exec": execPath,
+					"args": event.Args,
 				},
 				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
 				Severity:       R0007KubernetesClientExecutedDescriptor.Priority,
@@ -173,7 +180,8 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 				RuleDescription: fmt.Sprintf("Kubernetes client %s was executed in: %s", execPath, event.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName: event.GetPod(),
+				PodName:   event.GetPod(),
+				PodLabels: event.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
 		}
@@ -184,7 +192,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *tracerexectype
 	return nil
 }
 
-func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventType, event interface{}, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType && eventType != utils.NetworkEventType {
 		return nil
 	}

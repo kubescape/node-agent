@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/processmanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -26,20 +27,11 @@ import (
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
-	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
-	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
-	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
-	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -49,6 +41,11 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
 	storageUtils "github.com/kubescape/storage/pkg/utils"
+)
+
+const (
+	// Max file size to calculate hash is 50MB.
+	maxFileSize int64 = 50 * 1024 * 1024
 )
 
 type RuleManager struct {
@@ -68,11 +65,12 @@ type RuleManager struct {
 	clusterName              string
 	containerIdToShimPid     maps.SafeMap[string, uint32]
 	containerIdToPid         maps.SafeMap[string, uint32]
+	processManager           processmanager.ProcessManagerClient
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		ctx:               ctx,
@@ -85,6 +83,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		metrics:           metrics,
 		nodeName:          nodeName,
 		clusterName:       clusterName,
+		processManager:    processManager,
 	}, nil
 }
 
@@ -325,117 +324,18 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 	rm.syscallPeekFunc = peek
 }
 
-func (rm *RuleManager) ReportCapability(event tracercapabilitiestype.Event) {
+func (rm *RuleManager) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportCapability event")
+		logger.L().Error("RuleManager - failed to get namespace and pod name from custom event")
 		return
 	}
 
-	// list capability rules
+	// list custom rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
-	rm.processEvent(utils.CapabilitiesEventType, &event, rules)
+	rm.processEvent(eventType, event, rules)
 }
 
-func (rm *RuleManager) ReportFileExec(event tracerexectype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileExec event")
-		return
-	}
-
-	// list exec rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	rm.processEvent(utils.ExecveEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportFileOpen(event traceropentype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportFileOpen event")
-		return
-	}
-
-	// list open rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
-	rm.processEvent(utils.OpenEventType, &event, rules)
-
-}
-
-func (rm *RuleManager) ReportNetworkEvent(event tracernetworktype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportNetworkEvent event")
-		return
-	}
-
-	// list network rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
-	rm.processEvent(utils.NetworkEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportDNSEvent(event tracerdnstype.Event) {
-	// ignore events with empty container name
-	if event.K8s.ContainerName == "" {
-		return
-	}
-
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportDNSEvent event")
-		return
-	}
-
-	// list dns rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
-	rm.processEvent(utils.DnsEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportRandomxEvent(event tracerrandomxtype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from randomx event")
-		return
-	}
-
-	// list randomx rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
-	rm.processEvent(utils.RandomXEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportSymlinkEvent(event tracersymlinktype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportSymlinkEvent event")
-		return
-	}
-
-	// list symlink rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	rm.processEvent(utils.SymlinkEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportHardlinkEvent(event tracerhardlinktype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportHardlinkEvent event")
-		return
-	}
-
-	// list hardlink rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	rm.processEvent(utils.HardlinkEventType, &event, rules)
-}
-
-func (rm *RuleManager) ReportSSHEvent(event tracersshtype.Event) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from ReportSSHEvent event")
-		return
-	}
-
-	// list ssh rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	rm.processEvent(utils.SSHEventType, &event, rules)
-}
-
-func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}, rules []ruleengine.RuleEvaluator) {
+func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEvent, rules []ruleengine.RuleEvaluator) {
 	for _, rule := range rules {
 		if rule == nil {
 			continue
@@ -456,8 +356,13 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event interface{}
 	}
 }
 func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
-	path, err := utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
-	hostPath := ""
+	var err error
+	var path string
+	var hostPath string
+	if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path == "" {
+		path, err = utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
+	}
+
 	if err != nil {
 		if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path != "" {
 			hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", rm.containerIdToPid.Get(ruleFailure.GetTriggerEvent().Runtime.ContainerID), ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path))
@@ -470,91 +375,55 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
 
 	baseRuntimeAlert.Timestamp = time.Unix(0, int64(ruleFailure.GetTriggerEvent().Timestamp))
-
-	if baseRuntimeAlert.MD5Hash == "" && hostPath != "" {
-		md5hash, err := utils.CalculateMD5FileHash(hostPath)
+	var size int64 = 0
+	if hostPath != "" {
+		size, err = utils.GetFileSize(hostPath)
 		if err != nil {
-			md5hash = ""
+			size = 0
 		}
-		baseRuntimeAlert.MD5Hash = md5hash
 	}
 
-	if baseRuntimeAlert.SHA1Hash == "" && hostPath != "" {
-		sha1hash, err := utils.CalculateSHA1FileHash(hostPath)
-		if err != nil {
-			sha1hash = ""
-		}
-
-		baseRuntimeAlert.SHA1Hash = sha1hash
+	if baseRuntimeAlert.Size == "" && hostPath != "" && size != 0 {
+		baseRuntimeAlert.Size = humanize.Bytes(uint64(size))
 	}
 
-	if baseRuntimeAlert.SHA256Hash == "" && hostPath != "" {
-		sha256hash, err := utils.CalculateSHA256FileHash(hostPath)
-		if err != nil {
-			sha256hash = ""
-		}
-
-		baseRuntimeAlert.SHA256Hash = sha256hash
-	}
-
-	if baseRuntimeAlert.Size == "" && hostPath != "" {
-		size, err := utils.GetFileSize(hostPath)
-		if err != nil {
-			baseRuntimeAlert.Size = ""
-		} else {
-			baseRuntimeAlert.Size = humanize.Bytes(uint64(size))
+	if size != 0 && size < maxFileSize && hostPath != "" {
+		if baseRuntimeAlert.MD5Hash == "" || baseRuntimeAlert.SHA1Hash == "" {
+			sha1hash, md5hash, err := utils.CalculateFileHashes(hostPath)
+			if err == nil {
+				baseRuntimeAlert.MD5Hash = md5hash
+				baseRuntimeAlert.SHA1Hash = sha1hash
+			}
 		}
 	}
 
 	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
 	runtimeProcessDetails := ruleFailure.GetRuntimeProcessDetails()
-	if runtimeProcessDetails.ProcessTree.Cmdline == "" {
-		commandLine, err := utils.GetCmdlineByPid(int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID))
+
+	err = backoff.Retry(func() error {
+		tree, err := rm.processManager.GetProcessTreeForPID(
+			ruleFailure.GetRuntimeProcessDetails().ContainerID,
+			int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID),
+		)
 		if err != nil {
-			runtimeProcessDetails.ProcessTree.Cmdline = ""
-		} else {
-			runtimeProcessDetails.ProcessTree.Cmdline = *commandLine
+			return err
 		}
-	}
+		runtimeProcessDetails.ProcessTree = tree
+		return nil
+	}, backoff.NewExponentialBackOff(
+		backoff.WithInitialInterval(50*time.Millisecond),
+		backoff.WithMaxInterval(200*time.Millisecond),
+		backoff.WithMaxElapsedTime(500*time.Millisecond),
+	))
 
-	if runtimeProcessDetails.ProcessTree.PPID == 0 {
-		parent, err := utils.GetProcessStat(int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID))
-		if err != nil {
-			runtimeProcessDetails.ProcessTree.PPID = 0
-		} else {
-			runtimeProcessDetails.ProcessTree.PPID = uint32(parent.PPID)
-		}
+	if err != nil && rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeProcessDetails().ContainerID) {
+		logger.L().Debug("RuleManager - failed to get process tree, trying to get process tree from shim",
+			helpers.Error(err),
+			helpers.String("container ID", ruleFailure.GetRuntimeProcessDetails().ContainerID))
 
-		if runtimeProcessDetails.ProcessTree.Pcomm == "" {
-			if err == nil {
-				runtimeProcessDetails.ProcessTree.Pcomm = parent.Comm
-			} else {
-				runtimeProcessDetails.ProcessTree.Pcomm = ""
-			}
-		}
-	}
-
-	if runtimeProcessDetails.ProcessTree.PID == 0 {
-		runtimeProcessDetails.ProcessTree.PID = ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID
-	}
-
-	if runtimeProcessDetails.ProcessTree.Comm == "" {
-		comm, err := utils.GetCommFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
-		if err != nil {
-			comm = ""
-		}
-		runtimeProcessDetails.ProcessTree.Comm = comm
-	}
-
-	if runtimeProcessDetails.ProcessTree.Path == "" && path != "" {
-		runtimeProcessDetails.ProcessTree.Path = path
-	}
-
-	if rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeProcessDetails().ContainerID) {
-		shimPid := rm.containerIdToShimPid.Get(ruleFailure.GetRuntimeProcessDetails().ContainerID)
-		tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree, shimPid)
-		if err == nil {
+		if tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree,
+			rm.containerIdToShimPid.Get(ruleFailure.GetRuntimeProcessDetails().ContainerID)); err == nil {
 			runtimeProcessDetails.ProcessTree = *tree
 		}
 	}

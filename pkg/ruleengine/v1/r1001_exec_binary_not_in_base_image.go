@@ -18,7 +18,7 @@ const (
 	R1001Name = "Exec Binary Not In Base Image"
 )
 
-var R1001ExecBinaryNotInBaseImageRuleDescriptor = RuleDescriptor{
+var R1001ExecBinaryNotInBaseImageRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1001ID,
 	Name:        R1001Name,
 	Description: "Detecting exec calls of binaries that are not included in the base image",
@@ -52,7 +52,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) ID() string {
 func (rule *R1001ExecBinaryNotInBaseImage) DeleteRule() {
 }
 
-func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventType, event interface{}, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}
@@ -97,7 +97,8 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 				RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is not part of the image", execEvent.Comm, execEvent.GetContainer()),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName: execEvent.GetPod(),
+				PodName:   execEvent.GetPod(),
+				PodLabels: execEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
 		}
