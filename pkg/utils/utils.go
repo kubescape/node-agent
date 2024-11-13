@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash"
@@ -46,6 +47,7 @@ import (
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	kubeletconfigv1beta1 "k8s.io/kubelet/config/v1beta1"
 )
 
 var (
@@ -745,6 +747,11 @@ func DetectContainerRuntimeViaK8sAPI(ctx context.Context, k8sClient *k8sinterfac
 	if runtimeConfig.Name == igtypes.RuntimeNameUnknown {
 		return nil, fmt.Errorf("unknown container runtime: %s", node.Status.NodeInfo.ContainerRuntimeVersion)
 	}
+	realSocketPath, err := getContainerRuntimeSocketPath(k8sClient, nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container runtime socket path from Kubelet configz: %v", err)
+	}
+	runtimeConfig.SocketPath = realSocketPath
 
 	return runtimeConfig, nil
 }
@@ -782,4 +789,49 @@ func parseRuntimeInfo(version string) *containerutilsTypes.RuntimeConfig {
 			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
 		}
 	}
+}
+
+func getContainerRuntimeSocketPath(clientset *k8sinterface.KubernetesApi, nodeName string) (string, error) {
+	kubeletConfig, err := getCurrentKubeletConfig(clientset, nodeName)
+	if err != nil {
+		return "", fmt.Errorf("getting /configz: %w", err)
+	}
+	socketPath, found := strings.CutPrefix(kubeletConfig.ContainerRuntimeEndpoint, "unix://")
+	if !found {
+		return "", fmt.Errorf("socket path does not start with unix://")
+	}
+	logger.L().Info("using the detected container runtime socket path from Kubelet's config", helpers.String("socketPath", socketPath))
+	return socketPath, nil
+}
+
+// The /configz endpoint isn't officially documented. It was introduced in Kubernetes 1.26 and been around for a long time
+// as stated in https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/component-base/configz/OWNERS
+func getCurrentKubeletConfig(clientset *k8sinterface.KubernetesApi, nodeName string) (*kubeletconfigv1beta1.KubeletConfiguration, error) {
+	resp, err := clientset.GetKubernetesClient().CoreV1().RESTClient().Get().Resource("nodes").
+		Name(nodeName).Suffix("proxy", "configz").DoRaw(context.TODO())
+	if err != nil {
+		return nil, fmt.Errorf("fetching /configz from %q: %w", nodeName, err)
+	}
+	kubeCfg, err := decodeConfigz(resp)
+	if err != nil {
+		return nil, err
+	}
+	return kubeCfg, nil
+}
+
+// Decodes the http response from /configz and returns the kubelet configuration
+func decodeConfigz(respBody []byte) (*kubeletconfigv1beta1.KubeletConfiguration, error) {
+	// This hack because /configz reports the following structure:
+	// {"kubeletconfig": {the JSON representation of kubeletconfigv1beta1.KubeletConfiguration}}
+	type configzWrapper struct {
+		ComponentConfig kubeletconfigv1beta1.KubeletConfiguration `json:"kubeletconfig"`
+	}
+
+	configz := configzWrapper{}
+	err := json.Unmarshal(respBody, &configz)
+	if err != nil {
+		return nil, err
+	}
+
+	return &configz.ComponentConfig, nil
 }
