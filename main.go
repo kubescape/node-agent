@@ -132,14 +132,6 @@ func main() {
 
 	nodeName := os.Getenv(config.NodeNameEnvVar)
 
-	// Detect the container containerRuntime of the node
-	containerRuntime, err := utils.DetectContainerRuntimeViaK8sAPI(ctx, k8sClient, nodeName)
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error detecting the container runtime", helpers.Error(err))
-	}
-
-	logger.L().Ctx(ctx).Info("Detected container runtime", helpers.String("containerRuntime", containerRuntime.Name.String()))
-
 	// Create watchers
 	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.StorageClient, cfg.SkipNamespace)
 	// create k8sObject cache
@@ -283,7 +275,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime, nil, processManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, preRunningContainersIDs, &ruleBindingNotify, nil, processManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
