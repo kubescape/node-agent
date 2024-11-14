@@ -350,6 +350,13 @@ func (ap *ApplicationProfileCacheImpl) mergeContainer(normalContainer, userConta
 	normalContainer.Opens = append(normalContainer.Opens, userContainer.Opens...)
 	normalContainer.Syscalls = append(normalContainer.Syscalls, userContainer.Syscalls...)
 	normalContainer.Endpoints = append(normalContainer.Endpoints, userContainer.Endpoints...)
+	for k, v := range userContainer.PolicyByRuleId {
+		if existingPolicy, exists := normalContainer.PolicyByRuleId[k]; exists {
+			normalContainer.PolicyByRuleId[k] = utils.MergePolicies(existingPolicy, v)
+		} else {
+			normalContainer.PolicyByRuleId[k] = v
+		}
+	}
 }
 
 func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj runtime.Object) {

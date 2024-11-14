@@ -180,7 +180,6 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
 
 	initOps := GetInitOperations(watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
-	am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, initOps)
 
 	for {
 		select {
@@ -191,7 +190,8 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 				watchedContainer.UpdateDataTicker.Reset(utils.AddJitter(am.cfg.UpdateDataPeriod, am.cfg.MaxJitterPercentage))
 			}
 			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
-			am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, nil)
+			am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, initOps)
+			initOps = nil
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
