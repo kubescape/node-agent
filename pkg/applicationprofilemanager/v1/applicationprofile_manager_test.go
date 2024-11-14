@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
+	istiocache "istio.io/pkg/cache"
 )
 
 func TestApplicationProfileManager(t *testing.T) {
@@ -427,7 +428,7 @@ func TestReportRulePolicy(t *testing.T) {
 			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, mapset.NewSet[string](), k8sObjectCacheMock, seccompManagerMock)
 			assert.NoError(t, err)
 
-			am.savedRulePolicies.Set(tt.k8sContainerID, new(maps.SafeMap[string, *v1beta1.RulePolicy]))
+			am.savedRulePolicies.Set(tt.k8sContainerID, istiocache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
 			am.toSaveRulePolicies.Set(tt.k8sContainerID, new(maps.SafeMap[string, *v1beta1.RulePolicy]))
 			am.trackedContainers.Add(tt.k8sContainerID)
 

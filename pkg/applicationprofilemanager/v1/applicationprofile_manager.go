@@ -54,7 +54,7 @@ type ApplicationProfileManager struct {
 	savedExecs               maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
 	savedOpens               maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
 	savedSyscalls            maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
-	savedRulePolicies        maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.RulePolicy]]   // key is k8sContainerID
+	savedRulePolicies        maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
 	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
 	toSaveEndpoints          maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.HTTPEndpoint]] // key is k8sContainerID
 	toSaveExecs              maps.SafeMap[string, *maps.SafeMap[string, []string]]              // key is k8sContainerID
@@ -587,7 +587,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 
 			// record saved rule policies
 			toSaveRulePolicies.Range(func(ruleIdentifier string, rulePolicy *v1beta1.RulePolicy) bool {
-				if !am.savedRulePolicies.Get(watchedContainer.K8sContainerID).Has(ruleIdentifier) {
+				if !am.toSaveRulePolicies.Get(watchedContainer.K8sContainerID).Has(ruleIdentifier) {
 					am.savedRulePolicies.Get(watchedContainer.K8sContainerID).Set(ruleIdentifier, rulePolicy)
 				}
 				return true
@@ -675,7 +675,7 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.savedExecs.Set(k8sContainerID, cache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
 		am.savedOpens.Set(k8sContainerID, cache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
 		am.savedSyscalls.Set(k8sContainerID, mapset.NewSet[string]())
-		am.savedRulePolicies.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.RulePolicy]))
+		am.savedRulePolicies.Set(k8sContainerID, cache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
 		am.toSaveCapabilities.Set(k8sContainerID, mapset.NewSet[string]())
 		am.toSaveEndpoints.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.HTTPEndpoint]))
 		am.toSaveExecs.Set(k8sContainerID, new(maps.SafeMap[string, []string]))
@@ -782,20 +782,22 @@ func (am *ApplicationProfileManager) ReportRulePolicy(k8sContainerID, ruleId, al
 		return
 	}
 
-	savedPolicies := am.savedRulePolicies.Get(k8sContainerID)
-	savedPolicy := savedPolicies.Get(ruleId)
-
-	toBeSavedPolicies := am.toSaveRulePolicies.Get(k8sContainerID)
-	toBeSavedPolicy := toBeSavedPolicies.Get(ruleId)
-
 	newPolicy := &v1beta1.RulePolicy{
 		AllowedContainer: allowedContainer,
 		AllowedProcesses: []string{allowedProcess},
 	}
 
-	if IsPolicyIncluded(savedPolicy, newPolicy) {
-		return
+	savedPolicies := am.savedRulePolicies.Get(k8sContainerID)
+	savedPolicy, ok := savedPolicies.Get(ruleId)
+	if ok {
+		savedPolicy := savedPolicy.(*v1beta1.RulePolicy)
+		if IsPolicyIncluded(savedPolicy, newPolicy) {
+			return
+		}
 	}
+
+	toBeSavedPolicies := am.toSaveRulePolicies.Get(k8sContainerID)
+	toBeSavedPolicy := toBeSavedPolicies.Get(ruleId)
 
 	if IsPolicyIncluded(toBeSavedPolicy, newPolicy) {
 		return
