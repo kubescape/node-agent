@@ -190,8 +190,14 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 				watchedContainer.UpdateDataTicker.Reset(utils.AddJitter(am.cfg.UpdateDataPeriod, am.cfg.MaxJitterPercentage))
 			}
 			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
-			am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, initOps)
-			initOps = nil
+			am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, nil)
+
+			// save profile after initialaztion
+			if initOps != nil {
+				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, initOps)
+				initOps = nil
+			}
+
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
@@ -199,7 +205,6 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 				if objectcache.GetTerminationExitCode(am.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName, container.Runtime.ContainerID) == 0 {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				}
-
 				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, nil)
 				return err
 			case errors.Is(err, utils.ContainerReachedMaxTime):

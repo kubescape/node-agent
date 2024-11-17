@@ -109,22 +109,22 @@ func IsPolicyIncluded(existingPolicy, newPolicy *v1beta1.RulePolicy) bool {
 func GetInitOperations(containerType string, containerIndex int) []utils.PatchOperation {
 	var operations []utils.PatchOperation
 
+	ids := ruleengine.NewRuleCreator().GetAllRuleIDs()
+	rulePoliciesMap := make(map[string]v1beta1.RulePolicy)
+	for _, id := range ids {
+		rulePoliciesMap[id] = v1beta1.RulePolicy{
+			AllowedContainer: false,
+			AllowedProcesses: []string{},
+		}
+	}
+
 	createMap := utils.PatchOperation{
-		Op:    "add",
+		Op:    "replace",
 		Path:  fmt.Sprintf("/spec/%s/%d/rulePolicies", containerType, containerIndex),
-		Value: map[string]v1beta1.RulePolicy{},
+		Value: rulePoliciesMap,
 	}
 
 	operations = append(operations, createMap)
 
-	ids := ruleengine.NewRuleCreator().GetAllRuleIDs()
-	for _, id := range ids {
-		operation := utils.PatchOperation{
-			Op:    "add",
-			Path:  fmt.Sprintf("/spec/%s/%d/rulePolicies/%s", containerType, containerIndex, id),
-			Value: v1beta1.RulePolicy{},
-		}
-		operations = append(operations, operation)
-	}
 	return operations
 }
