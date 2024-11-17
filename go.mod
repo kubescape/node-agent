@@ -1,12 +1,10 @@
 module github.com/kubescape/node-agent
 
-go 1.22.8
-
-toolchain go1.23.2
+go 1.23.0
 
 require (
-	github.com/armosec/armoapi-go v0.0.439
-	github.com/armosec/utils-k8s-go v0.0.26
+	github.com/armosec/armoapi-go v0.0.470
+	github.com/armosec/utils-k8s-go v0.0.30
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cilium/ebpf v0.16.0
 	github.com/crewjam/rfc5424 v0.1.0
@@ -60,9 +58,9 @@ require (
 	github.com/acobaugh/osrelease v0.1.0 // indirect
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b // indirect
 	github.com/anchore/go-logger v0.0.0-20240217160628-ee28a485904f // indirect
-	github.com/anchore/packageurl-go v0.1.1-0.20240312213626-055233e539b4 // indirect
-	github.com/anchore/stereoscope v0.0.3-0.20240501181043-2e9894674185 // indirect
-	github.com/anchore/syft v1.4.1 // indirect
+	github.com/anchore/packageurl-go v0.1.1-0.20240507183024-848e011fc24f // indirect
+	github.com/anchore/stereoscope v0.0.3 // indirect
+	github.com/anchore/syft v1.13.0 // indirect
 	github.com/armosec/gojay v1.2.17 // indirect
 	github.com/armosec/utils-go v0.0.57 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
@@ -74,6 +72,7 @@ require (
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/cilium/cilium v1.16.1 // indirect
 	github.com/containerd/cgroups/v3 v3.0.3 // indirect
 	github.com/containerd/containerd v1.7.23 // indirect
 	github.com/containerd/containerd/api v1.7.19 // indirect
@@ -103,8 +102,8 @@ require (
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
-	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
-	github.com/github/go-spdx/v2 v2.2.0 // indirect
+	github.com/gabriel-vasile/mimetype v1.4.5 // indirect
+	github.com/github/go-spdx/v2 v2.3.2 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-fonts/liberation v0.3.2 // indirect
 	github.com/go-latex/latex v0.0.0-20231108140139-5c1ce85aa4ea // indirect
@@ -145,6 +144,7 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
+	github.com/mackerelio/go-osstat v0.2.5 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
@@ -173,9 +173,10 @@ require (
 	github.com/opencontainers/image-spec v1.1.0 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/opencontainers/selinux v1.11.0 // indirect
-	github.com/opentracing/opentracing-go v1.2.0 // indirect
+	github.com/opentracing/opentracing-go v1.2.1-0.20220228012449-10b1cf09e00b // indirect
 	github.com/pelletier/go-toml/v2 v2.2.2 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
+	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
@@ -185,15 +186,16 @@ require (
 	github.com/s3rj1k/go-fanotify/fanotify v0.0.0-20240229202106-bca3154da60a // indirect
 	github.com/sagikazarmark/locafero v0.4.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
+	github.com/sasha-s/go-deadlock v0.3.1 // indirect
 	github.com/scylladb/go-set v1.0.3-0.20200225121959-cc7b2070d91e // indirect
 	github.com/seccomp/libseccomp-golang v0.10.0 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
-	github.com/spf13/cast v1.6.0 // indirect
+	github.com/spf13/cast v1.7.0 // indirect
 	github.com/spf13/cobra v1.8.1 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/spf13/pflag v1.0.6-0.20210604193023-d5e0c0615ace // indirect
 	github.com/stripe/stripe-go/v74 v74.30.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
-	github.com/sylabs/squashfs v0.6.1 // indirect
+	github.com/sylabs/squashfs v1.0.0 // indirect
 	github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635 // indirect
 	github.com/therootcompany/xz v1.0.1 // indirect
 	github.com/ulikunitz/xz v0.5.12 // indirect
@@ -206,7 +208,6 @@ require (
 	github.com/wagoodman/go-progress v0.0.0-20230925121702-07e42b3cdba0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
-	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.mongodb.org/mongo-driver v1.15.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.53.0 // indirect
@@ -224,7 +225,8 @@ require (
 	go.opentelemetry.io/proto/otlp v1.3.1 // indirect
 	go.starlark.net v0.0.0-20240517230649-3792562d0b7f // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/crypto v0.28.0 // indirect
+	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
+	golang.org/x/crypto v0.27.0 // indirect
 	golang.org/x/exp v0.0.0-20240808152545-0cdaa3abc0fa // indirect
 	golang.org/x/image v0.18.0 // indirect
 	golang.org/x/oauth2 v0.23.0 // indirect

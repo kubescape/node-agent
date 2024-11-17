@@ -625,44 +625,44 @@ func Test_11_EndpointTest(t *testing.T) {
 	assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
 
 	// Merge methods
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000"}, "")
+	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:80"}, "")
 	assert.NoError(t, err)
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000", "--post-data", "test-data"}, "")
+	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:80", "--post-data", "test-data"}, "")
 
 	// Merge dynamic
 	for i := 0; i < threshold; i++ {
-		endpointTraffic.ExecIntoPod([]string{"wget", fmt.Sprintf("http://127.0.0.1:8000/users/%d", i)}, "")
+		endpointTraffic.ExecIntoPod([]string{"wget", fmt.Sprintf("http://127.0.0.1:80/users/%d", i)}, "")
 	}
 
 	// Merge headers
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000/users/99", "--header", "Connection:1234r"}, "")
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:8000/users/12", "--header", "Connection:ziz"}, "")
+	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:80/users/99", "--header", "Connection:1234r"}, "")
+	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:80/users/12", "--header", "Connection:ziz"}, "")
 
-	err = endpointTraffic.WaitForApplicationProfileCompletion(80)
-	if err != nil {
-		t.Errorf("Error waiting for application profile to be completed: %v", err)
-	}
+	err = endpointTraffic.WaitForApplicationProfileCompletion(10)
 
 	applicationProfile, err := endpointTraffic.GetApplicationProfile()
+	if err != nil {
+		t.Errorf("Error getting application profile: %v", err)
+	}
 
-	headers := map[string][]string{"Connection": {"close"}, "Host": {"127.0.0.1:8000"}}
+	headers := map[string][]string{"Connection": {"close"}, "Host": {"127.0.0.1:80"}}
 	rawJSON, err := json.Marshal(headers)
 	assert.NoError(t, err)
 
 	endpoint2 := v1beta1.HTTPEndpoint{
-		Endpoint:  ":8000/",
+		Endpoint:  ":80/",
 		Methods:   []string{"GET", "POST"},
 		Internal:  false,
 		Direction: "inbound",
 		Headers:   rawJSON,
 	}
 
-	headers = map[string][]string{"Host": {"127.0.0.1:8000"}, "Connection": {"1234r", "close", "ziz"}}
+	headers = map[string][]string{"Host": {"127.0.0.1:80"}, "Connection": {"1234r", "close", "ziz"}}
 	rawJSON, err = json.Marshal(headers)
 	assert.NoError(t, err)
 
 	endpoint1 := v1beta1.HTTPEndpoint{
-		Endpoint:  ":8000/users/" + dynamicpathdetector.DynamicIdentifier,
+		Endpoint:  ":80/users/" + dynamicpathdetector.DynamicIdentifier,
 		Methods:   []string{"GET"},
 		Internal:  false,
 		Direction: "inbound",
@@ -703,9 +703,7 @@ func Test_11_EndpointTest(t *testing.T) {
 			sort.Strings(savedEndpoint.Methods)
 			assert.Equal(t, e, savedEndpoint)
 		} else {
-			// Until upgrading helm chart with new storage version
-			fmt.Printf("Endpoint %v not found in the saved endpoints", savedEndpoint)
-			//t.Error
+			t.Errorf("Endpoint %v not found in the saved endpoints", savedEndpoint)
 		}
 
 	}
