@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -168,9 +170,11 @@ func isAllowed(event *eventtypes.Event, objCache objectcache.ObjectCache, proces
 
 	if policy, ok := appProfile.PolicyByRuleId[ruleId]; ok {
 		if policy.AllowedContainer || slices.Contains(policy.AllowedProcesses, process) {
+			logger.L().Debug("process is allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
 			return true, nil
 		}
 	}
 
+	logger.L().Debug("process is not allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
 	return false, nil
 }

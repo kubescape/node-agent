@@ -78,8 +78,9 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
 func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-
+	logger.L().Debug("Processing event", helpers.String("ruleID", rule.ID()), helpers.String("eventType", string(eventType)))
 	if !rule.EvaluateRule(eventType, event, objCache.K8sObjectCache()) {
+		logger.L().Debug("Event does not match rule", helpers.String("ruleID", rule.ID()), helpers.String("eventType", string(eventType)))
 		return nil
 	}
 

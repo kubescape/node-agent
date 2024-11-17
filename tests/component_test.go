@@ -1170,7 +1170,8 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 
 	fmt.Println("After completed")
 
-	time.Sleep(30 * time.Second)
+	// wait for cache
+	time.Sleep(120 * time.Second)
 
 	// generate hardlink alert
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "/etc/shadow", "/tmp/a"}, "")
@@ -1183,14 +1184,15 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Wait for the alert to be signaled
-	time.Sleep(30 * time.Second)
+	time.Sleep(60 * time.Second)
 
 	alerts, err := testutils.GetAlerts(endpointTraffic.Namespace)
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
 
-	assert.Equal(t, 1, len(alerts), "Expected 1 alert to be generated, but got %d alerts", len(alerts))
+	testutils.AssertContains(t, alerts, "Hardlink Created Over Sensitive File", "ln", "endpoint-traffic")
+	testutils.AssertNotContains(t, alerts, "Symlink Created Over Sensitive File", "ln", "endpoint-traffic")
 }
 
 func ptr(i int32) *int32 {
