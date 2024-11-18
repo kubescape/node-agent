@@ -60,7 +60,7 @@ func TestResolveIPAddress(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dm := CreateDNSManager()
 
-			dm.ReportDNSEvent(tt.dnsEvent)
+			dm.ReportEvent(tt.dnsEvent)
 			got, ok := dm.ResolveIPAddress(tt.ipAddr)
 			if got != tt.want || ok != tt.wantOk {
 				t.Errorf("ResolveIPAddress() got = %v, ok = %v, want = %v, wantOk = %v", got, ok, tt.want, tt.wantOk)
@@ -107,7 +107,7 @@ func TestResolveIPAddressFallback(t *testing.T) {
 				return
 			}
 
-			dm.ReportDNSEvent(tt.dnsEvent)
+			dm.ReportEvent(tt.dnsEvent)
 			got, ok := dm.ResolveIPAddress(addresses[0].String())
 			if got != tt.want || ok != tt.wantOk {
 				t.Errorf("ResolveIPAddress() got = %v, ok = %v, want = %v, wantOk = %v", got, ok, tt.want, tt.wantOk)
@@ -126,7 +126,7 @@ func TestCacheFallbackBehavior(t *testing.T) {
 			"1.2.3.4",
 		},
 	}
-	dm.ReportDNSEvent(event)
+	dm.ReportEvent(event)
 
 	// Check if the lookup is cached
 	cached, found := dm.lookupCache.Get(event.DNSName)
@@ -146,7 +146,7 @@ func TestCacheFallbackBehavior(t *testing.T) {
 	failEvent := tracerdnstype.Event{
 		DNSName: "nonexistent.local",
 	}
-	dm.ReportDNSEvent(failEvent)
+	dm.ReportEvent(failEvent)
 
 	// Check if the failure is cached
 	_, found = dm.failureCache.Get(failEvent.DNSName)
@@ -204,7 +204,7 @@ func TestConcurrentAccess(t *testing.T) {
 				if rand.Float32() < 0.5 {
 					// Write operation
 					event := testEvents[rand.IntN(len(testEvents))]
-					dm.ReportDNSEvent(event)
+					dm.ReportEvent(event)
 				} else {
 					// Read operation
 					if cached, found := dm.lookupCache.Get("test1.com"); found {

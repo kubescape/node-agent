@@ -51,6 +51,7 @@ type RuleCreator interface {
 	CreateRuleByID(id string) RuleEvaluator
 	CreateRuleByName(name string) RuleEvaluator
 	RegisterRule(rule RuleDescriptor)
+	CreateRulesByEventType(eventType utils.EventType) []RuleEvaluator
 }
 
 type RuleEvaluator interface {
@@ -71,6 +72,11 @@ type RuleEvaluator interface {
 
 	// Get rule parameters
 	GetParameters() map[string]interface{}
+}
+
+type RuleCondition interface {
+	EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) bool
+	ID() string
 }
 
 // RuleSpec is an interface for rule requirements

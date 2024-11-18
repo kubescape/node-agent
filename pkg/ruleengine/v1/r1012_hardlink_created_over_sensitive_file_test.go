@@ -26,16 +26,15 @@ func TestR1012HardlinkCreatedOverSensitiveFile(t *testing.T) {
 				Containers: []v1beta1.ApplicationProfileContainer{
 					{
 						Name: "test",
+						PolicyByRuleId: map[string]v1beta1.RulePolicy{
+							R1012ID: v1beta1.RulePolicy{
+								AllowedProcesses: []string{"/usr/sbin/groupadd"},
+							},
+						},
 						Opens: []v1beta1.OpenCalls{
 							{
 								Path:  "/test",
 								Flags: []string{"O_RDONLY"},
-							},
-						},
-						Execs: []v1beta1.ExecCalls{
-							{
-								Path: "/usr/sbin/groupadd",
-								Args: []string{"test"},
 							},
 						},
 					},
@@ -90,7 +89,6 @@ func TestR1012HardlinkCreatedOverSensitiveFile(t *testing.T) {
 	e.Comm = "/usr/sbin/groupadd"
 	e.OldPath = "/etc/passwd"
 	e.NewPath = "/etc/abc"
-
 	ruleResult = r.ProcessEvent(utils.HardlinkEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)

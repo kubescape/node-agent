@@ -43,3 +43,7 @@ func (r *RuleManagerMock) IsContainerMonitored(_ string) bool {
 func (r *RuleManagerMock) IsPodMonitored(_, _ string) bool {
 	return false
 }
+
+func (r *RuleManagerMock) EvaluateRulesForEvent(_ utils.EventType, _ utils.K8sEvent) []string {
+	return []string{}
+}

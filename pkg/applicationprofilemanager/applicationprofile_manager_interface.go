@@ -12,6 +12,7 @@ type ApplicationProfileManagerClient interface {
 	ReportFileExec(k8sContainerID, path string, args []string)
 	ReportFileOpen(k8sContainerID, path string, flags []string)
 	ReportHTTPEvent(k8sContainerID string, event *tracerhttptype.Event)
+	ReportRulePolicy(k8sContainerID, ruleId, allowedProcess string, allowedContainer bool)
 	ReportDroppedEvent(k8sContainerID string)
 	ContainerReachedMaxTime(containerID string)
 }

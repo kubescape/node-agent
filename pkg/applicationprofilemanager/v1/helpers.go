@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	tracerhttphelper "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -34,7 +37,7 @@ func GetNewEndpoint(event *tracerhttptype.Event, identifier string) (*v1beta1.HT
 		Headers:   rawJSON}, nil
 }
 
-func (am *ApplicationProfileManager) GetEndpointIdentifier(request *tracerhttptype.Event) (string, error) {
+func GetEndpointIdentifier(request *tracerhttptype.Event) (string, error) {
 	identifier := request.Request.URL.String()
 	if host := request.Request.Host; host != "" {
 
@@ -70,20 +73,58 @@ func CalculateHTTPEndpointHash(endpoint *v1beta1.HTTPEndpoint) string {
 }
 
 func isValidHost(host string) bool {
-	// Check if the host is empty
 	if host == "" {
 		return false
 	}
 
-	// Check if host contains spaces or invalid characters
 	if strings.ContainsAny(host, " \t\r\n") {
 		return false
 	}
 
-	// Parse the host using http's standard URL parser
 	if _, err := url.ParseRequestURI("http://" + host); err != nil {
 		return false
 	}
 
 	return true
+}
+
+func IsPolicyIncluded(existingPolicy, newPolicy *v1beta1.RulePolicy) bool {
+	if existingPolicy == nil {
+		return false
+	}
+
+	if newPolicy.AllowedContainer && !existingPolicy.AllowedContainer {
+		return false
+	}
+
+	for _, newProcess := range newPolicy.AllowedProcesses {
+		if !slices.Contains(existingPolicy.AllowedProcesses, newProcess) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func GetInitOperations(containerType string, containerIndex int) []utils.PatchOperation {
+	var operations []utils.PatchOperation
+
+	ids := ruleengine.NewRuleCreator().GetAllRuleIDs()
+	rulePoliciesMap := make(map[string]v1beta1.RulePolicy)
+	for _, id := range ids {
+		rulePoliciesMap[id] = v1beta1.RulePolicy{
+			AllowedContainer: false,
+			AllowedProcesses: []string{},
+		}
+	}
+
+	createMap := utils.PatchOperation{
+		Op:    "replace",
+		Path:  fmt.Sprintf("/spec/%s/%d/rulePolicies", containerType, containerIndex),
+		Value: rulePoliciesMap,
+	}
+
+	operations = append(operations, createMap)
+
+	return operations
 }

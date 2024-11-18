@@ -7,9 +7,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -152,4 +155,26 @@ func interfaceToStringSlice(val interface{}) ([]string, bool) {
 		return sliceOfStrings, true
 	}
 	return nil, false
+}
+
+func isAllowed(event *eventtypes.Event, objCache objectcache.ObjectCache, process string, ruleId string) (bool, error) {
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(event.Runtime.ContainerID)
+	if ap == nil {
+		return false, errors.New("application profile not found")
+	}
+
+	appProfile, err := getContainerFromApplicationProfile(ap, event.GetContainer())
+	if err != nil {
+		return false, err
+	}
+
+	if policy, ok := appProfile.PolicyByRuleId[ruleId]; ok {
+		if policy.AllowedContainer || slices.Contains(policy.AllowedProcesses, process) {
+			logger.L().Debug("process is allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
+			return true, nil
+		}
+	}
+
+	logger.L().Debug("process is not allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
+	return false, nil
 }
