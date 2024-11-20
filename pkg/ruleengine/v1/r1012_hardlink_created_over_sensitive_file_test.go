@@ -27,7 +27,7 @@ func TestR1012HardlinkCreatedOverSensitiveFile(t *testing.T) {
 					{
 						Name: "test",
 						PolicyByRuleId: map[string]v1beta1.RulePolicy{
-							R1012ID: v1beta1.RulePolicy{
+							R1012ID: {
 								AllowedProcesses: []string{"/usr/sbin/groupadd"},
 							},
 						},

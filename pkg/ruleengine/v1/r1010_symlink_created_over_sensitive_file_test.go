@@ -27,7 +27,7 @@ func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {
 					{
 						Name: "test",
 						PolicyByRuleId: map[string]v1beta1.RulePolicy{
-							R1010ID: v1beta1.RulePolicy{
+							R1010ID: {
 								AllowedProcesses: []string{"/usr/sbin/groupadd"},
 							},
 						},
