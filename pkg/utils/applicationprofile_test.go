@@ -43,21 +43,21 @@ func Test_EnrichApplicationProfileContainer(t *testing.T) {
 	var test map[string]*v1beta1.HTTPEndpoint
 
 	// empty enrich
-	EnrichApplicationProfileContainer(existingContainer, []string{}, []string{}, map[string][]string{}, map[string]mapset.Set[string]{}, test)
+	EnrichApplicationProfileContainer(existingContainer, []string{}, []string{}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{})
 	assert.Equal(t, 5, len(existingContainer.Capabilities))
 	assert.Equal(t, 2, len(existingContainer.Execs))
 	assert.Equal(t, 5, len(existingContainer.Syscalls))
 	assert.Equal(t, 0, len(existingContainer.Opens))
 
 	// enrich with existing capabilities, syscalls - no change
-	EnrichApplicationProfileContainer(existingContainer, []string{"SETGID"}, []string{"listen"}, map[string][]string{}, map[string]mapset.Set[string]{}, test)
+	EnrichApplicationProfileContainer(existingContainer, []string{"SETGID"}, []string{"listen"}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{})
 	assert.Equal(t, 5, len(existingContainer.Capabilities))
 	assert.Equal(t, 2, len(existingContainer.Execs))
 	assert.Equal(t, 5, len(existingContainer.Syscalls))
 	assert.Equal(t, 0, len(existingContainer.Opens))
 
 	// enrich with new capabilities, syscalls - add
-	EnrichApplicationProfileContainer(existingContainer, []string{"NEW"}, []string{"xxx", "yyy"}, map[string][]string{}, map[string]mapset.Set[string]{}, test)
+	EnrichApplicationProfileContainer(existingContainer, []string{"NEW"}, []string{"xxx", "yyy"}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{})
 	assert.Equal(t, 6, len(existingContainer.Capabilities))
 	assert.Equal(t, 2, len(existingContainer.Execs))
 	assert.Equal(t, 7, len(existingContainer.Syscalls))
@@ -67,9 +67,103 @@ func Test_EnrichApplicationProfileContainer(t *testing.T) {
 	opens := map[string]mapset.Set[string]{
 		"/checkoutservice": mapset.NewSet("O_RDONLY", "O_WRONLY"),
 	}
-	EnrichApplicationProfileContainer(existingContainer, []string{"NEW"}, []string{"xxx", "yyy"}, map[string][]string{}, opens, test)
+	EnrichApplicationProfileContainer(existingContainer, []string{"NEW"}, []string{"xxx", "yyy"}, map[string][]string{}, opens, test, map[string]v1beta1.RulePolicy{})
 	assert.Equal(t, 6, len(existingContainer.Capabilities))
 	assert.Equal(t, 2, len(existingContainer.Execs))
 	assert.Equal(t, 7, len(existingContainer.Syscalls))
 	assert.Equal(t, 1, len(existingContainer.Opens))
+}
+
+func TestMergePolicies(t *testing.T) {
+	tests := []struct {
+		name           string
+		primary        v1beta1.RulePolicy
+		secondary      v1beta1.RulePolicy
+		expectedPolicy v1beta1.RulePolicy
+	}{
+		{
+			name: "Both policies allow containers",
+			primary: v1beta1.RulePolicy{
+				AllowedContainer: true,
+				AllowedProcesses: []string{"process1", "process2"},
+			},
+			secondary: v1beta1.RulePolicy{
+				AllowedContainer: true,
+				AllowedProcesses: []string{"process2", "process3"},
+			},
+			expectedPolicy: v1beta1.RulePolicy{
+				AllowedContainer: true,
+				AllowedProcesses: []string{"process1", "process2", "process3"},
+			},
+		},
+		{
+			name: "Only primary allows containers",
+			primary: v1beta1.RulePolicy{
+				AllowedContainer: true,
+				AllowedProcesses: []string{"process1"},
+			},
+			secondary: v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process2"},
+			},
+			expectedPolicy: v1beta1.RulePolicy{
+				AllowedContainer: true,
+				AllowedProcesses: []string{"process1", "process2"},
+			},
+		},
+		{
+			name: "Only secondary allows containers",
+			primary: v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process1"},
+			},
+			secondary: v1beta1.RulePolicy{
+				AllowedContainer: true,
+				AllowedProcesses: []string{"process3"},
+			},
+			expectedPolicy: v1beta1.RulePolicy{
+				AllowedContainer: true,
+				AllowedProcesses: []string{"process1", "process3"},
+			},
+		},
+		{
+			name: "No duplicate processes in merged policy",
+			primary: v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process1", "process2"},
+			},
+			secondary: v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process1", "process2"},
+			},
+			expectedPolicy: v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{"process1", "process2"},
+			},
+		},
+		{
+			name: "Both policies empty",
+			primary: v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{},
+			},
+			secondary: v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{},
+			},
+			expectedPolicy: v1beta1.RulePolicy{
+				AllowedContainer: false,
+				AllowedProcesses: []string{},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mergedPolicy := MergePolicies(tt.primary, tt.secondary)
+
+			assert.Equal(t, tt.expectedPolicy.AllowedContainer, mergedPolicy.AllowedContainer)
+			assert.ElementsMatch(t, tt.expectedPolicy.AllowedProcesses, mergedPolicy.AllowedProcesses)
+		})
+	}
 }

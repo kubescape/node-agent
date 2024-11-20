@@ -12,3 +12,7 @@ func (r *RuleBindingCacheMock) ListRulesForPod(_, _ string) []ruleengine.RuleEva
 }
 func (r *RuleBindingCacheMock) AddNotifier(_ *chan RuleBindingNotify) {
 }
+
+func (r *RuleBindingCacheMock) GetRuleCreator() ruleengine.RuleCreator {
+	return nil
+}

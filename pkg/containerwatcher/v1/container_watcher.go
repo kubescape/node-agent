@@ -27,7 +27,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
@@ -41,11 +40,12 @@ import (
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
-	"github.com/kubescape/node-agent/pkg/processmanager"
-
+	"github.com/kubescape/node-agent/pkg/eventreporters/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
+	"github.com/kubescape/node-agent/pkg/processmanager"
 	"github.com/kubescape/node-agent/pkg/relevancymanager"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
@@ -169,6 +169,9 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	if err != nil {
 		return nil, fmt.Errorf("creating tracer collection: %w", err)
 	}
+
+	rulePolicyReporter := rulepolicy.NewRulePolicyReporter(ruleManager, applicationProfileManager)
+
 	// Create a capabilities worker pool
 	capabilitiesWorkerPool, err := ants.NewPoolWithFunc(capabilitiesWorkerPoolSize, func(i interface{}) {
 		event := i.(tracercapabilitiestype.Event)
@@ -214,6 +217,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		processManager.ReportEvent(utils.ExecveEventType, &event)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
+		rulePolicyReporter.ReportEvent(utils.ExecveEventType, &event, k8sContainerID, event.Comm)
 
 		// Report exec events to event receivers
 		reportEventToThirdPartyTracers(utils.ExecveEventType, &event, thirdPartyEventReceivers)
@@ -294,7 +298,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 
 		metrics.ReportEvent(utils.DnsEventType)
-		dnsManagerClient.ReportDNSEvent(event)
+		dnsManagerClient.ReportEvent(event)
 		ruleManager.ReportEvent(utils.DnsEventType, &event)
 
 		// Report DNS events to event receivers
@@ -324,9 +328,11 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
 		metrics.ReportEvent(utils.SymlinkEventType)
 		ruleManager.ReportEvent(utils.SymlinkEventType, &event)
+		rulePolicyReporter.ReportEvent(utils.SymlinkEventType, &event, k8sContainerID, event.Comm)
 		// Report symlink events to event receivers
 		reportEventToThirdPartyTracers(utils.SymlinkEventType, &event, thirdPartyEventReceivers)
 	})
@@ -339,9 +345,12 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
 		metrics.ReportEvent(utils.HardlinkEventType)
 		ruleManager.ReportEvent(utils.HardlinkEventType, &event)
-
+		rulePolicyReporter.ReportEvent(utils.HardlinkEventType, &event, k8sContainerID, event.Comm)
 		// Report hardlink events to event receivers
 		reportEventToThirdPartyTracers(utils.HardlinkEventType, &event, thirdPartyEventReceivers)
 	})

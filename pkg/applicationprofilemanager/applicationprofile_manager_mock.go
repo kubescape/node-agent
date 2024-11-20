@@ -42,6 +42,10 @@ func (a ApplicationProfileManagerMock) ReportHTTPEvent(_ string, _ *tracerhttpty
 	// noop
 }
 
+func (a ApplicationProfileManagerMock) ReportRulePolicy(_, _, _ string, _ bool) {
+	// noop
+}
+
 func (a ApplicationProfileManagerMock) ContainerReachedMaxTime(_ string) {
 	// noop
 }

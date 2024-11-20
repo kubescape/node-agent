@@ -28,6 +28,10 @@ func (r *RuleCreatorMock) CreateRuleByName(name string) RuleEvaluator {
 func (r *RuleCreatorMock) RegisterRule(rule RuleDescriptor) {
 }
 
+func (r *RuleCreatorMock) CreateRulesByEventType(eventType utils.EventType) []RuleEvaluator {
+	return []RuleEvaluator{}
+}
+
 var _ RuleEvaluator = (*RuleMock)(nil)
 
 type RuleMock struct {

@@ -26,16 +26,15 @@ func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {
 				Containers: []v1beta1.ApplicationProfileContainer{
 					{
 						Name: "test",
+						PolicyByRuleId: map[string]v1beta1.RulePolicy{
+							R1010ID: {
+								AllowedProcesses: []string{"/usr/sbin/groupadd"},
+							},
+						},
 						Opens: []v1beta1.OpenCalls{
 							{
 								Path:  "/test",
 								Flags: []string{"O_RDONLY"},
-							},
-						},
-						Execs: []v1beta1.ExecCalls{
-							{
-								Path: "/usr/sbin/groupadd",
-								Args: []string{"test"},
 							},
 						},
 					},

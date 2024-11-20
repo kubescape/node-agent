@@ -52,6 +52,7 @@ jobs:
           Test_11_EndpointTest,
           Test_12_MergingProfilesTest,
           Test_13_MergingNetworkNeighborhoodTest,
+          Test_14_RulePoliciesTest,
         ]
     steps:
       - name: Checkout code
@@ -97,9 +98,13 @@ jobs:
       - name: Run test
         run: |
           cd tests && go test -v ./... -run ${{ matrix.test }} --timeout=20m --tags=component
-      - name: Print storage logs
+      - name: Print node agent & storage logs
         if: always()
         run: |
+          echo "Node agent logs"
+          kubectl logs $(kubectl get pods -n kubescape -o name | grep node-agent) -n kubescape -c node-agent
+          echo "-----------------------------------------"
+          echo "Storage logs"
           kubectl logs $(kubectl get pods -n kubescape -o name | grep storage) -n kubescape
 
       # - name: Upload plot images 

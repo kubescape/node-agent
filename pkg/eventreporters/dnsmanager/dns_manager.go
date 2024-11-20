@@ -36,8 +36,8 @@ func CreateDNSManager() *DNSManager {
 	}
 }
 
-func (dm *DNSManager) ReportDNSEvent(dnsEvent tracerdnstype.Event) {
-	// If we have addresses in the event, use them directly
+func (dm *DNSManager) ReportEvent(dnsEvent tracerdnstype.Event) {
+
 	if len(dnsEvent.Addresses) > 0 {
 		for _, address := range dnsEvent.Addresses {
 			dm.addressToDomainMap.Set(address, dnsEvent.DNSName)

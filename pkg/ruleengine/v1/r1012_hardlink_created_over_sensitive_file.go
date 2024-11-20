@@ -1,7 +1,6 @@
 package ruleengine
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -79,86 +78,78 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
 func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if eventType != utils.HardlinkEventType {
+	logger.L().Debug("Processing event", helpers.String("ruleID", rule.ID()), helpers.String("eventType", string(eventType)))
+	if !rule.EvaluateRule(eventType, event, objCache.K8sObjectCache()) {
+		logger.L().Debug("Event does not match rule", helpers.String("ruleID", rule.ID()), helpers.String("eventType", string(eventType)))
 		return nil
 	}
 
-	hardlinkEvent, ok := event.(*tracerhardlinktype.Event)
-	if !ok {
-		return nil
-	}
+	hardlinkEvent, _ := event.(*tracerhardlinktype.Event)
 
-	if allowed, err := isHardLinkAllowed(hardlinkEvent, objCache); err != nil {
+	if allowed, err := isAllowed(&hardlinkEvent.Event, objCache, hardlinkEvent.Comm, R1012ID); err != nil {
+		logger.L().Error("failed to check if hardlink is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 		return nil
 	} else if allowed {
 		return nil
 	}
 
-	for _, path := range rule.additionalPaths {
-		if strings.HasPrefix(hardlinkEvent.OldPath, path) {
-			return &GenericRuleFailure{
-				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName: rule.Name(),
-					Arguments: map[string]interface{}{
-						"oldPath": hardlinkEvent.OldPath,
-						"newPath": hardlinkEvent.NewPath,
-					},
-					InfectedPID:    hardlinkEvent.Pid,
-					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-					Severity:       R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
-				},
-				RuntimeProcessDetails: apitypes.ProcessTree{
-					ProcessTree: apitypes.Process{
-						Comm:       hardlinkEvent.Comm,
-						PPID:       hardlinkEvent.PPid,
-						PID:        hardlinkEvent.Pid,
-						UpperLayer: &hardlinkEvent.UpperLayer,
-						Uid:        &hardlinkEvent.Uid,
-						Gid:        &hardlinkEvent.Gid,
-						Path:       hardlinkEvent.ExePath,
-						Hardlink:   hardlinkEvent.ExePath,
-					},
-					ContainerID: hardlinkEvent.Runtime.ContainerID,
-				},
-				TriggerEvent: hardlinkEvent.Event,
-				RuleAlert: apitypes.RuleAlert{
-					RuleDescription: fmt.Sprintf("Hardlink created over sensitive file: %s - %s in: %s", hardlinkEvent.OldPath, hardlinkEvent.NewPath, hardlinkEvent.GetContainer()),
-				},
-				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-					PodName:   hardlinkEvent.GetPod(),
-					PodLabels: hardlinkEvent.K8s.PodLabels,
-				},
-				RuleID: rule.ID(),
-				Extra:  hardlinkEvent.GetExtra(),
-			}
-		}
+	return &GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName: rule.Name(),
+			Arguments: map[string]interface{}{
+				"oldPath": hardlinkEvent.OldPath,
+				"newPath": hardlinkEvent.NewPath,
+			},
+			InfectedPID:    hardlinkEvent.Pid,
+			FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
+			Severity:       R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				Comm:       hardlinkEvent.Comm,
+				PPID:       hardlinkEvent.PPid,
+				PID:        hardlinkEvent.Pid,
+				UpperLayer: &hardlinkEvent.UpperLayer,
+				Uid:        &hardlinkEvent.Uid,
+				Gid:        &hardlinkEvent.Gid,
+				Path:       hardlinkEvent.ExePath,
+				Hardlink:   hardlinkEvent.ExePath,
+			},
+			ContainerID: hardlinkEvent.Runtime.ContainerID,
+		},
+		TriggerEvent: hardlinkEvent.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: fmt.Sprintf("Hardlink created over sensitive file: %s - %s in: %s", hardlinkEvent.OldPath, hardlinkEvent.NewPath, hardlinkEvent.GetContainer()),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName:   hardlinkEvent.GetPod(),
+			PodLabels: hardlinkEvent.K8s.PodLabels,
+		},
+		RuleID: rule.ID(),
+		Extra:  hardlinkEvent.GetExtra(),
+	}
+}
+
+func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) bool {
+	if eventType != utils.HardlinkEventType {
+		return false
 	}
 
-	return nil
+	hardlinkEvent, ok := event.(*tracerhardlinktype.Event)
+	if !ok {
+		return false
+	}
+
+	for _, path := range rule.additionalPaths {
+		if strings.HasPrefix(hardlinkEvent.OldPath, path) {
+			return true
+		}
+	}
+	return false
 }
 
 func (rule *R1012HardlinkCreatedOverSensitiveFile) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
-}
-
-func isHardLinkAllowed(hardlinkEvent *tracerhardlinktype.Event, objCache objectcache.ObjectCache) (bool, error) {
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(hardlinkEvent.Runtime.ContainerID)
-	if ap == nil {
-		return true, errors.New("application profile not found")
-	}
-
-	appProfileExecList, err := getContainerFromApplicationProfile(ap, hardlinkEvent.GetContainer())
-	if err != nil {
-		return true, err
-	}
-
-	for _, exec := range appProfileExecList.Execs {
-		if exec.Path == hardlinkEvent.Comm {
-			return true, nil
-		}
-	}
-
-	return false, nil
 }

@@ -8,7 +8,12 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, containerType string, containerIndex int) []PatchOperation {
+const (
+	ProcessAllowed   = "processAllowed"
+	ContainerAllowed = "containerAllowed"
+)
+
+func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, rulePolicies map[string]v1beta1.RulePolicy, containerType string, containerIndex int) []PatchOperation {
 	var profileOperations []PatchOperation
 	// add capabilities
 	sort.Strings(capabilities)
@@ -73,10 +78,13 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 		})
 	}
 
+	// add rule policies
+	profileOperations = append(profileOperations, createRulePolicyOperations(rulePolicies, containerType, containerIndex)...)
+
 	return profileOperations
 }
 
-func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint) {
+func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, rulePolicies map[string]v1beta1.RulePolicy) {
 	// add capabilities
 	caps := mapset.NewSet(observedCapabilities...)
 	caps.Append(container.Capabilities...)
@@ -115,6 +123,20 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 	for _, endpoint := range endpoints {
 		container.Endpoints = append(container.Endpoints, *endpoint)
 	}
+
+	// add rule policies
+	for ruleID, policy := range rulePolicies {
+		if container.PolicyByRuleId == nil {
+			container.PolicyByRuleId = make(map[string]v1beta1.RulePolicy)
+		}
+		if existingPolicy, ok := container.PolicyByRuleId[ruleID]; ok {
+			policy = MergePolicies(existingPolicy, policy)
+			container.PolicyByRuleId[ruleID] = policy
+		} else {
+			container.PolicyByRuleId[ruleID] = policy
+		}
+	}
+
 }
 
 // TODO make generic?
@@ -137,4 +159,53 @@ func GetApplicationProfileContainer(object *v1beta1.ApplicationProfile, containe
 		}
 	}
 	return nil
+}
+
+func MergePolicies(primary, secondary v1beta1.RulePolicy) v1beta1.RulePolicy {
+	mergedPolicy := v1beta1.RulePolicy{
+		AllowedContainer: primary.AllowedContainer || secondary.AllowedContainer,
+	}
+
+	processes := mapset.NewSet[string]()
+
+	for _, process := range primary.AllowedProcesses {
+		processes.Add(process)
+	}
+	for _, process := range secondary.AllowedProcesses {
+		processes.Add(process)
+	}
+
+	for process := range processes.Iter() {
+		mergedPolicy.AllowedProcesses = append(mergedPolicy.AllowedProcesses, process)
+	}
+
+	return mergedPolicy
+}
+
+func createRulePolicyOperations(rulePolicies map[string]v1beta1.RulePolicy, containerType string, containerIndex int) []PatchOperation {
+	var profileOperations []PatchOperation
+
+	if len(rulePolicies) == 0 {
+		return profileOperations
+	}
+
+	for ruleID, policy := range rulePolicies {
+		if len(policy.AllowedProcesses) != 0 {
+			for _, process := range policy.AllowedProcesses {
+				profileOperations = append(profileOperations, PatchOperation{
+					Op:    "add",
+					Path:  fmt.Sprintf("/spec/%s/%d/rulePolicies/%s/%s/-", containerType, containerIndex, ruleID, ProcessAllowed),
+					Value: process,
+				})
+			}
+		} else if policy.AllowedContainer {
+			profileOperations = append(profileOperations, PatchOperation{
+				Op:    "add",
+				Path:  fmt.Sprintf("/spec/%s/%d/rulePolicies/%s/%s", containerType, containerIndex, ruleID, ContainerAllowed),
+				Value: policy.AllowedContainer,
+			})
+		}
+	}
+
+	return profileOperations
 }
