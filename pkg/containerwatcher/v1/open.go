@@ -16,12 +16,8 @@ func (ch *IGContainerWatcher) openEventCallback(event *traceropentype.Event) {
 	}
 
 	openEvent := &events.OpenEvent{Event: *event}
-	if ch.thirdPartyEnricher != nil {
-		ch.thirdPartyEnricher.Enrich(openEvent, []uint64{unix.SYS_OPEN, unix.SYS_OPENAT})
-		if openEvent.GetExtra() != nil {
-			fmt.Println("openEventCallback GetExtra", openEvent.GetExtra())
-		}
-	}
+	ch.enrichEvent(openEvent, []uint64{unix.SYS_OPEN, unix.SYS_OPENAT})
+
 	if event.Err > -1 && event.FullPath != "" {
 		ch.openWorkerChan <- openEvent
 	}

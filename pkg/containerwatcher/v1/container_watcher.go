@@ -549,6 +549,12 @@ func (ch *IGContainerWatcher) Ready() bool {
 	return ch.running
 }
 
+func (ch *IGContainerWatcher) enrichEvent(event utils.EnrichEvent, syscalls []uint64) {
+	if ch.thirdPartyEnricher != nil {
+		ch.thirdPartyEnricher.Enrich(event, syscalls)
+	}
+}
+
 func reportEventToThirdPartyTracers(eventType utils.EventType, event utils.K8sEvent, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]]) {
 	if thirdPartyEventReceivers != nil && thirdPartyEventReceivers.Has(eventType) {
 		for receiver := range thirdPartyEventReceivers.Get(eventType).Iter() {

@@ -17,13 +17,7 @@ func (ch *IGContainerWatcher) symlinkEventCallback(event *tracersymlinktype.Even
 		return
 	}
 
-	if ch.thirdPartyEnricher != nil {
-		syscalls := []uint64{unix.SYS_SYMLINKAT, unix.SYS_SYMLINK}
-		ch.thirdPartyEnricher.Enrich(event, syscalls)
-		if event.GetExtra() != nil {
-			fmt.Println("symlinkEventCallback GetExtra", event.GetExtra())
-		}
-	}
+	ch.enrichEvent(event, []uint64{unix.SYS_SYMLINK, unix.SYS_SYMLINKAT})
 
 	if isDroppedEvent(event.Type, event.Message) {
 		logger.L().Ctx(ch.ctx).Warning("symlink tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))

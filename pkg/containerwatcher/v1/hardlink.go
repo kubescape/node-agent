@@ -22,13 +22,7 @@ func (ch *IGContainerWatcher) hardlinkEventCallback(event *tracerhardlinktype.Ev
 		return
 	}
 
-	if ch.thirdPartyEnricher != nil {
-		syscalls := []uint64{unix.SYS_LINK, unix.SYS_LINKAT}
-		ch.thirdPartyEnricher.Enrich(event, syscalls)
-		if event.GetExtra() != nil {
-			fmt.Println("hardlinkEventCallback GetExtra", event.GetExtra())
-		}
-	}
+	ch.enrichEvent(event, []uint64{unix.SYS_LINK, unix.SYS_LINKAT})
 
 	ch.hardlinkWorkerChan <- event
 }

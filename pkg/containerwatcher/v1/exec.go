@@ -16,12 +16,7 @@ func (ch *IGContainerWatcher) execEventCallback(event *tracerexectype.Event) {
 	}
 
 	execEvent := &events.ExecEvent{Event: *event}
-	if ch.thirdPartyEnricher != nil {
-		ch.thirdPartyEnricher.Enrich(execEvent, []uint64{unix.SYS_EXECVE, unix.SYS_EXECVEAT})
-		if execEvent.GetExtra() != nil {
-			fmt.Println("execEventCallback GetExtra", execEvent.GetExtra())
-		}
-	}
+	ch.enrichEvent(execEvent, []uint64{unix.SYS_EXECVE, unix.SYS_EXECVEAT})
 
 	if event.Retval > -1 && event.Comm != "" {
 		ch.execWorkerChan <- execEvent
