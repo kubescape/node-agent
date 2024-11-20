@@ -80,4 +80,12 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 	if failure == nil {
 		t.Errorf("Expected failure since the SSH connection is to a disallowed port, got nil")
 	}
+
+	// Test allowed port
+	sshEvent.DstPort = 2022
+	sshEvent.DstIP = "3.3.3.3"
+	failure = rule.ProcessEvent(utils.SSHEventType, sshEvent, &objCache)
+	if failure != nil {
+		t.Errorf("Expected nil since the SSH connection is to an allowed port, got %v", failure)
+	}
 }
