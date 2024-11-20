@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
@@ -68,12 +69,12 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 	}
 
 	if eventType == utils.ExecveEventType {
-		execEvent, ok := event.(*tracerexectype.Event)
+		execEvent, ok := event.(*events.ExecEvent)
 		if !ok {
 			return nil
 		}
 
-		if allowed, err := isAllowed(&execEvent.Event, objectCache, execEvent.Comm, R1011ID); err != nil {
+		if allowed, err := isAllowed(&execEvent.Event.Event, objectCache, execEvent.Comm, R1011ID); err != nil {
 			logger.L().Error("failed to check if ld_preload is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 			return nil
 		} else if allowed {
@@ -82,19 +83,19 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 
 		return rule.ruleFailureExecEvent(execEvent)
 	} else if eventType == utils.OpenEventType {
-		openEvent, ok := event.(*traceropentype.Event)
+		openEvent, ok := event.(*events.OpenEvent)
 		if !ok {
 			return nil
 		}
 
-		if allowed, err := isAllowed(&openEvent.Event, objectCache, openEvent.Comm, R1011ID); err != nil {
+		if allowed, err := isAllowed(&openEvent.Event.Event, objectCache, openEvent.Comm, R1011ID); err != nil {
 			logger.L().Error("failed to check if ld_preload is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 			return nil
 		} else if allowed {
 			return nil
 		}
 
-		return rule.ruleFailureOpenEvent(openEvent)
+		return rule.ruleFailureOpenEvent(&openEvent.Event)
 	}
 
 	return nil
@@ -103,14 +104,14 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 func (rule *R1011LdPreloadHook) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) bool {
 	switch eventType {
 	case utils.ExecveEventType:
-		execEvent, ok := event.(*tracerexectype.Event)
+		execEvent, ok := event.(*events.ExecEvent)
 		if !ok {
 			return false
 		}
 		return rule.shouldAlertExec(execEvent, k8sObjCache)
 
 	case utils.OpenEventType:
-		openEvent, ok := event.(*traceropentype.Event)
+		openEvent, ok := event.(*events.OpenEvent)
 		if !ok {
 			return false
 		}
@@ -127,233 +128,7 @@ func (rule *R1011LdPreloadHook) Requirements() ruleengine.RuleSpec {
 	}
 }
 
-func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *tracerexectype.Event) ruleengine.RuleFailure {
-	envVars, err := utils.GetProcessEnv(int(execEvent.Pid))
-	if err != nil {
-		logger.L().Debug("Failed to get process environment variables", helpers.Error(err))
-		return nil
-	}
-
-	ldHookVar, _ := GetLdHookVar(envVars)
-
-	upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
-
-		ruleFailure := GenericRuleFailure{
-			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
-				Arguments:      map[string]interface{}{"envVar": ldHookVar},
-				InfectedPID:    execEvent.Pid,
-				FixSuggestions: fmt.Sprintf("Check the environment variable %s", ldHookVar),
-				Severity:       R1011LdPreloadHookRuleDescriptor.Priority,
-			},
-			RuntimeProcessDetails: apitypes.ProcessTree{
-				ProcessTree: apitypes.Process{
-					Comm:       execEvent.Comm,
-					Gid:        &execEvent.Gid,
-					PID:        execEvent.Pid,
-					Uid:        &execEvent.Uid,
-					UpperLayer: &upperLayer,
-					PPID:       execEvent.Ppid,
-					Pcomm:      execEvent.Pcomm,
-					Cwd:        execEvent.Cwd,
-					Hardlink:   execEvent.ExePath,
-					Path:       getExecFullPathFromEvent(execEvent),
-					Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
-				},
-				ContainerID: execEvent.Runtime.ContainerID,
-			},
-			TriggerEvent: execEvent.Event.Event,
-			RuleAlert: apitypes.RuleAlert{
-				RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is using the environment variable %s", execEvent.Comm, execEvent.GetContainer(), fmt.Sprintf("%s=%s", ldHookVar, envVars[ldHookVar])),
-			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName:   execEvent.GetPod(),
-				PodLabels: execEvent.K8s.PodLabels,
-			},
-			RuleID: rule.ID(),
-			Extra:  execEvent.GetExtra(),
-		}
-	ruleFailure := GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName:      rule.Name(),
-			Arguments:      map[string]interface{}{"envVar": ldHookVar},
-			InfectedPID:    execEvent.Pid,
-			FixSuggestions: fmt.Sprintf("Check the environment variable %s", ldHookVar),
-			Severity:       R1011LdPreloadHookRuleDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
-			ProcessTree: apitypes.Process{
-				Comm:       execEvent.Comm,
-				Gid:        &execEvent.Gid,
-				PID:        execEvent.Pid,
-				Uid:        &execEvent.Uid,
-				UpperLayer: &upperLayer,
-				PPID:       execEvent.Ppid,
-				Pcomm:      execEvent.Pcomm,
-				Cwd:        execEvent.Cwd,
-				Hardlink:   execEvent.ExePath,
-				Path:       getExecFullPathFromEvent(execEvent),
-				Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
-			},
-			ContainerID: execEvent.Runtime.ContainerID,
-		},
-		TriggerEvent: execEvent.Event,
-		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is using the environment variable %s", execEvent.Comm, execEvent.GetContainer(), fmt.Sprintf("%s=%s", ldHookVar, envVars[ldHookVar])),
-		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName:   execEvent.GetPod(),
-			PodLabels: execEvent.K8s.PodLabels,
-		},
-		RuleID: rule.ID(),
-	}
-
-	return &ruleFailure
-}
-
-	return nil
-}
-
-func (rule *R1011LdPreloadHook) handleOpenEvent(openEvent *events.OpenEvent) ruleengine.RuleFailure {
-	if openEvent.FullPath == LD_PRELOAD_FILE && (openEvent.FlagsRaw&(int32(os.O_WRONLY)|int32(os.O_RDWR))) != 0 {
-		ruleFailure := GenericRuleFailure{
-			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName: rule.Name(),
-				Arguments: map[string]interface{}{
-					"path":  openEvent.FullPath,
-					"flags": openEvent.Flags,
-				},
-				InfectedPID:    openEvent.Pid,
-				FixSuggestions: "Check the file /etc/ld.so.preload",
-				Severity:       R1011LdPreloadHookRuleDescriptor.Priority,
-			},
-			RuntimeProcessDetails: apitypes.ProcessTree{
-				ProcessTree: apitypes.Process{
-					Comm: openEvent.Comm,
-					Gid:  &openEvent.Gid,
-					PID:  openEvent.Pid,
-					Uid:  &openEvent.Uid,
-				},
-				ContainerID: openEvent.Runtime.ContainerID,
-			},
-			TriggerEvent: openEvent.Event.Event,
-			RuleAlert: apitypes.RuleAlert{
-				RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is opening the file %s", openEvent.Comm, openEvent.GetContainer(), openEvent.Path),
-			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName:   openEvent.GetPod(),
-				PodLabels: openEvent.K8s.PodLabels,
-			},
-			RuleID: rule.ID(),
-			Extra:  openEvent.GetExtra(),
-		}
-func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.Event) ruleengine.RuleFailure {
-	ruleFailure := GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName: rule.Name(),
-			Arguments: map[string]interface{}{
-				"path":  openEvent.FullPath,
-				"flags": openEvent.Flags,
-			},
-			InfectedPID:    openEvent.Pid,
-			FixSuggestions: "Check the file /etc/ld.so.preload",
-			Severity:       R1011LdPreloadHookRuleDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
-			ProcessTree: apitypes.Process{
-				Comm: openEvent.Comm,
-				Gid:  &openEvent.Gid,
-				PID:  openEvent.Pid,
-				Uid:  &openEvent.Uid,
-			},
-			ContainerID: openEvent.Runtime.ContainerID,
-		},
-		TriggerEvent: openEvent.Event,
-		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is opening the file %s", openEvent.Comm, openEvent.GetContainer(), openEvent.Path),
-		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName:   openEvent.GetPod(),
-			PodLabels: openEvent.K8s.PodLabels,
-		},
-		RuleID: rule.ID(),
-	}
-
-	return &ruleFailure
-}
-
-func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *tracerexectype.Event, k8sObjCache objectcache.K8sObjectCache) bool {
-	// Java is a special case, we don't want to alert on it because it uses LD_LIBRARY_PATH.
-	if execEvent.Comm == JAVA_COMM {
-		return false
-	}
-
-	// Check if the process is a MATLAB process and ignore it.
-	if execEvent.GetContainer() == "matlab" {
-		return false
-	}
-
-	envVars, err := utils.GetProcessEnv(int(execEvent.Pid))
-	if err != nil {
-		logger.L().Debug("Failed to get process environment variables", helpers.Error(err))
-		return false
-	}
-
-	ldHookVar, shouldCheck := GetLdHookVar(envVars)
-	if shouldCheck {
-		podSpec := k8sObjCache.GetPodSpec(execEvent.GetNamespace(), execEvent.GetPod())
-		if podSpec != nil {
-			for _, container := range podSpec.Containers {
-				if container.Name == execEvent.GetContainer() {
-					for _, envVar := range container.Env {
-						if envVar.Name == ldHookVar {
-							return false
-						}
-					}
-				}
-			}
-		}
-		return true
-	}
-
-	return false
-}
-
-func (rule *R1011LdPreloadHook) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) bool {
-	switch eventType {
-	case utils.ExecveEventType:
-		execEvent, ok := event.(*tracerexectype.Event)
-		if !ok {
-			return false
-		}
-		return rule.shouldAlertExec(execEvent, k8sObjCache)
-
-	case utils.OpenEventType:
-		openEvent, ok := event.(*traceropentype.Event)
-		if !ok {
-			return false
-		}
-		return rule.shouldAlertOpen(openEvent)
-
-	default:
-		return false
-	}
-}
-
-func (rule *R1011LdPreloadHook) shouldAlertOpen(openEvent *traceropentype.Event) bool {
-	return openEvent.FullPath == LD_PRELOAD_FILE && (openEvent.FlagsRaw&(int32(os.O_WRONLY)|int32(os.O_RDWR))) != 0
-}
-
-func GetLdHookVar(envVars map[string]string) (string, bool) {
-	for _, envVar := range LD_PRELOAD_ENV_VARS {
-		if _, ok := envVars[envVar]; ok {
-			return envVar, true
-		}
-	}
-	return "", false
-}
-
-func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *tracerexectype.Event) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *events.ExecEvent) ruleengine.RuleFailure {
 	envVars, err := utils.GetProcessEnv(int(execEvent.Pid))
 	if err != nil {
 		logger.L().Debug("Failed to get process environment variables", helpers.Error(err))
@@ -384,11 +159,11 @@ func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *tracerexectype.E
 				Cwd:        execEvent.Cwd,
 				Hardlink:   execEvent.ExePath,
 				Path:       getExecFullPathFromEvent(execEvent),
-				Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+				Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 			},
 			ContainerID: execEvent.Runtime.ContainerID,
 		},
-		TriggerEvent: execEvent.Event,
+		TriggerEvent: execEvent.Event.Event,
 		RuleAlert: apitypes.RuleAlert{
 			RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is using the environment variable %s", execEvent.Comm, execEvent.GetContainer(), fmt.Sprintf("%s=%s", ldHookVar, envVars[ldHookVar])),
 		},
@@ -437,7 +212,7 @@ func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.E
 	return &ruleFailure
 }
 
-func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *tracerexectype.Event, k8sObjCache objectcache.K8sObjectCache) bool {
+func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *events.ExecEvent, k8sObjCache objectcache.K8sObjectCache) bool {
 	// Java is a special case, we don't want to alert on it because it uses LD_LIBRARY_PATH.
 	if execEvent.Comm == JAVA_COMM {
 		return false
@@ -474,7 +249,7 @@ func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *tracerexectype.Event,
 	return false
 }
 
-func (rule *R1011LdPreloadHook) shouldAlertOpen(openEvent *traceropentype.Event) bool {
+func (rule *R1011LdPreloadHook) shouldAlertOpen(openEvent *events.OpenEvent) bool {
 	return openEvent.FullPath == LD_PRELOAD_FILE && (openEvent.FlagsRaw&(int32(os.O_WRONLY)|int32(os.O_RDWR))) != 0
 }
 
