@@ -142,7 +142,7 @@ func TestR1011LdPreloadHook(t *testing.T) {
 					{
 						Name: "test",
 						PolicyByRuleId: map[string]v1beta1.RulePolicy{
-							R1011ID: v1beta1.RulePolicy{
+							R1011ID: {
 								AllowedProcesses: []string{"test"},
 							},
 						},

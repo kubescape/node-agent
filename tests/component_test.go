@@ -1123,6 +1123,7 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
 	}
 
+	// Wait for application profile to be ready
 	assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
 
 	// Add to rule policy symlink
