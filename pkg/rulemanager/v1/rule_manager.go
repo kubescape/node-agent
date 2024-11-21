@@ -469,7 +469,11 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	}
 
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
-	rm.enricher.EnrichRuleFailure(ruleFailure)
+
+	if rm.enricher != nil {
+		rm.enricher.EnrichRuleFailure(ruleFailure)
+	}
+
 	return ruleFailure
 }
 

@@ -3,10 +3,10 @@ package ruleengine
 import (
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	corev1 "k8s.io/api/core/v1"
@@ -35,19 +35,21 @@ func TestR1011LdPreloadHook(t *testing.T) {
 	}
 
 	// Create open event
-	e := &traceropentype.Event{
-		Event: eventtypes.Event{
-			CommonData: eventtypes.CommonData{
-				K8s: eventtypes.K8sMetadata{
-					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-						ContainerName: "test",
+	e := &events.OpenEvent{
+		Event: traceropentype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "test",
+						},
 					},
 				},
 			},
+			Comm:     "test",
+			FullPath: "/etc/ld.so.preload",
+			FlagsRaw: 1,
 		},
-		Comm:     "test",
-		FullPath: "/etc/ld.so.preload",
-		FlagsRaw: 1,
 	}
 
 	// Test with existing ld_preload file
@@ -100,17 +102,19 @@ func TestR1011LdPreloadHook(t *testing.T) {
 	}
 
 	// Create open event
-	e2 := &tracerexectype.Event{
-		Event: eventtypes.Event{
-			CommonData: eventtypes.CommonData{
-				K8s: eventtypes.K8sMetadata{
-					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-						ContainerName: "test",
+	e2 := &events.OpenEvent{
+		Event: traceropentype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "test",
+						},
 					},
 				},
 			},
+			Comm: "java",
 		},
-		Comm: "java",
 	}
 	// Test with exec event
 	ruleResult = r.ProcessEvent(utils.ExecveEventType, e2, &objCache)
@@ -118,19 +122,21 @@ func TestR1011LdPreloadHook(t *testing.T) {
 		t.Errorf("Expected ruleResult to be nil since exec event is on java")
 	}
 
-	e3 := &traceropentype.Event{
-		Event: eventtypes.Event{
-			CommonData: eventtypes.CommonData{
-				K8s: eventtypes.K8sMetadata{
-					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-						ContainerName: "test",
+	e3 := &events.OpenEvent{
+		Event: traceropentype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "test",
+						},
 					},
 				},
 			},
+			Comm:     "test",
+			FullPath: "/etc/ld.so.preload",
+			FlagsRaw: 1,
 		},
-		Comm:     "test",
-		FullPath: "/etc/ld.so.preload",
-		FlagsRaw: 1,
 	}
 
 	objCache = RuleObjectCacheMock{}

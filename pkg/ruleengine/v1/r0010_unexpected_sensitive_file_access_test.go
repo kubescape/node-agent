@@ -5,24 +5,27 @@ import (
 
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func createTestEvent(path string, flags []string) *traceropentype.Event {
-	return &traceropentype.Event{
-		Event: eventtypes.Event{
-			CommonData: eventtypes.CommonData{
-				K8s: eventtypes.K8sMetadata{
-					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-						ContainerName: "test",
+func createTestEvent(path string, flags []string) *events.OpenEvent {
+	return &events.OpenEvent{
+		Event: traceropentype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "test",
+						},
 					},
 				},
 			},
+			Path:     path,
+			FullPath: path,
+			Flags:    flags,
 		},
-		Path:     path,
-		FullPath: path,
-		Flags:    flags,
 	}
 }
 
@@ -50,7 +53,7 @@ func createTestProfile(containerName string, paths []string, flags []string) *v1
 func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 	tests := []struct {
 		name            string
-		event           *traceropentype.Event
+		event           *events.OpenEvent
 		profile         *v1beta1.ApplicationProfile
 		additionalPaths []interface{}
 		expectAlert     bool
