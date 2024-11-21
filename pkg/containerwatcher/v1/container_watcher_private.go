@@ -36,7 +36,11 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		logger.L().Info("start monitor on container", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+		logger.L().Info("start monitor on container",
+			helpers.String("container ID", notif.Container.Runtime.ContainerID),
+			helpers.String("k8s workload", k8sContainerID),
+			helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
+			helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
 		if ch.running {
 			ch.timeBasedContainers.Add(notif.Container.Runtime.ContainerID)
 		} else {
