@@ -58,18 +58,53 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 			expectFailure: false,
 		},
 
-		// Basic token access tests - Kubernetes paths
+		// Directory level whitelist tests
 		{
-			name:  "basic whitelisted kubernetes token access",
+			name:  "access allowed when directory is whitelisted - token",
 			event: createTestEvent0006("test", "/run/secrets/kubernetes.io/serviceaccount/token", []string{"O_RDONLY"}),
+			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
+				Path:  "/run/secrets/kubernetes.io/serviceaccount/namespace",
+				Flags: []string{"O_RDONLY"},
+			}}),
+			expectFailure: false, // Should pass because directory is whitelisted
+		},
+		{
+			name:  "access allowed when directory is whitelisted - ca.crt",
+			event: createTestEvent0006("test", "/run/secrets/kubernetes.io/serviceaccount/ca.crt", []string{"O_RDONLY"}),
 			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
 				Path:  "/run/secrets/kubernetes.io/serviceaccount/token",
 				Flags: []string{"O_RDONLY"},
 			}}),
-			expectFailure: false,
+			expectFailure: false, // Should pass because directory is whitelisted
 		},
+
+		// Tests with EKS paths and timestamps
 		{
-			name:  "unauthorized kubernetes token access",
+			name: "whitelisted eks token access with timestamps",
+			event: createTestEvent0006("test",
+				"/run/secrets/eks.amazonaws.com/serviceaccount/..2024_11_1111_24_34_58.850095521/token",
+				[]string{"O_RDONLY"}),
+			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
+				Path:  "/run/secrets/eks.amazonaws.com/serviceaccount/..2024_11_21_04_30_58.850095521/namespace",
+				Flags: []string{"O_RDONLY"},
+			}}),
+			expectFailure: false, // Should pass because normalized directory matches
+		},
+
+		// Different service account path variants
+		{
+			name:  "var/run path variant matches run path whitelist",
+			event: createTestEvent0006("test", "/var/run/secrets/kubernetes.io/serviceaccount/token", []string{"O_RDONLY"}),
+			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
+				Path:  "/run/secrets/kubernetes.io/serviceaccount/namespace",
+				Flags: []string{"O_RDONLY"},
+			}}),
+			expectFailure: true, // Should fail because different base path
+		},
+
+		// No whitelisting tests
+		{
+			name:  "unauthorized token access",
 			event: createTestEvent0006("test", "/run/secrets/kubernetes.io/serviceaccount/token", []string{"O_RDONLY"}),
 			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
 				Path:  "/some/other/path",
@@ -78,50 +113,7 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 			expectFailure: true,
 		},
 
-		// EKS token path tests with timestamps
-		{
-			name: "whitelisted eks token access - different timestamps",
-			event: createTestEvent0006("test",
-				"/run/secrets/eks.amazonaws.com/serviceaccount/..2024_11_1111_24_34_58.850095521/token",
-				[]string{"O_RDONLY"}),
-			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
-				Path:  "/run/secrets/eks.amazonaws.com/serviceaccount/..2024_11_21_04_30_58.850095521/token",
-				Flags: []string{"O_RDONLY"},
-			}}),
-			expectFailure: false,
-		},
-		{
-			name: "whitelisted eks token access - base path whitelist",
-			event: createTestEvent0006("test",
-				"/run/secrets/eks.amazonaws.com/serviceaccount/..2024_11_1111_24_34_58.850095521/token",
-				[]string{"O_RDONLY"}),
-			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
-				Path:  "/run/secrets/eks.amazonaws.com/serviceaccount/token",
-				Flags: []string{"O_RDONLY"},
-			}}),
-			expectFailure: false,
-		},
-		// Alternative token files tests
-		{
-			name:  "whitelisted ca.crt access",
-			event: createTestEvent0006("test", "/run/secrets/kubernetes.io/serviceaccount/ca.crt", []string{"O_RDONLY"}),
-			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
-				Path:  "/run/secrets/kubernetes.io/serviceaccount/ca.crt",
-				Flags: []string{"O_RDONLY"},
-			}}),
-			expectFailure: false,
-		},
-		{
-			name:  "whitelisted namespace access",
-			event: createTestEvent0006("test", "/run/secrets/kubernetes.io/serviceaccount/namespace", []string{"O_RDONLY"}),
-			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
-				Path:  "/run/secrets/kubernetes.io/serviceaccount/namespace",
-				Flags: []string{"O_RDONLY"},
-			}}),
-			expectFailure: false,
-		},
-
-		// Container name mismatch tests
+		// Container mismatch tests
 		{
 			name:  "different container name",
 			event: createTestEvent0006("test2", "/run/secrets/kubernetes.io/serviceaccount/token", []string{"O_RDONLY"}),
@@ -130,17 +122,6 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 				Flags: []string{"O_RDONLY"},
 			}}),
 			expectFailure: false, // No profile for the container
-		},
-
-		// Alternative path formats
-		{
-			name:  "var/run path variant",
-			event: createTestEvent0006("test", "/var/run/secrets/kubernetes.io/serviceaccount/token", []string{"O_RDONLY"}),
-			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
-				Path:  "/var/run/secrets/kubernetes.io/serviceaccount/token",
-				Flags: []string{"O_RDONLY"},
-			}}),
-			expectFailure: false,
 		},
 
 		// Edge cases

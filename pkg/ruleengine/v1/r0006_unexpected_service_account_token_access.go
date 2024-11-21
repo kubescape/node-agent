@@ -168,10 +168,11 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 
 	// Normalize the accessed path once
 	normalizedAccessedPath := normalizeTokenPath(openEvent.FullPath)
+	dirPath := filepath.Dir(normalizedAccessedPath)
 
 	// Check against whitelisted paths
 	for _, open := range appProfileOpenList.Opens {
-		if normalizedAccessedPath == normalizeTokenPath(open.Path) {
+		if dirPath == filepath.Dir(normalizeTokenPath(open.Path)) {
 			return nil
 		}
 	}
