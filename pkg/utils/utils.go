@@ -750,7 +750,7 @@ func getContainerRuntimeSocketPath(clientset *k8sinterface.KubernetesApi, nodeNa
 	}
 	socketPath, found := strings.CutPrefix(kubeletConfig.ContainerRuntimeEndpoint, "unix://")
 	if !found {
-		return "", fmt.Errorf("socket path does not start with unix://")
+		return "", fmt.Errorf("socket path does not start with unix:// %s", helpers.String("socketPath", kubeletConfig.ContainerRuntimeEndpoint))
 	}
 	logger.L().Info("using the detected container runtime socket path from Kubelet's config", helpers.String("socketPath", socketPath))
 	return socketPath, nil
