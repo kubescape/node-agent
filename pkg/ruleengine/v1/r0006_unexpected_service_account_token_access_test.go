@@ -77,6 +77,15 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 			}}),
 			expectFailure: false, // Should pass because directory is whitelisted
 		},
+		{
+			name:  "access is not allowed when directory is not whitelisted - namespace",
+			event: createTestEvent0006("test", "/run/secrets/kubernetes.io/serviceaccount/namespace", []string{"O_RDONLY"}),
+			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
+				Path:  "home",
+				Flags: []string{"O_RDONLY"},
+			}}),
+			expectFailure: true, // Should fail because directory is not whitelisted
+		},
 
 		// Tests with EKS paths and timestamps
 		{
