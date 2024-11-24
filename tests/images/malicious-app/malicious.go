@@ -61,22 +61,24 @@ func runAllMaliciousBehaviors() error {
 	}
 	fmt.Print(output)
 
-	// Trigger unexpected process launch (R0001)
-	// Trigger exec binary not in base image (R1001)
-	// Trigger unexpected service account use (R0006)
-	// Trigger kubernetes client executed in container (R0007)
-	// Run Kubectl get secrets by calling kubectl binary
-	fmt.Println("Running kubectl get secrets...")
-	output, err = runKubectl("./kubectl", "get", "secrets")
+	// Trigger unexpected Service Account Token Access (R0006)
+	// Open the service account token file
+	fmt.Println("Opening service account token file...")
+	file, err := os.Open("/run/secrets/kubernetes.io/serviceaccount/token")
 	if err != nil {
-		fmt.Printf("Failed to run kubectl: %v\n", err)
+		fmt.Printf("Failed to open service account token file: %v\n", err)
+	} else {
+		// Close the file
+		err = file.Close()
+		if err != nil {
+			fmt.Printf("Failed to close service account token file: %v\n", err)
+		}
 	}
-	fmt.Print(output)
 
 	// Trigger unexpected file access (R0002)
 	// Open a file for writing
 	fmt.Println("Opening malicious.txt for writing...")
-	file, err := os.OpenFile("malicious.txt", os.O_CREATE|os.O_WRONLY, 0644)
+	file, err = os.OpenFile("malicious.txt", os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Printf("Failed to open file: %v\n", err)
 	} else {
