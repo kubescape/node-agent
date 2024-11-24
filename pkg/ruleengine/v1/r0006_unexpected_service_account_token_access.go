@@ -11,7 +11,6 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -113,32 +112,6 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ID() string {
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) DeleteRule() {}
 
-func (rule *R0006UnexpectedServiceAccountTokenAccess) generatePatchCommand(event *traceropentype.Event, ap *v1beta1.ApplicationProfile) string {
-	if len(event.Flags) == 0 {
-		return fmt.Sprintf(
-			"kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"opens\": [{\"path\": \"%s\"}]}]}}'",
-			ap.GetName(),
-			ap.GetNamespace(),
-			event.GetContainer(),
-			event.FullPath,
-		)
-	}
-
-	flagList := make([]string, len(event.Flags))
-	for i, flag := range event.Flags {
-		flagList[i] = fmt.Sprintf("%q", flag)
-	}
-
-	return fmt.Sprintf(
-		"kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"opens\": [{\"path\": \"%s\", \"flags\": [%s]}]}]}}'",
-		ap.GetName(),
-		ap.GetNamespace(),
-		event.GetContainer(),
-		event.FullPath,
-		strings.Join(flagList, ","),
-	)
-}
-
 func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	// Quick type checks first
 	if eventType != utils.OpenEventType {
@@ -187,12 +160,8 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 			},
 			InfectedPID: openEvent.Pid,
 			FixSuggestions: fmt.Sprintf(
-				"If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". "+
-					"You can use the following command:\n%s",
-				openEvent.FullPath,
-				openEvent.GetPod(),
-				rule.generatePatchCommand(openEvent, ap),
-			),
+				"If this is a valid behavior, please add the open call to the whitelist in the application profile for the Pod %s",
+				openEvent.GetPod()),
 			Severity: R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
