@@ -61,6 +61,18 @@ func runAllMaliciousBehaviors() error {
 	}
 	fmt.Print(output)
 
+	// Trigger unexpected process launch (R0001)
+	// Trigger exec binary not in base image (R1001)
+	// Trigger unexpected service account use (R0006)
+	// Trigger kubernetes client executed in container (R0007)
+	// Run Kubectl get secrets by calling kubectl binary
+	fmt.Println("Running kubectl get secrets...")
+	output, err = runKubectl("./kubectl", "get", "secrets")
+	if err != nil {
+		fmt.Printf("Failed to run kubectl: %v\n", err)
+	}
+	fmt.Print(output)
+
 	// Trigger unexpected file access (R0002)
 	// Open a file for writing
 	fmt.Println("Opening malicious.txt for writing...")

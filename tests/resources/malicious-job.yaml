@@ -13,13 +13,13 @@ spec:
       containers:
       - name: malicious-app
         # sourcecode: node-agent/tests/images/malicious-app
-        image: quay.io/kubescape/node-agent:maliciousapp
+        image: quay.io/kubescape/node-agent:maliciousapp2
         imagePullPolicy: Always
         env:
           - name: WAIT_FOR_SIGTERM
             value: "true"
           - name: WAIT_BEFORE_START
-            value: "3m"
+            value: "4m"
         volumeMounts:
           - mountPath: /podmount
             name: mount-for-alert

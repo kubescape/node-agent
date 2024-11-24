@@ -99,6 +99,30 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 			}}),
 			expectFailure: false, // Should pass because normalized directory matches
 		},
+		// Tests with k8s paths and timestamps
+		{
+			name: "non whitelisted k8s token access with timestamps",
+			event: createTestEvent0006("test",
+				"/run/secrets/kubernetes.io/serviceaccount/..2024_11_24_09_06_53.3676909075/token",
+				[]string{"O_RDONLY"}),
+			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
+				Path:  "/run/secrets",
+				Flags: []string{"O_RDONLY"},
+			}}),
+			expectFailure: true, // Should fail because normalized directory does not match
+		},
+		// Tests with k8s paths and timestamps
+		{
+			name: "non whitelisted k8s token access with timestamps",
+			event: createTestEvent0006("test",
+				"/run/secrets/kubernetes.io/serviceaccount/..2024_11_24_09_06_53.3676909075/token",
+				[]string{"O_RDONLY"}),
+			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
+				Path:  "/",
+				Flags: []string{"O_RDONLY"},
+			}}),
+			expectFailure: true, // Should fail because normalized directory does not match
+		},
 
 		// Different service account path variants
 		{
