@@ -11,6 +11,8 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/storage"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/util/retry"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/kubescape/go-logger"
@@ -149,8 +151,30 @@ func (sc Storage) GetApplicationActivity(namespace, name string) (*v1beta1.Appli
 
 func (sc Storage) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error {
 	_, err := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
-	if err != nil {
+	switch {
+	case errors.IsAlreadyExists(err):
+		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			// retrieve the latest version before attempting update
+			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
+			result, getErr := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Get(context.Background(), SBOM.Name, metav1.GetOptions{ResourceVersion: "metadata"})
+			if getErr != nil {
+				return getErr
+			}
+			// update the SBOM manifest
+			result.Annotations = SBOM.Annotations
+			result.Labels = SBOM.Labels
+			result.Spec = SBOM.Spec
+			// try to send the updated workload configuration scan manifest
+			_, updateErr := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			return updateErr
+		})
+		if retryErr != nil {
+			return retryErr
+		}
+	case err != nil:
 		return err
+	default:
+		return nil
 	}
 	return nil
 }
@@ -190,6 +214,7 @@ func (sc Storage) modifyName(n string) string {
 	}
 	return n
 }
+
 func (sc Storage) modifyNameP(n *string) {
 	if sc.multiplier != nil {
 		*n = fmt.Sprintf("%s-%d", *n, *sc.multiplier)
@@ -201,6 +226,7 @@ func (sc Storage) revertNameP(n *string) {
 		*n = strings.TrimSuffix(*n, fmt.Sprintf("-%d", *sc.multiplier))
 	}
 }
+
 func getMultiplier() *int {
 	if m := os.Getenv("MULTIPLY"); m != "true" {
 		return nil
