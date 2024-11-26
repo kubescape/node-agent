@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 	"strings"
+	"slices"
 
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -62,17 +63,7 @@ func (rule *R1013CryptoMiningFilesAccess) ProcessEvent(eventType utils.EventType
 		return nil
 	}
 
-	shouldCheckEvent := false
-	for _, prefix := range utils.CryptoMiningFilesAccessPathsPrefix {
-		if strings.HasPrefix(openEvent.FullPath, prefix) {
-			shouldCheckEvent = true
-			break
-		}
-	}
-
-	if !shouldCheckEvent {
-		return nil
-	}
+	if slices.Contains(utils.CryptoMiningFilesAccessPathsPrefix, openEvent.FullPath) {
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
@@ -101,6 +92,8 @@ func (rule *R1013CryptoMiningFilesAccess) ProcessEvent(eventType utils.EventType
 	}
 
 	return &ruleFailure
+}
+return nil
 }
 
 func (rule *R1013CryptoMiningFilesAccess) Requirements() ruleengine.RuleSpec {

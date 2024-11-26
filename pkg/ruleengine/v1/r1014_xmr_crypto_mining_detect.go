@@ -2,7 +2,6 @@ package ruleengine
 
 import (
 	"slices"
-	"strings"
 
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
@@ -32,7 +31,7 @@ var R1014CryptoMinerDetectedRuleDescriptor = RuleDescriptor{
 	Name:        R1014Name,
 	Description: "Detecting Crypto miners by domains, files and RandomX  event",
 	Tags:        []string{"crypto", "miners", "malicious", "whitelisted", "network", "dns"},
-	Priority:    RulePriorityHigh,
+	Priority:    RulePriorityCritical,
 	Requirements: &RuleRequirements{
 		EventTypes: []utils.EventType{
 			utils.OpenEventType,
@@ -74,15 +73,9 @@ func (rule *R1014CryptoMinerDetected) ProcessEvent(eventType utils.EventType, ev
 	var Pod string
 
 	if openEvent, ok := event.(*traceropentype.Event); ok {
-		shouldCheckEvent := false
-		for _, prefix := range utils.CryptoMiningFilesAccessPathsPrefix {
-			if strings.HasPrefix(openEvent.FullPath, prefix) {
-				shouldCheckEvent = true
-				break
-			}
-		}
 
-		if shouldCheckEvent {
+		if slices.Contains(utils.CryptoMiningFilesAccessPathsPrefix, openEvent.FullPath) {
+
 			open_event = true
 			TypesEvent.Event = openEvent.Event
 			Pod = openEvent.GetPod()
@@ -99,6 +92,7 @@ func (rule *R1014CryptoMinerDetected) ProcessEvent(eventType utils.EventType, ev
 		}
 
 	} else if randomXEvent, ok := event.(*tracerrandomxtype.Event); ok {
+
 		randomx_event = true
 		TypesEvent.Event = randomXEvent.Event
 		Pod = randomXEvent.GetPod()
@@ -120,6 +114,7 @@ func (rule *R1014CryptoMinerDetected) ProcessEvent(eventType utils.EventType, ev
 	} else if dnsEvent, ok := event.(*tracerdnstype.Event); ok {
 		if slices.Contains(utils.CommonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
 			dns_event = true
+
 			TypesEvent.Event = dnsEvent.Event
 			Pod = dnsEvent.GetPod()
 
@@ -135,6 +130,7 @@ func (rule *R1014CryptoMinerDetected) ProcessEvent(eventType utils.EventType, ev
 		}
 
 	}
+
 	if open_event && randomx_event && dns_event && !alertTriggered {
 		alertTriggered = true
 

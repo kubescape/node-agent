@@ -4,7 +4,7 @@ metadata:
   annotations:
     meta.helm.sh/release-name: kubescape
     meta.helm.sh/release-namespace: kubescape
-  creationTimestamp: "2024-10-06T15:22:55Z"
+  creationTimestamp: "2024-11-26T11:07:08Z"
   generation: 1
   labels:
     app: node-agent
@@ -12,13 +12,13 @@ metadata:
     app.kubernetes.io/instance: kubescape
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: kubescape-operator
-    app.kubernetes.io/version: 1.22.4
-    helm.sh/chart: kubescape-operator-1.22.4
+    app.kubernetes.io/version: 1.23.2
+    helm.sh/chart: kubescape-operator-1.23.2
     kubescape.io/ignore: "true"
     tier: ks-control-plane
   name: all-rules-all-pods
-  resourceVersion: "523"
-  uid: 9f730a8e-9ce4-4725-a27c-3cca940e71a9
+  resourceVersion: "516"
+  uid: 78bc578c-6374-4641-adc3-a5f067d5a748
 spec:
   namespaceSelector:
     matchExpressions:
@@ -52,7 +52,6 @@ spec:
   - ruleName: Exec Binary Not In Base Image
   - ruleName: Malicious SSH Connection
   - ruleName: Fileless Execution
-  - ruleName: XMR Crypto Mining Detection
   - ruleName: Exec from mount
   - ruleName: Crypto Mining Related Port Communication
   - ruleName: Crypto Mining Domain Communication
@@ -64,3 +63,5 @@ spec:
   - ruleName: Exec to pod
   - ruleName: Port forward
   - ruleName: Unexpected Egress Network Traffic
+  - ruleName: Malicious Ptrace Usage
+  - ruleName: Crypto Miner detected
