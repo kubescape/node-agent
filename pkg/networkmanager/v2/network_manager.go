@@ -436,6 +436,8 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:      container.Runtime.ContainerID,
+		ImageID:          container.Runtime.ContainerImageDigest,
+		ImageTag:         container.Runtime.ContainerImageName,
 		UpdateDataTicker: time.NewTicker(utils.AddJitter(nm.cfg.InitialDelay, nm.cfg.MaxJitterPercentage)),
 		SyncChannel:      syncChannel,
 		K8sContainerID:   k8sContainerID,

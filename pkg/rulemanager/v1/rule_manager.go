@@ -213,6 +213,8 @@ func (rm *RuleManager) startRuleManager(ctx context.Context, container *containe
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:    container.Runtime.ContainerID,
+		ImageID:        container.Runtime.ContainerImageDigest,
+		ImageTag:       container.Runtime.ContainerImageName,
 		SyncChannel:    syncChannel,
 		K8sContainerID: k8sContainerID,
 		NsMntId:        container.Mntns,
