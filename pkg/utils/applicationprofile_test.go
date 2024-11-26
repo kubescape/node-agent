@@ -43,21 +43,21 @@ func Test_EnrichApplicationProfileContainer(t *testing.T) {
 	var test map[string]*v1beta1.HTTPEndpoint
 
 	// empty enrich
-	EnrichApplicationProfileContainer(existingContainer, []string{}, []string{}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{})
+	EnrichApplicationProfileContainer(existingContainer, []string{}, []string{}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{}, "", "")
 	assert.Equal(t, 5, len(existingContainer.Capabilities))
 	assert.Equal(t, 2, len(existingContainer.Execs))
 	assert.Equal(t, 5, len(existingContainer.Syscalls))
 	assert.Equal(t, 0, len(existingContainer.Opens))
 
 	// enrich with existing capabilities, syscalls - no change
-	EnrichApplicationProfileContainer(existingContainer, []string{"SETGID"}, []string{"listen"}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{})
+	EnrichApplicationProfileContainer(existingContainer, []string{"SETGID"}, []string{"listen"}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{}, "", "")
 	assert.Equal(t, 5, len(existingContainer.Capabilities))
 	assert.Equal(t, 2, len(existingContainer.Execs))
 	assert.Equal(t, 5, len(existingContainer.Syscalls))
 	assert.Equal(t, 0, len(existingContainer.Opens))
 
 	// enrich with new capabilities, syscalls - add
-	EnrichApplicationProfileContainer(existingContainer, []string{"NEW"}, []string{"xxx", "yyy"}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{})
+	EnrichApplicationProfileContainer(existingContainer, []string{"NEW"}, []string{"xxx", "yyy"}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{}, "", "")
 	assert.Equal(t, 6, len(existingContainer.Capabilities))
 	assert.Equal(t, 2, len(existingContainer.Execs))
 	assert.Equal(t, 7, len(existingContainer.Syscalls))
@@ -67,7 +67,7 @@ func Test_EnrichApplicationProfileContainer(t *testing.T) {
 	opens := map[string]mapset.Set[string]{
 		"/checkoutservice": mapset.NewSet("O_RDONLY", "O_WRONLY"),
 	}
-	EnrichApplicationProfileContainer(existingContainer, []string{"NEW"}, []string{"xxx", "yyy"}, map[string][]string{}, opens, test, map[string]v1beta1.RulePolicy{})
+	EnrichApplicationProfileContainer(existingContainer, []string{"NEW"}, []string{"xxx", "yyy"}, map[string][]string{}, opens, test, map[string]v1beta1.RulePolicy{}, "", "")
 	assert.Equal(t, 6, len(existingContainer.Capabilities))
 	assert.Equal(t, 2, len(existingContainer.Execs))
 	assert.Equal(t, 7, len(existingContainer.Syscalls))

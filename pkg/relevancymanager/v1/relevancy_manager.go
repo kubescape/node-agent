@@ -284,6 +284,8 @@ func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:      container.Runtime.ContainerID,
+		ImageID:          container.Runtime.ContainerImageDigest,
+		ImageTag:         container.Runtime.ContainerImageName,
 		UpdateDataTicker: time.NewTicker(utils.AddJitter(rm.cfg.InitialDelay, rm.cfg.MaxJitterPercentage)),
 		SyncChannel:      make(chan error, 10),
 		K8sContainerID:   k8sContainerID,
