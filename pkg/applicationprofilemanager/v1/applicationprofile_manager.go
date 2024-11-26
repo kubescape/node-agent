@@ -715,10 +715,6 @@ func (am *ApplicationProfileManager) ReportCapability(k8sContainerID, capability
 }
 
 func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string, args []string) {
-	// skip empty path
-	if path == "" {
-		return
-	}
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
