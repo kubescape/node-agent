@@ -1,3 +1,5 @@
-# Project maintainers
+# Maintainers
 
-Kubescape Node-agent is part of the Kubescape project, see maintainers [here](https://github.com/kubescape/kubescape/blob/master/MAINTAINERS.md)
+The Kubescape project manages this document in the central project repository.
+
+Go to the [centralized MAINTAINERS.md](https://github.com/kubescape/project-governance/blob/main/MAINTAINERS.md)
