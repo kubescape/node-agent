@@ -61,7 +61,6 @@ func TestApplicationProfileManager(t *testing.T) {
 	// report capability
 	go am.ReportCapability("ns/pod/cont", "NET_BIND_SERVICE")
 	// report file exec
-	go am.ReportFileExec("ns/pod/cont", "", []string{"ls"}) // will not be reported
 	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"})
 	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"})       // duplicate - not reported
 	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls", "-l"}) // additional arg - reported

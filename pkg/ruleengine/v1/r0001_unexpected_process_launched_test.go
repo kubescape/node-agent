@@ -82,6 +82,19 @@ func TestR0001UnexpectedProcessLaunched(t *testing.T) {
 		t.Errorf("Expected ruleResult to not be nil since exec is not whitelisted")
 	}
 
+	// Test /bin/sh
+	profile.Spec.Containers[0].Execs = append(profile.Spec.Containers[0].Execs, v1beta1.ExecCalls{
+		Path: "/bin/sh",
+		Args: []string{"/bin/sh", "-s", "unix:cmd"},
+	})
+	objCache.SetApplicationProfile(profile)
+
+	e.Comm = "sh"
+	e.Args = []string{"/bin/sh", "-s", "unix:cmd"}
+	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &objCache)
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since exec is whitelisted")
+	}
 }
 
 func TestR0001UnexpectedProcessLaunchedArgCompare(t *testing.T) {
