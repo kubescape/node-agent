@@ -153,8 +153,8 @@ github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e/go.mod h1:nSuG5e5P
 github.com/chzyer/readline v1.5.1/go.mod h1:Eh+b79XXUwfKfcPLepksvw2tcLE/Ct21YObkaSkeBlk=
 github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1/go.mod h1:Q3SI9o4m/ZMnBNeIyt5eFwwo7qiLfzFZmjNmxjkiQlU=
 github.com/chzyer/test v1.0.0/go.mod h1:2JlltgoNkt4TW/z9V/IzDdFaMTM2JPIi26O1pF38GC8=
-github.com/cilium/cilium v1.16.1 h1:7FiLrRJbO3d/RE423FUN0GxhrFDQBYRwr1veHN7uBys=
-github.com/cilium/cilium v1.16.1/go.mod h1:SIurqFNFBU9/sQTPC9tvrOktAMDnQOGPBCSYtsnjxp4=
+github.com/cilium/cilium v1.16.4 h1:YVyed/90Pfy5zyV1/v2uFLgcyWLj9/I4Sr3x3QGNRag=
+github.com/cilium/cilium v1.16.4/go.mod h1:Wgi1kl0UaiOmnzFxNAr7rON5tMp4GaiQrIvp0b2gJE0=
 github.com/cilium/ebpf v0.16.0 h1:+BiEnHL6Z7lXnlGUsXQPPAE7+kenAd4ES8MQ5min0Ok=
 github.com/cilium/ebpf v0.16.0/go.mod h1:L7u2Blt2jMM/vLAVgjxluxtBKlz3/GWjB0dMOEngfwE=
 github.com/circonus-labs/circonus-gometrics v2.3.1+incompatible/go.mod h1:nmEj6Dob7S7YxXgwXpfOuvO54S+tGdZdw9fuRZt25Ag=
@@ -842,8 +842,8 @@ github.com/uptrace/uptrace-go v1.30.1 h1:9Bb3bIfPZ9LmtwAbKpN7+nX8iVwx+LmVe/Cuilj
 github.com/uptrace/uptrace-go v1.30.1/go.mod h1:Sy6C30poEuG7ecG4Rcy4cBrC/jw8qJGHonXO3bXS5aQ=
 github.com/viant/assertly v0.4.8/go.mod h1:aGifi++jvCrUaklKEKT0BU95igDNaqkvz+49uaYMPRU=
 github.com/viant/toolbox v0.24.0/go.mod h1:OxMCG57V0PXuIP2HNQrtJf2CjqdmbrOx5EkMILuUhzM=
-github.com/vishvananda/netlink v1.3.0 h1:X7l42GfcV4S6E4vHTsw48qbrV+9PVojNfIhZcwQdrZk=
-github.com/vishvananda/netlink v1.3.0/go.mod h1:i6NetklAujEcC6fK0JPjT8qSwWyO0HLn4UKG+hGqeJs=
+github.com/vishvananda/netlink v1.3.1-0.20241022031324-976bd8de7d81 h1:9fkQcQYvtTr9ayFXuMfDMVuDt4+BYG9FwsGLnrBde0M=
+github.com/vishvananda/netlink v1.3.1-0.20241022031324-976bd8de7d81/go.mod h1:i6NetklAujEcC6fK0JPjT8qSwWyO0HLn4UKG+hGqeJs=
 github.com/wagoodman/go-partybus v0.0.0-20230516145632-8ccac152c651 h1:jIVmlAFIqV3d+DOxazTR9v+zgj8+VYuQBzPgBZvWBHA=
 github.com/wagoodman/go-partybus v0.0.0-20230516145632-8ccac152c651/go.mod h1:b26F2tHLqaoRQf8DywqzVaV1MQ9yvjb0OMcNl7Nxu20=
 github.com/wagoodman/go-progress v0.0.0-20230925121702-07e42b3cdba0 h1:0KGbf+0SMg+UFy4e1A/CPVvXn21f1qtWdeJwxZFoQG8=
