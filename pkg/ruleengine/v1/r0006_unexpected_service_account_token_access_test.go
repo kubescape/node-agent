@@ -1,12 +1,14 @@
 package ruleengine
 
 import (
+	"fmt"
 	"testing"
 
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
 
 func createTestEvent0006(containerName, path string, flags []string) *traceropentype.Event {
@@ -95,6 +97,18 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 				[]string{"O_RDONLY"}),
 			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
 				Path:  "/run/secrets/eks.amazonaws.com/serviceaccount/..2024_11_21_04_30_58.850095521/namespace",
+				Flags: []string{"O_RDONLY"},
+			}}),
+			expectFailure: false, // Should pass because normalized directory matches
+		},
+		// Tests with EKS paths and timestamps
+		{
+			name: "whitelisted eks token access with timestamps with compress",
+			event: createTestEvent0006("test",
+				"/run/secrets/eks.amazonaws.com/serviceaccount/..2024_11_1111_24_34_58.850095521/token",
+				[]string{"O_RDONLY"}),
+			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
+				Path:  fmt.Sprintf("/run/secrets/eks.amazonaws.com/serviceaccount/%s/token", dynamicpathdetector.DynamicIdentifier),
 				Flags: []string{"O_RDONLY"},
 			}}),
 			expectFailure: false, // Should pass because normalized directory matches

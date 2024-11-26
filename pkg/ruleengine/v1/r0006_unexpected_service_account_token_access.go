@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
@@ -57,7 +58,7 @@ func getTokenBasePath(path string) string {
 }
 
 // normalizeTokenPath removes timestamp directories from the path while maintaining
-// the essential structure. Optimized for minimal allocations.
+// the essential structure. Handles both timestamp directories and dynamic identifiers.
 func normalizeTokenPath(path string) string {
 	// Get the base path - if not a token path, return original
 	basePath := getTokenBasePath(path)
@@ -74,6 +75,12 @@ func normalizeTokenPath(path string) string {
 		return filepath.Join(basePath, finalComponent)
 	}
 
+	// Check if the path contains a dynamic identifier
+	if strings.Contains(middle, dynamicpathdetector.DynamicIdentifier) {
+		// If it has a dynamic identifier, keep the base structure but normalize the variable part
+		return filepath.Join(basePath, dynamicpathdetector.DynamicIdentifier, finalComponent)
+	}
+
 	// Process middle parts
 	var normalizedMiddle strings.Builder
 	parts := strings.Split(middle, "/")
@@ -83,7 +90,9 @@ func normalizeTokenPath(path string) string {
 		}
 		// Skip timestamp directories (starting with ".." and containing "_")
 		if strings.HasPrefix(part, "..") && strings.Contains(part, "_") {
-			continue
+			normalizedMiddle.WriteString("/")
+			normalizedMiddle.WriteString(dynamicpathdetector.DynamicIdentifier)
+			break // We only need one dynamic identifier
 		}
 		normalizedMiddle.WriteString("/")
 		normalizedMiddle.WriteString(part)
