@@ -33,7 +33,9 @@ var (
 
 func getExecPathFromEvent(event *tracerexectype.Event) string {
 	if len(event.Args) > 0 {
-		return event.Args[0]
+		if event.Args[0] != "" {
+			return event.Args[0]
+		}
 	}
 	return event.Comm
 }

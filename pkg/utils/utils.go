@@ -441,7 +441,9 @@ func GetHostFilePathFromEvent(event K8sEvent, containerPid uint32) (string, erro
 // Get the path of the executable from the given event.
 func GetExecPathFromEvent(event *tracerexectype.Event) string {
 	if len(event.Args) > 0 {
-		return event.Args[0]
+		if event.Args[0] != "" {
+			return event.Args[0]
+		}
 	}
 	return event.Comm
 }
