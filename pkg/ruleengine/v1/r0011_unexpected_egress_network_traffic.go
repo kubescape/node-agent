@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"net"
-	"slices"
-	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
@@ -69,13 +67,19 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 			return nil
 		}
 
+		// Skip partially watched containers.
+		if annotations := nn.GetAnnotations(); annotations != nil {
+			if annotations["kubescape.io/completion"] == string(utils.WatchedContainerCompletionStatusPartial) {
+				return nil
+			}
+		}
+
 		nnContainer, err := getContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
 		if err != nil {
 			return nil
 		}
 
 		domain := objCache.DnsCache().ResolveIpToDomain(networkEvent.DstEndpoint.Addr)
-
 		if domain != "" {
 			return nil
 		}
@@ -83,11 +87,6 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 		// Check if the address is in the egress list and isn't in cluster.
 		for _, egress := range nnContainer.Egress {
 			if egress.IPAddress == networkEvent.DstEndpoint.Addr {
-				return nil
-			}
-
-			// Check if we seen this dns name before and it's in-cluster address and in the egress list.
-			if domain != "" && (strings.HasSuffix(domain, "svc.cluster.local.") || slices.Contains(egress.DNSNames, domain)) {
 				return nil
 			}
 		}
@@ -163,11 +162,6 @@ func isPrivateIP(ip string) bool {
 		return true
 	}
 
-	// Check if IP is metadata server
-	if parsedIP.Equal(net.ParseIP("169.254.169.254")) {
-		return true
-	}
-
 	// Check if IP is in private IP ranges
 	privateIPRanges := []struct {
 		start net.IP
@@ -180,6 +174,8 @@ func isPrivateIP(ip string) bool {
 		{net.ParseIP("224.0.0.0"), net.ParseIP("239.255.255.255")},
 		// Class E (Experimental)
 		{net.ParseIP("240.0.0.0"), net.ParseIP("255.255.255.255")},
+		// APIPA (sometimes used for local dns)
+		{net.ParseIP("169.254.0.0"), net.ParseIP("169.254.255.255")},
 	}
 
 	for _, r := range privateIPRanges {

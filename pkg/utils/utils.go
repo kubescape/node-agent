@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash"
@@ -17,15 +18,17 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	mapset "github.com/deckarep/golang-set/v2"
-
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
+	runtimeclient "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/runtime-client"
+	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
+	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
+	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
@@ -34,18 +37,11 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/validation"
-
 	"github.com/prometheus/procfs"
-
-	runtimeclient "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/runtime-client"
-	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
-	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
+	kubeletconfigv1beta1 "k8s.io/kubelet/config/v1beta1"
 )
 
 var (
@@ -445,7 +441,9 @@ func GetHostFilePathFromEvent(event K8sEvent, containerPid uint32) (string, erro
 // Get the path of the executable from the given event.
 func GetExecPathFromEvent(event *tracerexectype.Event) string {
 	if len(event.Args) > 0 {
-		return event.Args[0]
+		if event.Args[0] != "" {
+			return event.Args[0]
+		}
 	}
 	return event.Comm
 }
@@ -475,9 +473,9 @@ func GetFileSize(path string) (int64, error) {
 }
 
 func CalculateSHA256FileExecHash(path string, args []string) string {
-	hash := sha256.New()
-	hash.Write([]byte(fmt.Sprintf("%s;%v", path, args)))
-	hashInBytes := hash.Sum(nil)
+	hsh := sha256.New()
+	hsh.Write([]byte(fmt.Sprintf("%s;%v", path, args)))
+	hashInBytes := hsh.Sum(nil)
 	return hex.EncodeToString(hashInBytes)
 }
 
@@ -683,49 +681,6 @@ func ChunkBy[T any](items []T, chunkSize int) [][]T {
 }
 
 // isUnixSocket checks if the given path is a Unix socket.
-func isUnixSocket(path string) (bool, error) {
-	fileInfo, err := os.Stat(path)
-	if err != nil {
-		return false, err // Could not obtain the file stats
-	}
-
-	stat, ok := fileInfo.Sys().(*syscall.Stat_t)
-	if !ok {
-		return false, fmt.Errorf("not a unix file")
-	}
-
-	// Check if the file is a socket
-	return (stat.Mode & syscall.S_IFMT) == syscall.S_IFSOCK, nil
-}
-
-func DetectContainerRuntimes(hostMount string) ([]*containerutilsTypes.RuntimeConfig, error) {
-	runtimes := map[igtypes.RuntimeName]string{
-		igtypes.RuntimeNameDocker:     runtimeclient.DockerDefaultSocketPath,
-		igtypes.RuntimeNameCrio:       runtimeclient.CrioDefaultSocketPath,
-		igtypes.RuntimeNameContainerd: runtimeclient.ContainerdDefaultSocketPath,
-		igtypes.RuntimeNamePodman:     runtimeclient.PodmanDefaultSocketPath,
-	}
-
-	detectedRuntimes := make([]*containerutilsTypes.RuntimeConfig, 0)
-
-	for runtimeName, socketPath := range runtimes {
-		// Check if the socket is available on the host mount
-		socketPath = hostMount + socketPath
-		if isSocket, err := isUnixSocket(socketPath); err == nil && isSocket {
-			logger.L().Info("Detected container runtime", helpers.String("runtime", runtimeName.String()), helpers.String("socketPath", socketPath))
-			detectedRuntimes = append(detectedRuntimes, &containerutilsTypes.RuntimeConfig{
-				Name:       runtimeName,
-				SocketPath: socketPath,
-			})
-		}
-	}
-
-	if len(detectedRuntimes) == 0 {
-		return nil, fmt.Errorf("no container runtimes detected at the following paths: %v", runtimes)
-	}
-
-	return detectedRuntimes, nil
-}
 
 func DetectContainerRuntimeViaK8sAPI(ctx context.Context, k8sClient *k8sinterface.KubernetesApi, nodeName string) (*containerutilsTypes.RuntimeConfig, error) {
 	// Get the current node
@@ -735,17 +690,23 @@ func DetectContainerRuntimeViaK8sAPI(ctx context.Context, k8sClient *k8sinterfac
 	if err != nil {
 		return nil, fmt.Errorf("failed to list nodes: %v", err)
 	}
-
 	if len(nodes.Items) == 0 {
 		return nil, fmt.Errorf("no node found with name: %s", nodeName)
 	}
-
 	node := nodes.Items[0]
+	// parse the runtime info
 	runtimeConfig := parseRuntimeInfo(node.Status.NodeInfo.ContainerRuntimeVersion)
 	if runtimeConfig.Name == igtypes.RuntimeNameUnknown {
 		return nil, fmt.Errorf("unknown container runtime: %s", node.Status.NodeInfo.ContainerRuntimeVersion)
 	}
-
+	// override the socket path
+	realSocketPath, err := getContainerRuntimeSocketPath(k8sClient, nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container runtime socket path from Kubelet configz: %v", err)
+	}
+	runtimeConfig.SocketPath = realSocketPath
+	// unset the runtime protocol
+	runtimeConfig.RuntimeProtocol = ""
 	return runtimeConfig, nil
 }
 
@@ -782,4 +743,49 @@ func parseRuntimeInfo(version string) *containerutilsTypes.RuntimeConfig {
 			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
 		}
 	}
+}
+
+func getContainerRuntimeSocketPath(clientset *k8sinterface.KubernetesApi, nodeName string) (string, error) {
+	kubeletConfig, err := getCurrentKubeletConfig(clientset, nodeName)
+	if err != nil {
+		return "", fmt.Errorf("getting /configz: %w", err)
+	}
+	socketPath, found := strings.CutPrefix(kubeletConfig.ContainerRuntimeEndpoint, "unix://")
+	if !found {
+		return "", fmt.Errorf("socket path does not start with unix:// %s", helpers.String("socketPath", kubeletConfig.ContainerRuntimeEndpoint))
+	}
+	logger.L().Info("using the detected container runtime socket path from Kubelet's config", helpers.String("socketPath", socketPath))
+	return socketPath, nil
+}
+
+// The /configz endpoint isn't officially documented. It was introduced in Kubernetes 1.26 and been around for a long time
+// as stated in https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/component-base/configz/OWNERS
+func getCurrentKubeletConfig(clientset *k8sinterface.KubernetesApi, nodeName string) (*kubeletconfigv1beta1.KubeletConfiguration, error) {
+	resp, err := clientset.GetKubernetesClient().CoreV1().RESTClient().Get().Resource("nodes").
+		Name(nodeName).Suffix("proxy", "configz").DoRaw(context.TODO())
+	if err != nil {
+		return nil, fmt.Errorf("fetching /configz from %q: %w", nodeName, err)
+	}
+	kubeCfg, err := decodeConfigz(resp)
+	if err != nil {
+		return nil, err
+	}
+	return kubeCfg, nil
+}
+
+// Decodes the http response from /configz and returns the kubelet configuration
+func decodeConfigz(respBody []byte) (*kubeletconfigv1beta1.KubeletConfiguration, error) {
+	// This hack because /configz reports the following structure:
+	// {"kubeletconfig": {the JSON representation of kubeletconfigv1beta1.KubeletConfiguration}}
+	type configzWrapper struct {
+		ComponentConfig kubeletconfigv1beta1.KubeletConfiguration `json:"kubeletconfig"`
+	}
+
+	configz := configzWrapper{}
+	err := json.Unmarshal(respBody, &configz)
+	if err != nil {
+		return nil, err
+	}
+
+	return &configz.ComponentConfig, nil
 }

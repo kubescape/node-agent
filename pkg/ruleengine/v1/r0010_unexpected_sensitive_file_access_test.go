@@ -8,6 +8,7 @@ import (
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
 
 func createTestEvent(path string, flags []string) *events.OpenEvent {
@@ -115,6 +116,76 @@ func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 			profile:     createTestProfile("test", []string{"/test"}, []string{"O_RDONLY"}),
 			expectAlert: true,
 			description: "Should alert for path traversal attempts",
+		},
+		// Dynamic path matching tests
+		{
+			name:        "Dynamic directory match",
+			event:       createTestEvent("/var/log/2024_01_01/app.log", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/var/log/" + dynamicpathdetector.DynamicIdentifier + "/app.log"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert when path matches dynamic pattern",
+		},
+		{
+			name:        "Dynamic multi-segment match",
+			event:       createTestEvent("/var/log/2024/01/01/app.log", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/var/log/" + dynamicpathdetector.DynamicIdentifier + "/" + dynamicpathdetector.DynamicIdentifier + "/" + dynamicpathdetector.DynamicIdentifier + "/app.log"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert when path matches multiple dynamic segments",
+		},
+		{
+			name:        "Dynamic prefix match",
+			event:       createTestEvent("/data/customer1/config.json", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/" + dynamicpathdetector.DynamicIdentifier + "/customer1/config.json"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert when path matches dynamic prefix",
+		},
+		{
+			name:        "Dynamic suffix match",
+			event:       createTestEvent("/etc/config/v1.2.3/settings.yaml", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/etc/config/" + dynamicpathdetector.DynamicIdentifier + "/settings.yaml"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert when path matches dynamic suffix",
+		},
+		{
+			name:        "Dynamic timestamp directory match",
+			event:       createTestEvent("/var/log/pods/2024_01_01_12_00_00/container.log", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/var/log/pods/" + dynamicpathdetector.DynamicIdentifier + "/container.log"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert when timestamp directory matches dynamic pattern",
+		},
+		{
+			name:        "Dynamic service account token path",
+			event:       createTestEvent("/run/secrets/kubernetes.io/serviceaccount/..2024_01_01_12_00_00.123456789/token", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/run/secrets/kubernetes.io/serviceaccount/" + dynamicpathdetector.DynamicIdentifier + "/token"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert when service account token path matches dynamic pattern",
+		},
+		{
+			name:            "Sensitive file with dynamic path not whitelisted",
+			event:           createTestEvent("/etc/kubernetes/..2024_01_01/secret.yaml", []string{"O_RDONLY"}),
+			profile:         createTestProfile("test", []string{"/var/log/" + dynamicpathdetector.DynamicIdentifier + "/app.log"}, []string{"O_RDONLY"}),
+			additionalPaths: []interface{}{"/etc/kubernetes"},
+			expectAlert:     true,
+			description:     "Should alert when sensitive file with timestamp is not whitelisted",
+		},
+		{
+			name:  "Multiple whitelisted dynamic paths",
+			event: createTestEvent("/var/log/2024_01_01/app.log", []string{"O_RDONLY"}),
+			profile: createTestProfile("test",
+				[]string{
+					"/tmp/" + dynamicpathdetector.DynamicIdentifier + "/test.log",
+					"/var/log/" + dynamicpathdetector.DynamicIdentifier + "/app.log",
+				},
+				[]string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert when path matches one of multiple dynamic patterns",
+		},
+		{
+			name:        "Mixed static and dynamic segments",
+			event:       createTestEvent("/data/users/john/2024_01_01/profile.json", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/data/users/john/" + dynamicpathdetector.DynamicIdentifier + "/profile.json"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert when static segments match and dynamic segment matches timestamp",
 		},
 	}
 

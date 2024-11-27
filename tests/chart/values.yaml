@@ -64,7 +64,7 @@ nodeAgent:
     alertManagerExporterUrls: [
       "alertmanager-operated.monitoring.svc.cluster.local:9093"
     ]
-    stdoutExporter: false
+    stdoutExporter: true
     syslogExporterURL: ""
 
   serviceMonitor:

@@ -34,7 +34,9 @@ var (
 
 func getExecPathFromEvent(event *events.ExecEvent) string {
 	if len(event.Args) > 0 {
-		return event.Args[0]
+		if event.Args[0] != "" {
+			return event.Args[0]
+		}
 	}
 	return event.Comm
 }

@@ -211,8 +211,13 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			path = event.Args[0]
 		}
 
+		if path == "" {
+			return
+		}
+
 		ruleManager.ReportEvent(utils.ExecveEventType, &event)
 		malwareManager.ReportEvent(utils.ExecveEventType, &event)
+
 		metrics.ReportEvent(utils.ExecveEventType)
 		processManager.ReportEvent(utils.ExecveEventType, &event)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)

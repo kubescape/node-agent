@@ -1,3 +1,3 @@
 # malicious-app image
 
-`uay.io/kubescape/node-agent:maliciousapp`
+`quay.io/kubescape/node-agent:maliciousapp`
