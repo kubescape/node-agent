@@ -113,6 +113,18 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 			}}),
 			expectFailure: false, // Should pass because normalized directory matches
 		},
+		// Tests with EKS paths and timestamps
+		{
+			name: "whitelisted eks token access with timestamps with compress hello world",
+			event: createTestEvent0006("test",
+				"/var/run/secrets/eks.amazonaws.com/serviceaccount/..2024_11_1111_24_34_58.850095521/token",
+				[]string{"O_RDONLY"}),
+			profile: createTestProfile0006("test", []v1beta1.OpenCalls{{
+				Path:  fmt.Sprintf("/%s/%s/%s/%s/%s/%s/token", dynamicpathdetector.DynamicIdentifier, dynamicpathdetector.DynamicIdentifier, dynamicpathdetector.DynamicIdentifier, dynamicpathdetector.DynamicIdentifier, dynamicpathdetector.DynamicIdentifier, dynamicpathdetector.DynamicIdentifier),
+				Flags: []string{"O_RDONLY"},
+			}}),
+			expectFailure: false, // Should pass because normalized directory matches
+		},
 		// Tests with k8s paths and timestamps
 		{
 			name: "non whitelisted k8s token access with timestamps",
