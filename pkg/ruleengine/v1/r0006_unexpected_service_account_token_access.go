@@ -59,52 +59,25 @@ func getTokenBasePath(path string) string {
 
 // normalizeTokenPath removes timestamp directories from the path while maintaining
 // the essential structure. Handles both timestamp directories and dynamic identifiers.
-func normalizeTokenPath(path string) string {
-	// Get the base path - if not a token path, return original
-	basePath := getTokenBasePath(path)
-	if basePath == "" {
-		return path
-	}
+func normalizeTimestampPath(path string) string {
+	parts := strings.Split(filepath.Clean(path), string(filepath.Separator))
+	var normalized []string
 
-	// Get the final component (usually "token", "ca.crt", etc.)
-	finalComponent := filepath.Base(path)
-
-	// Split the middle part (between base path and final component)
-	middle := strings.TrimPrefix(filepath.Dir(path), basePath)
-	if middle == "" {
-		return filepath.Join(basePath, finalComponent)
-	}
-
-	// Check if the path contains a dynamic identifier
-	if strings.Contains(middle, dynamicpathdetector.DynamicIdentifier) {
-		// If it has a dynamic identifier, keep the base structure but normalize the variable part
-		return filepath.Join(basePath, dynamicpathdetector.DynamicIdentifier, finalComponent)
-	}
-
-	// Process middle parts
-	var normalizedMiddle strings.Builder
-	parts := strings.Split(middle, "/")
 	for _, part := range parts {
 		if part == "" {
 			continue
 		}
-		// Skip timestamp directories (starting with ".." and containing "_")
+
+		// Replace timestamp directories with their base form
 		if strings.HasPrefix(part, "..") && strings.Contains(part, "_") {
-			normalizedMiddle.WriteString("/")
-			normalizedMiddle.WriteString(dynamicpathdetector.DynamicIdentifier)
-			break // We only need one dynamic identifier
+			normalized = append(normalized, "..timestamp")
+			continue
 		}
-		normalizedMiddle.WriteString("/")
-		normalizedMiddle.WriteString(part)
+
+		normalized = append(normalized, part)
 	}
 
-	// If no middle parts remain, join base and final
-	if normalizedMiddle.Len() == 0 {
-		return filepath.Join(basePath, finalComponent)
-	}
-
-	// Join all parts
-	return basePath + normalizedMiddle.String() + "/" + finalComponent
+	return "/" + strings.Join(normalized, "/")
 }
 
 func CreateRuleR0006UnexpectedServiceAccountTokenAccess() *R0006UnexpectedServiceAccountTokenAccess {
@@ -149,12 +122,12 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 	}
 
 	// Normalize the accessed path once
-	normalizedAccessedPath := normalizeTokenPath(openEvent.FullPath)
-	dirPath := filepath.Dir(normalizedAccessedPath)
+	normalizedAccessedPath := normalizeTimestampPath(openEvent.FullPath)
 
 	// Check against whitelisted paths
 	for _, open := range appProfileOpenList.Opens {
-		if dirPath == filepath.Dir(normalizeTokenPath(open.Path)) {
+		normalizedWhitelistedPath := normalizeTimestampPath(open.Path)
+		if dynamicpathdetector.CompareDynamic(filepath.Dir(normalizedWhitelistedPath), filepath.Dir(normalizedAccessedPath)) {
 			return nil
 		}
 	}
