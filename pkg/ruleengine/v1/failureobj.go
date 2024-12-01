@@ -17,6 +17,7 @@ type GenericRuleFailure struct {
 	RuleAlert              apitypes.RuleAlert
 	RuntimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails
 	RuleID                 string
+	CloudServices          []string
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {
@@ -41,6 +42,14 @@ func (rule *GenericRuleFailure) GetRuntimeAlertK8sDetails() apitypes.RuntimeAler
 
 func (rule *GenericRuleFailure) GetRuleId() string {
 	return rule.RuleID
+}
+
+func (rule *GenericRuleFailure) GetCloudServices() []string {
+	return rule.CloudServices
+}
+
+func (rule *GenericRuleFailure) SetCloudServices(cloudServices []string) {
+	rule.CloudServices = cloudServices
 }
 
 func (rule *GenericRuleFailure) SetBaseRuntimeAlert(baseRuntimeAlert apitypes.BaseRuntimeAlert) {
