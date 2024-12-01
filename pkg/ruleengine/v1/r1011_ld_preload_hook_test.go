@@ -16,7 +16,7 @@ func TestR1011LdPreloadHook(t *testing.T) {
 	// Create a new rule
 	r := CreateRuleR1011LdPreloadHook() // Assert r is not nil
 	if r == nil {
-		t.Errorf("Expected r to not be nil")
+		t.Errorf("Expected r to not be nilllll")
 	}
 
 	objCache := RuleObjectCacheMock{}
