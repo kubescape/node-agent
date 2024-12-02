@@ -2,6 +2,7 @@ package exporters
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,36 +20,50 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
+const (
+	defaultTimeout         = 5 * time.Second
+	defaultMaxAlertsPerMin = 100
+	defaultMethod          = "POST"
+	alertsEndpoint         = "/v1/runtimealerts"
+	malwareRuleID          = "R3000"
+	apiVersion             = "kubescape.io/v1"
+	runtimeAlertsKind      = "RuntimeAlerts"
+)
+
+type AlertType string
+
+const (
+	AlertTypeLimitReached AlertType = "AlertLimitReached"
+)
+
 type HTTPExporterConfig struct {
-	// URL is the URL to send the HTTP request to
-	URL string `json:"url"`
-	// Headers is a map of headers to send in the HTTP request
-	Headers map[string]string `json:"headers"`
-	// Timeout is the timeout for the HTTP request
-	TimeoutSeconds int `json:"timeoutSeconds"`
-	// Method is the HTTP method to use for the HTTP request
-	Method             string `json:"method"`
-	MaxAlertsPerMinute int    `json:"maxAlertsPerMinute"`
+	URL                string            `json:"url"`
+	Headers            map[string]string `json:"headers"`
+	TimeoutSeconds     int               `json:"timeoutSeconds"`
+	Method             string            `json:"method"`
+	MaxAlertsPerMinute int               `json:"maxAlertsPerMinute"`
 }
 
-// we will have a CRD-like json struct to send in the HTTP request
 type HTTPExporter struct {
-	config      HTTPExporterConfig
-	Host        string `json:"host"`
-	NodeName    string `json:"nodeName"`
-	ClusterName string `json:"clusterName"`
-	httpClient  *http.Client
-	// alertCount is the number of alerts sent in the last minute, used to limit the number of alerts sent, so we don't overload the system or reach the rate limit
-	alertCount         int
-	alertCountLock     sync.Mutex
-	alertCountStart    time.Time
-	alertLimitNotified bool
-	cloudMetadata      *apitypes.CloudMetadata
+	config        HTTPExporterConfig
+	host          string
+	nodeName      string
+	clusterName   string
+	httpClient    *http.Client
+	alertMetrics  *alertMetrics
+	cloudMetadata *apitypes.CloudMetadata
+}
+
+type alertMetrics struct {
+	sync.Mutex
+	count      int
+	startTime  time.Time
+	isNotified bool
 }
 
 type HTTPAlertsList struct {
 	Kind       string             `json:"kind"`
-	ApiVersion string             `json:"apiVersion"`
+	APIVersion string             `json:"apiVersion"`
 	Spec       HTTPAlertsListSpec `json:"spec"`
 }
 
@@ -58,186 +73,231 @@ type HTTPAlertsListSpec struct {
 	CloudMetadata apitypes.CloudMetadata  `json:"cloudMetadata"`
 }
 
-func (config *HTTPExporterConfig) Validate() error {
-	if config.Method == "" {
-		config.Method = "POST"
-	} else if config.Method != "POST" && config.Method != "PUT" {
-		return fmt.Errorf("method must be POST or PUT")
-	}
-	if config.TimeoutSeconds == 0 {
-		config.TimeoutSeconds = 5
-	}
-	if config.MaxAlertsPerMinute == 0 {
-		config.MaxAlertsPerMinute = 100
-	}
-	if config.Headers == nil {
-		config.Headers = make(map[string]string)
-	}
-	if config.URL == "" {
-		return fmt.Errorf("URL is required")
-	}
-	return nil
-}
-
-// InitHTTPExporter initializes an HTTPExporter with the given URL, headers, timeout, and method
-func InitHTTPExporter(config HTTPExporterConfig, clusterName string, nodeName string, cloudMetadata *apitypes.CloudMetadata) (*HTTPExporter, error) {
-	if err := config.Validate(); err != nil {
-		return nil, err
+// NewHTTPExporter creates a new HTTPExporter instance
+func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cloudMetadata *apitypes.CloudMetadata) (*HTTPExporter, error) {
+	if err := config.validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
 	return &HTTPExporter{
-		ClusterName: clusterName,
-		NodeName:    nodeName,
 		config:      config,
+		nodeName:    nodeName,
+		clusterName: clusterName,
 		httpClient: &http.Client{
 			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
 		},
+		alertMetrics:  &alertMetrics{},
 		cloudMetadata: cloudMetadata,
 	}, nil
 }
 
-func (exporter *HTTPExporter) sendAlertLimitReached() {
-	httpAlert := apitypes.RuntimeAlert{
-		Message:   "Alert limit reached",
-		HostName:  exporter.Host,
-		AlertType: apitypes.AlertTypeRule, // TODO: change this to a new alert type. @bez
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName:      "AlertLimitReached",
-			Severity:       ruleenginev1.RulePrioritySystemIssue,
-			FixSuggestions: "Check logs for more information",
-		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			NodeName:    exporter.NodeName,
-			ClusterName: exporter.ClusterName,
-		},
+func (config *HTTPExporterConfig) validate() error {
+	if config.URL == "" {
+		return fmt.Errorf("URL is required")
 	}
 
-	logger.L().Error("Alert limit reached", helpers.Int("alerts", exporter.alertCount), helpers.String("since", exporter.alertCountStart.Format(time.RFC3339)))
-	exporter.sendInAlertList(httpAlert, apitypes.ProcessTree{})
+	if config.Method == "" {
+		config.Method = defaultMethod
+	} else if config.Method != "POST" && config.Method != "PUT" {
+		return fmt.Errorf("method must be POST or PUT")
+	}
+
+	if config.TimeoutSeconds == 0 {
+		config.TimeoutSeconds = int(defaultTimeout.Seconds())
+	}
+
+	if config.MaxAlertsPerMinute == 0 {
+		config.MaxAlertsPerMinute = defaultMaxAlertsPerMin
+	}
+
+	if config.Headers == nil {
+		config.Headers = make(map[string]string)
+	}
+
+	return nil
 }
 
-func (exporter *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
-	isLimitReached := exporter.checkAlertLimit()
-	if isLimitReached && !exporter.alertLimitNotified {
-		exporter.sendAlertLimitReached()
-		exporter.alertLimitNotified = true
-		return
+// SendRuleAlert implements the Exporter interface
+func (e *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
+	defer cancel()
+
+	if err := e.sendRuleAlertWithContext(ctx, failedRule); err != nil {
+		logger.L().Error("failed to send rule alert", helpers.Error(err))
+	}
+}
+
+// SendMalwareAlert implements the Exporter interface
+func (e *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
+	defer cancel()
+
+	if err := e.sendMalwareAlertWithContext(ctx, malwareResult); err != nil {
+		logger.L().Error("failed to send malware alert", helpers.Error(err))
+	}
+}
+
+// Internal methods with context support
+func (e *HTTPExporter) sendRuleAlertWithContext(ctx context.Context, failedRule ruleengine.RuleFailure) error {
+	if e.shouldSendLimitAlert() {
+		return e.sendAlertLimitReached(ctx)
 	}
 
-	// populate the RuntimeAlert struct with the data from the failedRule
-	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
-	k8sDetails.NodeName = exporter.NodeName
-	k8sDetails.ClusterName = exporter.ClusterName
+	alert := e.createRuleAlert(failedRule)
+	return e.sendAlert(ctx, alert, failedRule.GetRuntimeProcessDetails(), failedRule.GetCloudServices())
+}
 
-	httpAlert := apitypes.RuntimeAlert{
+func (e *HTTPExporter) sendMalwareAlertWithContext(ctx context.Context, result malwaremanager.MalwareResult) error {
+	if e.shouldSendLimitAlert() {
+		return e.sendAlertLimitReached(ctx)
+	}
+
+	alert := e.createMalwareAlert(result)
+	return e.sendAlert(ctx, alert, result.GetRuntimeProcessDetails(), nil)
+}
+
+func (e *HTTPExporter) createRuleAlert(failedRule ruleengine.RuleFailure) apitypes.RuntimeAlert {
+	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
+	k8sDetails.NodeName = e.nodeName
+	k8sDetails.ClusterName = e.clusterName
+
+	return apitypes.RuntimeAlert{
 		Message:                failedRule.GetRuleAlert().RuleDescription,
-		HostName:               exporter.Host,
+		HostName:               e.host,
 		AlertType:              apitypes.AlertTypeRule,
 		BaseRuntimeAlert:       failedRule.GetBaseRuntimeAlert(),
 		RuntimeAlertK8sDetails: k8sDetails,
 		RuleAlert:              failedRule.GetRuleAlert(),
 		RuleID:                 failedRule.GetRuleId(),
 	}
-	exporter.sendInAlertList(httpAlert, failedRule.GetRuntimeProcessDetails())
 }
 
-func (exporter *HTTPExporter) sendInAlertList(httpAlert apitypes.RuntimeAlert, processTree apitypes.ProcessTree) {
-	// create the HTTPAlertsListSpec struct
-	// TODO: accumulate alerts and send them in a batch
-	var cloudMetadata apitypes.CloudMetadata
-	if exporter.cloudMetadata == nil {
-		cloudMetadata = apitypes.CloudMetadata{}
-	} else {
-		cloudMetadata = *exporter.cloudMetadata
+func (e *HTTPExporter) createMalwareAlert(result malwaremanager.MalwareResult) apitypes.RuntimeAlert {
+	k8sDetails := result.GetRuntimeAlertK8sDetails()
+	k8sDetails.NodeName = e.nodeName
+	k8sDetails.ClusterName = e.clusterName
+
+	return apitypes.RuntimeAlert{
+		Message:                fmt.Sprintf("Malware detected: %s", result.GetBasicRuntimeAlert().AlertName),
+		HostName:               e.host,
+		AlertType:              apitypes.AlertTypeMalware,
+		BaseRuntimeAlert:       result.GetBasicRuntimeAlert(),
+		RuntimeAlertK8sDetails: k8sDetails,
+		MalwareAlert:           result.GetMalwareRuntimeAlert(),
+		RuleID:                 malwareRuleID,
+	}
+}
+
+func (e *HTTPExporter) sendAlert(ctx context.Context, alert apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	payload := e.createAlertPayload(alert, processTree, cloudServices)
+	return e.sendHTTPRequest(ctx, payload)
+}
+
+func (e *HTTPExporter) createAlertPayload(alert apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) HTTPAlertsList {
+	cloudMetadata := e.getCloudMetadata(cloudServices)
+
+	return HTTPAlertsList{
+		Kind:       runtimeAlertsKind,
+		APIVersion: apiVersion,
+		Spec: HTTPAlertsListSpec{
+			Alerts:        []apitypes.RuntimeAlert{alert},
+			ProcessTree:   processTree,
+			CloudMetadata: cloudMetadata,
+		},
+	}
+}
+
+func (e *HTTPExporter) getCloudMetadata(cloudServices []string) apitypes.CloudMetadata {
+	if e.cloudMetadata == nil {
+		return apitypes.CloudMetadata{}
 	}
 
-	httpAlertsListSpec := HTTPAlertsListSpec{
-		Alerts:        []apitypes.RuntimeAlert{httpAlert},
-		ProcessTree:   processTree,
-		CloudMetadata: cloudMetadata,
-	}
-	// create the HTTPAlertsList struct
-	httpAlertsList := HTTPAlertsList{
-		Kind:       "RuntimeAlerts",
-		ApiVersion: "kubescape.io/v1",
-		Spec:       httpAlertsListSpec,
-	}
+	metadata := *e.cloudMetadata
+	metadata.Services = cloudServices
+	return metadata
+}
 
-	// create the JSON representation of the HTTPAlertsList struct
-	bodyBytes, err := json.Marshal(httpAlertsList)
+func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload HTTPAlertsList) error {
+	body, err := json.Marshal(payload)
 	if err != nil {
-		logger.L().Error("failed to marshal HTTPAlertsList", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
-	bodyReader := bytes.NewReader(bodyBytes)
 
-	// send the HTTP request
-	req, err := http.NewRequest(exporter.config.Method,
-		exporter.config.URL+"/v1/runtimealerts", bodyReader)
+	req, err := http.NewRequestWithContext(ctx,
+		e.config.Method,
+		e.config.URL+alertsEndpoint,
+		bytes.NewReader(body))
 	if err != nil {
-		logger.L().Error("failed to create HTTP request", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to create request: %w", err)
 	}
-	for key, value := range exporter.config.Headers {
+
+	for key, value := range e.config.Headers {
 		req.Header.Set(key, value)
 	}
 
-	resp, err := exporter.httpClient.Do(req)
+	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		logger.L().Error("failed to send HTTP request", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		logger.L().Error("Received non-2xx status code", helpers.Int("status", resp.StatusCode))
-		return
+		return fmt.Errorf("received non-2xx status code: %d", resp.StatusCode)
 	}
 
-	// discard the body
 	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		logger.L().Error("failed to clear response body", helpers.Error(err))
+		logger.L().Error("failed to drain response body", helpers.Error(err))
 	}
+
+	return nil
 }
 
-func (exporter *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
-	isLimitReached := exporter.checkAlertLimit()
-	if isLimitReached && !exporter.alertLimitNotified {
-		exporter.sendAlertLimitReached()
-		exporter.alertLimitNotified = true
-		return
+func (e *HTTPExporter) shouldSendLimitAlert() bool {
+	e.alertMetrics.Lock()
+	defer e.alertMetrics.Unlock()
+
+	if e.alertMetrics.startTime.IsZero() {
+		e.alertMetrics.startTime = time.Now()
 	}
 
-	k8sDetails := malwareResult.GetRuntimeAlertK8sDetails()
-	k8sDetails.NodeName = exporter.NodeName
-	k8sDetails.ClusterName = exporter.ClusterName
-
-	httpAlert := apitypes.RuntimeAlert{
-		Message:                fmt.Sprintf("Malware detected: %s", malwareResult.GetBasicRuntimeAlert().AlertName),
-		HostName:               exporter.Host,
-		AlertType:              apitypes.AlertTypeMalware,
-		BaseRuntimeAlert:       malwareResult.GetBasicRuntimeAlert(),
-		RuntimeAlertK8sDetails: k8sDetails,
-		MalwareAlert:           malwareResult.GetMalwareRuntimeAlert(),
-		RuleID:                 "R3000", // Hardcoded rule ID for malware alerts.
+	if time.Since(e.alertMetrics.startTime) > time.Minute {
+		e.resetAlertMetrics()
+		return false
 	}
-	exporter.sendInAlertList(httpAlert, malwareResult.GetRuntimeProcessDetails())
+
+	e.alertMetrics.count++
+	return e.alertMetrics.count > e.config.MaxAlertsPerMinute && !e.alertMetrics.isNotified
 }
 
-func (exporter *HTTPExporter) checkAlertLimit() bool {
-	exporter.alertCountLock.Lock()
-	defer exporter.alertCountLock.Unlock()
+func (e *HTTPExporter) resetAlertMetrics() {
+	e.alertMetrics.startTime = time.Now()
+	e.alertMetrics.count = 0
+	e.alertMetrics.isNotified = false
+}
 
-	if exporter.alertCountStart.IsZero() {
-		exporter.alertCountStart = time.Now()
+func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
+	e.alertMetrics.Lock()
+	e.alertMetrics.isNotified = true
+	e.alertMetrics.Unlock()
+
+	alert := apitypes.RuntimeAlert{
+		Message:   "Alert limit reached",
+		HostName:  e.host,
+		AlertType: apitypes.AlertTypeRule,
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			AlertName:      string(AlertTypeLimitReached),
+			Severity:       ruleenginev1.RulePrioritySystemIssue,
+			FixSuggestions: "Check logs for more information",
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			NodeName:    e.nodeName,
+			ClusterName: e.clusterName,
+		},
 	}
 
-	if time.Since(exporter.alertCountStart) > time.Minute {
-		exporter.alertCountStart = time.Now()
-		exporter.alertCount = 0
-		exporter.alertLimitNotified = false
-	}
+	logger.L().Error("Alert limit reached",
+		helpers.Int("alerts", e.alertMetrics.count),
+		helpers.String("since", e.alertMetrics.startTime.Format(time.RFC3339)))
 
-	exporter.alertCount++
-	return exporter.alertCount > exporter.config.MaxAlertsPerMinute
+	return e.sendAlert(ctx, alert, apitypes.ProcessTree{}, nil)
 }

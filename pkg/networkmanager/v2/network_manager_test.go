@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/eventreporters/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -204,6 +204,10 @@ func (d *dnsResolverMock) ResolveIPAddress(ipAddr string) (string, bool) {
 		return "domain.com", true
 	}
 	return "", false
+}
+
+func (d *dnsResolverMock) ResolveContainerToCloudServices(containerId string) mapset.Set[string] {
+	return nil
 }
 
 func TestNetworkManager_createNetworkNeighbor(t *testing.T) {

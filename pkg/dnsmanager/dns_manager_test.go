@@ -2,6 +2,7 @@ package dnsmanager
 
 import (
 	"net"
+	"strings"
 	"sync"
 	"testing"
 
@@ -230,6 +231,75 @@ func TestConcurrentAccess(t *testing.T) {
 				t.Errorf("Cache entry for %s has wrong number of addresses: got %d, want %d",
 					event.DNSName, len(entry.addresses), len(event.Addresses))
 			}
+		}
+	}
+}
+
+func TestIsCloudService(t *testing.T) {
+	tests := []struct {
+		name     string
+		domain   string
+		expected bool
+	}{
+		// AWS tests
+		{"AWS EC2", "ec2.amazonaws.com.", true},
+		{"AWS S3", "mybucket.s3.amazonaws.com.", true},
+		{"AWS CloudFront", "d1234.cloudfront.net.", true},
+		{"AWS Console", "console.aws.amazon.com.", true},
+		{"AWS Elastic Beanstalk", "myapp.elasticbeanstalk.com.", true},
+
+		// Azure tests
+		{"Azure Web App", "myapp.azurewebsites.net.", true},
+		{"Azure Cloud App", "myservice.cloudapp.net.", true},
+		{"Azure API", "api.azure-api.net.", true},
+		{"Azure Portal", "portal.azure.com.", true},
+
+		// GCP tests
+		{"Google APIs", "storage.googleapis.com.", true},
+		{"App Engine", "myapp.appspot.com.", true},
+		{"Cloud Functions", "function.cloudfunctions.net.", true},
+		{"Cloud Run", "myservice.run.app.", true},
+
+		// Negative tests
+		{"Regular Domain", "example.com.", false},
+		{"Subdomain", "sub.example.com.", false},
+		{"Empty String", "", false},
+		{"Single Dot", ".", false},
+		{"Similar But Not Cloud", "notamazonsaws.com.", false},
+		// {"Non Cloud With Azure In Name", "fake-azure.com.", false}, // Because of cpu usage we keep the check "simple".
+
+		// Edge cases
+		{"Domain Without Final Dot", "example.amazonaws.com", false},
+		{"Multiple Dots", "my.app.amazonaws.com.", true},
+		{"Uppercase Domain", "MYAPP.AMAZONAWS.COM.", true},
+		{"Mixed Case Domain", "MyApp.AmAzOnAwS.cOm.", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isCloudService(strings.ToLower(tt.domain)) // Convert input to lowercase
+			if result != tt.expected {
+				t.Errorf("isCloudService(%q) = %v; want %v",
+					tt.domain, result, tt.expected)
+			}
+		})
+	}
+}
+
+// Benchmark function remains the same
+func BenchmarkIsCloudService(b *testing.B) {
+	testDomains := []string{
+		"ec2.amazonaws.com.",
+		"example.com.",
+		"myapp.azurewebsites.net.",
+		"storage.googleapis.com.",
+		"notacloud.com.",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, domain := range testDomains {
+			isCloudService(domain)
 		}
 	}
 }

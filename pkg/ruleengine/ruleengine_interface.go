@@ -98,6 +98,8 @@ type RuleFailure interface {
 	GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails
 	// Get Rule ID
 	GetRuleId() string
+	// Get Cloud Services
+	GetCloudServices() []string
 
 	// Set Workload Details
 	SetWorkloadDetails(workloadDetails string)
@@ -111,4 +113,6 @@ type RuleFailure interface {
 	SetRuleAlert(ruleAlert apitypes.RuleAlert)
 	// Set K8s Runtime Details
 	SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails)
+	// Set Cloud Services
+	SetCloudServices(cloudServices []string)
 }

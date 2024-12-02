@@ -92,6 +92,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.ruleManager.ContainerCallback,
 		ch.sbomManager.ContainerCallback,
 		ch.processManager.ContainerCallback,
+		ch.dnsManager.ContainerCallback,
 	}
 
 	for receiver := range ch.thirdPartyContainerReceivers.Iter() {
