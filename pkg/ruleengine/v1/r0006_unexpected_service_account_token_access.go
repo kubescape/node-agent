@@ -127,12 +127,12 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		return nil
 	}
 
-	converedEvent, ok := event.(*events.OpenEvent)
+	convertedEvent, ok := event.(*events.OpenEvent)
 	if !ok {
 		return nil
 	}
 
-	openEvent := converedEvent.Event
+	openEvent := convertedEvent.Event
 
 	// Check if this is a token path - using optimized check
 	if getTokenBasePath(openEvent.FullPath) == "" {
