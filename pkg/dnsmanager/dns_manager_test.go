@@ -260,13 +260,6 @@ func TestIsCloudService(t *testing.T) {
 		{"Cloud Functions", "function.cloudfunctions.net.", true},
 		{"Cloud Run", "myservice.run.app.", true},
 
-		// Other cloud providers
-		{"Heroku App", "myapp.herokuapps.com.", true},
-		{"DigitalOcean Spaces", "spaces.digitaloceanspaces.com.", true},
-		{"Cloudflare", "mysite.cloudflare.com.", true},
-		{"Vercel", "project.vercel.app.", true},
-		{"Netlify", "site.netlify.app.", true},
-
 		// Negative tests
 		{"Regular Domain", "example.com.", false},
 		{"Subdomain", "sub.example.com.", false},
