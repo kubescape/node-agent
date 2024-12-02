@@ -33,6 +33,8 @@ func TestLoadConfig(t *testing.T) {
 				NodeProfileInterval:      1 * time.Minute,
 				MaxDelaySeconds:          30,
 				MaxJitterPercentage:      5,
+				MaxImageSize:             5368709120,
+				MaxSBOMSize:              20971520,
 				EnablePrometheusExporter: true,
 				EnableRuntimeDetection:   true,
 				EnableSeccomp:            true,

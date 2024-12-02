@@ -3,7 +3,6 @@ package containerwatcher
 import (
 	"context"
 	"fmt"
-	"os"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -50,6 +49,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/relevancymanager"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/sbommanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/panjf2000/ants/v2"
 )
@@ -85,18 +85,19 @@ type IGContainerWatcher struct {
 	cfg               config.Config
 	containerSelector containercollection.ContainerSelector
 	ctx               context.Context
-	nodeName          string
 	podName           string
 	namespace         string
 
 	// Clients
 	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
+	igK8sClient               *containercollection.K8sClient
 	k8sClient                 *k8sinterface.KubernetesApi
 	relevancyManager          relevancymanager.RelevancyManagerClient
 	networkManager            networkmanager.NetworkManagerClient
 	dnsManager                dnsmanager.DNSManagerClient
 	ruleManager               rulemanager.RuleManagerClient
 	malwareManager            malwaremanager.MalwareManagerClient
+	sbomManager               sbommanager.SbomManagerClient
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
@@ -160,7 +161,7 @@ type IGContainerWatcher struct {
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]], processManager processmanager.ProcessManagerClient) (*IGContainerWatcher, error) {
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, igK8sClient *containercollection.K8sClient, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]], processManager processmanager.ProcessManagerClient) (*IGContainerWatcher, error) {
 	// Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
@@ -421,18 +422,17 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		// Configuration
 		cfg:               cfg,
 		containerSelector: containercollection.ContainerSelector{}, // Empty selector to get all containers
-		nodeName:          os.Getenv(config.NodeNameEnvVar),
-		podName:           os.Getenv(config.PodNameEnvVar),
-		namespace:         os.Getenv(config.NamespaceEnvVar),
 
 		// Clients
 		applicationProfileManager: applicationProfileManager,
+		igK8sClient:               igK8sClient,
 		k8sClient:                 k8sClient,
 		relevancyManager:          relevancyManager,
 		networkManager:            networkManagerClient,
 		dnsManager:                dnsManagerClient,
 		ruleManager:               ruleManager,
 		malwareManager:            malwareManager,
+		sbomManager:               sbomManager,
 		// IG Collections
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,
