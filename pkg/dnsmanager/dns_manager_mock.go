@@ -1,6 +1,8 @@
 package dnsmanager
 
 import (
+	mapset "github.com/deckarep/golang-set/v2"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 )
 
@@ -17,6 +19,13 @@ func CreateDNSManagerMock() *DNSManagerMock {
 func (n *DNSManagerMock) ReportEvent(_ tracerdnstype.Event) {
 }
 
+func (n *DNSManagerMock) ContainerCallback(notif containercollection.PubSubEvent) {
+}
+
 func (n *DNSManagerMock) ResolveIPAddress(_ string) (string, bool) {
 	return "", false
+}
+
+func (n *DNSManagerMock) ResolveContainerToCloudServices(_ string) mapset.Set[string] {
+	return nil
 }

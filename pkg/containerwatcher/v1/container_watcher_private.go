@@ -90,7 +90,9 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.networkManager.ContainerCallback,
 		ch.malwareManager.ContainerCallback,
 		ch.ruleManager.ContainerCallback,
+		ch.sbomManager.ContainerCallback,
 		ch.processManager.ContainerCallback,
+		ch.dnsManager.ContainerCallback,
 	}
 
 	for receiver := range ch.thirdPartyContainerReceivers.Iter() {
@@ -120,7 +122,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		containercollection.WithTracerCollection(ch.tracerCollection),
 
 		// Enrich those containers with data from the Kubernetes API
-		containercollection.WithKubernetesEnrichment(ch.nodeName, ch.k8sClient.K8SConfig),
+		containercollection.WithKubernetesEnrichment(ch.cfg.NodeName, ch.k8sClient.K8SConfig),
 	}
 
 	// Initialize the container collection
@@ -135,13 +137,8 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 }
 
 func (ch *IGContainerWatcher) startRunningContainers() {
-	k8sClient, err := containercollection.NewK8sClient(ch.nodeName)
-	if err != nil {
-		logger.L().Fatal("creating IG Kubernetes client", helpers.Error(err))
-	}
-	defer k8sClient.Close()
 	for n := range *ch.ruleBindingPodNotify {
-		ch.addRunningContainers(k8sClient, &n)
+		ch.addRunningContainers(ch.igK8sClient, &n)
 	}
 }
 

@@ -2,7 +2,7 @@ package dnscache
 
 import (
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/node-agent/pkg/eventreporters/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 )
 

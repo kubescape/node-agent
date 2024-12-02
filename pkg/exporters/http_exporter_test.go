@@ -31,7 +31,7 @@ func TestSendRuleAlert(t *testing.T) {
 	defer server.Close()
 
 	// Create an HTTPExporter with the mock server URL
-	exporter, err := InitHTTPExporter(HTTPExporterConfig{
+	exporter, err := NewHTTPExporter(HTTPExporterConfig{
 		URL: server.URL,
 	}, "", "", nil)
 	assert.NoError(t, err)
@@ -69,7 +69,7 @@ func TestSendRuleAlert(t *testing.T) {
 		t.Fatalf("Timed out waiting for request body")
 	}
 	assert.Equal(t, "RuntimeAlerts", alertsList.Kind)
-	assert.Equal(t, "kubescape.io/v1", alertsList.ApiVersion)
+	assert.Equal(t, "kubescape.io/v1", alertsList.APIVersion)
 	assert.Equal(t, 1, len(alertsList.Spec.Alerts))
 	alert := alertsList.Spec.Alerts[0]
 	assert.Equal(t, ruleengine.RulePriorityCritical, alert.Severity)
@@ -93,7 +93,7 @@ func TestSendRuleAlertRateReached(t *testing.T) {
 	}))
 	defer server.Close()
 	// Create an HTTPExporter with the mock server URL
-	exporter, err := InitHTTPExporter(HTTPExporterConfig{
+	exporter, err := NewHTTPExporter(HTTPExporterConfig{
 		URL:                server.URL,
 		MaxAlertsPerMinute: 1,
 	}, "", "", nil)
@@ -160,7 +160,7 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 	defer server.Close()
 
 	// Create an HTTPExporter with the mock server URL
-	exporter, err := InitHTTPExporter(HTTPExporterConfig{
+	exporter, err := NewHTTPExporter(HTTPExporterConfig{
 		URL: server.URL,
 	}, "", "", nil)
 	assert.NoError(t, err)
@@ -222,7 +222,7 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 
 	// Assert other expectations
 	assert.Equal(t, "RuntimeAlerts", alertsList.Kind)
-	assert.Equal(t, "kubescape.io/v1", alertsList.ApiVersion)
+	assert.Equal(t, "kubescape.io/v1", alertsList.APIVersion)
 	assert.Equal(t, 1, len(alertsList.Spec.Alerts))
 	alert := alertsList.Spec.Alerts[0]
 	assert.Equal(t, "testmalware", alert.AlertName)
@@ -234,11 +234,11 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 
 func TestValidateHTTPExporterConfig(t *testing.T) {
 	// Test case: URL is empty
-	_, err := InitHTTPExporter(HTTPExporterConfig{}, "", "", nil)
+	_, err := NewHTTPExporter(HTTPExporterConfig{}, "", "", nil)
 	assert.Error(t, err)
 
 	// Test case: URL is not empty
-	exp, err := InitHTTPExporter(HTTPExporterConfig{
+	exp, err := NewHTTPExporter(HTTPExporterConfig{
 		URL: "http://localhost:9093",
 	}, "cluster", "node", nil)
 	assert.NoError(t, err)
@@ -246,11 +246,11 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 	assert.Equal(t, 5, exp.config.TimeoutSeconds)
 	assert.Equal(t, 100, exp.config.MaxAlertsPerMinute)
 	assert.Equal(t, map[string]string{}, exp.config.Headers)
-	assert.Equal(t, "cluster", exp.ClusterName)
-	assert.Equal(t, "node", exp.NodeName)
+	assert.Equal(t, "cluster", exp.clusterName)
+	assert.Equal(t, "node", exp.nodeName)
 
 	// Test case: Method is PUT
-	exp, err = InitHTTPExporter(HTTPExporterConfig{
+	exp, err = NewHTTPExporter(HTTPExporterConfig{
 		URL:                "http://localhost:9093",
 		Method:             "PUT",
 		TimeoutSeconds:     2,
@@ -266,7 +266,7 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 	assert.Equal(t, map[string]string{"Authorization": "Bearer token"}, exp.config.Headers)
 
 	// Test case: Method is neither POST nor PUT
-	_, err = InitHTTPExporter(HTTPExporterConfig{
+	_, err = NewHTTPExporter(HTTPExporterConfig{
 		URL:    "http://localhost:9093",
 		Method: "DELETE",
 	}, "", "", nil)

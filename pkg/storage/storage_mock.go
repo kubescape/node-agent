@@ -16,6 +16,7 @@ type StorageHttpClientMock struct {
 	ApplicationActivities []*spdxv1beta1.ApplicationActivity
 	ApplicationProfiles   []*spdxv1beta1.ApplicationProfile
 	FilteredSyftSBOMs     []*spdxv1beta1.SBOMSyftFiltered
+	SyftSBOMs             []*spdxv1beta1.SBOMSyft
 	NetworkNeighborhoods  []*v1beta1.NetworkNeighborhood
 	NetworkNeighborses    []*v1beta1.NetworkNeighbors
 	ImageCounters         map[string]int
@@ -56,8 +57,22 @@ func (sc *StorageHttpClientMock) GetFilteredSBOM(name string) (*v1beta1.SBOMSyft
 	return nil, errors.New("not found")
 }
 
+func (sc *StorageHttpClientMock) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
+	sc.SyftSBOMs = append(sc.SyftSBOMs, SBOM)
+	return SBOM, nil
+}
+
 func (sc *StorageHttpClientMock) GetSBOM(_ string) (*v1beta1.SBOMSyft, error) {
 	return sc.mockSBOM, nil
+}
+
+func (sc *StorageHttpClientMock) GetSBOMMeta(_ string) (*v1beta1.SBOMSyft, error) {
+	return sc.mockSBOM, nil
+}
+
+func (sc *StorageHttpClientMock) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
+	sc.SyftSBOMs = append(sc.SyftSBOMs, SBOM)
+	return SBOM, nil
 }
 
 func (sc *StorageHttpClientMock) PatchFilteredSBOM(_ string, _ *spdxv1beta1.SBOMSyftFiltered) error {

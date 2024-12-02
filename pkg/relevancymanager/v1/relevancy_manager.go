@@ -6,17 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/filehandler"
-	"github.com/kubescape/node-agent/pkg/k8sclient"
-	"github.com/kubescape/node-agent/pkg/relevancymanager"
-	"github.com/kubescape/node-agent/pkg/sbomhandler"
-	"github.com/kubescape/node-agent/pkg/utils"
-
+	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v4"
 	mapset "github.com/deckarep/golang-set/v2"
-
-	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
@@ -24,6 +16,12 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	instanceidhandlerV1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/filehandler"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/relevancymanager"
+	"github.com/kubescape/node-agent/pkg/sbomhandler"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -69,13 +67,11 @@ func (rm *RelevancyManager) deleteResources(watchedContainer *utils.WatchedConta
 
 func (rm *RelevancyManager) ensureImageInfo(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 
-	if watchedContainer.ImageID == "" || watchedContainer.ImageTag == "" || watchedContainer.InstanceID == nil || watchedContainer.Wlid == "" {
-		imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, err := rm.getContainerInfo(watchedContainer, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)
+	if watchedContainer.InstanceID == nil || watchedContainer.Wlid == "" {
+		parentWlid, parentResourceVersion, podTemplateHash, instanceID, err := rm.getContainerInfo(watchedContainer, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName)
 		if err != nil {
 			return fmt.Errorf("failed to get image info: %v", err)
 		}
-		watchedContainer.ImageID = imageID
-		watchedContainer.ImageTag = imageTag
 		watchedContainer.InstanceID = instanceID
 		watchedContainer.Wlid = parentWlid
 		watchedContainer.ParentResourceVersion = parentResourceVersion
@@ -85,9 +81,7 @@ func (rm *RelevancyManager) ensureImageInfo(container *containercollection.Conta
 	return nil
 }
 
-func (rm *RelevancyManager) getContainerInfo(watchedContainer *utils.WatchedContainerData, namespace, podName, containerName string) (string, string, string, string, string, instanceidhandler.IInstanceID, error) {
-	imageID := ""
-	imageTag := ""
+func (rm *RelevancyManager) getContainerInfo(watchedContainer *utils.WatchedContainerData, namespace, podName, containerName string) (string, string, string, instanceidhandler.IInstanceID, error) {
 	parentWlid := ""
 	parentResourceVersion := ""
 	podTemplateHash := ""
@@ -95,7 +89,7 @@ func (rm *RelevancyManager) getContainerInfo(watchedContainer *utils.WatchedCont
 	var instanceID instanceidhandler.IInstanceID
 	wl, err := rm.k8sClient.GetWorkload(namespace, "Pod", podName)
 	if err != nil {
-		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get pod %s in namespace %s with error: %v", podName, namespace, err)
+		return parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get pod %s in namespace %s with error: %v", podName, namespace, err)
 	}
 	pod := wl.(*workloadinterface.Workload)
 
@@ -107,41 +101,24 @@ func (rm *RelevancyManager) getContainerInfo(watchedContainer *utils.WatchedCont
 	// find parentWlid
 	kind, name, err := rm.k8sClient.CalculateWorkloadParentRecursive(pod)
 	if err != nil {
-		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get workload owner parent %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
+		return parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get workload owner parent %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 	parentWorkload, err := rm.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
 	if err != nil {
-		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get parent workload %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
+		return parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get parent workload %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 	w := parentWorkload.(*workloadinterface.Workload)
 	parentWlid = w.GenerateWlid(rm.clusterName)
 	parentResourceVersion = w.GetResourceVersion()
 	err = wlid.IsWlidValid(parentWlid)
 	if err != nil {
-		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("WLID of parent workload is not in the right %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
-	}
-
-	imageTag, err = findImageTag(pod, containerName, watchedContainer.ContainerType)
-	if err != nil {
-		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get containers for pod %s in namespace %s with error: %v", podName, namespace, err)
-	}
-	if imageTag == "" {
-		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("failed to find container %s in pod %s in namespace %s", containerName, podName, namespace)
-	}
-
-	// find imageID
-	imageID, err = findImageID(pod, containerName, watchedContainer.ContainerType)
-	if err != nil {
-		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to get containers for pod %s in namespace %s with error: %v", podName, namespace, err)
-	}
-	if imageID == "" {
-		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("failed to find container status %s in pod %s in namespace %s", containerName, podName, namespace)
+		return parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("WLID of parent workload is not in the right %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 
 	// find instanceID
 	instanceIDs, err := instanceidhandlerV1.GenerateInstanceID(pod)
 	if err != nil {
-		return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to create InstanceID to pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
+		return parentWlid, parentResourceVersion, podTemplateHash, instanceID, fmt.Errorf("fail to create InstanceID to pod %s in namespace %s with error: %v", pod.GetName(), pod.GetNamespace(), err)
 	}
 	instanceID = instanceIDs[0]
 	for i := range instanceIDs {
@@ -152,7 +129,7 @@ func (rm *RelevancyManager) getContainerInfo(watchedContainer *utils.WatchedCont
 			instanceID = instanceIDs[i]
 		}
 	}
-	return imageID, imageTag, parentWlid, parentResourceVersion, podTemplateHash, instanceID, nil
+	return parentWlid, parentResourceVersion, podTemplateHash, instanceID, nil
 }
 
 // Handle relevant data
@@ -180,72 +157,6 @@ func (rm *RelevancyManager) handleRelevancy(ctx context.Context, watchedContaine
 	span.End()
 }
 
-func findImageID(pod workloadinterface.IWorkload, containerName string, containerType utils.ContainerType) (string, error) {
-	var containerStatuses []v1.ContainerStatus
-	// find imageID
-	podStatus, err := pod.GetPodStatus() // Careful this is not available on container creation
-	if err != nil {
-		return "", err
-	}
-	switch containerType {
-	case utils.Container:
-		containerStatuses = podStatus.ContainerStatuses
-	case utils.InitContainer:
-		containerStatuses = podStatus.InitContainerStatuses
-	case utils.EphemeralContainer:
-		containerStatuses = podStatus.EphemeralContainerStatuses
-	default:
-		// noop
-	}
-
-	for i := range containerStatuses {
-		if containerStatuses[i].Name == containerName {
-			return containerStatuses[i].ImageID, nil
-		}
-	}
-	return "", nil
-
-}
-
-func findImageTag(pod workloadinterface.IWorkload, containerName string, containerType utils.ContainerType) (string, error) {
-	var containers []v1.Container
-	var ephemeralContainers []v1.EphemeralContainer
-	var err error
-
-	switch containerType {
-	case utils.Container:
-		containers, err = pod.GetContainers()
-		if err != nil {
-			return "", err
-		}
-	case utils.InitContainer:
-		containers, err = pod.GetInitContainers()
-		if err != nil {
-			return "", err
-		}
-	case utils.EphemeralContainer:
-		ephemeralContainers, err = pod.GetEphemeralContainers()
-		if err != nil {
-			return "", err
-		}
-	default:
-		// noop
-
-	}
-	for i := range containers {
-		if containers[i].Name == containerName {
-			return containers[i].Image, nil
-		}
-	}
-	for i := range ephemeralContainers {
-		if ephemeralContainers[i].Name == containerName {
-			return ephemeralContainers[i].Image, nil
-		}
-	}
-
-	return "", nil
-
-}
 func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	for {
 		select {
@@ -272,6 +183,7 @@ func (rm *RelevancyManager) monitorContainer(ctx context.Context, container *con
 		}
 	}
 }
+
 func (rm *RelevancyManager) ContainerReachedMaxTime(containerID string) {
 	if channel := rm.watchedContainerChannels.Get(containerID); channel != nil {
 		channel <- utils.ContainerReachedMaxTime
@@ -281,6 +193,8 @@ func (rm *RelevancyManager) ContainerReachedMaxTime(containerID string) {
 func (rm *RelevancyManager) startRelevancyProcess(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
 	ctx, span := otel.Tracer("").Start(ctx, "RelevancyManager.startRelevancyProcess")
 	defer span.End()
+
+	logger.L().Info("RelevancyManager - start monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:      container.Runtime.ContainerID,

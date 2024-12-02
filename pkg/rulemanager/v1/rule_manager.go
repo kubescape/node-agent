@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/processmanager"
@@ -67,11 +68,12 @@ type RuleManager struct {
 	containerIdToPid         maps.SafeMap[string, uint32]
 	enricher                 ruleenginetypes.Enricher
 	processManager           processmanager.ProcessManagerClient
+	dnsManager               dnsmanager.DNSResolver
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, enricher ruleenginetypes.Enricher) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		ctx:               ctx,
@@ -86,6 +88,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		clusterName:       clusterName,
 		enricher:          enricher,
 		processManager:    processManager,
+		dnsManager:        dnsManager,
 	}, nil
 }
 
@@ -471,6 +474,8 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	}
 
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
+
+	ruleFailure.SetCloudServices(rm.dnsManager.ResolveContainerToCloudServices(ruleFailure.GetTriggerEvent().Runtime.ContainerID).ToSlice())
 
 	if rm.enricher != nil {
 		rm.enricher.EnrichRuleFailure(ruleFailure)
