@@ -25,8 +25,9 @@ type cacheEntry struct {
 }
 
 const (
-	defaultPositiveTTL = 1 * time.Minute // Default TTL for successful lookups
-	defaultNegativeTTL = 5 * time.Second // Default TTL for failed lookups
+	defaultPositiveTTL  = 1 * time.Minute // Default TTL for successful lookups
+	defaultNegativeTTL  = 5 * time.Second // Default TTL for failed lookups
+	maxServiceCacheSize = 50              // Maximum number of cloud services to cache per container
 )
 
 var _ DNSManagerClient = (*DNSManager)(nil)
@@ -52,7 +53,10 @@ func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 func (dm *DNSManager) ReportEvent(dnsEvent tracerdnstype.Event) {
 	if isCloudService(dnsEvent.DNSName) {
 		if dm.containerToCloudServices.Has(dnsEvent.Runtime.ContainerID) {
-			dm.containerToCloudServices.Get(dnsEvent.Runtime.ContainerID).Add(dnsEvent.DNSName)
+			// Guard against cache size getting too large by checking the cardinality per container
+			if dm.containerToCloudServices.Get(dnsEvent.Runtime.ContainerID).Cardinality() < maxServiceCacheSize {
+				dm.containerToCloudServices.Get(dnsEvent.Runtime.ContainerID).Add(dnsEvent.DNSName)
+			}
 		}
 	}
 
@@ -141,19 +145,9 @@ func isCloudService(domain string) bool {
 		"run.app.",
 	}
 
-	// Check for other common cloud providers
-	otherCloudDomains := []string{
-		"herokuapps.com.",
-		"digitaloceanspaces.com.",
-		"cloudflare.com.",
-		"vercel.app.",
-		"netlify.app.",
-	}
-
 	// Combine all cloud domains
 	allCloudDomains := append(awsDomains, azureDomains...)
 	allCloudDomains = append(allCloudDomains, gcpDomains...)
-	allCloudDomains = append(allCloudDomains, otherCloudDomains...)
 
 	// Check if the input domain ends with any of the cloud domains
 	for _, cloudDomain := range allCloudDomains {
