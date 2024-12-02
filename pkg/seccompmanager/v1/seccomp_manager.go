@@ -7,13 +7,12 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/kubescape/node-agent/pkg/seccompmanager"
-
 	securejoin "github.com/cyphar/filepath-securejoin"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	v1beta1api "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/spf13/afero"
@@ -117,7 +116,7 @@ func getProfilesDir() (string, error) {
 		kubeletRoot = "/var/lib/kubelet"
 	}
 	// use securejoin to join the two, add seccomp and store in seccompProfilesDir
-	seccompProfilesDir, err := securejoin.SecureJoin(filepath.Join(hostRoot, kubeletRoot), "seccomp")
+	seccompProfilesDir, err := securejoin.SecureJoin(hostRoot, filepath.Join(kubeletRoot, "seccomp"))
 	if err != nil {
 		return "", fmt.Errorf("failed to join seccomp profiles dir: %w", err)
 	}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"slices"
 	"time"
 
@@ -19,6 +20,8 @@ type Config struct {
 	UpdateDataPeriod         time.Duration             `mapstructure:"updateDataPeriod"`
 	MaxDelaySeconds          int                       `mapstructure:"maxDelaySeconds"`
 	MaxJitterPercentage      int                       `mapstructure:"maxJitterPercentage"`
+	MaxImageSize             int64                     `mapstructure:"maxImageSize"`
+	MaxSBOMSize              int                       `mapstructure:"maxSBOMSize"`
 	EnableFullPathTracing    bool                      `mapstructure:"fullPathTracingEnabled"`
 	EnableApplicationProfile bool                      `mapstructure:"applicationProfileServiceEnabled"`
 	EnableMalwareDetection   bool                      `mapstructure:"malwareDetectionEnabled"`
@@ -32,6 +35,10 @@ type Config struct {
 	EnableSeccomp            bool                      `mapstructure:"seccompServiceEnabled"`
 	ExcludeNamespaces        []string                  `mapstructure:"excludeNamespaces"`
 	IncludeNamespaces        []string                  `mapstructure:"includeNamespaces"`
+	EnableSbomGeneration     bool                      `mapstructure:"sbomGenerationEnabled"`
+	NamespaceName            string                    `mapstructure:"namespaceName"`
+	NodeName                 string                    `mapstructure:"nodeName"`
+	PodName                  string                    `mapstructure:"podName"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -45,6 +52,11 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("nodeProfileInterval", 10*time.Minute)
 	viper.SetDefault("maxDelaySeconds", 30)
 	viper.SetDefault("maxJitterPercentage", 5)
+	viper.SetDefault("maxImageSize", 5*1024*1024*1024)
+	viper.SetDefault("maxSBOMSize", 20*1024*1024)
+	viper.SetDefault("namespaceName", os.Getenv(NamespaceEnvVar))
+	viper.SetDefault("nodeName", os.Getenv(NodeNameEnvVar))
+	viper.SetDefault("podName", os.Getenv(PodNameEnvVar))
 
 	viper.AutomaticEnv()
 

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/filehandler"
 )
 
@@ -45,6 +47,7 @@ func (s *InMemoryFileHandler) AddFile(bucket, file string) {
 				files: make(map[string]bool, initFileListLength),
 			}
 			s.buckets[bucket] = bucketFiles
+			logger.L().Debug("Created new bucket", helpers.String("bucket", bucket))
 		}
 		s.mutex.Unlock()
 	}
@@ -109,6 +112,7 @@ func (s *InMemoryFileHandler) AddFiles(bucket string, files map[string]bool) err
 				files: make(map[string]bool, initFileListLength),
 			}
 			s.buckets[bucket] = bucketFiles
+			logger.L().Debug("Created new bucket", helpers.String("bucket", bucket))
 		}
 		s.mutex.Unlock()
 	}

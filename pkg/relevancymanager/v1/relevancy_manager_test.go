@@ -7,22 +7,19 @@ import (
 	"os"
 	"path"
 	"testing"
+	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kinbiko/jsonassert"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/filehandler/v1"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/sbomhandler/syfthandler"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
-
-	mapset "github.com/deckarep/golang-set/v2"
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-
-	"time"
-
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kinbiko/jsonassert"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 )
@@ -76,7 +73,9 @@ func TestRelevancyManager(t *testing.T) {
 		},
 		Runtime: containercollection.RuntimeMetadata{
 			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-				ContainerID: "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+				ContainerID:          "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+				ContainerImageDigest: "nginx@sha256:6a59f1cbb8d28ac484176d52c473494859a512ddba3ea62a547258cf16c9b3ae",
+				ContainerImageName:   "nginx",
 			},
 		},
 	}
@@ -180,7 +179,9 @@ func TestRelevancyManagerIncompleteSBOM(t *testing.T) {
 		},
 		Runtime: containercollection.RuntimeMetadata{
 			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-				ContainerID: "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+				ContainerID:          "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+				ContainerImageName:   "docker.io/library/nginx:latest",
+				ContainerImageDigest: "sha256:0c86dddac19f2ce4fd716ac58c0fd87bf69bfd4edabfd6971fb885bafd12a00b",
 			},
 		},
 	}
