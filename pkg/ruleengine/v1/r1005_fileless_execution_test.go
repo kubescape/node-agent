@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,8 +22,8 @@ func TestHandleExecveEvent(t *testing.T) {
 			Pid:        123,
 			Uid:        123,
 		}
-
-		result := rule.handleExecveEvent(event)
+		execEvent := events.ExecEvent{Event: *event}
+		result := rule.handleExecveEvent(&execEvent)
 		assert.NotNil(t, result)
 	})
 
@@ -38,7 +39,8 @@ func TestHandleExecveEvent(t *testing.T) {
 			Uid:        123,
 		}
 
-		result := rule.handleExecveEvent(event)
+		execEvent := events.ExecEvent{Event: *event}
+		result := rule.handleExecveEvent(&execEvent)
 		assert.Nil(t, result)
 	})
 
@@ -54,7 +56,8 @@ func TestHandleExecveEvent(t *testing.T) {
 			Uid:        123,
 		}
 
-		result := rule.handleExecveEvent(event)
+		execEvent := events.ExecEvent{Event: *event}
+		result := rule.handleExecveEvent(&execEvent)
 		assert.Nil(t, result)
 	})
 
@@ -70,7 +73,8 @@ func TestHandleExecveEvent(t *testing.T) {
 			Uid:        123,
 		}
 
-		result := rule.handleExecveEvent(event)
+		execEvent := events.ExecEvent{Event: *event}
+		result := rule.handleExecveEvent(&execEvent)
 		assert.Nil(t, result)
 	})
 }

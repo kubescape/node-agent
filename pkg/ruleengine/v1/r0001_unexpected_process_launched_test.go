@@ -3,6 +3,8 @@ package ruleengine
 import (
 	"testing"
 
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -20,18 +22,20 @@ func TestR0001UnexpectedProcessLaunched(t *testing.T) {
 		t.Errorf("Expected r to not be nil")
 	}
 
-	e := &tracerexectype.Event{
-		Event: eventtypes.Event{
-			CommonData: eventtypes.CommonData{
-				K8s: eventtypes.K8sMetadata{
-					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-						ContainerName: "test",
+	e := &events.ExecEvent{
+		Event: tracerexectype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "test",
+						},
 					},
 				},
 			},
+			Comm: "/test",
+			Args: []string{"test"},
 		},
-		Comm: "/test",
-		Args: []string{"test"},
 	}
 
 	// Test with nil appProfileAccess
@@ -64,18 +68,20 @@ func TestR0001UnexpectedProcessLaunched(t *testing.T) {
 	}
 
 	// Test with non-whitelisted exec
-	e = &tracerexectype.Event{
-		Event: eventtypes.Event{
-			CommonData: eventtypes.CommonData{
-				K8s: eventtypes.K8sMetadata{
-					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-						ContainerName: "test",
+	e = &events.ExecEvent{
+		Event: tracerexectype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "test",
+						},
 					},
 				},
 			},
+			Comm: "/asdasd",
+			Args: []string{"asdasd"},
 		},
-		Comm: "/asdasd",
-		Args: []string{"asdasd"},
 	}
 	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &objCache)
 	if ruleResult == nil {
@@ -124,18 +130,20 @@ func TestR0001UnexpectedProcessLaunchedArgCompare(t *testing.T) {
 		objCache.SetApplicationProfile(profile)
 	}
 
-	e := &tracerexectype.Event{
-		Event: eventtypes.Event{
-			CommonData: eventtypes.CommonData{
-				K8s: eventtypes.K8sMetadata{
-					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-						ContainerName: "test",
+	e := &events.ExecEvent{
+		Event: tracerexectype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "test",
+						},
 					},
 				},
 			},
+			ExePath: "/test",
+			Args:    []string{"/test", "something"},
 		},
-		ExePath: "/test",
-		Args:    []string{"/test", "something"},
 	}
 
 	// Test with whitelisted exec

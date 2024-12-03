@@ -1,8 +1,4 @@
-#ifdef __TARGET_ARCH_x86
 #include "../../../../include/amd64/vmlinux.h"
-#elif defined(__TARGET_ARCH_arm64)
-#include "../../../../include/arm64/vmlinux.h"
-#endif
 
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
@@ -116,6 +112,7 @@ int tracepoint__sys_symlink(struct syscall_trace_enter *ctx)
     event->timestamp = bpf_ktime_get_boot_ns();
     event->mntns_id = mntns_id;
     event->pid = bpf_get_current_pid_tgid() >> 32;
+    event->tid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
     event->ppid = BPF_CORE_READ(current_task, real_parent, pid);
     event->uid = uid;
     event->gid = (u32)(uid_gid >> 32);
@@ -184,6 +181,7 @@ int tracepoint__sys_symlinkat(struct syscall_trace_enter *ctx)
     event->timestamp = bpf_ktime_get_boot_ns();
     event->mntns_id = mntns_id;
     event->pid = bpf_get_current_pid_tgid() >> 32;
+    event->tid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
     event->ppid = BPF_CORE_READ(current_task, real_parent, pid);
     event->uid = uid;
     event->gid = (u32)(uid_gid >> 32);

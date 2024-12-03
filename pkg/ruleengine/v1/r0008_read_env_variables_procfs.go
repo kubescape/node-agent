@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 )
 
 const (
@@ -57,10 +57,12 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 		return nil
 	}
 
-	openEvent, ok := event.(*traceropentype.Event)
+	fullEvent, ok := event.(*events.OpenEvent)
 	if !ok {
 		return nil
 	}
+
+	openEvent := fullEvent.Event
 
 	if !strings.HasPrefix(openEvent.FullPath, "/proc/") || !strings.HasSuffix(openEvent.FullPath, "/environ") {
 		return nil
@@ -112,6 +114,7 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 			PodLabels: openEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
+		Extra:  fullEvent.GetExtra(),
 	}
 
 	return &ruleFailure

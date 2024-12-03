@@ -6,25 +6,28 @@ import (
 
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
 
-func createTestEvent0006(containerName, path string, flags []string) *traceropentype.Event {
-	return &traceropentype.Event{
-		Event: eventtypes.Event{
-			CommonData: eventtypes.CommonData{
-				K8s: eventtypes.K8sMetadata{
-					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-						ContainerName: containerName,
+func createTestEvent0006(containerName, path string, flags []string) *events.OpenEvent {
+	return &events.OpenEvent{
+		Event: traceropentype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: containerName,
+						},
 					},
 				},
 			},
+			Path:     path,
+			FullPath: path,
+			Flags:    flags,
 		},
-		Path:     path,
-		FullPath: path,
-		Flags:    flags,
 	}
 }
 
@@ -44,7 +47,7 @@ func createTestProfile0006(containerName string, openCalls []v1beta1.OpenCalls) 
 func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 	tests := []struct {
 		name          string
-		event         *traceropentype.Event
+		event         *events.OpenEvent
 		profile       *v1beta1.ApplicationProfile
 		expectFailure bool
 	}{

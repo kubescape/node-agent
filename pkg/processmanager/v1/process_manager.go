@@ -118,7 +118,7 @@ func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		containerPID := uint32(notif.Container.Pid)
+		containerPID := uint32(notif.Container.ContainerPid())
 		if process, err := p.getProcessFromProc(int(containerPID)); err == nil {
 			shimPID := process.PPID
 			p.containerIdToShimPid.Set(containerID, shimPID)

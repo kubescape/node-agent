@@ -5,6 +5,7 @@ import (
 
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+	"golang.org/x/sys/unix"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
@@ -15,6 +16,8 @@ func (ch *IGContainerWatcher) symlinkEventCallback(event *tracersymlinktype.Even
 	if event.Type == types.DEBUG {
 		return
 	}
+
+	ch.enrichEvent(event, []uint64{unix.SYS_SYMLINK, unix.SYS_SYMLINKAT})
 
 	if isDroppedEvent(event.Type, event.Message) {
 		logger.L().Ctx(ch.ctx).Warning("symlink tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))

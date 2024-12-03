@@ -7,11 +7,12 @@ import (
 	"slices"
 	"strings"
 
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -31,7 +32,7 @@ var (
 	ProfileNotFound   = errors.New("application profile not found")
 )
 
-func getExecPathFromEvent(event *tracerexectype.Event) string {
+func getExecPathFromEvent(event *events.ExecEvent) string {
 	if len(event.Args) > 0 {
 		if event.Args[0] != "" {
 			return event.Args[0]
@@ -40,7 +41,7 @@ func getExecPathFromEvent(event *tracerexectype.Event) string {
 	return event.Comm
 }
 
-func getExecFullPathFromEvent(event *tracerexectype.Event) string {
+func getExecFullPathFromEvent(event *events.ExecEvent) string {
 	execPath := getExecPathFromEvent(event)
 	if strings.HasPrefix(execPath, "./") || strings.HasPrefix(execPath, "../") {
 		execPath = filepath.Join(event.Cwd, execPath)
@@ -122,7 +123,7 @@ func getContainerMountPaths(namespace, podName, containerName string, k8sObjCach
 	return mountPaths, nil
 }
 
-func isExecEventInProfile(execEvent *tracerexectype.Event, objectCache objectcache.ObjectCache, compareArgs bool) (bool, error) {
+func isExecEventInProfile(execEvent *events.ExecEvent, objectCache objectcache.ObjectCache, compareArgs bool) (bool, error) {
 	// Check if the exec is whitelisted, if so, return nil
 	execPath := getExecPathFromEvent(execEvent)
 

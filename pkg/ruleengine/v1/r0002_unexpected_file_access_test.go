@@ -5,6 +5,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -23,21 +24,22 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 	}
 
 	// Create a file access event
-	e := &traceropentype.Event{
-		Event: eventtypes.Event{
-			CommonData: eventtypes.CommonData{
-				K8s: eventtypes.K8sMetadata{
-					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-						ContainerName: "test",
+	e := &events.OpenEvent{
+		Event: traceropentype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "test",
+						},
 					},
 				},
 			},
+			Path:     "/test",
+			FullPath: "/test",
+			Flags:    []string{"O_RDONLY"},
 		},
-		Path:     "/test",
-		FullPath: "/test",
-		Flags:    []string{"O_RDONLY"},
 	}
-
 	// Test with nil appProfileAccess
 	ruleResult := r.ProcessEvent(utils.OpenEventType, e, &objectcache.ObjectCacheMock{})
 	if ruleResult != nil {

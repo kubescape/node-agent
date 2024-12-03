@@ -291,7 +291,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 	s.processing.Add(sbomName)
 	defer s.processing.Remove(sbomName)
 	// get container mounts
-	pid := strconv.Itoa(int(notif.Container.Pid))
+	pid := strconv.Itoa(int(notif.Container.ContainerPid()))
 	mounts, err := s.getMountedVolumes(pid)
 	if err != nil {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to get mounted volumes",

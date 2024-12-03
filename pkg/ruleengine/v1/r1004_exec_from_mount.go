@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 )
 
 const (
@@ -55,7 +55,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event ut
 		return nil
 	}
 
-	execEvent, ok := event.(*tracerexectype.Event)
+	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
 		return nil
 	}
@@ -98,11 +98,11 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event ut
 						Cwd:        execEvent.Cwd,
 						Hardlink:   execEvent.ExePath,
 						Path:       fullPath,
-						Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+						Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 					},
 					ContainerID: execEvent.Runtime.ContainerID,
 				},
-				TriggerEvent: execEvent.Event,
+				TriggerEvent: execEvent.Event.Event,
 				RuleAlert: apitypes.RuleAlert{
 					RuleDescription: fmt.Sprintf("Process (%s) was executed from a mounted path (%s) in: %s", fullPath, mount, execEvent.GetContainer()),
 				},
@@ -111,6 +111,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event ut
 					PodLabels: execEvent.K8s.PodLabels,
 				},
 				RuleID: R1004ID,
+				Extra:  execEvent.GetExtra(),
 			}
 
 			return &ruleFailure

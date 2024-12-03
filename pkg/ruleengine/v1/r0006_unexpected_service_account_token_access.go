@@ -5,13 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 )
 
 const (
@@ -100,10 +100,12 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		return nil
 	}
 
-	openEvent, ok := event.(*traceropentype.Event)
+	convertedEvent, ok := event.(*events.OpenEvent)
 	if !ok {
 		return nil
 	}
+
+	openEvent := convertedEvent.Event
 
 	// Check if this is a token path - using optimized check
 	if getTokenBasePath(openEvent.FullPath) == "" {
