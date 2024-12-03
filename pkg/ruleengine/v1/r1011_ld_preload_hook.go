@@ -71,7 +71,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 			return nil
 		}
 
-		if allowed, err := isAllowed(&execEvent.Event, objectCache, execEvent.Comm, R1011ID); err != nil {
+		if allowed, err := isAllowed(&execEvent.Event.Event, objectCache, execEvent.Comm, R1011ID); err != nil {
 			return nil
 		} else if allowed {
 			return nil
@@ -84,7 +84,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 			return nil
 		}
 
-		if allowed, err := isAllowed(&openEvent.Event, objectCache, openEvent.Comm, R1011ID); err != nil {
+		if allowed, err := isAllowed(&openEvent.Event.Event, objectCache, openEvent.Comm, R1011ID); err != nil {
 			return nil
 		} else if allowed {
 			return nil

@@ -12,7 +12,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"

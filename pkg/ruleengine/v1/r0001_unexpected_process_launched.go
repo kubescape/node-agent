@@ -9,7 +9,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
