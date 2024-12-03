@@ -90,9 +90,8 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 				"path":  openEvent.FullPath,
 				"flags": openEvent.Flags,
 			},
-			InfectedPID:    openEvent.Pid,
-			FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-			Severity:       R0008ReadEnvironmentVariablesProcFSRuleDescriptor.Priority,
+			InfectedPID: openEvent.Pid,
+			Severity:    R0008ReadEnvironmentVariablesProcFSRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

@@ -12,8 +12,6 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 )
 
 const (
@@ -63,7 +61,6 @@ func (rule *R1011LdPreloadHook) DeleteRule() {
 }
 
 func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
-
 	if !rule.EvaluateRule(eventType, event, objectCache.K8sObjectCache()) {
 		return nil
 	}
@@ -75,7 +72,6 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 		}
 
 		if allowed, err := isAllowed(&execEvent.Event, objectCache, execEvent.Comm, R1011ID); err != nil {
-			logger.L().Error("failed to check if ld_preload is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 			return nil
 		} else if allowed {
 			return nil
@@ -89,7 +85,6 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 		}
 
 		if allowed, err := isAllowed(&openEvent.Event, objectCache, openEvent.Comm, R1011ID); err != nil {
-			logger.L().Error("failed to check if ld_preload is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 			return nil
 		} else if allowed {
 			return nil
@@ -131,7 +126,6 @@ func (rule *R1011LdPreloadHook) Requirements() ruleengine.RuleSpec {
 func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *tracerexectype.Event) ruleengine.RuleFailure {
 	envVars, err := utils.GetProcessEnv(int(execEvent.Pid))
 	if err != nil {
-		logger.L().Debug("Failed to get process environment variables", helpers.Error(err))
 		return nil
 	}
 
@@ -141,11 +135,10 @@ func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *tracerexectype.E
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName:      rule.Name(),
-			Arguments:      map[string]interface{}{"envVar": ldHookVar},
-			InfectedPID:    execEvent.Pid,
-			FixSuggestions: fmt.Sprintf("Check the environment variable %s", ldHookVar),
-			Severity:       R1011LdPreloadHookRuleDescriptor.Priority,
+			AlertName:   rule.Name(),
+			Arguments:   map[string]interface{}{"envVar": ldHookVar},
+			InfectedPID: execEvent.Pid,
+			Severity:    R1011LdPreloadHookRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -185,9 +178,8 @@ func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.E
 				"path":  openEvent.FullPath,
 				"flags": openEvent.Flags,
 			},
-			InfectedPID:    openEvent.Pid,
-			FixSuggestions: "Check the file /etc/ld.so.preload",
-			Severity:       R1011LdPreloadHookRuleDescriptor.Priority,
+			InfectedPID: openEvent.Pid,
+			Severity:    R1011LdPreloadHookRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -225,7 +217,6 @@ func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *tracerexectype.Event,
 
 	envVars, err := utils.GetProcessEnv(int(execEvent.Pid))
 	if err != nil {
-		logger.L().Debug("Failed to get process environment variables", helpers.Error(err))
 		return false
 	}
 

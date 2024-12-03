@@ -141,10 +141,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 				"flags": openEvent.Flags,
 			},
 			InfectedPID: openEvent.Pid,
-			FixSuggestions: fmt.Sprintf(
-				"If this is a valid behavior, please add the open call to the whitelist in the application profile for the Pod %s",
-				openEvent.GetPod()),
-			Severity: R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
+			Severity:    R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

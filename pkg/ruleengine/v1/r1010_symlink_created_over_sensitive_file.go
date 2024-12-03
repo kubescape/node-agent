@@ -79,10 +79,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
 func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	logger.L().Debug("Processing event", helpers.String("ruleID", rule.ID()), helpers.String("eventType", string(eventType)))
-
 	if !rule.EvaluateRule(eventType, event, objCache.K8sObjectCache()) {
-		logger.L().Debug("Event does not match rule", helpers.String("ruleID", rule.ID()), helpers.String("eventType", string(eventType)))
 		return nil
 	}
 
@@ -102,9 +99,8 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 				"oldPath": symlinkEvent.OldPath,
 				"newPath": symlinkEvent.NewPath,
 			},
-			InfectedPID:    symlinkEvent.Pid,
-			FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-			Severity:       R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
+			InfectedPID: symlinkEvent.Pid,
+			Severity:    R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

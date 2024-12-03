@@ -115,9 +115,8 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 				"path":  openEvent.FullPath,
 				"flags": openEvent.Flags,
 			},
-			InfectedPID:    openEvent.Pid,
-			FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-			Severity:       R0010UnexpectedSensitiveFileAccessRuleDescriptor.Priority,
+			InfectedPID: openEvent.Pid,
+			Severity:    R0010UnexpectedSensitiveFileAccessRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

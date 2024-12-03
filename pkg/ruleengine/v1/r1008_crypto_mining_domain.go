@@ -179,10 +179,9 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 		if slices.Contains(commonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					AlertName:      rule.Name(),
-					InfectedPID:    dnsEvent.Pid,
-					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-					Severity:       R1008CryptoMiningDomainCommunicationRuleDescriptor.Priority,
+					AlertName:   rule.Name(),
+					InfectedPID: dnsEvent.Pid,
+					Severity:    R1008CryptoMiningDomainCommunicationRuleDescriptor.Priority,
 				},
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{

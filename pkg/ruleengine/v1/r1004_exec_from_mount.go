@@ -83,8 +83,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event ut
 						"exec": execEvent.ExePath,
 						"args": execEvent.Args,
 					},
-					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
-					Severity:       R1004ExecFromMountRuleDescriptor.Priority,
+					Severity: R1004ExecFromMountRuleDescriptor.Priority,
 				},
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{

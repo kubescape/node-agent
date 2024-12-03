@@ -96,9 +96,8 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 			Arguments: map[string]interface{}{
 				"syscall": syscallEvent.SyscallName,
 			},
-			InfectedPID:    syscallEvent.Pid,
-			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the system call \"%s\" to the whitelist in the application profile for the Pod \"%s\".", syscallEvent.SyscallName, syscallEvent.GetPod()),
-			Severity:       R0003UnexpectedSystemCallRuleDescriptor.Priority,
+			InfectedPID: syscallEvent.Pid,
+			Severity:    R0003UnexpectedSystemCallRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

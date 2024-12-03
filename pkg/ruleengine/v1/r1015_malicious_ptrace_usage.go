@@ -88,10 +88,9 @@ func (rule *R1015MaliciousPtraceUsage) ProcessEvent(eventType utils.EventType, e
 
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName:      rule.Name(),
-			InfectedPID:    ptraceEvent.Pid,
-			FixSuggestions: "Consider reviewing the application usage of ptrace.",
-			Severity:       R1015MaliciousPtraceUsageRuleDescriptor.Priority,
+			AlertName:   rule.Name(),
+			InfectedPID: ptraceEvent.Pid,
+			Severity:    R1015MaliciousPtraceUsageRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

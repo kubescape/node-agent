@@ -15,7 +15,6 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -79,19 +78,6 @@ func (rule *R0002UnexpectedFileAccess) SetParameters(parameters map[string]inter
 }
 
 func (rule *R0002UnexpectedFileAccess) DeleteRule() {
-}
-
-func (rule *R0002UnexpectedFileAccess) generatePatchCommand(event *traceropentype.Event, ap *v1beta1.ApplicationProfile) string {
-	flagList := "["
-	for _, arg := range event.Flags {
-		flagList += "\"" + arg + "\","
-	}
-	// remove the last comma
-	if len(flagList) > 1 {
-		flagList = flagList[:len(flagList)-1]
-	}
-	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"opens\": [{\"path\": \"%s\", \"flags\": %s}]}]}}'"
-	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(), event.GetContainer(), event.FullPath, flagList)
 }
 
 func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
@@ -159,8 +145,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 				"flags": openEvent.Flags,
 				"path":  openEvent.FullPath,
 			},
-			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the open call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", openEvent.FullPath, openEvent.GetPod(), rule.generatePatchCommand(openEvent, ap)),
-			Severity:       R0002UnexpectedFileAccessRuleDescriptor.Priority,
+			Severity: R0002UnexpectedFileAccessRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

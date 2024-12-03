@@ -78,8 +78,7 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 					Arguments: map[string]interface{}{
 						"hardlink": execEvent.ExePath,
 					},
-					FixSuggestions: "If this is a legitimate action, please add consider removing this workload from the binding of this rule.",
-					Severity:       R1000ExecFromMaliciousSourceDescriptor.Priority,
+					Severity: R1000ExecFromMaliciousSourceDescriptor.Priority,
 				},
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{

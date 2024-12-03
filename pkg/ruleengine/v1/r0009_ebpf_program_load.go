@@ -92,9 +92,8 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 				Arguments: map[string]interface{}{
 					"syscall": syscallEvent.SyscallName,
 				},
-				InfectedPID:    syscallEvent.Pid,
-				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
-				Severity:       R0009EbpfProgramLoadRuleDescriptor.Priority,
+				InfectedPID: syscallEvent.Pid,
+				Severity:    R0009EbpfProgramLoadRuleDescriptor.Priority,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
