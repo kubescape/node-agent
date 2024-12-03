@@ -103,9 +103,8 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 				"port":  event.Port,
 				"proto": event.Proto,
 			},
-			InfectedPID:    event.Pid,
-			FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-			Severity:       R0007KubernetesClientExecutedDescriptor.Priority,
+			InfectedPID: event.Pid,
+			Severity:    R0007KubernetesClientExecutedDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

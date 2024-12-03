@@ -59,6 +59,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/validator"
 	"github.com/kubescape/node-agent/pkg/watcher/dynamicwatcher"
 	"github.com/kubescape/node-agent/pkg/watcher/seccompprofilewatcher"
+
+	pyroscope "github.com/grafana/pyroscope-go"
 )
 
 func main() {
@@ -110,6 +112,23 @@ func main() {
 		go func() {
 			_ = http.ListenAndServe("localhost:6060", nil)
 		}()
+	}
+
+	if pyroscopeServerSvc, present := os.LookupEnv("PYROSCOPE_SERVER_SVC"); present {
+		logger.L().Info("Starting pyroscope profiler")
+
+		if os.Getenv("APPLICATION_NAME") == "" {
+			os.Setenv("APPLICATION_NAME", "node-agent")
+		}
+		_, err := pyroscope.Start(pyroscope.Config{
+			ApplicationName: os.Getenv("APPLICATION_NAME"),
+			ServerAddress:   pyroscopeServerSvc,
+			Logger:          pyroscope.StandardLogger,
+			Tags:            map[string]string{"node": cfg.NodeName, "app": "node-agent", "pod": os.Getenv("POD_NAME")},
+		})
+		if err != nil {
+			logger.L().Ctx(ctx).Error("error starting pyroscope", helpers.Error(err))
+		}
 	}
 
 	if m := os.Getenv("MULTIPLY"); m == "true" {
