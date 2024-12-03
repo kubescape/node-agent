@@ -7,6 +7,7 @@ import (
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -18,19 +19,21 @@ func TestR1004ExecFromMount(t *testing.T) {
 	if r == nil {
 		t.Errorf("Expected r to not be nil")
 	}
-	e := &tracerexectype.Event{
-		Event: eventtypes.Event{
-			CommonData: eventtypes.CommonData{
-				K8s: eventtypes.K8sMetadata{
-					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-						ContainerName: "test",
+	e := &events.ExecEvent{
+		Event: tracerexectype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "test",
+						},
 					},
+					Runtime: eventtypes.BasicRuntimeMetadata{ContainerID: "test"},
 				},
-				Runtime: eventtypes.BasicRuntimeMetadata{ContainerID: "test"},
 			},
+			Comm: "/test",
+			Args: []string{},
 		},
-		Comm: "/test",
-		Args: []string{},
 	}
 
 	// Test case where path is not mounted

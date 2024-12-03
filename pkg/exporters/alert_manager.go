@@ -5,10 +5,12 @@ package exporters
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/go-openapi/strfmt"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -45,6 +47,12 @@ func InitAlertManagerExporter(alertManagerURL string) *AlertManagerExporter {
 }
 
 func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+	trace, err := traceToString(failedRule.GetBaseRuntimeAlert().Trace)
+	if err != nil {
+		logger.L().Error("Error converting trace to string", helpers.Error(err))
+		trace = ""
+	}
+
 	processTree := failedRule.GetRuntimeProcessDetails().ProcessTree
 	process := utils.GetProcessFromProcessTree(&processTree, failedRule.GetBaseRuntimeAlert().InfectedPID)
 	if process == nil {
@@ -91,6 +99,7 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 				"comm":           process.Comm,
 				"uid":            fmt.Sprintf("%d", process.Uid),
 				"gid":            fmt.Sprintf("%d", process.Gid),
+				"trace":          trace,
 			},
 		},
 	}
@@ -153,4 +162,12 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 		logger.L().Error("Alert was not sent successfully")
 		return
 	}
+}
+
+func traceToString(t apitypes.Trace) (string, error) {
+	bytes, err := json.Marshal(t)
+	if err != nil {
+		return "", fmt.Errorf("error marshaling trace: %v", err)
+	}
+	return string(bytes), nil
 }

@@ -16,6 +16,7 @@ type hardlinkEvent struct {
 	Timestamp  uint64
 	MntnsId    uint64
 	Pid        uint32
+	Tid        uint32
 	Ppid       uint32
 	Uid        uint32
 	Gid        uint32
@@ -24,7 +25,7 @@ type hardlinkEvent struct {
 	Exepath    [4096]uint8
 	Oldpath    [4096]uint8
 	Newpath    [4096]uint8
-	_          [7]byte
+	_          [3]byte
 }
 
 // loadHardlink returns the embedded CollectionSpec for hardlink.

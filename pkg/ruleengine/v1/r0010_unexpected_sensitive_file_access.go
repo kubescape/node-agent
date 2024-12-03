@@ -5,13 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
@@ -83,10 +83,12 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 		return nil
 	}
 
-	openEvent, ok := event.(*traceropentype.Event)
+	fullEvent, ok := event.(*events.OpenEvent)
 	if !ok {
 		return nil
 	}
+
+	openEvent := fullEvent.Event
 
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
 	if ap == nil {
@@ -136,6 +138,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 			PodLabels: openEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
+		Extra:  fullEvent.GetExtra(),
 	}
 
 	return &ruleFailure

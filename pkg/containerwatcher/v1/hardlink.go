@@ -5,6 +5,7 @@ import (
 
 	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	"golang.org/x/sys/unix"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
@@ -20,6 +21,8 @@ func (ch *IGContainerWatcher) hardlinkEventCallback(event *tracerhardlinktype.Ev
 		logger.L().Ctx(ch.ctx).Warning("hardlink tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
+
+	ch.enrichEvent(event, []uint64{unix.SYS_LINK, unix.SYS_LINKAT})
 
 	ch.hardlinkWorkerChan <- event
 }

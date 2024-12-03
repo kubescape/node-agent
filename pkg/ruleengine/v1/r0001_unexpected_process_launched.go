@@ -5,11 +5,11 @@ import (
 	"slices"
 	"strings"
 
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
-
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
@@ -63,7 +63,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		return nil
 	}
 
-	execEvent, ok := event.(*tracerexectype.Event)
+	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
 		return nil
 	}
@@ -116,11 +116,11 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 				Cwd:        execEvent.Cwd,
 				Hardlink:   execEvent.ExePath,
 				Path:       getExecFullPathFromEvent(execEvent),
-				Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+				Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 			},
 			ContainerID: execEvent.Runtime.ContainerID,
 		},
-		TriggerEvent: execEvent.Event,
+		TriggerEvent: execEvent.Event.Event,
 		RuleAlert: apitypes.RuleAlert{
 			RuleDescription: fmt.Sprintf("Unexpected process launched: %s in: %s", execPath, execEvent.GetContainer()),
 		},
@@ -129,6 +129,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 			PodLabels: execEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
+		Extra:  execEvent.GetExtra(),
 	}
 
 	return &ruleFailure

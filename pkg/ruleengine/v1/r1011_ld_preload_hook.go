@@ -5,12 +5,12 @@ import (
 	"os"
 	"strings"
 
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 )
 
@@ -66,7 +66,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 	}
 
 	if eventType == utils.ExecveEventType {
-		execEvent, ok := event.(*tracerexectype.Event)
+		execEvent, ok := event.(*events.ExecEvent)
 		if !ok {
 			return nil
 		}
@@ -79,7 +79,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 
 		return rule.ruleFailureExecEvent(execEvent)
 	} else if eventType == utils.OpenEventType {
-		openEvent, ok := event.(*traceropentype.Event)
+		openEvent, ok := event.(*events.OpenEvent)
 		if !ok {
 			return nil
 		}
@@ -90,7 +90,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 			return nil
 		}
 
-		return rule.ruleFailureOpenEvent(openEvent)
+		return rule.ruleFailureOpenEvent(&openEvent.Event)
 	}
 
 	return nil
@@ -99,14 +99,14 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 func (rule *R1011LdPreloadHook) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) bool {
 	switch eventType {
 	case utils.ExecveEventType:
-		execEvent, ok := event.(*tracerexectype.Event)
+		execEvent, ok := event.(*events.ExecEvent)
 		if !ok {
 			return false
 		}
 		return rule.shouldAlertExec(execEvent, k8sObjCache)
 
 	case utils.OpenEventType:
-		openEvent, ok := event.(*traceropentype.Event)
+		openEvent, ok := event.(*events.OpenEvent)
 		if !ok {
 			return false
 		}
@@ -123,7 +123,7 @@ func (rule *R1011LdPreloadHook) Requirements() ruleengine.RuleSpec {
 	}
 }
 
-func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *tracerexectype.Event) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *events.ExecEvent) ruleengine.RuleFailure {
 	envVars, err := utils.GetProcessEnv(int(execEvent.Pid))
 	if err != nil {
 		return nil
@@ -152,11 +152,11 @@ func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *tracerexectype.E
 				Cwd:        execEvent.Cwd,
 				Hardlink:   execEvent.ExePath,
 				Path:       getExecFullPathFromEvent(execEvent),
-				Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(execEvent), " ")),
+				Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 			},
 			ContainerID: execEvent.Runtime.ContainerID,
 		},
-		TriggerEvent: execEvent.Event,
+		TriggerEvent: execEvent.Event.Event,
 		RuleAlert: apitypes.RuleAlert{
 			RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is using the environment variable %s", execEvent.Comm, execEvent.GetContainer(), fmt.Sprintf("%s=%s", ldHookVar, envVars[ldHookVar])),
 		},
@@ -204,7 +204,7 @@ func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.E
 	return &ruleFailure
 }
 
-func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *tracerexectype.Event, k8sObjCache objectcache.K8sObjectCache) bool {
+func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *events.ExecEvent, k8sObjCache objectcache.K8sObjectCache) bool {
 	// Java is a special case, we don't want to alert on it because it uses LD_LIBRARY_PATH.
 	if execEvent.Comm == JAVA_COMM {
 		return false
@@ -240,7 +240,7 @@ func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *tracerexectype.Event,
 	return false
 }
 
-func (rule *R1011LdPreloadHook) shouldAlertOpen(openEvent *traceropentype.Event) bool {
+func (rule *R1011LdPreloadHook) shouldAlertOpen(openEvent *events.OpenEvent) bool {
 	return openEvent.FullPath == LD_PRELOAD_FILE && (openEvent.FlagsRaw&(int32(os.O_WRONLY)|int32(os.O_RDWR))) != 0
 }
 

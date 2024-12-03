@@ -122,6 +122,7 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 			PodLabels: hardlinkEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
+		Extra:  hardlinkEvent.GetExtra(),
 	}
 }
 

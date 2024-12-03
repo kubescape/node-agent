@@ -98,6 +98,8 @@ type RuleFailure interface {
 	GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails
 	// Get Rule ID
 	GetRuleId() string
+	// Get Extra
+	GetExtra() interface{}
 	// Get Cloud Services
 	GetCloudServices() []string
 

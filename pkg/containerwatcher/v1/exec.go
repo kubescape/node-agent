@@ -6,6 +6,8 @@ import (
 	tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	"golang.org/x/sys/unix"
 )
 
 func (ch *IGContainerWatcher) execEventCallback(event *tracerexectype.Event) {
@@ -13,10 +15,11 @@ func (ch *IGContainerWatcher) execEventCallback(event *tracerexectype.Event) {
 		return
 	}
 
-	// do not skip dropped events as their processing is done in the worker
+	execEvent := &events.ExecEvent{Event: *event}
+	ch.enrichEvent(execEvent, []uint64{unix.SYS_EXECVE, unix.SYS_EXECVEAT})
 
 	if event.Retval > -1 && event.Comm != "" {
-		ch.execWorkerChan <- event
+		ch.execWorkerChan <- execEvent
 	}
 }
 

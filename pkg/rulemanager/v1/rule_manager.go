@@ -66,13 +66,14 @@ type RuleManager struct {
 	clusterName              string
 	containerIdToShimPid     maps.SafeMap[string, uint32]
 	containerIdToPid         maps.SafeMap[string, uint32]
+	enricher                 ruleenginetypes.Enricher
 	processManager           processmanager.ProcessManagerClient
 	dnsManager               dnsmanager.DNSResolver
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, dnsManager dnsmanager.DNSResolver) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		ctx:               ctx,
@@ -85,6 +86,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		metrics:           metrics,
 		nodeName:          nodeName,
 		clusterName:       clusterName,
+		enricher:          enricher,
 		processManager:    processManager,
 		dnsManager:        dnsManager,
 	}, nil
@@ -156,7 +158,7 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 					WithMountNsID: eventtypes.WithMountNsID{
 						MountNsID: watchedContainer.NsMntId,
 					},
-					Pid: container.Pid,
+					Pid: container.ContainerPid(),
 					// TODO: Figure out how to get UID, GID and comm from the syscall.
 					// Uid:         container.OciConfig.Process.User.UID,
 					// Gid:         container.OciConfig.Process.User.GID,
@@ -279,13 +281,13 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			}
 		}
 		rm.trackedContainers.Add(k8sContainerID)
-		shim, err := utils.GetProcessStat(int(notif.Container.Pid))
+		shim, err := utils.GetProcessStat(int(notif.Container.ContainerPid()))
 		if err != nil {
 			logger.L().Warning("RuleManager - failed to get shim process", helpers.Error(err))
 		} else {
 			rm.containerIdToShimPid.Set(notif.Container.Runtime.ContainerID, uint32(shim.PPID))
 		}
-		rm.containerIdToPid.Set(notif.Container.Runtime.ContainerID, notif.Container.Pid)
+		rm.containerIdToPid.Set(notif.Container.Runtime.ContainerID, notif.Container.ContainerPid())
 		go rm.startRuleManager(rm.ctx, notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:
 		channel := rm.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
@@ -355,6 +357,7 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 			res = rm.enrichRuleFailure(res)
 			res.SetWorkloadDetails(rm.podToWlid.Get(utils.CreateK8sPodID(res.GetRuntimeAlertK8sDetails().Namespace, res.GetRuntimeAlertK8sDetails().PodName)))
 			rm.exporter.SendRuleAlert(res)
+
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())
@@ -473,6 +476,10 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
 
 	ruleFailure.SetCloudServices(rm.dnsManager.ResolveContainerToCloudServices(ruleFailure.GetTriggerEvent().Runtime.ContainerID).ToSlice())
+
+	if rm.enricher != nil {
+		rm.enricher.EnrichRuleFailure(ruleFailure)
+	}
 
 	return ruleFailure
 }

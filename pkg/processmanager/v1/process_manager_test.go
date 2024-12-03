@@ -75,10 +75,10 @@ func TestProcessManagerBasics(t *testing.T) {
 		Container: &containercollection.Container{
 			Runtime: containercollection.RuntimeMetadata{
 				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-					ContainerID: containerID,
+					ContainerID:  containerID,
+					ContainerPID: containerPID,
 				},
 			},
-			Pid: containerPID,
 		},
 	})
 
@@ -106,10 +106,10 @@ func TestProcessTracking(t *testing.T) {
 		Container: &containercollection.Container{
 			Runtime: containercollection.RuntimeMetadata{
 				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-					ContainerID: containerID,
+					ContainerID:  containerID,
+					ContainerPID: containerPID,
 				},
 			},
-			Pid: containerPID,
 		},
 	})
 
@@ -197,10 +197,10 @@ func TestProcessRemoval(t *testing.T) {
 		Container: &containercollection.Container{
 			Runtime: containercollection.RuntimeMetadata{
 				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-					ContainerID: containerID,
+					ContainerID:  containerID,
+					ContainerPID: containerPID,
 				},
 			},
-			Pid: containerPID,
 		},
 	})
 
@@ -271,10 +271,10 @@ func TestContainerRemoval(t *testing.T) {
 		Container: &containercollection.Container{
 			Runtime: containercollection.RuntimeMetadata{
 				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-					ContainerID: containerID,
+					ContainerID:  containerID,
+					ContainerPID: containerPID,
 				},
 			},
-			Pid: containerPID,
 		},
 	})
 
@@ -305,10 +305,10 @@ func TestContainerRemoval(t *testing.T) {
 		Container: &containercollection.Container{
 			Runtime: containercollection.RuntimeMetadata{
 				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-					ContainerID: containerID,
+					ContainerID:  containerID,
+					ContainerPID: containerPID,
 				},
 			},
-			Pid: containerPID,
 		},
 	})
 
@@ -342,10 +342,10 @@ func TestMultipleContainers(t *testing.T) {
 			Container: &containercollection.Container{
 				Runtime: containercollection.RuntimeMetadata{
 					BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-						ContainerID: c.id,
+						ContainerID:  c.id,
+						ContainerPID: c.containerPID,
 					},
 				},
-				Pid: c.containerPID,
 			},
 		})
 
@@ -389,10 +389,10 @@ func TestMultipleContainers(t *testing.T) {
 		Container: &containercollection.Container{
 			Runtime: containercollection.RuntimeMetadata{
 				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-					ContainerID: containers[0].id,
+					ContainerID:  containers[0].id,
+					ContainerPID: containers[0].containerPID,
 				},
 			},
-			Pid: containers[0].containerPID,
 		},
 	})
 
@@ -427,10 +427,10 @@ func TestErrorCases(t *testing.T) {
 			Container: &containercollection.Container{
 				Runtime: containercollection.RuntimeMetadata{
 					BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-						ContainerID: containerID,
+						ContainerID:  containerID,
+						ContainerPID: containerPID,
 					},
 				},
-				Pid: containerPID,
 			},
 		})
 
@@ -461,10 +461,10 @@ func TestRaceConditions(t *testing.T) {
 		Container: &containercollection.Container{
 			Runtime: containercollection.RuntimeMetadata{
 				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-					ContainerID: containerID,
+					ContainerID:  containerID,
+					ContainerPID: containerPID,
 				},
 			},
-			Pid: containerPID,
 		},
 	})
 
@@ -598,10 +598,10 @@ func TestDuplicateProcessHandling(t *testing.T) {
 		Container: &containercollection.Container{
 			Runtime: containercollection.RuntimeMetadata{
 				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-					ContainerID: containerID,
+					ContainerID:  containerID,
+					ContainerPID: containerPID,
 				},
 			},
-			Pid: containerPID,
 		},
 	})
 
@@ -702,10 +702,10 @@ func TestProcessReparenting(t *testing.T) {
 		Container: &containercollection.Container{
 			Runtime: containercollection.RuntimeMetadata{
 				BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-					ContainerID: containerID,
+					ContainerID:  containerID,
+					ContainerPID: containerPID,
 				},
 			},
-			Pid: containerPID,
 		},
 	})
 

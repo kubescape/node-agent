@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"testing"
 
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -17,18 +18,20 @@ func TestR1000ExecFromMaliciousSource(t *testing.T) {
 		t.Errorf("Expected r to not be nil")
 	}
 	// Create an exec event
-	e := &tracerexectype.Event{
-		Event: eventtypes.Event{
-			CommonData: eventtypes.CommonData{
-				K8s: eventtypes.K8sMetadata{
-					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-						ContainerName: "test",
+	e := &events.ExecEvent{
+		Event: tracerexectype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "test",
+						},
 					},
 				},
 			},
+			Comm: "/test",
+			Args: []string{},
 		},
-		Comm: "/test",
-		Args: []string{},
 	}
 
 	ruleResult := r.ProcessEvent(utils.ExecveEventType, e, &RuleObjectCacheMock{})

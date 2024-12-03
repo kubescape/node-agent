@@ -14,11 +14,9 @@ import (
 	tracerdns "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/tracer"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetwork "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/tracer"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
@@ -29,6 +27,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
@@ -121,6 +120,8 @@ type IGContainerWatcher struct {
 	thirdPartyTracers mapset.Set[containerwatcher.CustomTracer]
 	// Third party container receivers
 	thirdPartyContainerReceivers mapset.Set[containerwatcher.ContainerReceiver]
+	// Third party event enrichers
+	thirdPartyEnricher containerwatcher.ThirdPartyEnricher
 
 	// Worker pools
 	capabilitiesWorkerPool *ants.PoolWithFunc
@@ -136,8 +137,8 @@ type IGContainerWatcher struct {
 	httpWorkerPool         *ants.PoolWithFunc
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
-	execWorkerChan         chan *tracerexectype.Event
-	openWorkerChan         chan *traceropentype.Event
+	execWorkerChan         chan *events.ExecEvent
+	openWorkerChan         chan *events.OpenEvent
 	ptraceWorkerChan       chan *tracerptracetype.Event
 	networkWorkerChan      chan *tracernetworktype.Event
 	dnsWorkerChan          chan *tracerdnstype.Event
@@ -161,8 +162,7 @@ type IGContainerWatcher struct {
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, igK8sClient *containercollection.K8sClient, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]], processManager processmanager.ProcessManagerClient) (*IGContainerWatcher, error) {
-	// Use container collection to get notified for new containers
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, igK8sClient *containercollection.K8sClient, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]], thirdPartyEnricher containerwatcher.ThirdPartyEnricher, processManager processmanager.ProcessManagerClient) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
 	tracerCollection, err := tracercollection.NewTracerCollection(containerCollection)
@@ -193,7 +193,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	}
 	// Create an exec worker pool
 	execWorkerPool, err := ants.NewPoolWithFunc(execWorkerPoolSize, func(i interface{}) {
-		event := i.(tracerexectype.Event)
+		event := i.(events.ExecEvent)
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
 			return
@@ -208,21 +208,20 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		path := event.Comm
 		if len(event.Args) > 0 {
-			if event.Args[0] != "" {
-				path = event.Args[0]
-			}
+			path = event.Args[0]
 		}
 
 		if path == "" {
 			return
 		}
 
+		ruleManager.ReportEvent(utils.ExecveEventType, &event)
+		malwareManager.ReportEvent(utils.ExecveEventType, &event)
+
 		metrics.ReportEvent(utils.ExecveEventType)
 		processManager.ReportEvent(utils.ExecveEventType, &event)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
 		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
-		ruleManager.ReportEvent(utils.ExecveEventType, &event)
-		malwareManager.ReportEvent(utils.ExecveEventType, &event)
 		rulePolicyReporter.ReportEvent(utils.ExecveEventType, &event, k8sContainerID, event.Comm)
 
 		// Report exec events to event receivers
@@ -233,7 +232,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	}
 	// Create an open worker pool
 	openWorkerPool, err := ants.NewPoolWithFunc(openWorkerPoolSize, func(i interface{}) {
-		event := i.(traceropentype.Event)
+		event := i.(events.OpenEvent)
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
 			return
@@ -339,7 +338,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.SymlinkEventType)
 		ruleManager.ReportEvent(utils.SymlinkEventType, &event)
 		rulePolicyReporter.ReportEvent(utils.SymlinkEventType, &event, k8sContainerID, event.Comm)
-
 		// Report symlink events to event receivers
 		reportEventToThirdPartyTracers(utils.SymlinkEventType, &event, thirdPartyEventReceivers)
 	})
@@ -370,6 +368,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		if event.K8s.ContainerName == "" {
 			return
 		}
+
 		metrics.ReportEvent(utils.SSHEventType)
 		ruleManager.ReportEvent(utils.SSHEventType, &event)
 
@@ -453,8 +452,8 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		// Channels
 		capabilitiesWorkerChan: make(chan *tracercapabilitiestype.Event, 1000),
-		execWorkerChan:         make(chan *tracerexectype.Event, 10000),
-		openWorkerChan:         make(chan *traceropentype.Event, 500000),
+		execWorkerChan:         make(chan *events.ExecEvent, 10000),
+		openWorkerChan:         make(chan *events.OpenEvent, 500000),
 		ptraceWorkerChan:       make(chan *tracerptracetype.Event, 1000),
 		networkWorkerChan:      make(chan *tracernetworktype.Event, 500000),
 		dnsWorkerChan:          make(chan *tracerdnstype.Event, 100000),
@@ -471,6 +470,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		runtime:                      runtime,
 		thirdPartyTracers:            mapset.NewSet[containerwatcher.CustomTracer](),
 		thirdPartyContainerReceivers: mapset.NewSet[containerwatcher.ContainerReceiver](),
+		thirdPartyEnricher:           thirdPartyEnricher,
 		processManager:               processManager,
 	}, nil
 }
@@ -551,6 +551,12 @@ func (ch *IGContainerWatcher) Stop() {
 
 func (ch *IGContainerWatcher) Ready() bool {
 	return ch.running
+}
+
+func (ch *IGContainerWatcher) enrichEvent(event utils.EnrichEvent, syscalls []uint64) {
+	if ch.thirdPartyEnricher != nil {
+		ch.thirdPartyEnricher.Enrich(event, syscalls)
+	}
 }
 
 func reportEventToThirdPartyTracers(eventType utils.EventType, event utils.K8sEvent, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]]) {
