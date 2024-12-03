@@ -10,7 +10,6 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -52,12 +51,6 @@ func (rule *R0004UnexpectedCapabilityUsed) ID() string {
 func (rule *R0004UnexpectedCapabilityUsed) DeleteRule() {
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) generatePatchCommand(event *tracercapabilitiestype.Event, ap *v1beta1.ApplicationProfile) string {
-	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"capabilities\": [{\"syscall\": \"%s\", \"caps\": [%s]}]}]}}'"
-	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(),
-		event.GetContainer(), event.Syscall, event.CapName)
-}
-
 func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.CapabilitiesEventType {
 		return nil
@@ -95,9 +88,8 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 				"syscall":    capEvent.Syscall,
 				"capability": capEvent.CapName,
 			},
-			InfectedPID:    capEvent.Pid,
-			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the capability use \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", capEvent.CapName, capEvent.GetPod(), rule.generatePatchCommand(capEvent, ap)),
-			Severity:       R0004UnexpectedCapabilityUsedRuleDescriptor.Priority,
+			InfectedPID: capEvent.Pid,
+			Severity:    R0004UnexpectedCapabilityUsedRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

@@ -102,10 +102,6 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 					"port":  networkEvent.Port,
 					"proto": networkEvent.Proto,
 				},
-				FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the IP %s to the whitelist in the application profile for the Pod %s.",
-					networkEvent.DstEndpoint.Addr,
-					networkEvent.GetPod(),
-				),
 				Severity: R0011UnexpectedEgressNetworkTrafficRuleDescriptor.Priority,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{

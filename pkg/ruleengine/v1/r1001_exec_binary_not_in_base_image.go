@@ -71,10 +71,9 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 		upperLayer := true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
-				InfectedPID:    execEvent.Pid,
-				FixSuggestions: "If this is an expected behavior it is strongly suggested to include all executables in the container image. If this is not possible you can remove the rule binding to this workload.",
-				Severity:       R1001ExecBinaryNotInBaseImageRuleDescriptor.Priority,
+				AlertName:   rule.Name(),
+				InfectedPID: execEvent.Pid,
+				Severity:    R1001ExecBinaryNotInBaseImageRuleDescriptor.Priority,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{

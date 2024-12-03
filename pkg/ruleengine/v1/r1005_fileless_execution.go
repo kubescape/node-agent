@@ -80,8 +80,7 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *events.ExecEven
 				Arguments: map[string]interface{}{
 					"hardlink": execEvent.ExePath,
 				},
-				FixSuggestions: "If this is a legitimate action, please add consider removing this workload from the binding of this rule.",
-				Severity:       R1005FilelessExecutionRuleDescriptor.Priority,
+				Severity: R1005FilelessExecutionRuleDescriptor.Priority,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{

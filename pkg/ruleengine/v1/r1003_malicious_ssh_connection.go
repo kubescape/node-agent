@@ -176,9 +176,8 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 					"dstPort": sshEvent.DstPort,
 					"srcPort": sshEvent.SrcPort,
 				},
-				InfectedPID:    sshEvent.Pid,
-				FixSuggestions: "If this is a legitimate action, please add the port as a parameter to the binding of this rule",
-				Severity:       R1003MaliciousSSHConnectionRuleDescriptor.Priority,
+				InfectedPID: sshEvent.Pid,
+				Severity:    R1003MaliciousSSHConnectionRuleDescriptor.Priority,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{

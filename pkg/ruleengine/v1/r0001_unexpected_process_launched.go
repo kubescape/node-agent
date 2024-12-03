@@ -10,8 +10,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
@@ -59,21 +57,6 @@ func CreateRuleR0001UnexpectedProcessLaunched() *R0001UnexpectedProcessLaunched 
 	return &R0001UnexpectedProcessLaunched{enforceArgs: false}
 }
 
-func (rule *R0001UnexpectedProcessLaunched) generatePatchCommand(event *events.ExecEvent, ap *v1beta1.ApplicationProfile) string {
-	argList := "["
-	for _, arg := range event.Args {
-		argList += "\"" + arg + "\","
-	}
-	// remove the last comma
-	if len(argList) > 1 {
-		argList = argList[:len(argList)-1]
-	}
-	argList += "]"
-	baseTemplate := "kubectl patch applicationprofile %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"execs\": [{\"path\": \"%s\", \"args\": %s}]}]}}'"
-	return fmt.Sprintf(baseTemplate, ap.GetName(), ap.GetNamespace(),
-		event.GetContainer(), getExecPathFromEvent(event), argList)
-}
-
 func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
@@ -118,8 +101,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 				"exec":   execPath,
 				"args":   execEvent.Args,
 			},
-			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the exec call \"%s\" to the whitelist in the application profile for the Pod \"%s\". You can use the following command: %s", execPath, execEvent.GetPod(), rule.generatePatchCommand(execEvent, ap)),
-			Severity:       R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
+			Severity: R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

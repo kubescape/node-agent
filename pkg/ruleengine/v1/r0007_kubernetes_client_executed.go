@@ -156,8 +156,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *events.ExecEve
 					"exec": execPath,
 					"args": event.Args,
 				},
-				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-				Severity:       R0007KubernetesClientExecutedDescriptor.Priority,
+				Severity: R0007KubernetesClientExecutedDescriptor.Priority,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{

@@ -62,10 +62,9 @@ func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event 
 	if randomXEvent, ok := event.(*tracerrandomxtype.Event); ok {
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
-				InfectedPID:    randomXEvent.Pid,
-				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-				Severity:       R1007XMRCryptoMiningRuleDescriptor.Priority,
+				AlertName:   rule.Name(),
+				InfectedPID: randomXEvent.Pid,
+				Severity:    R1007XMRCryptoMiningRuleDescriptor.Priority,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{

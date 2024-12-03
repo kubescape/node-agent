@@ -97,9 +97,8 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 				"oldPath": hardlinkEvent.OldPath,
 				"newPath": hardlinkEvent.NewPath,
 			},
-			InfectedPID:    hardlinkEvent.Pid,
-			FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-			Severity:       R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
+			InfectedPID: hardlinkEvent.Pid,
+			Severity:    R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

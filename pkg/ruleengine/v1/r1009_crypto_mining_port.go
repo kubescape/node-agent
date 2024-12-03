@@ -102,9 +102,8 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 						"proto": networkEvent.Proto,
 						"ip":    networkEvent.DstEndpoint.Addr,
 					},
-					InfectedPID:    networkEvent.Pid,
-					FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule.",
-					Severity:       R1009CryptoMiningRelatedPortRuleDescriptor.Priority,
+					InfectedPID: networkEvent.Pid,
+					Severity:    R1009CryptoMiningRelatedPortRuleDescriptor.Priority,
 				},
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{

@@ -12,7 +12,6 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 const (
@@ -53,12 +52,6 @@ func (rule *R0005UnexpectedDomainRequest) ID() string {
 }
 
 func (rule *R0005UnexpectedDomainRequest) DeleteRule() {
-}
-
-func (rule *R0005UnexpectedDomainRequest) generatePatchCommand(event *tracerdnstype.Event, nn *v1beta1.NetworkNeighborhood) string {
-	baseTemplate := "kubectl patch networkneighborhood %s --namespace %s --type merge -p '{\"spec\": {\"containers\": [{\"name\": \"%s\", \"dns\": [{\"dnsName\": \"%s\"}]}]}}'"
-	return fmt.Sprintf(baseTemplate, nn.GetName(), nn.GetNamespace(),
-		event.GetContainer(), event.DNSName)
 }
 
 func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
@@ -107,10 +100,6 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 				"protocol":  domainEvent.Protocol,
 				"port":      domainEvent.DstPort,
 			},
-			FixSuggestions: fmt.Sprintf("If this is a valid behavior, please add the domain %s to the whitelist in the application profile for the Pod %s. You can use the following command: %s",
-				domainEvent.DNSName,
-				domainEvent.GetPod(),
-				rule.generatePatchCommand(domainEvent, nn)),
 			Severity: R0005UnexpectedDomainRequestRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{

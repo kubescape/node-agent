@@ -72,10 +72,9 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event u
 		rule.alreadyNotified = true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				AlertName:      rule.Name(),
-				InfectedPID:    syscallEvent.Pid,
-				FixSuggestions: "If this is a legitimate action, please consider removing this workload from the binding of this rule",
-				Severity:       R1006UnshareSyscallRuleDescriptor.Priority,
+				AlertName:   rule.Name(),
+				InfectedPID: syscallEvent.Pid,
+				Severity:    R1006UnshareSyscallRuleDescriptor.Priority,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
