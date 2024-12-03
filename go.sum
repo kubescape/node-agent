@@ -624,8 +624,6 @@ github.com/imdario/mergo v0.3.16/go.mod h1:WBLT9ZmE3lPoWsEzCh9LPo3TiwVN+ZKEjmz+h
 github.com/inconshreveable/mousetrap v1.0.0/go.mod h1:PxqpIevigyE2G7u3NXJIT2ANytuPF1OarO4DADm73n8=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/inspektor-gadget/inspektor-gadget v0.35.0 h1:+/DxlElkTYCmFhJORhU2/XLzzjLW2jTNYJf7Q6ku0ks=
-github.com/inspektor-gadget/inspektor-gadget v0.35.0/go.mod h1:SX9luao86CnrEKOygVR/ylQ5Il04CXFMNg7cQhoiNV0=
 github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6 h1:fQqkJ+WkYfzy6BoUh32fr9uYrXfOGtsfw0skMQkfOic=
 github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6/go.mod h1:SpkAiCQRtJ6TvvxPnOSyH3BMl6unz3xZlaprSwhNNJM=
 github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 h1:BQSFePA1RWJOlocH6Fxy8MmwDt+yVQYULKfN0RoTN8A=
@@ -704,6 +702,8 @@ github.com/magiconair/properties v1.8.7/go.mod h1:Dhd985XPs7jluiymwWYZ0G4Z61jb3v
 github.com/mailru/easyjson v0.0.0-20190312143242-1de009706dbe/go.mod h1:C1wdFJiN94OJF2b5HbByQZoLdCWB1Yqtg26g4irojpc=
 github.com/mailru/easyjson v0.7.7 h1:UGYAvKxe3sBsEDzO8ZeWOSlIQfWFlxbzLZe7hwFURr0=
 github.com/mailru/easyjson v0.7.7/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJJLY9Nlc=
+github.com/matthyx/inspektor-gadget v0.0.0-20241203073859-c65596d0bce0 h1:KYj3eYxemRi9hIhWJtL6V2YAR03Sfn0eli+IfK16hbg=
+github.com/matthyx/inspektor-gadget v0.0.0-20241203073859-c65596d0bce0/go.mod h1:SX9luao86CnrEKOygVR/ylQ5Il04CXFMNg7cQhoiNV0=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
 github.com/mattn/go-colorable v0.1.4/go.mod h1:U0ppj6V5qS13XJ6of8GYAs25YV2eR4EVcfRqFIhoBtE=
 github.com/mattn/go-colorable v0.1.6/go.mod h1:u6P/XSegPjTcexA+o6vUJrdnUu04hMope9wVRipJSqc=
