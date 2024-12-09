@@ -36,7 +36,6 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/prometheus/procfs"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,7 +48,6 @@ var (
 	ContainerReachedMaxTime     = errors.New("container reached max time")
 	ObjectCompleted             = errors.New("object is completed")
 	TooLargeObjectError         = errors.New("object is too large")
-	IncompleteSBOMError         = errors.New("incomplete SBOM")
 )
 
 type ContainerType int
@@ -87,7 +85,6 @@ type WatchedContainerData struct {
 	InstanceID                                 instanceidhandler.IInstanceID
 	UpdateDataTicker                           *time.Ticker
 	SyncChannel                                chan error
-	SBOMSyftFiltered                           *v1beta1.SBOMSyftFiltered
 	RelevantRealtimeFilesByIdentifier          map[string]bool
 	RelevantRelationshipsArtifactsByIdentifier map[string]bool
 	RelevantArtifactsFilesByIdentifier         map[string]bool
@@ -98,10 +95,9 @@ type WatchedContainerData struct {
 	Wlid                                       string
 	TemplateHash                               string
 	K8sContainerID                             string
-	SBOMResourceVersion                        int
 	ContainerType                              ContainerType
 	ContainerIndex                             int
-	ContainerNames                             map[ContainerType][]string
+	ContainerInfos                             map[ContainerType][]ContainerInfo
 	NsMntId                                    uint64
 	InitialDelayExpired                        bool
 	statusUpdated                              bool
@@ -109,6 +105,12 @@ type WatchedContainerData struct {
 	completionStatus                           WatchedContainerCompletionStatus
 	ParentWorkloadSelector                     *metav1.LabelSelector
 	SeccompProfilePath                         *string
+}
+
+type ContainerInfo struct {
+	Name     string
+	ImageTag string
+	ImageID  string
 }
 
 func Between(value string, a string, b string) string {
@@ -243,20 +245,41 @@ func (watchedContainer *WatchedContainerData) StatusUpdated() bool {
 	return watchedContainer.statusUpdated
 }
 
-func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterface.IWorkload, containerName string) {
-	if watchedContainer.ContainerNames == nil {
-		watchedContainer.ContainerNames = make(map[ContainerType][]string)
+func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterface.IWorkload, containerName string) error {
+	if watchedContainer.ContainerInfos == nil {
+		watchedContainer.ContainerInfos = make(map[ContainerType][]ContainerInfo)
+	}
+	podSpec, err := wl.GetPodSpec()
+	if err != nil {
+		return fmt.Errorf("failed to get pod spec: %w", err)
+	}
+	podStatus, err := wl.GetPodStatus()
+	if err != nil {
+		return fmt.Errorf("failed to get pod status: %w", err)
 	}
 	// check pod level seccomp profile (might be overridden at container level)
-	podSpec, err := wl.GetPodSpec()
-	if err == nil && podSpec.SecurityContext != nil && podSpec.SecurityContext.SeccompProfile != nil {
+	if podSpec.SecurityContext != nil && podSpec.SecurityContext.SeccompProfile != nil {
 		watchedContainer.SeccompProfilePath = podSpec.SecurityContext.SeccompProfile.LocalhostProfile
 	}
-	checkContainers := func(containers []v1.Container, ephemeralContainers []v1.EphemeralContainer, containerType ContainerType) {
-		var containerNames []string
+	// TODO rewrite with podutil.VisitContainers()
+	checkContainers := func(containers []v1.Container, ephemeralContainers []v1.EphemeralContainer, containerType ContainerType) error {
+		var imageID string
+		for _, c := range podStatus.ContainerStatuses {
+			if c.Name == containerName {
+				imageID = c.ImageID
+			}
+		}
+		if imageID == "" {
+			return fmt.Errorf("failed to get imageID for container %s", containerName)
+		}
+		var containersInfo []ContainerInfo
 		if containerType == EphemeralContainer {
 			for i, c := range ephemeralContainers {
-				containerNames = append(containerNames, c.Name)
+				containersInfo = append(containersInfo, ContainerInfo{
+					Name:     c.Name,
+					ImageTag: c.Image,
+					ImageID:  imageID,
+				})
 				if c.Name == containerName {
 					watchedContainer.ContainerIndex = i
 					watchedContainer.ContainerType = containerType
@@ -267,7 +290,11 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 			}
 		} else {
 			for i, c := range containers {
-				containerNames = append(containerNames, c.Name)
+				containersInfo = append(containersInfo, ContainerInfo{
+					Name:     c.Name,
+					ImageTag: c.Image,
+					ImageID:  imageID,
+				})
 				if c.Name == containerName {
 					watchedContainer.ContainerIndex = i
 					watchedContainer.ContainerType = containerType
@@ -277,26 +304,22 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 				}
 			}
 		}
-		watchedContainer.ContainerNames[containerType] = containerNames
+		watchedContainer.ContainerInfos[containerType] = containersInfo
+		return nil
 	}
 	// containers
-	containers, err := wl.GetContainers()
-	if err != nil {
-		return
+	if err := checkContainers(podSpec.Containers, nil, Container); err != nil {
+		return err
 	}
-	checkContainers(containers, nil, Container)
 	// initContainers
-	initContainers, err := wl.GetInitContainers()
-	if err != nil {
-		return
+	if err := checkContainers(podSpec.InitContainers, nil, InitContainer); err != nil {
+		return err
 	}
-	checkContainers(initContainers, nil, InitContainer)
 	// ephemeralContainers
-	ephemeralContainers, err := wl.GetEphemeralContainers()
-	if err != nil {
-		return
+	if err := checkContainers(nil, podSpec.EphemeralContainers, EphemeralContainer); err != nil {
+		return err
 	}
-	checkContainers(nil, ephemeralContainers, EphemeralContainer)
+	return nil
 }
 
 type PatchOperation struct {
