@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/aws/aws-sdk-go/aws/ec2metadata"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -125,6 +127,15 @@ func extractAWSMetadata(node *corev1.Node, metadata *apitypes.CloudMetadata) *ap
 	// Extract account ID from annotations if available
 	if accountID, ok := node.Annotations["eks.amazonaws.com/account-id"]; ok {
 		metadata.AccountID = accountID
+	} else {
+		// Extract account ID from metadata service if available
+		client := ec2metadata.New(session.Must(session.NewSession()))
+		if client.Available() {
+			identity, err := client.GetInstanceIdentityDocument()
+			if err == nil {
+				metadata.AccountID = identity.AccountID
+			}
+		}
 	}
 
 	return metadata
