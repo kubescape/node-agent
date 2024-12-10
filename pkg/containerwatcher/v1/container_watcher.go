@@ -27,7 +27,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
-	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
@@ -45,7 +45,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
 	"github.com/kubescape/node-agent/pkg/processmanager"
-	"github.com/kubescape/node-agent/pkg/relevancymanager"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
@@ -91,7 +90,6 @@ type IGContainerWatcher struct {
 	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	igK8sClient               *containercollection.K8sClient
 	k8sClient                 *k8sinterface.KubernetesApi
-	relevancyManager          relevancymanager.RelevancyManagerClient
 	networkManager            networkmanager.NetworkManagerClient
 	dnsManager                dnsmanager.DNSManagerClient
 	ruleManager               rulemanager.RuleManagerClient
@@ -162,7 +160,7 @@ type IGContainerWatcher struct {
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, igK8sClient *containercollection.K8sClient, relevancyManager relevancymanager.RelevancyManagerClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]], thirdPartyEnricher containerwatcher.ThirdPartyEnricher, processManager processmanager.ProcessManagerClient) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, igK8sClient *containercollection.K8sClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]], thirdPartyEnricher containerwatcher.ThirdPartyEnricher, processManager processmanager.ProcessManagerClient) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
 	tracerCollection, err := tracercollection.NewTracerCollection(containerCollection)
@@ -221,7 +219,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		metrics.ReportEvent(utils.ExecveEventType)
 		processManager.ReportEvent(utils.ExecveEventType, &event)
 		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
-		relevancyManager.ReportFileExec(event.Runtime.ContainerID, k8sContainerID, path)
 		rulePolicyReporter.ReportEvent(utils.ExecveEventType, &event, k8sContainerID, event.Comm)
 
 		// Report exec events to event receivers
@@ -251,7 +248,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		metrics.ReportEvent(utils.OpenEventType)
 		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
-		relevancyManager.ReportFileOpen(event.Runtime.ContainerID, k8sContainerID, path)
 		ruleManager.ReportEvent(utils.OpenEventType, &event)
 		malwareManager.ReportEvent(utils.OpenEventType, &event)
 
@@ -426,7 +422,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		applicationProfileManager: applicationProfileManager,
 		igK8sClient:               igK8sClient,
 		k8sClient:                 k8sClient,
-		relevancyManager:          relevancyManager,
 		networkManager:            networkManagerClient,
 		dnsManager:                dnsManagerClient,
 		ruleManager:               ruleManager,
