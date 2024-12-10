@@ -8,6 +8,7 @@ require (
 	github.com/aquilax/truncate v1.0.0
 	github.com/armosec/armoapi-go v0.0.487
 	github.com/armosec/utils-k8s-go v0.0.30
+	github.com/aws/aws-sdk-go v1.55.5
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cilium/ebpf v0.16.0
 	github.com/crewjam/rfc5424 v0.1.0
@@ -195,6 +196,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/jinzhu/copier v0.4.0 // indirect
+	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kastenhq/goversion v0.0.0-20230811215019-93b2f8823953 // indirect
