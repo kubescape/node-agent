@@ -1,14 +1,20 @@
 package dnsmanager
 
 import (
+	"fmt"
 	"net"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"math/rand/v2"
 
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+
+	mapset "github.com/deckarep/golang-set/v2"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 func TestResolveIPAddress(t *testing.T) {
@@ -301,5 +307,206 @@ func BenchmarkIsCloudService(b *testing.B) {
 		for _, domain := range testDomains {
 			isCloudService(domain)
 		}
+	}
+}
+
+func TestContainerCloudServices(t *testing.T) {
+	t.Run("full container lifecycle with cloud services", func(t *testing.T) {
+		// SETUP
+		dm := CreateDNSManager()
+		containerId := "test-container-123"
+		testPid := uint32(1234)
+
+		// Add container
+		dm.ContainerCallback(containercollection.PubSubEvent{
+			Type: containercollection.EventTypeAddContainer,
+			Container: &containercollection.Container{
+				Runtime: containercollection.RuntimeMetadata{
+					BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
+						ContainerID: containerId,
+					},
+				},
+			},
+		})
+
+		// Verify container was added properly
+		pidToServices, found := dm.containerToCloudServices.Load(containerId)
+		if !found {
+			t.Fatal("Container was not added to containerToCloudServices map")
+		}
+
+		// Create new set for the PID
+		services := mapset.NewSet[string]()
+		pidToServices.Set(testPid, services)
+
+		// Process cloud service DNS events
+		cloudEvents := []tracerdnstype.Event{
+			{
+				Event: eventtypes.Event{
+					CommonData: eventtypes.CommonData{
+						Runtime: eventtypes.BasicRuntimeMetadata{
+							ContainerID: containerId,
+						},
+					},
+				},
+				Pid:     testPid,
+				DNSName: "test.amazonaws.com.",
+			},
+			{
+				Event: eventtypes.Event{
+					CommonData: eventtypes.CommonData{
+						Runtime: eventtypes.BasicRuntimeMetadata{
+							ContainerID: containerId,
+						},
+					},
+				},
+				Pid:     testPid,
+				DNSName: "example.azure.com.",
+			},
+		}
+
+		// Process each event
+		for _, event := range cloudEvents {
+			t.Logf("Processing event for DNS: %s", event.DNSName)
+			dm.ReportEvent(event)
+		}
+
+		// Verify services were added
+		resultServices := dm.ResolveContainerProcessToCloudServices(containerId, testPid)
+		if resultServices == nil {
+			t.Fatal("Expected non-nil service set")
+		}
+
+		expectedServices := mapset.NewSet[string]("test.amazonaws.com.", "example.azure.com.")
+		if !resultServices.Equal(expectedServices) {
+			t.Errorf("Expected services %v, got %v", expectedServices, resultServices)
+		}
+
+		// Test container removal
+		dm.ContainerCallback(containercollection.PubSubEvent{
+			Type: containercollection.EventTypeRemoveContainer,
+			Container: &containercollection.Container{
+				Runtime: containercollection.RuntimeMetadata{
+					BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
+						ContainerID: containerId,
+					},
+				},
+			},
+		})
+
+		// Verify services are removed
+		resultServices = dm.ResolveContainerProcessToCloudServices(containerId, testPid)
+		if resultServices != nil {
+			t.Error("Expected nil services after container removal")
+		}
+	})
+
+	t.Run("max service cache size", func(t *testing.T) {
+		dm := CreateDNSManager()
+		containerId := "test-container-456"
+		testPid := uint32(5678)
+
+		// Add container
+		dm.ContainerCallback(containercollection.PubSubEvent{
+			Type: containercollection.EventTypeAddContainer,
+			Container: &containercollection.Container{
+				Runtime: containercollection.RuntimeMetadata{
+					BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
+						ContainerID: containerId,
+					},
+				},
+			},
+		})
+
+		// Initialize the services set for the PID
+		if pidToServices, found := dm.containerToCloudServices.Load(containerId); found {
+			services := mapset.NewSet[string]()
+			pidToServices.Set(testPid, services)
+		}
+
+		// Add more services than the cache size
+		for i := 0; i <= maxServiceCacheSize+5; i++ {
+			event := tracerdnstype.Event{
+				Event: eventtypes.Event{
+					CommonData: eventtypes.CommonData{
+						Runtime: eventtypes.BasicRuntimeMetadata{
+							ContainerID: containerId,
+						},
+					},
+				},
+				Pid:     testPid,
+				DNSName: fmt.Sprintf("service%d.amazonaws.com.", i),
+			}
+			dm.ReportEvent(event)
+		}
+
+		// Verify cache size limit is enforced
+		services := dm.ResolveContainerProcessToCloudServices(containerId, testPid)
+		if services == nil {
+			t.Fatal("Expected non-nil service set")
+		}
+		if services.Cardinality() > maxServiceCacheSize {
+			t.Errorf("Expected service set size to be <= %d, got %d",
+				maxServiceCacheSize, services.Cardinality())
+		}
+	})
+}
+
+func TestCloudServiceCacheLimit(t *testing.T) {
+	dm := CreateDNSManager()
+	containerId := "test-container-456"
+	testPid := uint32(5678)
+
+	// Add container
+	dm.ContainerCallback(containercollection.PubSubEvent{
+		Type: containercollection.EventTypeAddContainer,
+		Container: &containercollection.Container{
+			Runtime: containercollection.RuntimeMetadata{
+				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
+					ContainerID: containerId,
+				},
+			},
+		},
+	})
+
+	// Add more than maxServiceCacheSize cloud services
+	for i := 0; i < maxServiceCacheSize+10; i++ {
+		dm.ReportEvent(tracerdnstype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					Runtime: eventtypes.BasicRuntimeMetadata{
+						ContainerID: containerId,
+					},
+				},
+			},
+			Pid:     testPid,
+			DNSName: fmt.Sprintf("service%d.amazonaws.com.", i),
+		})
+	}
+
+	// Give some time for events to be processed
+	time.Sleep(100 * time.Millisecond)
+
+	services := dm.ResolveContainerProcessToCloudServices(containerId, testPid)
+	if services == nil {
+		// Debug information
+		t.Log("Debug: Checking container existence")
+		if pidToServices, found := dm.containerToCloudServices.Load(containerId); found {
+			t.Log("Container found in map")
+			if services, found := pidToServices.Load(testPid); found {
+				t.Log("PID found in map")
+				t.Logf("Services: %v", services)
+			} else {
+				t.Log("PID not found in map")
+			}
+		} else {
+			t.Log("Container not found in map")
+		}
+		t.Fatal("Expected non-nil service set")
+	}
+
+	if services.Cardinality() > maxServiceCacheSize {
+		t.Errorf("Service cache exceeded maximum size: got %d, want <= %d",
+			services.Cardinality(), maxServiceCacheSize)
 	}
 }

@@ -26,6 +26,6 @@ func (n *DNSManagerMock) ResolveIPAddress(_ string) (string, bool) {
 	return "", false
 }
 
-func (n *DNSManagerMock) ResolveContainerToCloudServices(_ string) mapset.Set[string] {
+func (n *DNSManagerMock) ResolveContainerProcessToCloudServices(_ string, _ uint32) mapset.Set[string] {
 	return nil
 }

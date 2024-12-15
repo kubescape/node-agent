@@ -13,5 +13,5 @@ type DNSManagerClient interface {
 
 type DNSResolver interface {
 	ResolveIPAddress(ipAddr string) (string, bool)
-	ResolveContainerToCloudServices(containerId string) mapset.Set[string]
+	ResolveContainerProcessToCloudServices(containerId string, pid uint32) mapset.Set[string]
 }
