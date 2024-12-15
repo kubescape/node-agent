@@ -206,7 +206,7 @@ func (d *dnsResolverMock) ResolveIPAddress(ipAddr string) (string, bool) {
 	return "", false
 }
 
-func (d *dnsResolverMock) ResolveContainerToCloudServices(containerId string) mapset.Set[string] {
+func (d *dnsResolverMock) ResolveContainerProcessToCloudServices(containerId string, pid uint32) mapset.Set[string] {
 	return nil
 }
 

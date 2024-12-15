@@ -475,7 +475,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
 
-	ruleFailure.SetCloudServices(rm.dnsManager.ResolveContainerToCloudServices(ruleFailure.GetTriggerEvent().Runtime.ContainerID).ToSlice())
+	ruleFailure.SetCloudServices(rm.dnsManager.ResolveContainerProcessToCloudServices(ruleFailure.GetTriggerEvent().Runtime.ContainerID, runtimeProcessDetails.ProcessTree.PID).ToSlice())
 
 	if rm.enricher != nil {
 		rm.enricher.EnrichRuleFailure(ruleFailure)
