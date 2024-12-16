@@ -20,7 +20,6 @@ import (
 // SensitiveFiles is a list of sensitive files that should not be accessed by the application unexpectedly.
 var SensitiveFiles = []string{
 	"/etc/shadow",
-	"/etc/passwd",
 	"/etc/sudoers",
 	"/etc/ssh/sshd_config",
 	"/etc/ssh/ssh_config",
