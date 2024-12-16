@@ -51,10 +51,6 @@ func (sc *StorageHttpClientMock) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.S
 	return SBOM, nil
 }
 
-func (sc *StorageHttpClientMock) PatchFilteredSBOM(_ string, _ *spdxv1beta1.SBOMSyftFiltered) error {
-	return nil
-}
-
 func (sc *StorageHttpClientMock) IncrementImageUse(imageID string) {
 	if _, ok := sc.ImageCounters[imageID]; !ok {
 		sc.ImageCounters[imageID] = 0
