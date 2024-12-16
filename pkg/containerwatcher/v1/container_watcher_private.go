@@ -202,7 +202,7 @@ func (ch *IGContainerWatcher) startTracers() error {
 		}
 		logger.L().Info("Started syscall tracing")
 	}
-	if ch.cfg.EnableRelevancy || ch.cfg.EnableApplicationProfile {
+	if ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
 		// Start exec tracer
 		if err := ch.startExecTracing(); err != nil {
 			logger.L().Error("error starting exec tracing", helpers.Error(err))
@@ -321,7 +321,7 @@ func (ch *IGContainerWatcher) stopTracers() error {
 			errs = errors.Join(errs, err)
 		}
 	}
-	if ch.cfg.EnableRelevancy || ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
+	if ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
 		// Stop exec tracer
 		if err := ch.stopExecTracing(); err != nil {
 			logger.L().Error("error stopping exec tracing", helpers.Error(err))
