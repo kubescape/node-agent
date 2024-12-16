@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/kubescape/go-logger"
+	loggerhelpers "github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -34,6 +36,7 @@ func (sc Storage) CreateNetworkNeighborhood(neighborhood *v1beta1.NetworkNeighbo
 }
 
 func (sc Storage) PatchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, channel chan error) error {
+	logger.L().Debug("patching network neighborhood", loggerhelpers.String("name", name), loggerhelpers.String("namespace", namespace), loggerhelpers.Int("operations", len(operations)))
 	// split operations into max JSON operations batches
 	for _, chunk := range utils.ChunkBy(operations, sc.maxJsonPatchOperations) {
 		if err := sc.patchNetworkNeighborhood(name, namespace, chunk, channel); err != nil {

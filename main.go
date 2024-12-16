@@ -25,7 +25,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/containerwatcher/v1"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
-	"github.com/kubescape/node-agent/pkg/filehandler/v1"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
@@ -43,13 +42,10 @@ import (
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	processmanagerv1 "github.com/kubescape/node-agent/pkg/processmanager/v1"
-	"github.com/kubescape/node-agent/pkg/relevancymanager"
-	relevancymanagerv1 "github.com/kubescape/node-agent/pkg/relevancymanager/v1"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	rulemanagerv1 "github.com/kubescape/node-agent/pkg/rulemanager/v1"
-	"github.com/kubescape/node-agent/pkg/sbomhandler/syfthandler"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
@@ -194,23 +190,6 @@ func main() {
 		applicationProfileManager = applicationprofilemanager.CreateApplicationProfileManagerMock()
 	}
 
-	// Create the relevancy manager
-	var relevancyManager relevancymanager.RelevancyManagerClient
-	if cfg.EnableRelevancy {
-		fileHandler, err := filehandler.CreateInMemoryFileHandler()
-		if err != nil {
-			logger.L().Ctx(ctx).Fatal("failed to create the filehandler for relevancy manager", helpers.Error(err))
-		}
-
-		sbomHandler := syfthandler.CreateSyftSBOMHandler(storageClient)
-		relevancyManager, err = relevancymanagerv1.CreateRelevancyManager(ctx, cfg, clusterData.ClusterName, fileHandler, k8sClient, sbomHandler, preRunningContainersIDs)
-		if err != nil {
-			logger.L().Ctx(ctx).Fatal("error creating the relevancy manager", helpers.Error(err))
-		}
-	} else {
-		relevancyManager = relevancymanager.CreateRelevancyManagerMock()
-	}
-
 	// Create the network and DNS managers
 	var networkManagerClient networkmanager.NetworkManagerClient
 	var dnsManagerClient dnsmanager.DNSManagerClient
@@ -282,7 +261,7 @@ func main() {
 	var profileManager nodeprofilemanager.NodeProfileManagerClient
 	if cfg.EnableNodeProfile {
 		// FIXME validate the HTTPExporterConfig before we use it ?
-		profileManager = nodeprofilemanagerv1.NewNodeProfileManager(cfg, *clusterData, cfg.NodeName, k8sObjectCache, relevancyManager, ruleManager)
+		profileManager = nodeprofilemanagerv1.NewNodeProfileManager(cfg, *clusterData, cfg.NodeName, k8sObjectCache, ruleManager)
 	} else {
 		profileManager = nodeprofilemanager.NewNodeProfileManagerMock()
 	}
@@ -320,7 +299,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, relevancyManager, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime, nil, nil, processManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime, nil, nil, processManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

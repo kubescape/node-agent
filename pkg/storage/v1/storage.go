@@ -18,12 +18,10 @@ import (
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/retry"
 )
 
 const (
@@ -148,40 +146,6 @@ func (sc Storage) GetApplicationActivity(namespace, name string) (*v1beta1.Appli
 	return aa, err
 }
 
-func (sc Storage) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error {
-	_, err := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
-	switch {
-	case errors.IsAlreadyExists(err):
-		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			// retrieve the latest version before attempting update
-			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Get(context.Background(), SBOM.Name, metav1.GetOptions{ResourceVersion: "metadata"})
-			if getErr != nil {
-				return getErr
-			}
-			// update the SBOM manifest
-			result.Annotations = SBOM.Annotations
-			result.Labels = SBOM.Labels
-			result.Spec = SBOM.Spec
-			// try to send the updated workload configuration scan manifest
-			_, updateErr := sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Update(context.Background(), result, metav1.UpdateOptions{})
-			return updateErr
-		})
-		if retryErr != nil {
-			return retryErr
-		}
-	case err != nil:
-		return err
-	default:
-		return nil
-	}
-	return nil
-}
-
-func (sc Storage) GetFilteredSBOM(name string) (*v1beta1.SBOMSyftFiltered, error) {
-	return sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
-}
-
 func (sc Storage) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
 }
@@ -196,19 +160,6 @@ func (sc Storage) GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error) {
 
 func (sc Storage) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Update(context.Background(), SBOM, metav1.UpdateOptions{})
-}
-
-func (sc Storage) PatchFilteredSBOM(name string, sbom *v1beta1.SBOMSyftFiltered) error {
-
-	bytes, err := json.Marshal(sbom)
-	if err != nil {
-		return err
-	}
-	_, err = sc.StorageClient.SBOMSyftFiltereds(sc.namespace).Patch(context.Background(), name, types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func (sc Storage) IncrementImageUse(_ string) {

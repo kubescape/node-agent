@@ -82,10 +82,14 @@ func (nm *NetworkManager) ensureInstanceID(container *containercollection.Contai
 		return fmt.Errorf("failed to get workload: %w", err)
 	}
 	pod := wl.(*workloadinterface.Workload)
-
+	// fill container type, index and names
+	if watchedContainer.ContainerType == utils.Unknown {
+		if err := watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName); err != nil {
+			return fmt.Errorf("failed to set container info: %w", err)
+		}
+	}
 	// get pod template hash
 	watchedContainer.TemplateHash, _ = pod.GetLabel("pod-template-hash")
-
 	// find parentWlid
 	kind, name, err := nm.k8sClient.CalculateWorkloadParentRecursive(pod)
 	if err != nil {
@@ -102,12 +106,13 @@ func (nm *NetworkManager) ensureInstanceID(container *containercollection.Contai
 		return fmt.Errorf("failed to validate WLID: %w", err)
 	}
 	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
+	// find parent selector
 	selector, err := w.GetSelector()
 	if err != nil {
 		return fmt.Errorf("failed to get parentWL selector: %w", err)
 	}
 	watchedContainer.ParentWorkloadSelector = selector
-	// find instanceID
+	// find instanceID - this has to be the last one
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {
 		return fmt.Errorf("failed to generate instanceID: %w", err)
@@ -117,10 +122,6 @@ func (nm *NetworkManager) ensureInstanceID(container *containercollection.Contai
 		if instanceIDs[i].GetContainerName() == container.K8s.ContainerName {
 			watchedContainer.InstanceID = instanceIDs[i]
 		}
-	}
-	// fill container type, index and names
-	if watchedContainer.ContainerType == utils.Unknown {
-		watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName)
 	}
 	return nil
 }
@@ -308,15 +309,15 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 						},
 					},
 				}
-				addContainers := func(containers []v1beta1.NetworkNeighborhoodContainer, containerNames []string) []v1beta1.NetworkNeighborhoodContainer {
-					for _, name := range containerNames {
-						containers = append(containers, v1beta1.NetworkNeighborhoodContainer{Name: name})
+				addContainers := func(containers []v1beta1.NetworkNeighborhoodContainer, containerInfos []utils.ContainerInfo) []v1beta1.NetworkNeighborhoodContainer {
+					for _, info := range containerInfos {
+						containers = append(containers, v1beta1.NetworkNeighborhoodContainer{Name: info.Name})
 					}
 					return containers
 				}
-				newObject.Spec.Containers = addContainers(newObject.Spec.Containers, watchedContainer.ContainerNames[utils.Container])
-				newObject.Spec.InitContainers = addContainers(newObject.Spec.InitContainers, watchedContainer.ContainerNames[utils.InitContainer])
-				newObject.Spec.EphemeralContainers = addContainers(newObject.Spec.EphemeralContainers, watchedContainer.ContainerNames[utils.EphemeralContainer])
+				newObject.Spec.Containers = addContainers(newObject.Spec.Containers, watchedContainer.ContainerInfos[utils.Container])
+				newObject.Spec.InitContainers = addContainers(newObject.Spec.InitContainers, watchedContainer.ContainerInfos[utils.InitContainer])
+				newObject.Spec.EphemeralContainers = addContainers(newObject.Spec.EphemeralContainers, watchedContainer.ContainerInfos[utils.EphemeralContainer])
 				// enrich container
 				newContainer := utils.GetNetworkNeighborhoodContainer(newObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
 				utils.EnrichNeighborhoodContainer(newContainer, ingress, egress)
@@ -346,12 +347,12 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				} else {
 					var replaceOperations []utils.PatchOperation
-					containerNames := watchedContainer.ContainerNames[watchedContainer.ContainerType]
+					containerNames := watchedContainer.ContainerInfos[watchedContainer.ContainerType]
 					// check existing container
 					existingContainer := utils.GetNetworkNeighborhoodContainer(existingObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
 					if existingContainer == nil {
 						existingContainer = &v1beta1.NetworkNeighborhoodContainer{
-							Name: containerNames[watchedContainer.ContainerIndex],
+							Name: containerNames[watchedContainer.ContainerIndex].Name,
 						}
 					}
 					// update it
@@ -380,7 +381,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 							Op:   "add",
 							Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
 							Value: v1beta1.NetworkNeighborhoodContainer{
-								Name: containerNames[i],
+								Name: containerNames[i].Name,
 							},
 						})
 					}

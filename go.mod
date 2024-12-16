@@ -27,7 +27,6 @@ require (
 	github.com/grafana/pyroscope-go v1.2.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/inspektor-gadget/inspektor-gadget v0.35.0
-	github.com/kinbiko/jsonassert v1.2.0
 	github.com/kubescape/backend v0.0.25
 	github.com/kubescape/go-logger v0.0.23
 	github.com/kubescape/k8s-interface v0.0.177
@@ -201,6 +200,7 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kastenhq/goversion v0.0.0-20230811215019-93b2f8823953 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
+	github.com/kinbiko/jsonassert v1.2.0 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/knqyf263/go-rpmdb v0.1.1 // indirect

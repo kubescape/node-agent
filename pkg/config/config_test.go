@@ -23,7 +23,6 @@ func TestLoadConfig(t *testing.T) {
 				EnableFullPathTracing:    true,
 				EnableApplicationProfile: true,
 				EnableMalwareDetection:   true,
-				EnableRelevancy:          true,
 				EnableNetworkTracing:     true,
 				EnableNodeProfile:        true,
 				EnableHttpDetection:      true,

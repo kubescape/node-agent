@@ -60,7 +60,6 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			logger.L().Info("monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 			ch.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
-			ch.relevancyManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.networkManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.unregisterContainer(notif.Container)
 		})
@@ -86,7 +85,6 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 	containerEventFuncs := []containercollection.FuncNotify{
 		ch.containerCallback,
 		ch.applicationProfileManager.ContainerCallback,
-		ch.relevancyManager.ContainerCallback,
 		ch.networkManager.ContainerCallback,
 		ch.malwareManager.ContainerCallback,
 		ch.ruleManager.ContainerCallback,
@@ -204,7 +202,7 @@ func (ch *IGContainerWatcher) startTracers() error {
 		}
 		logger.L().Info("Started syscall tracing")
 	}
-	if ch.cfg.EnableRelevancy || ch.cfg.EnableApplicationProfile {
+	if ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
 		// Start exec tracer
 		if err := ch.startExecTracing(); err != nil {
 			logger.L().Error("error starting exec tracing", helpers.Error(err))
@@ -323,7 +321,7 @@ func (ch *IGContainerWatcher) stopTracers() error {
 			errs = errors.Join(errs, err)
 		}
 	}
-	if ch.cfg.EnableRelevancy || ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
+	if ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
 		// Stop exec tracer
 		if err := ch.stopExecTracing(); err != nil {
 			logger.L().Error("error stopping exec tracing", helpers.Error(err))

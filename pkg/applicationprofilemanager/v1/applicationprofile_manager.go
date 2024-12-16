@@ -97,10 +97,14 @@ func (am *ApplicationProfileManager) ensureInstanceID(container *containercollec
 		return fmt.Errorf("failed to get workload: %w", err)
 	}
 	pod := wl.(*workloadinterface.Workload)
-
+	// fill container type, index and names
+	if watchedContainer.ContainerType == utils.Unknown {
+		if err := watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName); err != nil {
+			return fmt.Errorf("failed to set container info: %w", err)
+		}
+	}
 	// get pod template hash
 	watchedContainer.TemplateHash, _ = pod.GetLabel("pod-template-hash")
-
 	// find parentWlid
 	kind, name, err := am.k8sClient.CalculateWorkloadParentRecursive(pod)
 	if err != nil {
@@ -117,7 +121,7 @@ func (am *ApplicationProfileManager) ensureInstanceID(container *containercollec
 		return fmt.Errorf("failed to validate WLID: %w", err)
 	}
 	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
-	// find instanceID
+	// find instanceID - this has to be the last one
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {
 		return fmt.Errorf("failed to generate instanceID: %w", err)
@@ -127,10 +131,6 @@ func (am *ApplicationProfileManager) ensureInstanceID(container *containercollec
 		if instanceIDs[i].GetContainerName() == container.K8s.ContainerName {
 			watchedContainer.InstanceID = instanceIDs[i]
 		}
-	}
-	// fill container type, index and names
-	if watchedContainer.ContainerType == utils.Unknown {
-		watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName)
 	}
 	return nil
 }
@@ -370,6 +370,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					ObjectMeta: metav1.ObjectMeta{
 						Name: slug,
 						Annotations: map[string]string{
+							helpersv1.InstanceIDMetadataKey: watchedContainer.InstanceID.GetStringNoContainer(),
 							helpersv1.WlidMetadataKey:       watchedContainer.Wlid,
 							helpersv1.CompletionMetadataKey: string(watchedContainer.GetCompletionStatus()),
 							helpersv1.StatusMetadataKey:     string(watchedContainer.GetStatus()),
@@ -377,9 +378,9 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						Labels: utils.GetLabels(watchedContainer, true),
 					},
 				}
-				addContainers := func(containers []v1beta1.ApplicationProfileContainer, containerNames []string) []v1beta1.ApplicationProfileContainer {
-					for _, name := range containerNames {
-						seccompProfile, err := am.seccompManager.GetSeccompProfile(name, watchedContainer.SeccompProfilePath)
+				addContainers := func(containers []v1beta1.ApplicationProfileContainer, containerInfos []utils.ContainerInfo) []v1beta1.ApplicationProfileContainer {
+					for _, info := range containerInfos {
+						seccompProfile, err := am.seccompManager.GetSeccompProfile(info.Name, watchedContainer.SeccompProfilePath)
 						if err != nil {
 							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
 								helpers.String("slug", slug),
@@ -388,7 +389,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 								helpers.String("k8s workload", watchedContainer.K8sContainerID))
 						}
 						containers = append(containers, v1beta1.ApplicationProfileContainer{
-							Name:           name,
+							Name:           info.Name,
 							Endpoints:      make([]v1beta1.HTTPEndpoint, 0),
 							Execs:          make([]v1beta1.ExecCalls, 0),
 							Opens:          make([]v1beta1.OpenCalls, 0),
@@ -396,14 +397,16 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							Syscalls:       make([]string, 0),
 							PolicyByRuleId: make(map[string]v1beta1.RulePolicy),
 							SeccompProfile: seccompProfile,
+							ImageTag:       info.ImageTag,
+							ImageID:        info.ImageID,
 						})
 					}
 					return containers
 				}
 				newObject.Spec.Architectures = []string{runtime.GOARCH}
-				newObject.Spec.Containers = addContainers(newObject.Spec.Containers, watchedContainer.ContainerNames[utils.Container])
-				newObject.Spec.InitContainers = addContainers(newObject.Spec.InitContainers, watchedContainer.ContainerNames[utils.InitContainer])
-				newObject.Spec.EphemeralContainers = addContainers(newObject.Spec.EphemeralContainers, watchedContainer.ContainerNames[utils.EphemeralContainer])
+				newObject.Spec.Containers = addContainers(newObject.Spec.Containers, watchedContainer.ContainerInfos[utils.Container])
+				newObject.Spec.InitContainers = addContainers(newObject.Spec.InitContainers, watchedContainer.ContainerInfos[utils.InitContainer])
+				newObject.Spec.EphemeralContainers = addContainers(newObject.Spec.EphemeralContainers, watchedContainer.ContainerInfos[utils.EphemeralContainer])
 				// enrich container
 				newContainer := utils.GetApplicationProfileContainer(newObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
 				utils.EnrichApplicationProfileContainer(newContainer, capabilities, observedSyscalls, execs, opens, endpoints, rulePolicies, watchedContainer.ImageID, watchedContainer.ImageTag)
@@ -433,12 +436,12 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				} else {
 					var replaceOperations []utils.PatchOperation
-					containerNames := watchedContainer.ContainerNames[watchedContainer.ContainerType]
+					containerNames := watchedContainer.ContainerInfos[watchedContainer.ContainerType]
 					// check existing container
 					existingContainer := utils.GetApplicationProfileContainer(existingObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
 					if existingContainer == nil {
-						name := containerNames[watchedContainer.ContainerIndex]
-						seccompProfile, err := am.seccompManager.GetSeccompProfile(name, watchedContainer.SeccompProfilePath)
+						info := containerNames[watchedContainer.ContainerIndex]
+						seccompProfile, err := am.seccompManager.GetSeccompProfile(info.Name, watchedContainer.SeccompProfilePath)
 						if err != nil {
 							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
 								helpers.String("slug", slug),
@@ -448,7 +451,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						}
 						logger.L().Debug("ApplicationProfileManager - got seccomp profile", helpers.Interface("profile", seccompProfile))
 						existingContainer = &v1beta1.ApplicationProfileContainer{
-							Name:           containerNames[watchedContainer.ContainerIndex],
+							Name:           info.Name,
 							Endpoints:      make([]v1beta1.HTTPEndpoint, 0),
 							Execs:          make([]v1beta1.ExecCalls, 0),
 							Opens:          make([]v1beta1.OpenCalls, 0),
@@ -456,6 +459,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							Syscalls:       make([]string, 0),
 							PolicyByRuleId: make(map[string]v1beta1.RulePolicy),
 							SeccompProfile: seccompProfile,
+							ImageTag:       info.ImageTag,
+							ImageID:        info.ImageID,
 						}
 					}
 					// update it
@@ -480,8 +485,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					}
 					// 3b. ensure the slice has all the containers
 					for i := len(existingContainers); i < len(containerNames); i++ {
-						name := containerNames[i]
-						seccompProfile, err := am.seccompManager.GetSeccompProfile(name, watchedContainer.SeccompProfilePath)
+						info := containerNames[i]
+						seccompProfile, err := am.seccompManager.GetSeccompProfile(info.Name, watchedContainer.SeccompProfilePath)
 						if err != nil {
 							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
 								helpers.String("slug", slug),
@@ -493,7 +498,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 							Op:   "add",
 							Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
 							Value: v1beta1.ApplicationProfileContainer{
-								Name:           name,
+								Name:           info.Name,
 								Endpoints:      make([]v1beta1.HTTPEndpoint, 0),
 								Execs:          make([]v1beta1.ExecCalls, 0),
 								Opens:          make([]v1beta1.OpenCalls, 0),
@@ -501,6 +506,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 								Syscalls:       make([]string, 0),
 								PolicyByRuleId: make(map[string]v1beta1.RulePolicy),
 								SeccompProfile: seccompProfile,
+								ImageTag:       info.ImageTag,
+								ImageID:        info.ImageID,
 							},
 						})
 					}

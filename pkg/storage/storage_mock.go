@@ -1,8 +1,6 @@
 package storage
 
 import (
-	"errors"
-
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -15,7 +13,6 @@ const (
 type StorageHttpClientMock struct {
 	ApplicationActivities []*spdxv1beta1.ApplicationActivity
 	ApplicationProfiles   []*spdxv1beta1.ApplicationProfile
-	FilteredSyftSBOMs     []*spdxv1beta1.SBOMSyftFiltered
 	SyftSBOMs             []*spdxv1beta1.SBOMSyft
 	NetworkNeighborhoods  []*v1beta1.NetworkNeighborhood
 	NetworkNeighborses    []*v1beta1.NetworkNeighbors
@@ -26,13 +23,6 @@ type StorageHttpClientMock struct {
 
 var _ StorageClient = (*StorageHttpClientMock)(nil)
 
-func CreateSyftSBOMStorageHttpClientMock(sbom spdxv1beta1.SBOMSyft) *StorageHttpClientMock {
-	return &StorageHttpClientMock{
-		ImageCounters: map[string]int{},
-		mockSBOM:      &sbom,
-	}
-}
-
 func (sc *StorageHttpClientMock) CreateApplicationActivity(activity *spdxv1beta1.ApplicationActivity, _ string) error {
 	sc.ApplicationActivities = append(sc.ApplicationActivities, activity)
 	return nil
@@ -41,20 +31,6 @@ func (sc *StorageHttpClientMock) CreateApplicationActivity(activity *spdxv1beta1
 func (sc *StorageHttpClientMock) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, _ string) error {
 	sc.NetworkNeighborses = append(sc.NetworkNeighborses, networkNeighbors)
 	return nil
-}
-
-func (sc *StorageHttpClientMock) CreateFilteredSBOM(SBOM *v1beta1.SBOMSyftFiltered) error {
-	sc.FilteredSyftSBOMs = append(sc.FilteredSyftSBOMs, SBOM)
-	return nil
-}
-
-func (sc *StorageHttpClientMock) GetFilteredSBOM(name string) (*v1beta1.SBOMSyftFiltered, error) {
-	for _, sbom := range sc.FilteredSyftSBOMs {
-		if sbom.Name == name {
-			return sbom, nil
-		}
-	}
-	return nil, errors.New("not found")
 }
 
 func (sc *StorageHttpClientMock) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
@@ -73,10 +49,6 @@ func (sc *StorageHttpClientMock) GetSBOMMeta(_ string) (*v1beta1.SBOMSyft, error
 func (sc *StorageHttpClientMock) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
 	sc.SyftSBOMs = append(sc.SyftSBOMs, SBOM)
 	return SBOM, nil
-}
-
-func (sc *StorageHttpClientMock) PatchFilteredSBOM(_ string, _ *spdxv1beta1.SBOMSyftFiltered) error {
-	return nil
 }
 
 func (sc *StorageHttpClientMock) IncrementImageUse(imageID string) {

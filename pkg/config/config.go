@@ -29,7 +29,6 @@ type Config struct {
 	EnableRuntimeDetection   bool                      `mapstructure:"runtimeDetectionEnabled"`
 	EnableHttpDetection      bool                      `mapstructure:"httpDetectionEnabled"`
 	EnableNetworkTracing     bool                      `mapstructure:"networkServiceEnabled"`
-	EnableRelevancy          bool                      `mapstructure:"relevantCVEServiceEnabled"`
 	EnableNodeProfile        bool                      `mapstructure:"nodeProfileServiceEnabled"`
 	NodeProfileInterval      time.Duration             `mapstructure:"nodeProfileInterval"`
 	EnableSeccomp            bool                      `mapstructure:"seccompServiceEnabled"`
