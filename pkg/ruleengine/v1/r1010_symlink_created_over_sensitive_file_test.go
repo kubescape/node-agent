@@ -68,7 +68,7 @@ func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {
 	}
 
 	// Create a symlink event with sensitive file path
-	e.OldPath = "/etc/passwd"
+	e.OldPath = "/etc/shadow"
 	e.NewPath = "/etc/abc"
 
 	ruleResult = r.ProcessEvent(utils.SymlinkEventType, e, &objCache)
@@ -88,7 +88,7 @@ func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {
 
 	// Test with whitelisted process
 	e.Comm = "/usr/sbin/groupadd"
-	e.OldPath = "/etc/passwd"
+	e.OldPath = "/etc/shadow"
 	e.NewPath = "/etc/abc"
 
 	ruleResult = r.ProcessEvent(utils.SymlinkEventType, e, &objCache)

@@ -112,7 +112,7 @@ func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 		},
 		{
 			name:        "Path traversal attempt",
-			event:       createTestEvent("/etc/shadow/../passwd", []string{"O_RDONLY"}),
+			event:       createTestEvent("/etc/shadow/../shadow", []string{"O_RDONLY"}),
 			profile:     createTestProfile("test", []string{"/test"}, []string{"O_RDONLY"}),
 			expectAlert: true,
 			description: "Should alert for path traversal attempts",

@@ -15,9 +15,9 @@ import (
 // DNSManager is used to manage DNS events and save IP resolutions.
 type DNSManager struct {
 	addressToDomainMap       maps.SafeMap[string, string]
-	lookupCache              cache.ExpiringCache                      // Cache for DNS lookups
-	failureCache             cache.ExpiringCache                      // Cache for failed lookups
-	containerToCloudServices maps.SafeMap[string, mapset.Set[string]] // key: containerId, value: set of cloud services
+	lookupCache              cache.ExpiringCache                                             // Cache for DNS lookups
+	failureCache             cache.ExpiringCache                                             // Cache for failed lookups
+	containerToCloudServices maps.SafeMap[string, *maps.SafeMap[uint32, mapset.Set[string]]] // key: containerId, value: map of pid to cloud services
 }
 
 type cacheEntry struct {
@@ -44,7 +44,7 @@ func CreateDNSManager() *DNSManager {
 func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		dm.containerToCloudServices.Set(notif.Container.Runtime.ContainerID, mapset.NewSet[string]())
+		dm.containerToCloudServices.Set(notif.Container.Runtime.ContainerID, maps.NewSafeMap[uint32, mapset.Set[string]]())
 	case containercollection.EventTypeRemoveContainer:
 		dm.containerToCloudServices.Delete(notif.Container.Runtime.ContainerID)
 	}
@@ -52,10 +52,17 @@ func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 
 func (dm *DNSManager) ReportEvent(dnsEvent tracerdnstype.Event) {
 	if isCloudService(dnsEvent.DNSName) {
-		if dm.containerToCloudServices.Has(dnsEvent.Runtime.ContainerID) {
-			// Guard against cache size getting too large by checking the cardinality per container
-			if dm.containerToCloudServices.Get(dnsEvent.Runtime.ContainerID).Cardinality() < maxServiceCacheSize {
-				dm.containerToCloudServices.Get(dnsEvent.Runtime.ContainerID).Add(dnsEvent.DNSName)
+		if pidToServices, found := dm.containerToCloudServices.Load(dnsEvent.Runtime.ContainerID); found {
+			// Guard against cache size getting too large by checking the cardinality per container and pid
+			if services, found := pidToServices.Load(dnsEvent.Pid); found {
+				if services.Cardinality() < maxServiceCacheSize {
+					services.Add(dnsEvent.DNSName)
+				}
+			} else {
+				// Create a new set for this pid
+				servicesSet := mapset.NewSet[string]()
+				servicesSet.Add(dnsEvent.DNSName)
+				pidToServices.Set(dnsEvent.Pid, servicesSet)
 			}
 		}
 	}
@@ -114,9 +121,11 @@ func (dm *DNSManager) ResolveIPAddress(ipAddr string) (string, bool) {
 	return domain, domain != ""
 }
 
-func (dm *DNSManager) ResolveContainerToCloudServices(containerId string) mapset.Set[string] {
-	if services, found := dm.containerToCloudServices.Load(containerId); found {
-		return services
+func (dm *DNSManager) ResolveContainerProcessToCloudServices(containerId string, pid uint32) mapset.Set[string] {
+	if pidToServices, found := dm.containerToCloudServices.Load(containerId); found {
+		if services, found := pidToServices.Load(pid); found {
+			return services
+		}
 	}
 	return nil
 }
