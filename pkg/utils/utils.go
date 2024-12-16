@@ -702,7 +702,6 @@ func DetectContainerRuntimeViaK8sAPI(ctx context.Context, k8sClient *k8sinterfac
 	// override the socket path
 	realSocketPath, err := getContainerRuntimeSocketPath(k8sClient, nodeName)
 	if err != nil {
-		// return nil, fmt.Errorf("failed to get container runtime socket path from Kubelet configz: %v", err)
 		logger.L().Warning("failed to get container runtime socket path from Kubelet configz", helpers.String("error", err.Error()))
 	} else {
 		runtimeConfig.SocketPath = realSocketPath
