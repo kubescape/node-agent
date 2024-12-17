@@ -12,6 +12,7 @@ RUN --mount=target=. \
 FROM gcr.io/distroless/static-debian12:latest
 
 COPY --from=builder /out/node-agent /usr/bin/node-agent
+COPY configuration/ig-config.yaml /root/.ig/config.yaml
 
 ARG image_version
 ENV RELEASE=$image_version
