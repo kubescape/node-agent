@@ -13,6 +13,7 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/grafana/pyroscope-go"
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	beUtils "github.com/kubescape/backend/pkg/utils"
@@ -56,8 +57,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/validator"
 	"github.com/kubescape/node-agent/pkg/watcher/dynamicwatcher"
 	"github.com/kubescape/node-agent/pkg/watcher/seccompprofilewatcher"
-
-	pyroscope "github.com/grafana/pyroscope-go"
 )
 
 func main() {
@@ -117,12 +116,14 @@ func main() {
 		if os.Getenv("APPLICATION_NAME") == "" {
 			os.Setenv("APPLICATION_NAME", "node-agent")
 		}
+
 		_, err := pyroscope.Start(pyroscope.Config{
 			ApplicationName: os.Getenv("APPLICATION_NAME"),
 			ServerAddress:   pyroscopeServerSvc,
 			Logger:          pyroscope.StandardLogger,
 			Tags:            map[string]string{"node": cfg.NodeName, "app": "node-agent", "pod": os.Getenv("POD_NAME")},
 		})
+
 		if err != nil {
 			logger.L().Ctx(ctx).Error("error starting pyroscope", helpers.Error(err))
 		}
@@ -131,6 +132,10 @@ func main() {
 	if m := os.Getenv("MULTIPLY"); m == "true" {
 		logger.L().Info("MULTIPLY environment variable is true. Multiplying feature enabled - this is a feature for testing purposes only")
 	}
+
+	// Start the health manager
+	healthManager := healthmanager.NewHealthManager()
+	healthManager.Start(ctx)
 
 	// Create clients
 	k8sClient := k8sinterface.NewKubernetesApi()
@@ -202,6 +207,9 @@ func main() {
 		dnsResolver = dnsManager
 		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
 	} else {
+		if cfg.EnableRuntimeDetection {
+			logger.L().Ctx(ctx).Fatal("Network tracing is disabled, but runtime detection is enabled. Network tracing is required for runtime detection.")
+		}
 		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
 		dnsResolver = dnsmanager.CreateDNSManagerMock()
 		networkManagerClient = networkmanager.CreateNetworkManagerMock()
@@ -307,16 +315,13 @@ func main() {
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
+	healthManager.SetContainerWatcher(mainHandler)
 
 	// Start the profileManager
 	profileManager.Start(ctx)
 
 	// Start the prometheusExporter
 	prometheusExporter.Start()
-
-	// Start the health manager
-	healthManager := healthmanager.NewHealthManager(mainHandler)
-	healthManager.Start(ctx)
 
 	// Start the container handler
 	err = mainHandler.Start(ctx)

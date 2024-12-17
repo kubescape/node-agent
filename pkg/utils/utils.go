@@ -704,7 +704,7 @@ func ChunkBy[T any](items []T, chunkSize int) [][]T {
 }
 
 // isUnixSocket checks if the given path is a Unix socket.
-
+// TODO remove this
 func DetectContainerRuntimeViaK8sAPI(ctx context.Context, k8sClient *k8sinterface.KubernetesApi, nodeName string) (*containerutilsTypes.RuntimeConfig, error) {
 	// Get the current node
 	nodes, err := k8sClient.GetKubernetesClient().CoreV1().Nodes().List(ctx, metav1.ListOptions{
