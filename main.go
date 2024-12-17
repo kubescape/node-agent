@@ -13,6 +13,7 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
 	mapset "github.com/deckarep/golang-set/v2"
+	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
@@ -280,6 +281,9 @@ func main() {
 	}
 
 	// Create the IG k8sClient
+	if err := igconfig.Config.ReadInConfig(); err != nil {
+		logger.L().Warning("reading IG config", helpers.Error(err))
+	}
 	igK8sClient, err := containercollection.NewK8sClient(cfg.NodeName)
 	if err != nil {
 		logger.L().Fatal("error creating IG Kubernetes client", helpers.Error(err))

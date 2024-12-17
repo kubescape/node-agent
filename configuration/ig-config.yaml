@@ -1,0 +1,4 @@
+containerd-socketpath: /run/containerd/containerd.sock
+crio-socketpath: /var/run/crio/crio.sock
+docker-socketpath: /var/run/docker.sock
+podman-socketpath: /run/podman/podman.sock
