@@ -277,7 +277,7 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid int) (apit
 	}
 
 	// If the process is runc, try to fetch the real process info.
-	// Intentiaoanlly we are doing this only once the process is asked for to avoid unnecessary calls to /proc and give time for the process to be created.
+	// Intentionally we are doing this only once the process is asked for to avoid unnecessary calls to /proc and give time for the process to be created.
 	if strings.HasPrefix(result.Comm, runCCommPrefix) {
 		if process, err := p.getProcessFromProc(int(result.PID)); err == nil {
 			childerns := result.Children
