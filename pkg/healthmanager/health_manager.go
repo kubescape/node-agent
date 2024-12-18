@@ -17,11 +17,14 @@ type HealthManager struct {
 	port             int
 }
 
-func NewHealthManager(containerWatcher *containerwatcher.IGContainerWatcher) *HealthManager {
+func NewHealthManager() *HealthManager {
 	return &HealthManager{
-		containerWatcher: containerWatcher,
-		port:             7888,
+		port: 7888,
 	}
+}
+
+func (h *HealthManager) SetContainerWatcher(containerWatcher *containerwatcher.IGContainerWatcher) {
+	h.containerWatcher = containerWatcher
 }
 
 func (h *HealthManager) Start(ctx context.Context) {
@@ -45,9 +48,9 @@ func (h *HealthManager) livenessProbe(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *HealthManager) readinessProbe(w http.ResponseWriter, _ *http.Request) {
-	if h.containerWatcher.Ready() {
+	if h.containerWatcher != nil && h.containerWatcher.Ready() {
 		w.WriteHeader(http.StatusOK)
-	} else {
-		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
+	w.WriteHeader(http.StatusInternalServerError)
 }

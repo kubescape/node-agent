@@ -13,6 +13,7 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/grafana/pyroscope-go"
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	beUtils "github.com/kubescape/backend/pkg/utils"
@@ -56,8 +57,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/validator"
 	"github.com/kubescape/node-agent/pkg/watcher/dynamicwatcher"
 	"github.com/kubescape/node-agent/pkg/watcher/seccompprofilewatcher"
-
-	pyroscope "github.com/grafana/pyroscope-go"
 )
 
 func main() {
@@ -117,12 +116,14 @@ func main() {
 		if os.Getenv("APPLICATION_NAME") == "" {
 			os.Setenv("APPLICATION_NAME", "node-agent")
 		}
+
 		_, err := pyroscope.Start(pyroscope.Config{
 			ApplicationName: os.Getenv("APPLICATION_NAME"),
 			ServerAddress:   pyroscopeServerSvc,
 			Logger:          pyroscope.StandardLogger,
 			Tags:            map[string]string{"node": cfg.NodeName, "app": "node-agent", "pod": os.Getenv("POD_NAME")},
 		})
+
 		if err != nil {
 			logger.L().Ctx(ctx).Error("error starting pyroscope", helpers.Error(err))
 		}
@@ -131,6 +132,10 @@ func main() {
 	if m := os.Getenv("MULTIPLY"); m == "true" {
 		logger.L().Info("MULTIPLY environment variable is true. Multiplying feature enabled - this is a feature for testing purposes only")
 	}
+
+	// Start the health manager
+	healthManager := healthmanager.NewHealthManager()
+	healthManager.Start(ctx)
 
 	// Create clients
 	k8sClient := k8sinterface.NewKubernetesApi()
@@ -146,14 +151,6 @@ func main() {
 	} else {
 		prometheusExporter = metricsmanager.NewMetricsMock()
 	}
-
-	// Detect the container containerRuntime of the node
-	containerRuntime, err := utils.DetectContainerRuntimeViaK8sAPI(ctx, k8sClient, cfg.NodeName)
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error detecting the container runtime", helpers.Error(err))
-	}
-
-	logger.L().Ctx(ctx).Info("Detected container runtime", helpers.String("containerRuntime", containerRuntime.Name.String()))
 
 	// Create watchers
 	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.StorageClient, cfg.SkipNamespace)
@@ -202,6 +199,9 @@ func main() {
 		dnsResolver = dnsManager
 		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, preRunningContainersIDs, k8sObjectCache)
 	} else {
+		if cfg.EnableRuntimeDetection {
+			logger.L().Ctx(ctx).Fatal("Network tracing is disabled, but runtime detection is enabled. Network tracing is required for runtime detection.")
+		}
 		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
 		dnsResolver = dnsmanager.CreateDNSManagerMock()
 		networkManagerClient = networkmanager.CreateNetworkManagerMock()
@@ -290,11 +290,12 @@ func main() {
 	}
 	defer igK8sClient.Close()
 	logger.L().Info("IG Kubernetes client created", helpers.Interface("client", igK8sClient))
+	logger.L().Info("Detected container runtime", helpers.String("containerRuntime", igK8sClient.RuntimeConfig.Name.String()))
 
 	// Create the SBOM manager
 	var sbomManager sbommanager.SbomManagerClient
 	if cfg.EnableSbomGeneration {
-		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeSocketPath, storageClient)
+		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SbomManager", helpers.Error(err))
 		}
@@ -303,20 +304,17 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime, nil, nil, processManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, preRunningContainersIDs, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil, processManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
+	healthManager.SetContainerWatcher(mainHandler)
 
 	// Start the profileManager
 	profileManager.Start(ctx)
 
 	// Start the prometheusExporter
 	prometheusExporter.Start()
-
-	// Start the health manager
-	healthManager := healthmanager.NewHealthManager(mainHandler)
-	healthManager.Start(ctx)
 
 	// Start the container handler
 	err = mainHandler.Start(ctx)
