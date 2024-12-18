@@ -152,14 +152,6 @@ func main() {
 		prometheusExporter = metricsmanager.NewMetricsMock()
 	}
 
-	// Detect the container containerRuntime of the node
-	containerRuntime, err := utils.DetectContainerRuntimeViaK8sAPI(ctx, k8sClient, cfg.NodeName)
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error detecting the container runtime", helpers.Error(err))
-	}
-
-	logger.L().Ctx(ctx).Info("Detected container runtime", helpers.String("containerRuntime", containerRuntime.Name.String()))
-
 	// Create watchers
 	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.StorageClient, cfg.SkipNamespace)
 	// create k8sObject cache
@@ -298,11 +290,12 @@ func main() {
 	}
 	defer igK8sClient.Close()
 	logger.L().Info("IG Kubernetes client created", helpers.Interface("client", igK8sClient))
+	logger.L().Info("Detected container runtime", helpers.String("containerRuntime", igK8sClient.RuntimeConfig.Name.String()))
 
 	// Create the SBOM manager
 	var sbomManager sbommanager.SbomManagerClient
 	if cfg.EnableSbomGeneration {
-		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeSocketPath, storageClient)
+		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SbomManager", helpers.Error(err))
 		}
@@ -311,7 +304,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime, nil, nil, processManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, preRunningContainersIDs, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil, processManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

@@ -1,12 +1,10 @@
 package utils
 
 import (
-	"context"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"hash"
@@ -24,23 +22,17 @@ import (
 	"github.com/armosec/utils-k8s-go/wlid"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
-	runtimeclient "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/runtime-client"
-	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
-	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler"
-	instanceidhandlerv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/prometheus/procfs"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
-	kubeletconfigv1beta1 "k8s.io/kubelet/config/v1beta1"
 )
 
 var (
@@ -366,19 +358,6 @@ func SetInMap(newExecMap *maps.SafeMap[string, mapset.Set[string]]) func(k strin
 	}
 }
 
-func ToInstanceType(c ContainerType) helpersv1.InstanceType {
-	switch c {
-	case Container:
-		return instanceidhandlerv1.Container
-	case InitContainer:
-		return instanceidhandlerv1.InitContainer
-	case EphemeralContainer:
-		return instanceidhandlerv1.EphemeralContainer
-	default:
-		return instanceidhandlerv1.Container
-	}
-}
-
 func GetCmdlineByPid(pid int) (*string, error) {
 	fs, err := procfs.NewFS("/proc")
 	if err != nil {
@@ -701,127 +680,6 @@ func ChunkBy[T any](items []T, chunkSize int) [][]T {
 		}
 	}
 	return append(chunks, items)
-}
-
-// isUnixSocket checks if the given path is a Unix socket.
-// TODO remove this
-func DetectContainerRuntimeViaK8sAPI(ctx context.Context, k8sClient *k8sinterface.KubernetesApi, nodeName string) (*containerutilsTypes.RuntimeConfig, error) {
-	// Get the current node
-	nodes, err := k8sClient.GetKubernetesClient().CoreV1().Nodes().List(ctx, metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("metadata.name=%s", nodeName),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list nodes: %v", err)
-	}
-	if len(nodes.Items) == 0 {
-		return nil, fmt.Errorf("no node found with name: %s", nodeName)
-	}
-	node := nodes.Items[0]
-	// parse the runtime info
-	runtimeConfig := parseRuntimeInfo(node.Status.NodeInfo.ContainerRuntimeVersion)
-	if runtimeConfig.Name == igtypes.RuntimeNameUnknown {
-		return nil, fmt.Errorf("unknown container runtime: %s", node.Status.NodeInfo.ContainerRuntimeVersion)
-	}
-	// override the socket path
-	realSocketPath, err := getContainerRuntimeSocketPath(k8sClient, nodeName)
-	if err != nil {
-		logger.L().Warning("failed to get container runtime socket path from Kubelet configz", helpers.String("error", err.Error()))
-	} else {
-		runtimeConfig.SocketPath = realSocketPath
-	}
-	// unset the runtime protocol
-	runtimeConfig.RuntimeProtocol = ""
-	return runtimeConfig, nil
-}
-
-func parseRuntimeInfo(version string) *containerutilsTypes.RuntimeConfig {
-	switch {
-	case strings.HasPrefix(version, "docker://"):
-		return &containerutilsTypes.RuntimeConfig{
-			Name:            igtypes.RuntimeNameDocker,
-			SocketPath:      runtimeclient.DockerDefaultSocketPath,
-			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
-		}
-	case strings.HasPrefix(version, "containerd://"):
-		return &containerutilsTypes.RuntimeConfig{
-			Name:            igtypes.RuntimeNameContainerd,
-			SocketPath:      runtimeclient.ContainerdDefaultSocketPath,
-			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
-		}
-	case strings.HasPrefix(version, "cri-o://"):
-		return &containerutilsTypes.RuntimeConfig{
-			Name:            igtypes.RuntimeNameCrio,
-			SocketPath:      runtimeclient.CrioDefaultSocketPath,
-			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
-		}
-	case strings.HasPrefix(version, "podman://"):
-		return &containerutilsTypes.RuntimeConfig{
-			Name:            igtypes.RuntimeNamePodman,
-			SocketPath:      runtimeclient.PodmanDefaultSocketPath,
-			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
-		}
-	default:
-		return &containerutilsTypes.RuntimeConfig{
-			Name:            igtypes.RuntimeNameUnknown,
-			SocketPath:      "",
-			RuntimeProtocol: containerutilsTypes.RuntimeProtocolCRI,
-		}
-	}
-}
-
-func getContainerRuntimeSocketPath(clientset *k8sinterface.KubernetesApi, nodeName string) (string, error) {
-	kubeletConfig, err := getCurrentKubeletConfig(clientset, nodeName)
-	if err != nil {
-		return "", fmt.Errorf("getting /configz: %w", err)
-	}
-
-	endpoint := kubeletConfig.ContainerRuntimeEndpoint
-	socketPath := endpoint
-
-	// If it starts with unix://, strip the prefix
-	if strings.HasPrefix(endpoint, "unix://") {
-		socketPath = strings.TrimPrefix(endpoint, "unix://")
-	}
-
-	if socketPath == "" {
-		return "", fmt.Errorf("container runtime socket path is empty")
-	}
-
-	logger.L().Info("using the detected container runtime socket path from Kubelet's config",
-		helpers.String("socketPath", socketPath))
-	return socketPath, nil
-}
-
-// The /configz endpoint isn't officially documented. It was introduced in Kubernetes 1.26 and been around for a long time
-// as stated in https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/component-base/configz/OWNERS
-func getCurrentKubeletConfig(clientset *k8sinterface.KubernetesApi, nodeName string) (*kubeletconfigv1beta1.KubeletConfiguration, error) {
-	resp, err := clientset.GetKubernetesClient().CoreV1().RESTClient().Get().Resource("nodes").
-		Name(nodeName).Suffix("proxy", "configz").DoRaw(context.TODO())
-	if err != nil {
-		return nil, fmt.Errorf("fetching /configz from %q: %w", nodeName, err)
-	}
-	kubeCfg, err := decodeConfigz(resp)
-	if err != nil {
-		return nil, err
-	}
-	return kubeCfg, nil
-}
-
-// Decodes the http response from /configz and returns the kubelet configuration
-func decodeConfigz(respBody []byte) (*kubeletconfigv1beta1.KubeletConfiguration, error) {
-	// This hack because /configz reports the following structure:
-	// {"kubeletconfig": {the JSON representation of kubeletconfigv1beta1.KubeletConfiguration}}
-	type configzWrapper struct {
-		ComponentConfig kubeletconfigv1beta1.KubeletConfiguration `json:"kubeletconfig"`
-	}
-
-	configz := configzWrapper{}
-	err := json.Unmarshal(respBody, &configz)
-	if err != nil {
-		return nil, err
-	}
-
-	return &configz.ComponentConfig, nil
 }
 
 func DiskUsage(path string) int64 {
