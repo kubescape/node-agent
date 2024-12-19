@@ -20,6 +20,7 @@ import (
 const (
 	cleanupInterval = 1 * time.Minute
 	maxTreeDepth    = 50
+	runCCommPrefix  = "runc:["
 )
 
 type ProcessManager struct {
@@ -272,6 +273,20 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid int) (apit
 			currentPID = parent.PPID
 		} else {
 			break
+		}
+	}
+
+	// If the process is runc, try to fetch the real process info.
+	// Intentionally we are doing this only once the process is asked for to avoid unnecessary calls to /proc and give time for the process to be created.
+	if strings.HasPrefix(result.Comm, runCCommPrefix) {
+		if process, err := p.getProcessFromProc(int(result.PID)); err == nil {
+			childerns := result.Children
+			upperLayer := result.UpperLayer
+			result = process
+			result.Children = childerns
+			result.UpperLayer = upperLayer
+			// Update the process in the tree
+			p.processTree.Set(result.PID, result)
 		}
 	}
 
