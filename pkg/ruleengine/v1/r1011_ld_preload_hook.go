@@ -90,7 +90,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 			return nil
 		}
 
-		return rule.ruleFailureOpenEvent(&openEvent.Event)
+		return rule.ruleFailureOpenEvent(&openEvent.Event, openEvent.GetExtra())
 	}
 
 	return nil
@@ -165,12 +165,13 @@ func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *events.ExecEvent
 			PodLabels: execEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
+		Extra:  execEvent.GetExtra(),
 	}
 
 	return &ruleFailure
 }
 
-func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.Event) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.Event, extra interface{}) ruleengine.RuleFailure {
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: rule.Name(),
@@ -199,6 +200,7 @@ func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.E
 			PodLabels: openEvent.K8s.PodLabels,
 		},
 		RuleID: rule.ID(),
+		Extra:  extra,
 	}
 
 	return &ruleFailure

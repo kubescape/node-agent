@@ -107,6 +107,7 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *events.ExecEven
 				PodLabels: execEvent.K8s.PodLabels,
 			},
 			RuleID: rule.ID(),
+			Extra:  execEvent.GetExtra(),
 		}
 
 		return &ruleFailure
