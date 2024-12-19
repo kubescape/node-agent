@@ -16,6 +16,7 @@ import (
 	"github.com/grafana/pyroscope-go"
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -290,7 +291,17 @@ func main() {
 	}
 	defer igK8sClient.Close()
 	logger.L().Info("IG Kubernetes client created", helpers.Interface("client", igK8sClient))
-	logger.L().Info("Detected container runtime", helpers.String("containerRuntime", igK8sClient.RuntimeConfig.Name.String()))
+
+	// Detect the container containerRuntime of the node
+	containerRuntime := &igtypes.RuntimeConfig{
+		Name:            igK8sClient.RuntimeConfig.Name,
+		SocketPath:      igK8sClient.RuntimeConfig.SocketPath,
+		RuntimeProtocol: "", // deliberately empty
+		Extra: igtypes.ExtraConfig{
+			Namespace: igK8sClient.RuntimeConfig.Extra.Namespace,
+		},
+	}
+	logger.L().Info("Detected container runtime", helpers.String("containerRuntime", containerRuntime.Name.String()))
 
 	// Create the SBOM manager
 	var sbomManager sbommanager.SbomManagerClient
@@ -304,7 +315,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, preRunningContainersIDs, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil, processManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime, nil, nil, processManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
