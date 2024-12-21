@@ -182,51 +182,39 @@ func TestK8sObjectCacheImpl_GetApiServerIpAddress(t *testing.T) {
 }
 
 func TestK8sObjectCacheImpl_setApiServerIpAddress(t *testing.T) {
-
 	tests := []struct {
 		name               string
+		envValue           string
 		apiServerIpAddress string
-		service            corev1.Service
 		wantErr            bool
 	}{
 		{
-			name: "Test with valid service",
-			service: corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "kubernetes",
-					Namespace: "default",
-				},
-				Spec: corev1.ServiceSpec{
-					ClusterIP: "63.56.12.45",
-				},
-			},
-			apiServerIpAddress: "63.56.12.45",
+			name:               "Test with environment variable set",
+			envValue:           "10.0.0.1",
+			apiServerIpAddress: "10.0.0.1",
 			wantErr:            false,
 		},
 		{
-			name: "Test with valid service",
-			service: corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "kubernetes",
-					Namespace: "blabla",
-				},
-				Spec: corev1.ServiceSpec{
-					ClusterIP: "63.56.12.45",
-				},
-			},
+			name:               "Test with no environment variable",
+			envValue:           "",
 			apiServerIpAddress: "",
 			wantErr:            true,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Setup environment for test
+			t.Setenv("KUBERNETES_SERVICE_HOST", tt.envValue)
+
 			k := &K8sObjectCacheImpl{
 				k8sClient: k8sinterface.NewKubernetesApiMock(),
 			}
-			k.k8sClient.GetKubernetesClient().CoreV1().Services(tt.service.GetNamespace()).Create(context.Background(), &tt.service, metav1.CreateOptions{})
+
 			if err := k.setApiServerIpAddress(); (err != nil) != tt.wantErr {
 				t.Errorf("K8sObjectCacheImpl.setApiServerIpAddress() error = %v, wantErr %v", err, tt.wantErr)
 			}
+
 			assert.Equal(t, tt.apiServerIpAddress, k.GetApiServerIpAddress())
 		})
 	}
