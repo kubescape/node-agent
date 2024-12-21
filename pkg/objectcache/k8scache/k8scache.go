@@ -2,6 +2,8 @@ package k8scache
 
 import (
 	"context"
+	"fmt"
+	"os"
 
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -104,12 +106,11 @@ func (k *K8sObjectCacheImpl) WatchResources() []watcher.WatchResource {
 }
 
 func (k *K8sObjectCacheImpl) setApiServerIpAddress() error {
-	apiAddress, err := k.k8sClient.GetKubernetesClient().CoreV1().Services("default").Get(context.Background(), "kubernetes", metav1.GetOptions{})
-	if err != nil {
-		return err
+	host := os.Getenv("KUBERNETES_SERVICE_HOST")
+	if host == "" {
+		return fmt.Errorf("KUBERNETES_SERVICE_HOST environment variable not set")
 	}
-	// TODO: is this the correct approach?
-	k.apiServerIpAddress = apiAddress.Spec.ClusterIP
+	k.apiServerIpAddress = host
 	return nil
 }
 
