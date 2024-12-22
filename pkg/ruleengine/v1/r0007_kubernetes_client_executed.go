@@ -26,22 +26,6 @@ const (
 
 var kubernetesClients = []string{
 	"kubectl",
-	"kubeadm",
-	"kubelet",
-	"kube-proxy",
-	"kube-apiserver",
-	"kube-controller-manager",
-	"kube-scheduler",
-	"crictl",
-	"docker",
-	"containerd",
-	"runc",
-	"ctr",
-	"containerd-shim",
-	"containerd-shim-runc-v2",
-	"containerd-shim-runc-v1",
-	"containerd-shim-runc-v0",
-	"containerd-shim-runc",
 }
 
 var R0007KubernetesClientExecutedDescriptor = ruleengine.RuleDescriptor{
