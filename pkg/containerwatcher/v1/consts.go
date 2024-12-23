@@ -9,6 +9,5 @@ const (
 	SYS_SYMLINK   = 88
 	SYS_OPEN      = 2
 	SYS_OPENAT    = 257
-	SYS_EXECVE    = 59
 	SYS_FORK      = 57
 )
