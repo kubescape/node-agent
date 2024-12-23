@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -21,18 +22,19 @@ var _ objectcache.K8sObjectCache = (*K8sObjectCacheImpl)(nil)
 var _ watcher.Adaptor = (*K8sObjectCacheImpl)(nil)
 
 type K8sObjectCacheImpl struct {
-	nodeName  string
-	k8sClient k8sclient.K8sClientInterface
-	pods      maps.SafeMap[string, *corev1.Pod]
-
-	apiServerIpAddress string
+	nodeName                string
+	k8sClient               k8sclient.K8sClientInterface
+	pods                    maps.SafeMap[string, *corev1.Pod]
+	apiServerIpAddress      string
+	preRunningContainersIDs mapset.Set[string]
 }
 
-func NewK8sObjectCache(nodeName string, k8sClient k8sclient.K8sClientInterface) (*K8sObjectCacheImpl, error) {
+func NewK8sObjectCache(nodeName string, k8sClient k8sclient.K8sClientInterface, preRunningContainersIDs mapset.Set[string]) (*K8sObjectCacheImpl, error) {
 	k := &K8sObjectCacheImpl{
-		k8sClient: k8sClient,
-		nodeName:  nodeName,
-		pods:      maps.SafeMap[string, *corev1.Pod]{},
+		k8sClient:               k8sClient,
+		nodeName:                nodeName,
+		pods:                    maps.SafeMap[string, *corev1.Pod]{},
+		preRunningContainersIDs: preRunningContainersIDs,
 	}
 
 	if err := k.setApiServerIpAddress(); err != nil {
@@ -40,6 +42,11 @@ func NewK8sObjectCache(nodeName string, k8sClient k8sclient.K8sClientInterface) 
 	}
 
 	return k, nil
+}
+
+// IsPreRunningContainer returns true if the container was running before the agent started
+func (k *K8sObjectCacheImpl) IsPreRunningContainer(containerID string) bool {
+	return k.preRunningContainersIDs.Contains(containerID)
 }
 
 // GetPodSpec returns the pod spec for the given namespace and pod name, if not found returns nil
