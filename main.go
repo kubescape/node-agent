@@ -153,17 +153,17 @@ func main() {
 		prometheusExporter = metricsmanager.NewMetricsMock()
 	}
 
+	// Initiate pre-existing containers
+	preRunningContainersIDs := mapset.NewSet[string]() // Set of container IDs
+
 	// Create watchers
 	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.StorageClient, cfg.SkipNamespace)
 	// create k8sObject cache
-	k8sObjectCache, err := k8scache.NewK8sObjectCache(cfg.NodeName, k8sClient)
+	k8sObjectCache, err := k8scache.NewK8sObjectCache(cfg.NodeName, k8sClient, preRunningContainersIDs)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
 	}
 	dWatcher.AddAdaptor(k8sObjectCache)
-
-	// Initiate pre-existing containers
-	preRunningContainersIDs := mapset.NewSet[string]() // Set of container IDs
 
 	// Create the seccomp manager
 	var seccompManager seccompmanager.SeccompManagerClient
