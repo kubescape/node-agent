@@ -18,7 +18,7 @@ func (ch *IGContainerWatcher) execEventCallback(event *tracerexectype.Event) {
 
 	execEvent := &events.ExecEvent{Event: *event}
 	ch.enrichEvent(execEvent, []uint64{SYS_FORK})
-	logger.L().Info("exec info", helpers.Int("pid", int(event.Pid)), helpers.Int("tid", int(event.Tid)), helpers.String("comm", event.Comm))
+	logger.L().Info("parent exec info", helpers.Int("ppid", int(event.Ppid)), helpers.Int("tid", int(event.Ppid)), helpers.String("comm", event.Comm))
 
 	if event.Retval > -1 && event.Comm != "" {
 		ch.execWorkerChan <- execEvent
