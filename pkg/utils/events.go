@@ -11,6 +11,7 @@ type EnrichEvent interface {
 	GetBaseEvent() *types.Event
 	GetPID() uint64
 	SetExtra(extra interface{})
+	GetExtra() interface{}
 }
 
 type EventType string
