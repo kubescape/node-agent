@@ -18,5 +18,5 @@ func (event *ExecEvent) GetExtra() interface{} {
 }
 
 func (event *ExecEvent) GetPID() uint64 {
-	return (uint64(event.Pid) << 32) | uint64(event.Tid)
+	return (uint64(event.Ppid) << 32) | uint64(event.Ppid)
 }
