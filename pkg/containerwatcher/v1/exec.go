@@ -16,7 +16,7 @@ func (ch *IGContainerWatcher) execEventCallback(event *tracerexectype.Event) {
 
 	execEvent := &events.ExecEvent{Event: *event}
 	ch.enrichEvent(execEvent, []uint64{SYS_FORK})
-
+	
 	if event.Retval > -1 && event.Comm != "" {
 		ch.execWorkerChan <- execEvent
 	}
