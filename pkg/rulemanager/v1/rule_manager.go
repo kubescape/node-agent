@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -469,7 +470,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 		ruleFailure.SetCloudServices(cloudServices.ToSlice())
 	}
 
-	if rm.enricher != nil {
+	if rm.enricher != nil && !reflect.ValueOf(rm.enricher).IsNil() {
 		rm.enricher.EnrichRuleFailure(ruleFailure)
 	}
 
