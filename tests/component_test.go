@@ -1156,7 +1156,7 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	hardlinkPolicy := applicationProfile.Spec.Containers[0].PolicyByRuleId[ruleengine.R1012ID]
 	assert.Len(t, hardlinkPolicy.AllowedProcesses, 0)
 
-	fmt.Println("After completed...")
+	fmt.Println("After completed....")
 
 	// wait for cache
 	time.Sleep(120 * time.Second)

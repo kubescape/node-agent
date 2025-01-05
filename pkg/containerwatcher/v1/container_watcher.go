@@ -3,6 +3,7 @@ package containerwatcher
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -549,7 +550,7 @@ func (ch *IGContainerWatcher) Ready() bool {
 }
 
 func (ch *IGContainerWatcher) enrichEvent(event utils.EnrichEvent, syscalls []uint64) {
-	if ch.thirdPartyEnricher != nil {
+	if ch.thirdPartyEnricher != nil && !reflect.ValueOf(ch.thirdPartyEnricher).IsNil() {
 		ch.thirdPartyEnricher.Enrich(event, syscalls)
 	}
 }
