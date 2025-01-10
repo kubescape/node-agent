@@ -25,7 +25,7 @@ func GetNewEndpoint(event *tracerhttptype.Event, identifier string) (*v1beta1.HT
 	headers["Host"] = []string{event.Request.Host}
 	rawJSON, err := json.Marshal(headers)
 	if err != nil {
-		logger.L().Error("Error marshaling JSON:", helpers.Error(err))
+		logger.L().Debug("GetNewEndpoint - error marshaling headers", helpers.Error(err), helpers.Interface("headers", headers))
 		return nil, err
 	}
 

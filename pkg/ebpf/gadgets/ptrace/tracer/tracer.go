@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
-
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
@@ -14,7 +12,9 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
+	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -strip /usr/bin/llvm-strip-18 -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event ptrace bpf/ptrace_detector.c -- -I./bpf/
@@ -88,7 +88,7 @@ func (t *Tracer) install() error {
 	tp := tracepointlib.TracepointInfo{Syscall: "sys_enter_ptrace", ObjFunc: t.objs.ptracePrograms.TraceEnterPtrace}
 	l, err := tracepointlib.AttachTracepoint(tp)
 	if err != nil {
-		logger.L().Error(fmt.Sprintf("Error attaching tracepoint: %s", err))
+		logger.L().Fatal("ptrace Tracer - error attaching tracepoint", helpers.Error(err))
 	}
 	links = append(links, l)
 
@@ -146,7 +146,7 @@ func (t *Tracer) SetMountNsMap(mountnsMap *ebpf.Map) {
 func (t *Tracer) SetEventHandler(handler any) {
 	nh, ok := handler.(func(ev *types.Event))
 	if !ok {
-		panic("event handler invalid")
+		logger.L().Fatal("ptrace Tracer.SetEventHandler - invalid event handler", helpers.Interface("handler", handler))
 	}
 	t.eventCallback = nh
 }

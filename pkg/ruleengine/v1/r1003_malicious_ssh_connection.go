@@ -86,7 +86,7 @@ func ReadPortRange() ([2]uint16, error) {
 func CreateRuleR1003MaliciousSSHConnection() *R1003MaliciousSSHConnection {
 	ephemeralPorts, err := ReadPortRange()
 	if err != nil {
-		logger.L().Error("Failed to read port range, setting to default range:", helpers.Error(err))
+		logger.L().Warning("Failed to read port range, setting to default range:", helpers.Error(err))
 	}
 	return &R1003MaliciousSSHConnection{
 		allowedPorts:       []uint16{22, 2022},
@@ -104,7 +104,7 @@ func (rule *R1003MaliciousSSHConnection) ID() string {
 func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interface{}) {
 	if allowedPortsInterface, ok := params["allowedPorts"].([]interface{}); ok {
 		if len(allowedPortsInterface) == 0 {
-			logger.L().Error("Allowed ports cannot be empty")
+			logger.L().Fatal("Allowed ports cannot be empty")
 			return
 		}
 
@@ -113,13 +113,13 @@ func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interfa
 			if convertedPort, ok := port.(float64); ok {
 				allowedPorts = append(allowedPorts, uint16(convertedPort))
 			} else {
-				logger.L().Error("Failed to convert allowed port to uint16")
+				logger.L().Fatal("Failed to convert allowed port to uint16")
 				return
 			}
 		}
 		rule.allowedPorts = allowedPorts
 	} else {
-		logger.L().Error("Failed to convert allowed ports to []interface{}")
+		logger.L().Fatal("Failed to convert allowed ports to []interface{}")
 		return
 	}
 }

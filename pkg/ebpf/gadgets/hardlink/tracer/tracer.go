@@ -7,15 +7,15 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
-
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
-
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -no-global-types -target bpfel -strip /usr/bin/llvm-strip-18 -cc /usr/bin/clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event hardlink bpf/hardlink.bpf.c -- -I./bpf/
@@ -175,7 +175,7 @@ func (t *Tracer) SetMountNsMap(mountnsMap *ebpf.Map) {
 func (t *Tracer) SetEventHandler(handler any) {
 	nh, ok := handler.(func(ev *types.Event))
 	if !ok {
-		panic("event handler invalid")
+		logger.L().Fatal("hardlink Tracer.SetEventHandler - invalid event handler", helpers.Interface("handler", handler))
 	}
 	t.eventCallback = nh
 }

@@ -38,7 +38,7 @@ func (h *HealthManager) Start(ctx context.Context) {
 		}
 		logger.L().Info("starting health manager", helpers.Int("port", h.port))
 		if err := srv.ListenAndServe(); err != nil {
-			logger.L().Ctx(ctx).Fatal("failed to start health manager", helpers.Error(err), helpers.Int("port", h.port))
+			logger.L().Ctx(ctx).Fatal("HealthManager - failed to start", helpers.Error(err), helpers.Int("port", h.port))
 		}
 	}()
 }

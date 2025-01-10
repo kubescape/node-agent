@@ -49,14 +49,14 @@ func InitAlertManagerExporter(alertManagerURL string) *AlertManagerExporter {
 func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	trace, err := traceToString(failedRule.GetBaseRuntimeAlert().Trace)
 	if err != nil {
-		logger.L().Error("Error converting trace to string", helpers.Error(err))
+		logger.L().Debug("AlertManagerExporter.SendRuleAlert - converting trace to string", helpers.Error(err), helpers.Interface("trace", failedRule.GetBaseRuntimeAlert().Trace))
 		trace = ""
 	}
 
 	processTree := failedRule.GetRuntimeProcessDetails().ProcessTree
 	process := utils.GetProcessFromProcessTree(&processTree, failedRule.GetBaseRuntimeAlert().InfectedPID)
 	if process == nil {
-		logger.L().Error("Failed to get process from process tree")
+		logger.L().Warning("AlertManagerExporter.SendRuleAlert - failed to get process from process tree", helpers.String("trace", trace), helpers.Int("pid", int(failedRule.GetBaseRuntimeAlert().InfectedPID)))
 		return
 	}
 	sourceUrl := fmt.Sprintf("https://armosec.github.io/kubecop/alertviewer/?AlertMessage=%s&AlertRuleName=%s&AlertRuleID=%s&AlertFix=%s&AlertNamespace=%s&AlertPod=%s&AlertContainer=%s&AlertProcess=%s",
@@ -108,11 +108,11 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 	params := alert.NewPostAlertsParams().WithContext(context.Background()).WithAlerts(models.PostableAlerts{&myAlert})
 	isOK, err := ame.client.Alert.PostAlerts(params)
 	if err != nil {
-		logger.L().Error("Error sending alert", helpers.Error(err))
+		logger.L().Warning("AlertManagerExporter.SendRuleAlert - error sending alert", helpers.Error(err))
 		return
 	}
 	if isOK == nil {
-		logger.L().Error("Alert was not sent successfully")
+		logger.L().Warning("AlertManagerExporter.SendRuleAlert - alert was not sent successfully")
 		return
 	}
 }
@@ -155,11 +155,11 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 	params := alert.NewPostAlertsParams().WithContext(context.Background()).WithAlerts(models.PostableAlerts{&myAlert})
 	isOK, err := ame.client.Alert.PostAlerts(params)
 	if err != nil {
-		logger.L().Error("Error sending alert", helpers.Error(err))
+		logger.L().Warning("AlertManagerExporter.SendMalwareAlert - error sending alert", helpers.Error(err))
 		return
 	}
 	if isOK == nil {
-		logger.L().Error("Alert was not sent successfully")
+		logger.L().Warning("AlertManagerExporter.SendMalwareAlert - alert was not sent successfully")
 		return
 	}
 }

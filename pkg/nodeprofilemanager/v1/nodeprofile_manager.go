@@ -53,11 +53,11 @@ func (n *NodeProfileManager) Start(ctx context.Context) {
 			time.Sleep(n.config.NodeProfileInterval)
 			profile, err := n.getProfile()
 			if err != nil {
-				logger.L().Ctx(ctx).Warning("get profile error", helpers.Error(err))
+				logger.L().Ctx(ctx).Warning("NodeProfileManager - get profile", helpers.Error(err))
 			} else {
 				err := n.sendProfile(profile)
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("send profile error", helpers.Error(err))
+					logger.L().Ctx(ctx).Warning("NodeProfileManager - send profile", helpers.Error(err))
 				}
 			}
 		}

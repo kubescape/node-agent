@@ -52,12 +52,12 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			if duration, err := time.ParseDuration(podLabelMaxSniffingTime); err == nil {
 				sniffingTime = duration
 			} else {
-				logger.L().Error("parsing sniffing time in label", helpers.Error(err))
+				logger.L().Debug("IGContainerWatcher.containerCallback - parsing sniffing time in label", helpers.Error(err), helpers.String("podLabelMaxSniffingTime", podLabelMaxSniffingTime))
 			}
 		}
 
 		time.AfterFunc(sniffingTime, func() {
-			logger.L().Info("monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+			logger.L().Info("stop monitor on container - monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 			ch.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.networkManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
@@ -145,7 +145,7 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 
 	// skip containers that should be ignored
 	if ch.ignoreContainer(pod.GetNamespace(), pod.GetName()) {
-		logger.L().Info("skipping pod", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod name", pod.GetName()))
+		logger.L().Debug("IGContainerWatcher - skipping pod", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod name", pod.GetName()))
 		return
 	}
 
@@ -156,7 +156,7 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 	case rulebindingmanager.Removed:
 		ch.ruleManagedPods.Remove(k8sPodID)
 		for i := range runningContainers {
-			logger.L().Info("removing container - pod not managed by rules or removed",
+			logger.L().Debug("IGContainerWatcher - removing container - pod not managed by rules or removed",
 				helpers.String("containerID", runningContainers[i].Runtime.ContainerID),
 				helpers.String("namespace", runningContainers[i].K8s.Namespace),
 				helpers.String("pod", runningContainers[i].K8s.PodName),
@@ -174,7 +174,7 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 				continue
 			}
 
-			logger.L().Debug("adding to pre running containers",
+			logger.L().Debug("IGContainerWatcher - adding to pre running containers",
 				helpers.String("containerID", runningContainers[i].Runtime.ContainerID),
 				helpers.String("namespace", runningContainers[i].K8s.Namespace),
 				helpers.String("pod", runningContainers[i].K8s.PodName),
@@ -197,111 +197,111 @@ func (ch *IGContainerWatcher) startTracers() error {
 	if ch.cfg.EnableApplicationProfile {
 		// Start syscall tracer
 		if err := ch.startSystemcallTracing(); err != nil {
-			logger.L().Error("error starting seccomp tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting seccomp tracing", helpers.Error(err))
 			return err
 		}
-		logger.L().Info("Started syscall tracing")
+		logger.L().Info("started syscall tracing")
 	}
 	if ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
 		// Start exec tracer
 		if err := ch.startExecTracing(); err != nil {
-			logger.L().Error("error starting exec tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting exec tracing", helpers.Error(err))
 			return err
 		}
-		logger.L().Info("Started exec tracing")
+		logger.L().Info("started exec tracing")
 		// Start open tracer
 		if err := ch.startOpenTracing(); err != nil {
-			logger.L().Error("error starting open tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting open tracing", helpers.Error(err))
 			return err
 		}
-		logger.L().Info("Started open tracing")
+		logger.L().Info("started open tracing")
 	}
 
 	if ch.cfg.EnableNetworkTracing {
 		if err := ch.startKubernetesResolution(); err != nil {
-			logger.L().Error("error starting kubernetes resolution", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting kubernetes resolution", helpers.Error(err))
 			return err
 		}
 
 		socketEnricher, err := socketenricher.NewSocketEnricher()
 		if err != nil {
-			logger.L().Error("error creating socket enricher", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error creating socket enricher", helpers.Error(err))
 			return err
 		}
 		ch.socketEnricher = socketEnricher
 
 		if err := ch.startDNSTracing(); err != nil {
 			// not failing on dns tracing error
-			logger.L().Error("error starting dns tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting dns tracing", helpers.Error(err))
 		}
-		logger.L().Info("Started dns tracing")
+		logger.L().Info("started dns tracing")
 
 		if err := ch.startNetworkTracing(); err != nil {
-			logger.L().Error("error starting network tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting network tracing", helpers.Error(err))
 			return err
 		}
-		logger.L().Info("Started network tracing")
+		logger.L().Info("started network tracing")
 	}
 
 	if ch.cfg.EnableRuntimeDetection {
 		// Start capabilities tracer
 		if err := ch.startCapabilitiesTracing(); err != nil {
-			logger.L().Error("error starting capabilities tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting capabilities tracing", helpers.Error(err))
 			return err
 		}
-		logger.L().Info("Started capabilities tracing")
+		logger.L().Info("started capabilities tracing")
 		// The randomx tracing is only supported on amd64 architecture.
 		if runtime.GOARCH == "amd64" {
 			if err := ch.startRandomxTracing(); err != nil {
-				logger.L().Error("error starting randomx tracing", helpers.Error(err))
+				logger.L().Error("IGContainerWatcher - error starting randomx tracing", helpers.Error(err))
 				return err
 			}
-			logger.L().Info("Started randomx tracing")
+			logger.L().Info("started randomx tracing")
 		} else {
 			logger.L().Warning("randomx tracing is not supported on this architecture", helpers.String("architecture", runtime.GOARCH))
 		}
 
 		if err := ch.startSymlinkTracing(); err != nil {
-			logger.L().Error("error starting symlink tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting symlink tracing", helpers.Error(err))
 			return err
 		}
-		logger.L().Info("Started symlink tracing")
+		logger.L().Info("started symlink tracing")
 
 		if err := ch.startHardlinkTracing(); err != nil {
-			logger.L().Error("error starting hardlink tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting hardlink tracing", helpers.Error(err))
 			return err
 		}
-		logger.L().Info("Started hardlink tracing")
+		logger.L().Info("started hardlink tracing")
 
 		// NOTE: SSH tracing relies on the network tracer, so it must be started after the network tracer.
 		if err := ch.startSshTracing(); err != nil {
-			logger.L().Error("error starting ssh tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting ssh tracing", helpers.Error(err))
 			return err
 		}
-		logger.L().Info("Started ssh tracing")
+		logger.L().Info("started ssh tracing")
 
 		if err := ch.startPtraceTracing(); err != nil {
-			logger.L().Error("error starting ptrace tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting ptrace tracing", helpers.Error(err))
 			return err
 		}
-		logger.L().Info("Started ptrace tracing")
+		logger.L().Info("started ptrace tracing")
 
 		// Start third party tracers
 		for tracer := range ch.thirdPartyTracers.Iter() {
 			if err := tracer.Start(); err != nil {
-				logger.L().Error("error starting custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+				logger.L().Error("IGContainerWatcher - error starting custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
 				return err
 			}
-			logger.L().Info("Started custom tracer", helpers.String("tracer", tracer.Name()))
+			logger.L().Info("started custom tracer", helpers.String("tracer", tracer.Name()))
 		}
 	}
 
 	if ch.cfg.EnableHttpDetection {
 		if err := ch.startHttpTracing(); err != nil {
-			logger.L().Error("error starting http tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting http tracing", helpers.Error(err))
 			return err
 		}
-		logger.L().Info("Started http tracing")
+		logger.L().Info("started http tracing")
 	}
 
 	return nil
@@ -312,24 +312,24 @@ func (ch *IGContainerWatcher) stopTracers() error {
 	if ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
 		// Stop capabilities tracer
 		if err := ch.stopCapabilitiesTracing(); err != nil {
-			logger.L().Error("error stopping capabilities tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error stopping capabilities tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 		// Stop syscall tracer
 		if err := ch.stopSystemcallTracing(); err != nil {
-			logger.L().Error("error stopping seccomp tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error stopping seccomp tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 	}
 	if ch.cfg.EnableApplicationProfile || ch.cfg.EnableRuntimeDetection {
 		// Stop exec tracer
 		if err := ch.stopExecTracing(); err != nil {
-			logger.L().Error("error stopping exec tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error stopping exec tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 		// Stop open tracer
 		if err := ch.stopOpenTracing(); err != nil {
-			logger.L().Error("error stopping open tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error stopping open tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 	}
@@ -337,12 +337,12 @@ func (ch *IGContainerWatcher) stopTracers() error {
 	if ch.cfg.EnableNetworkTracing || ch.cfg.EnableRuntimeDetection {
 		// Stop network tracer
 		if err := ch.stopNetworkTracing(); err != nil {
-			logger.L().Error("error stopping network tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error stopping network tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 		// Stop dns tracer
 		if err := ch.stopDNSTracing(); err != nil {
-			logger.L().Error("error stopping dns tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error stopping dns tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 	}
@@ -351,39 +351,39 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		// Stop randomx tracer
 		if runtime.GOARCH == "amd64" && ch.randomxTracer != nil {
 			if err := ch.stopRandomxTracing(); err != nil {
-				logger.L().Error("error stopping randomx tracing", helpers.Error(err))
+				logger.L().Error("IGContainerWatcher - error stopping randomx tracing", helpers.Error(err))
 				errs = errors.Join(errs, err)
 			}
 		}
 
 		// Stop symlink tracer
 		if err := ch.stopSymlinkTracing(); err != nil {
-			logger.L().Error("error stopping symlink tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error stopping symlink tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 
 		// Stop hardlink tracer
 		if err := ch.stopHardlinkTracing(); err != nil {
-			logger.L().Error("error stopping hardlink tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error stopping hardlink tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 
 		// Stop ssh tracer
 		if err := ch.stopSshTracing(); err != nil {
-			logger.L().Error("error starting ssh tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting ssh tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 
 		// Stop ptrace tracer
 		if err := ch.stopPtraceTracing(); err != nil {
-			logger.L().Error("error starting ptrace tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error starting ptrace tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 
 		// Stop third party tracers
 		for tracer := range ch.thirdPartyTracers.Iter() {
 			if err := tracer.Stop(); err != nil {
-				logger.L().Error("error stopping custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+				logger.L().Error("IGContainerWatcher - error stopping custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
 				errs = errors.Join(errs, err)
 			}
 		}
@@ -392,7 +392,7 @@ func (ch *IGContainerWatcher) stopTracers() error {
 	if ch.cfg.EnableHttpDetection {
 		// Stop http tracer
 		if err := ch.stopHttpTracing(); err != nil {
-			logger.L().Error("error stopping http tracing", helpers.Error(err))
+			logger.L().Error("IGContainerWatcher - error stopping http tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 	}
@@ -408,7 +408,7 @@ func (ch *IGContainerWatcher) printNsMap(id string) {
 		entries = nsMap.Iterate()
 	)
 	for entries.Next(&key, &value) { // Order of keys is non-deterministic due to randomized map seed
-		logger.L().Debug("map entry", helpers.String("key", key), helpers.Int("value", int(value)))
+		logger.L().Debug("printNsMap - map entry", helpers.String("key", key), helpers.Int("value", int(value)))
 	}
 }
 
@@ -416,14 +416,14 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 	if ch.timeBasedContainers.Contains(container.Runtime.ContainerID) ||
 		ch.ruleManagedPods.Contains(utils.CreateK8sPodID(container.K8s.Namespace, container.K8s.PodName)) {
 		// the container should still be monitored
-		logger.L().Debug("container should still be monitored",
+		logger.L().Debug("IGContainerWatcher - container should still be monitored",
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName),
 		)
 		return
 	}
 
-	logger.L().Debug("stopping to monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
+	logger.L().Debug("IGContainerWatcher - stopping to monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
 
 	ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
 

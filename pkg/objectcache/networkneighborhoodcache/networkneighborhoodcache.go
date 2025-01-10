@@ -80,7 +80,7 @@ func (nn *NetworkNeighborhoodCacheImpl) handleUserManagedNN(netNeighborhood *v1b
 	// Get the full user managed network neighborhood from the storage
 	userManagedNN, err := nn.getNetworkNeighborhood(netNeighborhood.GetNamespace(), netNeighborhood.GetName())
 	if err != nil {
-		logger.L().Error("failed to get full network neighborhood", helpers.Error(err))
+		logger.L().Warning("NetworkNeighborhoodCacheImpl - failed to get full network neighborhood", helpers.Error(err))
 		return
 	}
 
@@ -93,7 +93,7 @@ func (nn *NetworkNeighborhoodCacheImpl) handleUserManagedNN(netNeighborhood *v1b
 		// Fetch fresh base network neighborhood from cluster
 		freshBaseNN, err := nn.getNetworkNeighborhood(netNeighborhood.GetNamespace(), baseNNName)
 		if err != nil {
-			logger.L().Error("failed to get fresh base network neighborhood for merging",
+			logger.L().Warning("NetworkNeighborhoodCacheImpl - failed to get fresh base network neighborhood for merging",
 				helpers.String("name", baseNNName),
 				helpers.String("namespace", netNeighborhood.GetNamespace()),
 				helpers.Error(err))
@@ -106,7 +106,7 @@ func (nn *NetworkNeighborhoodCacheImpl) handleUserManagedNN(netNeighborhood *v1b
 		// Clean up the user-managed network neighborhood after successful merge
 		nn.userManagedNetworkNeighborhood.Delete(baseNNUniqueName)
 
-		logger.L().Debug("merged user-managed network neighborhood with fresh base network neighborhood",
+		logger.L().Debug("NetworkNeighborhoodCacheImpl - merged user-managed network neighborhood with fresh base network neighborhood",
 			helpers.String("name", baseNNName),
 			helpers.String("namespace", netNeighborhood.GetNamespace()))
 	}
@@ -207,7 +207,7 @@ func (nn *NetworkNeighborhoodCacheImpl) addPod(obj runtime.Object) {
 
 	slug, err := getSlug(pod)
 	if err != nil {
-		logger.L().Error("NetworkNeighborhoodCacheImpl: failed to get slug", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod", pod.GetName()), helpers.Error(err))
+		logger.L().Warning("NetworkNeighborhoodCacheImpl - failed to get slug", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod", pod.GetName()), helpers.Error(err))
 		return
 	}
 
@@ -244,7 +244,7 @@ func (nn *NetworkNeighborhoodCacheImpl) addPod(obj runtime.Object) {
 			// get the NN
 			networkNeighborhood, err := nn.getNetworkNeighborhood(pod.GetNamespace(), slug)
 			if err != nil {
-				logger.L().Error("failed to get network neighborhood", helpers.Error(err))
+				logger.L().Warning("NetworkNeighborhoodCacheImpl - failed to get network neighborhood", helpers.Error(err))
 				continue
 			}
 
@@ -277,7 +277,7 @@ func (nn *NetworkNeighborhoodCacheImpl) removeContainer(containerID string) {
 			nn.slugToContainers.Delete(uniqueSlug)
 			nn.allNetworkNeighborhoods.Remove(uniqueSlug)
 			nn.slugToNetworkNeighborhood.Delete(uniqueSlug)
-			logger.L().Debug("deleted pod from network neighborhood cache", helpers.String("containerID", containerID), helpers.String("uniqueSlug", uniqueSlug))
+			logger.L().Debug("NetworkNeighborhoodCacheImpl - deleted pod from network neighborhood cache", helpers.String("containerID", containerID), helpers.String("uniqueSlug", uniqueSlug))
 		}
 	}
 }
@@ -287,7 +287,7 @@ func (nn *NetworkNeighborhoodCacheImpl) removeContainer(containerID string) {
 func (nn *NetworkNeighborhoodCacheImpl) addFullNetworkNeighborhood(netNeighborhood *v1beta1.NetworkNeighborhood, nnName string) {
 	fullNN, err := nn.getNetworkNeighborhood(netNeighborhood.GetNamespace(), netNeighborhood.GetName())
 	if err != nil {
-		logger.L().Error("failed to get full network neighborhood", helpers.Error(err))
+		logger.L().Warning("NetworkNeighborhoodCacheImpl - failed to get full network neighborhood", helpers.Error(err))
 		return
 	}
 
@@ -297,14 +297,14 @@ func (nn *NetworkNeighborhoodCacheImpl) addFullNetworkNeighborhood(netNeighborho
 		fullNN = nn.performMerge(fullNN, userManagedNN)
 		// Clean up the user-managed network neighborhood after successful merge
 		nn.userManagedNetworkNeighborhood.Delete(nnName)
-		logger.L().Debug("merged pending user-managed network neighborhood", helpers.String("name", nnName))
+		logger.L().Debug("NetworkNeighborhoodCacheImpl - merged pending user-managed network neighborhood", helpers.String("name", nnName))
 	}
 
 	nn.slugToNetworkNeighborhood.Set(nnName, fullNN)
 	for _, i := range nn.slugToContainers.Get(nnName).ToSlice() {
 		nn.containerToSlug.Set(i, nnName)
 	}
-	logger.L().Debug("added pod to network neighborhood cache", helpers.String("name", nnName))
+	logger.L().Debug("NetworkNeighborhoodCacheImpl - added pod to network neighborhood cache", helpers.String("name", nnName))
 }
 
 func (nn *NetworkNeighborhoodCacheImpl) performMerge(normalNN, userManagedNN *v1beta1.NetworkNeighborhood) *v1beta1.NetworkNeighborhood {
@@ -335,7 +335,7 @@ func (nn *NetworkNeighborhoodCacheImpl) performMerge(normalNN, userManagedNN *v1
 func (nn *NetworkNeighborhoodCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.NetworkNeighborhoodContainer) []v1beta1.NetworkNeighborhoodContainer {
 	if len(userManagedContainers) != len(normalContainers) {
 		// If the number of containers don't match, we can't merge
-		logger.L().Error("failed to merge user-managed profile with base profile",
+		logger.L().Warning("NetworkNeighborhoodCacheImpl - failed to merge user-managed profile with base profile",
 			helpers.Int("normalContainers len", len(normalContainers)),
 			helpers.Int("userManagedContainers len", len(userManagedContainers)),
 			helpers.String("reason", "number of containers don't match"))
@@ -485,7 +485,7 @@ func (nn *NetworkNeighborhoodCacheImpl) deleteNetworkNeighborhood(obj runtime.Ob
 		baseNNUniqueName := objectcache.UniqueName(netNeighborhood.GetNamespace(), baseNNName)
 		nn.userManagedNetworkNeighborhood.Delete(baseNNUniqueName)
 
-		logger.L().Debug("deleted user-managed network neighborhood from cache",
+		logger.L().Debug("NetworkNeighborhoodCacheImpl - deleted user-managed network neighborhood from cache",
 			helpers.String("nnName", netNeighborhood.GetName()),
 			helpers.String("baseNN", baseNNName))
 	} else {
@@ -494,7 +494,7 @@ func (nn *NetworkNeighborhoodCacheImpl) deleteNetworkNeighborhood(obj runtime.Ob
 		nn.slugToState.Delete(nnName)
 		nn.allNetworkNeighborhoods.Remove(nnName)
 
-		logger.L().Debug("deleted network neighborhood from cache",
+		logger.L().Debug("NetworkNeighborhoodCacheImpl - deleted network neighborhood from cache",
 			helpers.String("uniqueSlug", nnName))
 	}
 
@@ -548,7 +548,7 @@ func (nn *NetworkNeighborhoodCacheImpl) cleanupOrphanedUserManagedNNs() {
 				mergedNN := nn.performMerge(baseNN, value)
 				nn.slugToNetworkNeighborhood.Set(key, mergedNN)
 				nn.userManagedNetworkNeighborhood.Delete(key)
-				logger.L().Debug("cleaned up orphaned user-managed network neighborhood", helpers.String("name", key))
+				logger.L().Debug("NetworkNeighborhoodCacheImpl - cleaned up orphaned user-managed network neighborhood", helpers.String("name", key))
 			}
 		}
 		return true

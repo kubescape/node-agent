@@ -189,9 +189,9 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 			}
 			errs := validation.IsValidLabelValue(labels[i])
 			if len(errs) != 0 {
-				logger.L().Debug("label is not valid", helpers.String("label", labels[i]))
+				logger.L().Debug("GetLabels - label is not valid", helpers.String("label", labels[i]))
 				for j := range errs {
-					logger.L().Debug("label err description", helpers.String("Err: ", errs[j]))
+					logger.L().Debug("GetLabels - label err description", helpers.String("Err: ", errs[j]))
 				}
 				delete(labels, i)
 			}

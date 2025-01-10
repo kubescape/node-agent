@@ -51,11 +51,11 @@ func (sp *SeccompProfileWatcherImpl) AddHandler(ctx context.Context, obj runtime
 	if _, ok := obj.(*v1beta1api.SeccompProfile); ok {
 		fullObj, err := sp.getFullSeccompProfile(obj)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("SeccompProfileWatcherImpl - failed to get full seccomp profile", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("SeccompProfileWatcherImpl - failed to get full seccomp profile", helpers.Error(err))
 			return
 		}
 		if err := sp.seccompManager.AddSeccompProfile(fullObj); err != nil {
-			logger.L().Ctx(ctx).Error("SeccompProfileWatcherImpl - failed to add seccomp profile", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("SeccompProfileWatcherImpl - failed to add seccomp profile", helpers.Error(err))
 		}
 	}
 }
@@ -64,11 +64,11 @@ func (sp *SeccompProfileWatcherImpl) ModifyHandler(ctx context.Context, obj runt
 	if _, ok := obj.(*v1beta1api.SeccompProfile); ok {
 		fullObj, err := sp.getFullSeccompProfile(obj)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("SeccompProfileWatcherImpl - failed to get full seccomp profile", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("SeccompProfileWatcherImpl - failed to get full seccomp profile", helpers.Error(err))
 			return
 		}
 		if err := sp.seccompManager.AddSeccompProfile(fullObj); err != nil {
-			logger.L().Ctx(ctx).Error("SeccompProfileWatcherImpl - failed to modify seccomp profile", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("SeccompProfileWatcherImpl - failed to modify seccomp profile", helpers.Error(err))
 		}
 	}
 }
@@ -76,7 +76,7 @@ func (sp *SeccompProfileWatcherImpl) ModifyHandler(ctx context.Context, obj runt
 func (sp *SeccompProfileWatcherImpl) DeleteHandler(ctx context.Context, obj runtime.Object) {
 	if _, ok := obj.(*v1beta1api.SeccompProfile); ok {
 		if err := sp.seccompManager.DeleteSeccompProfile(obj.(*v1beta1api.SeccompProfile)); err != nil {
-			logger.L().Ctx(ctx).Error("SeccompProfileWatcherImpl - failed to delete seccomp profile", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("SeccompProfileWatcherImpl - failed to delete seccomp profile", helpers.Error(err))
 		}
 	}
 }

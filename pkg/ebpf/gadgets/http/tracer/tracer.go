@@ -7,15 +7,15 @@ import (
 	"time"
 	"unsafe"
 
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	lru "github.com/hashicorp/golang-lru/v2"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
 )
@@ -103,7 +103,7 @@ func (t *Tracer) install() error {
 	for _, tp := range tracepoints {
 		l, err := tracepointlib.AttachTracepoint(tp)
 		if err != nil {
-			logger.L().Error(fmt.Sprintf("Error attaching tracepoint: %s", err))
+			logger.L().Fatal("http Tracer - error attaching tracepoint", helpers.Error(err))
 		}
 		links = append(links, l)
 	}
@@ -213,7 +213,7 @@ func (t *Tracer) SetMountNsMap(mountnsMap *ebpf.Map) {
 func (t *Tracer) SetEventHandler(handler any) {
 	nh, ok := handler.(func(ev *types.Event))
 	if !ok {
-		panic("event handler invalid")
+		logger.L().Fatal("http Tracer.SetEventHandler - invalid event handler", helpers.Interface("handler", handler))
 	}
 	t.eventCallback = nh
 }

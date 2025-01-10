@@ -32,7 +32,7 @@ func checkKernelVersion(minKernelVersion string) error {
 		return fmt.Errorf("checkKernelVersion: fail to detect the kernel version")
 	}
 	kernelVersion := int8ToStr(uname.Sysname[:]) + "," + int8ToStr(uname.Release[:]) + "," + int8ToStr(uname.Version[:])
-	logger.L().Debug("kernelVersion", helpers.String("is", kernelVersion))
+	logger.L().Debug("checkKernelVersion - kernelVersion", helpers.String("is", kernelVersion))
 
 	// use natsort because 5.15 is greater than 5.4 but not from a string comparison perspective
 	if natsort.Compare(int8ToStr(uname.Release[:]), minKernelVersion) {
@@ -77,13 +77,13 @@ func workaroundMounts() error {
 			return fmt.Errorf("statfs %s: %w", f.path, err)
 		}
 		if statfs.Type == f.magic {
-			logger.L().Debug("already mounted", helpers.String("name", f.name), helpers.String("path", f.path))
+			logger.L().Debug("workaroundMounts - already mounted", helpers.String("name", f.name), helpers.String("path", f.path))
 		} else {
 			err := unix.Mount("none", f.path, f.name, 0, "")
 			if err != nil {
 				return fmt.Errorf("mounting %s: %w", f.path, err)
 			}
-			logger.L().Debug("mounted", helpers.String("name", f.name), helpers.String("path", f.path))
+			logger.L().Debug("workaroundMounts - mounted", helpers.String("name", f.name), helpers.String("path", f.path))
 		}
 	}
 	return nil
@@ -91,24 +91,24 @@ func workaroundMounts() error {
 
 func CheckPrerequisites() error {
 	// Check eBPF support
-	logger.L().Debug("checking eBPF support")
+	logger.L().Debug("CheckPrerequisites - checking eBPF support")
 	if err := ebpf.VerifyEbpf(); err != nil {
 		return err
 	}
 	// Check environment variables
 	for _, envVar := range []string{config.NodeNameEnvVar, config.PodNameEnvVar, config.NamespaceEnvVar} {
-		logger.L().Debug("checking environment variable", helpers.String("envVar", envVar))
+		logger.L().Debug("CheckPrerequisites - checking environment variable", helpers.String("envVar", envVar))
 		if getenv := os.Getenv(envVar); getenv == "" {
 			return fmt.Errorf("%s environment variable not set", envVar)
 		}
 	}
 	// Ensure all filesystems are mounted
-	logger.L().Debug("checking mounts")
+	logger.L().Debug("CheckPrerequisites - checking mounts")
 	if err := workaroundMounts(); err != nil {
 		return err
 	}
 	// Raise the rlimit for memlock to the maximum allowed (eBPF needs it)
-	logger.L().Debug("raising memlock rlimit")
+	logger.L().Debug("CheckPrerequisites - raising memlock rlimit")
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return err
 	}
