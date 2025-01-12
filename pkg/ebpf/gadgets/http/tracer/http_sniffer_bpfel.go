@@ -31,11 +31,11 @@ type http_snifferHttpevent struct {
 	Type      uint8
 	_         [3]byte
 	SockFd    uint32
-	Buf       [1028]uint8
+	Buf       [4096]uint8
 	Syscall   [128]uint8
 	OtherIp   uint32
 	OtherPort uint16
-	_         [2]byte
+	_         [6]byte
 }
 
 type http_snifferPacketBuffer struct {
@@ -80,9 +80,10 @@ func loadHttp_snifferObjects(obj interface{}, opts *ebpf.CollectionOptions) erro
 type http_snifferSpecs struct {
 	http_snifferProgramSpecs
 	http_snifferMapSpecs
+	http_snifferVariableSpecs
 }
 
-// http_snifferSpecs contains programs before they are loaded into the kernel.
+// http_snifferProgramSpecs contains programs before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type http_snifferProgramSpecs struct {
@@ -126,12 +127,21 @@ type http_snifferMapSpecs struct {
 	PreAcceptArgsMap         *ebpf.MapSpec `ebpf:"pre_accept_args_map"`
 }
 
+// http_snifferVariableSpecs contains global variables before they are loaded into the kernel.
+//
+// It can be passed ebpf.CollectionSpec.Assign.
+type http_snifferVariableSpecs struct {
+	GadgetFilterByMntns *ebpf.VariableSpec `ebpf:"gadget_filter_by_mntns"`
+	Unusedevent         *ebpf.VariableSpec `ebpf:"unusedevent"`
+}
+
 // http_snifferObjects contains all objects after they have been loaded into the kernel.
 //
 // It can be passed to loadHttp_snifferObjects or ebpf.CollectionSpec.LoadAndAssign.
 type http_snifferObjects struct {
 	http_snifferPrograms
 	http_snifferMaps
+	http_snifferVariables
 }
 
 func (o *http_snifferObjects) Close() error {
@@ -168,6 +178,14 @@ func (m *http_snifferMaps) Close() error {
 		m.MsgPackets,
 		m.PreAcceptArgsMap,
 	)
+}
+
+// http_snifferVariables contains all global variables after they have been loaded into the kernel.
+//
+// It can be passed to loadHttp_snifferObjects or ebpf.CollectionSpec.LoadAndAssign.
+type http_snifferVariables struct {
+	GadgetFilterByMntns *ebpf.Variable `ebpf:"gadget_filter_by_mntns"`
+	Unusedevent         *ebpf.Variable `ebpf:"unusedevent"`
 }
 
 // http_snifferPrograms contains all programs after they have been loaded into the kernel.
