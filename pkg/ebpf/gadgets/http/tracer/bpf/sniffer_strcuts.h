@@ -14,16 +14,12 @@
 
 #define MAX_PACKET_SIZE 200
 #define PACKET_CHUNK_SIZE 200
-#define MAX_DATAEVENT_BUFFER 1028
+#define MAX_DATAEVENT_BUFFER 4096
 #define MAX_SYSCALL 128
 #define MAX_MSG_COUNT 20
 
 #define MSG_PEEK 0x02
 #define EINPROGRESS -115
-
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-
-
 
 struct pre_accept_args {
     uint64_t addr_ptr;  // user_msghdr

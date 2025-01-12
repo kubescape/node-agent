@@ -80,6 +80,10 @@ static __always_inline int should_discard()
     return 0;
 }
 
+static __always_inline __u64 min_size(__u64 a, __u64 b) {
+    return a < b ? a : b;
+}
+
 static __always_inline __u64 generate_unique_connection_id(__u64 pid_tgid, __u32 sockfd)
 {
     __u32 pid = pid_tgid >> 32; 
@@ -257,14 +261,23 @@ static __always_inline int process_packet(struct trace_event_raw_sys_exit *ctx, 
     __u32 total_size = (__u32)ctx->ret;
     __u32 key = 0;
 
+    if (total_size < 1)
+    {
+        return 0;
+    }
+
     char *buf = bpf_map_lookup_elem(&empty_char, &key);
     if (!buf)
         return 0;
 
-    int read_size = bpf_probe_read_user(buf, MIN(packet->len, PACKET_CHUNK_SIZE), (void *)packet->buf);
+    if (packet->len < 1)
+        return 0;
+
+    int read_size = bpf_probe_read_user(buf, min_size(packet->len, PACKET_CHUNK_SIZE), (void *)packet->buf);
     if (read_size < 0)
         return 0;
-    int type = get_http_type(ctx, buf, MIN(total_size, PACKET_CHUNK_SIZE));
+
+    int type = get_http_type(ctx, buf, min_size(total_size, PACKET_CHUNK_SIZE));
     if (!type)
         return 0;
 
@@ -279,7 +292,7 @@ static __always_inline int process_packet(struct trace_event_raw_sys_exit *ctx, 
     dataevent->sock_fd = packet->sockfd;
 
     bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
-    bpf_probe_read_user(&dataevent->buf, MIN(total_size, MAX_DATAEVENT_BUFFER), (void *)packet->buf);
+    bpf_probe_read_user(&dataevent->buf, min_size(total_size, MAX_DATAEVENT_BUFFER), (void *)packet->buf);
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, dataevent, sizeof(*dataevent));
     bpf_map_delete_elem(&buffer_packets, &id);
     return 0;
