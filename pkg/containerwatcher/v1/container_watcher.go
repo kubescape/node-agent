@@ -393,6 +393,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		metrics.ReportEvent(utils.HTTPEventType)
 		applicationProfileManager.ReportHTTPEvent(k8sContainerID, &event)
+		ruleManager.ReportEvent(utils.HTTPEventType, &event)
 
 		reportEventToThirdPartyTracers(utils.HTTPEventType, &event, thirdPartyEventReceivers)
 	})
