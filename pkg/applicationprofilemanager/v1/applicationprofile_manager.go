@@ -237,7 +237,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	}
 
 	if watchedContainer.InstanceID == nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - instanceID is nil",
+		logger.L().Debug("ApplicationProfileManager - instanceID is nil",
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -247,7 +247,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	// leave container name empty this way the "slug" will represent a workload
 	slug, err := watchedContainer.InstanceID.GetSlug(true)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get slug", helpers.Error(err),
+		logger.L().Ctx(ctx).Warning("ApplicationProfileManager - failed to get slug", helpers.Error(err),
 			helpers.String("slug", slug),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
@@ -382,7 +382,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 					for _, info := range containerInfos {
 						seccompProfile, err := am.seccompManager.GetSeccompProfile(info.Name, watchedContainer.SeccompProfilePath)
 						if err != nil {
-							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
+							logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
 								helpers.String("slug", slug),
 								helpers.Int("container index", watchedContainer.ContainerIndex),
 								helpers.String("container ID", watchedContainer.ContainerID),
@@ -413,7 +413,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				// try to create object
 				if err := am.storageClient.CreateApplicationProfile(newObject, namespace); err != nil {
 					gotErr = err
-					logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to create application profile", helpers.Error(err),
+					logger.L().Ctx(ctx).Warning("ApplicationProfileManager - failed to create application profile", helpers.Error(err),
 						helpers.String("slug", slug),
 						helpers.Int("container index", watchedContainer.ContainerIndex),
 						helpers.String("container ID", watchedContainer.ContainerID),
@@ -429,7 +429,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				existingObject, err := am.storageClient.GetApplicationProfile(namespace, slug)
 				if err != nil {
 					gotErr = err
-					logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get existing application profile", helpers.Error(err),
+					logger.L().Ctx(ctx).Warning("ApplicationProfileManager - failed to get existing application profile", helpers.Error(err),
 						helpers.String("slug", slug),
 						helpers.Int("container index", watchedContainer.ContainerIndex),
 						helpers.String("container ID", watchedContainer.ContainerID),
@@ -443,13 +443,12 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						info := containerNames[watchedContainer.ContainerIndex]
 						seccompProfile, err := am.seccompManager.GetSeccompProfile(info.Name, watchedContainer.SeccompProfilePath)
 						if err != nil {
-							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
+							logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
 								helpers.String("slug", slug),
 								helpers.Int("container index", watchedContainer.ContainerIndex),
 								helpers.String("container ID", watchedContainer.ContainerID),
 								helpers.String("k8s workload", watchedContainer.K8sContainerID))
 						}
-						logger.L().Debug("ApplicationProfileManager - got seccomp profile", helpers.Interface("profile", seccompProfile))
 						existingContainer = &v1beta1.ApplicationProfileContainer{
 							Name:           info.Name,
 							Endpoints:      make([]v1beta1.HTTPEndpoint, 0),
@@ -488,7 +487,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						info := containerNames[i]
 						seccompProfile, err := am.seccompManager.GetSeccompProfile(info.Name, watchedContainer.SeccompProfilePath)
 						if err != nil {
-							logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
+							logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
 								helpers.String("slug", slug),
 								helpers.Int("container index", watchedContainer.ContainerIndex),
 								helpers.String("container ID", watchedContainer.ContainerID),
@@ -535,7 +534,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 
 					if err := am.storageClient.PatchApplicationProfile(slug, namespace, replaceOperations, watchedContainer.SyncChannel); err != nil {
 						gotErr = err
-						logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to patch application profile", helpers.Error(err),
+						logger.L().Ctx(ctx).Warning("ApplicationProfileManager - failed to patch application profile", helpers.Error(err),
 							helpers.String("slug", slug),
 							helpers.Int("container index", watchedContainer.ContainerIndex),
 							helpers.String("container ID", watchedContainer.ContainerID),
@@ -641,14 +640,14 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 	if err := backoff.Retry(func() error {
 		return am.ensureInstanceID(container, watchedContainer)
 	}, backoff.NewExponentialBackOff()); err != nil {
-		logger.L().Ctx(ctx).Error("ApplicationProfileManager - failed to ensure instanceID", helpers.Error(err),
+		logger.L().Debug("ApplicationProfileManager - failed to ensure instanceID", helpers.Error(err),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
 
 	if err := am.monitorContainer(ctx, container, watchedContainer); err != nil {
-		logger.L().Info("ApplicationProfileManager - stop monitor on container", helpers.String("reason", err.Error()),
+		logger.L().Debug("ApplicationProfileManager - stop monitor on container", helpers.String("reason", err.Error()),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))

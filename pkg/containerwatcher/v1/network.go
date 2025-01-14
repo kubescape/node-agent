@@ -51,7 +51,7 @@ func (ch *IGContainerWatcher) startNetworkTracing() error {
 	if ch.socketEnricher != nil {
 		tracerNetwork.SetSocketEnricherMap(ch.socketEnricher.SocketsMap())
 	} else {
-		logger.L().Error("socket enricher is nil")
+		logger.L().Error("IGContainerWatcher - socket enricher is nil")
 	}
 
 	tracerNetwork.SetEventHandler(ch.networkEventCallback)

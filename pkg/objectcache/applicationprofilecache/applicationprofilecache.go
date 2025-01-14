@@ -82,7 +82,7 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 	// Get the full user managed profile from the storage
 	userManagedProfile, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
 	if err != nil {
-		logger.L().Error("failed to get full application profile", helpers.Error(err))
+		logger.L().Warning("ApplicationProfileCacheImpl - failed to get full application profile", helpers.Error(err))
 		return
 	}
 
@@ -95,7 +95,7 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 		// Fetch fresh base profile from cluster
 		freshBaseProfile, err := ap.getApplicationProfile(appProfile.GetNamespace(), baseProfileName)
 		if err != nil {
-			logger.L().Error("failed to get fresh base profile for merging",
+			logger.L().Warning("ApplicationProfileCacheImpl - failed to get fresh base profile for merging",
 				helpers.String("name", baseProfileName),
 				helpers.String("namespace", appProfile.GetNamespace()),
 				helpers.Error(err))
@@ -108,7 +108,7 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 		// Clean up the user-managed profile after successful merge
 		ap.userManagedProfiles.Delete(baseProfileUniqueName)
 
-		logger.L().Debug("merged user-managed profile with fresh base profile",
+		logger.L().Debug("ApplicationProfileCacheImpl - merged user-managed profile with fresh base profile",
 			helpers.String("name", baseProfileName),
 			helpers.String("namespace", appProfile.GetNamespace()))
 	}
@@ -210,7 +210,7 @@ func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 
 	slug, err := getSlug(pod)
 	if err != nil {
-		logger.L().Error("ApplicationProfileCacheImpl: failed to get slug", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod", pod.GetName()), helpers.Error(err))
+		logger.L().Warning("ApplicationProfileCacheImpl - failed to get slug", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod", pod.GetName()), helpers.Error(err))
 		return
 	}
 
@@ -247,7 +247,7 @@ func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 			// get the application profile
 			appProfile, err := ap.getApplicationProfile(pod.GetNamespace(), slug)
 			if err != nil {
-				logger.L().Error("failed to get application profile", helpers.Error(err))
+				logger.L().Warning("ApplicationProfileCacheImpl - failed to get application profile", helpers.Error(err))
 				continue
 			}
 
@@ -280,7 +280,7 @@ func (ap *ApplicationProfileCacheImpl) removeContainer(containerID string) {
 			ap.slugToContainers.Delete(uniqueSlug)
 			ap.allProfiles.Remove(uniqueSlug)
 			ap.slugToAppProfile.Delete(uniqueSlug)
-			logger.L().Debug("deleted pod from application profile cache", helpers.String("containerID", containerID), helpers.String("uniqueSlug", uniqueSlug))
+			logger.L().Debug("ApplicationProfileCacheImpl - deleted pod from application profile cache", helpers.String("containerID", containerID), helpers.String("uniqueSlug", uniqueSlug))
 		}
 	}
 }
@@ -290,7 +290,7 @@ func (ap *ApplicationProfileCacheImpl) removeContainer(containerID string) {
 func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1beta1.ApplicationProfile, apName string) {
 	fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
 	if err != nil {
-		logger.L().Error("failed to get full application profile", helpers.Error(err))
+		logger.L().Warning("ApplicationProfileCacheImpl - failed to get full application profile", helpers.Error(err))
 		return
 	}
 
@@ -300,14 +300,14 @@ func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1b
 		fullAP = ap.performMerge(fullAP, userManagedProfile)
 		// Clean up the user-managed profile after successful merge
 		ap.userManagedProfiles.Delete(apName)
-		logger.L().Debug("merged pending user-managed profile", helpers.String("name", apName))
+		logger.L().Debug("ApplicationProfileCacheImpl - merged pending user-managed profile", helpers.String("name", apName))
 	}
 
 	ap.slugToAppProfile.Set(apName, fullAP)
 	for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
 		ap.containerToSlug.Set(i, apName)
 	}
-	logger.L().Debug("added pod to application profile cache", helpers.String("name", apName))
+	logger.L().Debug("ApplicationProfileCacheImpl - added pod to application profile cache", helpers.String("name", apName))
 }
 
 func (ap *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedProfile *v1beta1.ApplicationProfile) *v1beta1.ApplicationProfile {
@@ -324,7 +324,7 @@ func (ap *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedPr
 func (ap *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.ApplicationProfileContainer) []v1beta1.ApplicationProfileContainer {
 	if len(userManagedContainers) != len(normalContainers) {
 		// If the number of containers don't match, we can't merge
-		logger.L().Error("failed to merge user-managed profile with base profile",
+		logger.L().Warning("ApplicationProfileCacheImpl - failed to merge user-managed profile with base profile",
 			helpers.Int("normalContainers len", len(normalContainers)),
 			helpers.Int("userManagedContainers len", len(userManagedContainers)),
 			helpers.String("reason", "number of containers don't match"))
@@ -369,7 +369,7 @@ func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj runtime.Obje
 		baseProfileUniqueName := objectcache.UniqueName(appProfile.GetNamespace(), baseProfileName)
 		ap.userManagedProfiles.Delete(baseProfileUniqueName)
 
-		logger.L().Debug("deleted user-managed profile from cache",
+		logger.L().Debug("ApplicationProfileCacheImpl - deleted user-managed profile from cache",
 			helpers.String("profileName", appProfile.GetName()),
 			helpers.String("baseProfile", baseProfileName))
 	} else {
@@ -379,7 +379,7 @@ func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj runtime.Obje
 		ap.allProfiles.Remove(apName)
 
 		// Log the deletion of normal profile
-		logger.L().Debug("deleted application profile from cache",
+		logger.L().Debug("ApplicationProfileCacheImpl - deleted application profile from cache",
 			helpers.String("uniqueSlug", apName))
 	}
 
@@ -434,7 +434,7 @@ func (ap *ApplicationProfileCacheImpl) cleanupOrphanedUserManagedProfiles() {
 				mergedProfile := ap.performMerge(baseProfile, value)
 				ap.slugToAppProfile.Set(key, mergedProfile)
 				ap.userManagedProfiles.Delete(key)
-				logger.L().Debug("cleaned up orphaned user-managed profile", helpers.String("name", key))
+				logger.L().Debug("ApplicationProfileCacheImpl - cleaned up orphaned user-managed profile", helpers.String("name", key))
 			}
 		}
 		return true

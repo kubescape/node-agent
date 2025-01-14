@@ -94,7 +94,7 @@ func main() {
 	if os.Getenv("SKIP_KERNEL_VERSION_CHECK") == "" {
 		err = validator.CheckPrerequisites()
 		if err != nil {
-			logger.L().Ctx(ctx).Error("error during validation", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("error during kernel validation", helpers.Error(err))
 
 			if strings.Contains(err.Error(), utils.ErrKernelVersion) {
 				os.Exit(utils.ExitCodeIncompatibleKernel)
@@ -105,14 +105,14 @@ func main() {
 	}
 
 	if _, present := os.LookupEnv("ENABLE_PROFILER"); present {
-		logger.L().Info("Starting profiler on port 6060")
+		logger.L().Info("starting profiler on port 6060")
 		go func() {
 			_ = http.ListenAndServe("localhost:6060", nil)
 		}()
 	}
 
 	if pyroscopeServerSvc, present := os.LookupEnv("PYROSCOPE_SERVER_SVC"); present {
-		logger.L().Info("Starting pyroscope profiler")
+		logger.L().Info("starting pyroscope profiler")
 
 		if os.Getenv("APPLICATION_NAME") == "" {
 			os.Setenv("APPLICATION_NAME", "node-agent")
@@ -301,7 +301,7 @@ func main() {
 			Namespace: igK8sClient.RuntimeConfig.Extra.Namespace,
 		},
 	}
-	logger.L().Info("Detected container runtime", helpers.String("containerRuntime", containerRuntime.Name.String()))
+	logger.L().Info("detected container runtime", helpers.String("containerRuntime", containerRuntime.Name.String()))
 
 	// Create the SBOM manager
 	var sbomManager sbommanager.SbomManagerClient

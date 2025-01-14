@@ -20,7 +20,7 @@ func NewDnsCache(dnsResolver dnsmanager.DNSResolver) *DnsCacheImpl {
 
 func (d *DnsCacheImpl) ResolveIpToDomain(ip string) string {
 	if d.dnsResolver == nil {
-		logger.L().Debug("DNS resolver is not set")
+		logger.L().Debug("DnsCacheImpl - resolver is not set")
 		return ""
 	}
 

@@ -123,7 +123,7 @@ func (e *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	defer cancel()
 
 	if err := e.sendRuleAlertWithContext(ctx, failedRule); err != nil {
-		logger.L().Error("failed to send rule alert", helpers.Error(err))
+		logger.L().Warning("HTTPExporter.SendRuleAlert - failed to send rule alert", helpers.Error(err))
 	}
 }
 
@@ -133,7 +133,7 @@ func (e *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResu
 	defer cancel()
 
 	if err := e.sendMalwareAlertWithContext(ctx, malwareResult); err != nil {
-		logger.L().Error("failed to send malware alert", helpers.Error(err))
+		logger.L().Warning("HTTPExporter.SendRuleAlert - failed to send malware alert", helpers.Error(err))
 	}
 }
 
@@ -246,7 +246,7 @@ func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload HTTPAlertsLi
 	}
 
 	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		logger.L().Error("failed to drain response body", helpers.Error(err))
+		logger.L().Debug("HTTPExporter.sendHTTPRequest - failed to drain response body", helpers.Error(err))
 	}
 
 	return nil
@@ -295,7 +295,7 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		},
 	}
 
-	logger.L().Error("Alert limit reached",
+	logger.L().Warning("Alert limit reached",
 		helpers.Int("alerts", e.alertMetrics.count),
 		helpers.String("since", e.alertMetrics.startTime.Format(time.RFC3339)))
 

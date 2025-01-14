@@ -56,14 +56,15 @@ func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName
 	}
 	if exportersConfig.HTTPExporterConfig != nil {
 		httpExporter, err := NewHTTPExporter(*exportersConfig.HTTPExporterConfig, clusterName, nodeName, cloudMetadata)
-		if err != nil {
-			logger.L().Error("failed to initialize http exporter", helpers.Error(err))
+		if err == nil {
+			exporters = append(exporters, httpExporter)
+		} else {
+			logger.L().Warning("InitExporters - failed to initialize http exporter", helpers.Error(err))
 		}
-		exporters = append(exporters, httpExporter)
 	}
 
 	if len(exporters) == 0 {
-		panic("no exporters were initialized")
+		logger.L().Fatal("InitExporters - no exporters were initialized")
 	}
 	logger.L().Info("exporters initialized")
 

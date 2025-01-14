@@ -539,7 +539,7 @@ func (ch *IGContainerWatcher) Stop() {
 		ch.stopContainerCollection()
 		err := ch.stopTracers()
 		if err != nil {
-			logger.L().Ctx(ch.ctx).Warning("error stopping app behavior tracing", helpers.Error(err))
+			logger.L().Ctx(ch.ctx).Error("stopping app behavior tracing", helpers.Error(err))
 		}
 		ch.running = false
 	}

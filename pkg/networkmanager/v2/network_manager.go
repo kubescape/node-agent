@@ -229,7 +229,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 	}
 
 	if watchedContainer.InstanceID == nil {
-		logger.L().Ctx(ctx).Error("NetworkManager - instanceID is nil",
+		logger.L().Debug("NetworkManager - instanceID is nil",
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -239,7 +239,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 	// leave container name empty this way the "slug" will represent a workload
 	slug, err := watchedContainer.InstanceID.GetSlug(true)
 	if err != nil {
-		logger.L().Ctx(ctx).Error("NetworkManager - failed to get slug", helpers.Error(err),
+		logger.L().Ctx(ctx).Warning("NetworkManager - failed to get slug", helpers.Error(err),
 			helpers.String("slug", slug),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
@@ -324,7 +324,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 				// try to create object
 				if err := nm.storageClient.CreateNetworkNeighborhood(newObject, namespace); err != nil {
 					gotErr = err
-					logger.L().Ctx(ctx).Error("NetworkManager - failed to create network neighborhood", helpers.Error(err),
+					logger.L().Ctx(ctx).Warning("NetworkManager - failed to create network neighborhood", helpers.Error(err),
 						helpers.String("slug", slug),
 						helpers.Int("container index", watchedContainer.ContainerIndex),
 						helpers.String("container ID", watchedContainer.ContainerID),
@@ -340,7 +340,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 				existingObject, err := nm.storageClient.GetNetworkNeighborhood(namespace, slug)
 				if err != nil {
 					gotErr = err
-					logger.L().Ctx(ctx).Error("NetworkManager - failed to get existing network neighborhood", helpers.Error(err),
+					logger.L().Ctx(ctx).Warning("NetworkManager - failed to get existing network neighborhood", helpers.Error(err),
 						helpers.String("slug", slug),
 						helpers.Int("container index", watchedContainer.ContainerIndex),
 						helpers.String("container ID", watchedContainer.ContainerID),
@@ -396,7 +396,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 
 					if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, replaceOperations, watchedContainer.SyncChannel); err != nil {
 						gotErr = err
-						logger.L().Ctx(ctx).Error("NetworkManager - failed to patch network neighborhood", helpers.Error(err),
+						logger.L().Ctx(ctx).Warning("NetworkManager - failed to patch network neighborhood", helpers.Error(err),
 							helpers.String("slug", slug),
 							helpers.Int("container index", watchedContainer.ContainerIndex),
 							helpers.String("container ID", watchedContainer.ContainerID),
@@ -449,14 +449,14 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 	if err := backoff.Retry(func() error {
 		return nm.ensureInstanceID(container, watchedContainer)
 	}, backoff.NewExponentialBackOff()); err != nil {
-		logger.L().Ctx(ctx).Error("NetworkManager - failed to ensure instanceID", helpers.Error(err),
+		logger.L().Debug("NetworkManager - failed to ensure instanceID", helpers.Error(err),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
 
 	if err := nm.monitorContainer(ctx, container, watchedContainer); err != nil {
-		logger.L().Info("NetworkManager - stop monitor on container", helpers.String("reason", err.Error()),
+		logger.L().Debug("NetworkManager - stop monitor on container", helpers.String("reason", err.Error()),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -490,7 +490,7 @@ func (nm *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		if nm.watchedContainerChannels.Has(notif.Container.Runtime.ContainerID) {
-			logger.L().Debug("container already exist in memory",
+			logger.L().Debug("NetworkManager - container already exist in memory",
 				helpers.String("container ID", notif.Container.Runtime.ContainerID),
 				helpers.String("k8s workload", k8sContainerID))
 			return
@@ -567,7 +567,7 @@ func (nm *NetworkManager) createNetworkNeighbor(networkEvent networkmanager.Netw
 		// for service, we need to retrieve it and use its selector
 		svc, err := nm.k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
 		if err != nil {
-			logger.L().Warning("failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
+			logger.L().Warning("NetworkManager - failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
 			return nil
 		}
 

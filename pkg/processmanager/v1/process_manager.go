@@ -125,7 +125,7 @@ func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent
 			p.containerIdToShimPid.Set(containerID, shimPID)
 			p.addProcess(process)
 		} else {
-			logger.L().Warning("Failed to get container process info",
+			logger.L().Warning("ProcessManager.ContainerCallback - failed to get container process info",
 				helpers.String("containerID", containerID),
 				helpers.Error(err))
 		}
@@ -354,7 +354,7 @@ func (p *ProcessManager) cleanup() {
 	})
 
 	for pid := range deadPids {
-		logger.L().Debug("Removing dead process", helpers.Int("pid", int(pid)))
+		logger.L().Debug("ProcessManager - removing dead process", helpers.Int("pid", int(pid)))
 		p.removeProcess(pid)
 	}
 }

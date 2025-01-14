@@ -116,7 +116,7 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *events.ExecEvent, ap *v1beta1.ApplicationProfile) *GenericRuleFailure {
 	whitelistedExecs, err := getContainerFromApplicationProfile(ap, event.GetContainer())
 	if err != nil {
-		logger.L().Error("Failed to get container from application profile", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
+		logger.L().Error("R0007KubernetesClientExecuted.handleExecEvent - failed to get container from application profile", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 		return nil
 	}
 

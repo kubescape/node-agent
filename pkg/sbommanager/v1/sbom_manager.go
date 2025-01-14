@@ -362,7 +362,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 	sz := size.Of(wipSbom)
 	wipSbom.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", sz)
 	if sz > s.cfg.MaxSBOMSize {
-		logger.L().Ctx(s.ctx).Warning("SbomManager - SBOM exceeds size limit",
+		logger.L().Debug("SbomManager - SBOM exceeds size limit",
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),

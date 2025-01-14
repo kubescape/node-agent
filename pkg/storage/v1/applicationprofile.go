@@ -36,7 +36,7 @@ func (sc Storage) CreateApplicationProfile(profile *v1beta1.ApplicationProfile, 
 }
 
 func (sc Storage) PatchApplicationProfile(name, namespace string, operations []utils.PatchOperation, channel chan error) error {
-	logger.L().Debug("patching application profile", loggerhelpers.String("name", name), loggerhelpers.String("namespace", namespace), loggerhelpers.Int("operations", len(operations)))
+	logger.L().Debug("Storage - patching application profile", loggerhelpers.String("name", name), loggerhelpers.String("namespace", namespace), loggerhelpers.Int("operations", len(operations)))
 	// split operations into max JSON operations batches
 	for _, chunk := range utils.ChunkBy(operations, sc.maxJsonPatchOperations) {
 		if err := sc.patchApplicationProfile(name, namespace, chunk, channel); err != nil {

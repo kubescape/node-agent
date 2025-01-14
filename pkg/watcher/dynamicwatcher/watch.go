@@ -76,7 +76,7 @@ func (wh *WatchHandler) Start(ctx context.Context) {
 	for k, v := range wh.resources {
 		go func(r string, w watcher.WatchResource) {
 			if err := wh.watch(ctx, w, wh.eventQueues[r]); err != nil {
-				logger.L().Fatal("WatchHandler - watch resource", helpers.Error(err))
+				logger.L().Fatal("WatchHandler - failed to watch resource", helpers.Error(err), helpers.String("resource", r))
 			}
 		}(k, v)
 	}
@@ -95,7 +95,7 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 			opt.ResourceVersion, err = wh.getExistingStorageObjects(ctx, res, opt)
 			return err
 		}, newBackOff(), func(err error, d time.Duration) {
-			logger.L().Ctx(ctx).Warning("WatchHandler - get existing storage objects", helpers.Error(err),
+			logger.L().Debug("WatchHandler - get existing storage objects", helpers.Error(err),
 				helpers.String("retry in", d.String()))
 		}); err != nil {
 			return fmt.Errorf("giving up get existing storage objects: %w", err)
@@ -201,7 +201,7 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 				helpers.String("retry in", d.String()))
 		}
 	}); err != nil {
-		logger.L().Ctx(ctx).Error("WatchHandler - giving up watch", helpers.Error(err),
+		logger.L().Debug("WatchHandler - giving up watch", helpers.Error(err),
 			helpers.String("resource", res.String()))
 		if exitFatal {
 			os.Exit(1)

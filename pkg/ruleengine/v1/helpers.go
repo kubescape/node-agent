@@ -172,11 +172,11 @@ func isAllowed(event *eventtypes.Event, objCache objectcache.ObjectCache, proces
 
 	if policy, ok := appProfile.PolicyByRuleId[ruleId]; ok {
 		if policy.AllowedContainer || slices.Contains(policy.AllowedProcesses, process) {
-			logger.L().Debug("process is allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
+			logger.L().Debug("isAllowed - process is allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
 			return true, nil
 		}
 	}
 
-	logger.L().Debug("process is not allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
+	logger.L().Debug("isAllowed - process is not allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
 	return false, nil
 }

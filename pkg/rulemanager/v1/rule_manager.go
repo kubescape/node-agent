@@ -101,7 +101,7 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 		pod = p
 		return nil
 	}, backoff.NewExponentialBackOff()); err != nil {
-		logger.L().Ctx(ctx).Error("RuleManager - failed to get pod", helpers.Error(err),
+		logger.L().Debug("RuleManager - failed to get pod", helpers.Error(err),
 			helpers.String("namespace", container.K8s.Namespace),
 			helpers.String("name", container.K8s.PodName))
 		// failed to get pod
@@ -118,7 +118,7 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 			}
 
 			if watchedContainer.NsMntId == 0 {
-				logger.L().Error("RuleManager - mount namespace ID is not set", helpers.String("container ID", watchedContainer.ContainerID))
+				logger.L().Debug("RuleManager - mount namespace ID is not set", helpers.String("container ID", watchedContainer.ContainerID))
 			}
 
 			var syscalls []string
@@ -220,7 +220,7 @@ func (rm *RuleManager) startRuleManager(ctx context.Context, container *containe
 	if err := backoff.Retry(func() error {
 		return rm.ensureInstanceID(container, watchedContainer)
 	}, backoff.NewExponentialBackOff()); err != nil {
-		logger.L().Ctx(ctx).Error("RuleManager - failed to ensure instanceID", helpers.Error(err),
+		logger.L().Debug("RuleManager - failed to ensure instanceID", helpers.Error(err),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
@@ -257,7 +257,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		if rm.watchedContainerChannels.Has(notif.Container.Runtime.ContainerID) {
-			logger.L().Debug("container already exist in memory",
+			logger.L().Debug("RuleManager - container already exist in memory",
 				helpers.String("container ID", notif.Container.Runtime.ContainerID),
 				helpers.String("k8s workload", k8sContainerID))
 			return
@@ -324,7 +324,7 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 
 func (rm *RuleManager) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Error("RuleManager - failed to get namespace and pod name from custom event")
+		logger.L().Warning("RuleManager - failed to get namespace and pod name from custom event")
 		return
 	}
 

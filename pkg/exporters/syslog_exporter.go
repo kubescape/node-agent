@@ -36,7 +36,7 @@ func InitSyslogExporter(syslogHost string) *SyslogExporter {
 
 	writer, err := syslog.Dial(os.Getenv("SYSLOG_PROTOCOL"), syslogHost, syslog.LOG_ERR, "kubecop")
 	if err != nil {
-		logger.L().Error("failed to initialize syslog exporter", helpers.Error(err))
+		logger.L().Fatal("InitSyslogExporter - failed to initialize syslog exporter", helpers.Error(err))
 		return nil
 	}
 
@@ -109,7 +109,7 @@ func (se *SyslogExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 
 	_, err := message.WriteTo(se.writer)
 	if err != nil {
-		logger.L().Error("failed to send alert to syslog", helpers.Error(err))
+		logger.L().Warning("SyslogExporter - failed to send alert to syslog", helpers.Error(err))
 	}
 }
 
@@ -181,6 +181,6 @@ func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareR
 
 	_, err := message.WriteTo(se.writer)
 	if err != nil {
-		logger.L().Error("failed to send alert to syslog", helpers.Error(err))
+		logger.L().Warning("SyslogExporter - failed to send alert to syslog", helpers.Error(err))
 	}
 }
