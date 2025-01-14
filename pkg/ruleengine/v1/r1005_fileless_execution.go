@@ -66,12 +66,23 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *events.ExecEven
 	execFullPath := getExecFullPathFromEvent(execEvent)
 	execPathDir := filepath.Dir(execFullPath)
 
-	// /proc/self/fd/<n> is a classic way to hide malicious execs
-	// (see ezuri packer for example)
-	// Here it would be even more interesting to check if the fd
-	// is memory mapped file
+	// Check for any /proc/*/fd/* or /proc/self/fd/* patterns
+	// This covers both /proc/self/fd and /proc/<pid>/fd paths
+	isProcFd := func(path string) bool {
+		if strings.HasPrefix(path, "/proc/self/fd") {
+			return true
+		}
+		// Match pattern like /proc/1/fd/7
+		parts := strings.Split(path, "/")
+		if len(parts) >= 4 &&
+			parts[1] == "proc" &&
+			parts[3] == "fd" {
+			return true
+		}
+		return false
+	}
 
-	if strings.HasPrefix(execPathDir, "/proc/self/fd") || strings.HasPrefix(execEvent.Cwd, "/proc/self/fd") || strings.HasPrefix(execEvent.ExePath, "/proc/self/fd") {
+	if isProcFd(execPathDir) || isProcFd(execEvent.Cwd) || isProcFd(execEvent.ExePath) {
 		upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
@@ -100,7 +111,7 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *events.ExecEven
 			},
 			TriggerEvent: execEvent.Event.Event,
 			RuleAlert: apitypes.RuleAlert{
-				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source \"%s\"", execPathDir, "/proc/self/fd"),
+				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source \"/proc/*/fd\"", execPathDir),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName:   execEvent.GetPod(),
