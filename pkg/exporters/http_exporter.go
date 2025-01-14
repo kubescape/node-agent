@@ -164,11 +164,12 @@ func (e *HTTPExporter) createRuleAlert(failedRule ruleengine.RuleFailure) apityp
 	return apitypes.RuntimeAlert{
 		Message:                failedRule.GetRuleAlert().RuleDescription,
 		HostName:               e.host,
-		AlertType:              apitypes.AlertTypeRule,
+		AlertType:              failedRule.GetAlertType(),
 		BaseRuntimeAlert:       failedRule.GetBaseRuntimeAlert(),
 		RuntimeAlertK8sDetails: k8sDetails,
 		RuleAlert:              failedRule.GetRuleAlert(),
 		RuleID:                 failedRule.GetRuleId(),
+		HttpRuleAlert:          failedRule.GetHttpRuleAlert(),
 	}
 }
 

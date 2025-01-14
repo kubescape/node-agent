@@ -88,6 +88,8 @@ type RuleSpec interface {
 type RuleFailure interface {
 	// Get Base Runtime Alert
 	GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert
+	// Get Alert Type
+	GetAlertType() apitypes.AlertType
 	// Get Runtime Process Details
 	GetRuntimeProcessDetails() apitypes.ProcessTree
 	// Get Trigger Event
@@ -98,10 +100,12 @@ type RuleFailure interface {
 	GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails
 	// Get Rule ID
 	GetRuleId() string
-	// Get Extra
-	GetExtra() interface{}
 	// Get Cloud Services
 	GetCloudServices() []string
+	// Get Http Details
+	GetHttpRuleAlert() apitypes.HttpRuleAlert
+	// Get Extra
+	GetExtra() interface{}
 
 	// Set Workload Details
 	SetWorkloadDetails(workloadDetails string)

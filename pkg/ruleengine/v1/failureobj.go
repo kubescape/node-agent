@@ -12,13 +12,15 @@ var _ ruleengine.RuleFailure = (*GenericRuleFailure)(nil)
 
 type GenericRuleFailure struct {
 	BaseRuntimeAlert       apitypes.BaseRuntimeAlert
+	AlertType              apitypes.AlertType
 	RuntimeProcessDetails  apitypes.ProcessTree
 	TriggerEvent           igtypes.Event
 	RuleAlert              apitypes.RuleAlert
 	RuntimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails
 	RuleID                 string
-	Extra                  interface{}
 	CloudServices          []string
+	HttpRuleAlert          apitypes.HttpRuleAlert
+	Extra                  interface{}
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {
@@ -51,6 +53,14 @@ func (rule *GenericRuleFailure) GetExtra() interface{} {
 
 func (rule *GenericRuleFailure) GetCloudServices() []string {
 	return rule.CloudServices
+}
+
+func (rule *GenericRuleFailure) GetHttpRuleAlert() apitypes.HttpRuleAlert {
+	return rule.HttpRuleAlert
+}
+
+func (rule *GenericRuleFailure) GetAlertType() apitypes.AlertType {
+	return rule.AlertType
 }
 
 func (rule *GenericRuleFailure) SetCloudServices(cloudServices []string) {
