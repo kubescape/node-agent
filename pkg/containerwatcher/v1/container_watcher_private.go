@@ -194,7 +194,7 @@ func (ch *IGContainerWatcher) stopContainerCollection() {
 }
 
 func (ch *IGContainerWatcher) startTracers() error {
-	if ch.cfg.EnableApplicationProfile {
+	if ch.cfg.EnableRuntimeDetection || ch.cfg.EnableSeccomp {
 		// Start syscall tracer
 		if err := ch.startSystemcallTracing(); err != nil {
 			logger.L().Error("IGContainerWatcher - error starting seccomp tracing", helpers.Error(err))
@@ -217,7 +217,7 @@ func (ch *IGContainerWatcher) startTracers() error {
 		logger.L().Info("started open tracing")
 	}
 
-	if ch.cfg.EnableNetworkTracing {
+	if ch.cfg.EnableNetworkTracing || ch.cfg.EnableRuntimeDetection {
 		if err := ch.startKubernetesResolution(); err != nil {
 			logger.L().Error("IGContainerWatcher - error starting kubernetes resolution", helpers.Error(err))
 			return err
