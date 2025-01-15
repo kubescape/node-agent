@@ -79,7 +79,7 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 			}
 		}
 
-		nnContainer, err := getContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
+		nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
 		if err != nil {
 			return nil
 		}

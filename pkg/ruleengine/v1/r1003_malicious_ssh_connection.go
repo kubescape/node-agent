@@ -144,7 +144,7 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 		return nil
 	}
 
-	nnContainer, err := getContainerFromNetworkNeighborhood(nn, sshEvent.GetContainer())
+	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, sshEvent.GetContainer())
 	if err != nil {
 		return nil
 	}

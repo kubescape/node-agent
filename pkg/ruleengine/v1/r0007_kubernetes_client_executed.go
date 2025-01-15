@@ -63,7 +63,7 @@ func (rule *R0007KubernetesClientExecuted) DeleteRule() {
 }
 
 func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetworktype.Event, nn *v1beta1.NetworkNeighborhood, k8sObjCache objectcache.K8sObjectCache) *GenericRuleFailure {
-	nnContainer, err := getContainerFromNetworkNeighborhood(nn, event.GetContainer())
+	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, event.GetContainer())
 	if err != nil {
 		return nil
 	}
@@ -114,13 +114,13 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 }
 
 func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *events.ExecEvent, ap *v1beta1.ApplicationProfile) *GenericRuleFailure {
-	whitelistedExecs, err := getContainerFromApplicationProfile(ap, event.GetContainer())
+	whitelistedExecs, err := GetContainerFromApplicationProfile(ap, event.GetContainer())
 	if err != nil {
 		logger.L().Error("R0007KubernetesClientExecuted.handleExecEvent - failed to get container from application profile", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 		return nil
 	}
 
-	execPath := getExecPathFromEvent(event)
+	execPath := GetExecPathFromEvent(event)
 	for _, whitelistedExec := range whitelistedExecs.Execs {
 		if whitelistedExec.Path == execPath {
 			return nil

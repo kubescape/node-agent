@@ -64,7 +64,7 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 		"/proc/self",
 	}
 
-	execPath := getExecFullPathFromEvent(execEvent)
+	execPath := GetExecFullPathFromEvent(execEvent)
 	execPathDir := filepath.Dir(execPath)
 	for _, maliciousExecPathPrefix := range maliciousExecPathPrefixes {
 		// if the exec path or the current dir is from a malicious source
@@ -92,7 +92,7 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 						Cwd:        execEvent.Cwd,
 						Hardlink:   execEvent.ExePath,
 						Path:       execPath,
-						Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+						Cmdline:    fmt.Sprintf("%s %s", GetExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 					},
 					ContainerID: execEvent.Runtime.ContainerID,
 				},

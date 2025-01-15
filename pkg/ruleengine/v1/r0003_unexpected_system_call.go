@@ -73,7 +73,7 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 		return nil
 	}
 
-	container, err := getContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
+	container, err := GetContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
 	if err != nil {
 		return nil
 	}

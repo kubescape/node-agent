@@ -118,7 +118,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		return nil
 	}
 
-	appProfileOpenList, err := getContainerFromApplicationProfile(ap, openEvent.GetContainer())
+	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
 	if err != nil {
 		return nil
 	}

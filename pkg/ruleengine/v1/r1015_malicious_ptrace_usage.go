@@ -55,7 +55,7 @@ func (rule *R1015MaliciousPtraceUsage) SetParameters(parameters map[string]inter
 		return
 	}
 
-	allowedProcesses, ok := interfaceToStringSlice(allowedProcessesInterface)
+	allowedProcesses, ok := InterfaceToStringSlice(allowedProcessesInterface)
 	if ok {
 		for _, process := range allowedProcesses {
 			rule.allowedProcesses = append(rule.allowedProcesses, fmt.Sprintf("%v", process))

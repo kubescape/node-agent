@@ -73,7 +73,7 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 		return nil
 	}
 
-	appProfileOpenList, err := getContainerFromApplicationProfile(ap, openEvent.GetContainer())
+	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
 	if err != nil {
 		return nil
 	}
