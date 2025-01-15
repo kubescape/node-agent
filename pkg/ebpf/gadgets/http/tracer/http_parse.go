@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"strconv"
@@ -56,7 +57,15 @@ func ParseHTTPRequest(data []byte) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer req.Body.Close()
+
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Body.Close()
+
+	req.Body = ioutil.NopCloser(bytes.NewReader(body))
 
 	return req, nil
 }
