@@ -349,6 +349,6 @@ require (
 
 replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6
 
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/afek854/inspektor-gadget v0.0.0-20250109130112-a3eb34ad8a9b
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/matthyx/inspektor-gadget v0.0.0-20250115200443-aad61982fb5d
 
 replace github.com/mholt/archiver/v3 v3.5.1 => github.com/anchore/archiver/v3 v3.5.2
