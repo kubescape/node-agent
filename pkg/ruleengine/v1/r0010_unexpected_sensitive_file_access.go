@@ -57,7 +57,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) SetParameters(parameters map[str
 		return
 	}
 
-	additionalPaths, ok := interfaceToStringSlice(additionalPathsInterface)
+	additionalPaths, ok := InterfaceToStringSlice(additionalPathsInterface)
 	if ok {
 		for _, path := range additionalPaths {
 			rule.additionalPaths = append(rule.additionalPaths, fmt.Sprintf("%v", path))
@@ -95,7 +95,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 		return nil
 	}
 
-	appProfileOpenList, err := getContainerFromApplicationProfile(ap, openEvent.GetContainer())
+	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
 	if err != nil {
 		return nil
 	}

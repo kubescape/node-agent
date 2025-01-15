@@ -66,7 +66,7 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
-	appProfileCapabilitiesList, err := getContainerFromApplicationProfile(ap, capEvent.GetContainer())
+	appProfileCapabilitiesList, err := GetContainerFromApplicationProfile(ap, capEvent.GetContainer())
 	if err != nil {
 		return nil
 	}

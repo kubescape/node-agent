@@ -31,7 +31,7 @@ var (
 	ProfileNotFound   = errors.New("application profile not found")
 )
 
-func getExecPathFromEvent(event *events.ExecEvent) string {
+func GetExecPathFromEvent(event *events.ExecEvent) string {
 	if len(event.Args) > 0 {
 		if event.Args[0] != "" {
 			return event.Args[0]
@@ -40,8 +40,8 @@ func getExecPathFromEvent(event *events.ExecEvent) string {
 	return event.Comm
 }
 
-func getExecFullPathFromEvent(event *events.ExecEvent) string {
-	execPath := getExecPathFromEvent(event)
+func GetExecFullPathFromEvent(event *events.ExecEvent) string {
+	execPath := GetExecPathFromEvent(event)
 	if strings.HasPrefix(execPath, "./") || strings.HasPrefix(execPath, "../") {
 		execPath = filepath.Join(event.Cwd, execPath)
 	} else if !strings.HasPrefix(execPath, "/") {
@@ -50,7 +50,7 @@ func getExecFullPathFromEvent(event *events.ExecEvent) string {
 	return execPath
 }
 
-func getContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containerName string) (v1beta1.ApplicationProfileContainer, error) {
+func GetContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containerName string) (v1beta1.ApplicationProfileContainer, error) {
 	for i := range ap.Spec.Containers {
 		if ap.Spec.Containers[i].Name == containerName {
 			return ap.Spec.Containers[i], nil
@@ -69,7 +69,7 @@ func getContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containe
 	return v1beta1.ApplicationProfileContainer{}, ContainerNotFound
 }
 
-func getContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, containerName string) (v1beta1.NetworkNeighborhoodContainer, error) {
+func GetContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, containerName string) (v1beta1.NetworkNeighborhoodContainer, error) {
 	for i := range nn.Spec.Containers {
 		if nn.Spec.Containers[i].Name == containerName {
 			return nn.Spec.Containers[i], nil
@@ -88,7 +88,7 @@ func getContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, contai
 	return v1beta1.NetworkNeighborhoodContainer{}, ContainerNotFound
 }
 
-func getContainerMountPaths(namespace, podName, containerName string, k8sObjCache objectcache.K8sObjectCache) ([]string, error) {
+func GetContainerMountPaths(namespace, podName, containerName string, k8sObjCache objectcache.K8sObjectCache) ([]string, error) {
 	podSpec := k8sObjCache.GetPodSpec(namespace, podName)
 	if podSpec == nil {
 		return []string{}, fmt.Errorf("pod spec not available for %s/%s", namespace, podName)
@@ -122,16 +122,16 @@ func getContainerMountPaths(namespace, podName, containerName string, k8sObjCach
 	return mountPaths, nil
 }
 
-func isExecEventInProfile(execEvent *events.ExecEvent, objectCache objectcache.ObjectCache, compareArgs bool) (bool, error) {
+func IsExecEventInProfile(execEvent *events.ExecEvent, objectCache objectcache.ObjectCache, compareArgs bool) (bool, error) {
 	// Check if the exec is whitelisted, if so, return nil
-	execPath := getExecPathFromEvent(execEvent)
+	execPath := GetExecPathFromEvent(execEvent)
 
 	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
 	if ap == nil {
 		return false, ProfileNotFound
 	}
 
-	appProfileExecList, err := getContainerFromApplicationProfile(ap, execEvent.GetContainer())
+	appProfileExecList, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())
 	if err != nil {
 		return false, ContainerNotFound
 	}
@@ -147,7 +147,7 @@ func isExecEventInProfile(execEvent *events.ExecEvent, objectCache objectcache.O
 	return false, nil
 }
 
-func interfaceToStringSlice(val interface{}) ([]string, bool) {
+func InterfaceToStringSlice(val interface{}) ([]string, bool) {
 	sliceOfInterfaces, ok := val.([]interface{})
 	if ok {
 		sliceOfStrings := []string{}
@@ -159,13 +159,13 @@ func interfaceToStringSlice(val interface{}) ([]string, bool) {
 	return nil, false
 }
 
-func isAllowed(event *eventtypes.Event, objCache objectcache.ObjectCache, process string, ruleId string) (bool, error) {
+func IsAllowed(event *eventtypes.Event, objCache objectcache.ObjectCache, process string, ruleId string) (bool, error) {
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(event.Runtime.ContainerID)
 	if ap == nil {
 		return false, errors.New("application profile not found")
 	}
 
-	appProfile, err := getContainerFromApplicationProfile(ap, event.GetContainer())
+	appProfile, err := GetContainerFromApplicationProfile(ap, event.GetContainer())
 	if err != nil {
 		return false, err
 	}

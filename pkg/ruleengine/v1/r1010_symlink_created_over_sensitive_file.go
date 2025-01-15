@@ -57,7 +57,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) SetParameters(parameters map[s
 		return
 	}
 
-	additionalPaths, ok := interfaceToStringSlice(additionalPathsInterface)
+	additionalPaths, ok := InterfaceToStringSlice(additionalPathsInterface)
 	if ok {
 		for _, path := range additionalPaths {
 			rule.additionalPaths = append(rule.additionalPaths, fmt.Sprintf("%v", path))
@@ -85,7 +85,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 
 	symlinkEvent, _ := event.(*tracersymlinktype.Event)
 
-	if allowed, err := isAllowed(&symlinkEvent.Event, objCache, symlinkEvent.Comm, R1010ID); err != nil {
+	if allowed, err := IsAllowed(&symlinkEvent.Event, objCache, symlinkEvent.Comm, R1010ID); err != nil {
 		logger.L().Debug("R1010SymlinkCreatedOverSensitiveFile.ProcessEvent - failed to check if symlink is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 		return nil
 	} else if allowed {

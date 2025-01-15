@@ -67,7 +67,7 @@ func (rule *R0002UnexpectedFileAccess) SetParameters(parameters map[string]inter
 		return
 	}
 
-	ignorePrefixes, ok := interfaceToStringSlice(ignorePrefixesInterface)
+	ignorePrefixes, ok := InterfaceToStringSlice(ignorePrefixesInterface)
 	if ok {
 		for _, prefix := range ignorePrefixes {
 			rule.ignorePrefixes = append(rule.ignorePrefixes, fmt.Sprintf("%v", prefix))
@@ -100,7 +100,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 	}
 
 	if rule.shouldIgnoreMounts {
-		mounts, err := getContainerMountPaths(openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer(), objCache.K8sObjectCache())
+		mounts, err := GetContainerMountPaths(openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer(), objCache.K8sObjectCache())
 		if err != nil {
 			return nil
 		}
@@ -116,7 +116,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 		return nil
 	}
 
-	appProfileOpenList, err := getContainerFromApplicationProfile(ap, openEvent.GetContainer())
+	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
 	if err != nil {
 		return nil
 	}
