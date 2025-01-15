@@ -194,7 +194,7 @@ func (ch *IGContainerWatcher) stopContainerCollection() {
 }
 
 func (ch *IGContainerWatcher) startTracers() error {
-	if ch.cfg.EnableApplicationProfile {
+	if ch.cfg.EnableRuntimeDetection || ch.cfg.EnableSeccomp {
 		// Start syscall tracer
 		if err := ch.startSystemcallTracing(); err != nil {
 			logger.L().Error("IGContainerWatcher - error starting seccomp tracing", helpers.Error(err))
