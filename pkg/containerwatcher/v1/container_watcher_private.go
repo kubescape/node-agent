@@ -111,11 +111,14 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		// Enrich events with Linux namespaces information, it is needed for per container filtering
 		containercollection.WithLinuxNamespaceEnrichment(),
 
+		// Get containers created with container runtimes
+		containercollection.WithContainerRuntimeEnrichment(ch.runtime),
+
+		// Get containers created with ebpf (works also if hostPid=false)
+		containercollection.WithContainerFanotifyEbpf(),
+
 		// WithTracerCollection enables the interation between the TracerCollection and ContainerCollection packages.
 		containercollection.WithTracerCollection(ch.tracerCollection),
-
-		// WithPodInformer uses a pod informer to get both initial containers and the stream of container events.
-		containercollection.WithPodInformer(ch.cfg.NodeName),
 	}
 
 	// Initialize the container collection
