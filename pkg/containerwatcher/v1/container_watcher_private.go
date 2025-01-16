@@ -116,9 +116,6 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 		// WithPodInformer uses a pod informer to get both initial containers and the stream of container events.
 		containercollection.WithPodInformer(ch.cfg.NodeName),
-
-		// Enrich those containers with data from the Kubernetes API
-		containercollection.WithKubernetesEnrichment(ch.cfg.NodeName, ch.k8sClient.K8SConfig),
 	}
 
 	// Initialize the container collection
