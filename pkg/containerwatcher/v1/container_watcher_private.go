@@ -111,16 +111,11 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		// Enrich events with Linux namespaces information, it is needed for per container filtering
 		containercollection.WithLinuxNamespaceEnrichment(),
 
-		// Get containers created with container runtimes
-		containercollection.WithContainerRuntimeEnrichment(ch.runtime),
-
-		// Get containers created with ebpf (works also if hostPid=false)
-		containercollection.WithContainerFanotifyEbpf(),
-
+		// WithTracerCollection enables the interation between the TracerCollection and ContainerCollection packages.
 		containercollection.WithTracerCollection(ch.tracerCollection),
 
-		// Enrich those containers with data from the Kubernetes API
-		containercollection.WithKubernetesEnrichment(ch.cfg.NodeName, ch.k8sClient.K8SConfig),
+		// WithPodInformer uses a pod informer to get both initial containers and the stream of container events.
+		containercollection.WithPodInformer(ch.cfg.NodeName),
 	}
 
 	// Initialize the container collection
@@ -128,7 +123,10 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		return fmt.Errorf("initializing container collection: %w", err)
 	}
 
-	// add containers that are already running
+	// Add pre-running containers to preRunningContainersIDs and ruleManagedPods, this is needed for the following reasons:
+	// 1. For runtime threat detection we want to keep monitoring the containers and not stop monitoring them after the max sniffing time.
+	// 2. To know in different parts of the code if a container "learning" is partial or complete.
+	// In addition, this routine will keep monitoring for rule bindings notifications for the entire lifecycle of the node-agent.
 	go ch.startRunningContainers()
 
 	return nil
