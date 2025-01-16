@@ -34,6 +34,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/exp/rand"
 	"istio.io/pkg/cache"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -623,6 +624,9 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.startApplicationProfiling")
 	defer span.End()
 
+	// Random sleep to avoid overloading the api server
+	time.Sleep(time.Duration(rand.Intn(10)) * time.Second)
+
 	syncChannel := make(chan error, 10)
 	am.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
 
@@ -696,6 +700,7 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.toSaveRulePolicies.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.RulePolicy]))
 		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		am.trackedContainers.Add(k8sContainerID)
+
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
 
 	case containercollection.EventTypeRemoveContainer:
