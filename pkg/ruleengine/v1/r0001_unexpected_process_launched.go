@@ -67,14 +67,14 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		return nil
 	}
 
-	execPath := getExecPathFromEvent(execEvent)
+	execPath := GetExecPathFromEvent(execEvent)
 
 	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
 	if ap == nil {
 		return nil
 	}
 
-	appProfileExecList, err := getContainerFromApplicationProfile(ap, execEvent.GetContainer())
+	appProfileExecList, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())
 	if err != nil {
 		return nil
 	}
@@ -114,7 +114,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 				Pcomm:      execEvent.Pcomm,
 				Cwd:        execEvent.Cwd,
 				Hardlink:   execEvent.ExePath,
-				Path:       getExecFullPathFromEvent(execEvent),
+				Path:       GetExecFullPathFromEvent(execEvent),
 				Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 			},
 			ContainerID: execEvent.Runtime.ContainerID,

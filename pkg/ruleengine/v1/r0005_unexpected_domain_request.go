@@ -78,7 +78,7 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		return nil
 	}
 
-	nnContainer, err := getContainerFromNetworkNeighborhood(nn, domainEvent.GetContainer())
+	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, domainEvent.GetContainer())
 	if err != nil {
 		return nil
 	}

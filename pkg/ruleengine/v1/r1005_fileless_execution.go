@@ -63,7 +63,7 @@ func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, even
 }
 
 func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *events.ExecEvent) ruleengine.RuleFailure {
-	execFullPath := getExecFullPathFromEvent(execEvent)
+	execFullPath := GetExecFullPathFromEvent(execEvent)
 	execPathDir := filepath.Dir(execFullPath)
 
 	// Check for any /proc/*/fd/* or /proc/self/fd/* patterns
@@ -105,7 +105,7 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *events.ExecEven
 					Cwd:        execEvent.Cwd,
 					Hardlink:   execEvent.ExePath,
 					Path:       execFullPath,
-					Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+					Cmdline:    fmt.Sprintf("%s %s", GetExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 				},
 				ContainerID: execEvent.Runtime.ContainerID,
 			},

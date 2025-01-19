@@ -74,7 +74,7 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 		return nil
 	}
 
-	nnContainer, err := getContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
+	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
 	if err != nil {
 		return nil
 	}

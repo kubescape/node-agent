@@ -71,7 +71,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 			return nil
 		}
 
-		if allowed, err := isAllowed(&execEvent.Event.Event, objectCache, execEvent.Comm, R1011ID); err != nil {
+		if allowed, err := IsAllowed(&execEvent.Event.Event, objectCache, execEvent.Comm, R1011ID); err != nil {
 			return nil
 		} else if allowed {
 			return nil
@@ -84,7 +84,7 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 			return nil
 		}
 
-		if allowed, err := isAllowed(&openEvent.Event.Event, objectCache, openEvent.Comm, R1011ID); err != nil {
+		if allowed, err := IsAllowed(&openEvent.Event.Event, objectCache, openEvent.Comm, R1011ID); err != nil {
 			return nil
 		} else if allowed {
 			return nil
@@ -151,8 +151,8 @@ func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *events.ExecEvent
 				Pcomm:      execEvent.Pcomm,
 				Cwd:        execEvent.Cwd,
 				Hardlink:   execEvent.ExePath,
-				Path:       getExecFullPathFromEvent(execEvent),
-				Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+				Path:       GetExecFullPathFromEvent(execEvent),
+				Cmdline:    fmt.Sprintf("%s %s", GetExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 			},
 			ContainerID: execEvent.Runtime.ContainerID,
 		},
