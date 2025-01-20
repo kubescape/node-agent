@@ -6,12 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -34,7 +36,8 @@ func TestCreateNetworkManager(t *testing.T) {
 	storageClient := &storage.StorageHttpClientMock{}
 	dnsManager := &dnsmanager.DNSManagerMock{}
 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
-	am := CreateNetworkManager(ctx, cfg, "cluster", k8sClient, storageClient, dnsManager, mapset.NewSet[string](), k8sObjectCacheMock, nil)
+	watchedContainers := &maps.SafeMap[string, *utils.WatchedContainerData]{}
+	am := CreateNetworkManager(ctx, cfg, "cluster", k8sClient, storageClient, dnsManager, mapset.NewSet[string](), k8sObjectCacheMock, watchedContainers)
 	// prepare container
 	container := &containercollection.Container{
 		K8s: containercollection.K8sMetadata{

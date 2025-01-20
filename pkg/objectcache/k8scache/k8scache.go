@@ -71,6 +71,16 @@ func (k *K8sObjectCacheImpl) GetPodStatus(namespace, podName string) *corev1.Pod
 	return nil
 }
 
+// GetPod returns the pod for the given namespace and pod name, if not found returns nil
+func (k *K8sObjectCacheImpl) GetPod(namespace, podName string) *corev1.Pod {
+	p := podKey(namespace, podName)
+	if k.pods.Has(p) {
+		return k.pods.Get(p)
+	}
+
+	return nil
+}
+
 func (k *K8sObjectCacheImpl) GetApiServerIpAddress() string {
 	return k.apiServerIpAddress
 }

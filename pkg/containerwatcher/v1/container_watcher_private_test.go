@@ -4,7 +4,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -144,13 +146,14 @@ func TestAddRunningContainers(t *testing.T) {
 			slices.Sort(tt.containersToRemove)
 
 			ch := IGContainerWatcher{
-				ruleManagedPods:         mapset.NewSet[string](tt.preRuleManagedPods...),
-				timeBasedContainers:     mapset.NewSet[string](tt.preTimeBasedContainers...),
-				preRunningContainersIDs: mapset.NewSet[string](),
-				containerCollection:     &containercollection.ContainerCollection{},
-				tracerCollection:        &tracercollection.TracerCollection{},
-				namespace:               tt.ignore.namespace,
-				podName:                 tt.ignore.name,
+				ruleManagedPods:             mapset.NewSet[string](tt.preRuleManagedPods...),
+				timeBasedContainers:         mapset.NewSet[string](tt.preTimeBasedContainers...),
+				preRunningContainersIDs:     mapset.NewSet[string](),
+				containerCollection:         &containercollection.ContainerCollection{},
+				tracerCollection:            &tracercollection.TracerCollection{},
+				namespace:                   tt.ignore.namespace,
+				podName:                     tt.ignore.name,
+				sharedWatchedContainersData: &maps.SafeMap[string, *utils.WatchedContainerData]{},
 			}
 
 			// Mock the calls to the Kubernetes client here

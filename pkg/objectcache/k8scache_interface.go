@@ -10,6 +10,7 @@ type K8sObjectCache interface {
 	GetPodStatus(namespace, podName string) *corev1.PodStatus
 	GetApiServerIpAddress() string
 	GetPods() []*corev1.Pod
+	GetPod(namespace, podName string) *corev1.Pod
 	IsPreRunningContainer(containerID string) bool
 }
 
@@ -27,6 +28,9 @@ func (k *K8sObjectCacheMock) GetPodSpec(_, _ string) *corev1.PodSpec {
 }
 func (k *K8sObjectCacheMock) GetPodStatus(_, _ string) *corev1.PodStatus {
 	return &k.PodStatus
+}
+func (k *K8sObjectCacheMock) GetPod(_, _ string) *corev1.Pod {
+	return &corev1.Pod{Spec: k.PodSpec, Status: k.PodStatus}
 }
 func (k *K8sObjectCacheMock) GetApiServerIpAddress() string {
 	return k.ApiServerIpAddress

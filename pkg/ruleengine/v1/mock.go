@@ -43,6 +43,10 @@ func (r *RuleObjectCacheMock) SetPodSpec(podSpec *corev1.PodSpec) {
 	r.podSpec = podSpec
 }
 
+func (r *RuleObjectCacheMock) GetPod(_, _ string) *corev1.Pod {
+	return &corev1.Pod{Spec: *r.podSpec, Status: *r.podStatus}
+}
+
 func (r *RuleObjectCacheMock) SetPodStatus(podStatus *corev1.PodStatus) {
 	r.podStatus = podStatus
 }
