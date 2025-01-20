@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"testing"
+	"time"
 
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -26,6 +27,9 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 					BasicK8sMetadata: eventtypes.BasicK8sMetadata{
 						ContainerName: "test",
 					},
+				},
+				Runtime: eventtypes.BasicRuntimeMetadata{
+					ContainerStartedAt: eventtypes.Time(time.Now().UnixNano()),
 				},
 			},
 		},

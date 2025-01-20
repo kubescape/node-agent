@@ -97,6 +97,7 @@ type WatchedContainerData struct {
 	completionStatus                           WatchedContainerCompletionStatus
 	ParentWorkloadSelector                     *metav1.LabelSelector
 	SeccompProfilePath                         *string
+	PreRunningContainer                        bool
 }
 
 type ContainerInfo struct {

@@ -90,7 +90,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	storageClient := &storage.StorageHttpClientMock{}
 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
 	seccompManagerMock := &seccompmanager.SeccompManagerMock{}
-	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, mapset.NewSet[string](), k8sObjectCacheMock, seccompManagerMock)
+	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock)
 	assert.NoError(t, err)
 	// prepare container
 	container := &containercollection.Container{
@@ -103,7 +103,8 @@ func TestApplicationProfileManager(t *testing.T) {
 		},
 		Runtime: containercollection.RuntimeMetadata{
 			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-				ContainerID: "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+				ContainerID:        "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+				ContainerStartedAt: types.Time(time.Now().UnixNano()),
 			},
 		},
 	}
@@ -482,7 +483,7 @@ func TestReportRulePolicy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, mapset.NewSet[string](), k8sObjectCacheMock, seccompManagerMock)
+			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock)
 			assert.NoError(t, err)
 
 			am.savedRulePolicies.Set(tt.k8sContainerID, istiocache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))

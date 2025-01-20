@@ -92,7 +92,7 @@ func TestCreateNetworkManager(t *testing.T) {
 	storageClient := &storage.StorageHttpClientMock{}
 	dnsManager := &dnsmanager.DNSManagerMock{}
 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
-	am := CreateNetworkManager(ctx, cfg, "cluster", k8sClient, storageClient, dnsManager, mapset.NewSet[string](), k8sObjectCacheMock)
+	am := CreateNetworkManager(ctx, cfg, "cluster", k8sClient, storageClient, dnsManager, k8sObjectCacheMock)
 	// prepare container
 	container := &containercollection.Container{
 		K8s: containercollection.K8sMetadata{
@@ -104,7 +104,8 @@ func TestCreateNetworkManager(t *testing.T) {
 		},
 		Runtime: containercollection.RuntimeMetadata{
 			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-				ContainerID: "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+				ContainerID:        "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+				ContainerStartedAt: types.Time(time.Now().UnixNano()),
 			},
 		},
 	}

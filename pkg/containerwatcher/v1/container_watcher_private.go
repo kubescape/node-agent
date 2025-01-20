@@ -212,6 +212,9 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 		// WithTracerCollection enables the interation between the TracerCollection and ContainerCollection packages.
 		containercollection.WithTracerCollection(ch.tracerCollection),
+
+		// WithProcEnrichment enables the enrichment of events with process information
+		containercollection.WithProcEnrichment(),
 	}
 
 	// Initialize the container collection
@@ -221,7 +224,6 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 	// Add pre-running containers to preRunningContainersIDs and ruleManagedPods, this is needed for the following reasons:
 	// 1. For runtime threat detection we want to keep monitoring the containers and not stop monitoring them after the max sniffing time.
-	// 2. To know in different parts of the code if a container "learning" is partial or complete.
 	// In addition, this routine will keep monitoring for rule bindings notifications for the entire lifecycle of the node-agent.
 	go ch.startRunningContainers()
 

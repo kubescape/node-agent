@@ -62,13 +62,13 @@ type ApplicationProfileManager struct {
 	k8sObjectCache           objectcache.K8sObjectCache
 	storageClient            storage.StorageClient
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
-	preRunningContainerIDs   mapset.Set[string]
 	seccompManager           seccompmanager.SeccompManagerClient
+	startTime                time.Time
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient) (*ApplicationProfileManager, error) {
+func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
 		cfg:                     cfg,
 		clusterName:             clusterName,
@@ -80,8 +80,8 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		trackedContainers:       mapset.NewSet[string](),
 		removedContainers:       mapset.NewSet[string](),
 		droppedEventsContainers: mapset.NewSet[string](),
-		preRunningContainerIDs:  preRunningContainerIDs,
 		seccompManager:          seccompManager,
+		startTime:               time.Now(),
 	}, nil
 }
 
@@ -116,13 +116,13 @@ func (am *ApplicationProfileManager) ContainerReachedMaxTime(containerID string)
 
 func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	logger.L().Debug("ApplicationProfileManager - start monitor on container",
-		helpers.Interface("preRunning", am.preRunningContainerIDs.Contains(container.Runtime.ContainerID)),
+		helpers.Interface("preRunning", watchedContainer.PreRunningContainer),
 		helpers.Int("container index", watchedContainer.ContainerIndex),
 		helpers.String("container ID", watchedContainer.ContainerID),
 		helpers.String("k8s workload", watchedContainer.K8sContainerID))
 
 	// set completion status & status as soon as we start monitoring the container
-	if am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
+	if watchedContainer.PreRunningContainer {
 		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
 	} else {
 		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
@@ -573,7 +573,9 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.startApplicationProfiling")
 	defer span.End()
 
-	if !am.cfg.EnableRuntimeDetection && am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
+	preRunning := time.Unix(0, int64(container.Runtime.ContainerStartedAt)).Before(am.startTime)
+
+	if !am.cfg.EnableRuntimeDetection && preRunning {
 		logger.L().Debug("ApplicationProfileManager - skip container", helpers.String("reason", "preRunning container"),
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
@@ -607,6 +609,7 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		SeccompProfilePath:     am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).SeccompProfilePath,
 		ContainerType:          am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ContainerType,
 		ContainerIndex:         am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ContainerIndex,
+		PreRunningContainer:    preRunning,
 	}
 
 	if err := am.monitorContainer(ctx, container, watchedContainer); err != nil {
