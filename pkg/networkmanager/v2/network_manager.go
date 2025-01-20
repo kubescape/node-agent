@@ -452,12 +452,12 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 		SyncChannel:            syncChannel,
 		K8sContainerID:         k8sContainerID,
 		NsMntId:                container.Mntns,
-		InstanceID:             nm.sharedWatchedContainersData.Get(k8sContainerID).InstanceID,
-		TemplateHash:           nm.sharedWatchedContainersData.Get(k8sContainerID).TemplateHash,
-		Wlid:                   nm.sharedWatchedContainersData.Get(k8sContainerID).Wlid,
-		ParentResourceVersion:  nm.sharedWatchedContainersData.Get(k8sContainerID).ParentResourceVersion,
-		ContainerInfos:         nm.sharedWatchedContainersData.Get(k8sContainerID).ContainerInfos,
-		ParentWorkloadSelector: nm.sharedWatchedContainersData.Get(k8sContainerID).ParentWorkloadSelector,
+		InstanceID:             nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).InstanceID,
+		TemplateHash:           nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).TemplateHash,
+		Wlid:                   nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).Wlid,
+		ParentResourceVersion:  nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ParentResourceVersion,
+		ContainerInfos:         nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ContainerInfos,
+		ParentWorkloadSelector: nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ParentWorkloadSelector,
 	}
 
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated

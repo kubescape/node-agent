@@ -635,6 +635,14 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 	syncChannel := make(chan error, 10)
 	am.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
 
+	sharedWatchedContainerData, ok := am.sharedWatchedContainersData.Load(container.Runtime.ContainerID)
+	if !ok {
+		logger.L().Debug("ApplicationProfileManager - container not found in shared data",
+			helpers.String("container ID", container.Runtime.ContainerID),
+			helpers.String("k8s workload", k8sContainerID))
+		return
+	}
+
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:            container.Runtime.ContainerID,
 		ImageID:                container.Runtime.ContainerImageDigest,
@@ -643,12 +651,12 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		SyncChannel:            syncChannel,
 		K8sContainerID:         k8sContainerID,
 		NsMntId:                container.Mntns,
-		InstanceID:             am.sharedWatchedContainersData.Get(k8sContainerID).InstanceID,
-		TemplateHash:           am.sharedWatchedContainersData.Get(k8sContainerID).TemplateHash,
-		Wlid:                   am.sharedWatchedContainersData.Get(k8sContainerID).Wlid,
-		ParentResourceVersion:  am.sharedWatchedContainersData.Get(k8sContainerID).ParentResourceVersion,
-		ContainerInfos:         am.sharedWatchedContainersData.Get(k8sContainerID).ContainerInfos,
-		ParentWorkloadSelector: am.sharedWatchedContainersData.Get(k8sContainerID).ParentWorkloadSelector,
+		InstanceID:             sharedWatchedContainerData.InstanceID,
+		TemplateHash:           sharedWatchedContainerData.TemplateHash,
+		Wlid:                   sharedWatchedContainerData.Wlid,
+		ParentResourceVersion:  sharedWatchedContainerData.ParentResourceVersion,
+		ContainerInfos:         sharedWatchedContainerData.ContainerInfos,
+		ParentWorkloadSelector: sharedWatchedContainerData.ParentWorkloadSelector,
 	}
 
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated (This should return quickly because the container is already enriched).
