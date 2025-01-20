@@ -36,6 +36,16 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		return
 	}
 
+	containerEventFuncs := []containercollection.FuncNotify{
+		ch.applicationProfileManager.ContainerCallback,
+		ch.networkManager.ContainerCallback,
+		ch.malwareManager.ContainerCallback,
+		ch.ruleManager.ContainerCallback,
+		ch.sbomManager.ContainerCallback,
+		ch.processManager.ContainerCallback,
+		ch.dnsManager.ContainerCallback,
+	}
+
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 
 	switch notif.Type {
@@ -87,6 +97,11 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		// Only set the data if we successfully retrieved it
 		ch.sharedWatchedContainersData.Set(notif.Container.Runtime.ContainerID, sharedWatchedContainerData)
 
+		// Call the container event functions
+		for _, f := range containerEventFuncs {
+			f(notif)
+		}
+
 		time.AfterFunc(sniffingTime, func() {
 			logger.L().Info("stop monitor on container - monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
 			ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
@@ -95,6 +110,10 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			ch.unregisterContainer(notif.Container)
 		})
 	case containercollection.EventTypeRemoveContainer:
+		// Call the container event functions
+		for _, f := range containerEventFuncs {
+			f(notif)
+		}
 		logger.L().Info("stop monitor on container - container has terminated",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
@@ -119,7 +138,7 @@ func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *container
 		}
 	}
 	// get pod template hash
-	watchedContainer.TemplateHash, _ = pod.GetLabel("pod-template-hash")
+	watchedContainer.TemplateHash, _ = pod.GetPodLabel("pod-template-hash")
 	// find parentWlid
 	kind, name, err := ch.k8sClient.CalculateWorkloadParentRecursive(pod)
 	if err != nil {
@@ -169,13 +188,6 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 	// Start the container collection
 	containerEventFuncs := []containercollection.FuncNotify{
 		ch.containerCallback,
-		ch.applicationProfileManager.ContainerCallback,
-		ch.networkManager.ContainerCallback,
-		ch.malwareManager.ContainerCallback,
-		ch.ruleManager.ContainerCallback,
-		ch.sbomManager.ContainerCallback,
-		ch.processManager.ContainerCallback,
-		ch.dnsManager.ContainerCallback,
 	}
 
 	for receiver := range ch.thirdPartyContainerReceivers.Iter() {

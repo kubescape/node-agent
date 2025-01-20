@@ -2,7 +2,6 @@ package rulemanager
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -84,11 +83,6 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 		helpers.String("container ID", container.Runtime.ContainerID),
 		helpers.String("k8s container id", k8sContainerID))
 
-	pod, err := rm.getPodWithRetry(container)
-	if err != nil {
-		return fmt.Errorf("failed to get pod: %w", err)
-	}
-
 	syscallTicker := time.NewTicker(syscallPeriod)
 
 	for {
@@ -122,7 +116,7 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 				continue
 			}
 
-			rules := rm.ruleBindingCache.ListRulesForPod(pod.GetNamespace(), pod.GetName())
+			rules := rm.ruleBindingCache.ListRulesForPod(container.K8s.Namespace, container.K8s.PodName)
 			for _, syscall := range syscalls {
 				event := ruleenginetypes.SyscallEvent{
 					Event: eventtypes.Event{
@@ -134,14 +128,13 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 								RuntimeName: container.Runtime.RuntimeName,
 							},
 							K8s: eventtypes.K8sMetadata{
-								Node: pod.Spec.NodeName,
+								Node: rm.nodeName,
 								BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-									Namespace:     pod.GetNamespace(),
-									PodName:       pod.GetName(),
-									PodLabels:     pod.GetLabels(),
+									Namespace:     container.K8s.Namespace,
+									PodName:       container.K8s.PodName,
+									PodLabels:     container.K8s.PodLabels,
 									ContainerName: container.K8s.ContainerName,
 								},
-								HostNetwork: pod.Spec.HostNetwork,
 							},
 						},
 					},
@@ -160,25 +153,6 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 			}
 		}
 	}
-}
-
-func (rm *RuleManager) getPodWithRetry(container *containercollection.Container) (*corev1.Pod, error) {
-	var pod *corev1.Pod
-	if err := backoff.Retry(func() error {
-		p := rm.objectCache.K8sObjectCache().GetPod(container.K8s.Namespace, container.K8s.PodName)
-		if pod == nil {
-			return errors.New("pod not found")
-		}
-		pod = p
-		return nil
-	}, backoff.NewExponentialBackOff()); err != nil {
-		logger.L().Debug("RuleManager - failed to get pod", helpers.Error(err),
-			helpers.String("namespace", container.K8s.Namespace),
-			helpers.String("name", container.K8s.PodName))
-		// failed to get pod
-		return nil, err
-	}
-	return pod, nil
 }
 
 func (rm *RuleManager) startRuleManager(container *containercollection.Container, k8sContainerID string) {
