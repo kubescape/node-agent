@@ -62,17 +62,17 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event ut
 
 	// Check if the event is expected, if so return nil
 	// No application profile also returns nil
-	if whiteListed, err := isExecEventInProfile(execEvent, objCache, false); whiteListed || errors.Is(err, ProfileNotFound) {
+	if whiteListed, err := IsExecEventInProfile(execEvent, objCache, false); whiteListed || errors.Is(err, ProfileNotFound) {
 		return nil
 	}
 
-	mounts, err := getContainerMountPaths(execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer(), objCache.K8sObjectCache())
+	mounts, err := GetContainerMountPaths(execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer(), objCache.K8sObjectCache())
 	if err != nil {
 		return nil
 	}
 
 	for _, mount := range mounts {
-		fullPath := getExecFullPathFromEvent(execEvent)
+		fullPath := GetExecFullPathFromEvent(execEvent)
 		if rule.isPathContained(fullPath, mount) || rule.isPathContained(execEvent.ExePath, mount) {
 			upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
 			ruleFailure := GenericRuleFailure{
@@ -97,7 +97,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event ut
 						Cwd:        execEvent.Cwd,
 						Hardlink:   execEvent.ExePath,
 						Path:       fullPath,
-						Cmdline:    fmt.Sprintf("%s %s", getExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+						Cmdline:    fmt.Sprintf("%s %s", GetExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 					},
 					ContainerID: execEvent.Runtime.ContainerID,
 				},

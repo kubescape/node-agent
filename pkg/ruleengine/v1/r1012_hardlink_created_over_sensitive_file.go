@@ -56,7 +56,7 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) SetParameters(parameters map[
 		return
 	}
 
-	additionalPaths, ok := interfaceToStringSlice(additionalPathsInterface)
+	additionalPaths, ok := InterfaceToStringSlice(additionalPathsInterface)
 	if ok {
 		for _, path := range additionalPaths {
 			rule.additionalPaths = append(rule.additionalPaths, fmt.Sprintf("%v", path))
@@ -84,7 +84,7 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 
 	hardlinkEvent, _ := event.(*tracerhardlinktype.Event)
 
-	if allowed, err := isAllowed(&hardlinkEvent.Event, objCache, hardlinkEvent.Comm, R1012ID); err != nil {
+	if allowed, err := IsAllowed(&hardlinkEvent.Event, objCache, hardlinkEvent.Comm, R1012ID); err != nil {
 		return nil
 	} else if allowed {
 		return nil

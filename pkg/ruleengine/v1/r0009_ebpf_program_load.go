@@ -74,7 +74,7 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 		return nil
 	}
 
-	appProfileSyscallList, err := getContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
+	appProfileSyscallList, err := GetContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
 	if err != nil {
 		return nil
 	}
