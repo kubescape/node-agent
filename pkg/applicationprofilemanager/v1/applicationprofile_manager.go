@@ -657,6 +657,9 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		ParentResourceVersion:  sharedWatchedContainerData.ParentResourceVersion,
 		ContainerInfos:         sharedWatchedContainerData.ContainerInfos,
 		ParentWorkloadSelector: sharedWatchedContainerData.ParentWorkloadSelector,
+		SeccompProfilePath:     sharedWatchedContainerData.SeccompProfilePath,
+		ContainerType:          sharedWatchedContainerData.ContainerType,
+		ContainerIndex:         sharedWatchedContainerData.ContainerIndex,
 	}
 
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated (This should return quickly because the container is already enriched).

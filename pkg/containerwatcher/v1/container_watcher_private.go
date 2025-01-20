@@ -124,7 +124,11 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 }
 
 func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*utils.WatchedContainerData, error) {
-	watchedContainer := utils.WatchedContainerData{}
+	watchedContainer := utils.WatchedContainerData{
+		ContainerID: container.Runtime.ContainerID,
+		ImageID:     container.Runtime.ContainerImageDigest,
+		ImageTag:    container.Runtime.ContainerImageName,
+	}
 
 	wl, err := ch.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
 	if err != nil {

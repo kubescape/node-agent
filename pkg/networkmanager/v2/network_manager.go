@@ -458,6 +458,9 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 		ParentResourceVersion:  nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ParentResourceVersion,
 		ContainerInfos:         nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ContainerInfos,
 		ParentWorkloadSelector: nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ParentWorkloadSelector,
+		SeccompProfilePath:     nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).SeccompProfilePath,
+		ContainerType:          nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ContainerType,
+		ContainerIndex:         nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ContainerIndex,
 	}
 
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
