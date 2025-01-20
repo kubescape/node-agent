@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v4"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/google/uuid"
@@ -15,9 +14,7 @@ import (
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
@@ -75,57 +72,13 @@ func CreateNetworkManager(ctx context.Context, cfg config.Config, clusterName st
 	}
 }
 
-func (nm *NetworkManager) ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	if watchedContainer.InstanceID != nil {
-		return nil
-	}
-	wl, err := nm.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
-	if err != nil {
-		return fmt.Errorf("failed to get workload: %w", err)
-	}
-	pod := wl.(*workloadinterface.Workload)
-	// fill container type, index and names
-	if watchedContainer.ContainerType == utils.Unknown {
-		if err := watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName); err != nil {
-			return fmt.Errorf("failed to set container info: %w", err)
+func (nm *NetworkManager) waitForSharedContainerData(containerID string) error {
+	return backoff.Retry(func() error {
+		if _, ok := nm.sharedWatchedContainersData.Load(containerID); ok {
+			return nil
 		}
-	}
-	// get pod template hash
-	watchedContainer.TemplateHash, _ = pod.GetLabel("pod-template-hash")
-	// find parentWlid
-	kind, name, err := nm.k8sClient.CalculateWorkloadParentRecursive(pod)
-	if err != nil {
-		return fmt.Errorf("failed to calculate workload parent: %w", err)
-	}
-	parentWorkload, err := nm.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
-	if err != nil {
-		return fmt.Errorf("failed to get parent workload: %w", err)
-	}
-	w := parentWorkload.(*workloadinterface.Workload)
-	watchedContainer.Wlid = w.GenerateWlid(nm.clusterName)
-	err = wlid.IsWlidValid(watchedContainer.Wlid)
-	if err != nil {
-		return fmt.Errorf("failed to validate WLID: %w", err)
-	}
-	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
-	// find parent selector
-	selector, err := w.GetSelector()
-	if err != nil {
-		return fmt.Errorf("failed to get parentWL selector: %w", err)
-	}
-	watchedContainer.ParentWorkloadSelector = selector
-	// find instanceID - this has to be the last one
-	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
-	if err != nil {
-		return fmt.Errorf("failed to generate instanceID: %w", err)
-	}
-	watchedContainer.InstanceID = instanceIDs[0]
-	for i := range instanceIDs {
-		if instanceIDs[i].GetContainerName() == container.K8s.ContainerName {
-			watchedContainer.InstanceID = instanceIDs[i]
-		}
-	}
-	return nil
+		return fmt.Errorf("container %s not found in shared data", containerID)
+	}, backoff.NewExponentialBackOff())
 }
 
 func (nm *NetworkManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
@@ -441,6 +394,13 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 		return
 	}
 
+	if err := nm.waitForSharedContainerData(container.Runtime.ContainerID); err != nil {
+		logger.L().Warning("NetworkManager - failed to get shared container data", helpers.Error(err),
+			helpers.String("container ID", container.Runtime.ContainerID),
+			helpers.String("k8s workload", k8sContainerID))
+		return
+	}
+
 	syncChannel := make(chan error, 10)
 	nm.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
 
@@ -461,16 +421,6 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 		SeccompProfilePath:     nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).SeccompProfilePath,
 		ContainerType:          nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ContainerType,
 		ContainerIndex:         nm.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ContainerIndex,
-	}
-
-	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
-	if err := backoff.Retry(func() error {
-		return nm.ensureInstanceID(container, watchedContainer)
-	}, backoff.NewExponentialBackOff()); err != nil {
-		logger.L().Debug("NetworkManager - failed to ensure instanceID", helpers.Error(err),
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
 
 	if err := nm.monitorContainer(ctx, container, watchedContainer); err != nil {

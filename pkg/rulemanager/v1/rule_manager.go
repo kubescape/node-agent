@@ -173,6 +173,11 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
+		if err := rm.waitForSharedContainerData(notif.Container.Runtime.ContainerID); err != nil {
+			logger.L().Warning("RuleManager - failed to get shared container data", helpers.Error(err))
+			return
+		}
+
 		if rm.trackedContainers.Contains(notif.Container.Runtime.ContainerID) {
 			logger.L().Debug("RuleManager - container already exist in memory",
 				helpers.String("container ID", notif.Container.Runtime.ContainerID),
@@ -203,6 +208,15 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		rm.containerIdToShimPid.Delete(notif.Container.Runtime.ContainerID)
 		rm.containerIdToPid.Delete(notif.Container.Runtime.ContainerID)
 	}
+}
+
+func (rm *RuleManager) waitForSharedContainerData(containerID string) error {
+	return backoff.Retry(func() error {
+		if _, ok := rm.sharedWatchedContainersData.Load(containerID); ok {
+			return nil
+		}
+		return fmt.Errorf("container %s not found in shared data", containerID)
+	}, backoff.NewExponentialBackOff())
 }
 
 func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error)) {
