@@ -243,11 +243,12 @@ func TestUnregisterContainer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			ch := IGContainerWatcher{
-				ruleManagedPods:         mapset.NewSet[string](tt.preRuleManagedPods...),
-				timeBasedContainers:     mapset.NewSet[string](tt.preTimeBasedContainers...),
-				preRunningContainersIDs: mapset.NewSet[string](),
-				containerCollection:     &containercollection.ContainerCollection{},
-				tracerCollection:        &tracercollection.TracerCollection{},
+				ruleManagedPods:             mapset.NewSet[string](tt.preRuleManagedPods...),
+				timeBasedContainers:         mapset.NewSet[string](tt.preTimeBasedContainers...),
+				preRunningContainersIDs:     mapset.NewSet[string](),
+				containerCollection:         &containercollection.ContainerCollection{},
+				tracerCollection:            &tracercollection.TracerCollection{},
+				sharedWatchedContainersData: &maps.SafeMap[string, *utils.WatchedContainerData]{},
 			}
 
 			for pod, containers := range tt.podToContainers {
