@@ -100,7 +100,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			helpers.String("k8s workload", k8sContainerID))
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
-		ch.sharedWatchedContainersData.Delete(notif.Container.Runtime.ContainerID) // TODO: check if we need to delete the container from the watchedContainers map
+		ch.sharedWatchedContainersData.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 

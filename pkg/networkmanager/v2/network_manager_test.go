@@ -1,23 +1,26 @@
 package v2
 
 import (
-	// "context"
+	"context"
 	"fmt"
 	"testing"
 
-	// "time"
+	"time"
 
-	// "github.com/goradd/maps"
-	// "github.com/kubescape/node-agent/pkg/config"
-	// "github.com/kubescape/node-agent/pkg/dnsmanager"
-	// "github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/goradd/maps"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
-	// "github.com/kubescape/node-agent/pkg/objectcache"
-	// "github.com/kubescape/node-agent/pkg/storage"
-	// "github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	// containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -26,105 +29,162 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-// func TestCreateNetworkManager(t *testing.T) {
-// 	cfg := config.Config{
-// 		InitialDelay:     1 * time.Second,
-// 		MaxSniffingTime:  5 * time.Minute,
-// 		UpdateDataPeriod: 1 * time.Second,
-// 	}
-// 	ctx := context.TODO()
-// 	k8sClient := &k8sclient.K8sClientMock{}
-// 	storageClient := &storage.StorageHttpClientMock{}
-// 	dnsManager := &dnsmanager.DNSManagerMock{}
-// 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
-// 	watchedContainers := &maps.SafeMap[string, *utils.WatchedContainerData]{}
-// 	am := CreateNetworkManager(ctx, cfg, "cluster", k8sClient, storageClient, dnsManager, mapset.NewSet[string](), k8sObjectCacheMock, watchedContainers)
-// 	// prepare container
-// 	container := &containercollection.Container{
-// 		K8s: containercollection.K8sMetadata{
-// 			BasicK8sMetadata: types.BasicK8sMetadata{
-// 				Namespace:     "ns",
-// 				PodName:       "pod",
-// 				ContainerName: "cont",
-// 			},
-// 		},
-// 		Runtime: containercollection.RuntimeMetadata{
-// 			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-// 				ContainerID: "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
-// 			},
-// 		},
-// 	}
-// 	// report network event
-// 	go am.ReportNetworkEvent("ns/pod/cont", tracernetworktype.Event{
-// 		Port:      80,
-// 		PktType:   "HOST",
-// 		Proto:     "TCP",
-// 		PodLabels: map[string]string{"app": "nginx"},
-// 		DstEndpoint: types.L3Endpoint{
-// 			Namespace: "kubescape",
-// 			Name:      "nginx-deployment-cbdccf466-csh9c",
-// 			Kind:      "pod",
-// 			Addr:      "1.2.3.4",
-// 			PodLabels: map[string]string{"app": "destination", "controller-revision-hash": "hash"},
-// 		},
-// 	})
-// 	// report container started (race condition with reports)
-// 	am.ContainerCallback(containercollection.PubSubEvent{
-// 		Type:      containercollection.EventTypeAddContainer,
-// 		Container: container,
-// 	})
-// 	// let it run for a while
-// 	time.Sleep(15 * time.Second)
-// 	// more events
-// 	go am.ReportNetworkEvent("ns/pod/cont", tracernetworktype.Event{
-// 		Port:      443,
-// 		PktType:   "OUTGOING",
-// 		Proto:     "TCP",
-// 		PodLabels: map[string]string{"app": "nginx"},
-// 		DstEndpoint: types.L3Endpoint{
-// 			Namespace: "kubescape",
-// 			Name:      "nginx-deployment-cbdccf466-csh9c",
-// 			Kind:      "pod",
-// 			Addr:      "1.2.3.4",
-// 			PodLabels: map[string]string{"app": "destination", "controller-revision-hash": "hash"},
-// 		},
-// 	})
-// 	// sleep more
-// 	time.Sleep(2 * time.Second)
-// 	// report container stopped
-// 	am.ContainerCallback(containercollection.PubSubEvent{
-// 		Type:      containercollection.EventTypeRemoveContainer,
-// 		Container: container,
-// 	})
-// 	// let it stop
-// 	time.Sleep(2 * time.Second)
-// 	// verify generated CRDs
-// 	assert.Equal(t, 2, len(storageClient.NetworkNeighborhoods))
-// 	// check the first neighborhood
-// 	assert.Equal(t, v1beta1.NetworkNeighbor{
-// 		Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
-// 		Type:              "internal",
-// 		Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
-// 		PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-// 		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
-// 	}, storageClient.NetworkNeighborhoods[0].Spec.Containers[1].Ingress[0])
-// 	assert.Equal(t, 0, len(storageClient.NetworkNeighborhoods[0].Spec.Containers[1].Egress))
-// 	// check the second neighborhood - this is a patch for execs and opens
-// 	assert.Equal(t, v1beta1.NetworkNeighbor{
-// 		Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
-// 		Type:              "internal",
-// 		Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
-// 		PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-// 		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
-// 	}, storageClient.NetworkNeighborhoods[1].Spec.Containers[1].Ingress[0])
-// 	assert.Equal(t, v1beta1.NetworkNeighbor{
-// 		Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
-// 		Type:              "internal",
-// 		Ports:             []v1beta1.NetworkPort{{Name: "TCP-443", Protocol: "TCP", Port: ptr.To(int32(443))}},
-// 		PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
-// 		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
-// 	}, storageClient.NetworkNeighborhoods[1].Spec.Containers[1].Egress[0])
-// }
+func ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData, k8sclient *k8sclient.K8sClientMock, clusterName string) error {
+	if watchedContainer.InstanceID != nil {
+		return nil
+	}
+	wl, err := k8sclient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
+	if err != nil {
+		return fmt.Errorf("failed to get workload: %w", err)
+	}
+	pod := wl.(*workloadinterface.Workload)
+	// fill container type, index and names
+	if watchedContainer.ContainerType == utils.Unknown {
+		if err := watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName); err != nil {
+			return fmt.Errorf("failed to set container info: %w", err)
+		}
+	}
+	// get pod template hash
+	watchedContainer.TemplateHash, _ = pod.GetLabel("pod-template-hash")
+	// find parentWlid
+	kind, name, err := k8sclient.CalculateWorkloadParentRecursive(pod)
+	if err != nil {
+		return fmt.Errorf("failed to calculate workload parent: %w", err)
+	}
+	parentWorkload, err := k8sclient.GetWorkload(pod.GetNamespace(), kind, name)
+	if err != nil {
+		return fmt.Errorf("failed to get parent workload: %w", err)
+	}
+	w := parentWorkload.(*workloadinterface.Workload)
+	watchedContainer.Wlid = w.GenerateWlid(clusterName)
+	err = wlid.IsWlidValid(watchedContainer.Wlid)
+	if err != nil {
+		return fmt.Errorf("failed to validate WLID: %w", err)
+	}
+	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
+	// find parent selector
+	selector, err := w.GetSelector()
+	if err != nil {
+		return fmt.Errorf("failed to get parentWL selector: %w", err)
+	}
+	watchedContainer.ParentWorkloadSelector = selector
+	// find instanceID - this has to be the last one
+	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
+	if err != nil {
+		return fmt.Errorf("failed to generate instanceID: %w", err)
+	}
+	watchedContainer.InstanceID = instanceIDs[0]
+	for i := range instanceIDs {
+		if instanceIDs[i].GetContainerName() == container.K8s.ContainerName {
+			watchedContainer.InstanceID = instanceIDs[i]
+		}
+	}
+	return nil
+}
+
+func TestCreateNetworkManager(t *testing.T) {
+	cfg := config.Config{
+		InitialDelay:     1 * time.Second,
+		MaxSniffingTime:  5 * time.Minute,
+		UpdateDataPeriod: 1 * time.Second,
+	}
+	ctx := context.TODO()
+	k8sClient := &k8sclient.K8sClientMock{}
+	storageClient := &storage.StorageHttpClientMock{}
+	dnsManager := &dnsmanager.DNSManagerMock{}
+	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
+	sharedWatchedContainersData := &maps.SafeMap[string, *utils.WatchedContainerData]{}
+	am := CreateNetworkManager(ctx, cfg, "cluster", k8sClient, storageClient, dnsManager, mapset.NewSet[string](), k8sObjectCacheMock, sharedWatchedContainersData)
+	// prepare container
+	container := &containercollection.Container{
+		K8s: containercollection.K8sMetadata{
+			BasicK8sMetadata: types.BasicK8sMetadata{
+				Namespace:     "ns",
+				PodName:       "pod",
+				ContainerName: "cont",
+			},
+		},
+		Runtime: containercollection.RuntimeMetadata{
+			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
+				ContainerID: "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+			},
+		},
+	}
+	sharedWatchedContainerData := &utils.WatchedContainerData{}
+	err := ensureInstanceID(container, sharedWatchedContainerData, k8sClient, "cluster")
+	assert.NoError(t, err)
+	sharedWatchedContainersData.Set(container.Runtime.ContainerID, sharedWatchedContainerData)
+	// report network event
+	go am.ReportNetworkEvent("ns/pod/cont", tracernetworktype.Event{
+		Port:      80,
+		PktType:   "HOST",
+		Proto:     "TCP",
+		PodLabels: map[string]string{"app": "nginx"},
+		DstEndpoint: types.L3Endpoint{
+			Namespace: "kubescape",
+			Name:      "nginx-deployment-cbdccf466-csh9c",
+			Kind:      "pod",
+			Addr:      "1.2.3.4",
+			PodLabels: map[string]string{"app": "destination", "controller-revision-hash": "hash"},
+		},
+	})
+	// report container started (race condition with reports)
+	am.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeAddContainer,
+		Container: container,
+	})
+	// let it run for a while
+	time.Sleep(15 * time.Second)
+	// more events
+	go am.ReportNetworkEvent("ns/pod/cont", tracernetworktype.Event{
+		Port:      443,
+		PktType:   "OUTGOING",
+		Proto:     "TCP",
+		PodLabels: map[string]string{"app": "nginx"},
+		DstEndpoint: types.L3Endpoint{
+			Namespace: "kubescape",
+			Name:      "nginx-deployment-cbdccf466-csh9c",
+			Kind:      "pod",
+			Addr:      "1.2.3.4",
+			PodLabels: map[string]string{"app": "destination", "controller-revision-hash": "hash"},
+		},
+	})
+	// sleep more
+	time.Sleep(2 * time.Second)
+	// report container stopped
+	am.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeRemoveContainer,
+		Container: container,
+	})
+	// let it stop
+	time.Sleep(2 * time.Second)
+	// verify generated CRDs
+	assert.Equal(t, 2, len(storageClient.NetworkNeighborhoods))
+	// check the first neighborhood
+	assert.Equal(t, v1beta1.NetworkNeighbor{
+		Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
+		Type:              "internal",
+		Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+		PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+	}, storageClient.NetworkNeighborhoods[0].Spec.Containers[1].Ingress[0])
+	assert.Equal(t, 0, len(storageClient.NetworkNeighborhoods[0].Spec.Containers[1].Egress))
+	// check the second neighborhood - this is a patch for execs and opens
+	assert.Equal(t, v1beta1.NetworkNeighbor{
+		Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
+		Type:              "internal",
+		Ports:             []v1beta1.NetworkPort{{Name: "TCP-80", Protocol: "TCP", Port: ptr.To(int32(80))}},
+		PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+	}, storageClient.NetworkNeighborhoods[1].Spec.Containers[1].Ingress[0])
+	assert.Equal(t, v1beta1.NetworkNeighbor{
+		Identifier:        "c86024d63c2bfddde96a258c3005e963e06fb9d8ee941a6de3003d6eae5dd7cc",
+		Type:              "internal",
+		Ports:             []v1beta1.NetworkPort{{Name: "TCP-443", Protocol: "TCP", Port: ptr.To(int32(443))}},
+		PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "destination"}},
+		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kubescape"}},
+	}, storageClient.NetworkNeighborhoods[1].Spec.Containers[1].Egress[0])
+}
 
 func TestIsValidEvent(t *testing.T) {
 	tests := []struct {
