@@ -174,7 +174,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		if err := rm.waitForSharedContainerData(notif.Container.Runtime.ContainerID); err != nil {
-			logger.L().Warning("RuleManager - failed to get shared container data", helpers.Error(err))
+			logger.L().Error("RuleManager - failed to get shared container data", helpers.Error(err))
 			return
 		}
 

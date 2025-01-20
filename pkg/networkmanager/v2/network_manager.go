@@ -395,7 +395,7 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 	}
 
 	if err := nm.waitForSharedContainerData(container.Runtime.ContainerID); err != nil {
-		logger.L().Warning("NetworkManager - failed to get shared container data", helpers.Error(err),
+		logger.L().Error("NetworkManager - failed to get shared container data", helpers.Error(err),
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
 		return

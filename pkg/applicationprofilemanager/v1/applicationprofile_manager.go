@@ -582,9 +582,8 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		return
 	}
 
-	err := am.waitForSharedContainerData(container.Runtime.ContainerID)
-	if err != nil {
-		logger.L().Warning("ApplicationProfileManager - failed to wait for shared container data", helpers.Error(err),
+	if err := am.waitForSharedContainerData(container.Runtime.ContainerID); err != nil {
+		logger.L().Error("ApplicationProfileManager - container not found in shared data",
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
 		return
@@ -592,14 +591,6 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 
 	syncChannel := make(chan error, 10)
 	am.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
-
-	sharedWatchedContainerData, ok := am.sharedWatchedContainersData.Load(container.Runtime.ContainerID)
-	if !ok {
-		logger.L().Debug("ApplicationProfileManager - container not found in shared data",
-			helpers.String("container ID", container.Runtime.ContainerID),
-			helpers.String("k8s workload", k8sContainerID))
-		return
-	}
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:            container.Runtime.ContainerID,
@@ -609,15 +600,15 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		SyncChannel:            syncChannel,
 		K8sContainerID:         k8sContainerID,
 		NsMntId:                container.Mntns,
-		InstanceID:             sharedWatchedContainerData.InstanceID,
-		TemplateHash:           sharedWatchedContainerData.TemplateHash,
-		Wlid:                   sharedWatchedContainerData.Wlid,
-		ParentResourceVersion:  sharedWatchedContainerData.ParentResourceVersion,
-		ContainerInfos:         sharedWatchedContainerData.ContainerInfos,
-		ParentWorkloadSelector: sharedWatchedContainerData.ParentWorkloadSelector,
-		SeccompProfilePath:     sharedWatchedContainerData.SeccompProfilePath,
-		ContainerType:          sharedWatchedContainerData.ContainerType,
-		ContainerIndex:         sharedWatchedContainerData.ContainerIndex,
+		InstanceID:             am.sharedWatchedContainersData.Get(container.Runtime.ContainerID).InstanceID,
+		TemplateHash:           am.sharedWatchedContainersData.Get(container.Runtime.ContainerID).TemplateHash,
+		Wlid:                   am.sharedWatchedContainersData.Get(container.Runtime.ContainerID).Wlid,
+		ParentResourceVersion:  am.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ParentResourceVersion,
+		ContainerInfos:         am.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ContainerInfos,
+		ParentWorkloadSelector: am.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ParentWorkloadSelector,
+		SeccompProfilePath:     am.sharedWatchedContainersData.Get(container.Runtime.ContainerID).SeccompProfilePath,
+		ContainerType:          am.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ContainerType,
+		ContainerIndex:         am.sharedWatchedContainersData.Get(container.Runtime.ContainerID).ContainerIndex,
 	}
 
 	if err := am.monitorContainer(ctx, container, watchedContainer); err != nil {
