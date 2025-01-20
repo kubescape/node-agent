@@ -37,39 +37,41 @@ import (
 )
 
 type NetworkManager struct {
-	cfg                      config.Config
-	clusterName              string
-	ctx                      context.Context
-	containerMutexes         storageUtils.MapMutex[string]                                 // key is k8sContainerID
-	trackedContainers        mapset.Set[string]                                            // key is k8sContainerID
-	removedContainers        mapset.Set[string]                                            // key is k8sContainerID
-	droppedEventsContainers  mapset.Set[string]                                            // key is k8sContainerID
-	savedEvents              maps.SafeMap[string, cache.ExpiringCache]                     // key is k8sContainerID
-	toSaveEvents             maps.SafeMap[string, mapset.Set[networkmanager.NetworkEvent]] // key is k8sContainerID
-	watchedContainerChannels maps.SafeMap[string, chan error]                              // key is ContainerID
-	k8sClient                k8sclient.K8sClientInterface
-	k8sObjectCache           objectcache.K8sObjectCache
-	storageClient            storage.StorageClient
-	preRunningContainerIDs   mapset.Set[string]
-	dnsResolverClient        dnsmanager.DNSResolver
+	cfg                         config.Config
+	clusterName                 string
+	ctx                         context.Context
+	containerMutexes            storageUtils.MapMutex[string]                                 // key is k8sContainerID
+	trackedContainers           mapset.Set[string]                                            // key is k8sContainerID
+	removedContainers           mapset.Set[string]                                            // key is k8sContainerID
+	droppedEventsContainers     mapset.Set[string]                                            // key is k8sContainerID
+	savedEvents                 maps.SafeMap[string, cache.ExpiringCache]                     // key is k8sContainerID
+	toSaveEvents                maps.SafeMap[string, mapset.Set[networkmanager.NetworkEvent]] // key is k8sContainerID
+	watchedContainerChannels    maps.SafeMap[string, chan error]                              // key is ContainerID
+	k8sClient                   k8sclient.K8sClientInterface
+	k8sObjectCache              objectcache.K8sObjectCache
+	storageClient               storage.StorageClient
+	preRunningContainerIDs      mapset.Set[string]
+	dnsResolverClient           dnsmanager.DNSResolver
+	sharedWatchedContainersData *maps.SafeMap[string, *utils.WatchedContainerData]
 }
 
 var _ networkmanager.NetworkManagerClient = (*NetworkManager)(nil)
 
-func CreateNetworkManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, dnsResolverClient dnsmanager.DNSResolver, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache) *NetworkManager {
+func CreateNetworkManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, dnsResolverClient dnsmanager.DNSResolver, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache, sharedWatchedContainersData *maps.SafeMap[string, *utils.WatchedContainerData]) *NetworkManager {
 	return &NetworkManager{
-		cfg:                     cfg,
-		clusterName:             clusterName,
-		ctx:                     ctx,
-		dnsResolverClient:       dnsResolverClient,
-		k8sClient:               k8sClient,
-		k8sObjectCache:          k8sObjectCache,
-		storageClient:           storageClient,
-		containerMutexes:        storageUtils.NewMapMutex[string](),
-		trackedContainers:       mapset.NewSet[string](),
-		removedContainers:       mapset.NewSet[string](),
-		droppedEventsContainers: mapset.NewSet[string](),
-		preRunningContainerIDs:  preRunningContainerIDs,
+		cfg:                         cfg,
+		clusterName:                 clusterName,
+		ctx:                         ctx,
+		dnsResolverClient:           dnsResolverClient,
+		k8sClient:                   k8sClient,
+		k8sObjectCache:              k8sObjectCache,
+		storageClient:               storageClient,
+		containerMutexes:            storageUtils.NewMapMutex[string](),
+		trackedContainers:           mapset.NewSet[string](),
+		removedContainers:           mapset.NewSet[string](),
+		droppedEventsContainers:     mapset.NewSet[string](),
+		preRunningContainerIDs:      preRunningContainerIDs,
+		sharedWatchedContainersData: sharedWatchedContainersData,
 	}
 }
 
@@ -436,13 +438,19 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 	nm.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
 
 	watchedContainer := &utils.WatchedContainerData{
-		ContainerID:      container.Runtime.ContainerID,
-		ImageID:          container.Runtime.ContainerImageDigest,
-		ImageTag:         container.Runtime.ContainerImageName,
-		UpdateDataTicker: time.NewTicker(utils.AddJitter(nm.cfg.InitialDelay, nm.cfg.MaxJitterPercentage)),
-		SyncChannel:      syncChannel,
-		K8sContainerID:   k8sContainerID,
-		NsMntId:          container.Mntns,
+		ContainerID:            container.Runtime.ContainerID,
+		ImageID:                container.Runtime.ContainerImageDigest,
+		ImageTag:               container.Runtime.ContainerImageName,
+		UpdateDataTicker:       time.NewTicker(utils.AddJitter(nm.cfg.InitialDelay, nm.cfg.MaxJitterPercentage)),
+		SyncChannel:            syncChannel,
+		K8sContainerID:         k8sContainerID,
+		NsMntId:                container.Mntns,
+		InstanceID:             nm.sharedWatchedContainersData.Get(k8sContainerID).InstanceID,
+		TemplateHash:           nm.sharedWatchedContainersData.Get(k8sContainerID).TemplateHash,
+		Wlid:                   nm.sharedWatchedContainersData.Get(k8sContainerID).Wlid,
+		ParentResourceVersion:  nm.sharedWatchedContainersData.Get(k8sContainerID).ParentResourceVersion,
+		ContainerInfos:         nm.sharedWatchedContainersData.Get(k8sContainerID).ContainerInfos,
+		ParentWorkloadSelector: nm.sharedWatchedContainersData.Get(k8sContainerID).ParentWorkloadSelector,
 	}
 
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated

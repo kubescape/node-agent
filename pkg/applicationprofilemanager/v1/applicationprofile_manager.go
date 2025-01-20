@@ -34,7 +34,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/exp/rand"
 	"istio.io/pkg/cache"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,49 +42,51 @@ import (
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
 
 type ApplicationProfileManager struct {
-	cfg                      config.Config
-	clusterName              string
-	ctx                      context.Context
-	containerMutexes         storageUtils.MapMutex[string]                                      // key is k8sContainerID
-	trackedContainers        mapset.Set[string]                                                 // key is k8sContainerID
-	removedContainers        mapset.Set[string]                                                 // key is k8sContainerID
-	droppedEventsContainers  mapset.Set[string]                                                 // key is k8sContainerID
-	savedCapabilities        maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
-	savedEndpoints           maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
-	savedExecs               maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
-	savedOpens               maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
-	savedSyscalls            maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
-	savedRulePolicies        maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
-	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
-	toSaveEndpoints          maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.HTTPEndpoint]] // key is k8sContainerID
-	toSaveExecs              maps.SafeMap[string, *maps.SafeMap[string, []string]]              // key is k8sContainerID
-	toSaveOpens              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]]    // key is k8sContainerID
-	toSaveRulePolicies       maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.RulePolicy]]   // key is k8sContainerID
-	watchedContainerChannels maps.SafeMap[string, chan error]                                   // key is ContainerID
-	k8sClient                k8sclient.K8sClientInterface
-	k8sObjectCache           objectcache.K8sObjectCache
-	storageClient            storage.StorageClient
-	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
-	preRunningContainerIDs   mapset.Set[string]
-	seccompManager           seccompmanager.SeccompManagerClient
+	cfg                         config.Config
+	clusterName                 string
+	ctx                         context.Context
+	containerMutexes            storageUtils.MapMutex[string]                                      // key is k8sContainerID
+	trackedContainers           mapset.Set[string]                                                 // key is k8sContainerID
+	removedContainers           mapset.Set[string]                                                 // key is k8sContainerID
+	droppedEventsContainers     mapset.Set[string]                                                 // key is k8sContainerID
+	savedCapabilities           maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
+	savedEndpoints              maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
+	savedExecs                  maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
+	savedOpens                  maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
+	savedSyscalls               maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
+	savedRulePolicies           maps.SafeMap[string, cache.ExpiringCache]                          // key is k8sContainerID
+	toSaveCapabilities          maps.SafeMap[string, mapset.Set[string]]                           // key is k8sContainerID
+	toSaveEndpoints             maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.HTTPEndpoint]] // key is k8sContainerID
+	toSaveExecs                 maps.SafeMap[string, *maps.SafeMap[string, []string]]              // key is k8sContainerID
+	toSaveOpens                 maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]]    // key is k8sContainerID
+	toSaveRulePolicies          maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.RulePolicy]]   // key is k8sContainerID
+	watchedContainerChannels    maps.SafeMap[string, chan error]                                   // key is ContainerID
+	k8sClient                   k8sclient.K8sClientInterface
+	k8sObjectCache              objectcache.K8sObjectCache
+	storageClient               storage.StorageClient
+	syscallPeekFunc             func(nsMountId uint64) ([]string, error)
+	preRunningContainerIDs      mapset.Set[string]
+	seccompManager              seccompmanager.SeccompManagerClient
+	sharedWatchedContainersData *maps.SafeMap[string, *utils.WatchedContainerData]
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient) (*ApplicationProfileManager, error) {
+func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, preRunningContainerIDs mapset.Set[string], k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient, sharedWatchedContainersData *maps.SafeMap[string, *utils.WatchedContainerData]) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
-		cfg:                     cfg,
-		clusterName:             clusterName,
-		ctx:                     ctx,
-		k8sClient:               k8sClient,
-		k8sObjectCache:          k8sObjectCache,
-		storageClient:           storageClient,
-		containerMutexes:        storageUtils.NewMapMutex[string](),
-		trackedContainers:       mapset.NewSet[string](),
-		removedContainers:       mapset.NewSet[string](),
-		droppedEventsContainers: mapset.NewSet[string](),
-		preRunningContainerIDs:  preRunningContainerIDs,
-		seccompManager:          seccompManager,
+		cfg:                         cfg,
+		clusterName:                 clusterName,
+		ctx:                         ctx,
+		k8sClient:                   k8sClient,
+		k8sObjectCache:              k8sObjectCache,
+		storageClient:               storageClient,
+		containerMutexes:            storageUtils.NewMapMutex[string](),
+		trackedContainers:           mapset.NewSet[string](),
+		removedContainers:           mapset.NewSet[string](),
+		droppedEventsContainers:     mapset.NewSet[string](),
+		preRunningContainerIDs:      preRunningContainerIDs,
+		seccompManager:              seccompManager,
+		sharedWatchedContainersData: sharedWatchedContainersData,
 	}, nil
 }
 
@@ -624,23 +625,26 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.startApplicationProfiling")
 	defer span.End()
 
-	// Random sleep to avoid overloading the api server
-	time.Sleep(time.Duration(rand.Intn(10)) * time.Second)
-
 	syncChannel := make(chan error, 10)
 	am.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
 
 	watchedContainer := &utils.WatchedContainerData{
-		ContainerID:      container.Runtime.ContainerID,
-		ImageID:          container.Runtime.ContainerImageDigest,
-		ImageTag:         container.Runtime.ContainerImageName,
-		UpdateDataTicker: time.NewTicker(utils.AddJitter(am.cfg.InitialDelay, am.cfg.MaxJitterPercentage)),
-		SyncChannel:      syncChannel,
-		K8sContainerID:   k8sContainerID,
-		NsMntId:          container.Mntns,
+		ContainerID:            container.Runtime.ContainerID,
+		ImageID:                container.Runtime.ContainerImageDigest,
+		ImageTag:               container.Runtime.ContainerImageName,
+		UpdateDataTicker:       time.NewTicker(utils.AddJitter(am.cfg.InitialDelay, am.cfg.MaxJitterPercentage)),
+		SyncChannel:            syncChannel,
+		K8sContainerID:         k8sContainerID,
+		NsMntId:                container.Mntns,
+		InstanceID:             am.sharedWatchedContainersData.Get(k8sContainerID).InstanceID,
+		TemplateHash:           am.sharedWatchedContainersData.Get(k8sContainerID).TemplateHash,
+		Wlid:                   am.sharedWatchedContainersData.Get(k8sContainerID).Wlid,
+		ParentResourceVersion:  am.sharedWatchedContainersData.Get(k8sContainerID).ParentResourceVersion,
+		ContainerInfos:         am.sharedWatchedContainersData.Get(k8sContainerID).ContainerInfos,
+		ParentWorkloadSelector: am.sharedWatchedContainersData.Get(k8sContainerID).ParentWorkloadSelector,
 	}
 
-	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
+	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated (This should return quickly because the container is already enriched).
 	if err := backoff.Retry(func() error {
 		return am.ensureInstanceID(container, watchedContainer)
 	}, backoff.NewExponentialBackOff()); err != nil {

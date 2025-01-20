@@ -34,7 +34,7 @@ func TestCreateNetworkManager(t *testing.T) {
 	storageClient := &storage.StorageHttpClientMock{}
 	dnsManager := &dnsmanager.DNSManagerMock{}
 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
-	am := CreateNetworkManager(ctx, cfg, "cluster", k8sClient, storageClient, dnsManager, mapset.NewSet[string](), k8sObjectCacheMock)
+	am := CreateNetworkManager(ctx, cfg, "cluster", k8sClient, storageClient, dnsManager, mapset.NewSet[string](), k8sObjectCacheMock, nil)
 	// prepare container
 	container := &containercollection.Container{
 		K8s: containercollection.K8sMetadata{
