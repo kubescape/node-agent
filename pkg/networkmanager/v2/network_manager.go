@@ -432,6 +432,13 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 	ctx, span := otel.Tracer("").Start(ctx, "NetworkManager.startNetworkMonitoring")
 	defer span.End()
 
+	if !nm.cfg.EnableRuntimeDetection && nm.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
+		logger.L().Debug("NetworkManager - skip container", helpers.String("reason", "preRunning container"),
+			helpers.String("container ID", container.Runtime.ContainerID),
+			helpers.String("k8s workload", k8sContainerID))
+		return
+	}
+
 	syncChannel := make(chan error, 10)
 	nm.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
 

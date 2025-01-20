@@ -623,6 +623,13 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.startApplicationProfiling")
 	defer span.End()
 
+	if !am.cfg.EnableRuntimeDetection && am.preRunningContainerIDs.Contains(container.Runtime.ContainerID) {
+		logger.L().Debug("ApplicationProfileManager - skip container", helpers.String("reason", "preRunning container"),
+			helpers.String("container ID", container.Runtime.ContainerID),
+			helpers.String("k8s workload", k8sContainerID))
+		return
+	}
+
 	syncChannel := make(chan error, 10)
 	am.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
 
