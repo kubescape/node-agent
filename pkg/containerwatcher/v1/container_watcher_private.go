@@ -60,32 +60,8 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			}
 		}
 
-		// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
-		var sharedWatchedContainerData *utils.WatchedContainerData
-		err := backoff.Retry(func() error {
-			data, err := ch.getSharedWatchedContainerData(notif.Container)
-			if err != nil {
-				return err
-			}
-			if data == nil {
-				return fmt.Errorf("received nil container data")
-			}
-			sharedWatchedContainerData = data
-			return nil
-		}, backoff.NewExponentialBackOff())
-
-		if err != nil {
-			logger.L().Error("IGContainerWatcher.containerCallback - error getting shared watched container data", helpers.Error(err))
-			return // Exit early on error
-		}
-
-		if sharedWatchedContainerData == nil {
-			logger.L().Error("IGContainerWatcher.containerCallback - shared watched container data is nil after retry")
-			return
-		}
-
-		// Only set the data if we successfully retrieved it
-		ch.sharedWatchedContainersData.Set(notif.Container.Runtime.ContainerID, sharedWatchedContainerData)
+		// Set shared watched container data
+		go ch.setSharedWatchedContainerData(notif.Container)
 
 		time.AfterFunc(sniffingTime, func() {
 			logger.L().Info("stop monitor on container - monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
@@ -102,6 +78,35 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 		ch.sharedWatchedContainersData.Delete(notif.Container.Runtime.ContainerID)
 	}
+}
+
+func (ch *IGContainerWatcher) setSharedWatchedContainerData(container *containercollection.Container) {
+	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
+	var sharedWatchedContainerData *utils.WatchedContainerData
+	err := backoff.Retry(func() error {
+		data, err := ch.getSharedWatchedContainerData(container)
+		if err != nil {
+			return err
+		}
+		if data == nil {
+			return fmt.Errorf("received nil container data")
+		}
+		sharedWatchedContainerData = data
+		return nil
+	}, backoff.NewExponentialBackOff())
+
+	if err != nil {
+		logger.L().Error("IGContainerWatcher.containerCallback - error getting shared watched container data", helpers.Error(err))
+		return // Exit early on error
+	}
+
+	if sharedWatchedContainerData == nil {
+		logger.L().Error("IGContainerWatcher.containerCallback - shared watched container data is nil after retry")
+		return
+	}
+
+	// Only set the data if we successfully retrieved it
+	ch.sharedWatchedContainersData.Set(container.Runtime.ContainerID, sharedWatchedContainerData)
 }
 
 func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*utils.WatchedContainerData, error) {
