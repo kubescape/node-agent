@@ -149,9 +149,7 @@ type IGContainerWatcher struct {
 	sshWorkerChan          chan *tracersshtype.Event
 	httpWorkerChan         chan *tracerhttptype.Event
 
-	preRunningContainersIDs mapset.Set[string]
 	objectCache             objectcache.ObjectCache
-	timeBasedContainers     mapset.Set[string] // list of containers to track based on ticker
 	ruleManagedPods         mapset.Set[string] // list of pods to track based on rules
 	metrics                 metricsmanager.MetricsManager
 	// cache
@@ -465,8 +463,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		// cache
 		ruleBindingPodNotify:         ruleBindingPodNotify,
-		preRunningContainersIDs:      mapset.NewSet[string](),
-		timeBasedContainers:          mapset.NewSet[string](),
 		ruleManagedPods:              mapset.NewSet[string](),
 		runtime:                      runtime,
 		thirdPartyTracers:            mapset.NewSet[containerwatcher.CustomTracer](),
