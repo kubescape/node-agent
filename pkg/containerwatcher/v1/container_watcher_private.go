@@ -486,14 +486,6 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 
 	ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
 	ch.objectCache.K8sObjectCache().DeleteSharedContainerData(container.Runtime.ContainerID)
-
-	// TODO: I dont think we need the following code ->
-	event := containercollection.PubSubEvent{
-		Timestamp: time.Now().Format(time.RFC3339),
-		Type:      containercollection.EventTypeRemoveContainer,
-		Container: container,
-	}
-	ch.tracerCollection.TracerMapsUpdater()(event)
 }
 
 func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {
