@@ -76,7 +76,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			helpers.String("k8s workload", k8sContainerID))
 		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
 		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
-		ch.sharedWatchedContainersData.Delete(notif.Container.Runtime.ContainerID)
+		ch.objectCache.K8sObjectCache().DeleteSharedContainerData(notif.Container.Runtime.ContainerID)
 	}
 }
 
@@ -105,8 +105,7 @@ func (ch *IGContainerWatcher) setSharedWatchedContainerData(container *container
 		return
 	}
 
-	// Only set the data if we successfully retrieved it
-	ch.sharedWatchedContainersData.Set(container.Runtime.ContainerID, sharedWatchedContainerData)
+	ch.objectCache.K8sObjectCache().SetSharedContainerData(container.Runtime.ContainerID, sharedWatchedContainerData)
 }
 
 func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*utils.WatchedContainerData, error) {
@@ -521,7 +520,7 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 	logger.L().Debug("IGContainerWatcher - stopping to monitor on container", helpers.String("container ID", container.Runtime.ContainerID), helpers.String("namespace", container.K8s.Namespace), helpers.String("PodName", container.K8s.PodName), helpers.String("ContainerName", container.K8s.ContainerName))
 
 	ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
-	ch.sharedWatchedContainersData.Delete(container.Runtime.ContainerID)
+	ch.objectCache.K8sObjectCache().DeleteSharedContainerData(container.Runtime.ContainerID)
 
 	// TODO: I dont think we need the following code ->
 	event := containercollection.PubSubEvent{

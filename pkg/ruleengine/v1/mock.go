@@ -3,7 +3,9 @@ package ruleengine
 import (
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -14,11 +16,12 @@ var _ objectcache.NetworkNeighborhoodCache = (*RuleObjectCacheMock)(nil)
 var _ objectcache.DnsCache = (*RuleObjectCacheMock)(nil)
 
 type RuleObjectCacheMock struct {
-	profile   *v1beta1.ApplicationProfile
-	podSpec   *corev1.PodSpec
-	podStatus *corev1.PodStatus
-	nn        *v1beta1.NetworkNeighborhood
-	dnsCache  map[string]string
+	profile                 *v1beta1.ApplicationProfile
+	podSpec                 *corev1.PodSpec
+	podStatus               *corev1.PodStatus
+	nn                      *v1beta1.NetworkNeighborhood
+	dnsCache                map[string]string
+	containerIDToSharedData maps.SafeMap[string, *utils.WatchedContainerData]
 }
 
 func (r *RuleObjectCacheMock) GetApplicationProfile(string) *v1beta1.ApplicationProfile {
@@ -57,6 +60,20 @@ func (r *RuleObjectCacheMock) GetApiServerIpAddress() string {
 
 func (r *RuleObjectCacheMock) GetPods() []*corev1.Pod {
 	return []*corev1.Pod{{Spec: *r.podSpec, Status: *r.podStatus}}
+}
+
+func (k *RuleObjectCacheMock) SetSharedContainerData(containerID string, data *utils.WatchedContainerData) {
+	k.containerIDToSharedData.Set(containerID, data)
+}
+func (k *RuleObjectCacheMock) GetSharedContainerData(containerID string) *utils.WatchedContainerData {
+	if data, ok := k.containerIDToSharedData.Load(containerID); ok {
+		return data
+	}
+
+	return nil
+}
+func (k *RuleObjectCacheMock) DeleteSharedContainerData(containerID string) {
+	k.containerIDToSharedData.Delete(containerID)
 }
 
 func (r *RuleObjectCacheMock) IsPreRunningContainer(containerID string) bool {

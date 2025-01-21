@@ -4,9 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/goradd/maps"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
-	"github.com/kubescape/node-agent/pkg/utils"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -146,14 +145,14 @@ func TestAddRunningContainers(t *testing.T) {
 			slices.Sort(tt.containersToRemove)
 
 			ch := IGContainerWatcher{
-				ruleManagedPods:             mapset.NewSet[string](tt.preRuleManagedPods...),
-				timeBasedContainers:         mapset.NewSet[string](tt.preTimeBasedContainers...),
-				preRunningContainersIDs:     mapset.NewSet[string](),
-				containerCollection:         &containercollection.ContainerCollection{},
-				tracerCollection:            &tracercollection.TracerCollection{},
-				namespace:                   tt.ignore.namespace,
-				podName:                     tt.ignore.name,
-				sharedWatchedContainersData: &maps.SafeMap[string, *utils.WatchedContainerData]{},
+				ruleManagedPods:         mapset.NewSet[string](tt.preRuleManagedPods...),
+				timeBasedContainers:     mapset.NewSet[string](tt.preTimeBasedContainers...),
+				preRunningContainersIDs: mapset.NewSet[string](),
+				containerCollection:     &containercollection.ContainerCollection{},
+				tracerCollection:        &tracercollection.TracerCollection{},
+				namespace:               tt.ignore.namespace,
+				podName:                 tt.ignore.name,
+				objectCache:             &objectcache.ObjectCacheMock{},
 			}
 
 			// Mock the calls to the Kubernetes client here
@@ -243,12 +242,12 @@ func TestUnregisterContainer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			ch := IGContainerWatcher{
-				ruleManagedPods:             mapset.NewSet[string](tt.preRuleManagedPods...),
-				timeBasedContainers:         mapset.NewSet[string](tt.preTimeBasedContainers...),
-				preRunningContainersIDs:     mapset.NewSet[string](),
-				containerCollection:         &containercollection.ContainerCollection{},
-				tracerCollection:            &tracercollection.TracerCollection{},
-				sharedWatchedContainersData: &maps.SafeMap[string, *utils.WatchedContainerData]{},
+				ruleManagedPods:         mapset.NewSet[string](tt.preRuleManagedPods...),
+				timeBasedContainers:     mapset.NewSet[string](tt.preTimeBasedContainers...),
+				preRunningContainersIDs: mapset.NewSet[string](),
+				containerCollection:     &containercollection.ContainerCollection{},
+				tracerCollection:        &tracercollection.TracerCollection{},
+				objectCache:             &objectcache.ObjectCacheMock{},
 			}
 
 			for pod, containers := range tt.podToContainers {

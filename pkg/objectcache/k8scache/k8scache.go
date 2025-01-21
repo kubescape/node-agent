@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,6 +28,7 @@ type K8sObjectCacheImpl struct {
 	pods                    maps.SafeMap[string, *corev1.Pod]
 	apiServerIpAddress      string
 	preRunningContainersIDs mapset.Set[string]
+	containerIDToSharedData maps.SafeMap[string, *utils.WatchedContainerData]
 }
 
 func NewK8sObjectCache(nodeName string, k8sClient k8sclient.K8sClientInterface, preRunningContainersIDs mapset.Set[string]) (*K8sObjectCacheImpl, error) {
@@ -35,6 +37,7 @@ func NewK8sObjectCache(nodeName string, k8sClient k8sclient.K8sClientInterface, 
 		nodeName:                nodeName,
 		pods:                    maps.SafeMap[string, *corev1.Pod]{},
 		preRunningContainersIDs: preRunningContainersIDs,
+		containerIDToSharedData: maps.SafeMap[string, *utils.WatchedContainerData]{},
 	}
 
 	if err := k.setApiServerIpAddress(); err != nil {
@@ -52,9 +55,8 @@ func (k *K8sObjectCacheImpl) IsPreRunningContainer(containerID string) bool {
 // GetPodSpec returns the pod spec for the given namespace and pod name, if not found returns nil
 func (k *K8sObjectCacheImpl) GetPodSpec(namespace, podName string) *corev1.PodSpec {
 	p := podKey(namespace, podName)
-	if k.pods.Has(p) {
-		spec := k.pods.Get(p).Spec
-		return &spec
+	if pod, ok := k.pods.Load(p); ok {
+		return &pod.Spec
 	}
 
 	return nil
@@ -74,8 +76,8 @@ func (k *K8sObjectCacheImpl) GetPodStatus(namespace, podName string) *corev1.Pod
 // GetPod returns the pod for the given namespace and pod name, if not found returns nil
 func (k *K8sObjectCacheImpl) GetPod(namespace, podName string) *corev1.Pod {
 	p := podKey(namespace, podName)
-	if k.pods.Has(p) {
-		return k.pods.Get(p)
+	if pod, ok := k.pods.Load(p); ok {
+		return pod
 	}
 
 	return nil
@@ -87,6 +89,22 @@ func (k *K8sObjectCacheImpl) GetApiServerIpAddress() string {
 
 func (k *K8sObjectCacheImpl) GetPods() []*corev1.Pod {
 	return k.pods.Values()
+}
+
+func (k *K8sObjectCacheImpl) SetSharedContainerData(containerID string, data *utils.WatchedContainerData) {
+	k.containerIDToSharedData.Set(containerID, data)
+}
+
+func (k *K8sObjectCacheImpl) GetSharedContainerData(containerID string) *utils.WatchedContainerData {
+	if data, ok := k.containerIDToSharedData.Load(containerID); ok {
+		return data
+	}
+
+	return nil
+}
+
+func (k *K8sObjectCacheImpl) DeleteSharedContainerData(containerID string) {
+	k.containerIDToSharedData.Delete(containerID)
 }
 
 func (k *K8sObjectCacheImpl) AddHandler(_ context.Context, obj runtime.Object) {

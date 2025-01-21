@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
-	"github.com/goradd/maps"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -93,8 +92,7 @@ func TestCreateNetworkManager(t *testing.T) {
 	storageClient := &storage.StorageHttpClientMock{}
 	dnsManager := &dnsmanager.DNSManagerMock{}
 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
-	sharedWatchedContainersData := &maps.SafeMap[string, *utils.WatchedContainerData]{}
-	am := CreateNetworkManager(ctx, cfg, "cluster", k8sClient, storageClient, dnsManager, mapset.NewSet[string](), k8sObjectCacheMock, sharedWatchedContainersData)
+	am := CreateNetworkManager(ctx, cfg, "cluster", k8sClient, storageClient, dnsManager, mapset.NewSet[string](), k8sObjectCacheMock)
 	// prepare container
 	container := &containercollection.Container{
 		K8s: containercollection.K8sMetadata{
@@ -113,7 +111,7 @@ func TestCreateNetworkManager(t *testing.T) {
 	sharedWatchedContainerData := &utils.WatchedContainerData{}
 	err := ensureInstanceID(container, sharedWatchedContainerData, k8sClient, "cluster")
 	assert.NoError(t, err)
-	sharedWatchedContainersData.Set(container.Runtime.ContainerID, sharedWatchedContainerData)
+	k8sObjectCacheMock.SetSharedContainerData(container.Runtime.ContainerID, sharedWatchedContainerData)
 	// report network event
 	go am.ReportNetworkEvent("ns/pod/cont", tracernetworktype.Event{
 		Port:      80,

@@ -37,44 +37,42 @@ const (
 )
 
 type RuleManager struct {
-	cfg                         config.Config
-	ruleBindingCache            bindingcache.RuleBindingCache
-	trackedContainers           mapset.Set[string] // key is k8sContainerID
-	k8sClient                   k8sclient.K8sClientInterface
-	ctx                         context.Context
-	objectCache                 objectcache.ObjectCache
-	exporter                    exporters.Exporter
-	metrics                     metricsmanager.MetricsManager
-	syscallPeekFunc             func(nsMountId uint64) ([]string, error)
-	podToWlid                   maps.SafeMap[string, string] // key is namespace/podName
-	nodeName                    string
-	clusterName                 string
-	containerIdToShimPid        maps.SafeMap[string, uint32]
-	containerIdToPid            maps.SafeMap[string, uint32]
-	enricher                    ruleenginetypes.Enricher
-	processManager              processmanager.ProcessManagerClient
-	dnsManager                  dnsmanager.DNSResolver
-	sharedWatchedContainersData *maps.SafeMap[string, *utils.WatchedContainerData]
+	cfg                  config.Config
+	ruleBindingCache     bindingcache.RuleBindingCache
+	trackedContainers    mapset.Set[string] // key is k8sContainerID
+	k8sClient            k8sclient.K8sClientInterface
+	ctx                  context.Context
+	objectCache          objectcache.ObjectCache
+	exporter             exporters.Exporter
+	metrics              metricsmanager.MetricsManager
+	syscallPeekFunc      func(nsMountId uint64) ([]string, error)
+	podToWlid            maps.SafeMap[string, string] // key is namespace/podName
+	nodeName             string
+	clusterName          string
+	containerIdToShimPid maps.SafeMap[string, uint32]
+	containerIdToPid     maps.SafeMap[string, uint32]
+	enricher             ruleenginetypes.Enricher
+	processManager       processmanager.ProcessManagerClient
+	dnsManager           dnsmanager.DNSResolver
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher, sharedWatchedContainersData *maps.SafeMap[string, *utils.WatchedContainerData]) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher) (*RuleManager, error) {
 	return &RuleManager{
-		cfg:                         cfg,
-		ctx:                         ctx,
-		k8sClient:                   k8sClient,
-		trackedContainers:           mapset.NewSet[string](),
-		ruleBindingCache:            ruleBindingCache,
-		objectCache:                 objectCache,
-		exporter:                    exporter,
-		metrics:                     metrics,
-		nodeName:                    nodeName,
-		clusterName:                 clusterName,
-		enricher:                    enricher,
-		processManager:              processManager,
-		dnsManager:                  dnsManager,
-		sharedWatchedContainersData: sharedWatchedContainersData,
+		cfg:               cfg,
+		ctx:               ctx,
+		k8sClient:         k8sClient,
+		trackedContainers: mapset.NewSet[string](),
+		ruleBindingCache:  ruleBindingCache,
+		objectCache:       objectCache,
+		exporter:          exporter,
+		metrics:           metrics,
+		nodeName:          nodeName,
+		clusterName:       clusterName,
+		enricher:          enricher,
+		processManager:    processManager,
+		dnsManager:        dnsManager,
 	}, nil
 }
 
@@ -186,7 +184,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		}
 		podID := utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName)
 		if !rm.podToWlid.Has(podID) {
-			w := rm.sharedWatchedContainersData.Get(notif.Container.Runtime.ContainerID).Wlid
+			w := rm.objectCache.K8sObjectCache().GetSharedContainerData(notif.Container.Runtime.ContainerID).Wlid
 			if w != "" {
 				rm.podToWlid.Set(podID, w)
 			} else {
@@ -212,7 +210,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 
 func (rm *RuleManager) waitForSharedContainerData(containerID string) error {
 	return backoff.Retry(func() error {
-		if _, ok := rm.sharedWatchedContainersData.Load(containerID); ok {
+		if rm.objectCache.K8sObjectCache().GetSharedContainerData(containerID) != nil {
 			return nil
 		}
 		return fmt.Errorf("container %s not found in shared data", containerID)

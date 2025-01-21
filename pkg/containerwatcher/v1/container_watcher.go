@@ -45,6 +45,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
@@ -148,11 +149,11 @@ type IGContainerWatcher struct {
 	sshWorkerChan          chan *tracersshtype.Event
 	httpWorkerChan         chan *tracerhttptype.Event
 
-	preRunningContainersIDs     mapset.Set[string]
-	sharedWatchedContainersData *maps.SafeMap[string, *utils.WatchedContainerData]
-	timeBasedContainers         mapset.Set[string] // list of containers to track based on ticker
-	ruleManagedPods             mapset.Set[string] // list of pods to track based on rules
-	metrics                     metricsmanager.MetricsManager
+	preRunningContainersIDs mapset.Set[string]
+	objectCache             objectcache.ObjectCache
+	timeBasedContainers     mapset.Set[string] // list of containers to track based on ticker
+	ruleManagedPods         mapset.Set[string] // list of pods to track based on rules
+	metrics                 metricsmanager.MetricsManager
 	// cache
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify
 	// container runtime
@@ -163,7 +164,7 @@ type IGContainerWatcher struct {
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, igK8sClient *containercollection.K8sClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]], thirdPartyEnricher containerwatcher.ThirdPartyEnricher, processManager processmanager.ProcessManagerClient, sharedWatchedContainersData *maps.SafeMap[string, *utils.WatchedContainerData], clusterName string) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
+func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, igK8sClient *containercollection.K8sClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient, preRunningContainers mapset.Set[string], ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]], thirdPartyEnricher containerwatcher.ThirdPartyEnricher, processManager processmanager.ProcessManagerClient, clusterName string, objectCache objectcache.ObjectCache) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
 	containerCollection := &containercollection.ContainerCollection{}
 	// Create a tracer collection instance
 	tracerCollection, err := tracercollection.NewTracerCollection(containerCollection)
@@ -472,7 +473,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		thirdPartyContainerReceivers: mapset.NewSet[containerwatcher.ContainerReceiver](),
 		thirdPartyEnricher:           thirdPartyEnricher,
 		processManager:               processManager,
-		sharedWatchedContainersData:  sharedWatchedContainersData,
+		objectCache:                  objectCache,
 	}, nil
 }
 
