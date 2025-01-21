@@ -3,6 +3,7 @@ package applicationprofilemanager
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -10,21 +11,73 @@ import (
 	"testing"
 	"time"
 
+	"github.com/armosec/utils-k8s-go/wlid"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
+
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/config"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
 	istiocache "istio.io/pkg/cache"
 )
+
+func ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData, k8sclient *k8sclient.K8sClientMock, clusterName string) error {
+	if watchedContainer.InstanceID != nil {
+		return nil
+	}
+	wl, err := k8sclient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
+	if err != nil {
+		return fmt.Errorf("failed to get workload: %w", err)
+	}
+	pod := wl.(*workloadinterface.Workload)
+	// fill container type, index and names
+	if watchedContainer.ContainerType == utils.Unknown {
+		if err := watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName); err != nil {
+			return fmt.Errorf("failed to set container info: %w", err)
+		}
+	}
+	// get pod template hash
+	watchedContainer.TemplateHash, _ = pod.GetLabel("pod-template-hash")
+	// find parentWlid
+	kind, name, err := k8sclient.CalculateWorkloadParentRecursive(pod)
+	if err != nil {
+		return fmt.Errorf("failed to calculate workload parent: %w", err)
+	}
+	parentWorkload, err := k8sclient.GetWorkload(pod.GetNamespace(), kind, name)
+	if err != nil {
+		return fmt.Errorf("failed to get parent workload: %w", err)
+	}
+	w := parentWorkload.(*workloadinterface.Workload)
+	watchedContainer.Wlid = w.GenerateWlid(clusterName)
+	err = wlid.IsWlidValid(watchedContainer.Wlid)
+	if err != nil {
+		return fmt.Errorf("failed to validate WLID: %w", err)
+	}
+	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
+	// find instanceID - this has to be the last one
+	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
+	if err != nil {
+		return fmt.Errorf("failed to generate instanceID: %w", err)
+	}
+	watchedContainer.InstanceID = instanceIDs[0]
+	for i := range instanceIDs {
+		if instanceIDs[i].GetContainerName() == container.K8s.ContainerName {
+			watchedContainer.InstanceID = instanceIDs[i]
+		}
+	}
+	return nil
+}
 
 func TestApplicationProfileManager(t *testing.T) {
 	cfg := config.Config{
@@ -54,6 +107,10 @@ func TestApplicationProfileManager(t *testing.T) {
 			},
 		},
 	}
+	sharedWatchedContainerData := &utils.WatchedContainerData{}
+	err = ensureInstanceID(container, sharedWatchedContainerData, k8sClient, "cluster")
+	assert.NoError(t, err)
+	k8sObjectCacheMock.SetSharedContainerData(container.Runtime.ContainerID, sharedWatchedContainerData)
 	// register peek function for syscall tracer
 	go am.RegisterPeekFunc(func(_ uint64) ([]string, error) {
 		return []string{"dup", "listen"}, nil
@@ -68,6 +125,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	go am.ReportFileExec("ns/pod/cont", "/bin/ls", []string{"-l"})
 	// report file open
 	go am.ReportFileOpen("ns/pod/cont", "/etc/passwd", []string{"O_RDONLY"})
+
 	// report container started (race condition with reports)
 	am.ContainerCallback(containercollection.PubSubEvent{
 		Type:      containercollection.EventTypeAddContainer,

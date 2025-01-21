@@ -9,6 +9,7 @@ require (
 	github.com/armosec/armoapi-go v0.0.506
 	github.com/armosec/utils-k8s-go v0.0.30
 	github.com/aws/aws-sdk-go v1.55.5
+	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cilium/ebpf v0.17.1
 	github.com/crewjam/rfc5424 v0.1.0

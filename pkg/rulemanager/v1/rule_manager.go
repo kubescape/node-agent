@@ -2,13 +2,11 @@ package rulemanager
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
 	"time"
 
-	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v4"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/dustin/go-humanize"
@@ -17,9 +15,7 @@ import (
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
@@ -32,37 +28,32 @@ import (
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
-	storageUtils "github.com/kubescape/storage/pkg/utils"
-	"go.opentelemetry.io/otel"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
-	// Max file size to calculate hash is 50MB.
-	maxFileSize int64 = 50 * 1024 * 1024
+	maxFileSize   = 50 * 1024 * 1024 // 50MB
+	syscallPeriod = 5 * time.Second
 )
 
 type RuleManager struct {
-	cfg                      config.Config
-	watchedContainerChannels maps.SafeMap[string, chan error] // key is k8sContainerID
-	ruleBindingCache         bindingcache.RuleBindingCache
-	trackedContainers        mapset.Set[string] // key is k8sContainerID
-	k8sClient                k8sclient.K8sClientInterface
-	ctx                      context.Context
-	objectCache              objectcache.ObjectCache
-	exporter                 exporters.Exporter
-	metrics                  metricsmanager.MetricsManager
-	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
-	containerMutexes         storageUtils.MapMutex[string] // key is k8sContainerID
-	podToWlid                maps.SafeMap[string, string]  // key is namespace/podName
-	nodeName                 string
-	clusterName              string
-	containerIdToShimPid     maps.SafeMap[string, uint32]
-	containerIdToPid         maps.SafeMap[string, uint32]
-	enricher                 ruleenginetypes.Enricher
-	processManager           processmanager.ProcessManagerClient
-	dnsManager               dnsmanager.DNSResolver
+	cfg                  config.Config
+	ruleBindingCache     bindingcache.RuleBindingCache
+	trackedContainers    mapset.Set[string] // key is k8sContainerID
+	k8sClient            k8sclient.K8sClientInterface
+	ctx                  context.Context
+	objectCache          objectcache.ObjectCache
+	exporter             exporters.Exporter
+	metrics              metricsmanager.MetricsManager
+	syscallPeekFunc      func(nsMountId uint64) ([]string, error)
+	podToWlid            maps.SafeMap[string, string] // key is namespace/podName
+	nodeName             string
+	clusterName          string
+	containerIdToShimPid maps.SafeMap[string, uint32]
+	containerIdToPid     maps.SafeMap[string, uint32]
+	enricher             ruleenginetypes.Enricher
+	processManager       processmanager.ProcessManagerClient
+	dnsManager           dnsmanager.DNSResolver
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
@@ -72,7 +63,6 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		cfg:               cfg,
 		ctx:               ctx,
 		k8sClient:         k8sClient,
-		containerMutexes:  storageUtils.NewMapMutex[string](),
 		trackedContainers: mapset.NewSet[string](),
 		ruleBindingCache:  ruleBindingCache,
 		objectCache:       objectCache,
@@ -86,47 +76,45 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 	}, nil
 }
 
-func (rm *RuleManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+func (rm *RuleManager) monitorContainer(container *containercollection.Container, k8sContainerID string) error {
 	logger.L().Debug("RuleManager - start monitor on container",
-		helpers.Int("container index", watchedContainer.ContainerIndex),
-		helpers.String("container ID", watchedContainer.ContainerID),
-		helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		helpers.String("container ID", container.Runtime.ContainerID),
+		helpers.String("k8s container id", k8sContainerID))
 
-	var pod *corev1.Pod
-	if err := backoff.Retry(func() error {
-		p, err := rm.k8sClient.GetKubernetesClient().CoreV1().Pods(container.K8s.Namespace).Get(ctx, container.K8s.PodName, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-		pod = p
-		return nil
-	}, backoff.NewExponentialBackOff()); err != nil {
-		logger.L().Debug("RuleManager - failed to get pod", helpers.Error(err),
-			helpers.String("namespace", container.K8s.Namespace),
-			helpers.String("name", container.K8s.PodName))
-		// failed to get pod
-		return err
-	}
-	syscallTicker := time.NewTicker(5 * time.Second)
+	syscallTicker := time.NewTicker(syscallPeriod)
 
 	for {
 		select {
+		case <-rm.ctx.Done():
+			logger.L().Debug("RuleManager - stop monitor on container",
+				helpers.String("container ID", container.Runtime.ContainerID),
+				helpers.String("k8s container id", k8sContainerID))
+			return nil
 		case <-syscallTicker.C:
 			if rm.syscallPeekFunc == nil {
-				logger.L().Debug("RuleManager - syscallPeekFunc is not set", helpers.String("container ID", watchedContainer.ContainerID))
+				logger.L().Debug("RuleManager - syscallPeekFunc is not set", helpers.String("container ID", container.Runtime.ContainerID))
 				continue
 			}
 
-			if watchedContainer.NsMntId == 0 {
-				logger.L().Debug("RuleManager - mount namespace ID is not set", helpers.String("container ID", watchedContainer.ContainerID))
+			if container.Mntns == 0 {
+				logger.L().Debug("RuleManager - mount namespace ID is not set", helpers.String("container ID", container.Runtime.ContainerID))
+			}
+
+			if !rm.trackedContainers.Contains(k8sContainerID) {
+				logger.L().Debug("RuleManager - container is not tracked", helpers.String("container ID", container.Runtime.ContainerID))
+				return nil
 			}
 
 			var syscalls []string
-			if syscallsFromFunc, err := rm.syscallPeekFunc(watchedContainer.NsMntId); err == nil {
+			if syscallsFromFunc, err := rm.syscallPeekFunc(container.Mntns); err == nil {
 				syscalls = syscallsFromFunc
 			}
 
-			rules := rm.ruleBindingCache.ListRulesForPod(pod.GetNamespace(), pod.GetName())
+			if len(syscalls) == 0 {
+				continue
+			}
+
+			rules := rm.ruleBindingCache.ListRulesForPod(container.K8s.Namespace, container.K8s.PodName)
 			for _, syscall := range syscalls {
 				event := ruleenginetypes.SyscallEvent{
 					Event: eventtypes.Event{
@@ -134,23 +122,22 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 						Type:      eventtypes.NORMAL,
 						CommonData: eventtypes.CommonData{
 							Runtime: eventtypes.BasicRuntimeMetadata{
-								ContainerID: watchedContainer.ContainerID,
+								ContainerID: container.Runtime.ContainerID,
 								RuntimeName: container.Runtime.RuntimeName,
 							},
 							K8s: eventtypes.K8sMetadata{
-								Node: pod.Spec.NodeName,
+								Node: rm.nodeName,
 								BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-									Namespace:     pod.GetNamespace(),
-									PodName:       pod.GetName(),
-									PodLabels:     pod.GetLabels(),
-									ContainerName: watchedContainer.InstanceID.GetContainerName(),
+									Namespace:     container.K8s.Namespace,
+									PodName:       container.K8s.PodName,
+									PodLabels:     container.K8s.PodLabels,
+									ContainerName: container.K8s.ContainerName,
 								},
-								HostNetwork: pod.Spec.HostNetwork,
 							},
 						},
 					},
 					WithMountNsID: eventtypes.WithMountNsID{
-						MountNsID: watchedContainer.NsMntId,
+						MountNsID: container.Mntns,
 					},
 					Pid: container.ContainerPid(),
 					// TODO: Figure out how to get UID, GID and comm from the syscall.
@@ -162,88 +149,31 @@ func (rm *RuleManager) monitorContainer(ctx context.Context, container *containe
 
 				rm.processEvent(utils.SyscallEventType, &event, rules)
 			}
-		case err := <-watchedContainer.SyncChannel:
-			switch {
-			case errors.Is(err, utils.ContainerHasTerminatedError):
-				return nil
-			}
 		}
 	}
 }
 
-func (rm *RuleManager) ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	if watchedContainer.InstanceID != nil {
-		return nil
+func (rm *RuleManager) startRuleManager(container *containercollection.Container, k8sContainerID string) {
+	if err := rm.waitForSharedContainerData(container.Runtime.ContainerID); err != nil {
+		logger.L().Error("RuleManager - failed to get shared container data", helpers.Error(err))
+		return
 	}
-	wl, err := rm.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
-	if err != nil {
-		return fmt.Errorf("failed to get workload: %w", err)
-	}
-	pod := wl.(*workloadinterface.Workload)
-	// fill container type, index and names
-	if watchedContainer.ContainerType == utils.Unknown {
-		if err := watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName); err != nil {
-			return fmt.Errorf("failed to set container info: %w", err)
+
+	podID := utils.CreateK8sPodID(container.K8s.Namespace, container.K8s.PodName)
+	if !rm.podToWlid.Has(podID) {
+		w := rm.objectCache.K8sObjectCache().GetSharedContainerData(container.Runtime.ContainerID).Wlid
+		if w != "" {
+			rm.podToWlid.Set(podID, w)
+		} else {
+			logger.L().Debug("RuleManager - failed to get workload identifier", helpers.String("k8s workload", container.K8s.PodName))
 		}
 	}
-	// find instanceID - this has to be the last one
-	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
-	if err != nil {
-		return fmt.Errorf("failed to generate instanceID: %w", err)
-	}
-	watchedContainer.InstanceID = instanceIDs[0]
-	for i := range instanceIDs {
-		if instanceIDs[i].GetContainerName() == container.K8s.ContainerName {
-			watchedContainer.InstanceID = instanceIDs[i]
-		}
-	}
-	return nil
-}
 
-func (rm *RuleManager) startRuleManager(ctx context.Context, container *containercollection.Container, k8sContainerID string) {
-	ctx, span := otel.Tracer("").Start(ctx, "RuleManager.startRuleManager")
-	defer span.End()
-
-	syncChannel := make(chan error, 10)
-	rm.watchedContainerChannels.Set(container.Runtime.ContainerID, syncChannel)
-
-	watchedContainer := &utils.WatchedContainerData{
-		ContainerID:    container.Runtime.ContainerID,
-		ImageID:        container.Runtime.ContainerImageDigest,
-		ImageTag:       container.Runtime.ContainerImageName,
-		SyncChannel:    syncChannel,
-		K8sContainerID: k8sContainerID,
-		NsMntId:        container.Mntns,
-	}
-
-	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated.
-	if err := backoff.Retry(func() error {
-		return rm.ensureInstanceID(container, watchedContainer)
-	}, backoff.NewExponentialBackOff()); err != nil {
-		logger.L().Debug("RuleManager - failed to ensure instanceID", helpers.Error(err),
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
-	}
-
-	if err := rm.monitorContainer(ctx, container, watchedContainer); err != nil {
+	if err := rm.monitorContainer(container, k8sContainerID); err != nil {
 		logger.L().Debug("RuleManager - stop monitor on container", helpers.String("reason", err.Error()),
-			helpers.Int("container index", watchedContainer.ContainerIndex),
-			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+			helpers.String("container ID", container.Runtime.ContainerID),
+			helpers.String("k8s container id", k8sContainerID))
 	}
-
-	rm.deleteResources(watchedContainer)
-}
-
-func (rm *RuleManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
-	// make sure we don't run deleteResources and saveProfile at the same time
-	rm.containerMutexes.Lock(watchedContainer.K8sContainerID)
-	defer rm.containerMutexes.Unlock(watchedContainer.K8sContainerID)
-
-	// delete resources
-	rm.trackedContainers.Remove(watchedContainer.K8sContainerID)
-	rm.watchedContainerChannels.Delete(watchedContainer.ContainerID)
 }
 
 func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) {
@@ -256,21 +186,13 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		if rm.watchedContainerChannels.Has(notif.Container.Runtime.ContainerID) {
+		if rm.trackedContainers.Contains(notif.Container.Runtime.ContainerID) {
 			logger.L().Debug("RuleManager - container already exist in memory",
 				helpers.String("container ID", notif.Container.Runtime.ContainerID),
 				helpers.String("k8s workload", k8sContainerID))
 			return
 		}
-		podID := utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName)
-		if !rm.podToWlid.Has(podID) {
-			w, err := rm.getWorkloadIdentifier(notif.Container.K8s.Namespace, notif.Container.K8s.PodName)
-			if err != nil {
-				logger.L().Debug("RuleManager - failed to get workload identifier", helpers.Error(err), helpers.String("k8s workload", notif.Container.K8s.PodName))
-			} else {
-				rm.podToWlid.Set(podID, w)
-			}
-		}
+
 		rm.trackedContainers.Add(k8sContainerID)
 		shim, err := utils.GetProcessStat(int(notif.Container.ContainerPid()))
 		if err != nil {
@@ -279,43 +201,22 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			rm.containerIdToShimPid.Set(notif.Container.Runtime.ContainerID, uint32(shim.PPID))
 		}
 		rm.containerIdToPid.Set(notif.Container.Runtime.ContainerID, notif.Container.ContainerPid())
-		go rm.startRuleManager(rm.ctx, notif.Container, k8sContainerID)
+		go rm.startRuleManager(notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:
-		channel := rm.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
-		if channel != nil {
-			channel <- utils.ContainerHasTerminatedError
-		}
-		rm.watchedContainerChannels.Delete(notif.Container.Runtime.ContainerID)
+		rm.trackedContainers.Remove(k8sContainerID)
 		rm.podToWlid.Delete(utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName))
 		rm.containerIdToShimPid.Delete(notif.Container.Runtime.ContainerID)
 		rm.containerIdToPid.Delete(notif.Container.Runtime.ContainerID)
 	}
 }
 
-func (rm *RuleManager) getWorkloadIdentifier(podNamespace, podName string) (string, error) {
-	wl, err := rm.k8sClient.GetWorkload(podNamespace, "Pod", podName)
-	if err != nil {
-		return "", fmt.Errorf("failed to get workload: %w", err)
-	}
-	pod := wl.(*workloadinterface.Workload)
-
-	// find parentWlid
-	kind, name, err := rm.k8sClient.CalculateWorkloadParentRecursive(pod)
-	if err != nil {
-		return "", fmt.Errorf("failed to calculate workload parent: %w", err)
-	}
-	parentWorkload, err := rm.k8sClient.GetWorkload(pod.GetNamespace(), kind, name)
-	if err != nil {
-		return "", fmt.Errorf("failed to get parent workload: %w", err)
-	}
-	w := parentWorkload.(*workloadinterface.Workload)
-	generatedWlid := w.GenerateWlid(rm.clusterName)
-	err = wlid.IsWlidValid(generatedWlid)
-	if err != nil {
-		return "", fmt.Errorf("failed to validate WLID: %w", err)
-	}
-
-	return generatedWlid, nil
+func (rm *RuleManager) waitForSharedContainerData(containerID string) error {
+	return backoff.Retry(func() error {
+		if rm.objectCache.K8sObjectCache().GetSharedContainerData(containerID) != nil {
+			return nil
+		}
+		return fmt.Errorf("container %s not found in shared data", containerID)
+	}, backoff.NewExponentialBackOff())
 }
 
 func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error)) {

@@ -273,7 +273,7 @@ func main() {
 	if cfg.EnableMalwareDetection {
 		// create exporter
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
-		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, cfg.NodeName, clusterData.ClusterName, exporter, prometheusExporter)
+		malwareManager, err = malwaremanagerv1.CreateMalwareManager(cfg, k8sClient, cfg.NodeName, clusterData.ClusterName, exporter, prometheusExporter, k8sObjectCache)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating MalwareManager", helpers.Error(err))
 		}
@@ -315,7 +315,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime, nil, nil, processManager)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, preRunningContainersIDs, &ruleBindingNotify, containerRuntime, nil, nil, processManager, clusterData.ClusterName, objCache)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -151,6 +152,7 @@ func TestAddRunningContainers(t *testing.T) {
 				tracerCollection:        &tracercollection.TracerCollection{},
 				namespace:               tt.ignore.namespace,
 				podName:                 tt.ignore.name,
+				objectCache:             &objectcache.ObjectCacheMock{},
 			}
 
 			// Mock the calls to the Kubernetes client here
@@ -245,6 +247,7 @@ func TestUnregisterContainer(t *testing.T) {
 				preRunningContainersIDs: mapset.NewSet[string](),
 				containerCollection:     &containercollection.ContainerCollection{},
 				tracerCollection:        &tracercollection.TracerCollection{},
+				objectCache:             &objectcache.ObjectCacheMock{},
 			}
 
 			for pod, containers := range tt.podToContainers {

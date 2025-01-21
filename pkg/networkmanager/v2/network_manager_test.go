@@ -4,14 +4,19 @@ import (
 	"context"
 	"fmt"
 	"testing"
+
 	"time"
 
+	"github.com/armosec/utils-k8s-go/wlid"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -22,6 +27,59 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 )
+
+func ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData, k8sclient *k8sclient.K8sClientMock, clusterName string) error {
+	if watchedContainer.InstanceID != nil {
+		return nil
+	}
+	wl, err := k8sclient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
+	if err != nil {
+		return fmt.Errorf("failed to get workload: %w", err)
+	}
+	pod := wl.(*workloadinterface.Workload)
+	// fill container type, index and names
+	if watchedContainer.ContainerType == utils.Unknown {
+		if err := watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName); err != nil {
+			return fmt.Errorf("failed to set container info: %w", err)
+		}
+	}
+	// get pod template hash
+	watchedContainer.TemplateHash, _ = pod.GetLabel("pod-template-hash")
+	// find parentWlid
+	kind, name, err := k8sclient.CalculateWorkloadParentRecursive(pod)
+	if err != nil {
+		return fmt.Errorf("failed to calculate workload parent: %w", err)
+	}
+	parentWorkload, err := k8sclient.GetWorkload(pod.GetNamespace(), kind, name)
+	if err != nil {
+		return fmt.Errorf("failed to get parent workload: %w", err)
+	}
+	w := parentWorkload.(*workloadinterface.Workload)
+	watchedContainer.Wlid = w.GenerateWlid(clusterName)
+	err = wlid.IsWlidValid(watchedContainer.Wlid)
+	if err != nil {
+		return fmt.Errorf("failed to validate WLID: %w", err)
+	}
+	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
+	// find parent selector
+	selector, err := w.GetSelector()
+	if err != nil {
+		return fmt.Errorf("failed to get parentWL selector: %w", err)
+	}
+	watchedContainer.ParentWorkloadSelector = selector
+	// find instanceID - this has to be the last one
+	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
+	if err != nil {
+		return fmt.Errorf("failed to generate instanceID: %w", err)
+	}
+	watchedContainer.InstanceID = instanceIDs[0]
+	for i := range instanceIDs {
+		if instanceIDs[i].GetContainerName() == container.K8s.ContainerName {
+			watchedContainer.InstanceID = instanceIDs[i]
+		}
+	}
+	return nil
+}
 
 func TestCreateNetworkManager(t *testing.T) {
 	cfg := config.Config{
@@ -50,6 +108,10 @@ func TestCreateNetworkManager(t *testing.T) {
 			},
 		},
 	}
+	sharedWatchedContainerData := &utils.WatchedContainerData{}
+	err := ensureInstanceID(container, sharedWatchedContainerData, k8sClient, "cluster")
+	assert.NoError(t, err)
+	k8sObjectCacheMock.SetSharedContainerData(container.Runtime.ContainerID, sharedWatchedContainerData)
 	// report network event
 	go am.ReportNetworkEvent("ns/pod/cont", tracernetworktype.Event{
 		Port:      80,
