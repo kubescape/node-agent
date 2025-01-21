@@ -154,6 +154,21 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 }
 
 func (rm *RuleManager) startRuleManager(container *containercollection.Container, k8sContainerID string) {
+	if err := rm.waitForSharedContainerData(container.Runtime.ContainerID); err != nil {
+		logger.L().Error("RuleManager - failed to get shared container data", helpers.Error(err))
+		return
+	}
+
+	podID := utils.CreateK8sPodID(container.K8s.Namespace, container.K8s.PodName)
+	if !rm.podToWlid.Has(podID) {
+		w := rm.objectCache.K8sObjectCache().GetSharedContainerData(container.Runtime.ContainerID).Wlid
+		if w != "" {
+			rm.podToWlid.Set(podID, w)
+		} else {
+			logger.L().Debug("RuleManager - failed to get workload identifier", helpers.String("k8s workload", container.K8s.PodName))
+		}
+	}
+
 	if err := rm.monitorContainer(container, k8sContainerID); err != nil {
 		logger.L().Debug("RuleManager - stop monitor on container", helpers.String("reason", err.Error()),
 			helpers.String("container ID", container.Runtime.ContainerID),
@@ -171,26 +186,13 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		if err := rm.waitForSharedContainerData(notif.Container.Runtime.ContainerID); err != nil {
-			logger.L().Error("RuleManager - failed to get shared container data", helpers.Error(err))
-			return
-		}
-
 		if rm.trackedContainers.Contains(notif.Container.Runtime.ContainerID) {
 			logger.L().Debug("RuleManager - container already exist in memory",
 				helpers.String("container ID", notif.Container.Runtime.ContainerID),
 				helpers.String("k8s workload", k8sContainerID))
 			return
 		}
-		podID := utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName)
-		if !rm.podToWlid.Has(podID) {
-			w := rm.objectCache.K8sObjectCache().GetSharedContainerData(notif.Container.Runtime.ContainerID).Wlid
-			if w != "" {
-				rm.podToWlid.Set(podID, w)
-			} else {
-				logger.L().Debug("RuleManager - failed to get workload identifier", helpers.String("k8s workload", notif.Container.K8s.PodName))
-			}
-		}
+
 		rm.trackedContainers.Add(k8sContainerID)
 		shim, err := utils.GetProcessStat(int(notif.Container.ContainerPid()))
 		if err != nil {
