@@ -63,7 +63,6 @@ type ApplicationProfileManager struct {
 	storageClient            storage.StorageClient
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	seccompManager           seccompmanager.SeccompManagerClient
-	startTime                time.Time
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
@@ -81,7 +80,6 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		removedContainers:       mapset.NewSet[string](),
 		droppedEventsContainers: mapset.NewSet[string](),
 		seccompManager:          seccompManager,
-		startTime:               time.Now(),
 	}, nil
 }
 
@@ -573,17 +571,15 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.startApplicationProfiling")
 	defer span.End()
 
-	preRunning := time.Unix(0, int64(container.Runtime.ContainerStartedAt)).Before(am.startTime)
-
-	if !am.cfg.EnableRuntimeDetection && preRunning {
-		logger.L().Debug("ApplicationProfileManager - skip container", helpers.String("reason", "preRunning container"),
+	if err := am.waitForSharedContainerData(container.Runtime.ContainerID); err != nil {
+		logger.L().Error("ApplicationProfileManager - container not found in shared data",
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
 		return
 	}
 
-	if err := am.waitForSharedContainerData(container.Runtime.ContainerID); err != nil {
-		logger.L().Error("ApplicationProfileManager - container not found in shared data",
+	if !am.cfg.EnableRuntimeDetection && am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).PreRunningContainer {
+		logger.L().Debug("ApplicationProfileManager - skip container", helpers.String("reason", "preRunning container"),
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
 		return
@@ -609,7 +605,7 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		SeccompProfilePath:     am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).SeccompProfilePath,
 		ContainerType:          am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ContainerType,
 		ContainerIndex:         am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ContainerIndex,
-		PreRunningContainer:    preRunning,
+		PreRunningContainer:    am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).PreRunningContainer,
 	}
 
 	if err := am.monitorContainer(ctx, container, watchedContainer); err != nil {

@@ -48,7 +48,6 @@ type NetworkManager struct {
 	k8sObjectCache           objectcache.K8sObjectCache
 	storageClient            storage.StorageClient
 	dnsResolverClient        dnsmanager.DNSResolver
-	startTime                time.Time
 }
 
 var _ networkmanager.NetworkManagerClient = (*NetworkManager)(nil)
@@ -66,7 +65,6 @@ func CreateNetworkManager(ctx context.Context, cfg config.Config, clusterName st
 		trackedContainers:       mapset.NewSet[string](),
 		removedContainers:       mapset.NewSet[string](),
 		droppedEventsContainers: mapset.NewSet[string](),
-		startTime:               time.Now(),
 	}
 }
 
@@ -391,17 +389,15 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 	ctx, span := otel.Tracer("").Start(ctx, "NetworkManager.startNetworkMonitoring")
 	defer span.End()
 
-	preRunning := time.Unix(0, int64(container.Runtime.ContainerStartedAt)).Before(nm.startTime)
-
-	if !nm.cfg.EnableRuntimeDetection && preRunning {
-		logger.L().Debug("NetworkManager - skip container", helpers.String("reason", "preRunning container"),
+	if err := nm.waitForSharedContainerData(container.Runtime.ContainerID); err != nil {
+		logger.L().Error("NetworkManager - failed to get shared container data", helpers.Error(err),
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
 		return
 	}
 
-	if err := nm.waitForSharedContainerData(container.Runtime.ContainerID); err != nil {
-		logger.L().Error("NetworkManager - failed to get shared container data", helpers.Error(err),
+	if !nm.cfg.EnableRuntimeDetection && nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).PreRunningContainer {
+		logger.L().Debug("NetworkManager - skip container", helpers.String("reason", "preRunning container"),
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
 		return
@@ -427,7 +423,7 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 		SeccompProfilePath:     nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).SeccompProfilePath,
 		ContainerType:          nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ContainerType,
 		ContainerIndex:         nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ContainerIndex,
-		PreRunningContainer:    preRunning,
+		PreRunningContainer:    nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).PreRunningContainer,
 	}
 
 	if err := nm.monitorContainer(ctx, container, watchedContainer); err != nil {

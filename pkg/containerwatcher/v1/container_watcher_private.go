@@ -142,6 +142,8 @@ func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *container
 		return nil, fmt.Errorf("failed to get selector: %w", err)
 	}
 	watchedContainer.ParentWorkloadSelector = selector
+	preRunning := time.Unix(0, int64(container.Runtime.ContainerStartedAt)).Before(ch.agentStartTime)
+	watchedContainer.PreRunningContainer = preRunning
 	// find instanceID - this has to be the last one
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -88,6 +89,7 @@ type IGContainerWatcher struct {
 	podName           string
 	namespace         string
 	clusterName       string
+	agentStartTime    time.Time
 
 	// Clients
 	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
@@ -149,9 +151,9 @@ type IGContainerWatcher struct {
 	sshWorkerChan          chan *tracersshtype.Event
 	httpWorkerChan         chan *tracerhttptype.Event
 
-	objectCache             objectcache.ObjectCache
-	ruleManagedPods         mapset.Set[string] // list of pods to track based on rules
-	metrics                 metricsmanager.MetricsManager
+	objectCache     objectcache.ObjectCache
+	ruleManagedPods mapset.Set[string] // list of pods to track based on rules
+	metrics         metricsmanager.MetricsManager
 	// cache
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify
 	// container runtime
@@ -421,6 +423,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		cfg:               cfg,
 		containerSelector: containercollection.ContainerSelector{}, // Empty selector to get all containers
 		clusterName:       clusterName,
+		agentStartTime:    time.Now(),
 
 		// Clients
 		applicationProfileManager: applicationProfileManager,
