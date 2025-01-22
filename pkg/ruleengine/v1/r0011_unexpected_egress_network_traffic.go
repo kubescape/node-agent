@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
@@ -37,10 +38,11 @@ var _ ruleengine.RuleEvaluator = (*R0011UnexpectedEgressNetworkTraffic)(nil)
 type R0011UnexpectedEgressNetworkTraffic struct {
 	BaseRule
 	alertedAdresses maps.SafeMap[string, bool]
+	startTime       time.Time
 }
 
 func CreateRuleR0011UnexpectedEgressNetworkTraffic() *R0011UnexpectedEgressNetworkTraffic {
-	return &R0011UnexpectedEgressNetworkTraffic{}
+	return &R0011UnexpectedEgressNetworkTraffic{startTime: time.Now()}
 }
 
 func (rule *R0011UnexpectedEgressNetworkTraffic) Name() string {
@@ -55,7 +57,7 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) DeleteRule() {
 
 func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent *tracernetworktype.Event, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	// Check if the container was pre-running.
-	if objCache.K8sObjectCache().IsPreRunningContainer(networkEvent.Runtime.ContainerID) {
+	if time.Unix(int64(networkEvent.Runtime.ContainerStartedAt), 0).Before(rule.startTime) {
 		return nil
 	}
 

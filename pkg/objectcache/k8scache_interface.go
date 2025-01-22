@@ -1,7 +1,6 @@
 package objectcache
 
 import (
-	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
@@ -13,7 +12,6 @@ type K8sObjectCache interface {
 	GetApiServerIpAddress() string
 	GetPods() []*corev1.Pod
 	GetPod(namespace, podName string) *corev1.Pod
-	IsPreRunningContainer(containerID string) bool
 	SetSharedContainerData(containerID string, data *utils.WatchedContainerData)
 	GetSharedContainerData(containerID string) *utils.WatchedContainerData
 	DeleteSharedContainerData(containerID string)
@@ -25,7 +23,6 @@ type K8sObjectCacheMock struct {
 	ApiServerIpAddress      string
 	PodSpec                 corev1.PodSpec
 	PodStatus               corev1.PodStatus
-	PreRunningContainersIDs mapset.Set[string]
 	containerIDToSharedData maps.SafeMap[string, *utils.WatchedContainerData]
 }
 
@@ -43,9 +40,6 @@ func (k *K8sObjectCacheMock) GetApiServerIpAddress() string {
 }
 func (k *K8sObjectCacheMock) GetPods() []*corev1.Pod {
 	return []*corev1.Pod{{Spec: k.PodSpec, Status: k.PodStatus}}
-}
-func (k *K8sObjectCacheMock) IsPreRunningContainer(containerID string) bool {
-	return k.PreRunningContainersIDs.Contains(containerID)
 }
 func (k *K8sObjectCacheMock) SetSharedContainerData(containerID string, data *utils.WatchedContainerData) {
 	k.containerIDToSharedData.Set(containerID, data)

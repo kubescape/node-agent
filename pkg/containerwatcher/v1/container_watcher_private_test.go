@@ -145,35 +145,23 @@ func TestAddRunningContainers(t *testing.T) {
 			slices.Sort(tt.containersToRemove)
 
 			ch := IGContainerWatcher{
-				ruleManagedPods:         mapset.NewSet[string](tt.preRuleManagedPods...),
-				timeBasedContainers:     mapset.NewSet[string](tt.preTimeBasedContainers...),
-				preRunningContainersIDs: mapset.NewSet[string](),
-				containerCollection:     &containercollection.ContainerCollection{},
-				tracerCollection:        &tracercollection.TracerCollection{},
-				namespace:               tt.ignore.namespace,
-				podName:                 tt.ignore.name,
-				objectCache:             &objectcache.ObjectCacheMock{},
+				ruleManagedPods:     mapset.NewSet[string](tt.preRuleManagedPods...),
+				containerCollection: &containercollection.ContainerCollection{},
+				tracerCollection:    &tracercollection.TracerCollection{},
+				namespace:           tt.ignore.namespace,
+				podName:             tt.ignore.name,
+				objectCache:         &objectcache.ObjectCacheMock{},
 			}
 
-			// Mock the calls to the Kubernetes client here
-			k8sMock := NewIGK8sClientMock()
-
-			ch.addRunningContainers(k8sMock, tt.notify)
+			ch.addRunningContainers(tt.notify)
 
 			r := ch.ruleManagedPods.ToSlice()
-			p := ch.preRunningContainersIDs.ToSlice()
 			slices.Sort(r)
-			slices.Sort(p)
 
 			assert.Equal(t, tt.expectedRuleManagedPods, r)
-			assert.Equal(t, tt.expectedPreRunning, p)
 
 			for _, containerID := range tt.containersToRemove {
 				assert.False(t, ch.ruleManagedPods.Contains(containerID))
-			}
-
-			for _, containerID := range tt.containersToAdd {
-				assert.NotNil(t, ch.containerCollection.GetContainer(containerID))
 			}
 		})
 	}
@@ -184,7 +172,6 @@ func TestUnregisterContainer(t *testing.T) {
 		name                    string
 		unregisterContainer     string
 		unregisterContainersPod string
-		preTimeBasedContainers  []string
 		preRuleManagedPods      []string
 		podToContainers         map[string][]string
 		expectedContainers      []string
@@ -197,9 +184,8 @@ func TestUnregisterContainer(t *testing.T) {
 				"pod1": {"container1"},
 				"pod2": {"container2"},
 			},
-			preTimeBasedContainers: []string{"container2"},
-			preRuleManagedPods:     []string{"test/pod2"},
-			expectedContainers:     []string{"container2"},
+			preRuleManagedPods: []string{"test/pod2"},
+			expectedContainers: []string{"container2"},
 		},
 		{
 			name:                    "Test still in TimeBasedContainers",
@@ -209,9 +195,8 @@ func TestUnregisterContainer(t *testing.T) {
 				"pod1": {"container1"},
 				"pod2": {"container2"},
 			},
-			preTimeBasedContainers: []string{"container1", "container2"},
-			preRuleManagedPods:     []string{"test/pod2"},
-			expectedContainers:     []string{"container1", "container2"},
+			preRuleManagedPods: []string{"test/pod2"},
+			expectedContainers: []string{"container2"},
 		},
 		{
 			name:                    "Test still in RuleManagedPods",
@@ -220,9 +205,8 @@ func TestUnregisterContainer(t *testing.T) {
 			podToContainers: map[string][]string{
 				"pod1": {"container1", "container2"},
 			},
-			preTimeBasedContainers: []string{"container2"},
-			preRuleManagedPods:     []string{"test/pod1"},
-			expectedContainers:     []string{"container1", "container2"},
+			preRuleManagedPods: []string{"test/pod1"},
+			expectedContainers: []string{"container1", "container2"},
 		},
 		{
 			name:                    "Test still in both",
@@ -232,9 +216,8 @@ func TestUnregisterContainer(t *testing.T) {
 				"pod1": {"container1"},
 				"pod2": {"container2"},
 			},
-			preTimeBasedContainers: []string{"container1", "container2"},
-			preRuleManagedPods:     []string{"test/pod1", "test/pod2"},
-			expectedContainers:     []string{"container1", "container2"},
+			preRuleManagedPods: []string{"test/pod1", "test/pod2"},
+			expectedContainers: []string{"container1", "container2"},
 		},
 	}
 
@@ -242,12 +225,10 @@ func TestUnregisterContainer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			ch := IGContainerWatcher{
-				ruleManagedPods:         mapset.NewSet[string](tt.preRuleManagedPods...),
-				timeBasedContainers:     mapset.NewSet[string](tt.preTimeBasedContainers...),
-				preRunningContainersIDs: mapset.NewSet[string](),
-				containerCollection:     &containercollection.ContainerCollection{},
-				tracerCollection:        &tracercollection.TracerCollection{},
-				objectCache:             &objectcache.ObjectCacheMock{},
+				ruleManagedPods:     mapset.NewSet[string](tt.preRuleManagedPods...),
+				containerCollection: &containercollection.ContainerCollection{},
+				tracerCollection:    &tracercollection.TracerCollection{},
+				objectCache:         &objectcache.ObjectCacheMock{},
 			}
 
 			for pod, containers := range tt.podToContainers {

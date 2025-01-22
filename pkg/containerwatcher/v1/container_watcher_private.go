@@ -45,11 +45,6 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 			helpers.String("k8s workload", k8sContainerID),
 			helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
-		if ch.running {
-			ch.timeBasedContainers.Add(notif.Container.Runtime.ContainerID)
-		} else {
-			ch.preRunningContainersIDs.Add(notif.Container.Runtime.ContainerID)
-		}
 		// Check if Pod has a label of max sniffing time
 		sniffingTime := utils.AddJitter(ch.cfg.MaxSniffingTime, ch.cfg.MaxJitterPercentage)
 		if podLabelMaxSniffingTime, ok := notif.Container.K8s.PodLabels[MaxSniffingTimeLabel]; ok {
@@ -65,7 +60,6 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 
 		time.AfterFunc(sniffingTime, func() {
 			logger.L().Info("stop monitor on container - monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
-			ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 			ch.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.networkManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.unregisterContainer(notif.Container)
@@ -74,8 +68,6 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		logger.L().Info("stop monitor on container - container has terminated",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
-		ch.preRunningContainersIDs.Remove(notif.Container.Runtime.ContainerID)
-		ch.timeBasedContainers.Remove(notif.Container.Runtime.ContainerID)
 		ch.objectCache.K8sObjectCache().DeleteSharedContainerData(notif.Container.Runtime.ContainerID)
 	}
 }
@@ -150,6 +142,8 @@ func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *container
 		return nil, fmt.Errorf("failed to get selector: %w", err)
 	}
 	watchedContainer.ParentWorkloadSelector = selector
+	preRunning := time.Unix(0, int64(container.Runtime.ContainerStartedAt)).Before(ch.agentStartTime)
+	watchedContainer.PreRunningContainer = preRunning
 	// find instanceID - this has to be the last one
 	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
 	if err != nil {
@@ -212,6 +206,9 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 		// WithTracerCollection enables the interation between the TracerCollection and ContainerCollection packages.
 		containercollection.WithTracerCollection(ch.tracerCollection),
+
+		// WithProcEnrichment enables the enrichment of events with process information
+		containercollection.WithProcEnrichment(),
 	}
 
 	// Initialize the container collection
@@ -219,10 +216,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		return fmt.Errorf("initializing container collection: %w", err)
 	}
 
-	// Add pre-running containers to preRunningContainersIDs and ruleManagedPods, this is needed for the following reasons:
-	// 1. For runtime threat detection we want to keep monitoring the containers and not stop monitoring them after the max sniffing time.
-	// 2. To know in different parts of the code if a container "learning" is partial or complete.
-	// In addition, this routine will keep monitoring for rule bindings notifications for the entire lifecycle of the node-agent.
+	// This routine will keep monitoring for rule bindings notifications for the entire lifecycle of the node-agent.
 	go ch.startRunningContainers()
 
 	return nil
@@ -230,11 +224,11 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 func (ch *IGContainerWatcher) startRunningContainers() {
 	for n := range *ch.ruleBindingPodNotify {
-		ch.addRunningContainers(ch.igK8sClient, &n)
+		ch.addRunningContainers(&n)
 	}
 }
 
-func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *rulebindingmanager.RuleBindingNotify) {
+func (ch *IGContainerWatcher) addRunningContainers(notf *rulebindingmanager.RuleBindingNotify) {
 	pod := notf.GetPod()
 
 	// skip containers that should be ignored
@@ -244,42 +238,16 @@ func (ch *IGContainerWatcher) addRunningContainers(k8sClient IGK8sClient, notf *
 	}
 
 	k8sPodID := utils.CreateK8sPodID(pod.GetNamespace(), pod.GetName())
-	runningContainers := k8sClient.GetRunningContainers(pod)
 
 	switch notf.GetAction() {
-	case rulebindingmanager.Removed:
-		ch.ruleManagedPods.Remove(k8sPodID)
-		for i := range runningContainers {
-			logger.L().Debug("IGContainerWatcher - removing container - pod not managed by rules or removed",
-				helpers.String("containerID", runningContainers[i].Runtime.ContainerID),
-				helpers.String("namespace", runningContainers[i].K8s.Namespace),
-				helpers.String("pod", runningContainers[i].K8s.PodName),
-				helpers.String("containerName", runningContainers[i].K8s.ContainerName))
-
-			ch.unregisterContainer(&runningContainers[i])
-		}
 	case rulebindingmanager.Added:
 		// add to the list of pods that are being monitored because of rules
 		ch.ruleManagedPods.Add(k8sPodID)
-
-		for i := range runningContainers {
-			if ch.timeBasedContainers.Contains(runningContainers[i].Runtime.ContainerID) || ch.preRunningContainersIDs.Contains(runningContainers[i].Runtime.ContainerID) {
-				// the container is already being monitored
-				continue
-			}
-
-			logger.L().Debug("IGContainerWatcher - adding to pre running containers",
-				helpers.String("containerID", runningContainers[i].Runtime.ContainerID),
-				helpers.String("namespace", runningContainers[i].K8s.Namespace),
-				helpers.String("pod", runningContainers[i].K8s.PodName),
-				helpers.String("containerName", runningContainers[i].K8s.ContainerName))
-
-			ch.preRunningContainersIDs.Add(runningContainers[i].Runtime.ContainerID)
-			ch.containerCollection.AddContainer(&runningContainers[i])
-		}
+	case rulebindingmanager.Removed:
+		ch.ruleManagedPods.Remove(k8sPodID)
 	}
-
 }
+
 func (ch *IGContainerWatcher) stopContainerCollection() {
 	if ch.containerCollection != nil {
 		ch.tracerCollection.Close()
@@ -507,8 +475,7 @@ func (ch *IGContainerWatcher) printNsMap(id string) {
 }
 
 func (ch *IGContainerWatcher) unregisterContainer(container *containercollection.Container) {
-	if ch.timeBasedContainers.Contains(container.Runtime.ContainerID) ||
-		ch.ruleManagedPods.Contains(utils.CreateK8sPodID(container.K8s.Namespace, container.K8s.PodName)) {
+	if ch.ruleManagedPods.Contains(utils.CreateK8sPodID(container.K8s.Namespace, container.K8s.PodName)) {
 		// the container should still be monitored
 		logger.L().Debug("IGContainerWatcher - container should still be monitored",
 			helpers.String("container ID", container.Runtime.ContainerID),
@@ -521,14 +488,6 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 
 	ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
 	ch.objectCache.K8sObjectCache().DeleteSharedContainerData(container.Runtime.ContainerID)
-
-	// TODO: I dont think we need the following code ->
-	event := containercollection.PubSubEvent{
-		Timestamp: time.Now().Format(time.RFC3339),
-		Type:      containercollection.EventTypeRemoveContainer,
-		Container: container,
-	}
-	ch.tracerCollection.TracerMapsUpdater()(event)
 }
 
 func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {

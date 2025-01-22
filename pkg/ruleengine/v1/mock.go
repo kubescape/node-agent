@@ -76,10 +76,6 @@ func (k *RuleObjectCacheMock) DeleteSharedContainerData(containerID string) {
 	k.containerIDToSharedData.Delete(containerID)
 }
 
-func (r *RuleObjectCacheMock) IsPreRunningContainer(containerID string) bool {
-	return false
-}
-
 func (r *RuleObjectCacheMock) K8sObjectCache() objectcache.K8sObjectCache {
 	return r
 }
