@@ -1,13 +1,15 @@
 package ruleengine
 
 import (
-	corev1 "k8s.io/api/core/v1"
+	"context"
 
 	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
-
+	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 var _ objectcache.ApplicationProfileCache = (*RuleObjectCacheMock)(nil)
@@ -62,18 +64,18 @@ func (r *RuleObjectCacheMock) GetPods() []*corev1.Pod {
 	return []*corev1.Pod{{Spec: *r.podSpec, Status: *r.podStatus}}
 }
 
-func (k *RuleObjectCacheMock) SetSharedContainerData(containerID string, data *utils.WatchedContainerData) {
-	k.containerIDToSharedData.Set(containerID, data)
+func (r *RuleObjectCacheMock) SetSharedContainerData(containerID string, data *utils.WatchedContainerData) {
+	r.containerIDToSharedData.Set(containerID, data)
 }
-func (k *RuleObjectCacheMock) GetSharedContainerData(containerID string) *utils.WatchedContainerData {
-	if data, ok := k.containerIDToSharedData.Load(containerID); ok {
+func (r *RuleObjectCacheMock) GetSharedContainerData(containerID string) *utils.WatchedContainerData {
+	if data, ok := r.containerIDToSharedData.Load(containerID); ok {
 		return data
 	}
 
 	return nil
 }
-func (k *RuleObjectCacheMock) DeleteSharedContainerData(containerID string) {
-	k.containerIDToSharedData.Delete(containerID)
+func (r *RuleObjectCacheMock) DeleteSharedContainerData(containerID string) {
+	r.containerIDToSharedData.Delete(containerID)
 }
 
 func (r *RuleObjectCacheMock) K8sObjectCache() objectcache.K8sObjectCache {
@@ -106,4 +108,20 @@ func (r *RuleObjectCacheMock) ResolveIpToDomain(ip string) string {
 	}
 
 	return ""
+}
+
+func (r *RuleObjectCacheMock) WatchResources() []watcher.WatchResource {
+	return nil
+}
+
+func (r *RuleObjectCacheMock) AddHandler(_ context.Context, _ runtime.Object) {
+	return
+}
+
+func (r *RuleObjectCacheMock) ModifyHandler(_ context.Context, _ runtime.Object) {
+	return
+}
+
+func (r *RuleObjectCacheMock) DeleteHandler(_ context.Context, _ runtime.Object) {
+	return
 }
