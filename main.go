@@ -250,7 +250,10 @@ func main() {
 
 	} else {
 		ruleManager = rulemanager.CreateRuleManagerMock()
-		objCache = objectcache.NewObjectCacheMock()
+		apc := &objectcache.ApplicationProfileCacheMock{}
+		nnc := &objectcache.NetworkNeighborhoodCacheMock{}
+		dc := &objectcache.DnsCacheMock{}
+		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
 		processManager = processmanager.CreateProcessManagerMock()
 	}
