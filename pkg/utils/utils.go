@@ -287,7 +287,6 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 	if err := checkContainers(ephemeralContainersIterator(podSpec.EphemeralContainers), podStatus.EphemeralContainerStatuses, EphemeralContainer); err != nil {
 		return err
 	}
-	logger.L().Info("Matthias - SetContainerInfo", helpers.Interface("ContainerInfos", watchedContainer.ContainerInfos))
 	return nil
 }
 
