@@ -72,11 +72,13 @@ func ensureInstanceID(container *containercollection.Container, watchedContainer
 	if err != nil {
 		return fmt.Errorf("failed to generate instanceID: %w", err)
 	}
-	watchedContainer.InstanceID = instanceIDs[0]
 	for i := range instanceIDs {
 		if instanceIDs[i].GetContainerName() == container.K8s.ContainerName {
 			watchedContainer.InstanceID = instanceIDs[i]
 		}
+	}
+	if watchedContainer.InstanceID == nil {
+		return fmt.Errorf("failed to find instance id for container %s", container.K8s.ContainerName)
 	}
 	return nil
 }
