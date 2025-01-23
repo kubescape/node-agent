@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"iter"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -239,9 +240,6 @@ func (watchedContainer *WatchedContainerData) StatusUpdated() bool {
 }
 
 func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterface.IWorkload, containerName string) error {
-	if watchedContainer.ContainerInfos == nil {
-		watchedContainer.ContainerInfos = make(map[ContainerType][]ContainerInfo)
-	}
 	podSpec, err := wl.GetPodSpec()
 	if err != nil {
 		return fmt.Errorf("failed to get pod spec: %w", err)
@@ -254,46 +252,23 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 	if podSpec.SecurityContext != nil && podSpec.SecurityContext.SeccompProfile != nil {
 		watchedContainer.SeccompProfilePath = podSpec.SecurityContext.SeccompProfile.LocalhostProfile
 	}
-	// TODO rewrite with podutil.VisitContainers()
-	checkContainers := func(containers []v1.Container, ephemeralContainers []v1.EphemeralContainer, containerType ContainerType) error {
-		var imageID string
-		for _, c := range podStatus.ContainerStatuses {
-			if c.Name == containerName {
-				imageID = c.ImageID
-			}
-		}
-		if imageID == "" {
-			return fmt.Errorf("failed to get imageID for container %s", containerName)
-		}
+	// fill container infos
+	if watchedContainer.ContainerInfos == nil {
+		watchedContainer.ContainerInfos = make(map[ContainerType][]ContainerInfo)
+	}
+	checkContainers := func(containers iter.Seq2[int, v1.Container], containerStatuses []v1.ContainerStatus, containerType ContainerType) error {
 		var containersInfo []ContainerInfo
-		if containerType == EphemeralContainer {
-			for i, c := range ephemeralContainers {
-				containersInfo = append(containersInfo, ContainerInfo{
-					Name:     c.Name,
-					ImageTag: c.Image,
-					ImageID:  imageID,
-				})
-				if c.Name == containerName {
-					watchedContainer.ContainerIndex = i
-					watchedContainer.ContainerType = containerType
-					if c.SecurityContext != nil && c.SecurityContext.SeccompProfile != nil {
-						watchedContainer.SeccompProfilePath = c.SecurityContext.SeccompProfile.LocalhostProfile
-					}
-				}
-			}
-		} else {
-			for i, c := range containers {
-				containersInfo = append(containersInfo, ContainerInfo{
-					Name:     c.Name,
-					ImageTag: c.Image,
-					ImageID:  imageID,
-				})
-				if c.Name == containerName {
-					watchedContainer.ContainerIndex = i
-					watchedContainer.ContainerType = containerType
-					if c.SecurityContext != nil && c.SecurityContext.SeccompProfile != nil {
-						watchedContainer.SeccompProfilePath = c.SecurityContext.SeccompProfile.LocalhostProfile
-					}
+		for i, c := range containers {
+			containersInfo = append(containersInfo, ContainerInfo{
+				Name:     c.Name,
+				ImageTag: c.Image,
+				ImageID:  containerStatuses[i].ImageID,
+			})
+			if c.Name == containerName {
+				watchedContainer.ContainerIndex = i
+				watchedContainer.ContainerType = containerType
+				if c.SecurityContext != nil && c.SecurityContext.SeccompProfile != nil {
+					watchedContainer.SeccompProfilePath = c.SecurityContext.SeccompProfile.LocalhostProfile
 				}
 			}
 		}
@@ -301,18 +276,39 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 		return nil
 	}
 	// containers
-	if err := checkContainers(podSpec.Containers, nil, Container); err != nil {
+	if err := checkContainers(containersIterator(podSpec.Containers), podStatus.ContainerStatuses, Container); err != nil {
 		return err
 	}
 	// initContainers
-	if err := checkContainers(podSpec.InitContainers, nil, InitContainer); err != nil {
+	if err := checkContainers(containersIterator(podSpec.InitContainers), podStatus.InitContainerStatuses, InitContainer); err != nil {
 		return err
 	}
 	// ephemeralContainers
-	if err := checkContainers(nil, podSpec.EphemeralContainers, EphemeralContainer); err != nil {
+	if err := checkContainers(ephemeralContainersIterator(podSpec.EphemeralContainers), podStatus.EphemeralContainerStatuses, EphemeralContainer); err != nil {
 		return err
 	}
+	logger.L().Info("Matthias - SetContainerInfo", helpers.Interface("ContainerInfos", watchedContainer.ContainerInfos))
 	return nil
+}
+
+func containersIterator(c []v1.Container) iter.Seq2[int, v1.Container] {
+	return func(yield func(int, v1.Container) bool) {
+		for i := 0; i < len(c); i++ {
+			if !yield(i, c[i]) {
+				return
+			}
+		}
+	}
+}
+
+func ephemeralContainersIterator(c []v1.EphemeralContainer) iter.Seq2[int, v1.Container] {
+	return func(yield func(int, v1.Container) bool) {
+		for i := 0; i < len(c); i++ {
+			if !yield(i, v1.Container(c[i].EphemeralContainerCommon)) {
+				return
+			}
+		}
+	}
 }
 
 type PatchOperation struct {

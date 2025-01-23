@@ -42,6 +42,10 @@ func (k *K8sClientMock) GetWorkload(namespace, _, name string) (k8sinterface.IWo
 		"status": map[string]interface{}{
 			"containerStatuses": []interface{}{
 				map[string]interface{}{
+					"name":    "log",
+					"imageID": storage.FluentBitImageID,
+				},
+				map[string]interface{}{
 					"name":    "cont",
 					"imageID": storage.NginxImageID,
 				},
