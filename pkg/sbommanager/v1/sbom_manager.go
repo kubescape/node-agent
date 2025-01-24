@@ -22,6 +22,7 @@ import (
 	"github.com/anchore/syft/syft/format/syftjson/model"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/aquilax/truncate"
+	"github.com/cenkalti/backoff/v4"
 	securejoin "github.com/cyphar/filepath-securejoin"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/distribution/distribution/reference"
@@ -33,6 +34,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -59,6 +61,7 @@ type SbomManager struct {
 	ctx                context.Context
 	hostRoot           string
 	imageServiceClient runtime.ImageServiceClient
+	k8sObjectCache     objectcache.K8sObjectCache
 	pool               *workerpool.WorkerPool
 	procDir            string
 	processing         mapset.Set[string]
@@ -68,7 +71,7 @@ type SbomManager struct {
 
 var _ sbommanager.SbomManagerClient = (*SbomManager)(nil)
 
-func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.StorageClient) (*SbomManager, error) {
+func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string, storageClient storage.StorageClient, k8sObjectCache objectcache.K8sObjectCache) (*SbomManager, error) {
 	// read HOST_ROOT from env
 	hostRoot, exists := os.LookupEnv("HOST_ROOT")
 	if !exists {
@@ -94,6 +97,7 @@ func CreateSbomManager(ctx context.Context, cfg config.Config, socketPath string
 		ctx:                ctx,
 		hostRoot:           hostRoot,
 		imageServiceClient: runtime.NewImageServiceClient(conn),
+		k8sObjectCache:     k8sObjectCache,
 		pool:               workerpool.New(1),
 		procDir:            procDir,
 		processing:         mapset.NewSet[string](),
@@ -158,27 +162,31 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 }
 
 func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
+	if err := s.waitForSharedContainerData(notif.Container.Runtime.ContainerID); err != nil {
+		logger.L().Error("SbomManager - container not found in shared data",
+			helpers.String("container ID", notif.Container.Runtime.ContainerID))
+		return
+	}
 	// prepare SBOM name
-	// ContainerImageDigest is containerStatuses[0].image (not imageID)
-	sbomName, err := names.ImageInfoToSlug(notif.Container.Runtime.ContainerImageName, notif.Container.Runtime.ContainerImageDigest)
+	sbomName, err := names.ImageInfoToSlug(s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageTag, s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageID)
 	if err != nil {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to generate SBOM name",
 			helpers.Error(err),
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-			helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest))
+			helpers.String("imageName", s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageTag),
+			helpers.String("imageDigest", s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageID))
 		return
 	}
 	// try to create a SBOM with initializing status to reserve our slot
-	imageID := normalizeImageID(notif.Container.Runtime.ContainerImageName, notif.Container.Runtime.ContainerImageDigest)
+	imageID := normalizeImageID(s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageTag, s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageID)
 	wipSbom := &v1beta1.SBOMSyft{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sbomName,
 			Annotations: map[string]string{
 				helpersv1.ImageIDMetadataKey:  imageID,
-				helpersv1.ImageTagMetadataKey: notif.Container.Runtime.ContainerImageName,
+				helpersv1.ImageTagMetadataKey: s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageTag,
 				helpersv1.StatusMetadataKey:   helpersv1.Initializing,
 				NodeNameMetadataKey:           s.cfg.NodeName,
 				ToolVersionMetadataKey:        s.version,
@@ -198,8 +206,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 				helpers.String("namespace", notif.Container.K8s.Namespace),
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
-				helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-				helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 				helpers.String("sbomName", sbomName))
 			return
 		}
@@ -209,8 +215,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 				helpers.String("namespace", notif.Container.K8s.Namespace),
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
-				helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-				helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 				helpers.String("sbomName", sbomName),
 				helpers.String("nodeName", wipSbom.Annotations[NodeNameMetadataKey]))
 			return
@@ -221,8 +225,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 					helpers.String("namespace", notif.Container.K8s.Namespace),
 					helpers.String("pod", notif.Container.K8s.PodName),
 					helpers.String("container", notif.Container.K8s.ContainerName),
-					helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-					helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 					helpers.String("sbomName", sbomName))
 				return
 			}
@@ -230,8 +232,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 				helpers.String("namespace", notif.Container.K8s.Namespace),
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
-				helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-				helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 				helpers.String("sbomName", sbomName),
 				helpers.String("got version", wipSbom.Annotations[ToolVersionMetadataKey]),
 				helpers.String("expected version", s.version))
@@ -243,8 +243,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 				helpers.String("namespace", notif.Container.K8s.Namespace),
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
-				helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-				helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 				helpers.String("sbomName", sbomName),
 				helpers.String("nodeName", wipSbom.Annotations[NodeNameMetadataKey]))
 			return
@@ -253,8 +251,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 				helpers.String("namespace", notif.Container.K8s.Namespace),
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
-				helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-				helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 				helpers.String("sbomName", sbomName))
 			return
 		default:
@@ -262,8 +258,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 				helpers.String("namespace", notif.Container.K8s.Namespace),
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
-				helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-				helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 				helpers.String("sbomName", sbomName))
 			// continue to create SBOM
 		}
@@ -273,8 +267,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-			helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("sbomName", sbomName))
 		return
 	default:
@@ -282,8 +274,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-			helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("sbomName", sbomName))
 		// continue to create SBOM
 	}
@@ -299,34 +289,28 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-			helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("sbomName", sbomName))
 		return
 	}
 	// get image layers
-	imageStatus, err := s.getImageStatus(notif.Container.Runtime.ContainerImageName)
+	imageStatus, err := s.getImageStatus(notif.Container.Runtime.ContainerImageName) // use original name to ask the CRI
 	if err != nil {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to get image layers",
 			helpers.Error(err),
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-			helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("sbomName", sbomName))
 		return
 	}
 	// prepare image source
-	src, err := NewSource(notif.Container.Runtime.ContainerImageName, notif.Container.Runtime.ContainerImageDigest, imageID, imageStatus, mounts, s.cfg.MaxImageSize)
+	src, err := NewSource(s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageTag, s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageID, imageID, imageStatus, mounts, s.cfg.MaxImageSize)
 	if err != nil {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to create image source",
 			helpers.Error(err),
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-			helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("sbomName", sbomName))
 		if errors.Is(err, ErrImageTooLarge) {
 			delete(wipSbom.Annotations, NodeNameMetadataKey)
@@ -346,8 +330,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-			helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("sbomName", sbomName))
 		// TODO we could save the error in a status field
 		return
@@ -366,8 +348,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-			helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("sbomName", sbomName),
 			helpers.Int("maxImageSize", s.cfg.MaxSBOMSize),
 			helpers.Int("size", sz))
@@ -383,8 +363,6 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-			helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("sbomName", sbomName))
 		return
 	}
@@ -392,9 +370,16 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 		helpers.String("namespace", notif.Container.K8s.Namespace),
 		helpers.String("pod", notif.Container.K8s.PodName),
 		helpers.String("container", notif.Container.K8s.ContainerName),
-		helpers.String("imageName", notif.Container.Runtime.ContainerImageName),
-		helpers.String("imageDigest", notif.Container.Runtime.ContainerImageDigest),
 		helpers.String("sbomName", sbomName))
+}
+
+func (s *SbomManager) waitForSharedContainerData(containerID string) error {
+	return backoff.Retry(func() error {
+		if s.k8sObjectCache.GetSharedContainerData(containerID) != nil {
+			return nil
+		}
+		return fmt.Errorf("container %s not found in shared data", containerID)
+	}, backoff.NewExponentialBackOff())
 }
 
 func formatSBOM(s sbom.SBOM) ([]byte, error) {

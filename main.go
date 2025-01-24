@@ -15,7 +15,6 @@ import (
 	"github.com/grafana/pyroscope-go"
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -290,22 +289,12 @@ func main() {
 	}
 	defer igK8sClient.Close()
 	logger.L().Info("IG Kubernetes client created", helpers.Interface("client", igK8sClient))
-
-	// Detect the container containerRuntime of the node
-	containerRuntime := &igtypes.RuntimeConfig{
-		Name:            igK8sClient.RuntimeConfig.Name,
-		SocketPath:      igK8sClient.RuntimeConfig.SocketPath,
-		RuntimeProtocol: "", // deliberately empty
-		Extra: igtypes.ExtraConfig{
-			Namespace: igK8sClient.RuntimeConfig.Extra.Namespace,
-		},
-	}
-	logger.L().Info("detected container runtime", helpers.String("containerRuntime", containerRuntime.Name.String()))
+	logger.L().Info("detected container runtime", helpers.String("containerRuntime", igK8sClient.RuntimeConfig.Name.String()))
 
 	// Create the SBOM manager
 	var sbomManager sbommanager.SbomManagerClient
 	if cfg.EnableSbomGeneration {
-		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient)
+		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating SbomManager", helpers.Error(err))
 		}
@@ -314,7 +303,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, &ruleBindingNotify, containerRuntime, nil, nil, processManager, clusterData.ClusterName, objCache)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil, processManager, clusterData.ClusterName, objCache)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

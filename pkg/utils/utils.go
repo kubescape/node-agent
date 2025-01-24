@@ -22,6 +22,7 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/goradd/maps"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
@@ -259,9 +260,10 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 	checkContainers := func(containers iter.Seq2[int, v1.Container], containerStatuses []v1.ContainerStatus, containerType ContainerType) error {
 		var containersInfo []ContainerInfo
 		for i, c := range containers {
+			normalizedImageName := NormalizeImageName(c.Image) // FIXME missing tag !!!!
 			containersInfo = append(containersInfo, ContainerInfo{
 				Name:     c.Name,
-				ImageTag: c.Image,
+				ImageTag: normalizedImageName,
 				ImageID:  containerStatuses[i].ImageID,
 			})
 			if c.Name == containerName {
@@ -270,6 +272,7 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 				if c.SecurityContext != nil && c.SecurityContext.SeccompProfile != nil {
 					watchedContainer.SeccompProfilePath = c.SecurityContext.SeccompProfile.LocalhostProfile
 				}
+				watchedContainer.ImageTag = normalizedImageName
 			}
 		}
 		watchedContainer.ContainerInfos[containerType] = containersInfo
@@ -308,6 +311,16 @@ func ephemeralContainersIterator(c []v1.EphemeralContainer) iter.Seq2[int, v1.Co
 			}
 		}
 	}
+}
+
+func NormalizeImageName(image string) string {
+	ref, err := name.ParseReference(image)
+	if err != nil {
+		logger.L().Debug("failed to parse image reference", helpers.Error(err), helpers.String("image", image))
+		return image
+	}
+	// docker.io is parsed as index.docker.io
+	return strings.Replace(ref.Name(), "index.docker.io", "docker.io", 1)
 }
 
 type PatchOperation struct {
