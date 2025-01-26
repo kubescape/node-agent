@@ -590,8 +590,8 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:            container.Runtime.ContainerID,
-		ImageID:                container.Runtime.ContainerImageDigest,
-		ImageTag:               container.Runtime.ContainerImageName,
+		ImageID:                am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ImageID,
+		ImageTag:               am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ImageTag,
 		UpdateDataTicker:       time.NewTicker(utils.AddJitter(am.cfg.InitialDelay, am.cfg.MaxJitterPercentage)),
 		SyncChannel:            syncChannel,
 		K8sContainerID:         k8sContainerID,

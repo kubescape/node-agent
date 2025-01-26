@@ -104,7 +104,7 @@ func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *container
 	watchedContainer := utils.WatchedContainerData{
 		ContainerID: container.Runtime.ContainerID,
 		ImageID:     container.Runtime.ContainerImageDigest,
-		ImageTag:    container.Runtime.ContainerImageName,
+		// we get ImageTag from the pod spec for consistency between different runtimes
 	}
 
 	wl, err := ch.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
