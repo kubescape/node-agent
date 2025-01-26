@@ -79,7 +79,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
 func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if !rule.EvaluateRule(eventType, event, objCache.K8sObjectCache()) {
+	if ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache()); !ok {
 		return nil
 	}
 
@@ -128,23 +128,23 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 	}
 }
 
-func (rule *R1010SymlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) bool {
+func (rule *R1010SymlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.SymlinkEventType {
-		return false
+		return false, nil
 	}
 
 	symlinkEvent, ok := event.(*tracersymlinktype.Event)
 	if !ok {
-		return false
+		return false, nil
 	}
 
 	for _, path := range rule.additionalPaths {
 		if strings.HasPrefix(symlinkEvent.OldPath, path) {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 func (rule *R1010SymlinkCreatedOverSensitiveFile) Requirements() ruleengine.RuleSpec {

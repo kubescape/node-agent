@@ -173,17 +173,6 @@ func main() {
 		seccompManager = seccompmanager.NewSeccompManagerMock()
 	}
 
-	// Create the application profile manager
-	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
-	if cfg.EnableApplicationProfile {
-		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, k8sObjectCache, seccompManager)
-		if err != nil {
-			logger.L().Ctx(ctx).Fatal("error creating the application profile manager", helpers.Error(err))
-		}
-	} else {
-		applicationProfileManager = applicationprofilemanager.CreateApplicationProfileManagerMock()
-	}
-
 	// Create the network and DNS managers
 	var networkManagerClient networkmanager.NetworkManagerClient
 	var dnsManagerClient dnsmanager.DNSManagerClient
@@ -203,6 +192,7 @@ func main() {
 		networkManagerClient = networkmanager.CreateNetworkManagerMock()
 	}
 
+	var ruleBindingCache *rulebindingcachev1.RBCache
 	var ruleManager rulemanager.RuleManagerClient
 	var processManager processmanager.ProcessManagerClient
 	var objCache objectcache.ObjectCache
@@ -221,7 +211,7 @@ func main() {
 		processManager = processmanagerv1.CreateProcessManager(ctx)
 
 		// create ruleBinding cache
-		ruleBindingCache := rulebindingcachev1.NewCache(cfg.NodeName, k8sClient)
+		ruleBindingCache = rulebindingcachev1.NewCache(cfg.NodeName, k8sClient)
 		dWatcher.AddAdaptor(ruleBindingCache)
 
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
@@ -255,6 +245,17 @@ func main() {
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
 		processManager = processmanager.CreateProcessManagerMock()
+	}
+
+	// Create the application profile manager
+	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
+	if cfg.EnableApplicationProfile {
+		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, k8sObjectCache, seccompManager, ruleBindingCache)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating the application profile manager", helpers.Error(err))
+		}
+	} else {
+		applicationProfileManager = applicationprofilemanager.CreateApplicationProfileManagerMock()
 	}
 
 	// Create the node profile manager

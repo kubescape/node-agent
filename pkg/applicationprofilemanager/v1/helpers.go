@@ -15,7 +15,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	tracerhttphelper "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -106,10 +106,10 @@ func IsPolicyIncluded(existingPolicy, newPolicy *v1beta1.RulePolicy) bool {
 	return true
 }
 
-func GetInitOperations(containerType string, containerIndex int) []utils.PatchOperation {
+func GetInitOperations(ruleCreator ruleengine.RuleCreator, containerType string, containerIndex int) []utils.PatchOperation {
 	var operations []utils.PatchOperation
 
-	ids := ruleengine.NewRuleCreator().GetAllRuleIDs()
+	ids := ruleCreator.GetAllRuleIDs()
 	rulePoliciesMap := make(map[string]v1beta1.RulePolicy)
 	for _, id := range ids {
 		rulePoliciesMap[id] = v1beta1.RulePolicy{

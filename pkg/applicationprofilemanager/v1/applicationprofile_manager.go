@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
+
 	"github.com/cenkalti/backoff/v4"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -63,11 +65,12 @@ type ApplicationProfileManager struct {
 	storageClient            storage.StorageClient
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	seccompManager           seccompmanager.SeccompManagerClient
+	ruleCache                *rulebindingcachev1.RBCache
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient) (*ApplicationProfileManager, error) {
+func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient, ruleCache *rulebindingcachev1.RBCache) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
 		cfg:                     cfg,
 		clusterName:             clusterName,
@@ -80,6 +83,7 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		removedContainers:       mapset.NewSet[string](),
 		droppedEventsContainers: mapset.NewSet[string](),
 		seccompManager:          seccompManager,
+		ruleCache:               ruleCache,
 	}, nil
 }
 
@@ -127,7 +131,10 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 	}
 	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
 
-	initOps := GetInitOperations(watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+	var initOps []utils.PatchOperation
+	if am.ruleCache != nil {
+		initOps = GetInitOperations(am.ruleCache.GetRuleCreator(), watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+	}
 
 	for {
 		select {
