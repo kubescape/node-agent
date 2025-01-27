@@ -753,7 +753,7 @@ func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID string, event
 	am.toSaveExecs.Get(k8sContainerID).Set(execIdentifier, append([]string{path}, event.Args...))
 
 	if am.enricher != nil {
-		go am.enricher.EnrichEvent(&event, execIdentifier)
+		go am.enricher.EnrichEvent(k8sContainerID, &event, execIdentifier)
 	}
 }
 
@@ -781,7 +781,7 @@ func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID string, event
 
 	if am.enricher != nil {
 		openIdentifier := utils.CalculateSHA256FileOpenHash(path)
-		go am.enricher.EnrichEvent(&event, openIdentifier)
+		go am.enricher.EnrichEvent(k8sContainerID, &event, openIdentifier)
 	}
 }
 

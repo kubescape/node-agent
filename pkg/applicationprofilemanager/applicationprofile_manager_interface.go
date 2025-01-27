@@ -22,5 +22,5 @@ type ApplicationProfileManagerClient interface {
 }
 
 type Enricher interface {
-	EnrichEvent(event utils.EnrichEvent, callID string)
+	EnrichEvent(k8sContainerID string, event utils.EnrichEvent, callID string)
 }
