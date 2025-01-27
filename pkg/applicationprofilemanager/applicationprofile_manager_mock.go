@@ -2,6 +2,7 @@ package applicationprofilemanager
 
 import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -27,11 +28,11 @@ func (a ApplicationProfileManagerMock) ReportCapability(_, _ string) {
 	// noop
 }
 
-func (a ApplicationProfileManagerMock) ReportFileExec(_, _ string, _ []string) {
+func (a ApplicationProfileManagerMock) ReportFileExec(_ string, _ events.ExecEvent) {
 	// noop
 }
 
-func (a ApplicationProfileManagerMock) ReportFileOpen(_, _ string, _ []string) {
+func (a ApplicationProfileManagerMock) ReportFileOpen(_ string, _ events.OpenEvent) {
 	// noop
 }
 

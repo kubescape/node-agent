@@ -16,10 +16,14 @@ import (
 	"github.com/goradd/maps"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
+	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -92,7 +96,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	storageClient := &storage.StorageHttpClientMock{}
 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
 	seccompManagerMock := &seccompmanager.SeccompManagerMock{}
-	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock)
+	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil)
 	assert.NoError(t, err)
 	// prepare container
 	container := &containercollection.Container{
@@ -121,13 +125,47 @@ func TestApplicationProfileManager(t *testing.T) {
 	// report capability
 	go am.ReportCapability("ns/pod/cont", "NET_BIND_SERVICE")
 	// report file exec
-	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"})
-	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"})       // duplicate - not reported
-	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls", "-l"}) // additional arg - reported
-	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"ls", "-c"})       // different order of args - reported
-	go am.ReportFileExec("ns/pod/cont", "/bin/ls", []string{"-l"})
+	e := &events.ExecEvent{
+		Event: tracerexectype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "cont",
+						},
+					},
+				},
+			},
+			Comm: "/bin/bash",
+			Args: []string{"/bin/bash", "-c", "ls"},
+		},
+	}
+	go am.ReportFileExec("ns/pod/cont", *e)
+	go am.ReportFileExec("ns/pod/cont", *e) // duplicate - not reported
+	e.Args = []string{"/bin/bash", "-c", "ls", "-l"}
+	go am.ReportFileExec("ns/pod/cont", *e) // additional arg - reported
+	e.Args = []string{"/bin/bash", "ls", "-c"}
+	go am.ReportFileExec("ns/pod/cont", *e) // different order of args - reported
+	e.Args = []string{"/bin/ls", "-l"}
+	go am.ReportFileExec("ns/pod/cont", *e)
 	// report file open
-	go am.ReportFileOpen("ns/pod/cont", "/etc/passwd", []string{"O_RDONLY"})
+	f := &events.OpenEvent{
+		Event: traceropentype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "cont",
+						},
+					},
+				},
+			},
+			Path:     "/etc/passwd",
+			FullPath: "/etc/passwd",
+			Flags:    []string{"O_RDONLY"},
+		},
+	}
+	go am.ReportFileOpen("ns/pod/cont", *f)
 
 	// report container started (race condition with reports)
 	am.ContainerCallback(containercollection.PubSubEvent{
@@ -137,9 +175,12 @@ func TestApplicationProfileManager(t *testing.T) {
 	// let it run for a while
 	time.Sleep(15 * time.Second) // need to sleep longer because of AddRandomDuration in startApplicationProfiling
 	// report another file open
-	go am.ReportFileOpen("ns/pod/cont", "/etc/hosts", []string{"O_RDONLY"})
+	f.Path = "/etc/hosts"
+	f.FullPath = "/etc/hosts"
+	go am.ReportFileOpen("ns/pod/cont", *f)
 	// report another file open
-	go am.ReportFileExec("ns/pod/cont", "/bin/bash", []string{"-c", "ls"}) // duplicate - will not be reported
+	e.Args = []string{"/bin/bash", "-c", "ls"}
+	go am.ReportFileExec("ns/pod/cont", *e) // duplicate - will not be reported
 
 	// report endpoint
 
@@ -251,10 +292,10 @@ func TestApplicationProfileManager(t *testing.T) {
 
 	reportedExecs := storageClient.ApplicationProfiles[0].Spec.Containers[1].Execs
 	expectedExecs := []v1beta1.ExecCalls{
-		{Path: "/bin/bash", Args: []string{"-c", "ls"}, Envs: []string(nil)},
-		{Path: "/bin/bash", Args: []string{"-c", "ls", "-l"}, Envs: []string(nil)},
-		{Path: "/bin/bash", Args: []string{"ls", "-c"}, Envs: []string(nil)},
-		{Path: "/bin/ls", Args: []string{"-l"}, Envs: []string(nil)},
+		{Path: "/bin/bash", Args: []string{"/bin/bash", "-c", "ls"}, Envs: []string(nil)},
+		{Path: "/bin/bash", Args: []string{"/bin/bash", "-c", "ls", "-l"}, Envs: []string(nil)},
+		{Path: "/bin/bash", Args: []string{"/bin/bash", "ls", "-c"}, Envs: []string(nil)},
+		{Path: "/bin/ls", Args: []string{"/bin/ls", "-l"}, Envs: []string(nil)},
 	}
 	assert.Len(t, reportedExecs, len(expectedExecs))
 	for _, expectedExec := range expectedExecs {
@@ -485,7 +526,7 @@ func TestReportRulePolicy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock)
+			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil)
 			assert.NoError(t, err)
 
 			am.savedRulePolicies.Set(tt.k8sContainerID, istiocache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
@@ -681,7 +722,7 @@ func TestReportIdentifiedCallStack(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock)
+			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil)
 			assert.NoError(t, err)
 
 			// Initialize container tracking
@@ -769,7 +810,7 @@ func TestApplicationProfileManagerWithCallStacks(t *testing.T) {
 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
 	seccompManagerMock := &seccompmanager.SeccompManagerMock{}
 
-	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock)
+	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil)
 	assert.NoError(t, err)
 
 	// Prepare container

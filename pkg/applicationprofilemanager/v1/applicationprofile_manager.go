@@ -19,6 +19,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -65,11 +66,12 @@ type ApplicationProfileManager struct {
 	storageClient            storage.StorageClient
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	seccompManager           seccompmanager.SeccompManagerClient
+	enricher                 applicationprofilemanager.Enricher
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient) (*ApplicationProfileManager, error) {
+func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient, enricher applicationprofilemanager.Enricher) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
 		cfg:                     cfg,
 		clusterName:             clusterName,
@@ -82,6 +84,7 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		removedContainers:       mapset.NewSet[string](),
 		droppedEventsContainers: mapset.NewSet[string](),
 		seccompManager:          seccompManager,
+		enricher:                enricher,
 	}, nil
 }
 
@@ -730,39 +733,55 @@ func (am *ApplicationProfileManager) ReportCapability(k8sContainerID, capability
 	am.toSaveCapabilities.Get(k8sContainerID).Add(capability)
 }
 
-func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID, path string, args []string) {
+func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID string, event events.ExecEvent) {
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
+
+	path := event.Comm
+	if len(event.Args) > 0 {
+		path = event.Args[0]
+	}
+
 	// check if we already have this exec
 	// we use a SHA256 hash of the exec to identify it uniquely (path + args, in the order they were provided)
-	execIdentifier := utils.CalculateSHA256FileExecHash(path, args)
+	execIdentifier := utils.CalculateSHA256FileExecHash(path, event.Args)
 	if _, ok := am.savedExecs.Get(k8sContainerID).Get(execIdentifier); ok {
 		return
 	}
 	// add to exec map, first element is the path, the rest are the args
-	am.toSaveExecs.Get(k8sContainerID).Set(execIdentifier, append([]string{path}, args...))
+	am.toSaveExecs.Get(k8sContainerID).Set(execIdentifier, append([]string{path}, event.Args...))
+
+	if am.enricher != nil {
+		go am.enricher.EnrichEvent(&event, execIdentifier)
+	}
 }
 
-func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID, path string, flags []string) {
+func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID string, event events.OpenEvent) {
 	if err := am.waitForContainer(k8sContainerID); err != nil {
 		return
 	}
 	// deduplicate /proc/1234/* into /proc/.../* (quite a common case)
 	// we perform it here instead of waiting for compression
+	path := event.Path
 	if strings.HasPrefix(path, "/proc/") {
 		path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
 	}
 	// check if we already have this open
-	if opens, ok := am.savedOpens.Get(k8sContainerID).Get(path); ok && opens.(mapset.Set[string]).Contains(flags...) {
+	if opens, ok := am.savedOpens.Get(k8sContainerID).Get(path); ok && opens.(mapset.Set[string]).Contains(event.Flags...) {
 		return
 	}
 	// add to open map
 	openMap := am.toSaveOpens.Get(k8sContainerID)
 	if openMap.Has(path) {
-		openMap.Get(path).Append(flags...)
+		openMap.Get(path).Append(event.Flags...)
 	} else {
-		openMap.Set(path, mapset.NewSet[string](flags...))
+		openMap.Set(path, mapset.NewSet[string](event.Flags...))
+	}
+
+	if am.enricher != nil {
+		openIdentifier := utils.CalculateSHA256FileOpenHash(path)
+		go am.enricher.EnrichEvent(&event, openIdentifier)
 	}
 }
 
