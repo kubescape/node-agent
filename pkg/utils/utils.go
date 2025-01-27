@@ -260,7 +260,7 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 	checkContainers := func(containers iter.Seq2[int, v1.Container], containerStatuses []v1.ContainerStatus, containerType ContainerType) error {
 		var containersInfo []ContainerInfo
 		for i, c := range containers {
-			normalizedImageName := NormalizeImageName(c.Image) // FIXME missing tag !!!!
+			normalizedImageName := NormalizeImageName(c.Image)
 			containersInfo = append(containersInfo, ContainerInfo{
 				Name:     c.Name,
 				ImageTag: normalizedImageName,
@@ -273,6 +273,7 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 					watchedContainer.SeccompProfilePath = c.SecurityContext.SeccompProfile.LocalhostProfile
 				}
 				watchedContainer.ImageTag = normalizedImageName
+				watchedContainer.ImageID = containerStatuses[i].ImageID
 			}
 		}
 		watchedContainer.ContainerInfos[containerType] = containersInfo
