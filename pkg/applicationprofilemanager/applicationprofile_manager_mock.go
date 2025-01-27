@@ -3,6 +3,7 @@ package applicationprofilemanager
 import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 type ApplicationProfileManagerMock struct {
@@ -43,6 +44,10 @@ func (a ApplicationProfileManagerMock) ReportHTTPEvent(_ string, _ *tracerhttpty
 }
 
 func (a ApplicationProfileManagerMock) ReportRulePolicy(_, _, _ string, _ bool) {
+	// noop
+}
+
+func (a ApplicationProfileManagerMock) ReportIdentifiedCallStack(_ string, _ *v1beta1.IdentifiedCallStack) {
 	// noop
 }
 
