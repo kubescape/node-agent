@@ -103,13 +103,20 @@ func (ch *IGContainerWatcher) setSharedWatchedContainerData(container *container
 func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*utils.WatchedContainerData, error) {
 	watchedContainer := utils.WatchedContainerData{
 		ContainerID: container.Runtime.ContainerID,
-		ImageID:     container.Runtime.ContainerImageDigest,
-		// we get ImageTag from the pod spec for consistency between different runtimes
+		// we get ImageID and ImageTag from the pod spec for consistency with operator
 	}
 
 	wl, err := ch.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workload: %w", err)
+	}
+	// make sure the pod is not pending (otherwise ImageID is empty in containerStatuses)
+	podStatus, err := wl.GetPodStatus()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod status: %w", err)
+	}
+	if podStatus.Phase == "Pending" {
+		return nil, fmt.Errorf("pod is still pending")
 	}
 	pod := wl.(*workloadinterface.Workload)
 	// fill container type, index and names
