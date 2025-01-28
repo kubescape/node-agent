@@ -621,7 +621,7 @@ func TestReportIdentifiedCallStack(t *testing.T) {
 								FileID: "1",
 								Lineno: "42",
 							},
-							Children: []*v1beta1.CallStackNode{
+							Children: []v1beta1.CallStackNode{
 								{
 									Frame: &v1beta1.StackFrame{
 										FileID: "2",
@@ -653,7 +653,7 @@ func TestReportIdentifiedCallStack(t *testing.T) {
 								FileID: "1",
 								Lineno: "42",
 							},
-							Children: []*v1beta1.CallStackNode{
+							Children: []v1beta1.CallStackNode{
 								{
 									Frame: &v1beta1.StackFrame{
 										FileID: "2",
@@ -780,7 +780,7 @@ func compareCallStackNodes(a, b *v1beta1.CallStackNode) bool {
 		return false
 	}
 	for i := range a.Children {
-		if !compareCallStackNodes(a.Children[i], b.Children[i]) {
+		if !compareCallStackNodes(&a.Children[i], &b.Children[i]) {
 			return false
 		}
 	}
@@ -865,7 +865,7 @@ func TestApplicationProfileManagerWithCallStacks(t *testing.T) {
 					FileID: "2",
 					Lineno: "84",
 				},
-				Children: []*v1beta1.CallStackNode{
+				Children: []v1beta1.CallStackNode{
 					{
 						Frame: &v1beta1.StackFrame{
 							FileID: "3",
@@ -1054,7 +1054,7 @@ func TestCalculateSHA256CallStackHash(t *testing.T) {
 					FileID: "2",
 					Lineno: "84",
 				},
-				Children: []*v1beta1.CallStackNode{
+				Children: []v1beta1.CallStackNode{
 					{
 						Frame: &v1beta1.StackFrame{
 							FileID: "3",
@@ -1088,7 +1088,7 @@ func TestCalculateSHA256CallStackHash(t *testing.T) {
 					FileID: "2",
 					Lineno: "84",
 				},
-				Children: []*v1beta1.CallStackNode{
+				Children: []v1beta1.CallStackNode{
 					{
 						Frame: &v1beta1.StackFrame{
 							FileID: "3",
@@ -1112,7 +1112,7 @@ func TestCalculateSHA256CallStackHash(t *testing.T) {
 					FileID: "2",
 					Lineno: "84",
 				},
-				Children: []*v1beta1.CallStackNode{
+				Children: []v1beta1.CallStackNode{
 					{
 						Frame: &v1beta1.StackFrame{
 							FileID: "4", // Different FileID

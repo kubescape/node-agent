@@ -154,7 +154,7 @@ func CalculateSHA256CallStackHash(callStack *v1beta1.IdentifiedCallStack) string
 
 		// Process children
 		for _, child := range node.Children {
-			processNode(child)
+			processNode(&child)
 		}
 	}
 

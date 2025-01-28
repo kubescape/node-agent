@@ -207,7 +207,7 @@ func PrintCallStackVerbose(ics *v1beta1.IdentifiedCallStack) {
 		fmt.Printf("%s  Children: %d\n", indent, len(node.Children))
 		for i, child := range node.Children {
 			fmt.Printf("%s  Child %d:\n", indent, i)
-			printNode(child, depth+1)
+			printNode(&child, depth+1)
 		}
 	}
 
