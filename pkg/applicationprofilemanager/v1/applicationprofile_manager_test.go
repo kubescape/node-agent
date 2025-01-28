@@ -560,572 +560,628 @@ func TestReportRulePolicy(t *testing.T) {
 	}
 }
 
-// func TestReportIdentifiedCallStack(t *testing.T) {
-// 	// Setup common test environment
-// 	cfg := config.Config{
-// 		InitialDelay:     1 * time.Second,
-// 		MaxSniffingTime:  5 * time.Minute,
-// 		UpdateDataPeriod: 1 * time.Second,
-// 	}
-// 	ctx := context.TODO()
-// 	k8sClient := &k8sclient.K8sClientMock{}
-// 	storageClient := &storage.StorageHttpClientMock{}
-// 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
-// 	seccompManagerMock := &seccompmanager.SeccompManagerMock{}
+func TestReportIdentifiedCallStack(t *testing.T) {
+	// Setup common test environment
+	cfg := config.Config{
+		InitialDelay:     1 * time.Second,
+		MaxSniffingTime:  5 * time.Minute,
+		UpdateDataPeriod: 1 * time.Second,
+	}
+	ctx := context.TODO()
+	k8sClient := &k8sclient.K8sClientMock{}
+	storageClient := &storage.StorageHttpClientMock{}
+	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
+	seccompManagerMock := &seccompmanager.SeccompManagerMock{}
 
-// 	tests := []struct {
-// 		name           string
-// 		k8sContainerID string
-// 		callStacks     []*v1beta1.IdentifiedCallStack
-// 		expected       []v1beta1.IdentifiedCallStack
-// 	}{
-// 		{
-// 			name:           "Single callstack",
-// 			k8sContainerID: "ns/pod/cont",
-// 			callStacks: []*v1beta1.IdentifiedCallStack{
-// 				{
-// 					CallID: "open",
-// 					CallStack: v1beta1.CallStack{
-// 						Root: &v1beta1.CallStackNode{
-// 							Frame: &v1beta1.StackFrame{
-// 								FileID: "1",
-// 								Lineno: "42",
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			expected: []v1beta1.IdentifiedCallStack{
-// 				{
-// 					CallID: "open",
-// 					CallStack: v1beta1.CallStack{
-// 						Root: &v1beta1.CallStackNode{
-// 							Frame: &v1beta1.StackFrame{
-// 								FileID: "1",
-// 								Lineno: "42",
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:           "Multiple callstacks",
-// 			k8sContainerID: "ns/pod/cont",
-// 			callStacks: []*v1beta1.IdentifiedCallStack{
-// 				{
-// 					CallID: "open",
-// 					CallStack: v1beta1.CallStack{
-// 						Root: &v1beta1.CallStackNode{
-// 							Frame: &v1beta1.StackFrame{
-// 								FileID: "1",
-// 								Lineno: "42",
-// 							},
-// 							Children: []v1beta1.CallStackNode{
-// 								{
-// 									Frame: &v1beta1.StackFrame{
-// 										FileID: "2",
-// 										Lineno: "84",
-// 									},
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 				{
-// 					CallID: "exec",
-// 					CallStack: v1beta1.CallStack{
-// 						Root: &v1beta1.CallStackNode{
-// 							Frame: &v1beta1.StackFrame{
-// 								FileID: "3",
-// 								Lineno: "120",
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			expected: []v1beta1.IdentifiedCallStack{
-// 				{
-// 					CallID: "open",
-// 					CallStack: v1beta1.CallStack{
-// 						Root: &v1beta1.CallStackNode{
-// 							Frame: &v1beta1.StackFrame{
-// 								FileID: "1",
-// 								Lineno: "42",
-// 							},
-// 							Children: []v1beta1.CallStackNode{
-// 								{
-// 									Frame: &v1beta1.StackFrame{
-// 										FileID: "2",
-// 										Lineno: "84",
-// 									},
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 				{
-// 					CallID: "exec",
-// 					CallStack: v1beta1.CallStack{
-// 						Root: &v1beta1.CallStackNode{
-// 							Frame: &v1beta1.StackFrame{
-// 								FileID: "3",
-// 								Lineno: "120",
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 		{
-// 			name:           "Duplicate callstack",
-// 			k8sContainerID: "ns/pod/cont",
-// 			callStacks: []*v1beta1.IdentifiedCallStack{
-// 				{
-// 					CallID: "open",
-// 					CallStack: v1beta1.CallStack{
-// 						Root: &v1beta1.CallStackNode{
-// 							Frame: &v1beta1.StackFrame{
-// 								FileID: "1",
-// 								Lineno: "42",
-// 							},
-// 						},
-// 					},
-// 				},
-// 				{
-// 					CallID: "open",
-// 					CallStack: v1beta1.CallStack{
-// 						Root: &v1beta1.CallStackNode{
-// 							Frame: &v1beta1.StackFrame{
-// 								FileID: "1",
-// 								Lineno: "42",
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			expected: []v1beta1.IdentifiedCallStack{
-// 				{
-// 					CallID: "open",
-// 					CallStack: v1beta1.CallStack{
-// 						Root: &v1beta1.CallStackNode{
-// 							Frame: &v1beta1.StackFrame{
-// 								FileID: "1",
-// 								Lineno: "42",
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	}
+	tests := []struct {
+		name           string
+		k8sContainerID string
+		callStacks     []v1beta1.IdentifiedCallStack
+		expected       []v1beta1.IdentifiedCallStack
+	}{
+		{
+			name:           "Single callstack",
+			k8sContainerID: "ns/pod/cont",
+			callStacks: []v1beta1.IdentifiedCallStack{
+				{
+					CallID: "open",
+					CallStack: v1beta1.CallStack{
+						Root: v1beta1.CallStackNode{
+							Frame: v1beta1.StackFrame{
+								FileID: "1",
+								Lineno: "42",
+							},
+							Children: []v1beta1.CallStackNode{},
+						},
+					},
+				},
+			},
+			expected: []v1beta1.IdentifiedCallStack{
+				{
+					CallID: "open",
+					CallStack: v1beta1.CallStack{
+						Root: v1beta1.CallStackNode{
+							Frame: v1beta1.StackFrame{
+								FileID: "1",
+								Lineno: "42",
+							},
+							Children: []v1beta1.CallStackNode{},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:           "Multiple callstacks",
+			k8sContainerID: "ns/pod/cont",
+			callStacks: []v1beta1.IdentifiedCallStack{
+				{
+					CallID: "open",
+					CallStack: v1beta1.CallStack{
+						Root: v1beta1.CallStackNode{
+							Frame: v1beta1.StackFrame{
+								FileID: "1",
+								Lineno: "42",
+							},
+							Children: []v1beta1.CallStackNode{
+								{
+									Frame: v1beta1.StackFrame{
+										FileID: "2",
+										Lineno: "84",
+									},
+									Children: []v1beta1.CallStackNode{},
+								},
+							},
+						},
+					},
+				},
+				{
+					CallID: "exec",
+					CallStack: v1beta1.CallStack{
+						Root: v1beta1.CallStackNode{
+							Frame: v1beta1.StackFrame{
+								FileID: "3",
+								Lineno: "120",
+							},
+							Children: []v1beta1.CallStackNode{},
+						},
+					},
+				},
+			},
+			expected: []v1beta1.IdentifiedCallStack{
+				{
+					CallID: "open",
+					CallStack: v1beta1.CallStack{
+						Root: v1beta1.CallStackNode{
+							Frame: v1beta1.StackFrame{
+								FileID: "1",
+								Lineno: "42",
+							},
+							Children: []v1beta1.CallStackNode{
+								{
+									Frame: v1beta1.StackFrame{
+										FileID: "2",
+										Lineno: "84",
+									},
+									Children: []v1beta1.CallStackNode{},
+								},
+							},
+						},
+					},
+				},
+				{
+					CallID: "exec",
+					CallStack: v1beta1.CallStack{
+						Root: v1beta1.CallStackNode{
+							Frame: v1beta1.StackFrame{
+								FileID: "3",
+								Lineno: "120",
+							},
+							Children: []v1beta1.CallStackNode{},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:           "Duplicate callstack",
+			k8sContainerID: "ns/pod/cont",
+			callStacks: []v1beta1.IdentifiedCallStack{
+				{
+					CallID: "open",
+					CallStack: v1beta1.CallStack{
+						Root: v1beta1.CallStackNode{
+							Frame: v1beta1.StackFrame{
+								FileID: "1",
+								Lineno: "42",
+							},
+							Children: []v1beta1.CallStackNode{},
+						},
+					},
+				},
+				{
+					CallID: "open",
+					CallStack: v1beta1.CallStack{
+						Root: v1beta1.CallStackNode{
+							Frame: v1beta1.StackFrame{
+								FileID: "1",
+								Lineno: "42",
+							},
+							Children: []v1beta1.CallStackNode{},
+						},
+					},
+				},
+			},
+			expected: []v1beta1.IdentifiedCallStack{
+				{
+					CallID: "open",
+					CallStack: v1beta1.CallStack{
+						Root: v1beta1.CallStackNode{
+							Frame: v1beta1.StackFrame{
+								FileID: "1",
+								Lineno: "42",
+							},
+							Children: []v1beta1.CallStackNode{},
+						},
+					},
+				},
+			},
+		},
+	}
 
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil)
-// 			assert.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil)
+			if err != nil {
+				t.Fatalf("Failed to create ApplicationProfileManager: %v", err)
+			}
 
-// 			// Initialize container tracking
-// 			am.savedCallStacks.Set(tt.k8sContainerID, istiocache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
-// 			am.toSaveCallStacks.Set(tt.k8sContainerID, new(maps.SafeMap[string, *v1beta1.IdentifiedCallStack]))
-// 			am.trackedContainers.Add(tt.k8sContainerID)
+			// Initialize container tracking
+			am.savedCallStacks.Set(tt.k8sContainerID, istiocache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
+			am.toSaveCallStacks.Set(tt.k8sContainerID, new(maps.SafeMap[string, *v1beta1.IdentifiedCallStack]))
+			am.trackedContainers.Add(tt.k8sContainerID)
 
-// 			// Report each callstack
-// 			for _, callStack := range tt.callStacks {
-// 				am.ReportIdentifiedCallStack(tt.k8sContainerID, callStack)
-// 			}
+			// Report each callstack
+			for _, callStack := range tt.callStacks {
+				am.ReportIdentifiedCallStack(tt.k8sContainerID, &callStack)
+			}
 
-// 			// Collect all callstacks that were queued to be saved
-// 			var resultCallStacks []v1beta1.IdentifiedCallStack
-// 			am.toSaveCallStacks.Get(tt.k8sContainerID).Range(func(identifier string, callStack *v1beta1.IdentifiedCallStack) bool {
-// 				resultCallStacks = append(resultCallStacks, *callStack)
-// 				return true
-// 			})
+			// Collect all callstacks that were queued to be saved
+			var resultCallStacks []v1beta1.IdentifiedCallStack
+			am.toSaveCallStacks.Get(tt.k8sContainerID).Range(func(identifier string, callStack *v1beta1.IdentifiedCallStack) bool {
+				resultCallStacks = append(resultCallStacks, *callStack)
+				return true
+			})
 
-// 			// Verify results
-// 			assert.Equal(t, len(tt.expected), len(resultCallStacks))
-// 			for _, expectedCallStack := range tt.expected {
-// 				found := false
-// 				for _, resultCallStack := range resultCallStacks {
-// 					if compareCallStacks(&expectedCallStack, &resultCallStack) {
-// 						found = true
-// 						break
-// 					}
-// 				}
-// 				assert.True(t, found, "Expected call stack not found in results")
-// 			}
-// 		})
-// 	}
-// }
+			// Verify results
+			if len(tt.expected) != len(resultCallStacks) {
+				t.Errorf("Expected %d call stacks, got %d", len(tt.expected), len(resultCallStacks))
+				return
+			}
+
+			for _, expectedCallStack := range tt.expected {
+				found := false
+				for _, resultCallStack := range resultCallStacks {
+					if compareCallStacks(expectedCallStack, resultCallStack) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Error("Expected call stack not found in results")
+				}
+			}
+		})
+	}
+}
+
+// Helper function to compare two call stack nodes and their subtrees
+func compareNodes(node1, node2 v1beta1.CallStackNode) bool {
+	if node1.Frame.FileID != node2.Frame.FileID || node1.Frame.Lineno != node2.Frame.Lineno {
+		return false
+	}
+
+	if len(node1.Children) != len(node2.Children) {
+		return false
+	}
+
+	for i := range node1.Children {
+		if !compareNodes(node1.Children[i], node2.Children[i]) {
+			return false
+		}
+	}
+
+	return true
+}
 
 // Helper function to deeply compare two call stacks
-// func compareCallStacks(a, b *v1beta1.IdentifiedCallStack) bool {
-// 	if a.CallID != b.CallID {
-// 		return false
-// 	}
-// 	return compareCallStackNodes(a.CallStack.Root, b.CallStack.Root)
-// }
+func compareCallStacks(a, b v1beta1.IdentifiedCallStack) bool {
+	if a.CallID != b.CallID {
+		return false
+	}
+	return compareCallStackNodes(a.CallStack.Root, b.CallStack.Root)
+}
 
-// func compareCallStackNodes(a, b *v1beta1.CallStackNode) bool {
-// 	if a == nil && b == nil {
-// 		return true
-// 	}
-// 	if a == nil || b == nil {
-// 		return false
-// 	}
-// 	if !compareStackFrames(a.Frame, b.Frame) {
-// 		return false
-// 	}
-// 	if len(a.Children) != len(b.Children) {
-// 		return false
-// 	}
-// 	for i := range a.Children {
-// 		if !compareCallStackNodes(&a.Children[i], &b.Children[i]) {
-// 			return false
-// 		}
-// 	}
-// 	return true
-// }
+func compareCallStackNodes(a, b v1beta1.CallStackNode) bool {
+	if !compareStackFrames(a.Frame, b.Frame) {
+		return false
+	}
+	if len(a.Children) != len(b.Children) {
+		return false
+	}
+	for i := range a.Children {
+		if !compareCallStackNodes(a.Children[i], b.Children[i]) {
+			return false
+		}
+	}
+	return true
+}
 
-// func compareStackFrames(a, b *v1beta1.StackFrame) bool {
-// 	if a == nil && b == nil {
-// 		return true
-// 	}
-// 	if a == nil || b == nil {
-// 		return false
-// 	}
-// 	return a.FileID == b.FileID && a.Lineno == b.Lineno
-// }
+func compareStackFrames(a, b v1beta1.StackFrame) bool {
+	return a.FileID == b.FileID && a.Lineno == b.Lineno
+}
 
-// func TestApplicationProfileManagerWithCallStacks(t *testing.T) {
-// 	// Setup test environment
-// 	cfg := config.Config{
-// 		InitialDelay:     1 * time.Second,
-// 		MaxSniffingTime:  5 * time.Minute,
-// 		UpdateDataPeriod: 5 * time.Second,
-// 	}
-// 	ctx := context.TODO()
-// 	k8sClient := &k8sclient.K8sClientMock{}
-// 	storageClient := &storage.StorageHttpClientMock{}
-// 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
-// 	seccompManagerMock := &seccompmanager.SeccompManagerMock{}
+func TestApplicationProfileManagerWithCallStacks(t *testing.T) {
+	// Setup test environment
+	cfg := config.Config{
+		InitialDelay:     1 * time.Second,
+		MaxSniffingTime:  5 * time.Minute,
+		UpdateDataPeriod: 5 * time.Second,
+	}
+	ctx := context.TODO()
+	k8sClient := &k8sclient.K8sClientMock{}
+	storageClient := &storage.StorageHttpClientMock{}
+	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
+	seccompManagerMock := &seccompmanager.SeccompManagerMock{}
 
-// 	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil)
-// 	assert.NoError(t, err)
+	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil)
+	if err != nil {
+		t.Fatalf("Failed to create ApplicationProfileManager: %v", err)
+	}
 
-// 	// Prepare container
-// 	container := &containercollection.Container{
-// 		K8s: containercollection.K8sMetadata{
-// 			BasicK8sMetadata: types.BasicK8sMetadata{
-// 				Namespace:     "ns",
-// 				PodName:       "pod",
-// 				ContainerName: "cont",
-// 			},
-// 		},
-// 		Runtime: containercollection.RuntimeMetadata{
-// 			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-// 				ContainerID:        "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
-// 				ContainerStartedAt: types.Time(time.Now().UnixNano()),
-// 			},
-// 		},
-// 	}
+	// Prepare container
+	container := &containercollection.Container{
+		K8s: containercollection.K8sMetadata{
+			BasicK8sMetadata: types.BasicK8sMetadata{
+				Namespace:     "ns",
+				PodName:       "pod",
+				ContainerName: "cont",
+			},
+		},
+		Runtime: containercollection.RuntimeMetadata{
+			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
+				ContainerID:        "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+				ContainerStartedAt: types.Time(time.Now().UnixNano()),
+			},
+		},
+	}
 
-// 	sharedWatchedContainerData := &utils.WatchedContainerData{}
-// 	err = ensureInstanceID(container, sharedWatchedContainerData, k8sClient, "cluster")
-// 	assert.NoError(t, err)
-// 	k8sObjectCacheMock.SetSharedContainerData(container.Runtime.ContainerID, sharedWatchedContainerData)
+	sharedWatchedContainerData := &utils.WatchedContainerData{}
+	err = ensureInstanceID(container, sharedWatchedContainerData, k8sClient, "cluster")
+	if err != nil {
+		t.Fatalf("Failed to ensure instance ID: %v", err)
+	}
+	k8sObjectCacheMock.SetSharedContainerData(container.Runtime.ContainerID, sharedWatchedContainerData)
 
-// 	// Start container monitoring
-// 	am.ContainerCallback(containercollection.PubSubEvent{
-// 		Type:      containercollection.EventTypeAddContainer,
-// 		Container: container,
-// 	})
+	// Start container monitoring
+	am.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeAddContainer,
+		Container: container,
+	})
 
-// 	// Wait for initialization
-// 	time.Sleep(2 * time.Second)
+	// Wait for initialization
+	time.Sleep(2 * time.Second)
 
-// 	// Report call stacks
-// 	callStack1 := &v1beta1.IdentifiedCallStack{
-// 		CallID: "open",
-// 		CallStack: v1beta1.CallStack{
-// 			Root: &v1beta1.CallStackNode{
-// 				Frame: &v1beta1.StackFrame{
-// 					FileID: "1",
-// 					Lineno: "42",
-// 				},
-// 			},
-// 		},
-// 	}
+	// Report call stacks
+	callStack1 := v1beta1.IdentifiedCallStack{
+		CallID: "open",
+		CallStack: v1beta1.CallStack{
+			Root: v1beta1.CallStackNode{
+				Frame: v1beta1.StackFrame{
+					FileID: "1",
+					Lineno: "42",
+				},
+				Children: []v1beta1.CallStackNode{},
+			},
+		},
+	}
 
-// 	callStack2 := &v1beta1.IdentifiedCallStack{
-// 		CallID: "exec",
-// 		CallStack: v1beta1.CallStack{
-// 			Root: &v1beta1.CallStackNode{
-// 				Frame: &v1beta1.StackFrame{
-// 					FileID: "2",
-// 					Lineno: "84",
-// 				},
-// 				Children: []v1beta1.CallStackNode{
-// 					{
-// 						Frame: &v1beta1.StackFrame{
-// 							FileID: "3",
-// 							Lineno: "120",
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	}
+	callStack2 := v1beta1.IdentifiedCallStack{
+		CallID: "exec",
+		CallStack: v1beta1.CallStack{
+			Root: v1beta1.CallStackNode{
+				Frame: v1beta1.StackFrame{
+					FileID: "2",
+					Lineno: "84",
+				},
+				Children: []v1beta1.CallStackNode{
+					{
+						Frame: v1beta1.StackFrame{
+							FileID: "3",
+							Lineno: "120",
+						},
+						Children: []v1beta1.CallStackNode{},
+					},
+				},
+			},
+		},
+	}
 
-// 	// Report call stacks and verify they're stored in toSaveCallStacks
-// 	am.ReportIdentifiedCallStack("ns/pod/cont", callStack1)
-// 	time.Sleep(100 * time.Millisecond)
+	// Report call stacks and verify they're stored in toSaveCallStacks
+	am.ReportIdentifiedCallStack("ns/pod/cont", &callStack1)
+	time.Sleep(100 * time.Millisecond)
 
-// 	// Debug logging for first call stack
-// 	toSaveCallStacks := am.toSaveCallStacks.Get("ns/pod/cont")
-// 	t.Logf("After first report - Number of call stacks in toSave: %d", toSaveCallStacks.Len())
-// 	toSaveCallStacks.Range(func(identifier string, stack *v1beta1.IdentifiedCallStack) bool {
-// 		t.Logf("Found call stack with ID: %s", stack.CallID)
-// 		return true
-// 	})
+	// Debug logging for first call stack
+	toSaveCallStacks := am.toSaveCallStacks.Get("ns/pod/cont")
+	t.Logf("After first report - Number of call stacks in toSave: %d", toSaveCallStacks.Len())
+	toSaveCallStacks.Range(func(identifier string, stack *v1beta1.IdentifiedCallStack) bool {
+		t.Logf("Found call stack with ID: %s", stack.CallID)
+		return true
+	})
 
-// 	am.ReportIdentifiedCallStack("ns/pod/cont", callStack2)
-// 	time.Sleep(100 * time.Millisecond)
+	am.ReportIdentifiedCallStack("ns/pod/cont", &callStack2)
+	time.Sleep(100 * time.Millisecond)
 
-// 	// Debug logging for second call stack
-// 	t.Logf("After second report - Number of call stacks in toSave: %d", toSaveCallStacks.Len())
-// 	toSaveCallStacks.Range(func(identifier string, stack *v1beta1.IdentifiedCallStack) bool {
-// 		t.Logf("Found call stack with ID: %s", stack.CallID)
-// 		return true
-// 	})
+	// Debug logging for second call stack
+	t.Logf("After second report - Number of call stacks in toSave: %d", toSaveCallStacks.Len())
+	toSaveCallStacks.Range(func(identifier string, stack *v1beta1.IdentifiedCallStack) bool {
+		t.Logf("Found call stack with ID: %s", stack.CallID)
+		return true
+	})
 
-// 	// Let monitoring run and trigger a save
-// 	time.Sleep(2 * time.Second)
+	// Let monitoring run and trigger a save
+	time.Sleep(2 * time.Second)
 
-// 	// Check saved call stacks after first save
-// 	savedCallStacks := am.savedCallStacks.Get("ns/pod/cont")
-// 	t.Logf("After first save - Number of call stacks in saved: %v", savedCallStacks)
+	// Check saved call stacks after first save
+	savedCallStacks := am.savedCallStacks.Get("ns/pod/cont")
+	t.Logf("After first save - Number of call stacks in saved: %v", savedCallStacks)
 
-// 	// Let it run for the remaining time
-// 	time.Sleep(2 * time.Second)
+	// Let it run for the remaining time
+	time.Sleep(2 * time.Second)
 
-// 	// Report container stopped
-// 	am.ContainerCallback(containercollection.PubSubEvent{
-// 		Type:      containercollection.EventTypeRemoveContainer,
-// 		Container: container,
-// 	})
+	// Report container stopped
+	am.ContainerCallback(containercollection.PubSubEvent{
+		Type:      containercollection.EventTypeRemoveContainer,
+		Container: container,
+	})
 
-// 	// Wait for final processing
-// 	time.Sleep(2 * time.Second)
+	// Wait for final processing
+	time.Sleep(2 * time.Second)
 
-// 	// Debug logging for profiles
-// 	for i, profile := range storageClient.ApplicationProfiles {
-// 		t.Logf("Profile %d:", i)
-// 		t.Logf("  Number of containers: %d", len(profile.Spec.Containers))
-// 		if len(profile.Spec.Containers) > 1 {
-// 			t.Logf("  Call stacks in container[1]: %d", len(profile.Spec.Containers[1].IdentifiedCallStacks))
-// 			for _, cs := range profile.Spec.Containers[1].IdentifiedCallStacks {
-// 				t.Logf("    Call stack ID: %s", cs.CallID)
-// 			}
-// 		}
-// 	}
+	// Debug logging for profiles
+	for i, profile := range storageClient.ApplicationProfiles {
+		t.Logf("Profile %d:", i)
+		t.Logf("  Number of containers: %d", len(profile.Spec.Containers))
+		if len(profile.Spec.Containers) > 1 {
+			t.Logf("  Call stacks in container[1]: %d", len(profile.Spec.Containers[1].IdentifiedCallStacks))
+			for _, cs := range profile.Spec.Containers[1].IdentifiedCallStacks {
+				t.Logf("    Call stack ID: %s", cs.CallID)
+			}
+		}
+	}
 
-// 	// Verify results
-// 	assert.Greater(t, len(storageClient.ApplicationProfiles), 0, "No application profiles were created")
+	// Verify results
+	if len(storageClient.ApplicationProfiles) == 0 {
+		t.Fatal("No application profiles were created")
+	}
 
-// 	// Get the latest profile
-// 	latestProfile := storageClient.ApplicationProfiles[len(storageClient.ApplicationProfiles)-1]
-// 	assert.NotNil(t, latestProfile.Spec.Containers, "Containers slice is nil")
-// 	assert.Greater(t, len(latestProfile.Spec.Containers), 1, "Not enough containers in profile")
+	// Get the latest profile
+	latestProfile := storageClient.ApplicationProfiles[len(storageClient.ApplicationProfiles)-1]
+	if latestProfile.Spec.Containers == nil {
+		t.Fatal("Containers slice is nil")
+	}
+	if len(latestProfile.Spec.Containers) <= 1 {
+		t.Fatal("Not enough containers in profile")
+	}
 
-// 	foundCallStacks := latestProfile.Spec.Containers[1].IdentifiedCallStacks
+	foundCallStacks := latestProfile.Spec.Containers[1].IdentifiedCallStacks
 
-// 	// Sort both expected and found call stacks
-// 	sortCallStacks := func(cs []v1beta1.IdentifiedCallStack) {
-// 		sort.Slice(cs, func(i, j int) bool {
-// 			return string(cs[i].CallID) < string(cs[j].CallID)
-// 		})
-// 	}
+	// Sort both expected and found call stacks
+	sortCallStacks := func(cs []v1beta1.IdentifiedCallStack) {
+		sort.Slice(cs, func(i, j int) bool {
+			return string(cs[i].CallID) < string(cs[j].CallID)
+		})
+	}
 
-// 	expectedCallStacks := []v1beta1.IdentifiedCallStack{*callStack1, *callStack2}
-// 	sortCallStacks(expectedCallStacks)
-// 	sortCallStacks(foundCallStacks)
+	expectedCallStacks := []v1beta1.IdentifiedCallStack{callStack1, callStack2}
+	sortCallStacks(expectedCallStacks)
+	sortCallStacks(foundCallStacks)
 
-// 	t.Logf("Number of profiles: %d", len(storageClient.ApplicationProfiles))
-// 	t.Logf("Latest profile containers: %d", len(latestProfile.Spec.Containers))
-// 	t.Logf("Found call stacks: %d", len(foundCallStacks))
+	t.Logf("Number of profiles: %d", len(storageClient.ApplicationProfiles))
+	t.Logf("Latest profile containers: %d", len(latestProfile.Spec.Containers))
+	t.Logf("Found call stacks: %d", len(foundCallStacks))
 
-// 	assert.Equal(t, len(expectedCallStacks), len(foundCallStacks), "Number of call stacks doesn't match")
-// 	if len(foundCallStacks) == len(expectedCallStacks) {
-// 		for i := range expectedCallStacks {
-// 			assert.True(t, compareCallStacks(&expectedCallStacks[i], &foundCallStacks[i]),
-// 				"Call stack mismatch at index %d\nExpected: %+v\nGot: %+v", i, expectedCallStacks[i], foundCallStacks[i])
-// 		}
-// 	}
-// }
+	if len(expectedCallStacks) != len(foundCallStacks) {
+		t.Errorf("Number of call stacks doesn't match. Expected %d, got %d",
+			len(expectedCallStacks), len(foundCallStacks))
+		return
+	}
 
-// func TestCallStackComparison(t *testing.T) {
-// 	tests := []struct {
-// 		name     string
-// 		stack1   *v1beta1.IdentifiedCallStack
-// 		stack2   *v1beta1.IdentifiedCallStack
-// 		expected bool
-// 	}{
-// 		{
-// 			name: "identical single frame stacks",
-// 			stack1: &v1beta1.IdentifiedCallStack{
-// 				CallID: "test",
-// 				CallStack: v1beta1.CallStack{
-// 					Root: &v1beta1.CallStackNode{
-// 						Frame: &v1beta1.StackFrame{
-// 							FileID: "1",
-// 							Lineno: "42",
-// 						},
-// 					},
-// 				},
-// 			},
-// 			stack2: &v1beta1.IdentifiedCallStack{
-// 				CallID: "test",
-// 				CallStack: v1beta1.CallStack{
-// 					Root: &v1beta1.CallStackNode{
-// 						Frame: &v1beta1.StackFrame{
-// 							FileID: "1",
-// 							Lineno: "42",
-// 						},
-// 					},
-// 				},
-// 			},
-// 			expected: true,
-// 		},
-// 		{
-// 			name: "different call IDs",
-// 			stack1: &v1beta1.IdentifiedCallStack{
-// 				CallID: "test1",
-// 				CallStack: v1beta1.CallStack{
-// 					Root: &v1beta1.CallStackNode{
-// 						Frame: &v1beta1.StackFrame{
-// 							FileID: "1",
-// 							Lineno: "42",
-// 						},
-// 					},
-// 				},
-// 			},
-// 			stack2: &v1beta1.IdentifiedCallStack{
-// 				CallID: "test2",
-// 				CallStack: v1beta1.CallStack{
-// 					Root: &v1beta1.CallStackNode{
-// 						Frame: &v1beta1.StackFrame{
-// 							FileID: "1",
-// 							Lineno: "42",
-// 						},
-// 					},
-// 				},
-// 			},
-// 			expected: false,
-// 		},
-// 	}
+	for i := range expectedCallStacks {
+		if !compareCallStacks(expectedCallStacks[i], foundCallStacks[i]) {
+			t.Errorf("Call stack mismatch at index %d\nExpected: %+v\nGot: %+v",
+				i, expectedCallStacks[i], foundCallStacks[i])
+		}
+	}
+}
 
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			result := compareCallStacks(tt.stack1, tt.stack2)
-// 			assert.Equal(t, tt.expected, result)
-// 		})
-// 	}
-// }
+func TestCallStackComparison(t *testing.T) {
+	tests := []struct {
+		name     string
+		stack1   v1beta1.IdentifiedCallStack
+		stack2   v1beta1.IdentifiedCallStack
+		expected bool
+	}{
+		{
+			name: "identical single frame stacks",
+			stack1: v1beta1.IdentifiedCallStack{
+				CallID: "test",
+				CallStack: v1beta1.CallStack{
+					Root: v1beta1.CallStackNode{
+						Frame: v1beta1.StackFrame{
+							FileID: "1",
+							Lineno: "42",
+						},
+						Children: []v1beta1.CallStackNode{},
+					},
+				},
+			},
+			stack2: v1beta1.IdentifiedCallStack{
+				CallID: "test",
+				CallStack: v1beta1.CallStack{
+					Root: v1beta1.CallStackNode{
+						Frame: v1beta1.StackFrame{
+							FileID: "1",
+							Lineno: "42",
+						},
+						Children: []v1beta1.CallStackNode{},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "different call IDs",
+			stack1: v1beta1.IdentifiedCallStack{
+				CallID: "test1",
+				CallStack: v1beta1.CallStack{
+					Root: v1beta1.CallStackNode{
+						Frame: v1beta1.StackFrame{
+							FileID: "1",
+							Lineno: "42",
+						},
+						Children: []v1beta1.CallStackNode{},
+					},
+				},
+			},
+			stack2: v1beta1.IdentifiedCallStack{
+				CallID: "test2",
+				CallStack: v1beta1.CallStack{
+					Root: v1beta1.CallStackNode{
+						Frame: v1beta1.StackFrame{
+							FileID: "1",
+							Lineno: "42",
+						},
+						Children: []v1beta1.CallStackNode{},
+					},
+				},
+			},
+			expected: false,
+		},
+	}
 
-// func TestCalculateSHA256CallStackHash(t *testing.T) {
-// 	callStack1 := &v1beta1.IdentifiedCallStack{
-// 		CallID: "open",
-// 		CallStack: v1beta1.CallStack{
-// 			Root: &v1beta1.CallStackNode{
-// 				Frame: &v1beta1.StackFrame{
-// 					FileID: "1",
-// 					Lineno: "42",
-// 				},
-// 			},
-// 		},
-// 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := compareCallStacks(tt.stack1, tt.stack2)
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
 
-// 	callStack2 := &v1beta1.IdentifiedCallStack{
-// 		CallID: "exec",
-// 		CallStack: v1beta1.CallStack{
-// 			Root: &v1beta1.CallStackNode{
-// 				Frame: &v1beta1.StackFrame{
-// 					FileID: "2",
-// 					Lineno: "84",
-// 				},
-// 				Children: []v1beta1.CallStackNode{
-// 					{
-// 						Frame: &v1beta1.StackFrame{
-// 							FileID: "3",
-// 							Lineno: "120",
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	}
+func TestCalculateSHA256CallStackHash(t *testing.T) {
+	callStack1 := v1beta1.IdentifiedCallStack{
+		CallID: "open",
+		CallStack: v1beta1.CallStack{
+			Root: v1beta1.CallStackNode{
+				Frame: v1beta1.StackFrame{
+					FileID: "1",
+					Lineno: "42",
+				},
+				Children: []v1beta1.CallStackNode{},
+			},
+		},
+	}
 
-// 	hash1 := CalculateSHA256CallStackHash(callStack1)
-// 	hash2 := CalculateSHA256CallStackHash(callStack2)
+	callStack2 := v1beta1.IdentifiedCallStack{
+		CallID: "exec",
+		CallStack: v1beta1.CallStack{
+			Root: v1beta1.CallStackNode{
+				Frame: v1beta1.StackFrame{
+					FileID: "2",
+					Lineno: "84",
+				},
+				Children: []v1beta1.CallStackNode{
+					{
+						Frame: v1beta1.StackFrame{
+							FileID: "3",
+							Lineno: "120",
+						},
+						Children: []v1beta1.CallStackNode{},
+					},
+				},
+			},
+		},
+	}
 
-// 	t.Logf("Hash for callStack1: %s", hash1)
-// 	t.Logf("Hash for callStack2: %s", hash2)
+	hash1 := CalculateSHA256CallStackHash(callStack1)
+	hash2 := CalculateSHA256CallStackHash(callStack2)
 
-// 	// Different call stacks should produce different hashes
-// 	assert.NotEqual(t, hash1, hash2, "Different call stacks should have different hashes")
+	t.Logf("Hash for callStack1: %s", hash1)
+	t.Logf("Hash for callStack2: %s", hash2)
 
-// 	// Same call stack should produce same hash
-// 	hash1Again := CalculateSHA256CallStackHash(callStack1)
-// 	assert.Equal(t, hash1, hash1Again, "Same call stack should produce same hash")
+	// Different call stacks should produce different hashes
+	if hash1 == hash2 {
+		t.Error("Different call stacks should have different hashes")
+	}
 
-// 	// Test with children nodes
-// 	childrenCallStack := &v1beta1.IdentifiedCallStack{
-// 		CallID: "exec",
-// 		CallStack: v1beta1.CallStack{
-// 			Root: &v1beta1.CallStackNode{
-// 				Frame: &v1beta1.StackFrame{
-// 					FileID: "2",
-// 					Lineno: "84",
-// 				},
-// 				Children: []v1beta1.CallStackNode{
-// 					{
-// 						Frame: &v1beta1.StackFrame{
-// 							FileID: "3",
-// 							Lineno: "120",
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	}
+	// Same call stack should produce same hash
+	hash1Again := CalculateSHA256CallStackHash(callStack1)
+	if hash1 != hash1Again {
+		t.Error("Same call stack should produce same hash")
+	}
 
-// 	hashWithChildren := CalculateSHA256CallStackHash(childrenCallStack)
-// 	t.Logf("Hash for childrenCallStack: %s", hashWithChildren)
+	// Test with children nodes
+	childrenCallStack := v1beta1.IdentifiedCallStack{
+		CallID: "exec",
+		CallStack: v1beta1.CallStack{
+			Root: v1beta1.CallStackNode{
+				Frame: v1beta1.StackFrame{
+					FileID: "2",
+					Lineno: "84",
+				},
+				Children: []v1beta1.CallStackNode{
+					{
+						Frame: v1beta1.StackFrame{
+							FileID: "3",
+							Lineno: "120",
+						},
+						Children: []v1beta1.CallStackNode{},
+					},
+				},
+			},
+		},
+	}
 
-// 	// Different call stack with same root but different children should have different hash
-// 	differentChildrenCallStack := &v1beta1.IdentifiedCallStack{
-// 		CallID: "exec",
-// 		CallStack: v1beta1.CallStack{
-// 			Root: &v1beta1.CallStackNode{
-// 				Frame: &v1beta1.StackFrame{
-// 					FileID: "2",
-// 					Lineno: "84",
-// 				},
-// 				Children: []v1beta1.CallStackNode{
-// 					{
-// 						Frame: &v1beta1.StackFrame{
-// 							FileID: "4", // Different FileID
-// 							Lineno: "120",
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	}
+	hashWithChildren := CalculateSHA256CallStackHash(childrenCallStack)
+	t.Logf("Hash for childrenCallStack: %s", hashWithChildren)
 
-// 	hashWithDifferentChildren := CalculateSHA256CallStackHash(differentChildrenCallStack)
-// 	t.Logf("Hash for differentChildrenCallStack: %s", hashWithDifferentChildren)
-// 	assert.NotEqual(t, hashWithChildren, hashWithDifferentChildren,
-// 		"Call stacks with different children should have different hashes")
-// }
+	// Different call stack with same root but different children should have different hash
+	differentChildrenCallStack := v1beta1.IdentifiedCallStack{
+		CallID: "exec",
+		CallStack: v1beta1.CallStack{
+			Root: v1beta1.CallStackNode{
+				Frame: v1beta1.StackFrame{
+					FileID: "2",
+					Lineno: "84",
+				},
+				Children: []v1beta1.CallStackNode{
+					{
+						Frame: v1beta1.StackFrame{
+							FileID: "4", // Different FileID
+							Lineno: "120",
+						},
+						Children: []v1beta1.CallStackNode{},
+					},
+				},
+			},
+		},
+	}
+
+	hashWithDifferentChildren := CalculateSHA256CallStackHash(differentChildrenCallStack)
+	t.Logf("Hash for differentChildrenCallStack: %s", hashWithDifferentChildren)
+	if hashWithChildren == hashWithDifferentChildren {
+		t.Error("Call stacks with different children should have different hashes")
+	}
+}

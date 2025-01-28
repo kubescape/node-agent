@@ -178,46 +178,6 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 	}
 }
 
-func PrintCallStackVerbose(ics v1beta1.IdentifiedCallStack) {
-	fmt.Printf("IdentifiedCallStack:\n")
-	fmt.Printf("  CallID: %s\n", ics.CallID)
-
-	// No need to check for nil Root as it's a value type
-	// Check if it's an empty frame and has no children instead
-	if len(ics.CallStack.Root.Children) == 0 && isEmptyFrame(ics.CallStack.Root.Frame) {
-		fmt.Println("  Root: empty")
-		return
-	}
-
-	var printNode func(v1beta1.CallStackNode, int)
-	printNode = func(node v1beta1.CallStackNode, depth int) {
-		indent := strings.Repeat("  ", depth+1)
-		fmt.Printf("%sNode:\n", indent)
-
-		if !isEmptyFrame(node.Frame) {
-			fmt.Printf("%s  Frame:\n", indent)
-			fmt.Printf("%s    FileID: %s\n", indent, node.Frame.FileID)
-			fmt.Printf("%s    Lineno: %s\n", indent, node.Frame.Lineno)
-		} else {
-			fmt.Printf("%s  Frame: empty\n", indent)
-		}
-
-		fmt.Printf("%s  Children: %d\n", indent, len(node.Children))
-		for i, child := range node.Children {
-			fmt.Printf("%s  Child %d:\n", indent, i)
-			printNode(child, depth+1)
-		}
-	}
-
-	fmt.Println("  Root:")
-	printNode(ics.CallStack.Root, 1)
-}
-
-// Helper function to check if a frame is empty
-func isEmptyFrame(frame v1beta1.StackFrame) bool {
-	return frame.FileID == "" && frame.Lineno == ""
-}
-
 func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedContainer *utils.WatchedContainerData, namespace string, initalizeOperations []utils.PatchOperation) {
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.saveProfile")
 	defer span.End()
@@ -343,10 +303,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		callStacks = append(callStacks, *callStack)
 		return true
 	})
-	// Print the call stacks
-	for _, callStack := range callStacks {
-		PrintCallStackVerbose(callStack)
-	}
 
 	// new activity
 	// the process tries to use JSON patching to avoid conflicts between updates on the same object from different containers
