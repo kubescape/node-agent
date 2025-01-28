@@ -779,10 +779,10 @@ func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID string, event
 		openMap.Set(path, mapset.NewSet[string](event.Flags...))
 	}
 
-	if am.enricher != nil {
-		openIdentifier := utils.CalculateSHA256FileOpenHash(path)
-		go am.enricher.EnrichEvent(k8sContainerID, &event, openIdentifier)
-	}
+	// if am.enricher != nil {
+	// 	openIdentifier := utils.CalculateSHA256FileOpenHash(path)
+	// 	go am.enricher.EnrichEvent(k8sContainerID, &event, openIdentifier)
+	// }
 }
 
 func (am *ApplicationProfileManager) ReportDroppedEvent(k8sContainerID string) {
