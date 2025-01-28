@@ -2,7 +2,6 @@ package applicationprofilemanager
 
 import (
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -139,13 +138,8 @@ func CalculateSHA256CallStackHash(callStack *v1beta1.IdentifiedCallStack) string
 	// Helper function to write frame data
 	writeFrame := func(frame *v1beta1.StackFrame) {
 		if frame != nil {
-			fileIDBytes := make([]byte, 8)
-			binary.LittleEndian.PutUint64(fileIDBytes, frame.FileID)
-			hash.Write(fileIDBytes)
-
-			linenoBytes := make([]byte, 8)
-			binary.LittleEndian.PutUint64(linenoBytes, frame.Lineno)
-			hash.Write(linenoBytes)
+			hash.Write([]byte(frame.FileID))
+			hash.Write([]byte(frame.Lineno))
 		}
 	}
 
