@@ -29,7 +29,7 @@ require (
 	github.com/inspektor-gadget/inspektor-gadget v0.36.1-0.20250120121224-32d83e9ec523
 	github.com/kubescape/backend v0.0.25
 	github.com/kubescape/go-logger v0.0.23
-	github.com/kubescape/k8s-interface v0.0.182-0.20250129173721-b45899af5d6d
+	github.com/kubescape/k8s-interface v0.0.182
 	github.com/kubescape/storage v0.0.141
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opencontainers/go-digest v1.0.0
