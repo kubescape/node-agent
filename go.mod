@@ -6,9 +6,8 @@ require (
 	github.com/DmitriyVTitov/size v1.5.0
 	github.com/anchore/syft v1.18.1
 	github.com/aquilax/truncate v1.0.0
-	github.com/armosec/armoapi-go v0.0.506
+	github.com/armosec/armoapi-go v0.0.512
 	github.com/armosec/utils-k8s-go v0.0.30
-	github.com/aws/aws-sdk-go v1.55.5
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cilium/ebpf v0.17.1
@@ -30,7 +29,7 @@ require (
 	github.com/inspektor-gadget/inspektor-gadget v0.36.1-0.20250120121224-32d83e9ec523
 	github.com/kubescape/backend v0.0.25
 	github.com/kubescape/go-logger v0.0.23
-	github.com/kubescape/k8s-interface v0.0.180
+	github.com/kubescape/k8s-interface v0.0.182-0.20250129173721-b45899af5d6d
 	github.com/kubescape/storage v0.0.141
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opencontainers/go-digest v1.0.0
@@ -97,6 +96,7 @@ require (
 	github.com/armosec/gojay v1.2.17 // indirect
 	github.com/armosec/utils-go v0.0.58 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
+	github.com/aws/aws-sdk-go v1.55.5 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/becheran/wildmatch-go v1.0.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
