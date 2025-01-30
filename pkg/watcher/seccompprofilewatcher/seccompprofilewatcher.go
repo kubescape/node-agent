@@ -2,7 +2,6 @@ package seccompprofilewatcher
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/watcher"
@@ -48,12 +47,7 @@ func (sp *SeccompProfileWatcherImpl) WatchResources() []watcher.WatchResource {
 // ------------------ watcher.Watcher methods -----------------------
 
 func (sp *SeccompProfileWatcherImpl) AddHandler(ctx context.Context, obj runtime.Object) {
-	if _, ok := obj.(*v1beta1api.SeccompProfile); ok {
-		fullObj, err := sp.getFullSeccompProfile(obj)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("SeccompProfileWatcherImpl - failed to get full seccomp profile", helpers.Error(err))
-			return
-		}
+	if fullObj, ok := obj.(*v1beta1api.SeccompProfile); ok {
 		if err := sp.seccompManager.AddSeccompProfile(fullObj); err != nil {
 			logger.L().Ctx(ctx).Warning("SeccompProfileWatcherImpl - failed to add seccomp profile", helpers.Error(err))
 		}
@@ -61,12 +55,7 @@ func (sp *SeccompProfileWatcherImpl) AddHandler(ctx context.Context, obj runtime
 }
 
 func (sp *SeccompProfileWatcherImpl) ModifyHandler(ctx context.Context, obj runtime.Object) {
-	if _, ok := obj.(*v1beta1api.SeccompProfile); ok {
-		fullObj, err := sp.getFullSeccompProfile(obj)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("SeccompProfileWatcherImpl - failed to get full seccomp profile", helpers.Error(err))
-			return
-		}
+	if fullObj, ok := obj.(*v1beta1api.SeccompProfile); ok {
 		if err := sp.seccompManager.AddSeccompProfile(fullObj); err != nil {
 			logger.L().Ctx(ctx).Warning("SeccompProfileWatcherImpl - failed to modify seccomp profile", helpers.Error(err))
 		}
@@ -79,13 +68,4 @@ func (sp *SeccompProfileWatcherImpl) DeleteHandler(ctx context.Context, obj runt
 			logger.L().Ctx(ctx).Warning("SeccompProfileWatcherImpl - failed to delete seccomp profile", helpers.Error(err))
 		}
 	}
-}
-
-func (sp *SeccompProfileWatcherImpl) getFullSeccompProfile(obj runtime.Object) (*v1beta1api.SeccompProfile, error) {
-	meta := obj.(metav1.Object)
-	fullObj, err := sp.storageClient.SeccompProfiles(meta.GetNamespace()).Get(context.Background(), meta.GetName(), metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get full seccomp profile: %w", err)
-	}
-	return fullObj, nil
 }
