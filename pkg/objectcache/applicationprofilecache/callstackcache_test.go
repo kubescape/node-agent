@@ -127,12 +127,12 @@ func TestCallStackSearchTreeBranching(t *testing.T) {
 
 	// Debug print the stored tree before verification
 	fmt.Println("\nStored tree before verification:")
-	printBiNode(tree.roots["test1"], 0)
+	printBiNode(tree.Roots["test1"], 0)
 
 	fmt.Println("\nStarting verification:")
 
 	// Start verification
-	root := tree.roots["test1"]
+	root := tree.Roots["test1"]
 	fmt.Printf("Root frame: {%s %s}\n", root.Frame.FileID, root.Frame.Lineno)
 
 	current := root
@@ -222,20 +222,20 @@ func TestCallStackSearchTreeBasic(t *testing.T) {
 	tree.AddCallStack(simpleStack)
 
 	// Verify path storage
-	paths := tree.pathsByCallID["test1"]
+	paths := tree.PathsByCallID["test1"]
 	if len(paths) != 1 {
 		t.Errorf("Expected 1 path, got %d", len(paths))
 	}
 
 	// Verify trie storage
 	expectedKey := "1:1/2:1/3:1"
-	value := tree.forwardTrie.Get(expectedKey)
+	value := tree.ForwardTrie.Get(expectedKey)
 	if value == nil {
 		t.Error("Path not found in trie")
 	}
 
 	// Verify bidirectional tree
-	root := tree.roots["test1"]
+	root := tree.Roots["test1"]
 	if root == nil {
 		t.Fatal("Root node not found")
 	}
@@ -277,19 +277,19 @@ func TestCallStackSearchTreeWithSpecialFrame(t *testing.T) {
 	tree.AddCallStack(stack)
 
 	// Verify the path is stored correctly
-	paths := tree.pathsByCallID["test1"]
+	paths := tree.PathsByCallID["test1"]
 	if len(paths) != 1 {
 		t.Errorf("Expected 1 path, got %d", len(paths))
 	}
 
 	// Verify path with special frame exists in trie
 	expectedKey := "10425069705252389217:645761/10425069705252389217:653231/2918313636494991837:867979/0:4012"
-	if value := tree.forwardTrie.Get(expectedKey); value == nil {
+	if value := tree.ForwardTrie.Get(expectedKey); value == nil {
 		t.Error("Special frame path not found in trie")
 	}
 
 	// Verify the node structure
-	root := tree.roots["test1"]
+	root := tree.Roots["test1"]
 	if root == nil {
 		t.Fatal("Root node not found")
 	}
@@ -337,13 +337,13 @@ func TestCallStackSearchTreeEmpty(t *testing.T) {
 	tree.AddCallStack(emptyStack)
 
 	// Verify empty path handling
-	paths := tree.pathsByCallID["test1"]
+	paths := tree.PathsByCallID["test1"]
 	if len(paths) != 0 {
 		t.Errorf("Expected 0 paths for empty stack, got %d", len(paths))
 	}
 
 	// Verify root handling
-	if root := tree.roots["test1"]; root != nil {
+	if root := tree.Roots["test1"]; root != nil {
 		t.Error("Expected nil root for empty stack")
 	}
 }
@@ -369,20 +369,20 @@ func TestCallStackSearchTreeMultipleCallIDs(t *testing.T) {
 	tree.AddCallStack(stack2)
 
 	// Verify separate storage by CallID
-	if len(tree.pathsByCallID) != 2 {
-		t.Errorf("Expected 2 CallIDs, got %d", len(tree.pathsByCallID))
+	if len(tree.PathsByCallID) != 2 {
+		t.Errorf("Expected 2 CallIDs, got %d", len(tree.PathsByCallID))
 	}
 
 	// Verify paths for each CallID
-	paths1 := tree.pathsByCallID["id1"]
-	paths2 := tree.pathsByCallID["id2"]
+	paths1 := tree.PathsByCallID["id1"]
+	paths2 := tree.PathsByCallID["id2"]
 	if len(paths1) != 1 || len(paths2) != 1 {
 		t.Error("Wrong number of paths per CallID")
 	}
 
 	// Verify separate root nodes with correct structures
-	root1 := tree.roots["id1"]
-	root2 := tree.roots["id2"]
+	root1 := tree.Roots["id1"]
+	root2 := tree.Roots["id2"]
 	if root1 == nil || root2 == nil {
 		t.Fatal("Missing root nodes")
 	}

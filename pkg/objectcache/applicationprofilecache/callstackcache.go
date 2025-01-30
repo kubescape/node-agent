@@ -17,18 +17,18 @@ type BidirectionalNode struct {
 // CallStackSearchTree provides efficient searching and comparison of call stacks
 type CallStackSearchTree struct {
 	// Store forward paths in trie for prefix matching
-	forwardTrie *trie.PathTrie
+	ForwardTrie *trie.PathTrie
 	// Store complete paths mapped by CallID for quick lookup
-	pathsByCallID map[v1beta1.CallID][][]v1beta1.StackFrame
+	PathsByCallID map[v1beta1.CallID][][]v1beta1.StackFrame
 	// Store root nodes for bidirectional traversal
-	roots map[v1beta1.CallID]*BidirectionalNode
+	Roots map[v1beta1.CallID]*BidirectionalNode
 }
 
 func NewCallStackSearchTree() *CallStackSearchTree {
 	return &CallStackSearchTree{
-		forwardTrie:   trie.NewPathTrie(),
-		pathsByCallID: make(map[v1beta1.CallID][][]v1beta1.StackFrame),
-		roots:         make(map[v1beta1.CallID]*BidirectionalNode),
+		ForwardTrie:   trie.NewPathTrie(),
+		PathsByCallID: make(map[v1beta1.CallID][][]v1beta1.StackFrame),
+		Roots:         make(map[v1beta1.CallID]*BidirectionalNode),
 	}
 }
 
@@ -48,15 +48,15 @@ func (t *CallStackSearchTree) AddCallStack(stack v1beta1.IdentifiedCallStack) {
 	}
 
 	root := t.buildBidirectionalTree(firstFrames)
-	t.roots[stack.CallID] = root
+	t.Roots[stack.CallID] = root
 
 	// Store paths for this CallID
-	t.pathsByCallID[stack.CallID] = make([][]v1beta1.StackFrame, 0)
-	t.pathsByCallID[stack.CallID] = append(t.pathsByCallID[stack.CallID], firstFrames)
+	t.PathsByCallID[stack.CallID] = make([][]v1beta1.StackFrame, 0)
+	t.PathsByCallID[stack.CallID] = append(t.PathsByCallID[stack.CallID], firstFrames)
 
 	// Add first path to trie
 	key := pathToKey(firstFrames)
-	t.forwardTrie.Put(key, firstFrames)
+	t.ForwardTrie.Put(key, firstFrames)
 
 	// Process remaining paths
 	for i := 1; i < len(paths); i++ {
@@ -67,11 +67,11 @@ func (t *CallStackSearchTree) AddCallStack(stack v1beta1.IdentifiedCallStack) {
 		}
 
 		// Add to paths by CallID
-		t.pathsByCallID[stack.CallID] = append(t.pathsByCallID[stack.CallID], frames)
+		t.PathsByCallID[stack.CallID] = append(t.PathsByCallID[stack.CallID], frames)
 
 		// Add to trie
 		key = pathToKey(frames)
-		t.forwardTrie.Put(key, frames)
+		t.ForwardTrie.Put(key, frames)
 
 		// Merge into bidirectional tree
 		current := root
