@@ -287,6 +287,8 @@ github.com/deckarep/golang-set/v2 v2.7.0 h1:gIloKvD7yH2oip4VLhsv3JyLLFnC0Y2mlusg
 github.com/deckarep/golang-set/v2 v2.7.0/go.mod h1:VAky9rY/yGXJOLEDv3OMci+7wtDpOF4IN+y82NBOac4=
 github.com/deitch/magic v0.0.0-20230404182410-1ff89d7342da h1:ZOjWpVsFZ06eIhnh4mkaceTiVoktdU67+M7KDHJ268M=
 github.com/deitch/magic v0.0.0-20230404182410-1ff89d7342da/go.mod h1:B3tI9iGHi4imdLi4Asdha1Sc6feLMTfPLXh9IUYmysk=
+github.com/dghubble/trie v0.1.0 h1:kJnjBLFFElBwS60N4tkPvnLhnpcDxbBjIulgI8CpNGM=
+github.com/dghubble/trie v0.1.0/go.mod h1:sOmnzfBNH7H92ow2292dDFWNsVQuh/izuD7otCYb1ak=
 github.com/dgrijalva/jwt-go/v4 v4.0.0-preview1/go.mod h1:+hnT3ywWDTAFrW5aE+u2Sa/wT555ZqwoCS+pk3p6ry4=
 github.com/distribution/distribution v2.8.2+incompatible h1:k9+4DKdOG+quPFZXT/mUsiQrGu9vYCp+dXpuPkuqhk8=
 github.com/distribution/distribution v2.8.2+incompatible/go.mod h1:EgLm2NgWtdKgzF9NpMzUKgzmR7AMmb0VQi2B+ZzDRjc=
