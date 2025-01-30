@@ -5,6 +5,7 @@ import (
 
 	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -30,7 +31,7 @@ func (r *RuleObjectCacheMock) GetApplicationProfile(string) *v1beta1.Application
 	return r.profile
 }
 
-func (r *RuleObjectCacheMock) GetCallStackSearchTree(string) *v1beta1.CallStackSearchTree {
+func (r *RuleObjectCacheMock) GetCallStackSearchTree(string) *callstackcache.CallStackSearchTree {
 	return nil
 }
 
