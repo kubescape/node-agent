@@ -14,6 +14,7 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -49,7 +50,7 @@ func newApplicationProfileState(ap *v1beta1.ApplicationProfile) applicationProfi
 
 // ContainerCallStackIndex maintains call stack search trees for a container
 type ContainerCallStackIndex struct {
-	searchTree *CallStackSearchTree
+	searchTree *callstackcache.CallStackSearchTree
 }
 
 type ApplicationProfileCacheImpl struct {
@@ -126,7 +127,7 @@ func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID stri
 	// Initialize container index if needed
 	if !ap.containerCallStacks.Has(containerID) {
 		ap.containerCallStacks.Set(containerID, &ContainerCallStackIndex{
-			searchTree: NewCallStackSearchTree(),
+			searchTree: callstackcache.NewCallStackSearchTree(),
 		})
 	}
 
@@ -206,7 +207,7 @@ func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string)
 	return nil
 }
 
-func (ap *ApplicationProfileCacheImpl) GetCallStackSearchTree(containerID string) *CallStackSearchTree {
+func (ap *ApplicationProfileCacheImpl) GetCallStackSearchTree(containerID string) *callstackcache.CallStackSearchTree {
 	if index := ap.containerCallStacks.Get(containerID); index != nil {
 		return index.searchTree
 	}

@@ -30,6 +30,10 @@ func (r *RuleObjectCacheMock) GetApplicationProfile(string) *v1beta1.Application
 	return r.profile
 }
 
+func (r *RuleObjectCacheMock) GetCallStackSearchTree(string) *v1beta1.CallStackSearchTree {
+	return nil
+}
+
 func (r *RuleObjectCacheMock) SetApplicationProfile(profile *v1beta1.ApplicationProfile) {
 	r.profile = profile
 }

@@ -1,4 +1,4 @@
-package applicationprofilecache
+package callstackcache
 
 import (
 	"strings"
