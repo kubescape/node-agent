@@ -206,6 +206,13 @@ func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string)
 	return nil
 }
 
+func (ap *ApplicationProfileCacheImpl) GetCallStackSearchTree(containerID string) *CallStackSearchTree {
+	if index := ap.containerCallStacks.Get(containerID); index != nil {
+		return index.searchTree
+	}
+	return nil
+}
+
 // ------------------ watcher.Adaptor methods -----------------------
 
 // ------------------ watcher.WatchResources methods -----------------------
