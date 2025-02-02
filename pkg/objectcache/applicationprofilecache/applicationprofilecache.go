@@ -203,9 +203,11 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(obj runtime.Object)
 			time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
 				ap.addFullApplicationProfile(appProfile, apName)
 			})
+		} else {
+			logger.L().Info("ApplicationProfileCacheImpl - retrying to add full application profile", helpers.String("name", apName))
+			return fmt.Errorf("retry")
 		}
-		logger.L().Info("ApplicationProfileCacheImpl - retrying to add full application profile", helpers.String("name", apName))
-		return fmt.Errorf("retry")
+		return nil
 	}, backoff.NewExponentialBackOff())
 }
 
