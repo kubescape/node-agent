@@ -64,6 +64,7 @@ type ApplicationProfileCacheImpl struct {
 	maxDelaySeconds     int // maximum delay in seconds before getting the full object from the storage
 	userManagedProfiles maps.SafeMap[string, *v1beta1.ApplicationProfile]
 	containerCallStacks maps.SafeMap[string, *ContainerCallStackIndex] // cache the containerID to call stack search tree mapping
+	containerToName     maps.SafeMap[string, string]                   // cache the containerID to container name mapping
 }
 
 func NewApplicationProfileCache(nodeName string, storageClient versioned.SpdxV1beta1Interface, maxDelaySeconds int) *ApplicationProfileCacheImpl {
@@ -78,6 +79,7 @@ func NewApplicationProfileCache(nodeName string, storageClient versioned.SpdxV1b
 		allProfiles:         mapset.NewSet[string](),
 		userManagedProfiles: maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
 		containerCallStacks: maps.SafeMap[string, *ContainerCallStackIndex]{},
+		containerToName:     maps.SafeMap[string, string]{},
 	}
 }
 
@@ -123,7 +125,7 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 }
 
 // indexContainerCallStacks builds the search index for a container's call stacks and removes them from the profile
-func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID string, appProfile *v1beta1.ApplicationProfile) {
+func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, containerName string, appProfile *v1beta1.ApplicationProfile) {
 	// Initialize container index if needed
 	if !ap.containerCallStacks.Has(containerID) {
 		ap.containerCallStacks.Set(containerID, &ContainerCallStackIndex{
@@ -135,7 +137,7 @@ func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID stri
 
 	// Find the container in the profile and index its call stacks
 	for i := range appProfile.Spec.Containers {
-		if appProfile.Spec.Containers[i].ImageID == containerID {
+		if appProfile.Spec.Containers[i].Name == containerName {
 			// Index all call stacks
 			for _, stack := range appProfile.Spec.Containers[i].IdentifiedCallStacks {
 				index.searchTree.AddCallStack(stack)
@@ -149,7 +151,7 @@ func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID stri
 
 	// Also check init containers
 	for i := range appProfile.Spec.InitContainers {
-		if appProfile.Spec.InitContainers[i].ImageID == containerID {
+		if appProfile.Spec.InitContainers[i].Name == containerName {
 			for _, stack := range appProfile.Spec.InitContainers[i].IdentifiedCallStacks {
 				index.searchTree.AddCallStack(stack)
 			}
@@ -160,7 +162,7 @@ func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID stri
 
 	// And ephemeral containers
 	for i := range appProfile.Spec.EphemeralContainers {
-		if appProfile.Spec.EphemeralContainers[i].ImageID == containerID {
+		if appProfile.Spec.EphemeralContainers[i].Name == containerName {
 			for _, stack := range appProfile.Spec.EphemeralContainers[i].IdentifiedCallStacks {
 				index.searchTree.AddCallStack(stack)
 			}
@@ -303,6 +305,7 @@ func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 			continue
 		}
 		ap.containerToSlug.Set(container, uniqueSlug)
+		ap.initContainerIdToName(pod)
 
 		// if application profile exists but is not cached
 		if ap.allProfiles.Contains(uniqueSlug) && !ap.slugToAppProfile.Has(uniqueSlug) {
@@ -321,6 +324,19 @@ func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 
 }
 
+func (ap *ApplicationProfileCacheImpl) initContainerIdToName(pod *corev1.Pod) {
+	for i, container := range pod.Spec.Containers {
+		ap.containerToName.Set(utils.TrimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID), container.Name)
+	}
+	for i, container := range pod.Spec.InitContainers {
+		ap.containerToName.Set(utils.TrimRuntimePrefix(pod.Status.InitContainerStatuses[i].ContainerID), container.Name)
+	}
+	for i, container := range pod.Spec.EphemeralContainers {
+		ap.containerToName.Set(utils.TrimRuntimePrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID), container.Name)
+	}
+
+}
+
 func (ap *ApplicationProfileCacheImpl) deletePod(obj runtime.Object) {
 	pod := obj.(*corev1.Pod)
 
@@ -335,6 +351,7 @@ func (ap *ApplicationProfileCacheImpl) removeContainer(containerID string) {
 	uniqueSlug := ap.containerToSlug.Get(containerID)
 	ap.containerToSlug.Delete(containerID)
 	ap.containerCallStacks.Delete(containerID)
+	ap.containerToName.Delete(containerID)
 
 	// remove pod form the application profile mapping
 	if ap.slugToContainers.Has(uniqueSlug) {
@@ -370,7 +387,7 @@ func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1b
 	ap.slugToAppProfile.Set(apName, fullAP)
 	for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
 		ap.containerToSlug.Set(i, apName)
-		ap.indexContainerCallStacks(i, fullAP)
+		ap.indexContainerCallStacks(i, ap.containerToName.Get(i), fullAP)
 	}
 	logger.L().Debug("ApplicationProfileCacheImpl - added pod to application profile cache", helpers.String("name", apName))
 }
