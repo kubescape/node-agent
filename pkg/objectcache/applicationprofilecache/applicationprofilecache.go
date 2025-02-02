@@ -198,6 +198,7 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(obj runtime.Object)
 
 	ap.allProfiles.Add(apName)
 
+	// TODO: FIX THIS BUG. This is a bug in the original code.
 	backoff.Retry(func() error {
 		if ap.slugToContainers.Has(apName) {
 			time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
