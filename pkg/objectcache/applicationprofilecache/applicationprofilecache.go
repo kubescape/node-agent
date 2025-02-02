@@ -140,6 +140,7 @@ func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, con
 		if appProfile.Spec.Containers[i].Name == containerName {
 			// Index all call stacks
 			for _, stack := range appProfile.Spec.Containers[i].IdentifiedCallStacks {
+				logger.L().Info("ApplicationProfileCacheImpl - indexing call stack", helpers.String("containerID", containerID), helpers.String("containerName", containerName), helpers.String("CallID", string(stack.CallID)))
 				index.searchTree.AddCallStack(stack)
 			}
 
@@ -170,6 +171,12 @@ func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, con
 			break
 		}
 	}
+
+	// Print the indexed call stacks
+	logger.L().Info("ApplicationProfileCacheImpl - indexed call stacks for container",
+		helpers.String("containerID", containerID),
+		helpers.String("containerName", containerName),
+		helpers.Int("callStackCount", len(index.searchTree.Roots)))
 }
 
 func (ap *ApplicationProfileCacheImpl) addApplicationProfile(obj runtime.Object) {
@@ -210,7 +217,9 @@ func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string)
 }
 
 func (ap *ApplicationProfileCacheImpl) GetCallStackSearchTree(containerID string) *callstackcache.CallStackSearchTree {
+	logger.L().Info("ApplicationProfileCacheImpl - getting call stack search tree", helpers.String("containerID", containerID))
 	if index := ap.containerCallStacks.Get(containerID); index != nil {
+		logger.L().Info("ApplicationProfileCacheImpl - found call stack search tree", helpers.String("containerID", containerID))
 		return index.searchTree
 	}
 	return nil
