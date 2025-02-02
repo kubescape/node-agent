@@ -126,6 +126,7 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 
 // indexContainerCallStacks builds the search index for a container's call stacks and removes them from the profile
 func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, containerName string, appProfile *v1beta1.ApplicationProfile) {
+	logger.L().Info("ApplicationProfileCacheImpl - indexing call stacks for container", helpers.String("containerID", containerID), helpers.String("containerName", containerName))
 	// Initialize container index if needed
 	if !ap.containerCallStacks.Has(containerID) {
 		ap.containerCallStacks.Set(containerID, &ContainerCallStackIndex{
