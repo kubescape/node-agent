@@ -161,6 +161,9 @@ func (e *HTTPExporter) createRuleAlert(failedRule ruleengine.RuleFailure) apityp
 	k8sDetails.NodeName = e.nodeName
 	k8sDetails.ClusterName = e.clusterName
 
+	httpDetails := failedRule.GetHttpRuleAlert()
+	httpDetails.SourcePodInfo.ClusterName = e.clusterName
+
 	return apitypes.RuntimeAlert{
 		Message:                failedRule.GetRuleAlert().RuleDescription,
 		HostName:               e.host,
@@ -169,7 +172,7 @@ func (e *HTTPExporter) createRuleAlert(failedRule ruleengine.RuleFailure) apityp
 		RuntimeAlertK8sDetails: k8sDetails,
 		RuleAlert:              failedRule.GetRuleAlert(),
 		RuleID:                 failedRule.GetRuleId(),
-		HttpRuleAlert:          failedRule.GetHttpRuleAlert(),
+		HttpRuleAlert:          httpDetails,
 	}
 }
 
