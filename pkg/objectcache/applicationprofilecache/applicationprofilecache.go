@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cenkalti/backoff"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
@@ -197,11 +198,15 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(obj runtime.Object)
 
 	ap.allProfiles.Add(apName)
 
-	if ap.slugToContainers.Has(apName) {
-		time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
-			ap.addFullApplicationProfile(appProfile, apName)
-		})
-	}
+	backoff.Retry(func() error {
+		if ap.slugToContainers.Has(apName) {
+			time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
+				ap.addFullApplicationProfile(appProfile, apName)
+			})
+		}
+		logger.L().Info("ApplicationProfileCacheImpl - retrying to add full application profile", helpers.String("name", apName))
+		return fmt.Errorf("retry")
+	}, backoff.NewExponentialBackOff())
 }
 
 func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string) *v1beta1.ApplicationProfile {
