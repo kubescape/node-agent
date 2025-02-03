@@ -440,7 +440,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		}
 
 		ruleManager.ReportEvent(utils.IoUringEventType, &event)
-		rulePolicyReporter.ReportEvent(utils.HardlinkEventType, &event, k8sContainerID, event.Comm)
+		rulePolicyReporter.ReportEvent(utils.HardlinkEventType, &event, k8sContainerID, event.Identifier)
 	})
 
 	if err != nil {

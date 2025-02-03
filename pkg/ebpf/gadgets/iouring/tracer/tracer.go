@@ -130,6 +130,7 @@ func (t *Tracer) SetEventHandler(handler any) {
 }
 
 func (t *Tracer) parseEvent(bpfEvent *iouringEvent) *types.Event {
+	comm := gadgets.FromCString(*(*[]byte)(unsafe.Pointer(&bpfEvent.Comm)))
 	return &types.Event{
 		Event: eventtypes.Event{
 			Type:      eventtypes.NORMAL,
@@ -141,9 +142,10 @@ func (t *Tracer) parseEvent(bpfEvent *iouringEvent) *types.Event {
 		Tid:           bpfEvent.Tid,
 		Uid:           bpfEvent.Uid,
 		Gid:           bpfEvent.Gid,
-		Comm:          gadgets.FromCString(*(*[]byte)(unsafe.Pointer(&bpfEvent.Comm))),
+		Comm:          comm,
 		Flags:         bpfEvent.Flags,
 		UserData:      bpfEvent.UserData,
+		Identifier:    fmt.Sprintf("%s-%d", comm, bpfEvent.Opcode),
 	}
 }
 
