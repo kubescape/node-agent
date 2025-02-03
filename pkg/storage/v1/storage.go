@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
@@ -155,7 +156,7 @@ func (sc Storage) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
 }
 
 func (sc Storage) GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error) {
-	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{ResourceVersion: "metadata"})
+	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{ResourceVersion: softwarecomposition.ResourceVersionMetadata})
 }
 
 func (sc Storage) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {

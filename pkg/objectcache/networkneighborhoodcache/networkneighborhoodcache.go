@@ -77,15 +77,8 @@ func (nn *NetworkNeighborhoodCacheImpl) handleUserManagedNN(netNeighborhood *v1b
 	baseNNName := strings.TrimPrefix(netNeighborhood.GetName(), "ug-")
 	baseNNUniqueName := objectcache.UniqueName(netNeighborhood.GetNamespace(), baseNNName)
 
-	// Get the full user managed network neighborhood from the storage
-	userManagedNN, err := nn.getNetworkNeighborhood(netNeighborhood.GetNamespace(), netNeighborhood.GetName())
-	if err != nil {
-		logger.L().Warning("NetworkNeighborhoodCacheImpl - failed to get full network neighborhood", helpers.Error(err))
-		return
-	}
-
 	// Store the user-managed network neighborhood temporarily
-	nn.userManagedNetworkNeighborhood.Set(baseNNUniqueName, userManagedNN)
+	nn.userManagedNetworkNeighborhood.Set(baseNNUniqueName, netNeighborhood)
 
 	// If we have the base network neighborhood cached, fetch a fresh copy and merge.
 	// If the base network neighborhood is not cached yet, the merge will be attempted when it's added.
@@ -100,7 +93,7 @@ func (nn *NetworkNeighborhoodCacheImpl) handleUserManagedNN(netNeighborhood *v1b
 			return
 		}
 
-		mergedNN := nn.performMerge(freshBaseNN, userManagedNN)
+		mergedNN := nn.performMerge(freshBaseNN, netNeighborhood)
 		nn.slugToNetworkNeighborhood.Set(baseNNUniqueName, mergedNN)
 
 		// Clean up the user-managed network neighborhood after successful merge
@@ -285,22 +278,16 @@ func (nn *NetworkNeighborhoodCacheImpl) removeContainer(containerID string) {
 // ------------------ watch network neighborhood methods -----------------------
 
 func (nn *NetworkNeighborhoodCacheImpl) addFullNetworkNeighborhood(netNeighborhood *v1beta1.NetworkNeighborhood, nnName string) {
-	fullNN, err := nn.getNetworkNeighborhood(netNeighborhood.GetNamespace(), netNeighborhood.GetName())
-	if err != nil {
-		logger.L().Warning("NetworkNeighborhoodCacheImpl - failed to get full network neighborhood", helpers.Error(err))
-		return
-	}
-
 	// Check if there's a pending user-managed network neighborhood to merge
 	if nn.userManagedNetworkNeighborhood.Has(nnName) {
 		userManagedNN := nn.userManagedNetworkNeighborhood.Get(nnName)
-		fullNN = nn.performMerge(fullNN, userManagedNN)
+		netNeighborhood = nn.performMerge(netNeighborhood, userManagedNN)
 		// Clean up the user-managed network neighborhood after successful merge
 		nn.userManagedNetworkNeighborhood.Delete(nnName)
 		logger.L().Debug("NetworkNeighborhoodCacheImpl - merged pending user-managed network neighborhood", helpers.String("name", nnName))
 	}
 
-	nn.slugToNetworkNeighborhood.Set(nnName, fullNN)
+	nn.slugToNetworkNeighborhood.Set(nnName, netNeighborhood)
 	for _, i := range nn.slugToContainers.Get(nnName).ToSlice() {
 		nn.containerToSlug.Set(i, nnName)
 	}
