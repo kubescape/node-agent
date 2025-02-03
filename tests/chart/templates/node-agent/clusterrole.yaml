@@ -6,7 +6,7 @@ metadata:
     kubescape.io/ignore: "true"
 rules:
 - apiGroups: [""]
-  resources: ["pods", "nodes", "nodes/proxy", "services", "endpoints", "namespaces"]
+  resources: ["pods", "nodes", "nodes/proxy", "services", "endpoints", "namespaces", "configmaps"]
   verbs: ["get", "watch", "list"]
 - apiGroups: [""]
   resources: ["events"]
