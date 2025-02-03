@@ -15,7 +15,7 @@ struct event {
     __u32 tid;
     __u32 uid;
     __u32 gid;
-    char comm[16];
     __u32 flags;
     __u64 user_data;
+    __u8 comm[16];
 };

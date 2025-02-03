@@ -9,7 +9,6 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
-	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
@@ -40,15 +39,19 @@ func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 	}
 
 	if err := t.install(); err != nil {
+
 		t.Close()
 		return nil, err
 	}
+	fmt.Println("Installed")
 
 	go t.run()
+	fmt.Printf("Running")
 	return t, nil
 }
 
 func (t *Tracer) Close() {
+	fmt.Println("Closingggg")
 	for _, l := range t.links {
 		gadgets.CloseLink(l)
 	}
@@ -84,8 +87,17 @@ func (t *Tracer) install() error {
 
 func (t *Tracer) run() {
 	for {
+		fmt.Println("t.reader.Read()")
+		if t.reader == nil {
+			fmt.Println("t.reader is nil")
+			return
+		}
+		fmt.Println("t.reader is not nil")
 		record, err := t.reader.Read()
+		fmt.Println("WHAYYYYYYYYYY")
 		if err != nil {
+			fmt.Println("Fuckkkkkkkkkkkkkkkkkkk")
+			fmt.Println("err", err)
 			if errors.Is(err, perf.ErrClosed) {
 				return
 			}
@@ -100,20 +112,16 @@ func (t *Tracer) run() {
 			continue
 		}
 
+		fmt.Println("record.LostSamples", record.LostSamples)
+
 		bpfEvent := tracepointlib.ConvertToEvent[iouringEvent](&record)
+		fmt.Println("bpfEvent", bpfEvent)
 		t.eventCallback(t.parseEvent(bpfEvent))
+		fmt.Println("t.parseEvent(bpfEvent)", t.parseEvent(bpfEvent))
 	}
 }
 
 func (t *Tracer) Run(gadgetCtx gadgets.GadgetContext) error {
-	defer t.Close()
-
-	if err := t.install(); err != nil {
-		return fmt.Errorf("installing tracer: %w", err)
-	}
-
-	go t.run()
-	gadgetcontext.WaitForTimeoutOrDone(gadgetCtx)
 	return nil
 }
 

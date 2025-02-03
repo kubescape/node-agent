@@ -41,7 +41,7 @@ int trace_io_uring_submit(struct trace_event_raw_io_uring_submit_sqe *ctx)
     struct event *event = bpf_map_lookup_elem(&empty_event, &zero);
     if (!event)
         return 0;
-        
+
     event->mntns_id = gadget_get_mntns_id();
     event->timestamp = bpf_ktime_get_boot_ns();
     
@@ -59,7 +59,7 @@ int trace_io_uring_submit(struct trace_event_raw_io_uring_submit_sqe *ctx)
     event->flags = ctx->flags;
     event->user_data = ctx->user_data;
     
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(struct event));
     
     return 0;
 }

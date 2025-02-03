@@ -20,9 +20,9 @@ type iouringEvent struct {
 	Tid       uint32
 	Uid       uint32
 	Gid       uint32
-	Comm      [16]int8
 	Flags     uint32
 	UserData  uint64
+	Comm      [16]uint8
 }
 
 // loadIouring returns the embedded CollectionSpec for iouring.

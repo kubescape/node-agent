@@ -26,7 +26,6 @@ require (
 	github.com/goradd/maps v1.0.0
 	github.com/grafana/pyroscope-go v1.2.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/iceber/iouring-go v0.0.0-20230403020409-002cfd2e2a90
 	github.com/inspektor-gadget/inspektor-gadget v0.36.1
 	github.com/kubescape/backend v0.0.25
 	github.com/kubescape/go-logger v0.0.23

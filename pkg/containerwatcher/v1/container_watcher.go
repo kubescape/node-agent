@@ -73,7 +73,7 @@ const (
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
-	ptraceWorkerPoolSize       = 1
+	defaultWorkerPoolSize      = 2
 	networkWorkerPoolSize      = 1
 	dnsWorkerPoolSize          = 5
 	randomxWorkerPoolSize      = 1
@@ -413,7 +413,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	}
 
 	// Create a ptrace worker pool
-	ptraceWorkerPool, err := ants.NewPoolWithFunc(ptraceWorkerPoolSize, func(i interface{}) {
+	ptraceWorkerPool, err := ants.NewPoolWithFunc(defaultWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerptracetype.Event)
 		if event.K8s.ContainerName == "" {
 			return
@@ -426,7 +426,8 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	}
 
 	// Create a iouring worker pool
-	iouringWorkerPool, err := ants.NewPoolWithFunc(1, func(i interface{}) {
+	iouringWorkerPool, err := ants.NewPoolWithFunc(defaultWorkerPoolSize, func(i interface{}) {
+		fmt.Println("Fuck me")
 		event := i.(traceriouringtype.Event)
 		if event.K8s.ContainerName == "" {
 			return
@@ -439,8 +440,9 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 
+		fmt.Println("Reporting event", event)
 		ruleManager.ReportEvent(utils.IoUringEventType, &event)
-		rulePolicyReporter.ReportEvent(utils.HardlinkEventType, &event, k8sContainerID, event.Identifier)
+		rulePolicyReporter.ReportEvent(utils.IoUringEventType, &event, k8sContainerID, event.Identifier)
 	})
 
 	if err != nil {

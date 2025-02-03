@@ -22,7 +22,7 @@ func (ch *IGContainerWatcher) iouringEventCallback(event *traceriouringtype.Even
 			helpers.String("error", event.Message))
 		return
 	}
-
+	fmt.Println("iouringEventCallback", event)
 	ch.iouringWorkerChan <- event
 }
 
@@ -47,6 +47,7 @@ func (ch *IGContainerWatcher) startIouringTracing() error {
 
 	go func() {
 		for event := range ch.iouringWorkerChan {
+			fmt.Println("iouringWorkerChan", event)
 			_ = ch.iouringWorkerPool.Invoke(*event)
 		}
 	}()

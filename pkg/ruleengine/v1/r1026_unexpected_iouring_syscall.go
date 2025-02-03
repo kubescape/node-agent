@@ -58,6 +58,7 @@ func (rule *R1026UnexpectedIouringOperation) DeleteRule() {
 }
 
 func (rule *R1026UnexpectedIouringOperation) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	fmt.Println("Heyuyyyy ProcessEvent")
 	if !rule.EvaluateRule(eventType, event, objCache.K8sObjectCache()) {
 		return nil
 	}
