@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cenkalti/backoff"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
@@ -198,18 +197,11 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(obj runtime.Object)
 
 	ap.allProfiles.Add(apName)
 
-	// TODO: FIX THIS BUG. This is a bug in the original code.
-	backoff.Retry(func() error {
-		if ap.slugToContainers.Has(apName) {
-			time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
-				ap.addFullApplicationProfile(appProfile, apName)
-			})
-		} else {
-			logger.L().Info("ApplicationProfileCacheImpl - retrying to add full application profile", helpers.String("name", apName))
-			return fmt.Errorf("retry")
-		}
-		return nil
-	}, backoff.NewExponentialBackOff())
+	if ap.slugToContainers.Has(apName) {
+		time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
+			ap.addFullApplicationProfile(appProfile, apName)
+		})
+	}
 }
 
 func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string) *v1beta1.ApplicationProfile {
@@ -330,6 +322,7 @@ func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 			ap.slugToAppProfile.Set(uniqueSlug, appProfile)
 		}
 
+		ap.indexContainerCallStacks(container, ap.containerToName.Get(container), ap.slugToAppProfile.Get(uniqueSlug))
 	}
 
 }
@@ -397,7 +390,6 @@ func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1b
 	ap.slugToAppProfile.Set(apName, fullAP)
 	for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
 		ap.containerToSlug.Set(i, apName)
-		ap.indexContainerCallStacks(i, ap.containerToName.Get(i), fullAP)
 	}
 	logger.L().Debug("ApplicationProfileCacheImpl - added pod to application profile cache", helpers.String("name", apName))
 }
