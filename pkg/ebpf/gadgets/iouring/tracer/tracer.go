@@ -155,3 +155,7 @@ func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
 	}
 	return tracer, nil
 }
+
+func (t *Tracer) Stop() {
+	t.Close()
+}
