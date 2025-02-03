@@ -14,7 +14,7 @@ import (
 
 const (
 	R1026ID   = "R1026"
-	R1026Name = "Unexpected io_uring Operation Detected"
+	R1026Name = "Unexpected IO Uring Operation Detected"
 )
 
 var R1026UnexpectedIouringOperationRuleDescriptor = ruleengine.RuleDescriptor{
