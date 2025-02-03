@@ -75,6 +75,7 @@ type iouringProgramSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type iouringMapSpecs struct {
 	Bufs                 *ebpf.MapSpec `ebpf:"bufs"`
+	EmptyEvent           *ebpf.MapSpec `ebpf:"empty_event"`
 	Events               *ebpf.MapSpec `ebpf:"events"`
 	GadgetHeap           *ebpf.MapSpec `ebpf:"gadget_heap"`
 	GadgetMntnsFilterMap *ebpf.MapSpec `ebpf:"gadget_mntns_filter_map"`
@@ -109,6 +110,7 @@ func (o *iouringObjects) Close() error {
 // It can be passed to loadIouringObjects or ebpf.CollectionSpec.LoadAndAssign.
 type iouringMaps struct {
 	Bufs                 *ebpf.Map `ebpf:"bufs"`
+	EmptyEvent           *ebpf.Map `ebpf:"empty_event"`
 	Events               *ebpf.Map `ebpf:"events"`
 	GadgetHeap           *ebpf.Map `ebpf:"gadget_heap"`
 	GadgetMntnsFilterMap *ebpf.Map `ebpf:"gadget_mntns_filter_map"`
@@ -117,6 +119,7 @@ type iouringMaps struct {
 func (m *iouringMaps) Close() error {
 	return _IouringClose(
 		m.Bufs,
+		m.EmptyEvent,
 		m.Events,
 		m.GadgetHeap,
 		m.GadgetMntnsFilterMap,
