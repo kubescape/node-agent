@@ -335,6 +335,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
 		metrics.ReportEvent(utils.SymlinkEventType)
+		applicationProfileManager.ReportSymlinkEvent(k8sContainerID, &event)
 		ruleManager.ReportEvent(utils.SymlinkEventType, &event)
 		rulePolicyReporter.ReportEvent(utils.SymlinkEventType, &event, k8sContainerID, event.Comm)
 		// Report symlink events to event receivers
@@ -353,6 +354,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
 		metrics.ReportEvent(utils.HardlinkEventType)
+		applicationProfileManager.ReportHardlinkEvent(k8sContainerID, &event)
 		ruleManager.ReportEvent(utils.HardlinkEventType, &event)
 		rulePolicyReporter.ReportEvent(utils.HardlinkEventType, &event, k8sContainerID, event.Comm)
 		// Report hardlink events to event receivers

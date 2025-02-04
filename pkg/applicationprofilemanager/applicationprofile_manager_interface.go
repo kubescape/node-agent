@@ -3,7 +3,9 @@ package applicationprofilemanager
 import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -17,6 +19,8 @@ type ApplicationProfileManagerClient interface {
 	ReportHTTPEvent(k8sContainerID string, event *tracerhttptype.Event)
 	ReportRulePolicy(k8sContainerID, ruleId, allowedProcess string, allowedContainer bool)
 	ReportIdentifiedCallStack(k8sContainerID string, callStack *v1beta1.IdentifiedCallStack)
+	ReportSymlinkEvent(k8sContainerID string, event *tracersymlinktype.Event)
+	ReportHardlinkEvent(k8sContainerID string, event *tracerhardlinktype.Event)
 	ReportDroppedEvent(k8sContainerID string)
 	ContainerReachedMaxTime(containerID string)
 }

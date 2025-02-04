@@ -20,7 +20,9 @@ import (
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
@@ -782,6 +784,28 @@ func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID string, event
 	if am.enricher != nil {
 		openIdentifier := utils.CalculateSHA256FileOpenHash(path)
 		go am.enricher.EnrichEvent(k8sContainerID, &event, openIdentifier)
+	}
+}
+
+func (am *ApplicationProfileManager) ReportSymlinkEvent(k8sContainerID string, event *tracersymlinktype.Event) {
+	if err := am.waitForContainer(k8sContainerID); err != nil {
+		return
+	}
+
+	if am.enricher != nil {
+		symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
+		go am.enricher.EnrichEvent(k8sContainerID, event, symlinkIdentifier)
+	}
+}
+
+func (am *ApplicationProfileManager) ReportHardlinkEvent(k8sContainerID string, event *tracerhardlinktype.Event) {
+	if err := am.waitForContainer(k8sContainerID); err != nil {
+		return
+	}
+
+	if am.enricher != nil {
+		hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
+		go am.enricher.EnrichEvent(k8sContainerID, event, hardlinkIdentifier)
 	}
 }
 
