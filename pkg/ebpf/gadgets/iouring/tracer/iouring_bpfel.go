@@ -15,13 +15,12 @@ import (
 type iouringEvent struct {
 	Timestamp uint64
 	MntnsId   uint64
-	Opcode    uint32
 	Pid       uint32
 	Tid       uint32
 	Uid       uint32
 	Gid       uint32
+	Opcode    uint32
 	Flags     uint32
-	UserData  uint64
 	Comm      [16]uint8
 }
 

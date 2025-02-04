@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sync"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
@@ -13,12 +12,11 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
-	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
 	kernel "github.com/kubescape/node-agent/pkg/validator/ebpf"
 	"github.com/shirou/gopsutil/v4/host"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -strip /usr/bin/llvm-strip-18 -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event iouring bpf/iouring.c -- -I./bpf/
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -strip /usr/bin/llvm-strip-18 -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type event iouring bpf/iouring.c -- -I./bpf/
 
 const (
 	SupportedMajor = 6
@@ -51,15 +49,13 @@ func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 		t.Close()
 		return nil, err
 	}
-	fmt.Println("Installed")
 
 	go t.run()
-	fmt.Printf("Running")
+
 	return t, nil
 }
 
 func (t *Tracer) Close() {
-	fmt.Println("Closingggg")
 	for _, l := range t.links {
 		gadgets.CloseLink(l)
 	}
@@ -105,50 +101,41 @@ func (t *Tracer) install() error {
 
 	t.reader, err = perf.NewReader(t.objs.Events, gadgets.PerfBufferPages*os.Getpagesize())
 	if err != nil {
-		fmt.Println("Error creating perf ring buffer")
 		return fmt.Errorf("creating perf ring buffer: %w", err)
 	}
-	fmt.Println("All good")
 
 	return nil
 }
 
 func (t *Tracer) run() {
-	var readerMu sync.Mutex
 	for {
-		readerMu.Lock()
-		if t.reader == nil {
-			fmt.Println("WHAYYYYYYYYYY")
-			readerMu.Unlock()
-			return
-		}
-
 		record, err := t.reader.Read()
-		readerMu.Unlock()
 		if err != nil {
-			fmt.Println("Fuckkkkkkkkkkkkkkkkkkk")
-			fmt.Println("err", err)
 			if errors.Is(err, perf.ErrClosed) {
+				// nothing to do, we're done
 				return
 			}
+
 			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
-			t.eventCallback(&types.Event{Event: eventtypes.Err(msg)})
-			continue
+			t.eventCallback(types.Base(eventtypes.Err(msg)))
+			return
 		}
 
 		if record.LostSamples > 0 {
 			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
-			t.eventCallback(&types.Event{Event: eventtypes.Warn(msg)})
+			t.eventCallback(types.Base(eventtypes.Warn(msg)))
 			continue
 		}
 
-		fmt.Println("record.LostSamples", record.LostSamples)
+		bpfEvent := (*iouringEvent)(unsafe.Pointer(&record.RawSample[0]))
+		event := t.parseEvent(bpfEvent)
+		if t.enricher != nil {
+			t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
+		}
+		t.eventCallback(event)
 
-		bpfEvent := tracepointlib.ConvertToEvent[iouringEvent](&record)
-		fmt.Println("bpfEvent", bpfEvent)
-		t.eventCallback(t.parseEvent(bpfEvent))
-		fmt.Println("t.parseEvent(bpfEvent)", t.parseEvent(bpfEvent))
 	}
+
 }
 
 func (t *Tracer) Run(gadgetCtx gadgets.GadgetContext) error {
@@ -168,22 +155,20 @@ func (t *Tracer) SetEventHandler(handler any) {
 }
 
 func (t *Tracer) parseEvent(bpfEvent *iouringEvent) *types.Event {
-	comm := gadgets.FromCString(*(*[]byte)(unsafe.Pointer(&bpfEvent.Comm)))
 	return &types.Event{
 		Event: eventtypes.Event{
 			Type:      eventtypes.NORMAL,
 			Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
 		},
 		WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
-		Opcode:        bpfEvent.Opcode,
 		Pid:           bpfEvent.Pid,
 		Tid:           bpfEvent.Tid,
 		Uid:           bpfEvent.Uid,
 		Gid:           bpfEvent.Gid,
-		Comm:          comm,
+		Opcode:        bpfEvent.Opcode,
 		Flags:         bpfEvent.Flags,
-		UserData:      bpfEvent.UserData,
-		Identifier:    fmt.Sprintf("%s-%d", comm, bpfEvent.Opcode),
+		Comm:          gadgets.FromCString(bpfEvent.Comm[:]),
+		Identifier:    fmt.Sprintf("%s-%d", gadgets.FromCString(bpfEvent.Comm[:]), bpfEvent.Opcode),
 	}
 }
 

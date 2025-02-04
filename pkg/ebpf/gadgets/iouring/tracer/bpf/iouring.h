@@ -23,14 +23,14 @@ struct trace_event_raw_io_uring_submit_req {
 } __attribute__((preserve_access_index));
 
 struct event {
-    gadget_timestamp timestamp;
-    gadget_mntns_id mntns_id;
-    __u32 opcode;
+    gadget_timestamp timestamp;  // Keep first
+    gadget_mntns_id mntns_id;   // Keep second
     __u32 pid;
-    __u32 tid;
+    __u32 tid; 
     __u32 uid;
     __u32 gid;
+    __u32 opcode;
     __u32 flags;
-    __u64 user_data;
-    __u8 comm[16];
+    __u8 comm[16];             // Keep array at end
 };
+

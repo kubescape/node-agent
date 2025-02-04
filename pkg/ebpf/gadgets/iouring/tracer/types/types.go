@@ -15,3 +15,9 @@ type Event struct {
 	UserData   uint64 `json:"user_data,omitempty" column:"user_data,template:user_data"`
 	Identifier string `json:"identifier,omitempty" column:"identifier,template:identifier"`
 }
+
+func Base(ev eventtypes.Event) *Event {
+	return &Event{
+		Event: ev,
+	}
+}

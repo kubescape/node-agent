@@ -1,9 +1,11 @@
 #include "iouring.h"
 
 struct {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+	__uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+	__uint(key_size, sizeof(u32));
+	__uint(value_size, sizeof(u32));
 } events SEC(".maps");
-
+ 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, 1);
@@ -57,12 +59,11 @@ int handle_submit_req(struct trace_event_raw_io_uring_submit_sqe *ctx) {
     
     if (bpf_get_current_comm(&event->comm, sizeof(event->comm)) < 0)
         return 0;
-    
+
     event->opcode = ctx->opcode;
     event->flags = ctx->flags;
-    event->user_data = ctx->user_data;
-    
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU | BPF_F_CTXLEN_MASK, event, sizeof(*event));
+
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(struct event));
 
     return 0;
 }

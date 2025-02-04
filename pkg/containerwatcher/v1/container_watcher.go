@@ -427,7 +427,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 	// Create a iouring worker pool
 	iouringWorkerPool, err := ants.NewPoolWithFunc(defaultWorkerPoolSize, func(i interface{}) {
-		fmt.Println("Fuck me")
 		event := i.(traceriouringtype.Event)
 		if event.K8s.ContainerName == "" {
 			return
@@ -440,7 +439,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 
-		fmt.Println("Reporting event", event)
 		ruleManager.ReportEvent(utils.IoUringEventType, &event)
 		rulePolicyReporter.ReportEvent(utils.IoUringEventType, &event, k8sContainerID, event.Identifier)
 	})

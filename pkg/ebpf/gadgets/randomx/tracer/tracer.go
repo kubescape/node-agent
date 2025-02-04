@@ -63,7 +63,6 @@ func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 	}
 
 	go t.run()
-
 	return t, nil
 }
 
