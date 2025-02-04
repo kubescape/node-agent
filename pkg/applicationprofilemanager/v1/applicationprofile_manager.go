@@ -785,6 +785,7 @@ func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID string, event
 	isSensitive := utils.IsSensitivePath(path, ruleengine.SensitiveFiles)
 
 	if am.enricher != nil && isSensitive {
+		logger.L().Info("ApplicationProfileManager - sensitive file open event", helpers.String("path", path))
 		openIdentifier := utils.CalculateSHA256FileOpenHash(path)
 		go am.enricher.EnrichEvent(k8sContainerID, &event, openIdentifier)
 	}
