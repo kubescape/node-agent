@@ -2,15 +2,13 @@
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-    __uint(key_size, sizeof(u32));
-    __uint(value_size, sizeof(u32));
 } events SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(key_size, sizeof(u32));
-    __uint(value_size, sizeof(struct event));
-    __uint(max_entries, 1);
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, struct event);
 } empty_event SEC(".maps");
 
 // Declared to avoid compiler deletion
@@ -29,9 +27,13 @@ static __always_inline int should_discard()
     return 0;
 }
 
-SEC("tracepoint/io_uring/io_uring_submit_sqe")
-int trace_io_uring_submit(struct trace_event_raw_io_uring_submit_sqe *ctx)
-{
+#if HAS_KERNEL_FEATURE(6, 3)
+SEC("tp/io_uring/io_uring_submit_req")
+int handle_submit_req(struct trace_event_raw_io_uring_submit_req *ctx) {
+#else
+SEC("tp/io_uring/io_uring_submit_sqe") 
+int handle_submit_req(struct trace_event_raw_io_uring_submit_sqe *ctx) {
+#endif
     if (should_discard()) {
         return 0;
     }
@@ -53,15 +55,16 @@ int trace_io_uring_submit(struct trace_event_raw_io_uring_submit_sqe *ctx)
     event->uid = uid_gid & 0xFFFFFFFF;
     event->gid = uid_gid >> 32;
     
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    if (bpf_get_current_comm(&event->comm, sizeof(event->comm)) < 0)
+        return 0;
     
     event->opcode = ctx->opcode;
     event->flags = ctx->flags;
     event->user_data = ctx->user_data;
     
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(struct event));
-    
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU | BPF_F_CTXLEN_MASK, event, sizeof(*event));
+
     return 0;
 }
 
-char LICENSE[] SEC("license") = "GPL";
+char _license[] SEC("license") = "GPL";

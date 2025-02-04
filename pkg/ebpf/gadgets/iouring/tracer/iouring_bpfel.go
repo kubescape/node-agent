@@ -67,7 +67,7 @@ type iouringSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type iouringProgramSpecs struct {
-	TraceIoUringSubmit *ebpf.ProgramSpec `ebpf:"trace_io_uring_submit"`
+	HandleSubmitReq *ebpf.ProgramSpec `ebpf:"handle_submit_req"`
 }
 
 // iouringMapSpecs contains maps before they are loaded into the kernel.
@@ -138,12 +138,12 @@ type iouringVariables struct {
 //
 // It can be passed to loadIouringObjects or ebpf.CollectionSpec.LoadAndAssign.
 type iouringPrograms struct {
-	TraceIoUringSubmit *ebpf.Program `ebpf:"trace_io_uring_submit"`
+	HandleSubmitReq *ebpf.Program `ebpf:"handle_submit_req"`
 }
 
 func (p *iouringPrograms) Close() error {
 	return _IouringClose(
-		p.TraceIoUringSubmit,
+		p.HandleSubmitReq,
 	)
 }
 

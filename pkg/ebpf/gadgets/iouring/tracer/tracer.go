@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
@@ -13,9 +14,16 @@ import (
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
 	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
+	kernel "github.com/kubescape/node-agent/pkg/validator/ebpf"
+	"github.com/shirou/gopsutil/v4/host"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -strip /usr/bin/llvm-strip-18 -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event iouring bpf/iouring.c -- -I./bpf/
+
+const (
+	SupportedMajor = 6
+	SupportedMinor = 3
+)
 
 type Config struct {
 	MountnsMap *ebpf.Map
@@ -71,30 +79,52 @@ func (t *Tracer) install() error {
 		return fmt.Errorf("loading ebpf spec: %w", err)
 	}
 
-	tracepoint, err := link.Tracepoint("io_uring", "io_uring_submit_sqe", t.objs.TraceIoUringSubmit, nil)
+	info, err := host.Info()
 	if err != nil {
-		return fmt.Errorf("attaching tracepoint: %w", err)
+		return fmt.Errorf("failed to get host info: %w", err)
 	}
+
+	var tracepointName string
+	major, minor, _, err := kernel.ParseKernelVersion(info.KernelVersion)
+	if err != nil {
+		return fmt.Errorf("parsing kernel version: %w", err)
+	}
+
+	if major >= SupportedMajor && minor >= SupportedMinor {
+		tracepointName = "io_uring_submit_req"
+	} else {
+		tracepointName = "io_uring_submit_sqe"
+	}
+
+	tracepoint, err := link.Tracepoint("io_uring", tracepointName, t.objs.HandleSubmitReq, nil)
+	if err != nil {
+		return fmt.Errorf("attaching tracepoint %s: %w", tracepointName, err)
+	}
+
 	t.links = append(t.links, tracepoint)
 
 	t.reader, err = perf.NewReader(t.objs.Events, gadgets.PerfBufferPages*os.Getpagesize())
 	if err != nil {
+		fmt.Println("Error creating perf ring buffer")
 		return fmt.Errorf("creating perf ring buffer: %w", err)
 	}
+	fmt.Println("All good")
 
 	return nil
 }
 
 func (t *Tracer) run() {
+	var readerMu sync.Mutex
 	for {
-		fmt.Println("t.reader.Read()")
+		readerMu.Lock()
 		if t.reader == nil {
-			fmt.Println("t.reader is nil")
+			fmt.Println("WHAYYYYYYYYYY")
+			readerMu.Unlock()
 			return
 		}
-		fmt.Println("t.reader is not nil")
+
 		record, err := t.reader.Read()
-		fmt.Println("WHAYYYYYYYYYY")
+		readerMu.Unlock()
 		if err != nil {
 			fmt.Println("Fuckkkkkkkkkkkkkkkkkkk")
 			fmt.Println("err", err)

@@ -23,6 +23,27 @@ func VerifyEbpf() error {
 	return nil
 }
 
+func ParseKernelVersion(version string) (uint, uint, uint, error) {
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 {
+		return 0, 0, 0, fmt.Errorf("invalid version format: %s", version)
+	}
+
+	var major, minor, patch uint
+	// Handle cases where patch version might be missing
+	versionStr := version
+	if len(parts) == 2 {
+		versionStr = version + ".0"
+	}
+
+	_, err := fmt.Sscanf(versionStr, "%d.%d.%d", &major, &minor, &patch)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to parse version: %w", err)
+	}
+
+	return major, minor, patch, nil
+}
+
 // CheckBTFSupport checks for BTF support.
 func checkBTFSupport() error {
 	// Check for vmlinux BTF file
@@ -79,22 +100,10 @@ func getKernelVersion() (string, error) {
 }
 
 func isKernelVersionSupported(version string) bool {
-	// Simple check: assume version string starts with major.minor
-	parts := strings.Split(version, ".")
-	if len(parts) < 2 {
-		return false
-	}
-	major := parts[0]
-	minor := parts[1]
-
-	// Convert to integers for comparison
-	majorInt := 0
-	minorInt := 0
-	_, err := fmt.Sscanf(major+"."+minor, "%d.%d", &majorInt, &minorInt)
+	major, minor, _, err := ParseKernelVersion(version)
 	if err != nil {
 		return false
 	}
 
-	// Check if version is at least 4.4
-	return majorInt > 4 || (majorInt == 4 && minorInt >= 4)
+	return major > 4 || (major == 4 && minor >= 4)
 }
