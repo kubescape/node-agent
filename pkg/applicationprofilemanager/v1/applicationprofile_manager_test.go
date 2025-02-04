@@ -18,7 +18,6 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -101,16 +100,16 @@ func TestApplicationProfileManager(t *testing.T) {
 	// prepare container
 	container := &containercollection.Container{
 		K8s: containercollection.K8sMetadata{
-			BasicK8sMetadata: types.BasicK8sMetadata{
+			BasicK8sMetadata: eventtypes.BasicK8sMetadata{
 				Namespace:     "ns",
 				PodName:       "pod",
 				ContainerName: "cont",
 			},
 		},
 		Runtime: containercollection.RuntimeMetadata{
-			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
+			BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
 				ContainerID:        "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
-				ContainerStartedAt: types.Time(time.Now().UnixNano()),
+				ContainerStartedAt: eventtypes.Time(time.Now().UnixNano()),
 			},
 		},
 	}
@@ -775,25 +774,6 @@ func TestReportIdentifiedCallStack(t *testing.T) {
 	}
 }
 
-// Helper function to compare two call stack nodes and their subtrees
-func compareNodes(node1, node2 v1beta1.CallStackNode) bool {
-	if node1.Frame.FileID != node2.Frame.FileID || node1.Frame.Lineno != node2.Frame.Lineno {
-		return false
-	}
-
-	if len(node1.Children) != len(node2.Children) {
-		return false
-	}
-
-	for i := range node1.Children {
-		if !compareNodes(node1.Children[i], node2.Children[i]) {
-			return false
-		}
-	}
-
-	return true
-}
-
 // Helper function to deeply compare two call stacks
 func compareCallStacks(a, b v1beta1.IdentifiedCallStack) bool {
 	if a.CallID != b.CallID {
@@ -842,16 +822,16 @@ func TestApplicationProfileManagerWithCallStacks(t *testing.T) {
 	// Prepare container
 	container := &containercollection.Container{
 		K8s: containercollection.K8sMetadata{
-			BasicK8sMetadata: types.BasicK8sMetadata{
+			BasicK8sMetadata: eventtypes.BasicK8sMetadata{
 				Namespace:     "ns",
 				PodName:       "pod",
 				ContainerName: "cont",
 			},
 		},
 		Runtime: containercollection.RuntimeMetadata{
-			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
+			BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
 				ContainerID:        "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
-				ContainerStartedAt: types.Time(time.Now().UnixNano()),
+				ContainerStartedAt: eventtypes.Time(time.Now().UnixNano()),
 			},
 		},
 	}

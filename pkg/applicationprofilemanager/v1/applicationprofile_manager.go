@@ -25,6 +25,7 @@ import (
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -781,7 +782,9 @@ func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID string, event
 		openMap.Set(path, mapset.NewSet[string](event.Flags...))
 	}
 
-	if am.enricher != nil {
+	isSensitive := utils.IsSensitivePath(path, ruleengine.SensitiveFiles)
+
+	if am.enricher != nil && isSensitive {
 		openIdentifier := utils.CalculateSHA256FileOpenHash(path)
 		go am.enricher.EnrichEvent(k8sContainerID, &event, openIdentifier)
 	}

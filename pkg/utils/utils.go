@@ -723,3 +723,30 @@ func DiskUsage(path string) int64 {
 	}
 	return s
 }
+
+// IsSensitivePath checks if a given path matches or is within any sensitive paths
+func IsSensitivePath(fullPath string, paths []string) bool {
+	// Clean the path to handle "..", "//", etc.
+	fullPath = filepath.Clean(fullPath)
+
+	for _, sensitivePath := range paths {
+		sensitivePath = filepath.Clean(sensitivePath)
+
+		// Check if the path exactly matches
+		if fullPath == sensitivePath {
+			return true
+		}
+
+		// Check if the path is a directory that contains sensitive files
+		if strings.HasPrefix(sensitivePath, fullPath+"/") {
+			return true
+		}
+
+		// Check if the path is within a sensitive directory
+		if strings.HasPrefix(fullPath, sensitivePath+"/") {
+			return true
+		}
+	}
+
+	return false
+}
