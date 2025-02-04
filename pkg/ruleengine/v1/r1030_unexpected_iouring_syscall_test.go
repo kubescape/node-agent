@@ -9,9 +9,9 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
-func TestR1026UnexpectedIouringOperation(t *testing.T) {
+func TestR1030UnexpectedIouringOperation(t *testing.T) {
 	// Create a new rule
-	r := CreateRuleR1026UnexpectedIouringOperation()
+	r := CreateRuleR1030UnexpectedIouringOperation()
 	if r == nil {
 		t.Errorf("Expected r to not be nil")
 	}
@@ -26,7 +26,7 @@ func TestR1026UnexpectedIouringOperation(t *testing.T) {
 					{
 						Name: "test",
 						PolicyByRuleId: map[string]v1beta1.RulePolicy{
-							R1026ID: {
+							R1030ID: {
 								AllowedProcesses: []string{"/usr/bin/allowed-process"},
 							},
 						},

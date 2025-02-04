@@ -13,14 +13,14 @@ import (
 )
 
 const (
-	R1026ID   = "R1026"
-	R1026Name = "Unexpected IO Uring Operation Detected"
+	R1030ID   = "R1030"
+	R1030Name = "Unexpected io_uring Operation Detected"
 )
 
-var R1026UnexpectedIouringOperationRuleDescriptor = ruleengine.RuleDescriptor{
-	ID:          R1026ID,
-	Name:        R1026Name,
-	Description: "Detecting unexpected io_uring operations.",
+var R1030UnexpectedIouringOperationRuleDescriptor = ruleengine.RuleDescriptor{
+	ID:          R1030ID,
+	Name:        R1030Name,
+	Description: "Detects io_uring operations that were not recorded during the initial observation period, indicating potential unauthorized activity.",
 	Tags:        []string{"syscalls", "io_uring"},
 	Priority:    RulePriorityHigh,
 	Requirements: &RuleRequirements{
@@ -29,35 +29,35 @@ var R1026UnexpectedIouringOperationRuleDescriptor = ruleengine.RuleDescriptor{
 		},
 	},
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
-		return CreateRuleR1026UnexpectedIouringOperation()
+		return CreateRuleR1030UnexpectedIouringOperation()
 	},
 }
 
-var _ ruleengine.RuleEvaluator = (*R1026UnexpectedIouringOperation)(nil)
+var _ ruleengine.RuleEvaluator = (*R1030UnexpectedIouringOperation)(nil)
 
-type R1026UnexpectedIouringOperation struct {
+type R1030UnexpectedIouringOperation struct {
 	BaseRule
 }
 
-func CreateRuleR1026UnexpectedIouringOperation() *R1026UnexpectedIouringOperation {
-	return &R1026UnexpectedIouringOperation{}
+func CreateRuleR1030UnexpectedIouringOperation() *R1030UnexpectedIouringOperation {
+	return &R1030UnexpectedIouringOperation{}
 }
 
-func (rule *R1026UnexpectedIouringOperation) SetParameters(parameters map[string]interface{}) {
+func (rule *R1030UnexpectedIouringOperation) SetParameters(parameters map[string]interface{}) {
 }
 
-func (rule *R1026UnexpectedIouringOperation) Name() string {
-	return R1026Name
+func (rule *R1030UnexpectedIouringOperation) Name() string {
+	return R1030Name
 }
 
-func (rule *R1026UnexpectedIouringOperation) ID() string {
-	return R1026ID
+func (rule *R1030UnexpectedIouringOperation) ID() string {
+	return R1030ID
 }
 
-func (rule *R1026UnexpectedIouringOperation) DeleteRule() {
+func (rule *R1030UnexpectedIouringOperation) DeleteRule() {
 }
 
-func (rule *R1026UnexpectedIouringOperation) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1030UnexpectedIouringOperation) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if !rule.EvaluateRule(eventType, event, objCache.K8sObjectCache()) {
 		return nil
 	}
@@ -67,7 +67,7 @@ func (rule *R1026UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 		return nil
 	}
 
-	if allowed, err := IsAllowed(&iouringEvent.Event, objCache, iouringEvent.Identifier, R1026ID); err != nil {
+	if allowed, err := IsAllowed(&iouringEvent.Event, objCache, iouringEvent.Identifier, R1030ID); err != nil {
 		return nil
 	} else if allowed {
 		return nil
@@ -84,10 +84,10 @@ func (rule *R1026UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 			Arguments: map[string]interface{}{
 				"opcode":    iouringEvent.Opcode,
 				"flags":     iouringEvent.Flags,
-				"opertaion": name,
+				"operation": name,
 			},
 			InfectedPID: iouringEvent.Pid,
-			Severity:    R1026UnexpectedIouringOperationRuleDescriptor.Priority,
+			Severity:    R1030UnexpectedIouringOperationRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -100,7 +100,7 @@ func (rule *R1026UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 		},
 		TriggerEvent: iouringEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Unexpected io_uring operation detected: %s (opcode=%d) flags=0x%x in %s",
+			RuleDescription: fmt.Sprintf("Unexpected io_uring operation detected: %s (opcode=%d) flags=0x%x in %s.",
 				name, iouringEvent.Opcode, iouringEvent.Flags, iouringEvent.Comm),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
@@ -112,7 +112,7 @@ func (rule *R1026UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 
 }
 
-func (rule *R1026UnexpectedIouringOperation) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) bool {
+func (rule *R1030UnexpectedIouringOperation) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) bool {
 	if eventType != utils.IoUringEventType {
 		return false
 	}
@@ -126,8 +126,8 @@ func (rule *R1026UnexpectedIouringOperation) EvaluateRule(eventType utils.EventT
 	return ok
 }
 
-func (rule *R1026UnexpectedIouringOperation) Requirements() ruleengine.RuleSpec {
+func (rule *R1030UnexpectedIouringOperation) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
-		EventTypes: R1026UnexpectedIouringOperationRuleDescriptor.Requirements.RequiredEventTypes(),
+		EventTypes: R1030UnexpectedIouringOperationRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }
