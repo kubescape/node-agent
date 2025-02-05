@@ -38,6 +38,7 @@ require (
 	github.com/prometheus/alertmanager v0.27.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/procfs v0.15.1
+	github.com/shirou/gopsutil/v4 v4.25.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/afero v1.11.0
 	github.com/spf13/viper v1.19.0
@@ -135,6 +136,7 @@ require (
 	github.com/docker/go-events v0.0.0-20190806004212-e31b211e4f1c // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dsnet/compress v0.0.2-0.20210315054119-f66993602bf5 // indirect
+	github.com/ebitengine/purego v0.8.2 // indirect
 	github.com/edsrzf/mmap-go v1.1.0 // indirect
 	github.com/elliotchance/phpserialize v1.4.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.12.1 // indirect
@@ -157,6 +159,7 @@ require (
 	github.com/go-latex/latex v0.0.0-20231108140139-5c1ce85aa4ea // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-openapi/analysis v0.23.0 // indirect
 	github.com/go-openapi/errors v0.22.0 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
@@ -206,6 +209,7 @@ require (
 	github.com/knqyf263/go-rpmdb v0.1.1 // indirect
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
+	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/mackerelio/go-osstat v0.2.5 // indirect
 	github.com/magiconair/properties v1.8.9 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
@@ -251,6 +255,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pkg/profile v1.7.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/pquerna/cachecontrol v0.2.0 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.61.0 // indirect
@@ -279,6 +284,8 @@ require (
 	github.com/sylabs/squashfs v1.0.4 // indirect
 	github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635 // indirect
 	github.com/therootcompany/xz v1.0.1 // indirect
+	github.com/tklauser/go-sysconf v0.3.12 // indirect
+	github.com/tklauser/numcpus v0.9.0 // indirect
 	github.com/ulikunitz/xz v0.5.12 // indirect
 	github.com/uptrace/opentelemetry-go-extra/otelutil v0.3.2 // indirect
 	github.com/uptrace/opentelemetry-go-extra/otelzap v0.3.2 // indirect
@@ -295,6 +302,7 @@ require (
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
+	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.mongodb.org/mongo-driver v1.17.1 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
