@@ -290,6 +290,7 @@ func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 	}
 
 	containers := objectcache.ListContainersIDs(pod)
+	ap.initContainerIdToName(pod)
 	for _, container := range containers {
 
 		if !ap.slugToContainers.Has(uniqueSlug) {
@@ -307,7 +308,6 @@ func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 			continue
 		}
 		ap.containerToSlug.Set(container, uniqueSlug)
-		ap.initContainerIdToName(pod)
 
 		// if application profile exists but is not cached
 		if ap.allProfiles.Contains(uniqueSlug) && !ap.slugToAppProfile.Has(uniqueSlug) {
@@ -329,6 +329,7 @@ func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 
 func (ap *ApplicationProfileCacheImpl) initContainerIdToName(pod *corev1.Pod) {
 	for i, container := range pod.Spec.Containers {
+		logger.L().Info("ApplicationProfileCacheImpl - initContainerIdToName", helpers.String("containerID", utils.TrimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID)), helpers.String("containerName", container.Name))
 		ap.containerToName.Set(utils.TrimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID), container.Name)
 	}
 	for i, container := range pod.Spec.InitContainers {
@@ -390,6 +391,7 @@ func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1b
 	ap.slugToAppProfile.Set(apName, fullAP)
 	for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
 		ap.containerToSlug.Set(i, apName)
+		logger.L().Info("ApplicationProfileCacheImpl - indexing call stacks for container1", helpers.String("containerID", i))
 		ap.indexContainerCallStacks(i, ap.containerToName.Get(i), fullAP)
 	}
 	logger.L().Debug("ApplicationProfileCacheImpl - added pod to application profile cache", helpers.String("name", apName))
