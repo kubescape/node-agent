@@ -749,15 +749,15 @@ func (am *ApplicationProfileManager) ReportFileExec(k8sContainerID string, event
 	// check if we already have this exec
 	// we use a SHA256 hash of the exec to identify it uniquely (path + args, in the order they were provided)
 	execIdentifier := utils.CalculateSHA256FileExecHash(path, event.Args)
+	if am.enricher != nil {
+		go am.enricher.EnrichEvent(k8sContainerID, &event, execIdentifier)
+	}
+
 	if _, ok := am.savedExecs.Get(k8sContainerID).Get(execIdentifier); ok {
 		return
 	}
 	// add to exec map, first element is the path, the rest are the args
 	am.toSaveExecs.Get(k8sContainerID).Set(execIdentifier, append([]string{path}, event.Args...))
-
-	if am.enricher != nil {
-		go am.enricher.EnrichEvent(k8sContainerID, &event, execIdentifier)
-	}
 }
 
 func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID string, event events.OpenEvent) {
@@ -770,6 +770,15 @@ func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID string, event
 	if strings.HasPrefix(path, "/proc/") {
 		path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
 	}
+
+	isSensitive := utils.IsSensitivePath(path, ruleengine.SensitiveFiles)
+
+	if am.enricher != nil && isSensitive {
+		logger.L().Info("ApplicationProfileManager - sensitive file open event", helpers.String("path", path))
+		openIdentifier := utils.CalculateSHA256FileOpenHash(path)
+		go am.enricher.EnrichEvent(k8sContainerID, &event, openIdentifier)
+	}
+
 	// check if we already have this open
 	if opens, ok := am.savedOpens.Get(k8sContainerID).Get(path); ok && opens.(mapset.Set[string]).Contains(event.Flags...) {
 		return
@@ -780,14 +789,6 @@ func (am *ApplicationProfileManager) ReportFileOpen(k8sContainerID string, event
 		openMap.Get(path).Append(event.Flags...)
 	} else {
 		openMap.Set(path, mapset.NewSet[string](event.Flags...))
-	}
-
-	isSensitive := utils.IsSensitivePath(path, ruleengine.SensitiveFiles)
-
-	if am.enricher != nil && isSensitive {
-		logger.L().Info("ApplicationProfileManager - sensitive file open event", helpers.String("path", path))
-		openIdentifier := utils.CalculateSHA256FileOpenHash(path)
-		go am.enricher.EnrichEvent(k8sContainerID, &event, openIdentifier)
 	}
 }
 
