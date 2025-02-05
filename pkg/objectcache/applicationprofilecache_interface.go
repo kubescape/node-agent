@@ -3,6 +3,7 @@ package objectcache
 import (
 	"context"
 
+	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -10,6 +11,7 @@ import (
 
 type ApplicationProfileCache interface {
 	GetApplicationProfile(containerID string) *v1beta1.ApplicationProfile
+	GetCallStackSearchTree(containerID string) *callstackcache.CallStackSearchTree
 	WatchResources() []watcher.WatchResource
 	AddHandler(ctx context.Context, obj runtime.Object)
 	ModifyHandler(ctx context.Context, obj runtime.Object)
@@ -22,6 +24,10 @@ type ApplicationProfileCacheMock struct {
 }
 
 func (ap *ApplicationProfileCacheMock) GetApplicationProfile(_ string) *v1beta1.ApplicationProfile {
+	return nil
+}
+
+func (ap *ApplicationProfileCacheMock) GetCallStackSearchTree(_ string) *callstackcache.CallStackSearchTree {
 	return nil
 }
 

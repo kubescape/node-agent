@@ -14,6 +14,7 @@ require (
 	github.com/crewjam/rfc5424 v0.1.0
 	github.com/cyphar/filepath-securejoin v0.4.1
 	github.com/deckarep/golang-set/v2 v2.7.0
+	github.com/dghubble/trie v0.1.0
 	github.com/distribution/distribution v2.8.2+incompatible
 	github.com/dustin/go-humanize v1.0.1
 	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
@@ -295,6 +296,7 @@ require (
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
+	github.com/yl2chen/cidranger v1.0.2 // indirect
 	go.mongodb.org/mongo-driver v1.17.1 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
@@ -351,5 +353,7 @@ require (
 replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6
 
 replace github.com/mholt/archiver/v3 v3.5.1 => github.com/anchore/archiver/v3 v3.5.2
+
+replace github.com/kubescape/storage => github.com/kubescape/storage v0.0.154-0.20250128150729-f5cb1a341394
 
 replace github.com/inspektor-gadget/inspektor-gadget => github.com/afek854/inspektor-gadget v0.0.0-20250130122622-4a97666bae1c

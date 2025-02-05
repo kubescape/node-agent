@@ -491,6 +491,13 @@ func CalculateSHA256FileExecHash(path string, args []string) string {
 	return hex.EncodeToString(hashInBytes)
 }
 
+func CalculateSHA256FileOpenHash(path string) string {
+	hsh := sha256.New()
+	hsh.Write([]byte(path))
+	hashInBytes := hsh.Sum(nil)
+	return hex.EncodeToString(hashInBytes)
+}
+
 // CalculateFileHashes calculates both SHA1 and MD5 hashes of the given file.
 func CalculateFileHashes(path string) (sha1Hash string, md5Hash string, err error) {
 	file, err := os.Open(path)
@@ -715,4 +722,31 @@ func DiskUsage(path string) int64 {
 		}
 	}
 	return s
+}
+
+// IsSensitivePath checks if a given path matches or is within any sensitive paths
+func IsSensitivePath(fullPath string, paths []string) bool {
+	// Clean the path to handle "..", "//", etc.
+	fullPath = filepath.Clean(fullPath)
+
+	for _, sensitivePath := range paths {
+		sensitivePath = filepath.Clean(sensitivePath)
+
+		// Check if the path exactly matches
+		if fullPath == sensitivePath {
+			return true
+		}
+
+		// Check if the path is a directory that contains sensitive files
+		if strings.HasPrefix(sensitivePath, fullPath+"/") {
+			return true
+		}
+
+		// Check if the path is within a sensitive directory
+		if strings.HasPrefix(fullPath, sensitivePath+"/") {
+			return true
+		}
+	}
+
+	return false
 }
