@@ -6,9 +6,24 @@
 #include "../../../../include/macros.h"
 #include "../../../../include/buffer.h"
 
-extern int LINUX_KERNEL_VERSION __kconfig;
+#ifndef __KERNEL_FEATURE_H
+#define __KERNEL_FEATURE_H
 
-#define HAS_KERNEL_FEATURE(maj, min) (CURRENT_KERNEL_VERSION >= KERNEL_VERSION(maj, min, 0))
+/* Define macro to check kernel version features */
+#define HAS_KERNEL_FEATURE(major, minor) \
+    (KERNEL_VERSION_MAJOR > (major) || \
+    (KERNEL_VERSION_MAJOR == (major) && KERNEL_VERSION_MINOR >= (minor)))
+
+/* Define current kernel version based on compile-time flags */
+#ifdef VERSION_63
+#define KERNEL_VERSION_MAJOR 6
+#define KERNEL_VERSION_MINOR 3
+#else
+#define KERNEL_VERSION_MAJOR 0
+#define KERNEL_VERSION_MINOR 0
+#endif
+
+#endif /* __KERNEL_FEATURE_H */
 
 struct trace_event_raw_io_uring_submit_req {
     struct trace_entry ent;

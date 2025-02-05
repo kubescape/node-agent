@@ -16,6 +16,7 @@ import (
 	"github.com/shirou/gopsutil/v4/host"
 )
 
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -strip /usr/bin/llvm-strip-18 -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall -DVERSION_63=1" -type event iouring_63 bpf/iouring.c -- -I./bpf/
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -strip /usr/bin/llvm-strip-18 -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type event iouring bpf/iouring.c -- -I./bpf/
 
 const (
@@ -66,30 +67,35 @@ func (t *Tracer) Close() {
 }
 
 func (t *Tracer) install() error {
-	spec, err := loadIouring()
-	if err != nil {
-		return fmt.Errorf("loading ebpf program: %w", err)
-	}
-
-	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
-		return fmt.Errorf("loading ebpf spec: %w", err)
-	}
+	var spec *ebpf.CollectionSpec
+	var tracepointName string
 
 	info, err := host.Info()
 	if err != nil {
 		return fmt.Errorf("failed to get host info: %w", err)
 	}
 
-	var tracepointName string
 	major, minor, _, err := kernel.ParseKernelVersion(info.KernelVersion)
 	if err != nil {
 		return fmt.Errorf("parsing kernel version: %w", err)
 	}
-
 	if major >= SupportedMajor && minor >= SupportedMinor {
+		spec, err = loadIouring_63()
+		if err != nil {
+			return fmt.Errorf("loading ebpf program: %w", err)
+		}
 		tracepointName = "io_uring_submit_req"
+
 	} else {
+		spec, err = loadIouring()
+		if err != nil {
+			return fmt.Errorf("loading ebpf program: %w", err)
+		}
 		tracepointName = "io_uring_submit_sqe"
+	}
+
+	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
+		return fmt.Errorf("loading ebpf spec: %w", err)
 	}
 
 	tracepoint, err := link.Tracepoint("io_uring", tracepointName, t.objs.HandleSubmitReq, nil)
