@@ -126,7 +126,6 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 
 // indexContainerCallStacks builds the search index for a container's call stacks and removes them from the profile
 func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, containerName string, appProfile *v1beta1.ApplicationProfile) {
-	logger.L().Info("ApplicationProfileCacheImpl - indexing call stacks for container", helpers.String("containerID", containerID), helpers.String("containerName", containerName))
 	// Initialize container index if needed
 	if !ap.containerCallStacks.Has(containerID) {
 		ap.containerCallStacks.Set(containerID, &ContainerCallStackIndex{
@@ -141,7 +140,6 @@ func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, con
 		if appProfile.Spec.Containers[i].Name == containerName {
 			// Index all call stacks
 			for _, stack := range appProfile.Spec.Containers[i].IdentifiedCallStacks {
-				logger.L().Info("ApplicationProfileCacheImpl - indexing call stack", helpers.String("containerID", containerID), helpers.String("containerName", containerName), helpers.String("CallID", string(stack.CallID)))
 				index.searchTree.AddCallStack(stack)
 			}
 
@@ -329,7 +327,6 @@ func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 
 func (ap *ApplicationProfileCacheImpl) initContainerIdToName(pod *corev1.Pod) {
 	for i, container := range pod.Spec.Containers {
-		logger.L().Info("ApplicationProfileCacheImpl - initContainerIdToName", helpers.String("containerID", utils.TrimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID)), helpers.String("containerName", container.Name))
 		ap.containerToName.Set(utils.TrimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID), container.Name)
 	}
 	for i, container := range pod.Spec.InitContainers {
@@ -391,7 +388,6 @@ func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1b
 	ap.slugToAppProfile.Set(apName, fullAP)
 	for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
 		ap.containerToSlug.Set(i, apName)
-		logger.L().Info("ApplicationProfileCacheImpl - indexing call stacks for container1", helpers.String("containerID", i))
 		ap.indexContainerCallStacks(i, ap.containerToName.Get(i), fullAP)
 	}
 	logger.L().Debug("ApplicationProfileCacheImpl - added pod to application profile cache", helpers.String("name", apName))
