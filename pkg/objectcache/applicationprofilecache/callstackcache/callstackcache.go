@@ -34,6 +34,11 @@ func NewCallStackSearchTree() *CallStackSearchTree {
 
 // AddCallStack adds a new identified call stack to the search tree
 func (t *CallStackSearchTree) AddCallStack(stack v1beta1.IdentifiedCallStack) {
+	// If call stack already exists, skip
+	if _, ok := t.Roots[stack.CallID]; ok {
+		return
+	}
+
 	// Get all paths from the call stack
 	paths := getCallStackPaths(stack.CallStack)
 	if len(paths) == 0 {
