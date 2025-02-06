@@ -45,19 +45,15 @@ func (t *CallStackSearchTree) AddCallStack(stack v1beta1.IdentifiedCallStack) {
 		return
 	}
 
-	// First create root from first path
+	// First create root from first path using the helper
 	firstPath := paths[0]
-	firstFrames := make([]v1beta1.StackFrame, len(firstPath))
-	for i, node := range firstPath {
-		firstFrames[i] = node.Frame
-	}
+	firstFrames := convertNodesToFrames(firstPath)
 
 	root := t.buildBidirectionalTree(firstFrames)
 	t.Roots[stack.CallID] = root
 
 	// Store paths for this CallID
-	t.PathsByCallID[stack.CallID] = make([][]v1beta1.StackFrame, 0)
-	t.PathsByCallID[stack.CallID] = append(t.PathsByCallID[stack.CallID], firstFrames)
+	t.PathsByCallID[stack.CallID] = [][]v1beta1.StackFrame{firstFrames}
 
 	// Add first path to trie
 	key := pathToKey(firstFrames)
@@ -66,15 +62,10 @@ func (t *CallStackSearchTree) AddCallStack(stack v1beta1.IdentifiedCallStack) {
 	// Process remaining paths
 	for i := 1; i < len(paths); i++ {
 		path := paths[i]
-		frames := make([]v1beta1.StackFrame, len(path))
-		for j, node := range path {
-			frames[j] = node.Frame
-		}
+		frames := convertNodesToFrames(path)
 
-		// Add to paths by CallID
+		// Add to paths by CallID and trie
 		t.PathsByCallID[stack.CallID] = append(t.PathsByCallID[stack.CallID], frames)
-
-		// Add to trie
 		key = pathToKey(frames)
 		t.ForwardTrie.Put(key, frames)
 
@@ -185,4 +176,13 @@ func frameKey(frame v1beta1.StackFrame) string {
 // framesEqual checks if two call stacks are equal
 func framesEqual(a, b v1beta1.StackFrame) bool {
 	return a.FileID == b.FileID && a.Lineno == b.Lineno
+}
+
+// Add after existing helper functions
+func convertNodesToFrames(nodes []v1beta1.CallStackNode) []v1beta1.StackFrame {
+	frames := make([]v1beta1.StackFrame, len(nodes))
+	for i, node := range nodes {
+		frames[i] = node.Frame
+	}
+	return frames
 }
