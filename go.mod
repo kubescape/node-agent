@@ -10,10 +10,12 @@ require (
 	github.com/armosec/utils-k8s-go v0.0.30
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cenkalti/backoff/v4 v4.3.0
+	github.com/cenkalti/backoff/v5 v5.0.1
 	github.com/cilium/ebpf v0.17.2
 	github.com/crewjam/rfc5424 v0.1.0
 	github.com/cyphar/filepath-securejoin v0.4.1
 	github.com/deckarep/golang-set/v2 v2.7.0
+	github.com/dghubble/trie v0.1.0
 	github.com/distribution/distribution v2.8.2+incompatible
 	github.com/dustin/go-humanize v1.0.1
 	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e

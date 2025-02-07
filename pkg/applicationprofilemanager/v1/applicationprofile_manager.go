@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
+	"github.com/cenkalti/backoff/v5"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -571,14 +571,15 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 	ctx, span := otel.Tracer("").Start(ctx, "ApplicationProfileManager.startApplicationProfiling")
 	defer span.End()
 
-	if err := am.waitForSharedContainerData(container.Runtime.ContainerID); err != nil {
+	sharedData, err := am.waitForSharedContainerData(container.Runtime.ContainerID)
+	if err != nil {
 		logger.L().Error("ApplicationProfileManager - container not found in shared data",
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
 		return
 	}
 
-	if !am.cfg.EnableRuntimeDetection && am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).PreRunningContainer {
+	if !am.cfg.EnableRuntimeDetection && sharedData.PreRunningContainer {
 		logger.L().Debug("ApplicationProfileManager - skip container", helpers.String("reason", "preRunning container"),
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
@@ -590,22 +591,22 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:            container.Runtime.ContainerID,
-		ImageID:                am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ImageID,
-		ImageTag:               am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ImageTag,
+		ImageID:                sharedData.ImageID,
+		ImageTag:               sharedData.ImageTag,
 		UpdateDataTicker:       time.NewTicker(utils.AddJitter(am.cfg.InitialDelay, am.cfg.MaxJitterPercentage)),
 		SyncChannel:            syncChannel,
 		K8sContainerID:         k8sContainerID,
 		NsMntId:                container.Mntns,
-		InstanceID:             am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).InstanceID,
-		TemplateHash:           am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).TemplateHash,
-		Wlid:                   am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).Wlid,
-		ParentResourceVersion:  am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ParentResourceVersion,
-		ContainerInfos:         am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ContainerInfos,
-		ParentWorkloadSelector: am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ParentWorkloadSelector,
-		SeccompProfilePath:     am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).SeccompProfilePath,
-		ContainerType:          am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ContainerType,
-		ContainerIndex:         am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ContainerIndex,
-		PreRunningContainer:    am.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).PreRunningContainer,
+		InstanceID:             sharedData.InstanceID,
+		TemplateHash:           sharedData.TemplateHash,
+		Wlid:                   sharedData.Wlid,
+		ParentResourceVersion:  sharedData.ParentResourceVersion,
+		ContainerInfos:         sharedData.ContainerInfos,
+		ParentWorkloadSelector: sharedData.ParentWorkloadSelector,
+		SeccompProfilePath:     sharedData.SeccompProfilePath,
+		ContainerType:          sharedData.ContainerType,
+		ContainerIndex:         sharedData.ContainerIndex,
+		PreRunningContainer:    sharedData.PreRunningContainer,
 	}
 
 	if err := am.monitorContainer(ctx, container, watchedContainer); err != nil {
@@ -622,21 +623,22 @@ func (am *ApplicationProfileManager) waitForContainer(k8sContainerID string) err
 	if am.removedContainers.Contains(k8sContainerID) {
 		return fmt.Errorf("container %s has been removed", k8sContainerID)
 	}
-	return backoff.Retry(func() error {
+	_, err := backoff.Retry(context.Background(), func() (any, error) {
 		if am.trackedContainers.Contains(k8sContainerID) {
-			return nil
+			return nil, nil
 		}
-		return fmt.Errorf("container %s not found", k8sContainerID)
-	}, backoff.NewExponentialBackOff())
+		return nil, fmt.Errorf("container %s not found", k8sContainerID)
+	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
+	return err
 }
 
-func (am *ApplicationProfileManager) waitForSharedContainerData(containerID string) error {
-	return backoff.Retry(func() error {
-		if am.k8sObjectCache.GetSharedContainerData(containerID) != nil {
-			return nil
+func (am *ApplicationProfileManager) waitForSharedContainerData(containerID string) (*utils.WatchedContainerData, error) {
+	return backoff.Retry(context.Background(), func() (*utils.WatchedContainerData, error) {
+		if sharedData := am.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
+			return sharedData, nil
 		}
-		return fmt.Errorf("container %s not found in shared data", containerID)
-	}, backoff.NewExponentialBackOff())
+		return nil, fmt.Errorf("container %s not found in shared data", containerID)
+	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
 }
 
 func (am *ApplicationProfileManager) ContainerCallback(notif containercollection.PubSubEvent) {
