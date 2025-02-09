@@ -187,6 +187,59 @@ func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 			expectAlert: false,
 			description: "Should not alert when static segments match and dynamic segment matches timestamp",
 		},
+		// {
+		// 	name:        "Double slashes in path",
+		// 	event:       createTestEvent("/etc//shadow", []string{"O_RDONLY"}),
+		// 	profile:     createTestProfile("test", []string{"/etc/shadow"}, []string{"O_RDONLY"}),
+		// 	expectAlert: false,
+		// 	description: "Should normalize paths with double slashes",
+		// },
+		{
+			name:        "Trailing slash differences",
+			event:       createTestEvent("/etc/kubernetes/", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/etc/kubernetes"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should handle trailing slash differences",
+		},
+		{
+			name:        "Partial path segment match",
+			event:       createTestEvent("/etc/kubernetes-staging/secret", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/etc/kubernetes"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should not alert when path merely starts with a sensitive path string",
+		},
+		{
+			name:  "Complex dynamic pattern combination",
+			event: createTestEvent("/var/log/2024/01/pod-123/container-456/app.log", []string{"O_RDONLY"}),
+			profile: createTestProfile("test", []string{
+				"/var/log/" + dynamicpathdetector.DynamicIdentifier + "/" +
+					dynamicpathdetector.DynamicIdentifier + "/pod-" +
+					dynamicpathdetector.DynamicIdentifier + "/container-" +
+					dynamicpathdetector.DynamicIdentifier + "/app.log"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should handle complex combinations of dynamic patterns",
+		},
+		{
+			name:        "Empty path handling",
+			event:       createTestEvent("", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/test"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should handle empty paths gracefully",
+		},
+		{
+			name:        "Special characters in path",
+			event:       createTestEvent("/etc/conf!g#file", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/etc/conf!g#file"}, []string{"O_RDONLY"}),
+			expectAlert: false,
+			description: "Should handle special characters in paths",
+		},
+		{
+			name:        "Relative path with dots",
+			event:       createTestEvent("./etc/shadow", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/etc/shadow"}, []string{"O_RDONLY"}),
+			expectAlert: true,
+			description: "Should handle relative paths correctly",
+		},
 	}
 
 	for _, tt := range tests {
