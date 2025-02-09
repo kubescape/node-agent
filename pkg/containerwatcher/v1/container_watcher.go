@@ -222,7 +222,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		metrics.ReportEvent(utils.ExecveEventType)
 		processManager.ReportEvent(utils.ExecveEventType, &event)
-		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
+		applicationProfileManager.ReportFileExec(k8sContainerID, event)
 		rulePolicyReporter.ReportEvent(utils.ExecveEventType, &event, k8sContainerID, event.Comm)
 
 		// Report exec events to event receivers
@@ -245,13 +245,12 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 			return
 		}
 
-		path := event.Path
 		if cfg.EnableFullPathTracing {
-			path = event.FullPath
+			event.Path = event.FullPath
 		}
 
 		metrics.ReportEvent(utils.OpenEventType)
-		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
+		applicationProfileManager.ReportFileOpen(k8sContainerID, event)
 		ruleManager.ReportEvent(utils.OpenEventType, &event)
 		malwareManager.ReportEvent(utils.OpenEventType, &event)
 
@@ -336,6 +335,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
 		metrics.ReportEvent(utils.SymlinkEventType)
+		applicationProfileManager.ReportSymlinkEvent(k8sContainerID, &event)
 		ruleManager.ReportEvent(utils.SymlinkEventType, &event)
 		rulePolicyReporter.ReportEvent(utils.SymlinkEventType, &event, k8sContainerID, event.Comm)
 		// Report symlink events to event receivers
@@ -354,6 +354,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
 		metrics.ReportEvent(utils.HardlinkEventType)
+		applicationProfileManager.ReportHardlinkEvent(k8sContainerID, &event)
 		ruleManager.ReportEvent(utils.HardlinkEventType, &event)
 		rulePolicyReporter.ReportEvent(utils.HardlinkEventType, &event, k8sContainerID, event.Comm)
 		// Report hardlink events to event receivers
