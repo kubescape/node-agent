@@ -53,6 +53,7 @@ jobs:
           Test_12_MergingProfilesTest,
           Test_13_MergingNetworkNeighborhoodTest,
           Test_14_RulePoliciesTest,
+          Test_15_CompletedApCannotBecomeReadyAgain
         ]
     steps:
       - name: Checkout code
