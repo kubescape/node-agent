@@ -89,15 +89,8 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 	baseProfileName := strings.TrimPrefix(appProfile.GetName(), "ug-")
 	baseProfileUniqueName := objectcache.UniqueName(appProfile.GetNamespace(), baseProfileName)
 
-	// Get the full user managed profile from the storage
-	userManagedProfile, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
-	if err != nil {
-		logger.L().Warning("ApplicationProfileCacheImpl - failed to get full application profile", helpers.Error(err))
-		return
-	}
-
 	// Store the user-managed profile temporarily
-	ap.userManagedProfiles.Set(baseProfileUniqueName, userManagedProfile)
+	ap.userManagedProfiles.Set(baseProfileUniqueName, appProfile)
 
 	// If we have the base profile cached, fetch a fresh copy and merge.
 	// If the base profile is not cached yet, the merge will be attempted when it's added.
@@ -112,7 +105,7 @@ func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1be
 			return
 		}
 
-		mergedProfile := ap.performMerge(freshBaseProfile, userManagedProfile)
+		mergedProfile := ap.performMerge(freshBaseProfile, appProfile)
 		ap.slugToAppProfile.Set(baseProfileUniqueName, mergedProfile)
 
 		// Clean up the user-managed profile after successful merge
@@ -370,22 +363,16 @@ func (ap *ApplicationProfileCacheImpl) removeContainer(containerID string) {
 // ------------------ watch application profile methods -----------------------
 
 func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1beta1.ApplicationProfile, apName string) {
-	fullAP, err := ap.getApplicationProfile(appProfile.GetNamespace(), appProfile.GetName())
-	if err != nil {
-		logger.L().Warning("ApplicationProfileCacheImpl - failed to get full application profile", helpers.Error(err))
-		return
-	}
-
 	// Check if there's a pending user-managed profile to merge
 	if ap.userManagedProfiles.Has(apName) {
 		userManagedProfile := ap.userManagedProfiles.Get(apName)
-		fullAP = ap.performMerge(fullAP, userManagedProfile)
+		appProfile = ap.performMerge(appProfile, userManagedProfile)
 		// Clean up the user-managed profile after successful merge
 		ap.userManagedProfiles.Delete(apName)
 		logger.L().Debug("ApplicationProfileCacheImpl - merged pending user-managed profile", helpers.String("name", apName))
 	}
 
-	ap.slugToAppProfile.Set(apName, fullAP)
+	ap.slugToAppProfile.Set(apName, appProfile)
 	for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
 		ap.containerToSlug.Set(i, apName)
 		ap.indexContainerCallStacks(i, ap.containerToName.Get(i), fullAP)
