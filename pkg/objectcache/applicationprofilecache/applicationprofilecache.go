@@ -313,7 +313,11 @@ func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 			ap.slugToAppProfile.Set(uniqueSlug, appProfile)
 		}
 
-		ap.indexContainerCallStacks(container, ap.containerToName.Get(container), ap.slugToAppProfile.Get(uniqueSlug))
+		appProfile := ap.slugToAppProfile.Get(uniqueSlug)
+		state := ap.slugToState.Get(uniqueSlug)
+		if appProfile != nil && state.status == helpersv1.Completed {
+			ap.indexContainerCallStacks(container, ap.containerToName.Get(container), appProfile)
+		}
 	}
 
 }
