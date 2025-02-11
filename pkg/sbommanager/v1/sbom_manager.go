@@ -51,9 +51,8 @@ import (
 )
 
 const (
-	digestDelim            = "@"
-	NodeNameMetadataKey    = "kubescape.io/node-name"
-	ToolVersionMetadataKey = "kubescape.io/tool-version"
+	digestDelim         = "@"
+	NodeNameMetadataKey = "kubescape.io/node-name"
 )
 
 type SbomManager struct {
@@ -187,11 +186,11 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sbomName,
 			Annotations: map[string]string{
-				helpersv1.ImageIDMetadataKey:  imageID,
-				helpersv1.ImageTagMetadataKey: sharedData.ImageTag,
-				helpersv1.StatusMetadataKey:   helpersv1.Initializing,
-				NodeNameMetadataKey:           s.cfg.NodeName,
-				ToolVersionMetadataKey:        s.version,
+				helpersv1.ImageIDMetadataKey:     imageID,
+				helpersv1.ImageTagMetadataKey:    sharedData.ImageTag,
+				helpersv1.StatusMetadataKey:      helpersv1.Initializing,
+				NodeNameMetadataKey:              s.cfg.NodeName,
+				helpersv1.ToolVersionMetadataKey: s.version,
 			},
 			Labels: labelsFromImageID(imageID),
 		},
@@ -222,7 +221,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 			return
 		case wipSbom.Annotations[helpersv1.StatusMetadataKey] == helpersv1.Ready:
 			// only skip if the SBOM was created with the same version of tool
-			if wipSbom.Annotations[ToolVersionMetadataKey] == s.version {
+			if wipSbom.Annotations[helpersv1.ToolVersionMetadataKey] == s.version {
 				logger.L().Debug("SbomManager - SBOM is already created, skipping",
 					helpers.String("namespace", notif.Container.K8s.Namespace),
 					helpers.String("pod", notif.Container.K8s.PodName),
@@ -235,10 +234,10 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName),
-				helpers.String("got version", wipSbom.Annotations[ToolVersionMetadataKey]),
+				helpers.String("got version", wipSbom.Annotations[helpersv1.ToolVersionMetadataKey]),
 				helpers.String("expected version", s.version))
 			// update the version of the tool
-			wipSbom.Annotations[ToolVersionMetadataKey] = s.version
+			wipSbom.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
 			// continue to create SBOM
 		case wipSbom.Annotations[NodeNameMetadataKey] != s.cfg.NodeName:
 			logger.L().Debug("SbomManager - SBOM is already being processed by another node, skipping",
