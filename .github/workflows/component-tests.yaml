@@ -53,6 +53,7 @@ jobs:
           Test_12_MergingProfilesTest,
           Test_13_MergingNetworkNeighborhoodTest,
           Test_14_RulePoliciesTest,
+          Test_15_CompletedApCannotBecomeReadyAgain
         ]
     steps:
       - name: Checkout code
@@ -106,30 +107,3 @@ jobs:
           echo "-----------------------------------------"
           echo "Storage logs"
           kubectl logs $(kubectl get pods -n kubescape -o name | grep storage) -n kubescape
-
-      # - name: Upload plot images 
-      #   if: always()
-      #   uses: actions/upload-artifact@v2
-      #   with:
-      #     name: Performance plots
-      #     path: "tests/*.png"
-      # - name: Upload pprof files
-      #   if: always()
-      #   uses: actions/upload-artifact@v2
-      #   with:
-      #     name: Pprof files
-      #     path: "tests/*.pprof"
-      # - name: Comment on PR
-      #   if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
-      #   uses: actions/github-script@v3
-      #   with:
-      #     github-token: ${{secrets.GITHUB_TOKEN}}
-      #     script: |
-      #       const artifactUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
-      #       const comment = `:sparkles: Artifacts are available [here](${artifactUrl}).`;
-      #       github.issues.createComment({
-      #         issue_number: context.issue.number,
-      #         owner: context.repo.owner,
-      #         repo: context.repo.repo,
-      #         body: comment
-      #       });

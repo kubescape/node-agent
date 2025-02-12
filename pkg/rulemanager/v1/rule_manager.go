@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	backoffv5 "github.com/cenkalti/backoff/v5"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/dustin/go-humanize"
 	"github.com/goradd/maps"
@@ -154,14 +155,15 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 }
 
 func (rm *RuleManager) startRuleManager(container *containercollection.Container, k8sContainerID string) {
-	if err := rm.waitForSharedContainerData(container.Runtime.ContainerID); err != nil {
+	sharedData, err := rm.waitForSharedContainerData(container.Runtime.ContainerID)
+	if err != nil {
 		logger.L().Error("RuleManager - failed to get shared container data", helpers.Error(err))
 		return
 	}
 
 	podID := utils.CreateK8sPodID(container.K8s.Namespace, container.K8s.PodName)
 	if !rm.podToWlid.Has(podID) {
-		w := rm.objectCache.K8sObjectCache().GetSharedContainerData(container.Runtime.ContainerID).Wlid
+		w := sharedData.Wlid
 		if w != "" {
 			rm.podToWlid.Set(podID, w)
 		} else {
@@ -210,13 +212,13 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 	}
 }
 
-func (rm *RuleManager) waitForSharedContainerData(containerID string) error {
-	return backoff.Retry(func() error {
-		if rm.objectCache.K8sObjectCache().GetSharedContainerData(containerID) != nil {
-			return nil
+func (rm *RuleManager) waitForSharedContainerData(containerID string) (*utils.WatchedContainerData, error) {
+	return backoffv5.Retry(context.Background(), func() (*utils.WatchedContainerData, error) {
+		if sharedData := rm.objectCache.K8sObjectCache().GetSharedContainerData(containerID); sharedData != nil {
+			return sharedData, nil
 		}
-		return fmt.Errorf("container %s not found in shared data", containerID)
-	}, backoff.NewExponentialBackOff())
+		return nil, fmt.Errorf("container %s not found in shared data", containerID)
+	}, backoffv5.WithBackOff(backoffv5.NewExponentialBackOff()))
 }
 
 func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error)) {

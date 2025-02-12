@@ -176,7 +176,7 @@ func main() {
 	// Create the application profile manager
 	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	if cfg.EnableApplicationProfile {
-		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, k8sObjectCache, seccompManager)
+		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, k8sObjectCache, seccompManager, nil)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the application profile manager", helpers.Error(err))
 		}

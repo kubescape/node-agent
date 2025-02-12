@@ -13,7 +13,7 @@ const (
 	ContainerAllowed = "containerAllowed"
 )
 
-func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, rulePolicies map[string]v1beta1.RulePolicy, containerType string, containerIndex int) []PatchOperation {
+func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, rulePolicies map[string]v1beta1.RulePolicy, callStacks []v1beta1.IdentifiedCallStack, containerType string, containerIndex int) []PatchOperation {
 	var profileOperations []PatchOperation
 	// add capabilities
 	sort.Strings(capabilities)
@@ -81,10 +81,20 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 	// add rule policies
 	profileOperations = append(profileOperations, createRulePolicyOperations(rulePolicies, containerType, containerIndex)...)
 
+	// add call stacks
+	callStacksPath := fmt.Sprintf("/spec/%s/%d/identifiedCallStacks/-", containerType, containerIndex)
+	for _, callStack := range callStacks {
+		profileOperations = append(profileOperations, PatchOperation{
+			Op:    "add",
+			Path:  callStacksPath,
+			Value: callStack,
+		})
+	}
+
 	return profileOperations
 }
 
-func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, rulePolicies map[string]v1beta1.RulePolicy, imageID, imageTag string) {
+func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, rulePolicies map[string]v1beta1.RulePolicy, callStacks []v1beta1.IdentifiedCallStack, imageID, imageTag string) {
 	// add image metadata
 	container.ImageID = imageID
 	container.ImageTag = imageTag
@@ -140,6 +150,9 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 			container.PolicyByRuleId[ruleID] = policy
 		}
 	}
+
+	// add call stacks
+	container.IdentifiedCallStacks = append(container.IdentifiedCallStacks, callStacks...)
 
 }
 
