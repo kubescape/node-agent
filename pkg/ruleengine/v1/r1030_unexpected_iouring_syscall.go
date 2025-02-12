@@ -73,7 +73,7 @@ func (rule *R1030UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 		return nil
 	}
 
-	ok, name := iouring.GetOpcodeName(iouringEvent.Opcode)
+	ok, name := iouring.GetOpcodeName(uint8(iouringEvent.Opcode))
 	if !ok {
 		return nil
 	}
@@ -122,7 +122,7 @@ func (rule *R1030UnexpectedIouringOperation) EvaluateRule(eventType utils.EventT
 		return ok
 	}
 
-	ok, _ = iouring.GetOpcodeName(iouringEvent.Opcode)
+	ok, _ = iouring.GetOpcodeName(uint8(iouringEvent.Opcode))
 	return ok
 }
 

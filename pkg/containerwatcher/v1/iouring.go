@@ -57,7 +57,6 @@ func (ch *IGContainerWatcher) startIouringTracing() error {
 }
 
 func (ch *IGContainerWatcher) stopIouringTracing() error {
-	// Stop io_uring tracer
 	if err := ch.tracerCollection.RemoveTracer(iouringTraceName); err != nil {
 		return fmt.Errorf("removing tracer: %w", err)
 	}

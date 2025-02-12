@@ -456,6 +456,11 @@ func (ch *IGContainerWatcher) stopTracers() error {
 			errs = errors.Join(errs, err)
 		}
 
+		if err := ch.stopIouringTracing(); err != nil {
+			logger.L().Error("IGContainerWatcher - error stopping io_uring tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+
 		// Stop third party tracers
 		for tracer := range ch.thirdPartyTracers.Iter() {
 			if err := tracer.Stop(); err != nil {
