@@ -63,7 +63,9 @@ func (t *Tracer) Close() {
 	if t.reader != nil {
 		t.reader.Close()
 	}
-	t.objs.Close()
+	if t.objs.Events != nil {
+		t.objs.Close()
+	}
 }
 
 func (t *Tracer) install() error {

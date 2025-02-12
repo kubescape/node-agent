@@ -357,8 +357,8 @@ func (ch *IGContainerWatcher) startTracers() error {
 		logger.L().Info("started ptrace tracing")
 
 		if err := ch.startIouringTracing(); err != nil {
-			logger.L().Error("IGContainerWatcher - error starting io_uring tracing", helpers.Error(err))
-			return err
+			logger.L().Error("IGContainerWatcher - error starting io_uring tracing, skipping.", helpers.Error(err))
+			ch.stopIouringTracing()
 		}
 		logger.L().Info("started io_uring tracing")
 

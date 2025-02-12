@@ -42,4 +42,4 @@ spec:
     - ruleName: "Port forward"
     - ruleName: "Unexpected Egress Network Traffic"
     - ruleName: "Malicious Ptrace Usage"
-    - ruleName: "Unexpected IO Uring Operation Detected"
+    - ruleName: "Unexpected io_uring Operation Detected"
