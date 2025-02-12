@@ -238,7 +238,16 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 		// 1. try to patch object
 		var gotErr error
 		if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, operations, watchedContainer.SyncChannel); err != nil {
-			if apierrors.IsNotFound(err) {
+			switch {
+			case apierrors.IsTimeout(err):
+				// backoff timeout, we have already retried for maxElapsedTime
+				gotErr = err
+				logger.L().Ctx(ctx).Debug("NetworkManager - failed to patch network neighborhood", helpers.Error(err),
+					helpers.String("slug", slug),
+					helpers.Int("container index", watchedContainer.ContainerIndex),
+					helpers.String("container ID", watchedContainer.ContainerID),
+					helpers.String("k8s workload", watchedContainer.K8sContainerID))
+			case apierrors.IsNotFound(err):
 				// 2a. new object
 				newObject := &v1beta1.NetworkNeighborhood{
 					ObjectMeta: metav1.ObjectMeta{
@@ -278,7 +287,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 						helpers.String("container ID", watchedContainer.ContainerID),
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				}
-			} else {
+			default:
 				logger.L().Debug("NetworkManager - failed to patch network neighborhood, will get existing one and adjust patch", helpers.Error(err),
 					helpers.String("slug", slug),
 					helpers.Int("container index", watchedContainer.ContainerIndex),
