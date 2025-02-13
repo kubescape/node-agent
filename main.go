@@ -12,6 +12,7 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
+	"github.com/cilium/ebpf/rlimit"
 	"github.com/grafana/pyroscope-go"
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -99,6 +100,11 @@ func main() {
 			} else {
 				os.Exit(utils.ExitCodeError)
 			}
+		}
+	} else {
+		if err := rlimit.RemoveMemlock(); err != nil {
+			logger.L().Ctx(ctx).Error("error removing memlock limit", helpers.Error(err))
+			return
 		}
 	}
 
