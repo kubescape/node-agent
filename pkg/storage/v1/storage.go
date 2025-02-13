@@ -31,6 +31,7 @@ const (
 
 type Storage struct {
 	StorageClient          spdxv1beta1.SpdxV1beta1Interface
+	maxElapsedTime         time.Duration
 	maxJsonPatchOperations int
 	namespace              string
 	multiplier             *int // used for testing to multiply the resources by this
@@ -38,7 +39,7 @@ type Storage struct {
 
 var _ storage.StorageClient = (*Storage)(nil)
 
-func CreateStorage(namespace string) (*Storage, error) {
+func CreateStorage(namespace string, maxElapsedTime time.Duration) (*Storage, error) {
 	var cfg *rest.Config
 	kubeconfig := os.Getenv(KubeConfig)
 	// use the current context in kubeconfig
@@ -70,6 +71,7 @@ func CreateStorage(namespace string) (*Storage, error) {
 
 	return &Storage{
 		StorageClient:          clientset.SpdxV1beta1(),
+		maxElapsedTime:         maxElapsedTime,
 		maxJsonPatchOperations: 9999,
 		namespace:              namespace,
 		multiplier:             getMultiplier(),

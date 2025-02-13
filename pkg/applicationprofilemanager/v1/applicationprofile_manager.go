@@ -333,7 +333,16 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		// 1. try to patch object
 		var gotErr error
 		if err := am.storageClient.PatchApplicationProfile(slug, namespace, operations, watchedContainer.SyncChannel); err != nil {
-			if apierrors.IsNotFound(err) {
+			switch {
+			case apierrors.IsTimeout(err):
+				// backoff timeout, we have already retried for maxElapsedTime
+				gotErr = err
+				logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to patch application profile", helpers.Error(err),
+					helpers.String("slug", slug),
+					helpers.Int("container index", watchedContainer.ContainerIndex),
+					helpers.String("container ID", watchedContainer.ContainerID),
+					helpers.String("k8s workload", watchedContainer.K8sContainerID))
+			case apierrors.IsNotFound(err):
 				// 2a. new object
 				newObject := &v1beta1.ApplicationProfile{
 					ObjectMeta: metav1.ObjectMeta{
@@ -389,7 +398,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						helpers.String("container ID", watchedContainer.ContainerID),
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				}
-			} else {
+			default:
 				logger.L().Debug("ApplicationProfileManager - failed to patch application profile, will get existing one and adjust patch", helpers.Error(err),
 					helpers.String("slug", slug),
 					helpers.Int("container index", watchedContainer.ContainerIndex),
