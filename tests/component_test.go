@@ -566,6 +566,8 @@ func Test_10_MalwareDetectionTest(t *testing.T) {
 	_, _, err := testutils.ExecIntoPod("malware-cryptominer", ns.Name, []string{"ls", "-l", "/usr/share/nginx/html/xmrig"}, "")
 	assert.NoErrorf(t, err, "expected no error when executing command in malware container")
 
+	_, _, err = testutils.ExecIntoPod("malware-cryptominer", ns.Name, []string{"/usr/share/nginx/html/xmrig/xmrig"}, "")
+
 	// wait for the alerts to be generated
 	time.Sleep(20 * time.Second)
 
