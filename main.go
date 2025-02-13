@@ -104,7 +104,7 @@ func main() {
 	} else {
 		if err := rlimit.RemoveMemlock(); err != nil {
 			logger.L().Ctx(ctx).Error("error removing memlock limit", helpers.Error(err))
-			return
+			os.Exit(utils.ExitCodeError)
 		}
 	}
 
