@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
+	"github.com/cenkalti/backoff/v5"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/google/uuid"
 	"github.com/goradd/maps"
@@ -66,15 +66,6 @@ func CreateNetworkManager(ctx context.Context, cfg config.Config, clusterName st
 		removedContainers:       mapset.NewSet[string](),
 		droppedEventsContainers: mapset.NewSet[string](),
 	}
-}
-
-func (nm *NetworkManager) waitForSharedContainerData(containerID string) error {
-	return backoff.Retry(func() error {
-		if nm.k8sObjectCache.GetSharedContainerData(containerID) != nil {
-			return nil
-		}
-		return fmt.Errorf("container %s not found in shared data", containerID)
-	}, backoff.NewExponentialBackOff())
 }
 
 func (nm *NetworkManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
@@ -247,7 +238,16 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 		// 1. try to patch object
 		var gotErr error
 		if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, operations, watchedContainer.SyncChannel); err != nil {
-			if apierrors.IsNotFound(err) {
+			switch {
+			case apierrors.IsTimeout(err):
+				// backoff timeout, we have already retried for maxElapsedTime
+				gotErr = err
+				logger.L().Ctx(ctx).Debug("NetworkManager - failed to patch network neighborhood", helpers.Error(err),
+					helpers.String("slug", slug),
+					helpers.Int("container index", watchedContainer.ContainerIndex),
+					helpers.String("container ID", watchedContainer.ContainerID),
+					helpers.String("k8s workload", watchedContainer.K8sContainerID))
+			case apierrors.IsNotFound(err):
 				// 2a. new object
 				newObject := &v1beta1.NetworkNeighborhood{
 					ObjectMeta: metav1.ObjectMeta{
@@ -287,7 +287,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 						helpers.String("container ID", watchedContainer.ContainerID),
 						helpers.String("k8s workload", watchedContainer.K8sContainerID))
 				}
-			} else {
+			default:
 				logger.L().Debug("NetworkManager - failed to patch network neighborhood, will get existing one and adjust patch", helpers.Error(err),
 					helpers.String("slug", slug),
 					helpers.Int("container index", watchedContainer.ContainerIndex),
@@ -389,14 +389,15 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 	ctx, span := otel.Tracer("").Start(ctx, "NetworkManager.startNetworkMonitoring")
 	defer span.End()
 
-	if err := nm.waitForSharedContainerData(container.Runtime.ContainerID); err != nil {
+	sharedData, err := nm.waitForSharedContainerData(container.Runtime.ContainerID)
+	if err != nil {
 		logger.L().Error("NetworkManager - failed to get shared container data", helpers.Error(err),
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
 		return
 	}
 
-	if !nm.cfg.EnableRuntimeDetection && nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).PreRunningContainer {
+	if !nm.cfg.EnableRuntimeDetection && sharedData.PreRunningContainer {
 		logger.L().Debug("NetworkManager - skip container", helpers.String("reason", "preRunning container"),
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
@@ -408,22 +409,22 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 
 	watchedContainer := &utils.WatchedContainerData{
 		ContainerID:            container.Runtime.ContainerID,
-		ImageID:                nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ImageID,
-		ImageTag:               nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ImageTag,
+		ImageID:                sharedData.ImageID,
+		ImageTag:               sharedData.ImageTag,
 		UpdateDataTicker:       time.NewTicker(utils.AddJitter(nm.cfg.InitialDelay, nm.cfg.MaxJitterPercentage)),
 		SyncChannel:            syncChannel,
 		K8sContainerID:         k8sContainerID,
 		NsMntId:                container.Mntns,
-		InstanceID:             nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).InstanceID,
-		TemplateHash:           nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).TemplateHash,
-		Wlid:                   nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).Wlid,
-		ParentResourceVersion:  nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ParentResourceVersion,
-		ContainerInfos:         nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ContainerInfos,
-		ParentWorkloadSelector: nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ParentWorkloadSelector,
-		SeccompProfilePath:     nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).SeccompProfilePath,
-		ContainerType:          nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ContainerType,
-		ContainerIndex:         nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).ContainerIndex,
-		PreRunningContainer:    nm.k8sObjectCache.GetSharedContainerData(container.Runtime.ContainerID).PreRunningContainer,
+		InstanceID:             sharedData.InstanceID,
+		TemplateHash:           sharedData.TemplateHash,
+		Wlid:                   sharedData.Wlid,
+		ParentResourceVersion:  sharedData.ParentResourceVersion,
+		ContainerInfos:         sharedData.ContainerInfos,
+		ParentWorkloadSelector: sharedData.ParentWorkloadSelector,
+		SeccompProfilePath:     sharedData.SeccompProfilePath,
+		ContainerType:          sharedData.ContainerType,
+		ContainerIndex:         sharedData.ContainerIndex,
+		PreRunningContainer:    sharedData.PreRunningContainer,
 	}
 
 	if err := nm.monitorContainer(ctx, container, watchedContainer); err != nil {
@@ -440,12 +441,22 @@ func (nm *NetworkManager) waitForContainer(k8sContainerID string) error {
 	if nm.removedContainers.Contains(k8sContainerID) {
 		return fmt.Errorf("container %s has been removed", k8sContainerID)
 	}
-	return backoff.Retry(func() error {
+	_, err := backoff.Retry(context.Background(), func() (any, error) {
 		if nm.trackedContainers.Contains(k8sContainerID) {
-			return nil
+			return nil, nil
 		}
-		return fmt.Errorf("container %s not found", k8sContainerID)
-	}, backoff.NewExponentialBackOff())
+		return nil, fmt.Errorf("container %s not found", k8sContainerID)
+	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
+	return err
+}
+
+func (nm *NetworkManager) waitForSharedContainerData(containerID string) (*utils.WatchedContainerData, error) {
+	return backoff.Retry(context.Background(), func() (*utils.WatchedContainerData, error) {
+		if sharedData := nm.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
+			return sharedData, nil
+		}
+		return nil, fmt.Errorf("container %s not found in shared data", containerID)
+	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
 }
 
 func (nm *NetworkManager) ContainerCallback(notif containercollection.PubSubEvent) {

@@ -22,7 +22,7 @@ import (
 	"github.com/anchore/syft/syft/format/syftjson/model"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/aquilax/truncate"
-	"github.com/cenkalti/backoff/v4"
+	"github.com/cenkalti/backoff/v5"
 	securejoin "github.com/cyphar/filepath-securejoin"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/distribution/distribution/reference"
@@ -37,6 +37,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/moby/sys/mountinfo"
 	"github.com/opencontainers/go-digest"
@@ -50,9 +51,8 @@ import (
 )
 
 const (
-	digestDelim            = "@"
-	NodeNameMetadataKey    = "kubescape.io/node-name"
-	ToolVersionMetadataKey = "kubescape.io/tool-version"
+	digestDelim         = "@"
+	NodeNameMetadataKey = "kubescape.io/node-name"
 )
 
 type SbomManager struct {
@@ -162,34 +162,35 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 }
 
 func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
-	if err := s.waitForSharedContainerData(notif.Container.Runtime.ContainerID); err != nil {
+	sharedData, err := s.waitForSharedContainerData(notif.Container.Runtime.ContainerID)
+	if err != nil {
 		logger.L().Error("SbomManager - container not found in shared data",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID))
 		return
 	}
 	// prepare SBOM name
-	sbomName, err := names.ImageInfoToSlug(s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageTag, s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageID)
+	sbomName, err := names.ImageInfoToSlug(sharedData.ImageTag, sharedData.ImageID)
 	if err != nil {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to generate SBOM name",
 			helpers.Error(err),
 			helpers.String("namespace", notif.Container.K8s.Namespace),
 			helpers.String("pod", notif.Container.K8s.PodName),
 			helpers.String("container", notif.Container.K8s.ContainerName),
-			helpers.String("imageName", s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageTag),
-			helpers.String("imageDigest", s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageID))
+			helpers.String("imageName", sharedData.ImageTag),
+			helpers.String("imageDigest", sharedData.ImageID))
 		return
 	}
 	// try to create a SBOM with initializing status to reserve our slot
-	imageID := normalizeImageID(s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageTag, s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageID)
+	imageID := normalizeImageID(sharedData.ImageTag, sharedData.ImageID)
 	wipSbom := &v1beta1.SBOMSyft{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sbomName,
 			Annotations: map[string]string{
-				helpersv1.ImageIDMetadataKey:  imageID,
-				helpersv1.ImageTagMetadataKey: s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageTag,
-				helpersv1.StatusMetadataKey:   helpersv1.Initializing,
-				NodeNameMetadataKey:           s.cfg.NodeName,
-				ToolVersionMetadataKey:        s.version,
+				helpersv1.ImageIDMetadataKey:     imageID,
+				helpersv1.ImageTagMetadataKey:    sharedData.ImageTag,
+				helpersv1.StatusMetadataKey:      helpersv1.Initializing,
+				NodeNameMetadataKey:              s.cfg.NodeName,
+				helpersv1.ToolVersionMetadataKey: s.version,
 			},
 			Labels: labelsFromImageID(imageID),
 		},
@@ -220,7 +221,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 			return
 		case wipSbom.Annotations[helpersv1.StatusMetadataKey] == helpersv1.Ready:
 			// only skip if the SBOM was created with the same version of tool
-			if wipSbom.Annotations[ToolVersionMetadataKey] == s.version {
+			if wipSbom.Annotations[helpersv1.ToolVersionMetadataKey] == s.version {
 				logger.L().Debug("SbomManager - SBOM is already created, skipping",
 					helpers.String("namespace", notif.Container.K8s.Namespace),
 					helpers.String("pod", notif.Container.K8s.PodName),
@@ -233,10 +234,10 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 				helpers.String("pod", notif.Container.K8s.PodName),
 				helpers.String("container", notif.Container.K8s.ContainerName),
 				helpers.String("sbomName", sbomName),
-				helpers.String("got version", wipSbom.Annotations[ToolVersionMetadataKey]),
+				helpers.String("got version", wipSbom.Annotations[helpersv1.ToolVersionMetadataKey]),
 				helpers.String("expected version", s.version))
 			// update the version of the tool
-			wipSbom.Annotations[ToolVersionMetadataKey] = s.version
+			wipSbom.Annotations[helpersv1.ToolVersionMetadataKey] = s.version
 			// continue to create SBOM
 		case wipSbom.Annotations[NodeNameMetadataKey] != s.cfg.NodeName:
 			logger.L().Debug("SbomManager - SBOM is already being processed by another node, skipping",
@@ -304,7 +305,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 		return
 	}
 	// prepare image source
-	src, err := NewSource(s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageTag, s.k8sObjectCache.GetSharedContainerData(notif.Container.Runtime.ContainerID).ImageID, imageID, imageStatus, mounts, s.cfg.MaxImageSize)
+	src, err := NewSource(sharedData.ImageTag, sharedData.ImageID, imageID, imageStatus, mounts, s.cfg.MaxImageSize)
 	if err != nil {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to create image source",
 			helpers.Error(err),
@@ -373,13 +374,13 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 		helpers.String("sbomName", sbomName))
 }
 
-func (s *SbomManager) waitForSharedContainerData(containerID string) error {
-	return backoff.Retry(func() error {
-		if s.k8sObjectCache.GetSharedContainerData(containerID) != nil {
-			return nil
+func (s *SbomManager) waitForSharedContainerData(containerID string) (*utils.WatchedContainerData, error) {
+	return backoff.Retry(context.Background(), func() (*utils.WatchedContainerData, error) {
+		if sharedData := s.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
+			return sharedData, nil
 		}
-		return fmt.Errorf("container %s not found in shared data", containerID)
-	}, backoff.NewExponentialBackOff())
+		return nil, fmt.Errorf("container %s not found in shared data", containerID)
+	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
 }
 
 func formatSBOM(s sbom.SBOM) ([]byte, error) {

@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
+	"github.com/cenkalti/backoff/v5"
 	"github.com/kubescape/go-logger"
 	loggerhelpers "github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -52,7 +55,19 @@ func (sc Storage) patchApplicationProfile(name, namespace string, operations []u
 		return fmt.Errorf("marshal patch: %w", err)
 	}
 
-	profile, err := sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), sc.modifyName(name), types.JSONPatchType, patch, v1.PatchOptions{})
+	backOff := backoff.NewExponentialBackOff()
+	backOff.MaxInterval = 10 * time.Second
+	profile, err := backoff.Retry(context.Background(), func() (*v1beta1.ApplicationProfile, error) {
+		profile, err := sc.StorageClient.ApplicationProfiles(namespace).Patch(context.Background(), sc.modifyName(name), types.JSONPatchType, patch, v1.PatchOptions{})
+		switch {
+		case apierrors.IsTimeout(err), apierrors.IsServerTimeout(err), apierrors.IsTooManyRequests(err):
+			return nil, apierrors.NewTimeoutError("backoff timeout", 0)
+		case err != nil:
+			return nil, backoff.Permanent(err)
+		default:
+			return profile, nil
+		}
+	}, backoff.WithBackOff(backOff), backoff.WithMaxElapsedTime(sc.maxElapsedTime))
 	if err != nil {
 		return fmt.Errorf("patch application profile: %w", err)
 	}

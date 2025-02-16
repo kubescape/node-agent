@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
@@ -30,6 +31,7 @@ const (
 
 type Storage struct {
 	StorageClient          spdxv1beta1.SpdxV1beta1Interface
+	maxElapsedTime         time.Duration
 	maxJsonPatchOperations int
 	namespace              string
 	multiplier             *int // used for testing to multiply the resources by this
@@ -37,7 +39,7 @@ type Storage struct {
 
 var _ storage.StorageClient = (*Storage)(nil)
 
-func CreateStorage(namespace string) (*Storage, error) {
+func CreateStorage(namespace string, maxElapsedTime time.Duration) (*Storage, error) {
 	var cfg *rest.Config
 	kubeconfig := os.Getenv(KubeConfig)
 	// use the current context in kubeconfig
@@ -69,6 +71,7 @@ func CreateStorage(namespace string) (*Storage, error) {
 
 	return &Storage{
 		StorageClient:          clientset.SpdxV1beta1(),
+		maxElapsedTime:         maxElapsedTime,
 		maxJsonPatchOperations: 9999,
 		namespace:              namespace,
 		multiplier:             getMultiplier(),
@@ -155,7 +158,7 @@ func (sc Storage) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
 }
 
 func (sc Storage) GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error) {
-	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{ResourceVersion: "metadata"})
+	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{ResourceVersion: softwarecomposition.ResourceVersionMetadata})
 }
 
 func (sc Storage) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {

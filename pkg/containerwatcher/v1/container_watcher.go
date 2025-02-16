@@ -36,6 +36,8 @@ import (
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	traceriouring "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer"
+	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
 	tracerptrace "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer"
 	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
 	tracerandomx "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/tracer"
@@ -71,10 +73,11 @@ const (
 	hardlinkTraceName          = "trace_hardlink"
 	sshTraceName               = "trace_ssh"
 	httpTraceName              = "trace_http"
+	iouringTraceName           = "trace_iouring"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
-	ptraceWorkerPoolSize       = 1
+	defaultWorkerPoolSize      = 2
 	networkWorkerPoolSize      = 1
 	dnsWorkerPoolSize          = 5
 	randomxWorkerPoolSize      = 1
@@ -123,8 +126,10 @@ type IGContainerWatcher struct {
 	hardlinkTracer     *tracerhardlink.Tracer
 	sshTracer          *tracerssh.Tracer
 	httpTracer         *tracerhttp.Tracer
-	kubeIPInstance     operators.OperatorInstance
-	kubeNameInstance   operators.OperatorInstance
+	iouringTracer      *traceriouring.Tracer
+
+	kubeIPInstance   operators.OperatorInstance
+	kubeNameInstance operators.OperatorInstance
 	// Third party tracers
 	thirdPartyTracers mapset.Set[containerwatcher.CustomTracer]
 	// Third party container receivers
@@ -144,6 +149,7 @@ type IGContainerWatcher struct {
 	hardlinkWorkerPool     *ants.PoolWithFunc
 	sshdWorkerPool         *ants.PoolWithFunc
 	httpWorkerPool         *ants.PoolWithFunc
+	iouringWorkerPool      *ants.PoolWithFunc
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *events.ExecEvent
@@ -156,6 +162,7 @@ type IGContainerWatcher struct {
 	hardlinkWorkerChan     chan *tracerhardlinktype.Event
 	sshWorkerChan          chan *tracersshtype.Event
 	httpWorkerChan         chan *tracerhttptype.Event
+	iouringWorkerChan      chan *traceriouringtype.Event
 
 	objectCache     objectcache.ObjectCache
 	ruleManagedPods mapset.Set[string] // list of pods to track based on rules
@@ -266,7 +273,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 
 		metrics.ReportEvent(utils.ExecveEventType)
 		processManager.ReportEvent(utils.ExecveEventType, &event)
-		applicationProfileManager.ReportFileExec(k8sContainerID, path, event.Args)
+		applicationProfileManager.ReportFileExec(k8sContainerID, event)
 		rulePolicyReporter.ReportEvent(utils.ExecveEventType, &event, k8sContainerID, event.Comm)
 
 		// Report exec events to event receivers
@@ -289,13 +296,12 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		path := event.Path
 		if cfg.EnableFullPathTracing {
-			path = event.FullPath
+			event.Path = event.FullPath
 		}
 
 		metrics.ReportEvent(utils.OpenEventType)
-		applicationProfileManager.ReportFileOpen(k8sContainerID, path, event.Flags)
+		applicationProfileManager.ReportFileOpen(k8sContainerID, event)
 		ruleManager.ReportEvent(utils.OpenEventType, &event)
 		malwareManager.ReportEvent(utils.OpenEventType, &event)
 		hostHashSensor.ReportEvent(utils.OpenEventType, &event)
@@ -381,6 +387,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
 		metrics.ReportEvent(utils.SymlinkEventType)
+		applicationProfileManager.ReportSymlinkEvent(k8sContainerID, &event)
 		ruleManager.ReportEvent(utils.SymlinkEventType, &event)
 		rulePolicyReporter.ReportEvent(utils.SymlinkEventType, &event, k8sContainerID, event.Comm)
 		// Report symlink events to event receivers
@@ -399,6 +406,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
 
 		metrics.ReportEvent(utils.HardlinkEventType)
+		applicationProfileManager.ReportHardlinkEvent(k8sContainerID, &event)
 		ruleManager.ReportEvent(utils.HardlinkEventType, &event)
 		rulePolicyReporter.ReportEvent(utils.HardlinkEventType, &event, k8sContainerID, event.Comm)
 		// Report hardlink events to event receivers
@@ -451,7 +459,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 	}
 
 	// Create a ptrace worker pool
-	ptraceWorkerPool, err := ants.NewPoolWithFunc(ptraceWorkerPoolSize, func(i interface{}) {
+	ptraceWorkerPool, err := ants.NewPoolWithFunc(defaultWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerptracetype.Event)
 		if event.K8s.ContainerName == "" {
 			return
@@ -461,6 +469,28 @@ func CreateIGContainerWatcher(cfg config.Config,
 
 	if err != nil {
 		return nil, fmt.Errorf("creating ptrace worker pool: %w", err)
+	}
+
+	// Create a iouring worker pool
+	iouringWorkerPool, err := ants.NewPoolWithFunc(defaultWorkerPoolSize, func(i interface{}) {
+		event := i.(traceriouringtype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+
+		if isDroppedEvent(event.Type, event.Message) {
+			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
+			return
+		}
+
+		ruleManager.ReportEvent(utils.IoUringEventType, &event)
+		rulePolicyReporter.ReportEvent(utils.IoUringEventType, &event, k8sContainerID, event.Identifier)
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("creating iouring worker pool: %w", err)
 	}
 
 	return &IGContainerWatcher{
@@ -494,6 +524,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		sshdWorkerPool:         sshWorkerPool,
 		httpWorkerPool:         httpWorkerPool,
 		ptraceWorkerPool:       ptraceWorkerPool,
+		iouringWorkerPool:      iouringWorkerPool,
 		metrics:                metrics,
 
 		// Channels
@@ -508,6 +539,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		hardlinkWorkerChan:     make(chan *tracerhardlinktype.Event, 1000),
 		sshWorkerChan:          make(chan *tracersshtype.Event, 1000),
 		httpWorkerChan:         make(chan *tracerhttptype.Event, 500000),
+		iouringWorkerChan:      make(chan *traceriouringtype.Event, 5000),
 
 		// cache
 		ruleBindingPodNotify:         ruleBindingPodNotify,

@@ -29,5 +29,6 @@ const (
 	SSHEventType          EventType = "ssh"
 	HTTPEventType         EventType = "http"
 	PtraceEventType       EventType = "ptrace"
+	IoUringEventType      EventType = "iouring"
 	AllEventType          EventType = "all"
 )

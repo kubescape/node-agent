@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -24,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 )
 
 func tearDownTest(t *testing.T, startTime time.Time) {
@@ -413,11 +415,6 @@ func Test_07_RuleBindingApplyTest(t *testing.T) {
 	assert.NotEqualf(t, 0, exitCode, "Expected error when applying rule binding '%s'", file)
 }
 
-// TODO: create a test with an existing app profile and check if the alerts are generated
-//func Test_08_BasicAlertTestExistingProfile(t *testing.T) {
-//
-//}
-
 func Test_08_ApplicationProfilePatching(t *testing.T) {
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
@@ -568,6 +565,8 @@ func Test_10_MalwareDetectionTest(t *testing.T) {
 
 	_, _, err := testutils.ExecIntoPod("malware-cryptominer", ns.Name, []string{"ls", "-l", "/usr/share/nginx/html/xmrig"}, "")
 	assert.NoErrorf(t, err, "expected no error when executing command in malware container")
+
+	_, _, err = testutils.ExecIntoPod("malware-cryptominer", ns.Name, []string{"/usr/share/nginx/html/xmrig/xmrig"}, "")
 
 	// wait for the alerts to be generated
 	time.Sleep(20 * time.Second)
@@ -981,12 +980,12 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 								{
 									Name:     "TCP-80",
 									Protocol: "TCP",
-									Port:     ptr(int32(80)),
+									Port:     ptr.To(int32(80)),
 								},
 								{
 									Name:     "TCP-443",
 									Protocol: "TCP",
-									Port:     ptr(int32(443)),
+									Port:     ptr.To(int32(443)),
 								},
 							},
 						},
@@ -1003,12 +1002,12 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 								{
 									Name:     "TCP-80",
 									Protocol: "TCP",
-									Port:     ptr(int32(80)),
+									Port:     ptr.To(int32(80)),
 								},
 								{
 									Name:     "TCP-443",
 									Protocol: "TCP",
-									Port:     ptr(int32(443)),
+									Port:     ptr.To(int32(443)),
 								},
 							},
 						},
@@ -1183,6 +1182,40 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	testutils.AssertNotContains(t, alerts, "Symlink Created Over Sensitive File", "ln", "endpoint-traffic")
 }
 
-func ptr(i int32) *int32 {
-	return &i
+func Test_15_CompletedApCannotBecomeReadyAgain(t *testing.T) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	storageclient := spdxv1beta1client.NewForConfigOrDie(k8sClient.K8SConfig)
+
+	ns := testutils.NewRandomNamespace()
+	defer func() {
+		_ = k8sClient.KubernetesClient.CoreV1().Namespaces().Delete(context.Background(), ns.Name, v1.DeleteOptions{})
+	}()
+
+	// create an application profile with completed status
+	name := "test"
+	ap1, err := storageclient.ApplicationProfiles(ns.Name).Create(context.TODO(), &v1beta1.ApplicationProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+			Annotations: map[string]string{
+				helpersv1.CompletionMetadataKey: helpersv1.Complete,
+				helpersv1.StatusMetadataKey:     helpersv1.Completed,
+			},
+		},
+	}, v1.CreateOptions{})
+	require.NoError(t, err)
+	require.Equal(t, helpersv1.Completed, ap1.Annotations[helpersv1.StatusMetadataKey])
+
+	// patch the application profile with ready status
+	patchOperations := []utils.PatchOperation{
+		{
+			Op:    "replace",
+			Path:  "/metadata/annotations/" + utils.EscapeJSONPointerElement(helpersv1.StatusMetadataKey),
+			Value: helpersv1.Ready,
+		},
+	}
+	patch, err := json.Marshal(patchOperations)
+	require.NoError(t, err)
+	ap2, err := storageclient.ApplicationProfiles(ns.Name).Patch(context.Background(), name, types.JSONPatchType, patch, v1.PatchOptions{})
+	assert.NoError(t, err)                                                             // patch should succeed
+	assert.Equal(t, helpersv1.Completed, ap2.Annotations[helpersv1.StatusMetadataKey]) // but the status should not change
 }

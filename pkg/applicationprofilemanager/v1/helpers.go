@@ -128,3 +128,33 @@ func GetInitOperations(containerType string, containerIndex int) []utils.PatchOp
 
 	return operations
 }
+
+func CalculateSHA256CallStackHash(callStack v1beta1.IdentifiedCallStack) string {
+	hash := sha256.New()
+
+	// Write CallID
+	hash.Write([]byte(callStack.CallID))
+
+	// Helper function to write frame data
+	writeFrame := func(frame v1beta1.StackFrame) {
+		// No need for nil check since it's a value type
+		hash.Write([]byte(frame.FileID))
+		hash.Write([]byte(frame.Lineno))
+	}
+
+	// Helper function to recursively process node and its children
+	var processNode func(v1beta1.CallStackNode)
+	processNode = func(node v1beta1.CallStackNode) {
+		writeFrame(node.Frame)
+
+		// Process children
+		for _, child := range node.Children {
+			processNode(child)
+		}
+	}
+
+	// Process the entire call stack - no need for nil check since Root is a value type
+	processNode(callStack.CallStack.Root)
+
+	return hex.EncodeToString(hash.Sum(nil))
+}

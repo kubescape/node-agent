@@ -12,6 +12,7 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
+	"github.com/cilium/ebpf/rlimit"
 	"github.com/grafana/pyroscope-go"
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -108,6 +109,11 @@ func main() {
 				os.Exit(utils.ExitCodeError)
 			}
 		}
+	} else {
+		if err := rlimit.RemoveMemlock(); err != nil {
+			logger.L().Ctx(ctx).Error("error removing memlock limit", helpers.Error(err))
+			os.Exit(utils.ExitCodeError)
+		}
 	}
 
 	if _, present := os.LookupEnv("ENABLE_PROFILER"); present {
@@ -150,7 +156,7 @@ func main() {
 	if cfg.KubernetesMode {
 		logger.L().Info("Kubernetes mode is true")
 		k8sClient = k8sinterface.NewKubernetesApi()
-		storageClient, err = storage.CreateStorage(clusterData.Namespace)
+		storageClient, err = storage.CreateStorage(clusterData.Namespace, cfg.UpdateDataPeriod)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 		}
@@ -200,7 +206,7 @@ func main() {
 	// Create the application profile manager
 	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	if cfg.EnableApplicationProfile {
-		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, k8sObjectCache, seccompManager)
+		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, k8sObjectCache, seccompManager, nil)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the application profile manager", helpers.Error(err))
 		}
