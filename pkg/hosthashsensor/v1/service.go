@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -190,7 +191,7 @@ func (s *HostHashSensorService) processEvent(job interface{}) {
 	}
 
 	// Send the alert
-	s.putEventOnSendQueue(eventType, event, hashes, fileToCheck)
+	s.putEventOnSendQueue(eventType, event, hashes, fileToCheck, convertedFilePath)
 }
 
 func (s *HostHashSensorService) shouldCheckFile(fileToCheck string, accessType FileAccessType) bool {
@@ -302,13 +303,13 @@ func (s *HostHashSensorService) isHashInCache(fileToCheck string, hashes Hashes)
 	return false
 }
 
-func (s *HostHashSensorService) putEventOnSendQueue(eventType utils.EventType, event utils.K8sEvent, hashes Hashes, fileToCheck string) {
+func (s *HostHashSensorService) putEventOnSendQueue(eventType utils.EventType, event utils.K8sEvent, hashes Hashes, fileToCheck string, convertedFilePath string) {
 
 	var pid uint32
 	var action FileAccessType
 	var igEvent *igtypes.Event
 	var fileDetails armotypes.File
-
+	var processDetails armotypes.Process
 	if eventType == utils.ExecveEventType {
 		execEvent, ok := event.(*events.ExecEvent)
 		if !ok {
@@ -320,6 +321,10 @@ func (s *HostHashSensorService) putEventOnSendQueue(eventType utils.EventType, e
 		igEvent = execEvent.GetBaseEvent()
 		fileDetails.Ownership.Uid = &execEvent.Uid
 		fileDetails.Ownership.Gid = &execEvent.Gid
+		processDetails.PID = execEvent.Pid
+		processDetails.PPID = execEvent.Ppid
+		processDetails.Comm = execEvent.Comm
+		processDetails.Cmdline = strings.Join(execEvent.Args, " ")
 	} else if eventType == utils.OpenEventType {
 		openEvent, ok := event.(*events.OpenEvent)
 		if !ok {
@@ -343,6 +348,8 @@ func (s *HostHashSensorService) putEventOnSendQueue(eventType utils.EventType, e
 		igEvent = openEvent.GetBaseEvent()
 		fileDetails.Ownership.Uid = &openEvent.Uid
 		fileDetails.Ownership.Gid = &openEvent.Gid
+		processDetails.PID = openEvent.Pid
+		processDetails.Comm = openEvent.Comm
 	} else {
 		logger.L().Error("Event is not an ExecEvent or OpenEvent")
 		return
@@ -354,7 +361,7 @@ func (s *HostHashSensorService) putEventOnSendQueue(eventType utils.EventType, e
 		SHA1:   hashes.sha1,
 		SHA256: hashes.sha256,
 	}
-	if info, err := os.Stat(fileToCheck); err == nil {
+	if info, err := os.Stat(convertedFilePath); err == nil {
 		fileDetails.Timestamps.ModificationTime = info.ModTime()
 		stat, ok := info.Sys().(*syscall.Stat_t)
 		if ok {
@@ -365,16 +372,19 @@ func (s *HostHashSensorService) putEventOnSendQueue(eventType utils.EventType, e
 		fileDetails.Attributes.Permissions = fmt.Sprintf("%o", info.Mode())
 	}
 
+	logger.L().Debug("Process details", helpers.String("process", fmt.Sprintf("%+v", processDetails)))
+
 	// logger.L().Debug("Event timestamp", helpers.Int("timestamp", int(igEvent.Timestamp)), helpers.String("event", fmt.Sprintf("%s", time.Unix(0, int64(igEvent.Timestamp)).String())))
 
 	// Create the finding
 	finding := FileHashResultFinding{
-		Hashes:      hashes,
-		Timestamp:   time.Unix(0, int64(igEvent.Timestamp)),
-		FileDetails: fileDetails,
-		Pid:         int(pid),
-		Action:      action,
-		Event:       *igEvent,
+		Hashes:         hashes,
+		Timestamp:      time.Unix(0, int64(igEvent.Timestamp)),
+		FileDetails:    fileDetails,
+		ProcessDetails: processDetails,
+		Pid:            int(pid),
+		Action:         action,
+		Event:          *igEvent,
 	}
 
 	s.sendQueue.PutOnSendQueue(finding)
