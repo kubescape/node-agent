@@ -8,6 +8,11 @@ import (
 func NewRuleCreator() *ruleenginev1.RuleCreatorImpl {
 	return &ruleenginev1.RuleCreatorImpl{
 		RuleDescriptions: []ruleengine.RuleDescriptor{
+			// ruleenginev1.R0008ReadEnvironmentVariablesProcFSRuleDescriptor,
+			ruleenginev1.R0010UnexpectedSensitiveFileAccessRuleDescriptor,
+			ruleenginev1.R1003MaliciousSSHConnectionRuleDescriptor,
+			ruleenginev1.R1010SymlinkCreatedOverSensitiveFileRuleDescriptor,
+			ruleenginev1.R1012HardlinkCreatedOverSensitiveFileRuleDescriptor,
 			ruleenginev1.R1000ExecFromMaliciousSourceDescriptor,
 			ruleenginev1.R1002LoadKernelModuleRuleDescriptor,
 			ruleenginev1.R1005FilelessExecutionRuleDescriptor,
@@ -19,6 +24,7 @@ func NewRuleCreator() *ruleenginev1.RuleCreatorImpl {
 			R3003SuspiciousToolRuleDescriptor,
 			R3004DockerSocketAccessRuleDescriptor,
 			R3005MaliciousFsMemoryInjectionRuleDescriptor,
+			ruleenginev1.R1030UnexpectedIouringOperationRuleDescriptor,
 		},
 	}
 }

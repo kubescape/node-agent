@@ -67,6 +67,6 @@ func (exporter *StdoutExporter) SendFileHashAlerts(fileHashResults []hosthashsen
 			"BaseRuntimeMetadata":   fileHashResult.GetBasicRuntimeAlert(),
 			"RuntimeProcessDetails": fileHashResult.GetRuntimeProcessDetails(),
 			"RuntimeK8sDetails":     fileHashResult.GetRuntimeAlertK8sDetails(),
-		}).Error(fileHashResult.GetBasicRuntimeAlert().AlertName)
+		}).Debug(fileHashResult.GetBasicRuntimeAlert().AlertName)
 	}
 }

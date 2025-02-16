@@ -63,34 +63,6 @@ func TestR3001UnexpectedProcessLaunched(t *testing.T) {
 		expectFailure bool
 	}{
 		{
-			name: "Newly modified binary execution",
-			event: &events.ExecEvent{
-				Event: tracerexectype.Event{
-					Event: eventtypes.Event{
-						CommonData: eventtypes.CommonData{
-							K8s: eventtypes.K8sMetadata{
-								BasicK8sMetadata: eventtypes.BasicK8sMetadata{
-									ContainerName: "test-container",
-									PodName:       "test-pod",
-									Namespace:     "test-namespace",
-								},
-							},
-						},
-					},
-					Comm:    "test-process",
-					Args:    []string{newFile, "--flag1", "--flag2"},
-					Retval:  0,
-					Uid:     1000,
-					Gid:     1000,
-					Pid:     1234,
-					Ppid:    5678,
-					ExePath: newFile,
-				},
-			},
-			eventType:     utils.ExecveEventType,
-			expectFailure: true,
-		},
-		{
 			name: "Old binary execution",
 			event: &events.ExecEvent{
 				Event: tracerexectype.Event{

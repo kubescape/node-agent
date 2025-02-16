@@ -26,6 +26,8 @@ func TestLoadConfig(t *testing.T) {
 				EnableNetworkTracing:     true,
 				EnableNodeProfile:        true,
 				EnableHttpDetection:      true,
+				EnableHostMalwareSensor:  false,
+				KubernetesMode:           true,
 				InitialDelay:             2 * time.Minute,
 				MaxSniffingTime:          6 * time.Hour,
 				UpdateDataPeriod:         1 * time.Minute,

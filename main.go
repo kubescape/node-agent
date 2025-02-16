@@ -28,8 +28,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
-	"github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
 	hosthashsensorv1 "github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
+	hostrulemanagerv1 "github.com/kubescape/node-agent/pkg/hostrulemanager/v1"
 	hostwatcherv1 "github.com/kubescape/node-agent/pkg/hostwatcher/v1"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
@@ -294,7 +294,7 @@ func main() {
 		apc := &objectcache.ApplicationProfileCacheMock{}
 		nnc := &objectcache.NetworkNeighborhoodCacheMock{}
 		dc := &objectcache.DnsCacheMock{}
-		hostHashSensor = hosthashsensor.CreateHostHashSensorMock()
+		hostHashSensor = hosthashsensorv1.CreateHostHashSensorMock()
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
 		processManager = processmanager.CreateProcessManagerMock()
@@ -381,7 +381,10 @@ func main() {
 		dWatcher.Start(ctx)
 		defer dWatcher.Stop(ctx)
 	} else {
-		hostWatcher, err := hostwatcherv1.CreateIGHostWatcher(cfg, prometheusExporter, processManager, hostHashSensor)
+		// create exporter
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
+		hostRuleManager := hostrulemanagerv1.NewRuleManager(ctx, exporter, nil, processManager)
+		hostWatcher, err := hostwatcherv1.CreateIGHostWatcher(cfg, prometheusExporter, processManager, hostHashSensor, hostRuleManager)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the host watcher", helpers.Error(err))
 		}

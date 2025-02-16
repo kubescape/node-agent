@@ -42,7 +42,7 @@ func (f FileHashResultFinding) GetMalwareRuntimeAlert() armotypes.MalwareAlert {
 		Action:             "Accessed",
 		MalwareDescription: "Host hash sensor detected a file hash",
 		ProcessTree: armotypes.ProcessTree{
-			ProcessTree: armotypes.Process{},
+			ProcessTree: f.ProcessDetails,
 		},
 	}
 }

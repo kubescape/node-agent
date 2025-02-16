@@ -1,4 +1,190 @@
 package hostrulemanager
 
+import (
+	"context"
+	"time"
+
+	"github.com/cenkalti/backoff/v4"
+	"github.com/dustin/go-humanize"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/hostrulemanager"
+	hostrules "github.com/kubescape/node-agent/pkg/hostrules/v1"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/processmanager"
+	"github.com/kubescape/node-agent/pkg/ruleengine"
+	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/utils"
+)
+
+const (
+	maxFileSize = 50 * 1024 * 1024 // 50MB
+	hostPID     = 1
+)
+
 type RuleManager struct {
+	ctx            context.Context
+	exporter       exporters.Exporter
+	objectCache    objectcache.ObjectCache
+	ruleCreator    *ruleenginev1.RuleCreatorImpl
+	processManager processmanager.ProcessManagerClient
+}
+
+var _ hostrulemanager.HostRuleManagerClient = &RuleManager{}
+
+func NewRuleManager(ctx context.Context, exporter exporters.Exporter, objectCache objectcache.ObjectCache, processManager processmanager.ProcessManagerClient) *RuleManager {
+	return &RuleManager{
+		ctx:            ctx,
+		exporter:       exporter,
+		objectCache:    objectCache,
+		ruleCreator:    hostrules.NewRuleCreator(),
+		processManager: processManager,
+	}
+}
+
+func (r *RuleManager) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
+	r.processEvent(eventType, event, r.ruleCreator.CreateRulesByEventType(eventType))
+}
+
+func (r *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEvent, rules []ruleengine.RuleEvaluator) {
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+
+		if !isEventRelevant(rule.Requirements(), eventType) {
+			continue
+		}
+
+		res := rule.ProcessEvent(eventType, event, r.objectCache)
+		if res != nil {
+			res = r.enrichRuleFailure(res)
+			r.exporter.SendRuleAlert(res) // TODO: SEND IT TO DIFFERENT FUNCTION.
+		}
+	}
+}
+
+func (r *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
+	var err error
+	var path string
+	var hostPath string
+	if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path == "" {
+		path, err = utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
+	}
+
+	if err != nil {
+		if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path != "" {
+			hostPath = ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path
+		}
+	} else {
+		hostPath = path
+	}
+
+	// Enrich BaseRuntimeAlert
+	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
+
+	baseRuntimeAlert.Timestamp = time.Unix(0, int64(ruleFailure.GetTriggerEvent().Timestamp))
+	var size int64 = 0
+	if hostPath != "" {
+		size, err = utils.GetFileSize(hostPath)
+		if err != nil {
+			size = 0
+		}
+	}
+
+	if baseRuntimeAlert.Size == "" && hostPath != "" && size != 0 {
+		baseRuntimeAlert.Size = humanize.Bytes(uint64(size))
+	}
+
+	if size != 0 && size < maxFileSize && hostPath != "" {
+		if baseRuntimeAlert.MD5Hash == "" || baseRuntimeAlert.SHA1Hash == "" {
+			sha1hash, md5hash, err := utils.CalculateFileHashes(hostPath)
+			if err == nil {
+				baseRuntimeAlert.MD5Hash = md5hash
+				baseRuntimeAlert.SHA1Hash = sha1hash
+			}
+		}
+	}
+
+	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
+
+	runtimeProcessDetails := ruleFailure.GetRuntimeProcessDetails()
+
+	err = backoff.Retry(func() error {
+		tree, err := r.processManager.GetProcessTreeForPID(
+			ruleFailure.GetRuntimeProcessDetails().ContainerID,
+			int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID),
+		)
+		if err != nil {
+			return err
+		}
+		runtimeProcessDetails.ProcessTree = tree
+		return nil
+	}, backoff.NewExponentialBackOff(
+		backoff.WithInitialInterval(50*time.Millisecond),
+		backoff.WithMaxInterval(200*time.Millisecond),
+		backoff.WithMaxElapsedTime(500*time.Millisecond),
+	))
+
+	if err != nil {
+		logger.L().Debug("RuleManager - failed to get process tree, trying to get process tree",
+			helpers.Error(err),
+		)
+
+		if tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree, hostPID); err == nil {
+			runtimeProcessDetails.ProcessTree = *tree
+		}
+	}
+
+	ruleFailure.SetRuntimeProcessDetails(runtimeProcessDetails)
+
+	// Enrich RuntimeAlertK8sDetails
+	runtimek8sdetails := ruleFailure.GetRuntimeAlertK8sDetails()
+	if runtimek8sdetails.Image == "" {
+		runtimek8sdetails.Image = ruleFailure.GetTriggerEvent().Runtime.ContainerImageName
+	}
+
+	if runtimek8sdetails.ImageDigest == "" {
+		runtimek8sdetails.ImageDigest = ruleFailure.GetTriggerEvent().Runtime.ContainerImageDigest
+	}
+
+	if runtimek8sdetails.Namespace == "" {
+		runtimek8sdetails.Namespace = ruleFailure.GetTriggerEvent().K8s.Namespace
+	}
+
+	if runtimek8sdetails.PodName == "" {
+		runtimek8sdetails.PodName = ruleFailure.GetTriggerEvent().K8s.PodName
+	}
+
+	if runtimek8sdetails.PodNamespace == "" {
+		runtimek8sdetails.PodNamespace = ruleFailure.GetTriggerEvent().K8s.Namespace
+	}
+
+	if runtimek8sdetails.ContainerName == "" {
+		runtimek8sdetails.ContainerName = ruleFailure.GetTriggerEvent().K8s.ContainerName
+	}
+
+	if runtimek8sdetails.ContainerID == "" {
+		runtimek8sdetails.ContainerID = ruleFailure.GetTriggerEvent().Runtime.ContainerID
+	}
+
+	if runtimek8sdetails.HostNetwork == nil {
+		hostNetwork := ruleFailure.GetTriggerEvent().K8s.HostNetwork
+		runtimek8sdetails.HostNetwork = &hostNetwork
+	}
+
+	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
+
+	return ruleFailure
+}
+
+// Checks if the event type is relevant to the rule.
+func isEventRelevant(ruleSpec ruleengine.RuleSpec, eventType utils.EventType) bool {
+	for _, i := range ruleSpec.RequiredEventTypes() {
+		if i == eventType {
+			return true
+		}
+	}
+	return false
 }
