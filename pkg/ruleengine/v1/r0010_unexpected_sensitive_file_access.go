@@ -7,6 +7,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -88,23 +89,30 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 
 	openEvent := fullEvent.Event
 
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
-	if ap == nil {
-		return nil
-	}
+	var appProfileOpenList v1beta1.ApplicationProfileContainer
+	var err error
 
-	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
-	if err != nil {
-		return nil
+	if objCache != nil {
+		ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
+		if ap == nil {
+			return nil
+		}
+
+		appProfileOpenList, err = GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
+		if err != nil {
+			return nil
+		}
 	}
 
 	if !utils.IsSensitivePath(openEvent.FullPath, rule.additionalPaths) {
 		return nil
 	}
 
-	for _, open := range appProfileOpenList.Opens {
-		if dynamicpathdetector.CompareDynamic(open.Path, openEvent.FullPath) {
-			return nil
+	if objCache != nil {
+		for _, open := range appProfileOpenList.Opens {
+			if dynamicpathdetector.CompareDynamic(open.Path, openEvent.FullPath) {
+				return nil
+			}
 		}
 	}
 
