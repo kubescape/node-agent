@@ -50,10 +50,11 @@ type SendQueue struct {
 }
 
 type FileHashResultFinding struct {
-	Hashes      Hashes
-	FileDetails apitypes.File
-	Timestamp   time.Time
-	Pid         int
-	Action      FileAccessType
-	Event       igtypes.Event
+	Hashes         Hashes
+	FileDetails    apitypes.File
+	ProcessDetails apitypes.Process
+	Timestamp      time.Time
+	Pid            int
+	Action         FileAccessType
+	Event          igtypes.Event
 }
