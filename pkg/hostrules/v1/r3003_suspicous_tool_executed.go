@@ -14,7 +14,7 @@ import (
 
 const (
 	R3003ID   = "R3003"
-	R3003Name = "Execution of suspicious security tools"
+	R3003Name = "Execution of suspicious security tool"
 )
 
 var R3003SuspiciousToolRuleDescriptor = ruleengine.RuleDescriptor{
