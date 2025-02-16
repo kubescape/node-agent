@@ -28,7 +28,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
-	"github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
 	hosthashsensorv1 "github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
 	hostrulemanagerv1 "github.com/kubescape/node-agent/pkg/hostrulemanager/v1"
 	hostwatcherv1 "github.com/kubescape/node-agent/pkg/hostwatcher/v1"
@@ -295,7 +294,7 @@ func main() {
 		apc := &objectcache.ApplicationProfileCacheMock{}
 		nnc := &objectcache.NetworkNeighborhoodCacheMock{}
 		dc := &objectcache.DnsCacheMock{}
-		hostHashSensor = hosthashsensor.CreateHostHashSensorMock()
+		hostHashSensor = hosthashsensorv1.CreateHostHashSensorMock()
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
 		processManager = processmanager.CreateProcessManagerMock()
