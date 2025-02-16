@@ -8,7 +8,7 @@ import (
 func NewRuleCreator() *ruleenginev1.RuleCreatorImpl {
 	return &ruleenginev1.RuleCreatorImpl{
 		RuleDescriptions: []ruleengine.RuleDescriptor{
-			ruleenginev1.R0008ReadEnvironmentVariablesProcFSRuleDescriptor,
+			// ruleenginev1.R0008ReadEnvironmentVariablesProcFSRuleDescriptor,
 			ruleenginev1.R0010UnexpectedSensitiveFileAccessRuleDescriptor,
 			ruleenginev1.R1003MaliciousSSHConnectionRuleDescriptor,
 			ruleenginev1.R1010SymlinkCreatedOverSensitiveFileRuleDescriptor,
