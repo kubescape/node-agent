@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kubescape/node-agent/pkg/hosthashsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 
@@ -131,6 +132,35 @@ func (ce *CsvExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResu
 		malwareResult.GetTriggerEvent().Runtime.ContainerImageName,
 		malwareResult.GetTriggerEvent().Runtime.ContainerImageDigest,
 	})
+}
+
+func (ce *CsvExporter) SendFileHashAlerts(fileHashResults []hosthashsensor.FileHashResult) {
+	for _, fileHashResult := range fileHashResults {
+		csvFile, err := os.OpenFile(ce.CsvMalwarePath, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			logrus.Errorf("failed to initialize csv exporter: %v", err)
+			return
+		}
+		defer csvFile.Close()
+
+		csvWriter := csv.NewWriter(csvFile)
+		defer csvWriter.Flush()
+		csvWriter.Write([]string{
+			fileHashResult.GetBasicRuntimeAlert().AlertName,
+			fileHashResult.GetMalwareRuntimeAlert().MalwareDescription,
+			fileHashResult.GetRuntimeProcessDetails().ProcessTree.Cmdline,
+			fileHashResult.GetBasicRuntimeAlert().MD5Hash,
+			fileHashResult.GetBasicRuntimeAlert().SHA256Hash,
+			fileHashResult.GetBasicRuntimeAlert().SHA1Hash,
+			fileHashResult.GetBasicRuntimeAlert().Size,
+			fileHashResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
+			fileHashResult.GetTriggerEvent().GetBaseEvent().GetPod(),
+			fileHashResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
+			fileHashResult.GetTriggerEvent().Runtime.ContainerID,
+			fileHashResult.GetTriggerEvent().Runtime.ContainerImageName,
+			fileHashResult.GetTriggerEvent().Runtime.ContainerImageDigest,
+		})
+	}
 }
 
 // Write Malware Headers

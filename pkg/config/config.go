@@ -30,6 +30,7 @@ type Config struct {
 	EnableHttpDetection      bool                      `mapstructure:"httpDetectionEnabled"`
 	EnableNetworkTracing     bool                      `mapstructure:"networkServiceEnabled"`
 	EnableNodeProfile        bool                      `mapstructure:"nodeProfileServiceEnabled"`
+	EnableHostMalwareSensor  bool                      `mapstructure:"hostMalwareSensorEnabled"`
 	NodeProfileInterval      time.Duration             `mapstructure:"nodeProfileInterval"`
 	EnableSeccomp            bool                      `mapstructure:"seccompServiceEnabled"`
 	ExcludeNamespaces        []string                  `mapstructure:"excludeNamespaces"`
@@ -38,6 +39,7 @@ type Config struct {
 	NamespaceName            string                    `mapstructure:"namespaceName"`
 	NodeName                 string                    `mapstructure:"nodeName"`
 	PodName                  string                    `mapstructure:"podName"`
+	KubernetesMode           bool                      `mapstructure:"kubernetesMode"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -56,6 +58,8 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("namespaceName", os.Getenv(NamespaceEnvVar))
 	viper.SetDefault("nodeName", os.Getenv(NodeNameEnvVar))
 	viper.SetDefault("podName", os.Getenv(PodNameEnvVar))
+	viper.SetDefault("hostMalwareSensorEnabled", false)
+	viper.SetDefault("kubernetesMode", true)
 
 	viper.AutomaticEnv()
 

@@ -1,0 +1,9 @@
+{
+  "fullPathTracingEnabled": true,
+  "runtimeDetectionEnabled": true,
+  "hostMalwareSensorEnabled": true,
+  "kubernetesMode": false,
+  "exporters": {
+    "stdoutExporter": true
+  }
+}

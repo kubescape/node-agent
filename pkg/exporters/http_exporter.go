@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/hosthashsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
@@ -26,6 +27,7 @@ const (
 	defaultMethod          = "POST"
 	alertsEndpoint         = "/v1/runtimealerts"
 	malwareRuleID          = "R3000"
+	fileHashRuleID         = "R6000"
 	apiVersion             = "kubescape.io/v1"
 	runtimeAlertsKind      = "RuntimeAlerts"
 )
@@ -193,18 +195,23 @@ func (e *HTTPExporter) createMalwareAlert(result malwaremanager.MalwareResult) a
 }
 
 func (e *HTTPExporter) sendAlert(ctx context.Context, alert apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
-	payload := e.createAlertPayload(alert, processTree, cloudServices)
+	payload := e.createAlertPayload([]apitypes.RuntimeAlert{alert}, processTree, cloudServices)
 	return e.sendHTTPRequest(ctx, payload)
 }
 
-func (e *HTTPExporter) createAlertPayload(alert apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) HTTPAlertsList {
+func (e *HTTPExporter) sendAlertList(ctx context.Context, alertList []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
+	payload := e.createAlertPayload(alertList, processTree, cloudServices)
+	return e.sendHTTPRequest(ctx, payload)
+}
+
+func (e *HTTPExporter) createAlertPayload(alertList []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) HTTPAlertsList {
 	cloudMetadata := e.getCloudMetadata(cloudServices)
 
 	return HTTPAlertsList{
 		Kind:       runtimeAlertsKind,
 		APIVersion: apiVersion,
 		Spec: HTTPAlertsListSpec{
-			Alerts:        []apitypes.RuntimeAlert{alert},
+			Alerts:        alertList,
 			ProcessTree:   processTree,
 			CloudMetadata: cloudMetadata,
 		},
@@ -304,4 +311,40 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		helpers.String("since", e.alertMetrics.startTime.Format(time.RFC3339)))
 
 	return e.sendAlert(ctx, alert, apitypes.ProcessTree{}, nil)
+}
+
+func (e *HTTPExporter) SendFileHashAlerts(fileHashResults []hosthashsensor.FileHashResult) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
+	defer cancel()
+
+	if err := e.sendFileHashAlertWithContext(ctx, fileHashResults); err != nil {
+		logger.L().Warning("HTTPExporter.SendFileHashAlerts - failed to send file hash alert", helpers.Error(err))
+	}
+}
+
+func (e *HTTPExporter) sendFileHashAlertWithContext(ctx context.Context, results []hosthashsensor.FileHashResult) error {
+	if e.shouldSendLimitAlert() {
+		return e.sendAlertLimitReached(ctx)
+	}
+
+	alertList := []apitypes.RuntimeAlert{}
+	for _, result := range results {
+		k8sDetails := result.GetRuntimeAlertK8sDetails()
+		k8sDetails.NodeName = e.nodeName
+		k8sDetails.ClusterName = e.clusterName
+
+		alert := apitypes.RuntimeAlert{
+			Message:                result.GetMalwareRuntimeAlert().MalwareDescription,
+			HostName:               e.host,
+			AlertType:              apitypes.AlertTypeMalware,
+			BaseRuntimeAlert:       result.GetBasicRuntimeAlert(),
+			RuntimeAlertK8sDetails: k8sDetails,
+			MalwareAlert:           result.GetMalwareRuntimeAlert(),
+			RuleID:                 fileHashRuleID,
+		}
+
+		alertList = append(alertList, alert)
+	}
+
+	return e.sendAlertList(ctx, alertList, results[0].GetRuntimeProcessDetails(), nil)
 }
