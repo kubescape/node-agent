@@ -24,7 +24,7 @@ func NewRuleCreator() *ruleenginev1.RuleCreatorImpl {
 			R3003SuspiciousToolRuleDescriptor,
 			R3004DockerSocketAccessRuleDescriptor,
 			R3005MaliciousFsMemoryInjectionRuleDescriptor,
-			ruleenginev1.R1030UnexpectedIouringOperationRuleDescriptor,
+			// ruleenginev1.R1030UnexpectedIouringOperationRuleDescriptor,
 		},
 	}
 }
