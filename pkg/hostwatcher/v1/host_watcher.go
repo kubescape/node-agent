@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
+	"github.com/kubescape/node-agent/pkg/hostrulemanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -99,7 +100,7 @@ func getHostAsContainer() (*containercollection.Container, error) {
 }
 
 func CreateIGHostWatcher(cfg config.Config, metrics metricsmanager.MetricsManager,
-	processManager processmanager.ProcessManagerClient, hostHashSensor hosthashsensor.HostHashSensorServiceInterface) (*IGHostWatcher, error) { // Use container collection to get notified for new containers
+	processManager processmanager.ProcessManagerClient, hostHashSensor hosthashsensor.HostHashSensorServiceInterface, hostRuleManager hostrulemanager.HostRuleManagerClient) (*IGHostWatcher, error) { // Use container collection to get notified for new containers
 
 	// Get own pid
 	ownPid := os.Getpid()
@@ -137,6 +138,7 @@ func CreateIGHostWatcher(cfg config.Config, metrics metricsmanager.MetricsManage
 
 		metrics.ReportEvent(utils.ExecveEventType)
 		processManager.ReportEvent(utils.ExecveEventType, &event)
+		hostRuleManager.ReportEvent(utils.ExecveEventType, &event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating exec worker pool: %w", err)
@@ -147,6 +149,7 @@ func CreateIGHostWatcher(cfg config.Config, metrics metricsmanager.MetricsManage
 
 		metrics.ReportEvent(utils.OpenEventType)
 		hostHashSensor.ReportEvent(utils.OpenEventType, &event)
+		hostRuleManager.ReportEvent(utils.OpenEventType, &event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating open worker pool: %w", err)
