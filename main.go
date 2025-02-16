@@ -383,7 +383,7 @@ func main() {
 	} else {
 		// create exporter
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
-		hostRuleManager := hostrulemanagerv1.NewRuleManager(ctx, exporter, nil)
+		hostRuleManager := hostrulemanagerv1.NewRuleManager(ctx, exporter, nil, processManager)
 		hostWatcher, err := hostwatcherv1.CreateIGHostWatcher(cfg, prometheusExporter, processManager, hostHashSensor, hostRuleManager)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the host watcher", helpers.Error(err))
