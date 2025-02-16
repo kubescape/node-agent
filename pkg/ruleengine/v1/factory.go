@@ -8,12 +8,12 @@ import (
 var _ ruleengine.RuleCreator = (*RuleCreatorImpl)(nil)
 
 type RuleCreatorImpl struct {
-	ruleDescriptions []ruleengine.RuleDescriptor
+	RuleDescriptions []ruleengine.RuleDescriptor
 }
 
 func NewRuleCreator() *RuleCreatorImpl {
 	return &RuleCreatorImpl{
-		ruleDescriptions: []ruleengine.RuleDescriptor{
+		RuleDescriptions: []ruleengine.RuleDescriptor{
 			R0001UnexpectedProcessLaunchedRuleDescriptor,
 			R0002UnexpectedFileAccessRuleDescriptor,
 			R0003UnexpectedSystemCallRuleDescriptor,
@@ -46,7 +46,7 @@ func NewRuleCreator() *RuleCreatorImpl {
 
 func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []ruleengine.RuleEvaluator {
 	var rules []ruleengine.RuleEvaluator
-	for _, rule := range r.ruleDescriptions {
+	for _, rule := range r.RuleDescriptions {
 		if rule.HasTags(tags) {
 			rules = append(rules, rule.RuleCreationFunc())
 		}
@@ -55,7 +55,7 @@ func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []ruleengine.RuleEval
 }
 
 func (r *RuleCreatorImpl) CreateRuleByID(id string) ruleengine.RuleEvaluator {
-	for _, rule := range r.ruleDescriptions {
+	for _, rule := range r.RuleDescriptions {
 		if rule.ID == id {
 			return rule.RuleCreationFunc()
 		}
@@ -64,7 +64,7 @@ func (r *RuleCreatorImpl) CreateRuleByID(id string) ruleengine.RuleEvaluator {
 }
 
 func (r *RuleCreatorImpl) CreateRuleByName(name string) ruleengine.RuleEvaluator {
-	for _, rule := range r.ruleDescriptions {
+	for _, rule := range r.RuleDescriptions {
 		if rule.Name == name {
 			return rule.RuleCreationFunc()
 		}
@@ -73,16 +73,16 @@ func (r *RuleCreatorImpl) CreateRuleByName(name string) ruleengine.RuleEvaluator
 }
 
 func (r *RuleCreatorImpl) GetAllRuleDescriptors() []ruleengine.RuleDescriptor {
-	return r.ruleDescriptions
+	return r.RuleDescriptions
 }
 
 func (r *RuleCreatorImpl) RegisterRule(rule ruleengine.RuleDescriptor) {
-	r.ruleDescriptions = append(r.ruleDescriptions, rule)
+	r.RuleDescriptions = append(r.RuleDescriptions, rule)
 }
 
 func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []ruleengine.RuleEvaluator {
 	var rules []ruleengine.RuleEvaluator
-	for _, rule := range r.ruleDescriptions {
+	for _, rule := range r.RuleDescriptions {
 		if containsEventType(rule.Requirements.RequiredEventTypes(), eventType) {
 			rules = append(rules, rule.RuleCreationFunc())
 		}
@@ -91,7 +91,7 @@ func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []ru
 }
 func (r *RuleCreatorImpl) GetAllRuleIDs() []string {
 	var ruleIDs []string
-	for _, rule := range r.ruleDescriptions {
+	for _, rule := range r.RuleDescriptions {
 		ruleIDs = append(ruleIDs, rule.ID)
 	}
 	return ruleIDs

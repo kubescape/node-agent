@@ -8,7 +8,6 @@ import (
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutils "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils"
-	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
@@ -18,7 +17,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
-	hosthashsensorv1 "github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -58,7 +56,7 @@ type IGHostWatcher struct {
 	agentStartTime time.Time
 
 	// Host hash sensor
-	hostHashSensor hosthashsensorv1.HostHashSensorServiceInterface
+	hostHashSensor hosthashsensor.HostHashSensorServiceInterface
 
 	// IG Collections
 	tracerCollection    *tracercollection.TracerCollection
@@ -77,8 +75,6 @@ type IGHostWatcher struct {
 
 	metrics metricsmanager.MetricsManager
 
-	// container runtime
-	runtime *containerutilsTypes.RuntimeConfig
 	// process manager
 	processManager processmanager.ProcessManagerClient
 
