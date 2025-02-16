@@ -48,7 +48,6 @@ import (
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
 	"github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
-	hosthashsensorv1 "github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
@@ -107,7 +106,6 @@ type IGContainerWatcher struct {
 	ruleManager               rulemanager.RuleManagerClient
 	malwareManager            malwaremanager.MalwareManagerClient
 	sbomManager               sbommanager.SbomManagerClient
-	hostHashSensor            hosthashsensorv1.HostHashSensorServiceInterface
 
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
@@ -285,6 +283,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 	// Create an open worker pool
 	openWorkerPool, err := ants.NewPoolWithFunc(openWorkerPoolSize, func(i interface{}) {
 		event := i.(events.OpenEvent)
+		hostHashSensor.ReportEvent(utils.OpenEventType, &event)
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
 			return
@@ -304,7 +303,6 @@ func CreateIGContainerWatcher(cfg config.Config,
 		applicationProfileManager.ReportFileOpen(k8sContainerID, event)
 		ruleManager.ReportEvent(utils.OpenEventType, &event)
 		malwareManager.ReportEvent(utils.OpenEventType, &event)
-		hostHashSensor.ReportEvent(utils.OpenEventType, &event)
 
 		// Report open events to event receivers
 		reportEventToThirdPartyTracers(utils.OpenEventType, &event, thirdPartyEventReceivers)

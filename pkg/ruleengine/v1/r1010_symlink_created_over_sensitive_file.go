@@ -79,7 +79,13 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
 func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if !rule.EvaluateRule(eventType, event, objCache.K8sObjectCache()) {
+	var k8sCache objectcache.K8sObjectCache
+	if objCache == nil {
+		k8sCache = nil
+	} else {
+		k8sCache = objCache.K8sObjectCache()
+	}
+	if !rule.EvaluateRule(eventType, event, k8sCache) {
 		return nil
 	}
 
