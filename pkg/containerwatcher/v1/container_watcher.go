@@ -9,6 +9,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	containerutils "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
@@ -22,6 +23,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -45,6 +47,8 @@ import (
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
+	"github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
+	hosthashsensorv1 "github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
@@ -103,6 +107,8 @@ type IGContainerWatcher struct {
 	ruleManager               rulemanager.RuleManagerClient
 	malwareManager            malwaremanager.MalwareManagerClient
 	sbomManager               sbommanager.SbomManagerClient
+	hostHashSensor            hosthashsensorv1.HostHashSensorServiceInterface
+
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
@@ -171,8 +177,43 @@ type IGContainerWatcher struct {
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, igK8sClient *containercollection.K8sClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient, ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]], thirdPartyEnricher containerwatcher.ThirdPartyEnricher, processManager processmanager.ProcessManagerClient, clusterName string, objectCache objectcache.ObjectCache) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
+func getHostAsContainer() (*containercollection.Container, error) {
+	pidOne := 1
+	mntns, err := containerutils.GetMntNs(pidOne)
+	if err != nil {
+		return nil, fmt.Errorf("getting mount namespace ID for host PID %d: %w", pidOne, err)
+	}
+	return &containercollection.Container{
+		Runtime: containercollection.RuntimeMetadata{
+			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
+				ContainerPID: uint32(pidOne),
+			},
+		},
+		Mntns: mntns,
+	}, nil
+}
+
+func CreateIGContainerWatcher(cfg config.Config,
+	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi,
+	igK8sClient *containercollection.K8sClient, networkManagerClient networkmanager.NetworkManagerClient,
+	dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient,
+	malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient,
+	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig,
+	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
+	thirdPartyEnricher containerwatcher.ThirdPartyEnricher, processManager processmanager.ProcessManagerClient,
+	clusterName string, objectCache objectcache.ObjectCache, hostHashSensor hosthashsensor.HostHashSensorServiceInterface) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
+
 	containerCollection := &containercollection.ContainerCollection{}
+
+	if cfg.EnableHostMalwareSensor {
+		// Add the host mount ns as a "container"
+		hostContainer, err := getHostAsContainer()
+		if err != nil {
+			return nil, fmt.Errorf("getting host as container: %w", err)
+		}
+		containerCollection.AddContainer(hostContainer)
+	}
+
 	// Create a tracer collection instance
 	tracerCollection, err := tracercollection.NewTracerCollection(containerCollection)
 	if err != nil {
@@ -203,6 +244,18 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	// Create an exec worker pool
 	execWorkerPool, err := ants.NewPoolWithFunc(execWorkerPoolSize, func(i interface{}) {
 		event := i.(events.ExecEvent)
+
+		path := event.Comm
+		if len(event.Args) > 0 {
+			path = event.Args[0]
+		}
+
+		if path == "" {
+			return
+		}
+
+		hostHashSensor.ReportEvent(utils.ExecveEventType, &event)
+
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
 			return
@@ -212,15 +265,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		if isDroppedEvent(event.Type, event.Message) {
 			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
-			return
-		}
-
-		path := event.Comm
-		if len(event.Args) > 0 {
-			path = event.Args[0]
-		}
-
-		if path == "" {
 			return
 		}
 
@@ -260,6 +304,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 		applicationProfileManager.ReportFileOpen(k8sContainerID, event)
 		ruleManager.ReportEvent(utils.OpenEventType, &event)
 		malwareManager.ReportEvent(utils.OpenEventType, &event)
+		hostHashSensor.ReportEvent(utils.OpenEventType, &event)
 
 		// Report open events to event receivers
 		reportEventToThirdPartyTracers(utils.OpenEventType, &event, thirdPartyEventReceivers)

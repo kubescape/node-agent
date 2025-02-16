@@ -28,6 +28,9 @@ import (
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
+	"github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
+	hosthashsensorv1 "github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
+	hostwatcherv1 "github.com/kubescape/node-agent/pkg/hostwatcher/v1"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -62,7 +65,12 @@ import (
 func main() {
 	ctx := context.Background()
 
-	cfg, err := config.LoadConfig("/etc/config")
+	configDir := "/etc/config"
+	if envPath := os.Getenv("CONFIG_DIR"); envPath != "" {
+		configDir = envPath
+	}
+
+	cfg, err := config.LoadConfig(configDir)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
@@ -143,10 +151,19 @@ func main() {
 	healthManager.Start(ctx)
 
 	// Create clients
-	k8sClient := k8sinterface.NewKubernetesApi()
-	storageClient, err := storage.CreateStorage(clusterData.Namespace, cfg.UpdateDataPeriod)
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
+	var k8sClient *k8sinterface.KubernetesApi
+	var storageClient *storage.Storage
+	if cfg.KubernetesMode {
+		logger.L().Info("Kubernetes mode is true")
+		k8sClient = k8sinterface.NewKubernetesApi()
+		storageClient, err = storage.CreateStorage(clusterData.Namespace, cfg.UpdateDataPeriod)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
+		}
+	} else {
+		logger.L().Info("Kubernetes mode is false")
+		k8sClient = nil
+		storageClient = nil
 	}
 
 	// Create Prometheus metrics exporter
@@ -157,14 +174,21 @@ func main() {
 		prometheusExporter = metricsmanager.NewMetricsMock()
 	}
 
-	// Create watchers
-	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.StorageClient, cfg.SkipNamespace)
-	// create k8sObject cache
-	k8sObjectCache, err := k8scache.NewK8sObjectCache(cfg.NodeName, k8sClient)
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
+	var dWatcher *dynamicwatcher.WatchHandler
+	var k8sObjectCache *k8scache.K8sObjectCacheImpl
+	if cfg.KubernetesMode {
+		// Create watchers
+		dWatcher = dynamicwatcher.NewWatchHandler(k8sClient, storageClient.StorageClient, cfg.SkipNamespace)
+		// create k8sObject cache
+		k8sObjectCache, err = k8scache.NewK8sObjectCache(cfg.NodeName, k8sClient)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
+		}
+		dWatcher.AddAdaptor(k8sObjectCache)
+	} else {
+		k8sObjectCache = nil
+		dWatcher = nil
 	}
-	dWatcher.AddAdaptor(k8sObjectCache)
 
 	// Create the seccomp manager
 	var seccompManager seccompmanager.SeccompManagerClient
@@ -211,11 +235,12 @@ func main() {
 
 	var ruleManager rulemanager.RuleManagerClient
 	var processManager processmanager.ProcessManagerClient
+	var hostHashSensor hosthashsensorv1.HostHashSensorServiceInterface
 	var objCache objectcache.ObjectCache
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
 	var cloudMetadata *apitypes.CloudMetadata
 
-	if cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
+	if (cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection) && cfg.KubernetesMode {
 		cloudMetadata, err = cloudmetadata.GetCloudMetadata(ctx, k8sClient, cfg.NodeName)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("error getting cloud metadata", helpers.Error(err))
@@ -226,31 +251,42 @@ func main() {
 		// create the process manager
 		processManager = processmanagerv1.CreateProcessManager(ctx)
 
-		// create ruleBinding cache
-		ruleBindingCache := rulebindingcachev1.NewCache(cfg.NodeName, k8sClient)
-		dWatcher.AddAdaptor(ruleBindingCache)
-
-		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
-		ruleBindingCache.AddNotifier(&ruleBindingNotify)
-
-		apc := applicationprofilecache.NewApplicationProfileCache(cfg.NodeName, storageClient.StorageClient, cfg.MaxDelaySeconds)
-		dWatcher.AddAdaptor(apc)
-
-		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(cfg.NodeName, storageClient.StorageClient, cfg.MaxDelaySeconds)
-		dWatcher.AddAdaptor(nnc)
-
-		dc := dnscache.NewDnsCache(dnsResolver)
-
-		// create object cache
-		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
-
 		// create exporter
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
 
-		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processManager, dnsResolver, nil)
-		if err != nil {
-			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
+		if cfg.KubernetesMode {
+			// create ruleBinding cache
+			ruleBindingCache := rulebindingcachev1.NewCache(cfg.NodeName, k8sClient)
+			dWatcher.AddAdaptor(ruleBindingCache)
+
+			ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
+			ruleBindingCache.AddNotifier(&ruleBindingNotify)
+
+			apc := applicationprofilecache.NewApplicationProfileCache(cfg.NodeName, storageClient.StorageClient, cfg.MaxDelaySeconds)
+			dWatcher.AddAdaptor(apc)
+
+			nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(cfg.NodeName, storageClient.StorageClient, cfg.MaxDelaySeconds)
+			dWatcher.AddAdaptor(nnc)
+
+			dc := dnscache.NewDnsCache(dnsResolver)
+
+			// create object cache
+			objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
+
+			// create runtimeDetection managers
+			ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processManager, dnsResolver, nil)
+			if err != nil {
+				logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
+			}
+		}
+
+		if cfg.EnableHostMalwareSensor {
+			hostHashSensor, err = hosthashsensorv1.CreateHostHashSensor(cfg, exporter, prometheusExporter)
+			if err != nil {
+				logger.L().Ctx(ctx).Fatal("error creating HostHashSensor", helpers.Error(err))
+			}
+		} else {
+			hostHashSensor = hosthashsensorv1.CreateHostHashSensorMock()
 		}
 
 	} else {
@@ -258,6 +294,7 @@ func main() {
 		apc := &objectcache.ApplicationProfileCacheMock{}
 		nnc := &objectcache.NetworkNeighborhoodCacheMock{}
 		dc := &objectcache.DnsCacheMock{}
+		hostHashSensor = hosthashsensor.CreateHostHashSensorMock()
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
 		processManager = processmanager.CreateProcessManagerMock()
@@ -285,60 +322,72 @@ func main() {
 		malwareManager = malwaremanager.CreateMalwareManagerMock()
 	}
 
-	// Create the IG k8sClient
-	if err := igconfig.Config.ReadInConfig(); err != nil {
-		logger.L().Warning("reading IG config", helpers.Error(err))
-	}
-	igK8sClient, err := containercollection.NewK8sClient(cfg.NodeName)
-	if err != nil {
-		logger.L().Fatal("error creating IG Kubernetes client", helpers.Error(err))
-	}
-	defer igK8sClient.Close()
-	logger.L().Info("IG Kubernetes client created", helpers.Interface("client", igK8sClient))
-	logger.L().Info("detected container runtime", helpers.String("containerRuntime", igK8sClient.RuntimeConfig.Name.String()))
-
-	// Create the SBOM manager
-	var sbomManager sbommanager.SbomManagerClient
-	if cfg.EnableSbomGeneration {
-		sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache)
+	if cfg.KubernetesMode {
+		// Create the IG k8sClient
+		if err := igconfig.Config.ReadInConfig(); err != nil {
+			logger.L().Warning("reading IG config", helpers.Error(err))
+		}
+		igK8sClient, err := containercollection.NewK8sClient(cfg.NodeName)
 		if err != nil {
-			logger.L().Ctx(ctx).Fatal("error creating SbomManager", helpers.Error(err))
+			logger.L().Fatal("error creating IG Kubernetes client", helpers.Error(err))
 		}
+		defer igK8sClient.Close()
+		logger.L().Info("IG Kubernetes client created", helpers.Interface("client", igK8sClient))
+		logger.L().Info("detected container runtime", helpers.String("containerRuntime", igK8sClient.RuntimeConfig.Name.String()))
+
+		// Create the SBOM manager
+		var sbomManager sbommanager.SbomManagerClient
+		if cfg.EnableSbomGeneration {
+			sbomManager, err = sbommanagerv1.CreateSbomManager(ctx, cfg, igK8sClient.RuntimeConfig.SocketPath, storageClient, k8sObjectCache)
+			if err != nil {
+				logger.L().Ctx(ctx).Fatal("error creating SbomManager", helpers.Error(err))
+			}
+		} else {
+			sbomManager = sbommanager.CreateSbomManagerMock()
+		}
+
+		// Create the container handler
+		mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
+			igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager,
+			malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
+			processManager, clusterData.ClusterName, objCache, hostHashSensor)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
+		}
+		healthManager.SetContainerWatcher(mainHandler)
+
+		// Start the profileManager
+		profileManager.Start(ctx)
+
+		// Start the prometheusExporter
+		prometheusExporter.Start()
+
+		// Start the container handler
+		err = mainHandler.Start(ctx)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("error starting the container watcher", helpers.Error(err))
+			switch {
+			case strings.Contains(err.Error(), utils.ErrKernelVersion):
+				os.Exit(utils.ExitCodeIncompatibleKernel)
+			case strings.Contains(err.Error(), utils.ErrMacOS):
+				os.Exit(utils.ExitCodeMacOS)
+			default:
+				os.Exit(utils.ExitCodeError)
+			}
+		}
+		defer mainHandler.Stop()
+
+		// start watching
+		dWatcher.Start(ctx)
+		defer dWatcher.Stop(ctx)
 	} else {
-		sbomManager = sbommanager.CreateSbomManagerMock()
-	}
-
-	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil, processManager, clusterData.ClusterName, objCache)
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
-	}
-	healthManager.SetContainerWatcher(mainHandler)
-
-	// Start the profileManager
-	profileManager.Start(ctx)
-
-	// Start the prometheusExporter
-	prometheusExporter.Start()
-
-	// Start the container handler
-	err = mainHandler.Start(ctx)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("error starting the container watcher", helpers.Error(err))
-		switch {
-		case strings.Contains(err.Error(), utils.ErrKernelVersion):
-			os.Exit(utils.ExitCodeIncompatibleKernel)
-		case strings.Contains(err.Error(), utils.ErrMacOS):
-			os.Exit(utils.ExitCodeMacOS)
-		default:
-			os.Exit(utils.ExitCodeError)
+		hostWatcher, err := hostwatcherv1.CreateIGHostWatcher(cfg, prometheusExporter, processManager, hostHashSensor)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating the host watcher", helpers.Error(err))
 		}
+		hostWatcher.Start(ctx)
+		defer hostWatcher.Stop()
 	}
-	defer mainHandler.Stop()
-
-	// start watching
-	dWatcher.Start(ctx)
-	defer dWatcher.Stop(ctx)
 
 	// Wait for shutdown signal
 	shutdown := make(chan os.Signal, 1)

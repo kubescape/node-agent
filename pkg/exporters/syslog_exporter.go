@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/hosthashsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 
@@ -182,5 +183,73 @@ func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareR
 	_, err := message.WriteTo(se.writer)
 	if err != nil {
 		logger.L().Warning("SyslogExporter - failed to send alert to syslog", helpers.Error(err))
+	}
+}
+
+func (se *SyslogExporter) SendFileHashAlerts(fileHashResults []hosthashsensor.FileHashResult) {
+	for _, fileHashResult := range fileHashResults {
+		message := rfc5424.Message{
+			Priority:  rfc5424.Error,
+			Timestamp: time.Now(),
+			Hostname:  "kubecop",
+			AppName:   "kubecop",
+			Message:   []byte(fmt.Sprintf("File hash alert for file '%s' in namespace '%s' pod '%s' description '%s'", fileHashResult.GetBasicRuntimeAlert().AlertName, fileHashResult.GetTriggerEvent().GetBaseEvent().GetNamespace(), fileHashResult.GetTriggerEvent().GetBaseEvent().GetPod(), fileHashResult.GetMalwareRuntimeAlert().MalwareDescription)),
+			StructuredData: []rfc5424.StructuredData{
+				{
+					ID: "filehash@48577",
+					Parameters: []rfc5424.SDParam{
+						{
+							Name:  "file_name",
+							Value: fileHashResult.GetBasicRuntimeAlert().AlertName,
+						},
+						{
+							Name:  "md5hash",
+							Value: fileHashResult.GetBasicRuntimeAlert().MD5Hash,
+						},
+						{
+							Name:  "sha1hash",
+							Value: fileHashResult.GetBasicRuntimeAlert().SHA1Hash,
+						},
+						{
+							Name:  "sha256hash",
+							Value: fileHashResult.GetBasicRuntimeAlert().SHA256Hash,
+						},
+						{
+							Name:  "size",
+							Value: fileHashResult.GetBasicRuntimeAlert().Size,
+						},
+						{
+							Name:  "namespace",
+							Value: fileHashResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
+						},
+						{
+							Name:  "pod_name",
+							Value: fileHashResult.GetTriggerEvent().GetBaseEvent().GetPod(),
+						},
+						{
+							Name:  "container_name",
+							Value: fileHashResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
+						},
+						{
+							Name:  "container_id",
+							Value: fileHashResult.GetTriggerEvent().Runtime.ContainerID,
+						},
+						{
+							Name:  "container_image",
+							Value: fileHashResult.GetTriggerEvent().Runtime.ContainerImageName,
+						},
+						{
+							Name:  "container_image_digest",
+							Value: fileHashResult.GetTriggerEvent().Runtime.ContainerImageDigest,
+						},
+					},
+				},
+			},
+		}
+
+		_, err := message.WriteTo(se.writer)
+		if err != nil {
+			logger.L().Warning("SyslogExporter - failed to send alert to syslog", helpers.Error(err))
+		}
 	}
 }
