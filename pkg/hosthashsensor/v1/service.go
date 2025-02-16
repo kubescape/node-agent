@@ -304,7 +304,6 @@ func (s *HostHashSensorService) isHashInCache(fileToCheck string, hashes Hashes)
 }
 
 func (s *HostHashSensorService) putEventOnSendQueue(eventType utils.EventType, event utils.K8sEvent, hashes Hashes, fileToCheck string, convertedFilePath string) {
-
 	var pid uint32
 	var action FileAccessType
 	var igEvent *igtypes.Event
@@ -324,6 +323,11 @@ func (s *HostHashSensorService) putEventOnSendQueue(eventType utils.EventType, e
 		processDetails.PID = execEvent.Pid
 		processDetails.PPID = execEvent.Ppid
 		processDetails.Comm = execEvent.Comm
+		processDetails.Path = execEvent.ExePath
+		processDetails.Uid = &execEvent.Uid
+		processDetails.Gid = &execEvent.Gid
+		processDetails.Cwd = execEvent.Cwd
+		processDetails.UpperLayer = &execEvent.UpperLayer
 		processDetails.Cmdline = strings.Join(execEvent.Args, " ")
 	} else if eventType == utils.OpenEventType {
 		openEvent, ok := event.(*events.OpenEvent)
@@ -350,6 +354,8 @@ func (s *HostHashSensorService) putEventOnSendQueue(eventType utils.EventType, e
 		fileDetails.Ownership.Gid = &openEvent.Gid
 		processDetails.PID = openEvent.Pid
 		processDetails.Comm = openEvent.Comm
+		processDetails.Uid = &openEvent.Uid
+		processDetails.Gid = &openEvent.Gid
 	} else {
 		logger.L().Error("Event is not an ExecEvent or OpenEvent")
 		return
