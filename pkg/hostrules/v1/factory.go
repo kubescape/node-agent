@@ -19,7 +19,7 @@ func NewRuleCreator() *ruleenginev1.RuleCreatorImpl {
 			ruleenginev1.R1007XMRCryptoMiningRuleDescriptor,
 			ruleenginev1.R1008CryptoMiningDomainCommunicationRuleDescriptor,
 			ruleenginev1.R1015MaliciousPtraceUsageRuleDescriptor,
-			R3001UnexpectedProcessLaunchedRuleDescriptor,
+			R3001NewlyModifedBinaryLaunchedRuleDescriptor,
 			R3002CGroupsReleaseAgentModifiedRuleDescriptor,
 			R3003SuspiciousToolRuleDescriptor,
 			R3004DockerSocketAccessRuleDescriptor,

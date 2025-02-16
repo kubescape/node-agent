@@ -20,7 +20,7 @@ const (
 	NewlyModifiedThreshold = 5 * time.Minute
 )
 
-var R3001UnexpectedProcessLaunchedRuleDescriptor = ruleengine.RuleDescriptor{
+var R3001NewlyModifedBinaryLaunchedRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R3001ID,
 	Name:        R3001Name,
 	Description: "Detects execution of newly modified binaries within containers",
@@ -33,29 +33,29 @@ var R3001UnexpectedProcessLaunchedRuleDescriptor = ruleengine.RuleDescriptor{
 		return CreateRuleR3001UnexpectedProcessLaunched()
 	},
 }
-var _ ruleengine.RuleEvaluator = (*R3001NewlyModifedBinaryProcessLaunched)(nil)
+var _ ruleengine.RuleEvaluator = (*R3001NewlyModifedBinaryLaunched)(nil)
 
-type R3001NewlyModifedBinaryProcessLaunched struct {
+type R3001NewlyModifedBinaryLaunched struct {
 	ruleenginev1.BaseRule
 	enforceArgs bool
 }
 
-func (rule *R3001NewlyModifedBinaryProcessLaunched) SetParameters(params map[string]interface{}) {
+func (rule *R3001NewlyModifedBinaryLaunched) SetParameters(params map[string]interface{}) {
 
 }
 
-func (rule *R3001NewlyModifedBinaryProcessLaunched) Name() string {
+func (rule *R3001NewlyModifedBinaryLaunched) Name() string {
 	return R3001Name
 }
-func (rule *R3001NewlyModifedBinaryProcessLaunched) ID() string {
+func (rule *R3001NewlyModifedBinaryLaunched) ID() string {
 	return R3001ID
 }
 
-func CreateRuleR3001UnexpectedProcessLaunched() *R3001NewlyModifedBinaryProcessLaunched {
-	return &R3001NewlyModifedBinaryProcessLaunched{enforceArgs: false}
+func CreateRuleR3001UnexpectedProcessLaunched() *R3001NewlyModifedBinaryLaunched {
+	return &R3001NewlyModifedBinaryLaunched{enforceArgs: false}
 }
 
-func (rule *R3001NewlyModifedBinaryProcessLaunched) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, _ objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R3001NewlyModifedBinaryLaunched) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}
@@ -86,7 +86,7 @@ func (rule *R3001NewlyModifedBinaryProcessLaunched) ProcessEvent(eventType utils
 				"exec":   execEvent.ExePath,
 				"args":   execEvent.Args,
 			},
-			Severity: R3001UnexpectedProcessLaunchedRuleDescriptor.Priority,
+			Severity: R3001NewlyModifedBinaryLaunchedRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -118,8 +118,8 @@ func (rule *R3001NewlyModifedBinaryProcessLaunched) ProcessEvent(eventType utils
 	return &ruleFailure
 }
 
-func (rule *R3001NewlyModifedBinaryProcessLaunched) Requirements() ruleengine.RuleSpec {
+func (rule *R3001NewlyModifedBinaryLaunched) Requirements() ruleengine.RuleSpec {
 	return &ruleenginev1.RuleRequirements{
-		EventTypes: R3001UnexpectedProcessLaunchedRuleDescriptor.Requirements.RequiredEventTypes(),
+		EventTypes: R3001NewlyModifedBinaryLaunchedRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }
