@@ -22,12 +22,23 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 	sha256simd "github.com/minio/sha256-simd"
 	"github.com/panjf2000/ants/v2"
+	"istio.io/pkg/cache"
+)
+
+const (
+	hashCacheTTL                  = 10 * time.Minute
+	hashCacheEvictionInterval     = 10 * time.Minute
+	hashCacheMaxItems             = 10000
+	cooldownCacheTTL              = 5 * time.Minute
+	cooldownCacheEvictionInterval = 5 * time.Minute
+	cooldownCacheMaxItems         = 10000
 )
 
 type Hashes struct {
-	md5    string
-	sha1   string
-	sha256 string
+	md5         string
+	sha1        string
+	sha256      string
+	timeOfCheck time.Time
 }
 
 type HashRequest struct {
@@ -80,6 +91,9 @@ func CreateHostHashSensor(cfg config.Config, exporter exporters.Exporter, metric
 		return nil, fmt.Errorf("failed to create send queue: %v", err)
 	}
 
+	service.hashCache = cache.NewLRU(hashCacheTTL, hashCacheEvictionInterval, hashCacheMaxItems)
+	service.cooldownCache = cache.NewLRU(cooldownCacheTTL, cooldownCacheEvictionInterval, cooldownCacheMaxItems)
+
 	// Create file filters
 	service.fileFilters = []FileFilterInterface{
 		&SimpleFileFilter{},
@@ -129,6 +143,7 @@ func (s *HostHashSensorService) processEvent(job interface{}) {
 
 	fileToCheck := ""
 	accessType := FileAccessTypeOpenRead
+	var pid uint32
 	if eventType == utils.ExecveEventType {
 		execEvent, ok := event.(*events.ExecEvent)
 		if !ok {
@@ -138,6 +153,7 @@ func (s *HostHashSensorService) processEvent(job interface{}) {
 
 		fileToCheck = execEvent.ExePath
 		accessType = FileAccessTypeExec
+		pid = execEvent.Ppid
 	} else if eventType == utils.OpenEventType {
 		openEvent, ok := event.(*events.OpenEvent)
 		if !ok {
@@ -157,6 +173,7 @@ func (s *HostHashSensorService) processEvent(job interface{}) {
 			}
 		}
 		fileToCheck = openEvent.FullPath
+		pid = openEvent.Pid
 	}
 
 	// Check if it is a file that we should check
@@ -172,21 +189,27 @@ func (s *HostHashSensorService) processEvent(job interface{}) {
 		return
 	}
 
-	// Calculate the hash of the file
-	hashes, err := s.calculateHash(convertedFilePath, HashRequest{
-		md5:    true,
-		sha1:   true,
-		sha256: true,
-	})
-	if err != nil {
-		logger.L().Debug("HostHashSensorService.processEvent - failed to calculate hash", helpers.String("error", err.Error()))
-		return
+	var hashes Hashes
+	if hashes, ok := s.isFileInCache(convertedFilePath); !ok {
+		// Calculate the hash of the file
+		hashes, err = s.calculateHash(convertedFilePath, HashRequest{
+			md5:    true,
+			sha1:   true,
+			sha256: true,
+		})
+		if err != nil {
+			logger.L().Debug("HostHashSensorService.processEvent - failed to calculate hash", helpers.String("error", err.Error()))
+			return
+		}
+		s.putFileInCache(convertedFilePath, hashes)
 	}
 
-	// Check if the hash is in the cache
-	if s.isHashInCache(fileToCheck, hashes) {
-		logger.L().Debug("HostHashSensorService.processEvent - hash is in cache", helpers.String("file", fileToCheck))
+	// Check if the file is in the cooldown cache
+	cooldownCacheKey := fmt.Sprintf("%s:%s:%d", convertedFilePath, hashes.md5, pid)
+	if _, ok := s.cooldownCache.Get(cooldownCacheKey); ok {
 		return
+	} else {
+		s.cooldownCache.SetWithExpiration(cooldownCacheKey, true, cooldownCacheTTL)
 	}
 
 	// Send the alert
@@ -252,10 +275,13 @@ func (s *HostHashSensorService) calculateHash(fileToCheck string, hashRequest Ha
 		sha256Hash = fmt.Sprintf("%x", h256.Sum(nil))
 	}
 
+	timeOfCheck := time.Now()
+
 	return Hashes{
-		md5:    md5Hash,
-		sha1:   sha1Hash,
-		sha256: sha256Hash,
+		md5:         md5Hash,
+		sha1:        sha1Hash,
+		sha256:      sha256Hash,
+		timeOfCheck: timeOfCheck,
 	}, nil
 }
 
@@ -298,8 +324,30 @@ func (s *HostHashSensorService) convertFilePathToAgentPath(eventType utils.Event
 	return rFilePath, nil
 }
 
-func (s *HostHashSensorService) isHashInCache(_ string, _ Hashes) bool {
-	return false
+func (s *HostHashSensorService) isFileInCache(fileToCheck string) (Hashes, bool) {
+	hashes, ok := s.hashCache.Get(fileToCheck)
+	if !ok {
+		return Hashes{}, false
+	}
+	// Get time time of last modification
+	info, err := os.Stat(fileToCheck)
+	if err != nil {
+		return Hashes{}, false
+	}
+	answerHash, ok := hashes.(Hashes)
+	if !ok {
+		s.hashCache.Remove(fileToCheck)
+		return Hashes{}, false
+	}
+	if answerHash.timeOfCheck.Before(info.ModTime()) {
+		s.hashCache.Remove(fileToCheck)
+		return Hashes{}, false
+	}
+	return answerHash, true
+}
+
+func (s *HostHashSensorService) putFileInCache(fileToCheck string, hashes Hashes) {
+	s.hashCache.Set(fileToCheck, hashes)
 }
 
 func (s *HostHashSensorService) putEventOnSendQueue(eventType utils.EventType, event utils.K8sEvent, hashes Hashes, fileToCheck string, convertedFilePath string) {

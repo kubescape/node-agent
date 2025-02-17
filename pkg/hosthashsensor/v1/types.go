@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/panjf2000/ants/v2"
+	"istio.io/pkg/cache"
 )
 
 type HostHashSensorServiceInterface interface {
@@ -41,6 +42,8 @@ type HostHashSensorService struct {
 	fileFilters          []FileFilterInterface
 	hashWorkerPool       *ants.PoolWithFunc
 	sendQueue            *SendQueue
+	hashCache            cache.ExpiringCache
+	cooldownCache        cache.ExpiringCache
 }
 
 type SendQueue struct {
