@@ -8,10 +8,12 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/dustin/go-humanize"
+	"github.com/goradd/maps"
 	containerutils "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/cooldownqueue"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/hostrulemanager"
 	hostrules "github.com/kubescape/node-agent/pkg/hostrules/v1"
@@ -23,9 +25,11 @@ import (
 )
 
 const (
-	maxFileSize   = 50 * 1024 * 1024 // 50MB
-	hostPID       = 1
-	syscallPeriod = 5 * time.Second
+	maxFileSize            = 50 * 1024 * 1024 // 50MB
+	hostPID                = 1
+	syscallPeekingInterval = 5 * time.Second
+	evictionInterval       = 5 * time.Second
+	cooldownDuration       = 5 * time.Minute
 )
 
 type RuleManager struct {
@@ -36,6 +40,7 @@ type RuleManager struct {
 	processManager  processmanager.ProcessManagerClient
 	hostname        string
 	rules           []ruleengine.RuleEvaluator
+	cooldownQueues  maps.SafeMap[string, *cooldownqueue.CooldownQueue[ruleengine.RuleFailure]] // ruleID+PID -> cooldown queue
 }
 
 var _ hostrulemanager.HostRuleManagerClient = &RuleManager{}
@@ -71,7 +76,7 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 func (r *RuleManager) startSyscallPeek() error {
 	logger.L().Debug("RuleManager - startSyscallPeek")
 
-	syscallTicker := time.NewTicker(syscallPeriod)
+	syscallTicker := time.NewTicker(syscallPeekingInterval)
 	var hostMntNsId uint64
 	if mntns, err := r.getHostMountNamespaceId(); err == nil {
 		hostMntNsId = mntns
@@ -155,7 +160,16 @@ func (r *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEve
 		res := rule.ProcessEvent(eventType, event, r.objectCache)
 		if res != nil {
 			res = r.enrichRuleFailure(res)
-			r.exporter.SendRuleAlert(res)
+			cooldownKey := fmt.Sprintf("%s-%d", rule.ID(), res.GetRuntimeProcessDetails().ProcessTree.PID)
+			cooldownQueue, ok := r.cooldownQueues.Load(cooldownKey)
+			if !ok {
+				cooldownQueue = cooldownqueue.NewCooldownQueue[ruleengine.RuleFailure](cooldownDuration, evictionInterval)
+				r.cooldownQueues.Set(cooldownKey, cooldownQueue)
+				r.exporter.SendRuleAlert(res)
+			} else {
+				// Enqueue the alert to the cooldown queue.
+				cooldownQueue.Enqueue(res, rule.ID()) // TODO: Maybe we want a unique key per rule?
+			}
 		}
 	}
 }

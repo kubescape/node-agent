@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/watch"
@@ -33,17 +34,17 @@ func TestCooldownQueue_Enqueue(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			q := NewCooldownQueue()
+			q := NewCooldownQueue[watch.Event](DefaultExpiration, EvictionInterval)
 			go func() {
 				time.Sleep(10 * time.Second)
 				q.Stop()
 			}()
 			for _, e := range tt.inEvents {
 				time.Sleep(50 * time.Millisecond) // need to sleep to preserve order since the insertion is async
-				q.Enqueue(e)
+				q.Enqueue(e, watcher.MakeEventKey(e))
 			}
 			var outEvents []watch.Event
-			for e := range q.ResultChan {
+			for e := range q.ResultChan() {
 				outEvents = append(outEvents, e)
 			}
 			// sort outEvents to make the comparison easier
@@ -91,7 +92,7 @@ func Test_makeEventKey(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := makeEventKey(tt.e)
+			got := watcher.MakeEventKey(tt.e)
 			assert.Equal(t, tt.want, got)
 		})
 	}
