@@ -97,6 +97,14 @@ func (r *RuleCreatorImpl) GetAllRuleIDs() []string {
 	return ruleIDs
 }
 
+func (r *RuleCreatorImpl) CreateAllRules() []ruleengine.RuleEvaluator {
+	var rules []ruleengine.RuleEvaluator
+	for _, rule := range r.RuleDescriptions {
+		rules = append(rules, rule.RuleCreationFunc())
+	}
+	return rules
+}
+
 func containsEventType(eventTypes []utils.EventType, eventType utils.EventType) bool {
 	for _, et := range eventTypes {
 		if et == eventType {
