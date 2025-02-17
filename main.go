@@ -240,10 +240,17 @@ func main() {
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
 	var cloudMetadata *apitypes.CloudMetadata
 
-	if (cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection) && cfg.KubernetesMode {
-		cloudMetadata, err = cloudmetadata.GetCloudMetadata(ctx, k8sClient, cfg.NodeName)
-		if err != nil {
-			logger.L().Ctx(ctx).Error("error getting cloud metadata", helpers.Error(err))
+	if cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
+		if cfg.KubernetesMode {
+			cloudMetadata, err = cloudmetadata.GetCloudMetadata(ctx, k8sClient, cfg.NodeName)
+			if err != nil {
+				logger.L().Ctx(ctx).Error("error getting cloud metadata", helpers.Error(err))
+			}
+		} else {
+			cloudMetadata, err = cloudmetadata.GetCloudMetadataWithIMDS(ctx)
+			if err != nil {
+				logger.L().Ctx(ctx).Error("error getting cloud metadata with IMDS", helpers.Error(err))
+			}
 		}
 	}
 
