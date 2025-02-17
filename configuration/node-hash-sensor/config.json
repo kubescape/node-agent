@@ -4,6 +4,23 @@
   "hostMalwareSensorEnabled": true,
   "kubernetesMode": false,
   "exporters": {
-    "stdoutExporter": true
+    "stdoutExporter": true,
+    "httpExporterConfig": {
+      "url": "https://report-ks.eudev3.cyberarmorsoft.com",
+      "path": "/cloud/v1/hostAlert",
+      "queryParams": [
+        {
+          "key": "customerGUID",
+          "value": "<env>"
+        }
+      ],
+      "method": "POST",
+      "headers": [
+        {
+          "key": "X-API-Key",
+          "value": "<env>"
+        }
+      ]
+    }
   }
 }

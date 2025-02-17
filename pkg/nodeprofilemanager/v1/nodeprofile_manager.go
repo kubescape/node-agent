@@ -196,8 +196,8 @@ func (n *NodeProfileManager) sendProfile(profile *armotypes.NodeProfile) error {
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
-	for key, value := range n.config.Exporters.HTTPExporterConfig.Headers {
-		req.Header.Set(key, value)
+	for _, header := range n.config.Exporters.HTTPExporterConfig.Headers {
+		req.Header.Set(header.Key, header.Value)
 	}
 	// send the request
 	resp, err := n.httpClient.Do(req)
