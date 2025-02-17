@@ -89,17 +89,19 @@ func workaroundMounts() error {
 	return nil
 }
 
-func CheckPrerequisites() error {
+func CheckPrerequisites(cfg config.Config) error {
 	// Check eBPF support
 	logger.L().Debug("CheckPrerequisites - checking eBPF support")
 	if err := ebpf.VerifyEbpf(); err != nil {
 		return err
 	}
-	// Check environment variables
-	for _, envVar := range []string{config.NodeNameEnvVar, config.PodNameEnvVar, config.NamespaceEnvVar} {
-		logger.L().Debug("CheckPrerequisites - checking environment variable", helpers.String("envVar", envVar))
-		if getenv := os.Getenv(envVar); getenv == "" {
-			return fmt.Errorf("%s environment variable not set", envVar)
+	if cfg.KubernetesMode {
+		// Check environment variables
+		for _, envVar := range []string{config.NodeNameEnvVar, config.PodNameEnvVar, config.NamespaceEnvVar} {
+			logger.L().Debug("CheckPrerequisites - checking environment variable", helpers.String("envVar", envVar))
+			if getenv := os.Getenv(envVar); getenv == "" {
+				return fmt.Errorf("%s environment variable not set", envVar)
+			}
 		}
 	}
 	// Ensure all filesystems are mounted
