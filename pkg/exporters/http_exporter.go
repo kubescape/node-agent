@@ -258,7 +258,8 @@ func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload HTTPAlertsLi
 		var queryParamList []string
 		for _, queryParam := range e.config.QueryParams {
 			if queryParam.Value == "<env>" {
-				queryParam.Value = os.Getenv(strings.ToUpper(queryParam.Key))
+				envKey := strings.ReplaceAll(strings.ToUpper(queryParam.Key), "-", "_")
+				queryParam.Value = os.Getenv(envKey)
 				if queryParam.Value == "" {
 					logger.L().Warning("HTTPExporter.sendHTTPRequest - query param value is empty", helpers.String("key", queryParam.Key))
 					continue
@@ -279,7 +280,8 @@ func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload HTTPAlertsLi
 
 	for _, header := range e.config.Headers {
 		if header.Value == "<env>" {
-			header.Value = os.Getenv(strings.ToUpper(header.Key))
+			envKey := strings.ReplaceAll(strings.ToUpper(header.Key), "-", "_")
+			header.Value = os.Getenv(envKey)
 			if header.Value == "" {
 				logger.L().Warning("HTTPExporter.sendHTTPRequest - header value is empty", helpers.String("key", header.Key))
 				continue
