@@ -142,6 +142,12 @@ func (ch *IGHostWatcher) startTracers() error {
 			return err
 		}
 		logger.L().Info("started ptrace tracing")
+		// Start syscall tracer
+		if err := ch.startSystemcallTracing(); err != nil {
+			logger.L().Error("IGHostWatcher - error starting syscall tracing", helpers.Error(err))
+			return err
+		}
+		logger.L().Info("started syscalls tracing")
 	}
 
 	return nil
@@ -213,6 +219,11 @@ func (ch *IGHostWatcher) stopTracers() error {
 		// Stop ptrace tracer
 		if err := ch.stopPtraceTracing(); err != nil {
 			logger.L().Error("IGHostWatcher - error stopping ptrace tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+		// Stop syscall tracer
+		if err := ch.stopSystemcallTracing(); err != nil {
+			logger.L().Error("IGHostWatcher - error stopping syscall tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 	}
