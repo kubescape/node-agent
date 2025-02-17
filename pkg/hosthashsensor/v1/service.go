@@ -298,7 +298,7 @@ func (s *HostHashSensorService) convertFilePathToAgentPath(eventType utils.Event
 	return rFilePath, nil
 }
 
-func (s *HostHashSensorService) isHashInCache(fileToCheck string, hashes Hashes) bool {
+func (s *HostHashSensorService) isHashInCache(_ string, _ Hashes) bool {
 	return false
 }
 
