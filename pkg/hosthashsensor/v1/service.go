@@ -161,10 +161,9 @@ func (s *HostHashSensorService) processEvent(job interface{}) {
 
 	// Check if it is a file that we should check
 	if !s.shouldCheckFile(fileToCheck, accessType) {
-		logger.L().Debug("HostHashSensorService.processEvent - file is not a file that we should check", helpers.String("file", fileToCheck))
+		//logger.L().Debug("HostHashSensorService.processEvent - file is not a file that we should check", helpers.String("file", fileToCheck))
 		return
 	}
-	logger.L().Debug("HostHashSensorService.processEvent - file is a file that we should check", helpers.String("file", fileToCheck))
 
 	// Convert the file path to a path that the agent can use
 	convertedFilePath, err := s.convertFilePathToAgentPath(eventType, event, fileToCheck)
@@ -377,10 +376,6 @@ func (s *HostHashSensorService) putEventOnSendQueue(eventType utils.EventType, e
 		fileDetails.Size = info.Size()
 		fileDetails.Attributes.Permissions = fmt.Sprintf("%o", info.Mode())
 	}
-
-	logger.L().Debug("Process details", helpers.String("process", fmt.Sprintf("%+v", processDetails)))
-
-	// logger.L().Debug("Event timestamp", helpers.Int("timestamp", int(igEvent.Timestamp)), helpers.String("event", fmt.Sprintf("%s", time.Unix(0, int64(igEvent.Timestamp)).String())))
 
 	// Create the finding
 	finding := FileHashResultFinding{
