@@ -168,7 +168,7 @@ func (r *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEve
 				r.exporter.SendRuleAlert(res)
 			} else {
 				// Enqueue the alert to the cooldown queue.
-				cooldownQueue.Enqueue(res, rule.ID()) // TODO: Maybe we want a unique key per rule?
+				cooldownQueue.Enqueue(res, res.GetRuleAlert().RuleDescription) // TODO: Have a proper unique key for the cooldown queue.
 			}
 		}
 	}
