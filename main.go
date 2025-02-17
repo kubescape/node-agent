@@ -99,7 +99,7 @@ func main() {
 
 	// Check if we need to validate the kernel version.
 	if os.Getenv("SKIP_KERNEL_VERSION_CHECK") == "" {
-		err = validator.CheckPrerequisites()
+		err = validator.CheckPrerequisites(cfg)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("error during kernel validation", helpers.Error(err))
 
