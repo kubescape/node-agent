@@ -7,7 +7,7 @@ ARG TARGETOS TARGETARCH
 RUN --mount=target=. \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg \
-    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/node-agent .
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/node-agent ./cmd/node/main.go
 
 FROM gcr.io/distroless/static-debian12:latest
 

@@ -91,7 +91,7 @@ func TestCheckPrerequisites(t *testing.T) {
 				t.Setenv(config.NamespaceEnvVar, "namespace")
 				t.Setenv(config.PodNameEnvVar, "pod")
 			}
-			if err := CheckPrerequisites(); (err != nil) != tt.wantErr {
+			if err := CheckPrerequisites(config.Config{}); (err != nil) != tt.wantErr {
 				t.Errorf("CheckPrerequisites() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
