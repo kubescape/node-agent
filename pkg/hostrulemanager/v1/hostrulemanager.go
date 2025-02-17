@@ -19,7 +19,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
-	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -33,10 +32,10 @@ type RuleManager struct {
 	ctx             context.Context
 	exporter        exporters.Exporter
 	objectCache     objectcache.ObjectCache
-	ruleCreator     *ruleenginev1.RuleCreatorImpl
 	syscallPeekFunc func(nsMountId uint64) ([]string, error)
 	processManager  processmanager.ProcessManagerClient
 	hostname        string
+	rules           []ruleengine.RuleEvaluator
 }
 
 var _ hostrulemanager.HostRuleManagerClient = &RuleManager{}
@@ -51,9 +50,9 @@ func NewRuleManager(ctx context.Context, exporter exporters.Exporter, objectCach
 		ctx:            ctx,
 		exporter:       exporter,
 		objectCache:    objectCache,
-		ruleCreator:    hostrules.NewRuleCreator(),
 		processManager: processManager,
 		hostname:       hostname,
+		rules:          hostrules.NewRuleCreator().CreateAllRules(), // Create all host rules (in the context of the host).
 	}
 
 	go func() {
@@ -124,7 +123,7 @@ func (r *RuleManager) startSyscallPeek() error {
 					SyscallName: syscall,
 				}
 
-				r.processEvent(utils.SyscallEventType, &event, r.ruleCreator.CreateRulesByEventType(utils.SyscallEventType))
+				r.processEvent(utils.SyscallEventType, &event, r.rules)
 			}
 		}
 	}
@@ -140,7 +139,7 @@ func (r *RuleManager) getHostMountNamespaceId() (uint64, error) {
 }
 
 func (r *RuleManager) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
-	r.processEvent(eventType, event, r.ruleCreator.CreateRulesByEventType(eventType))
+	r.processEvent(eventType, event, r.rules)
 }
 
 func (r *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEvent, rules []ruleengine.RuleEvaluator) {

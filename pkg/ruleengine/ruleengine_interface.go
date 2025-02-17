@@ -52,6 +52,7 @@ type RuleCreator interface {
 	CreateRuleByName(name string) RuleEvaluator
 	RegisterRule(rule RuleDescriptor)
 	CreateRulesByEventType(eventType utils.EventType) []RuleEvaluator
+	CreateAllRules() []RuleEvaluator
 }
 
 type RuleEvaluator interface {
