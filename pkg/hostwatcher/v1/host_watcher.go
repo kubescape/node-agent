@@ -8,6 +8,7 @@ import (
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutils "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils"
+	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	tracerdns "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/tracer"
@@ -92,15 +93,15 @@ type IGHostWatcher struct {
 	execTracer         *tracerexec.Tracer
 	openTracer         *traceropen.Tracer
 	ptraceTracer       *tracerptrace.Tracer
-	// syscallTracer      *tracerseccomp.Tracer
-	networkTracer  *tracernetwork.Tracer
-	dnsTracer      *tracerdns.Tracer
-	randomxTracer  *tracerandomx.Tracer
-	symlinkTracer  *tracersymlink.Tracer
-	hardlinkTracer *tracerhardlink.Tracer
-	sshTracer      *tracerssh.Tracer
-	httpTracer     *tracerhttp.Tracer
-	iouringTracer  *traceriouring.Tracer
+	syscallTracer      *tracerseccomp.Tracer
+	networkTracer      *tracernetwork.Tracer
+	dnsTracer          *tracerdns.Tracer
+	randomxTracer      *tracerandomx.Tracer
+	symlinkTracer      *tracersymlink.Tracer
+	hardlinkTracer     *tracerhardlink.Tracer
+	sshTracer          *tracerssh.Tracer
+	httpTracer         *tracerhttp.Tracer
+	iouringTracer      *traceriouring.Tracer
 
 	// Worker pools
 	capabilitiesWorkerPool *ants.PoolWithFunc
@@ -133,6 +134,8 @@ type IGHostWatcher struct {
 
 	// process manager
 	processManager processmanager.ProcessManagerClient
+	// rule manager
+	ruleManager hostrulemanager.HostRuleManagerClient
 
 	// Own pid
 	ownPid uint32
@@ -322,6 +325,7 @@ func CreateIGHostWatcher(cfg config.Config, metrics metricsmanager.MetricsManage
 
 		// Clients
 		hostHashSensor: hostHashSensor,
+		ruleManager:    hostRuleManager,
 		// IG Collections
 		tracerCollection:    tracerCollection,
 		containerCollection: containerCollection,

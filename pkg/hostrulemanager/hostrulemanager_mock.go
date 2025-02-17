@@ -14,3 +14,7 @@ func CreateHostRuleManagerMock() *HostRuleManagerMock {
 func (r *HostRuleManagerMock) ReportEvent(_ utils.EventType, _ utils.K8sEvent) {
 	// noop
 }
+
+func (r *HostRuleManagerMock) RegisterPeekFunc(_ func(mntns uint64) ([]string, error)) {
+	// noop
+}

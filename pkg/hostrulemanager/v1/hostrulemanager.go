@@ -2,10 +2,14 @@ package hostrulemanager
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/dustin/go-humanize"
+	containerutils "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils"
+	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/exporters"
@@ -14,33 +18,125 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
+	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 const (
-	maxFileSize = 50 * 1024 * 1024 // 50MB
-	hostPID     = 1
+	maxFileSize   = 50 * 1024 * 1024 // 50MB
+	hostPID       = 1
+	syscallPeriod = 5 * time.Second
 )
 
 type RuleManager struct {
-	ctx            context.Context
-	exporter       exporters.Exporter
-	objectCache    objectcache.ObjectCache
-	ruleCreator    *ruleenginev1.RuleCreatorImpl
-	processManager processmanager.ProcessManagerClient
+	ctx             context.Context
+	exporter        exporters.Exporter
+	objectCache     objectcache.ObjectCache
+	ruleCreator     *ruleenginev1.RuleCreatorImpl
+	syscallPeekFunc func(nsMountId uint64) ([]string, error)
+	processManager  processmanager.ProcessManagerClient
+	hostname        string
 }
 
 var _ hostrulemanager.HostRuleManagerClient = &RuleManager{}
 
 func NewRuleManager(ctx context.Context, exporter exporters.Exporter, objectCache objectcache.ObjectCache, processManager processmanager.ProcessManagerClient) *RuleManager {
-	return &RuleManager{
+	hostname, err := os.Hostname()
+	if err != nil {
+		logger.L().Error("RuleManager - failed to get hostname", helpers.Error(err))
+	}
+
+	ruleManager := RuleManager{
 		ctx:            ctx,
 		exporter:       exporter,
 		objectCache:    objectCache,
 		ruleCreator:    hostrules.NewRuleCreator(),
 		processManager: processManager,
+		hostname:       hostname,
 	}
+
+	go func() {
+		if err := ruleManager.startSyscallPeek(); err != nil {
+			logger.L().Error("RuleManager - failed to start syscall peek", helpers.Error(err))
+		}
+	}()
+
+	return &ruleManager
+}
+
+func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error)) {
+	rm.syscallPeekFunc = peek
+}
+
+func (r *RuleManager) startSyscallPeek() error {
+	logger.L().Debug("RuleManager - startSyscallPeek")
+
+	syscallTicker := time.NewTicker(syscallPeriod)
+	var hostMntNsId uint64
+	if mntns, err := r.getHostMountNamespaceId(); err == nil {
+		hostMntNsId = mntns
+	}
+
+	for {
+		select {
+		case <-r.ctx.Done():
+			logger.L().Debug("RuleManager - syscallPeek stopped")
+			return nil
+		case <-syscallTicker.C:
+			if r.syscallPeekFunc == nil {
+				logger.L().Debug("RuleManager - syscallPeekFunc is not set")
+				continue
+			}
+
+			if hostMntNsId == 0 {
+				logger.L().Debug("RuleManager - mount namespace ID is not set")
+			}
+
+			var syscalls []string
+			if syscallsFromFunc, err := r.syscallPeekFunc(hostMntNsId); err == nil {
+				syscalls = syscallsFromFunc
+			}
+
+			if len(syscalls) == 0 {
+				continue
+			}
+
+			for _, syscall := range syscalls {
+				event := ruleenginetypes.SyscallEvent{
+					Event: eventtypes.Event{
+						Timestamp: eventtypes.Time(time.Now().UnixNano()),
+						Type:      eventtypes.NORMAL,
+						CommonData: eventtypes.CommonData{
+							K8s: eventtypes.K8sMetadata{
+								Node: r.hostname,
+							},
+						},
+					},
+					WithMountNsID: eventtypes.WithMountNsID{
+						MountNsID: hostMntNsId,
+					},
+					Pid: uint32(hostPID),
+					// TODO: Figure out how to get UID, GID and comm from the syscall.
+					// Uid:         container.OciConfig.Process.User.UID,
+					// Gid:         container.OciConfig.Process.User.GID,
+					// Comm:        container.OciConfig.Process.Args[0],
+					SyscallName: syscall,
+				}
+
+				r.processEvent(utils.SyscallEventType, &event, r.ruleCreator.CreateRulesByEventType(utils.SyscallEventType))
+			}
+		}
+	}
+}
+
+func (r *RuleManager) getHostMountNamespaceId() (uint64, error) {
+	mntns, err := containerutils.GetMntNs(hostPID)
+	if err != nil {
+		return 0, fmt.Errorf("getting mount namespace ID for host PID %d: %w", hostPID, err)
+	}
+
+	return mntns, nil
 }
 
 func (r *RuleManager) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
@@ -60,7 +156,7 @@ func (r *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEve
 		res := rule.ProcessEvent(eventType, event, r.objectCache)
 		if res != nil {
 			res = r.enrichRuleFailure(res)
-			r.exporter.SendRuleAlert(res) // TODO: SEND IT TO DIFFERENT FUNCTION.
+			r.exporter.SendRuleAlert(res)
 		}
 	}
 }
@@ -133,7 +229,9 @@ func (r *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rule
 		)
 
 		if tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree, hostPID); err == nil {
-			runtimeProcessDetails.ProcessTree = *tree
+			if tree != nil {
+				runtimeProcessDetails.ProcessTree = *tree
+			}
 		}
 	}
 
