@@ -245,7 +245,7 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 	assert.Equal(t, "POST", exp.config.Method)
 	assert.Equal(t, 5, exp.config.TimeoutSeconds)
 	assert.Equal(t, 100, exp.config.MaxAlertsPerMinute)
-	assert.Equal(t, map[string]string{}, exp.config.Headers)
+	assert.Equal(t, []HTTPKeyValues{}, exp.config.Headers)
 	assert.Equal(t, "cluster", exp.clusterName)
 	assert.Equal(t, "node", exp.nodeName)
 
@@ -255,15 +255,18 @@ func TestValidateHTTPExporterConfig(t *testing.T) {
 		Method:             "PUT",
 		TimeoutSeconds:     2,
 		MaxAlertsPerMinute: 20000,
-		Headers: map[string]string{
-			"Authorization": "Bearer token",
+		Headers: []HTTPKeyValues{
+			{
+				Key:   "Authorization",
+				Value: "Bearer token",
+			},
 		},
 	}, "", "", nil)
 	assert.NoError(t, err)
 	assert.Equal(t, "PUT", exp.config.Method)
 	assert.Equal(t, 2, exp.config.TimeoutSeconds)
 	assert.Equal(t, 20000, exp.config.MaxAlertsPerMinute)
-	assert.Equal(t, map[string]string{"Authorization": "Bearer token"}, exp.config.Headers)
+	assert.Equal(t, []HTTPKeyValues{{Key: "Authorization", Value: "Bearer token"}}, exp.config.Headers)
 
 	// Test case: Method is neither POST nor PUT
 	_, err = NewHTTPExporter(HTTPExporterConfig{
