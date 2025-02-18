@@ -37,6 +37,11 @@ func (hns *HostNetworkSensor) reportNetworkEvent(networkEvent *tracernetworktype
 		Event:     networkEvent.Event,
 		Timestamp: time.Unix(0, int64(networkEvent.Timestamp)),
 		Pid:       int(networkEvent.Pid),
+		ProcessDetails: apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				PID: uint32(networkEvent.Pid),
+			},
+		},
 	}
 	hns.setProcessTree(&result)
 

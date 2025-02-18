@@ -27,6 +27,11 @@ func (hns *HostNetworkSensor) reportDnsEvent(dnsEvent *tracerdnstype.Event) {
 		Event:     dnsEvent.Event,
 		Timestamp: time.Unix(0, int64(dnsEvent.Timestamp)),
 		Pid:       int(dnsEvent.Pid),
+		ProcessDetails: apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				PID: uint32(dnsEvent.Pid),
+			},
+		},
 	}
 	hns.setProcessTree(&result)
 
