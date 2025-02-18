@@ -74,7 +74,7 @@ func CreateHostHashSensor(cfg config.Config, exporter exporters.Exporter, metric
 	// Get host mount namespace ID
 	nsId, err := getHostMountNamespaceId()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get host mount namespace ID: %v", err)
+		nsId = 0
 	}
 	service.hostMountNamespaceId = nsId
 
