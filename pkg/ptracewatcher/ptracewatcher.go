@@ -429,9 +429,6 @@ func (p *PtraceWatcher) OnOpen(processInfo ProcessInfo, filename string, flags i
 			Path:  filename,
 			Flags: []string{fmt.Sprintf("%d", flags)},
 			Mode:  fmt.Sprintf("%d", mode),
-			Runtime: eventtypes.RuntimeMetadata{
-				ContainerName: processInfo.ContainerName,
-			},
 		},
 	}
 	p.reportWorkerPool.Submit(func() {
