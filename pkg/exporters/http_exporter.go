@@ -221,7 +221,6 @@ func (e *HTTPExporter) sendAlertList(ctx context.Context, alertList []apitypes.R
 
 func (e *HTTPExporter) createAlertPayload(alertList []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) HTTPAlertsList {
 	cloudMetadata := e.getCloudMetadata(cloudServices)
-
 	return HTTPAlertsList{
 		Kind:       runtimeAlertsKind,
 		APIVersion: apiVersion,

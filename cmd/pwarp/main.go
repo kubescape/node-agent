@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/healthmanager"
 	hosthashsensorv1 "github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
 	hostrulemanagerv1 "github.com/kubescape/node-agent/pkg/hostrulemanager/v1"
+	"github.com/kubescape/node-agent/pkg/hostrules/v1"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	processmanagerv1 "github.com/kubescape/node-agent/pkg/processmanager/v1"
@@ -83,7 +84,8 @@ func main() {
 
 	// create exporter
 	exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
-	hostRuleManager := hostrulemanagerv1.NewRuleManager(ctx, exporter, nil, processManager)
+	hostRuleCreator := hostrules.NewRuleCreator()
+	hostRuleManager := hostrulemanagerv1.NewRuleManager(ctx, exporter, nil, processManager, hostRuleCreator)
 	ptraceWatcher, err := ptracewatcher.CreatePtraceWatcher(cfg, prometheusExporter, processManager, hostHashSensor, hostRuleManager)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the host watcher", helpers.Error(err))

@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/dustin/go-humanize"
 	"github.com/goradd/maps"
@@ -16,11 +17,11 @@ import (
 	"github.com/kubescape/node-agent/pkg/cooldownqueue"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/hostrulemanager"
-	hostrules "github.com/kubescape/node-agent/pkg/hostrules/v1"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
+	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -45,7 +46,7 @@ type RuleManager struct {
 
 var _ hostrulemanager.HostRuleManagerClient = &RuleManager{}
 
-func NewRuleManager(ctx context.Context, exporter exporters.Exporter, objectCache objectcache.ObjectCache, processManager processmanager.ProcessManagerClient) *RuleManager {
+func NewRuleManager(ctx context.Context, exporter exporters.Exporter, objectCache objectcache.ObjectCache, processManager processmanager.ProcessManagerClient, ruleCreator *ruleenginev1.RuleCreatorImpl) *RuleManager {
 	hostname, err := os.Hostname()
 	if err != nil {
 		logger.L().Error("RuleManager - failed to get hostname", helpers.Error(err))
@@ -57,7 +58,7 @@ func NewRuleManager(ctx context.Context, exporter exporters.Exporter, objectCach
 		objectCache:    objectCache,
 		processManager: processManager,
 		hostname:       hostname,
-		rules:          hostrules.NewRuleCreator().CreateAllRules(), // Create all host rules (in the context of the host).
+		rules:          ruleCreator.CreateAllRules(), // Create all host rules (in the context of the host).
 	}
 
 	go func() {
@@ -240,6 +241,12 @@ func (r *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rule
 		if tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree, hostPID); err == nil {
 			if tree != nil {
 				runtimeProcessDetails.ProcessTree = *tree
+			} else {
+				runtimeProcessDetails = armotypes.ProcessTree{
+					ProcessTree: armotypes.Process{
+						PID: uint32(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID),
+					},
+				}
 			}
 		}
 	}

@@ -24,6 +24,7 @@ import (
 	hostnetworksensor "github.com/kubescape/node-agent/pkg/hostnetworksensor"
 	hostnetworksensorv1 "github.com/kubescape/node-agent/pkg/hostnetworksensor/v1"
 	hostrulemanagerv1 "github.com/kubescape/node-agent/pkg/hostrulemanager/v1"
+	"github.com/kubescape/node-agent/pkg/hostrules/v1"
 	hostwatcherv1 "github.com/kubescape/node-agent/pkg/hostwatcher/v1"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	metricprometheus "github.com/kubescape/node-agent/pkg/metricsmanager/prometheus"
@@ -166,7 +167,8 @@ func main() {
 
 	// create exporter
 	exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
-	hostRuleManager := hostrulemanagerv1.NewRuleManager(ctx, exporter, nil, processManager)
+	hostRuleCreator := hostrules.NewRuleCreator()
+	hostRuleManager := hostrulemanagerv1.NewRuleManager(ctx, exporter, nil, processManager, hostRuleCreator)
 	hostWatcher, err := hostwatcherv1.CreateIGHostWatcher(cfg, prometheusExporter, processManager, hostHashSensor, hostRuleManager, hostNetworkSensor, dnsManagerClient)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the host watcher", helpers.Error(err))
