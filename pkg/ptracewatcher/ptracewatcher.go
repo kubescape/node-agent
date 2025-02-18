@@ -82,19 +82,11 @@ func (pt *ProcessTracer) addProcess(pid int, name string, parent *TracedProcess)
 	}
 }
 
-func (pt *ProcessTracer) addThread(tgid int, tid int) {
-	pt.processes[tgid].threads[tid] = syscall.PtraceRegs{}
-}
-
-func (pt *ProcessTracer) removeThread(tgid int, tid int) {
-	delete(pt.processes[tgid].threads, tid)
-}
-
 func (pt *ProcessTracer) removeProcess(pid int) {
 	delete(pt.processes, pid)
 }
 
-func (pt *ProcessTracer) trace(cmd *exec.Cmd, onExit func(err error)) error {
+func (pt *ProcessTracer) trace(cmd *exec.Cmd) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Ptrace: true,
 	}
@@ -110,13 +102,6 @@ func (pt *ProcessTracer) trace(cmd *exec.Cmd, onExit func(err error)) error {
 	pt.addProcess(cmd.Process.Pid, cmd.Path, nil)
 
 	runtime.UnlockOSThread()
-
-	//go func() {
-	//	err := pt.handleProcessEvents()
-	//	if err != nil {
-	//		onExit(err)
-	//	}
-	//}()
 
 	return pt.handleProcessEvents()
 }
@@ -246,91 +231,17 @@ func (pt *ProcessTracer) handleProcessEvents() error {
 						}
 					}
 				} else {
-					//return fmt.Errorf("failed to get registers in pid %d: %v", pid, err)
 					fmt.Fprintf(os.Stderr, "failed to get registers in pid %d: %v\n", pid, err)
 				}
 			}
 
 			if err := syscall.PtraceSyscall(pid, 0); err != nil {
-				//return fmt.Errorf("ptrace syscall failed: %v - pid: %d", err, pid)
 				fmt.Fprintf(os.Stderr, "ptrace syscall failed: %v - pid: %d\n", err, pid)
 			}
 		}
 	}
 
 	return nil
-}
-
-// getSyscallName returns the human-readable name of a syscall given its ID
-func getSyscallName(syscallID uint64) string {
-	switch syscallID {
-	case syscall.SYS_READ:
-		return "read"
-	case syscall.SYS_WRITE:
-		return "write"
-	case syscall.SYS_OPEN:
-		return "open"
-	case syscall.SYS_CLOSE:
-		return "close"
-	case syscall.SYS_STAT:
-		return "stat"
-	case syscall.SYS_FSTAT:
-		return "fstat"
-	case syscall.SYS_LSTAT:
-		return "lstat"
-	case syscall.SYS_POLL:
-		return "poll"
-	case syscall.SYS_LSEEK:
-		return "lseek"
-	case syscall.SYS_MMAP:
-		return "mmap"
-	case syscall.SYS_MPROTECT:
-		return "mprotect"
-	case syscall.SYS_MUNMAP:
-		return "munmap"
-	case syscall.SYS_BRK:
-		return "brk"
-	case syscall.SYS_RT_SIGACTION:
-		return "rt_sigaction"
-	case syscall.SYS_RT_SIGPROCMASK:
-		return "rt_sigprocmask"
-	case syscall.SYS_RT_SIGRETURN:
-		return "rt_sigreturn"
-	case syscall.SYS_IOCTL:
-		return "ioctl"
-	case syscall.SYS_PREAD64:
-		return "pread64"
-	case syscall.SYS_PWRITE64:
-		return "pwrite64"
-	case syscall.SYS_READV:
-		return "readv"
-	case syscall.SYS_WRITEV:
-		return "writev"
-	case syscall.SYS_ACCESS:
-		return "access"
-	case syscall.SYS_PIPE:
-		return "pipe"
-	case syscall.SYS_SELECT:
-		return "select"
-	case syscall.SYS_SCHED_YIELD:
-		return "sched_yield"
-	case syscall.SYS_CLONE:
-		return "clone"
-	case syscall.SYS_FORK:
-		return "fork"
-	case syscall.SYS_VFORK:
-		return "vfork"
-	case syscall.SYS_EXECVE:
-		return "execve"
-	case syscall.SYS_EXIT:
-		return "exit"
-	case syscall.SYS_WAIT4:
-		return "wait4"
-	case syscall.SYS_KILL:
-		return "kill"
-	default:
-		return fmt.Sprintf("unknown(%d)", syscallID)
-	}
 }
 
 // readString reads a null-terminated string from the traced process's memory
@@ -366,10 +277,6 @@ func readStringList(pid int, addr uintptr) []string {
 	return retStrings
 }
 
-func mainSecond() {
-
-}
-
 func CreatePtraceWatcher(cfg config.Config, metrics metricsmanager.MetricsManager,
 	processManager processmanager.ProcessManagerClient, hostHashSensor hosthashsensor.HostHashSensorServiceInterface, hostRuleManager hostrulemanager.HostRuleManagerClient) (IPtraceWatcher, error) {
 	// Save cfg, metrics, processManager, hostHashSensor, hostRuleManager
@@ -390,11 +297,11 @@ func CreatePtraceWatcher(cfg config.Config, metrics metricsmanager.MetricsManage
 
 func (p *PtraceWatcher) Start(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("Usage: %s command [args...]\n", os.Args[0])
+		return fmt.Errorf("usage: %s command [args...] ", os.Args[0])
 	}
 
 	if runtime.GOOS != "linux" {
-		return fmt.Errorf("This program only works on Linux\n")
+		return fmt.Errorf("this program only works on Linux")
 	}
 
 	p.processTracer = NewProcessTracer([]SyscallEventListener{p})
@@ -407,13 +314,7 @@ func (p *PtraceWatcher) Start(args []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	return p.processTracer.trace(cmd, func(err error) {
-		if err != nil {
-			logger.L().Error("error tracing process", helpers.Error(err))
-		}
-		// send sigterm to ourself
-		syscall.Kill(os.Getpid(), syscall.SIGTERM)
-	})
+	return p.processTracer.trace(cmd)
 }
 
 func (p *PtraceWatcher) Stop() error {
