@@ -117,12 +117,6 @@ func (ch *IGHostWatcher) startTracers() error {
 			return err
 		}
 		logger.L().Info("started hardlink tracing")
-		// Start iouring tracer
-		if err := ch.startIouringTracing(); err != nil {
-			logger.L().Error("IGHostWatcher - error starting iouring tracing", helpers.Error(err))
-			return err
-		}
-		logger.L().Info("started iouring tracing")
 		if runtime.GOARCH == "amd64" {
 			if err := ch.startRandomxTracing(); err != nil {
 				logger.L().Error("IGHostWatcher - error starting randomx tracing", helpers.Error(err))
@@ -202,11 +196,7 @@ func (ch *IGHostWatcher) stopTracers() error {
 			logger.L().Error("IGHostWatcher - error stopping hardlink tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
-		// Stop iouring tracer
-		if err := ch.stopIouringTracing(); err != nil {
-			logger.L().Error("IGHostWatcher - error stopping iouring tracing", helpers.Error(err))
-			errs = errors.Join(errs, err)
-		}
+		// Stop randomx tracer
 		if runtime.GOARCH == "amd64" {
 			if err := ch.stopRandomxTracing(); err != nil {
 				logger.L().Error("IGHostWatcher - error stopping randomx tracing", helpers.Error(err))
