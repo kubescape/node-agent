@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
@@ -39,6 +40,7 @@ import (
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
+	"github.com/kubescape/node-agent/pkg/hostnetworksensor"
 	"github.com/kubescape/node-agent/pkg/hostrulemanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/processmanager"
@@ -158,7 +160,9 @@ func getHostAsContainer() (*containercollection.Container, error) {
 }
 
 func CreateIGHostWatcher(cfg config.Config, metrics metricsmanager.MetricsManager,
-	processManager processmanager.ProcessManagerClient, hostHashSensor hosthashsensor.HostHashSensorServiceInterface, hostRuleManager hostrulemanager.HostRuleManagerClient) (*IGHostWatcher, error) { // Use container collection to get notified for new containers
+	processManager processmanager.ProcessManagerClient, hostHashSensor hosthashsensor.HostHashSensorServiceInterface,
+	hostRuleManager hostrulemanager.HostRuleManagerClient, hostNetworkSensorClient hostnetworksensor.HostNetworkSensorClient,
+	dnsManagerClient dnsmanager.DNSManagerClient) (*IGHostWatcher, error) { // Use container collection to get notified for new containers
 
 	// Get own pid
 	ownPid := os.Getpid()
@@ -237,6 +241,7 @@ func CreateIGHostWatcher(cfg config.Config, metrics metricsmanager.MetricsManage
 		event := i.(tracernetworktype.Event)
 		metrics.ReportEvent(utils.NetworkEventType)
 		hostRuleManager.ReportEvent(utils.NetworkEventType, &event)
+		hostNetworkSensorClient.ReportEvent(utils.NetworkEventType, &event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating network worker pool: %w", err)
@@ -258,6 +263,8 @@ func CreateIGHostWatcher(cfg config.Config, metrics metricsmanager.MetricsManage
 
 		metrics.ReportEvent(utils.DnsEventType)
 		hostRuleManager.ReportEvent(utils.DnsEventType, &event)
+		dnsManagerClient.ReportEvent(event)
+		hostNetworkSensorClient.ReportEvent(utils.DnsEventType, &event)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating dns worker pool: %w", err)

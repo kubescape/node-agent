@@ -2,6 +2,7 @@
   "fullPathTracingEnabled": true,
   "runtimeDetectionEnabled": true,
   "hostMalwareSensorEnabled": true,
+  "hostNetworkSensorEnabled": true,
   "kubernetesMode": false,
   "exporters": {
     "stdoutExporter": true,

@@ -17,9 +17,12 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/cloudmetadata"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
 	hosthashsensorv1 "github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
+	hostnetworksensor "github.com/kubescape/node-agent/pkg/hostnetworksensor"
+	hostnetworksensorv1 "github.com/kubescape/node-agent/pkg/hostnetworksensor/v1"
 	hostrulemanagerv1 "github.com/kubescape/node-agent/pkg/hostrulemanager/v1"
 	hostwatcherv1 "github.com/kubescape/node-agent/pkg/hostwatcher/v1"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -112,7 +115,10 @@ func main() {
 	}
 
 	var processManager processmanager.ProcessManagerClient
+	var dnsManagerClient dnsmanager.DNSManagerClient
+	var dnsResolver dnsmanager.DNSResolver
 	var hostHashSensor hosthashsensorv1.HostHashSensorServiceInterface
+	var hostNetworkSensor hostnetworksensor.HostNetworkSensorClient
 	var cloudMetadata *apitypes.CloudMetadata
 
 	if cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
@@ -138,15 +144,30 @@ func main() {
 			hostHashSensor = hosthashsensorv1.CreateHostHashSensorMock()
 		}
 
+		if cfg.EnableHostNetworkSensor {
+			dnsManager := dnsmanager.CreateDNSManager()
+			dnsManagerClient = dnsManager
+			dnsResolver = dnsManager
+
+			hostNetworkSensor, err = hostnetworksensorv1.CreateHostNetworkSensor(exporter, dnsResolver, processManager)
+			if err != nil {
+				logger.L().Ctx(ctx).Fatal("error creating HostNetworkSensor", helpers.Error(err))
+			}
+		} else {
+			hostNetworkSensor = hostnetworksensor.CreateHostNetworkSensorMock()
+		}
+
 	} else {
 		hostHashSensor = hosthashsensorv1.CreateHostHashSensorMock()
 		processManager = processmanager.CreateProcessManagerMock()
+		hostNetworkSensor = hostnetworksensor.CreateHostNetworkSensorMock()
+		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
 	}
 
 	// create exporter
 	exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
 	hostRuleManager := hostrulemanagerv1.NewRuleManager(ctx, exporter, nil, processManager)
-	hostWatcher, err := hostwatcherv1.CreateIGHostWatcher(cfg, prometheusExporter, processManager, hostHashSensor, hostRuleManager)
+	hostWatcher, err := hostwatcherv1.CreateIGHostWatcher(cfg, prometheusExporter, processManager, hostHashSensor, hostRuleManager, hostNetworkSensor, dnsManagerClient)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the host watcher", helpers.Error(err))
 	}

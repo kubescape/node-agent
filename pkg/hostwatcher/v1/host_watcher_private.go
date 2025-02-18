@@ -71,7 +71,7 @@ func (ch *IGHostWatcher) startTracers() error {
 		logger.L().Info("started open tracing")
 	}
 
-	if ch.cfg.EnableRuntimeDetection {
+	if ch.cfg.EnableRuntimeDetection || ch.cfg.EnableHostNetworkSensor {
 		socketEnricher, err := socketenricher.NewSocketEnricher()
 		if err != nil {
 			logger.L().Error("IGContainerWatcher - error creating socket enricher", helpers.Error(err))
@@ -91,6 +91,8 @@ func (ch *IGHostWatcher) startTracers() error {
 			return err
 		}
 		logger.L().Info("started dns tracing")
+	}
+	if ch.cfg.EnableRuntimeDetection {
 		// Start http tracer
 		if err := ch.startHttpTracing(); err != nil {
 			logger.L().Error("IGHostWatcher - error starting http tracing", helpers.Error(err))

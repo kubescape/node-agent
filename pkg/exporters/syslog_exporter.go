@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/hosthashsensor"
+	hostnetworksensor "github.com/kubescape/node-agent/pkg/hostnetworksensor/types"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 
@@ -251,5 +252,51 @@ func (se *SyslogExporter) SendFileHashAlerts(fileHashResults []hosthashsensor.Fi
 		if err != nil {
 			logger.L().Warning("SyslogExporter - failed to send alert to syslog", helpers.Error(err))
 		}
+	}
+}
+
+func (se *SyslogExporter) SendNetworkScanAlert(networkScanResult hostnetworksensor.NetworkScanResult) {
+	message := rfc5424.Message{
+		Priority:  rfc5424.Error,
+		Timestamp: time.Now(),
+		Hostname:  "kubecop",
+		AppName:   "kubecop",
+		Message:   []byte(fmt.Sprintf("Network scan alert for pod '%s' in namespace '%s' description '%s'", networkScanResult.GetBasicRuntimeAlert().AlertName, networkScanResult.GetTriggerEvent().GetBaseEvent().GetPod(), "Network scan alert")),
+		StructuredData: []rfc5424.StructuredData{
+			{
+				ID: "networkscan@48577",
+				Parameters: []rfc5424.SDParam{
+					{
+						Name:  "pod_name",
+						Value: networkScanResult.GetTriggerEvent().GetBaseEvent().GetPod(),
+					},
+					{
+						Name:  "namespace",
+						Value: networkScanResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
+					},
+					{
+						Name:  "container_name",
+						Value: networkScanResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
+					},
+					{
+						Name:  "container_id",
+						Value: networkScanResult.GetTriggerEvent().Runtime.ContainerID,
+					},
+					{
+						Name:  "container_image",
+						Value: networkScanResult.GetTriggerEvent().Runtime.ContainerImageName,
+					},
+					{
+						Name:  "container_image_digest",
+						Value: networkScanResult.GetTriggerEvent().Runtime.ContainerImageDigest,
+					},
+				},
+			},
+		},
+	}
+
+	_, err := message.WriteTo(se.writer)
+	if err != nil {
+		logger.L().Warning("SyslogExporter - failed to send alert to syslog", helpers.Error(err))
 	}
 }

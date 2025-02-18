@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/kubescape/node-agent/pkg/hosthashsensor"
+	hostnetworksensor "github.com/kubescape/node-agent/pkg/hostnetworksensor/types"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 
@@ -161,6 +162,35 @@ func (ce *CsvExporter) SendFileHashAlerts(fileHashResults []hosthashsensor.FileH
 			fileHashResult.GetTriggerEvent().Runtime.ContainerImageDigest,
 		})
 	}
+}
+
+// SendNetworkScanAlert sends an alert to csv
+func (ce *CsvExporter) SendNetworkScanAlert(networkScanResult hostnetworksensor.NetworkScanResult) {
+	csvFile, err := os.OpenFile(ce.CsvRulePath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		logrus.Errorf("failed to initialize csv exporter: %v", err)
+		return
+	}
+	defer csvFile.Close()
+
+	csvWriter := csv.NewWriter(csvFile)
+	defer csvWriter.Flush()
+
+	csvWriter.Write([]string{
+		networkScanResult.GetBasicRuntimeAlert().AlertName,
+		"Network Scan Alert",
+		networkScanResult.GetBasicRuntimeAlert().FixSuggestions,
+		networkScanResult.GetRuntimeAlertK8sDetails().PodName,
+		networkScanResult.GetRuntimeAlertK8sDetails().ContainerName,
+		networkScanResult.GetRuntimeAlertK8sDetails().Namespace,
+		networkScanResult.GetRuntimeAlertK8sDetails().ContainerID,
+		fmt.Sprintf("%d", networkScanResult.GetRuntimeProcessDetails().ProcessTree.PID),
+		networkScanResult.GetRuntimeProcessDetails().ProcessTree.Comm,
+		fmt.Sprintf("%d", networkScanResult.GetRuntimeProcessDetails().ProcessTree.Uid),
+		fmt.Sprintf("%d", networkScanResult.GetRuntimeProcessDetails().ProcessTree.Gid),
+		fmt.Sprintf("%d", networkScanResult.GetRuntimeProcessDetails().ProcessTree.PPID),
+		networkScanResult.GetBasicRuntimeAlert().Timestamp.String(),
+	})
 }
 
 // Write Malware Headers
