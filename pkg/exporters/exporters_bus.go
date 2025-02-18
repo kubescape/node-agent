@@ -5,6 +5,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/hosthashsensor"
+	hostnetworksensor "github.com/kubescape/node-agent/pkg/hostnetworksensor/types"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 
@@ -87,5 +88,11 @@ func (e *ExporterBus) SendMalwareAlert(malwareResult malwaremanager.MalwareResul
 func (e *ExporterBus) SendFileHashAlerts(findings []hosthashsensor.FileHashResult) {
 	for _, exporter := range e.exporters {
 		exporter.SendFileHashAlerts(findings)
+	}
+}
+
+func (e *ExporterBus) SendNetworkScanAlert(networkScanResult hostnetworksensor.NetworkScanResult) {
+	for _, exporter := range e.exporters {
+		exporter.SendNetworkScanAlert(networkScanResult)
 	}
 }

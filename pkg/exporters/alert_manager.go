@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -15,6 +16,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/hosthashsensor"
+	hostnetworksensor "github.com/kubescape/node-agent/pkg/hostnetworksensor/types"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -210,6 +212,45 @@ func (ame *AlertManagerExporter) SendFileHashAlerts(fileHashResults []hosthashse
 			logger.L().Warning("AlertManagerExporter.SendFileHashAlerts - alert was not sent successfully")
 			return
 		}
+	}
+}
+
+func (ame *AlertManagerExporter) SendNetworkScanAlert(networkScanResult hostnetworksensor.NetworkScanResult) {
+	summary := fmt.Sprintf("Network scan alert for pod '%s' in namespace '%s'", networkScanResult.GetBasicRuntimeAlert().AlertName, networkScanResult.GetTriggerEvent().GetBaseEvent().GetNamespace())
+	myAlert := models.PostableAlert{
+		StartsAt: strfmt.DateTime(time.Now()),
+		EndsAt:   strfmt.DateTime(time.Now().Add(time.Hour)),
+		Annotations: map[string]string{
+			"title":       networkScanResult.GetBasicRuntimeAlert().AlertName,
+			"summary":     summary,
+			"message":     summary,
+			"description": "Network scan alert",
+		},
+		Alert: models.Alert{
+			GeneratorURL: strfmt.URI("https://armosec.github.io/kubecop/alertviewer/"),
+			Labels: map[string]string{
+				"alertname": "KubescapeNetworkScanAlert",
+				"pod_name":  networkScanResult.GetTriggerEvent().GetBaseEvent().GetPod(),
+				"namespace": networkScanResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
+				"severity":  "high",
+				"host":      ame.Host,
+				"node_name": ame.NodeName,
+				"domain":    networkScanResult.GetNetworkScanAlert().Domain,
+				"addresses": strings.Join(networkScanResult.GetNetworkScanAlert().Addresses, ", "),
+			},
+		},
+	}
+
+	// Send the alert
+	params := alert.NewPostAlertsParams().WithContext(context.Background()).WithAlerts(models.PostableAlerts{&myAlert})
+	isOK, err := ame.client.Alert.PostAlerts(params)
+	if err != nil {
+		logger.L().Warning("AlertManagerExporter.SendNetworkScanAlert - error sending alert", helpers.Error(err))
+		return
+	}
+	if isOK == nil {
+		logger.L().Warning("AlertManagerExporter.SendNetworkScanAlert - alert was not sent successfully")
+		return
 	}
 }
 

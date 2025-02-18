@@ -237,10 +237,6 @@ func (r *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rule
 	))
 
 	if err != nil {
-		logger.L().Debug("RuleManager - failed to get process tree, trying to get process tree",
-			helpers.Error(err),
-		)
-
 		if tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree, hostPID); err == nil {
 			if tree != nil {
 				runtimeProcessDetails.ProcessTree = *tree

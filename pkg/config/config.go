@@ -31,6 +31,7 @@ type Config struct {
 	EnableNetworkTracing     bool                      `mapstructure:"networkServiceEnabled"`
 	EnableNodeProfile        bool                      `mapstructure:"nodeProfileServiceEnabled"`
 	EnableHostMalwareSensor  bool                      `mapstructure:"hostMalwareSensorEnabled"`
+	EnableHostNetworkSensor  bool                      `mapstructure:"hostNetworkSensorEnabled"`
 	NodeProfileInterval      time.Duration             `mapstructure:"nodeProfileInterval"`
 	EnableSeccomp            bool                      `mapstructure:"seccompServiceEnabled"`
 	ExcludeNamespaces        []string                  `mapstructure:"excludeNamespaces"`
@@ -59,6 +60,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("nodeName", os.Getenv(NodeNameEnvVar))
 	viper.SetDefault("podName", os.Getenv(PodNameEnvVar))
 	viper.SetDefault("hostMalwareSensorEnabled", false)
+	viper.SetDefault("hostNetworkSensorEnabled", false)
 	viper.SetDefault("kubernetesMode", true)
 
 	viper.AutomaticEnv()

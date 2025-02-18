@@ -2,6 +2,7 @@ package exporters
 
 import (
 	"github.com/kubescape/node-agent/pkg/hosthashsensor"
+	hostnetworksensor "github.com/kubescape/node-agent/pkg/hostnetworksensor/types"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 )
@@ -14,6 +15,8 @@ type Exporter interface {
 	SendMalwareAlert(malwareResult malwaremanager.MalwareResult)
 	// SendFileHashAlerts sends an alert on file hash detection to the exporter.
 	SendFileHashAlerts(fileHashResults []hosthashsensor.FileHashResult)
+	// SendNetworkScanAlert sends an alert on network scan detection to the exporter.
+	SendNetworkScanAlert(networkScanResult hostnetworksensor.NetworkScanResult)
 }
 
 var _ Exporter = (*ExporterMock)(nil)
@@ -27,4 +30,7 @@ func (e *ExporterMock) SendMalwareAlert(_ malwaremanager.MalwareResult) {
 }
 
 func (e *ExporterMock) SendFileHashAlerts(_ []hosthashsensor.FileHashResult) {
+}
+
+func (e *ExporterMock) SendNetworkScanAlert(_ hostnetworksensor.NetworkScanResult) {
 }

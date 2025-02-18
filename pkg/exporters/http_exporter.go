@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/hosthashsensor"
+	hostnetworksensor "github.com/kubescape/node-agent/pkg/hostnetworksensor/types"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
@@ -30,6 +31,7 @@ const (
 	alertsEndpoint         = "/v1/runtimealerts"
 	malwareRuleID          = "R3000"
 	fileHashRuleID         = "R6000"
+	networkScanRuleID      = "R6001"
 	apiVersion             = "kubescape.io/v1"
 	runtimeAlertsKind      = "RuntimeAlerts"
 )
@@ -391,4 +393,30 @@ func (e *HTTPExporter) sendFileHashAlertWithContext(ctx context.Context, results
 	}
 
 	return e.sendAlertList(ctx, alertList, results[0].GetRuntimeProcessDetails(), nil)
+}
+
+func (e *HTTPExporter) SendNetworkScanAlert(networkScanResult hostnetworksensor.NetworkScanResult) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
+	defer cancel()
+
+	if err := e.sendNetworkScanAlertWithContext(ctx, networkScanResult); err != nil {
+		logger.L().Warning("HTTPExporter.SendNetworkScanAlert - failed to send network scan alert", helpers.Error(err))
+	}
+}
+
+func (e *HTTPExporter) sendNetworkScanAlertWithContext(ctx context.Context, result hostnetworksensor.NetworkScanResult) error {
+	if e.shouldSendLimitAlert() {
+		return e.sendAlertLimitReached(ctx)
+	}
+
+	alert := apitypes.RuntimeAlert{
+		Message:                fmt.Sprintf("Network scan detected: %s", result.GetBasicRuntimeAlert().AlertName),
+		HostName:               e.host,
+		AlertType:              apitypes.AlertTypeNetworkScan,
+		BaseRuntimeAlert:       result.GetBasicRuntimeAlert(),
+		RuntimeAlertK8sDetails: result.GetRuntimeAlertK8sDetails(),
+		RuleID:                 networkScanRuleID,
+	}
+
+	return e.sendAlert(ctx, alert, result.GetRuntimeProcessDetails(), nil)
 }
