@@ -204,7 +204,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 
 	containerCollection := &containercollection.ContainerCollection{}
 
-	if cfg.EnableHostMalwareSensor || cfg.EnableHostNetworkSensor {
+	if cfg.EnableHostMalwareSensor {
 		// Add the host mount ns as a "container"
 		hostContainer, err := getHostAsContainer()
 		if err != nil {
