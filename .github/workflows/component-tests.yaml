@@ -13,12 +13,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Login to Quay.io
         uses: docker/login-action@v3
         with:
           registry: quay.io/kubescape
           username: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
           password: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          install-only: true
       - name: Build the Image and Push to Quay.io
         id: build-and-push-image
         run: |
@@ -28,7 +34,7 @@ jobs:
           echo "image_repo=${IMAGE_REPO}" >> "$GITHUB_OUTPUT"
           export IMAGE_NAME=quay.io/kubescape/node-agent:${IMAGE_TAG}
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          make docker-build TAG=${IMAGE_TAG} IMAGE=${IMAGE_REPO} && make docker-push TAG=${IMAGE_TAG} IMAGE=${IMAGE_REPO}
+          goreleaser release --snapshot --clean --config=.tests.goreleaser.yaml && make docker-push TAG=${IMAGE_TAG} IMAGE=${IMAGE_REPO}
     outputs:
       image_tag: ${{ steps.build-and-push-image.outputs.image_tag }}
       image_repo: ${{ steps.build-and-push-image.outputs.image_repo }}

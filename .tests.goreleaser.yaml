@@ -1,0 +1,38 @@
+# Make sure to check the documentation at https://goreleaser.com
+
+# The lines below are called `modelines`. See `:help modeline`
+# Feel free to remove those if you don't want/need to use them.
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+version: 2
+
+before:
+  hooks:
+    # You may remove this if you don't use go modules.
+    - go mod tidy
+
+builds:
+  - id: node
+    main: ./cmd/node/main.go
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+
+dockers:
+  - image_templates:
+      - "quay.io/kubescape/node-agent:{{ .Env.IMAGE_TAG }}"
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+      - "--build-arg"
+      - "image_version={{ .Env.IMAGE_TAG }}"
+    ids:
+      - node
+    dockerfile: build/Dockerfile
+    extra_files:
+      - configuration/ig-config.yaml

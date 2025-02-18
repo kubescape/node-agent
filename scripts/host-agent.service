@@ -1,0 +1,14 @@
+[Unit]
+Description=ARMO Host Agent
+After=syslog.target
+After=network.target
+
+[Service]
+RestartSec=2s
+Type=simple
+Environment=CONFIG_DIR=/etc/host-agent
+ExecStart=/usr/bin/host-agent
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

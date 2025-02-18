@@ -1,4 +1,3 @@
-# This is an example .goreleaser.yml file with some sensible defaults.
 # Make sure to check the documentation at https://goreleaser.com
 
 # The lines below are called `modelines`. See `:help modeline`
@@ -16,6 +15,7 @@ before:
 builds:
   - id: host
     main: ./cmd/host/main.go
+    binary: host-agent
     env:
       - CGO_ENABLED=0
     goos:
@@ -25,6 +25,7 @@ builds:
       - arm64
   - id: node
     main: ./cmd/node/main.go
+    binary: node-agent
     env:
       - CGO_ENABLED=0
     goos:
@@ -33,21 +34,9 @@ builds:
       - amd64
       - arm64
 
-archives:
-  - formats: ["tar.gz"]
-    builds:
-      - host
-    # this name template makes the OS and Arch compatible with the results of `uname`.
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
-
 nfpms:
   - id: host
+    package_name: host-agent
     builds:
       - host
     vendor: Kubescape
@@ -57,8 +46,14 @@ nfpms:
       - apk
       - deb
       - rpm
-      - termux.deb
-      - archlinux
+    contents:
+      - src: configuration/node-hash-sensor
+        dst: /etc/host-agent
+      - src: scripts/host-agent.service
+        dst: /usr/lib/systemd/system/host-agent.service
+    scripts:
+      postinstall: "scripts/postinstall.sh"
+      postremove: "scripts/postremove.sh"
 
 docker_manifests:
   - name_template: "quay.io/kubescape/node-agent:{{ .Tag }}"
@@ -72,6 +67,8 @@ dockers:
     build_flag_templates:
       - "--pull"
       - "--platform=linux/amd64"
+      - "--build-arg"
+      - "image_version={{ .Tag }}"
     ids:
       - node
     dockerfile: build/Dockerfile
@@ -83,6 +80,8 @@ dockers:
     build_flag_templates:
       - "--pull"
       - "--platform=linux/arm64"
+      - "--build-arg"
+      - "image_version={{ .Tag }}"
     goarch: arm64
     ids:
       - node
