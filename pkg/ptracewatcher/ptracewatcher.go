@@ -334,6 +334,7 @@ func (p *PtraceWatcher) OnOpen(processInfo ProcessInfo, filename string, flags i
 	}
 	p.reportWorkerPool.Submit(func() {
 		p.hostRuleManager.ReportEvent(utils.OpenEventType, event)
+		p.hostHashSensor.ReportEvent(utils.OpenEventType, event)
 	})
 }
 
@@ -348,6 +349,7 @@ func (p *PtraceWatcher) OnExecve(processInfo ProcessInfo, filename string, argv 
 	}
 	p.reportWorkerPool.Submit(func() {
 		p.hostRuleManager.ReportEvent(utils.ExecveEventType, event)
+		p.hostHashSensor.ReportEvent(utils.ExecveEventType, event)
 	})
 }
 
