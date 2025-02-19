@@ -9,7 +9,6 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	containerutils "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
@@ -23,7 +22,6 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -174,22 +172,6 @@ type IGContainerWatcher struct {
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func getHostAsContainer() (*containercollection.Container, error) {
-	pidOne := 1
-	mntns, err := containerutils.GetMntNs(pidOne)
-	if err != nil {
-		return nil, fmt.Errorf("getting mount namespace ID for host PID %d: %w", pidOne, err)
-	}
-	return &containercollection.Container{
-		Runtime: containercollection.RuntimeMetadata{
-			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-				ContainerPID: uint32(pidOne),
-			},
-		},
-		Mntns: mntns,
-	}, nil
-}
-
 func CreateIGContainerWatcher(cfg config.Config,
 	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi,
 	igK8sClient *containercollection.K8sClient, networkManagerClient networkmanager.NetworkManagerClient,
@@ -201,15 +183,6 @@ func CreateIGContainerWatcher(cfg config.Config,
 	clusterName string, objectCache objectcache.ObjectCache) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
 
 	containerCollection := &containercollection.ContainerCollection{}
-
-	if cfg.EnableHostMalwareSensor {
-		// Add the host mount ns as a "container"
-		hostContainer, err := getHostAsContainer()
-		if err != nil {
-			return nil, fmt.Errorf("getting host as container: %w", err)
-		}
-		containerCollection.AddContainer(hostContainer)
-	}
 
 	// Create a tracer collection instance
 	tracerCollection, err := tracercollection.NewTracerCollection(containerCollection)
