@@ -88,7 +88,7 @@ type HTTPAlertsListSpec struct {
 
 // NewHTTPExporter creates a new HTTPExporter instance
 func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cloudMetadata *apitypes.CloudMetadata) (*HTTPExporter, error) {
-	if err := config.validate(); err != nil {
+	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
@@ -104,7 +104,7 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 	}, nil
 }
 
-func (config *HTTPExporterConfig) validate() error {
+func (config *HTTPExporterConfig) Validate() error {
 	if config.URL == "" {
 		return fmt.Errorf("URL is required")
 	}
