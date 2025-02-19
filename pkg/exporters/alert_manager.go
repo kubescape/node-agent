@@ -8,15 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/go-openapi/strfmt"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/node-agent/pkg/hosthashsensor"
-	hostnetworksensor "github.com/kubescape/node-agent/pkg/hostnetworksensor/types"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -163,93 +160,6 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 	}
 	if isOK == nil {
 		logger.L().Warning("AlertManagerExporter.SendMalwareAlert - alert was not sent successfully")
-		return
-	}
-}
-
-func (ame *AlertManagerExporter) SendFileHashAlerts(fileHashResults []hosthashsensor.FileHashResult) {
-	for _, fileHashResult := range fileHashResults {
-		summary := fmt.Sprintf("File hash alert for file '%s' in namespace '%s' pod '%s'", fileHashResult.GetBasicRuntimeAlert().AlertName, fileHashResult.GetTriggerEvent().GetBaseEvent().GetNamespace(), fileHashResult.GetTriggerEvent().GetBaseEvent().GetPod())
-		myAlert := models.PostableAlert{
-			StartsAt: strfmt.DateTime(time.Now()),
-			EndsAt:   strfmt.DateTime(time.Now().Add(time.Hour)),
-			Annotations: map[string]string{
-				"title":       fileHashResult.GetBasicRuntimeAlert().AlertName,
-				"summary":     summary,
-				"message":     summary,
-				"description": fileHashResult.GetMalwareRuntimeAlert().MalwareDescription,
-			},
-			Alert: models.Alert{
-				GeneratorURL: strfmt.URI("https://armosec.github.io/kubecop/alertviewer/"),
-				Labels: map[string]string{
-					"alertname":              "KubescapeFileHashAlert",
-					"file_name":              fileHashResult.GetBasicRuntimeAlert().AlertName,
-					"container_id":           fileHashResult.GetTriggerEvent().Runtime.ContainerID,
-					"container_name":         fileHashResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
-					"namespace":              fileHashResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
-					"pod_name":               fileHashResult.GetTriggerEvent().GetBaseEvent().GetPod(),
-					"size":                   fileHashResult.GetBasicRuntimeAlert().Size,
-					"md5hash":                fileHashResult.GetBasicRuntimeAlert().MD5Hash,
-					"sha256hash":             fileHashResult.GetBasicRuntimeAlert().SHA256Hash,
-					"sha1hash":               fileHashResult.GetBasicRuntimeAlert().SHA1Hash,
-					"container_image":        fileHashResult.GetTriggerEvent().Runtime.ContainerImageName,
-					"container_image_digest": fileHashResult.GetTriggerEvent().Runtime.ContainerImageDigest,
-					"severity":               "medium",
-					"host":                   ame.Host,
-					"node_name":              ame.NodeName,
-				},
-			},
-		}
-
-		// Send the alert
-		params := alert.NewPostAlertsParams().WithContext(context.Background()).WithAlerts(models.PostableAlerts{&myAlert})
-		isOK, err := ame.client.Alert.PostAlerts(params)
-		if err != nil {
-			logger.L().Warning("AlertManagerExporter.SendFileHashAlerts - error sending alert", helpers.Error(err))
-			return
-		}
-		if isOK == nil {
-			logger.L().Warning("AlertManagerExporter.SendFileHashAlerts - alert was not sent successfully")
-			return
-		}
-	}
-}
-
-func (ame *AlertManagerExporter) SendNetworkScanAlert(networkScanResult hostnetworksensor.NetworkScanResult) {
-	summary := fmt.Sprintf("Network scan alert for pod '%s' in namespace '%s'", networkScanResult.GetBasicRuntimeAlert().AlertName, networkScanResult.GetTriggerEvent().GetBaseEvent().GetNamespace())
-	myAlert := models.PostableAlert{
-		StartsAt: strfmt.DateTime(time.Now()),
-		EndsAt:   strfmt.DateTime(time.Now().Add(time.Hour)),
-		Annotations: map[string]string{
-			"title":       networkScanResult.GetBasicRuntimeAlert().AlertName,
-			"summary":     summary,
-			"message":     summary,
-			"description": "Network scan alert",
-		},
-		Alert: models.Alert{
-			GeneratorURL: strfmt.URI("https://armosec.github.io/kubecop/alertviewer/"),
-			Labels: map[string]string{
-				"alertname": "KubescapeNetworkScanAlert",
-				"pod_name":  networkScanResult.GetTriggerEvent().GetBaseEvent().GetPod(),
-				"namespace": networkScanResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
-				"severity":  "high",
-				"host":      ame.Host,
-				"node_name": ame.NodeName,
-				"domain":    networkScanResult.GetNetworkScanAlert().Domain,
-				"addresses": strings.Join(networkScanResult.GetNetworkScanAlert().Addresses, ", "),
-			},
-		},
-	}
-
-	// Send the alert
-	params := alert.NewPostAlertsParams().WithContext(context.Background()).WithAlerts(models.PostableAlerts{&myAlert})
-	isOK, err := ame.client.Alert.PostAlerts(params)
-	if err != nil {
-		logger.L().Warning("AlertManagerExporter.SendNetworkScanAlert - error sending alert", helpers.Error(err))
-		return
-	}
-	if isOK == nil {
-		logger.L().Warning("AlertManagerExporter.SendNetworkScanAlert - alert was not sent successfully")
 		return
 	}
 }

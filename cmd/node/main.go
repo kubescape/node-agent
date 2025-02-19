@@ -28,9 +28,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
-	hosthashsensorv1 "github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
-	"github.com/kubescape/node-agent/pkg/hostnetworksensor"
-	hostnetworksensorv1 "github.com/kubescape/node-agent/pkg/hostnetworksensor/v1"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -220,8 +217,6 @@ func main() {
 
 	var ruleManager rulemanager.RuleManagerClient
 	var processManager processmanager.ProcessManagerClient
-	var hostHashSensor hosthashsensorv1.HostHashSensorServiceInterface
-	var hostNetworkSensor hostnetworksensor.HostNetworkSensorClient
 	var objCache objectcache.ObjectCache
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
 	var cloudMetadata *apitypes.CloudMetadata
@@ -264,32 +259,12 @@ func main() {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
 
-		if cfg.EnableHostMalwareSensor {
-			hostHashSensor, err = hosthashsensorv1.CreateHostHashSensor(cfg, exporter, prometheusExporter)
-			if err != nil {
-				logger.L().Ctx(ctx).Fatal("error creating HostHashSensor", helpers.Error(err))
-			}
-		} else {
-			hostHashSensor = hosthashsensorv1.CreateHostHashSensorMock()
-		}
-
-		if cfg.EnableHostNetworkSensor {
-			hostNetworkSensor, err = hostnetworksensorv1.CreateHostNetworkSensor(exporter, dnsResolver, processManager)
-			if err != nil {
-				logger.L().Ctx(ctx).Fatal("error creating HostNetworkSensor", helpers.Error(err))
-			}
-		} else {
-			hostNetworkSensor = hostnetworksensor.CreateHostNetworkSensorMock()
-		}
-
 	} else {
 		ruleManager = rulemanager.CreateRuleManagerMock()
 		apc := &objectcache.ApplicationProfileCacheMock{}
 		nnc := &objectcache.NetworkNeighborhoodCacheMock{}
 		dc := &objectcache.DnsCacheMock{}
-		hostHashSensor = hosthashsensorv1.CreateHostHashSensorMock()
 		processManager = processmanager.CreateProcessManagerMock()
-		hostNetworkSensor = hostnetworksensor.CreateHostNetworkSensorMock()
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
 		processManager = processmanager.CreateProcessManagerMock()
@@ -344,7 +319,7 @@ func main() {
 	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
 		igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager,
 		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
-		processManager, clusterData.ClusterName, objCache, hostHashSensor, hostNetworkSensor)
+		processManager, clusterData.ClusterName, objCache)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

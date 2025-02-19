@@ -47,8 +47,6 @@ import (
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
-	"github.com/kubescape/node-agent/pkg/hosthashsensor/v1"
-	"github.com/kubescape/node-agent/pkg/hostnetworksensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
@@ -200,7 +198,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig,
 	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
 	thirdPartyEnricher containerwatcher.ThirdPartyEnricher, processManager processmanager.ProcessManagerClient,
-	clusterName string, objectCache objectcache.ObjectCache, hostHashSensor hosthashsensor.HostHashSensorServiceInterface, hostNetworkSensor hostnetworksensor.HostNetworkSensorClient) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
+	clusterName string, objectCache objectcache.ObjectCache) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
 
 	containerCollection := &containercollection.ContainerCollection{}
 
@@ -253,8 +251,6 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		hostHashSensor.ReportEvent(utils.ExecveEventType, &event)
-
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
 			return
@@ -284,7 +280,6 @@ func CreateIGContainerWatcher(cfg config.Config,
 	// Create an open worker pool
 	openWorkerPool, err := ants.NewPoolWithFunc(openWorkerPoolSize, func(i interface{}) {
 		event := i.(events.OpenEvent)
-		hostHashSensor.ReportEvent(utils.OpenEventType, &event)
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
 			return
@@ -328,7 +323,6 @@ func CreateIGContainerWatcher(cfg config.Config,
 		metrics.ReportEvent(utils.NetworkEventType)
 		networkManagerClient.ReportNetworkEvent(k8sContainerID, event)
 		ruleManager.ReportEvent(utils.NetworkEventType, &event)
-		hostNetworkSensor.ReportEvent(utils.NetworkEventType, &event)
 
 		// Report network events to event receivers
 		reportEventToThirdPartyTracers(utils.NetworkEventType, &event, thirdPartyEventReceivers)
@@ -357,7 +351,6 @@ func CreateIGContainerWatcher(cfg config.Config,
 		metrics.ReportEvent(utils.DnsEventType)
 		dnsManagerClient.ReportEvent(event)
 		ruleManager.ReportEvent(utils.DnsEventType, &event)
-		hostNetworkSensor.ReportEvent(utils.DnsEventType, &event)
 
 		// Report DNS events to event receivers
 		reportEventToThirdPartyTracers(utils.DnsEventType, &event, thirdPartyEventReceivers)

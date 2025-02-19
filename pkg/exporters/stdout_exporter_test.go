@@ -6,7 +6,6 @@ import (
 	"time"
 
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/node-agent/pkg/hosthashsensor"
 	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -116,15 +115,4 @@ func (m *MockFileHashResult) GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8
 		PodName:       "testpodname",
 		PodNamespace:  "testpodnamespace",
 	}
-}
-
-func TestStdoutExporter_SendFileHashAlerts(t *testing.T) {
-	exporter := InitStdoutExporter(nil, nil)
-	assert.NotNil(t, exporter)
-
-	exporter.SendFileHashAlerts([]hosthashsensor.FileHashResult{
-		&MockFileHashResult{},
-		&MockFileHashResult{},
-		&MockFileHashResult{},
-	})
 }

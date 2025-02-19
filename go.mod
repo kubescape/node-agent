@@ -34,7 +34,6 @@ require (
 	github.com/kubescape/go-logger v0.0.23
 	github.com/kubescape/k8s-interface v0.0.188
 	github.com/kubescape/storage v0.0.158
-	github.com/minio/sha256-simd v1.0.0
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.0
@@ -209,7 +208,6 @@ require (
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/kinbiko/jsonassert v1.2.0 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
-	github.com/klauspost/cpuid/v2 v2.0.4 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/knqyf263/go-rpmdb v0.1.1 // indirect
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect

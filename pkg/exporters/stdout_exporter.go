@@ -1,13 +1,9 @@
 package exporters
 
 import (
-	"fmt"
 	"os"
-	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/node-agent/pkg/hosthashsensor"
-	hostnetworksensor "github.com/kubescape/node-agent/pkg/hostnetworksensor/types"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 
@@ -60,26 +56,4 @@ func (exporter *StdoutExporter) SendMalwareAlert(malwareResult malwaremanager.Ma
 		"RuleID":                "R3000",
 		"CloudMetadata":         exporter.cloudmetadata,
 	}).Error(malwareResult.GetBasicRuntimeAlert().AlertName)
-}
-
-func (exporter *StdoutExporter) SendFileHashAlerts(fileHashResults []hosthashsensor.FileHashResult) {
-	for _, fileHashResult := range fileHashResults {
-		exporter.logger.WithFields(log.Fields{
-			"message":               fileHashResult.GetMalwareRuntimeAlert().MalwareDescription,
-			"event":                 fileHashResult.GetTriggerEvent(),
-			"BaseRuntimeMetadata":   fileHashResult.GetBasicRuntimeAlert(),
-			"RuntimeProcessDetails": fileHashResult.GetRuntimeProcessDetails(),
-			"RuntimeK8sDetails":     fileHashResult.GetRuntimeAlertK8sDetails(),
-		}).Debug(fileHashResult.GetBasicRuntimeAlert().AlertName)
-	}
-}
-
-func (exporter *StdoutExporter) SendNetworkScanAlert(networkScanResult hostnetworksensor.NetworkScanResult) {
-	exporter.logger.WithFields(log.Fields{
-		"message":               fmt.Sprintf("Scanned domain: %s and Scanned addresses: %s", networkScanResult.GetNetworkScanAlert().Domain, strings.Join(networkScanResult.GetNetworkScanAlert().Addresses, ", ")),
-		"event":                 networkScanResult.GetTriggerEvent(),
-		"BaseRuntimeMetadata":   networkScanResult.GetBasicRuntimeAlert(),
-		"RuntimeProcessDetails": networkScanResult.GetRuntimeProcessDetails(),
-		"RuntimeK8sDetails":     networkScanResult.GetRuntimeAlertK8sDetails(),
-	}).Debug(networkScanResult.GetBasicRuntimeAlert().AlertName)
 }
