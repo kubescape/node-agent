@@ -69,19 +69,21 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 		return nil
 	}
 
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEvent.Runtime.ContainerID)
-	if ap == nil {
-		return nil
-	}
+	if objCache != nil {
+		ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEvent.Runtime.ContainerID)
+		if ap == nil {
+			return nil
+		}
 
-	appProfileSyscallList, err := GetContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
-	if err != nil {
-		return nil
-	}
+		appProfileSyscallList, err := GetContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
+		if err != nil {
+			return nil
+		}
 
-	// Check if the syscall is in the list of allowed syscalls
-	if slices.Contains(appProfileSyscallList.Syscalls, syscallEvent.SyscallName) {
-		return nil
+		// Check if the syscall is in the list of allowed syscalls
+		if slices.Contains(appProfileSyscallList.Syscalls, syscallEvent.SyscallName) {
+			return nil
+		}
 	}
 
 	if syscallEvent.SyscallName == "bpf" {

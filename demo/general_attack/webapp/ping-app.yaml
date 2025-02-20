@@ -4,6 +4,7 @@ metadata:
   name: ping-app
   labels:
     app: ping-app
+    kubescape.io/max-sniffing-time: "5m"
 spec:
 
   containers:
@@ -26,6 +27,7 @@ spec:
   - protocol: TCP
     port: 80
     targetPort: 80
+  type: LoadBalancer
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -34,8 +36,8 @@ metadata:
   name: ping-app-role
 rules:
 - apiGroups: [""]
-  resources: ["*"]
-  verbs: ["get", "list", "watch", "create", "update", "delete"]
+  resources: ["pods"]
+  verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

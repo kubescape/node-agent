@@ -62,7 +62,12 @@ import (
 func main() {
 	ctx := context.Background()
 
-	cfg, err := config.LoadConfig("/etc/config")
+	configDir := "/etc/config"
+	if envPath := os.Getenv("CONFIG_DIR"); envPath != "" {
+		configDir = envPath
+	}
+
+	cfg, err := config.LoadConfig(configDir)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
 	}
@@ -91,7 +96,7 @@ func main() {
 
 	// Check if we need to validate the kernel version.
 	if os.Getenv("SKIP_KERNEL_VERSION_CHECK") == "" {
-		err = validator.CheckPrerequisites()
+		err = validator.CheckPrerequisites(cfg)
 		if err != nil {
 			logger.L().Ctx(ctx).Error("error during kernel validation", helpers.Error(err))
 
@@ -143,6 +148,7 @@ func main() {
 	healthManager.Start(ctx)
 
 	// Create clients
+	logger.L().Info("Kubernetes mode is true")
 	k8sClient := k8sinterface.NewKubernetesApi()
 	storageClient, err := storage.CreateStorage(clusterData.Namespace, cfg.UpdateDataPeriod)
 	if err != nil {
@@ -226,6 +232,9 @@ func main() {
 		// create the process manager
 		processManager = processmanagerv1.CreateProcessManager(ctx)
 
+		// create exporter
+		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
+
 		// create ruleBinding cache
 		ruleBindingCache := rulebindingcachev1.NewCache(cfg.NodeName, k8sClient)
 		dWatcher.AddAdaptor(ruleBindingCache)
@@ -243,9 +252,6 @@ func main() {
 
 		// create object cache
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
-
-		// create exporter
-		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
 
 		// create runtimeDetection managers
 		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processManager, dnsResolver, nil)
@@ -309,7 +315,10 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient, igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager, malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil, processManager, clusterData.ClusterName, objCache)
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
+		igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager,
+		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
+		processManager, clusterData.ClusterName, objCache)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

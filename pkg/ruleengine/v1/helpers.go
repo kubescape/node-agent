@@ -160,6 +160,9 @@ func InterfaceToStringSlice(val interface{}) ([]string, bool) {
 }
 
 func IsAllowed(event *eventtypes.Event, objCache objectcache.ObjectCache, process string, ruleId string) (bool, error) {
+	if objCache == nil {
+		return false, nil
+	}
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(event.Runtime.ContainerID)
 	if ap == nil {
 		return false, errors.New("application profile not found")

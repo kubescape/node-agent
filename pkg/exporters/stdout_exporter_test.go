@@ -3,7 +3,9 @@ package exporters
 import (
 	"os"
 	"testing"
+	"time"
 
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -65,4 +67,52 @@ func TestStdoutExporter_SendAlert(t *testing.T) {
 			RuleDescription: "Application profile is missing",
 		},
 	})
+}
+
+type MockFileHashResult struct {
+}
+
+func (m *MockFileHashResult) GetBasicRuntimeAlert() apitypes.BaseRuntimeAlert {
+	return apitypes.BaseRuntimeAlert{
+		AlertName: "testrule",
+	}
+}
+
+func (m *MockFileHashResult) GetRuntimeProcessDetails() apitypes.ProcessTree {
+	return apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			PID: 1,
+		},
+		ContainerID: "testcontainerid",
+		UniqueID:    1,
+	}
+}
+
+func (m *MockFileHashResult) GetTriggerEvent() igtypes.Event {
+	return igtypes.Event{
+		CommonData: igtypes.CommonData{
+			Runtime: igtypes.BasicRuntimeMetadata{
+				ContainerID: "testcontainerid",
+			},
+		},
+		Timestamp: igtypes.Time(time.Now().UnixNano()),
+		Type:      igtypes.EventType("testevent"),
+		Message:   "testmessage",
+	}
+}
+
+func (m *MockFileHashResult) GetMalwareRuntimeAlert() apitypes.MalwareAlert {
+	return apitypes.MalwareAlert{
+		MalwareDescription: "testmalware",
+	}
+}
+
+func (m *MockFileHashResult) GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails {
+	return apitypes.RuntimeAlertK8sDetails{
+		ContainerID:   "testcontainerid",
+		ContainerName: "testcontainer",
+		Namespace:     "testnamespace",
+		PodName:       "testpodname",
+		PodNamespace:  "testpodnamespace",
+	}
 }

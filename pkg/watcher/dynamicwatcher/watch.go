@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/cooldownqueue"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/watcher"
-	"github.com/kubescape/node-agent/pkg/watcher/cooldownqueue"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -40,7 +40,7 @@ type WatchHandler struct {
 	k8sClient         k8sclient.K8sClientInterface
 	storageClient     spdxv1beta1.SpdxV1beta1Interface
 	resources         map[string]watcher.WatchResource
-	eventQueues       map[string]*cooldownqueue.CooldownQueue
+	eventQueues       map[string]*cooldownqueue.CooldownQueue[watch.Event]
 	handlers          []watcher.Watcher
 	skipNamespaceFunc SkipNamespaceFunc
 }
@@ -53,7 +53,7 @@ func NewWatchHandler(k8sClient k8sclient.K8sClientInterface, storageClient spdxv
 		k8sClient:         k8sClient,
 		storageClient:     storageClient,
 		resources:         make(map[string]watcher.WatchResource),
-		eventQueues:       make(map[string]*cooldownqueue.CooldownQueue),
+		eventQueues:       make(map[string]*cooldownqueue.CooldownQueue[watch.Event]),
 		skipNamespaceFunc: skipNamespaceFunc,
 	}
 }
@@ -67,7 +67,7 @@ func (wh *WatchHandler) AddAdaptor(adaptor watcher.Adaptor) {
 	for _, r := range adaptor.WatchResources() {
 		if _, ok := wh.resources[r.GroupVersionResource().String()]; !ok {
 			wh.resources[r.GroupVersionResource().String()] = r
-			wh.eventQueues[r.GroupVersionResource().String()] = cooldownqueue.NewCooldownQueue()
+			wh.eventQueues[r.GroupVersionResource().String()] = cooldownqueue.NewCooldownQueue[watch.Event](cooldownqueue.DefaultExpiration, cooldownqueue.EvictionInterval)
 		}
 	}
 }
@@ -83,7 +83,7 @@ func (wh *WatchHandler) Start(ctx context.Context) {
 	}
 }
 
-func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResource, eventQueue *cooldownqueue.CooldownQueue) error {
+func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResource, eventQueue *cooldownqueue.CooldownQueue[watch.Event]) error {
 	// for our storage, we need to list all resources and get them one by one
 	// as list returns objects with empty spec
 	// and watch does not return existing objects
@@ -106,7 +106,7 @@ func (wh *WatchHandler) watch(ctx context.Context, resource watcher.WatchResourc
 	go wh.watchRetry(ctx, res, opt, eventQueue)
 
 	// process events
-	for event := range eventQueue.ResultChan {
+	for event := range eventQueue.ResultChan() {
 		// skip non-objects
 		obj, ok := event.Object.(runtime.Object)
 		if !ok || obj == nil {
@@ -159,7 +159,7 @@ func (wh *WatchHandler) chooseWatcher(res schema.GroupVersionResource, opts meta
 	}
 }
 
-func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions, eventQueue *cooldownqueue.CooldownQueue) {
+func (wh *WatchHandler) watchRetry(_ context.Context, res schema.GroupVersionResource, watchOpts metav1.ListOptions, eventQueue *cooldownqueue.CooldownQueue[watch.Event]) {
 	exitFatal := true
 	if err := backoff.RetryNotify(func() error {
 		w, err := wh.chooseWatcher(res, watchOpts)
@@ -196,7 +196,7 @@ func (wh *WatchHandler) watchRetry(ctx context.Context, res schema.GroupVersionR
 			if res.Group != "kubescape.io" && wh.skipNamespaceFunc(obj.GetNamespace()) {
 				continue
 			}
-			eventQueue.Enqueue(event)
+			eventQueue.Enqueue(event, watcher.MakeEventKey(event))
 		}
 	}, newBackOff(), func(err error, d time.Duration) {
 		if !errors.Is(err, errWatchClosed) {

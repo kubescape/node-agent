@@ -139,22 +139,24 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 		return nil
 	}
 
-	nn := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(sshEvent.Runtime.ContainerID)
-	if nn == nil {
-		return nil
-	}
+	if objectCache != nil {
+		nn := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(sshEvent.Runtime.ContainerID)
+		if nn == nil {
+			return nil
+		}
 
-	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, sshEvent.GetContainer())
-	if err != nil {
-		return nil
-	}
+		nnContainer, err := GetContainerFromNetworkNeighborhood(nn, sshEvent.GetContainer())
+		if err != nil {
+			return nil
+		}
 
-	for _, egress := range nnContainer.Egress {
-		if egress.IPAddress == sshEvent.DstIP {
-			for _, port := range egress.Ports {
-				if port.Port != nil {
-					if uint16(*port.Port) == sshEvent.DstPort {
-						return nil
+		for _, egress := range nnContainer.Egress {
+			if egress.IPAddress == sshEvent.DstIP {
+				for _, port := range egress.Ports {
+					if port.Port != nil {
+						if uint16(*port.Port) == sshEvent.DstPort {
+							return nil
+						}
 					}
 				}
 			}

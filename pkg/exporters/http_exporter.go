@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,12 +38,19 @@ const (
 	AlertTypeLimitReached AlertType = "AlertLimitReached"
 )
 
+type HTTPKeyValues struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 type HTTPExporterConfig struct {
-	URL                string            `json:"url"`
-	Headers            map[string]string `json:"headers"`
-	TimeoutSeconds     int               `json:"timeoutSeconds"`
-	Method             string            `json:"method"`
-	MaxAlertsPerMinute int               `json:"maxAlertsPerMinute"`
+	URL                string          `json:"url"`
+	Path               *string         `json:"path,omitempty"`
+	QueryParams        []HTTPKeyValues `json:"queryParams,omitempty"`
+	Headers            []HTTPKeyValues `json:"headers"`
+	TimeoutSeconds     int             `json:"timeoutSeconds"`
+	Method             string          `json:"method"`
+	MaxAlertsPerMinute int             `json:"maxAlertsPerMinute"`
 }
 
 type HTTPExporter struct {
@@ -75,7 +84,7 @@ type HTTPAlertsListSpec struct {
 
 // NewHTTPExporter creates a new HTTPExporter instance
 func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cloudMetadata *apitypes.CloudMetadata) (*HTTPExporter, error) {
-	if err := config.validate(); err != nil {
+	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
@@ -91,7 +100,7 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 	}, nil
 }
 
-func (config *HTTPExporterConfig) validate() error {
+func (config *HTTPExporterConfig) Validate() error {
 	if config.URL == "" {
 		return fmt.Errorf("URL is required")
 	}
@@ -111,7 +120,11 @@ func (config *HTTPExporterConfig) validate() error {
 	}
 
 	if config.Headers == nil {
-		config.Headers = make(map[string]string)
+		config.Headers = []HTTPKeyValues{}
+	}
+
+	if config.QueryParams == nil {
+		config.QueryParams = []HTTPKeyValues{}
 	}
 
 	return nil
@@ -193,18 +206,17 @@ func (e *HTTPExporter) createMalwareAlert(result malwaremanager.MalwareResult) a
 }
 
 func (e *HTTPExporter) sendAlert(ctx context.Context, alert apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
-	payload := e.createAlertPayload(alert, processTree, cloudServices)
+	payload := e.createAlertPayload([]apitypes.RuntimeAlert{alert}, processTree, cloudServices)
 	return e.sendHTTPRequest(ctx, payload)
 }
 
-func (e *HTTPExporter) createAlertPayload(alert apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) HTTPAlertsList {
+func (e *HTTPExporter) createAlertPayload(alertList []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) HTTPAlertsList {
 	cloudMetadata := e.getCloudMetadata(cloudServices)
-
 	return HTTPAlertsList{
 		Kind:       runtimeAlertsKind,
 		APIVersion: apiVersion,
 		Spec: HTTPAlertsListSpec{
-			Alerts:        []apitypes.RuntimeAlert{alert},
+			Alerts:        alertList,
 			ProcessTree:   processTree,
 			CloudMetadata: cloudMetadata,
 		},
@@ -227,16 +239,47 @@ func (e *HTTPExporter) sendHTTPRequest(ctx context.Context, payload HTTPAlertsLi
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
+	var url string
+	if e.config.Path != nil {
+		url = fmt.Sprintf("%s%s", e.config.URL, *e.config.Path)
+	} else {
+		url = e.config.URL + alertsEndpoint
+	}
+
+	if len(e.config.QueryParams) > 0 {
+		var queryParamList []string
+		for _, queryParam := range e.config.QueryParams {
+			if queryParam.Value == "<env>" {
+				envKey := strings.ReplaceAll(strings.ToUpper(queryParam.Key), "-", "_")
+				queryParam.Value = os.Getenv(envKey)
+				if queryParam.Value == "" {
+					logger.L().Warning("HTTPExporter.sendHTTPRequest - query param value is empty", helpers.String("key", queryParam.Key))
+					continue
+				}
+			}
+			queryParamList = append(queryParamList, fmt.Sprintf("%s=%s", queryParam.Key, queryParam.Value))
+		}
+		url = fmt.Sprintf("%s?%s", url, strings.Join(queryParamList, "&"))
+	}
+
 	req, err := http.NewRequestWithContext(ctx,
 		e.config.Method,
-		e.config.URL+alertsEndpoint,
+		url,
 		bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	for key, value := range e.config.Headers {
-		req.Header.Set(key, value)
+	for _, header := range e.config.Headers {
+		if header.Value == "<env>" {
+			envKey := strings.ReplaceAll(strings.ToUpper(header.Key), "-", "_")
+			header.Value = os.Getenv(envKey)
+			if header.Value == "" {
+				logger.L().Warning("HTTPExporter.sendHTTPRequest - header value is empty", helpers.String("key", header.Key))
+				continue
+			}
+		}
+		req.Header.Set(header.Key, header.Value)
 	}
 
 	resp, err := e.httpClient.Do(req)

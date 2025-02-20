@@ -103,6 +103,7 @@ type IGContainerWatcher struct {
 	ruleManager               rulemanager.RuleManagerClient
 	malwareManager            malwaremanager.MalwareManagerClient
 	sbomManager               sbommanager.SbomManagerClient
+
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
@@ -171,8 +172,18 @@ type IGContainerWatcher struct {
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
-func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi, igK8sClient *containercollection.K8sClient, networkManagerClient networkmanager.NetworkManagerClient, dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient, malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient, ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig, thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]], thirdPartyEnricher containerwatcher.ThirdPartyEnricher, processManager processmanager.ProcessManagerClient, clusterName string, objectCache objectcache.ObjectCache) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
+func CreateIGContainerWatcher(cfg config.Config,
+	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi,
+	igK8sClient *containercollection.K8sClient, networkManagerClient networkmanager.NetworkManagerClient,
+	dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient,
+	malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient,
+	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig,
+	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
+	thirdPartyEnricher containerwatcher.ThirdPartyEnricher, processManager processmanager.ProcessManagerClient,
+	clusterName string, objectCache objectcache.ObjectCache) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
+
 	containerCollection := &containercollection.ContainerCollection{}
+
 	// Create a tracer collection instance
 	tracerCollection, err := tracercollection.NewTracerCollection(containerCollection)
 	if err != nil {
@@ -203,6 +214,16 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	// Create an exec worker pool
 	execWorkerPool, err := ants.NewPoolWithFunc(execWorkerPoolSize, func(i interface{}) {
 		event := i.(events.ExecEvent)
+
+		path := event.Comm
+		if len(event.Args) > 0 {
+			path = event.Args[0]
+		}
+
+		if path == "" {
+			return
+		}
+
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
 			return
@@ -212,15 +233,6 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 
 		if isDroppedEvent(event.Type, event.Message) {
 			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
-			return
-		}
-
-		path := event.Comm
-		if len(event.Args) > 0 {
-			path = event.Args[0]
-		}
-
-		if path == "" {
 			return
 		}
 
@@ -270,6 +282,7 @@ func CreateIGContainerWatcher(cfg config.Config, applicationProfileManager appli
 	// Create a network worker pool
 	networkWorkerPool, err := ants.NewPoolWithFunc(networkWorkerPoolSize, func(i interface{}) {
 		event := i.(tracernetworktype.Event)
+
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
 			return

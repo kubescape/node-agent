@@ -68,20 +68,22 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 		return nil
 	}
 
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
-	if ap == nil {
-		return nil
-	}
-
-	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
-	if err != nil {
-		return nil
-	}
-
-	for _, open := range appProfileOpenList.Opens {
-		// Check if there is an open call to /proc/<pid>/environ
-		if strings.HasPrefix(open.Path, "/proc/") && strings.HasSuffix(open.Path, "/environ") {
+	if objCache != nil {
+		ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
+		if ap == nil {
 			return nil
+		}
+
+		appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
+		if err != nil {
+			return nil
+		}
+
+		for _, open := range appProfileOpenList.Opens {
+			// Check if there is an open call to /proc/<pid>/environ
+			if strings.HasPrefix(open.Path, "/proc/") && strings.HasSuffix(open.Path, "/environ") {
+				return nil
+			}
 		}
 	}
 

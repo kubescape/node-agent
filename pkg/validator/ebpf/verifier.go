@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -24,16 +25,17 @@ func VerifyEbpf() error {
 }
 
 func ParseKernelVersion(version string) (uint, uint, uint, error) {
-	parts := strings.Split(version, ".")
-	if len(parts) < 2 {
+	re := regexp.MustCompile(`(\d+)\.(\d+)(?:\.(\d+))?`) // Captures 2 or 3 digits
+	parts := re.FindStringSubmatch(version)
+	if len(parts) < 1 {
 		return 0, 0, 0, fmt.Errorf("invalid version format: %s", version)
 	}
 
 	var major, minor, patch uint
 	// Handle cases where patch version might be missing
-	versionStr := version
-	if len(parts) == 2 {
-		versionStr = version + ".0"
+	versionStr := parts[0]
+	if len(parts) < 5 {
+		versionStr += ".0"
 	}
 
 	_, err := fmt.Sscanf(versionStr, "%d.%d.%d", &major, &minor, &patch)

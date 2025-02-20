@@ -47,3 +47,15 @@ func enrichCloudMetadataForAWS(ctx context.Context, client *k8sinterface.Kuberne
 
 	logger.L().Debug("enriched cloud metadata from aws-auth ConfigMap")
 }
+
+// GetCloudMetadataWithIMDS retrieves cloud metadata for a given node using IMDS
+func GetCloudMetadataWithIMDS(ctx context.Context) (*apitypes.CloudMetadata, error) {
+	cMetadataClient := k8sInterfaceCloudMetadata.NewMetadataClient(true)
+
+	cMetadata, err := cMetadataClient.GetMetadata(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return cMetadata, nil
+}

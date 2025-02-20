@@ -8,8 +8,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 
 	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
 )
@@ -38,31 +36,14 @@ var _ ruleengine.RuleEvaluator = (*R1015MaliciousPtraceUsage)(nil)
 
 type R1015MaliciousPtraceUsage struct {
 	BaseRule
-	allowedProcesses []string
 }
 
 func CreateRuleR1015MaliciousPtraceUsage() *R1015MaliciousPtraceUsage {
-	return &R1015MaliciousPtraceUsage{
-		allowedProcesses: []string{},
-	}
+	return &R1015MaliciousPtraceUsage{}
 }
 
 func (rule *R1015MaliciousPtraceUsage) SetParameters(parameters map[string]interface{}) {
-	rule.BaseRule.SetParameters(parameters)
 
-	allowedProcessesInterface := rule.GetParameters()["allowedProcesses"]
-	if allowedProcessesInterface == nil {
-		return
-	}
-
-	allowedProcesses, ok := InterfaceToStringSlice(allowedProcessesInterface)
-	if ok {
-		for _, process := range allowedProcesses {
-			rule.allowedProcesses = append(rule.allowedProcesses, fmt.Sprintf("%v", process))
-		}
-	} else {
-		logger.L().Warning("failed to convert allowedProcesses to []string", helpers.String("ruleID", rule.ID()))
-	}
 }
 
 func (rule *R1015MaliciousPtraceUsage) Name() string {
