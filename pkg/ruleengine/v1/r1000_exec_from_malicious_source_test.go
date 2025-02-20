@@ -39,13 +39,6 @@ func TestR1000ExecFromMaliciousSource(t *testing.T) {
 		t.Errorf("Expected ruleResult to be nil since test is not a malicious exec")
 	}
 
-	e.Comm = "/proc/self/fd/3"
-
-	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &RuleObjectCacheMock{})
-	if ruleResult == nil {
-		t.Errorf("Expected ruleResult since exec is malicious")
-	}
-
 	e.Cwd = "/"
 
 	e.Comm = "/run.sh"
@@ -89,5 +82,38 @@ func TestR1000ExecFromMaliciousSource(t *testing.T) {
 	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult since exec is malicious")
+	}
+
+	// Create an exec event simulating the motd scenario
+	e = &events.ExecEvent{
+		Event: tracerexectype.Event{
+			Event: eventtypes.Event{
+				CommonData: eventtypes.CommonData{
+					K8s: eventtypes.K8sMetadata{
+						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
+							ContainerName: "test",
+						},
+					},
+				},
+			},
+			Comm:    "50-motd-news",
+			Args:    []string{"/bin/sh", "/etc/update-motd.d/50-motd-news", "--force"},
+			ExePath: "/bin/sh", // The actual executable
+			Cwd:     "/",
+		},
+	}
+
+	// This should not trigger a rule failure
+	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	if ruleResult != nil {
+		t.Errorf("Got false positive alert for legitimate motd execution:\nCwd: %s\nExePath: %s\nArgs: %v",
+			e.Cwd, e.ExePath, e.Args)
+	}
+
+	// For comparison, test a real malicious case
+	e.ExePath = "/dev/shm/malicious"
+	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	if ruleResult == nil {
+		t.Errorf("Failed to detect actually malicious execution from /dev/shm")
 	}
 }

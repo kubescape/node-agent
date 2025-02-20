@@ -63,6 +63,10 @@ func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, even
 }
 
 func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *events.ExecEvent) ruleengine.RuleFailure {
+	if !strings.Contains(execEvent.ExePath, "memfd") {
+		return nil
+	}
+
 	execFullPath := GetExecFullPathFromEvent(execEvent)
 	execPathDir := filepath.Dir(execFullPath)
 
@@ -111,7 +115,7 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *events.ExecEven
 			},
 			TriggerEvent: execEvent.Event.Event,
 			RuleAlert: apitypes.RuleAlert{
-				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source \"/proc/*/fd\"", execPathDir),
+				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source %s", execPathDir, execEvent.ExePath),
 			},
 			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 				PodName:   execEvent.GetPod(),
