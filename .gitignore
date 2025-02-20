@@ -4,5 +4,3 @@ temp
 resources/ebpf/falco/*
 node-agent
 __pycache__
-# Added by goreleaser init:
-dist/

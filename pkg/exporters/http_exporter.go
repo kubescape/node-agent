@@ -210,11 +210,6 @@ func (e *HTTPExporter) sendAlert(ctx context.Context, alert apitypes.RuntimeAler
 	return e.sendHTTPRequest(ctx, payload)
 }
 
-func (e *HTTPExporter) sendAlertList(ctx context.Context, alertList []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) error {
-	payload := e.createAlertPayload(alertList, processTree, cloudServices)
-	return e.sendHTTPRequest(ctx, payload)
-}
-
 func (e *HTTPExporter) createAlertPayload(alertList []apitypes.RuntimeAlert, processTree apitypes.ProcessTree, cloudServices []string) HTTPAlertsList {
 	cloudMetadata := e.getCloudMetadata(cloudServices)
 	return HTTPAlertsList{

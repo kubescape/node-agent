@@ -32,7 +32,7 @@ require (
 	github.com/inspektor-gadget/inspektor-gadget v0.36.1
 	github.com/kubescape/backend v0.0.25
 	github.com/kubescape/go-logger v0.0.23
-	github.com/kubescape/k8s-interface v0.0.188
+	github.com/kubescape/k8s-interface v0.0.189
 	github.com/kubescape/storage v0.0.158
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opencontainers/go-digest v1.0.0
@@ -365,5 +365,3 @@ replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5
 replace github.com/mholt/archiver/v3 v3.5.1 => github.com/anchore/archiver/v3 v3.5.2
 
 replace github.com/inspektor-gadget/inspektor-gadget => github.com/inspektor-gadget/inspektor-gadget v0.37.1-0.20250204194118-4f3c26b1ad29
-
-replace github.com/kubescape/k8s-interface => github.com/kubescape/k8s-interface v0.0.189-0.20250217154244-190cc71ef91f
