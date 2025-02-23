@@ -133,16 +133,17 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 		if err != nil {
 			return nil
 		}
+	} else {
+		// Running without application profile, to avoid false positives check if the process name is legitimate
+		for _, processName := range legitimateProcessNames {
+			if processName == openEvent.Comm {
+				return nil
+			}
+		}
 	}
 
 	if !utils.IsSensitivePath(openEvent.FullPath, rule.additionalPaths) {
 		return nil
-	}
-
-	for _, processName := range legitimateProcessNames {
-		if processName == openEvent.Comm {
-			return nil
-		}
 	}
 
 	if objCache != nil {
