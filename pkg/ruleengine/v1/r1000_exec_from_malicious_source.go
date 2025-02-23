@@ -59,7 +59,6 @@ var whitelistedProcessesForMaliciousSource = []string{
 	"bash",
 	"dash",
 	"sh",
-	"perl",
 	"supervisord",
 }
 
