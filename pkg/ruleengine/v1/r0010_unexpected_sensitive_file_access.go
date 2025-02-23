@@ -48,6 +48,37 @@ func CreateRuleR0010UnexpectedSensitiveFileAccess() *R0010UnexpectedSensitiveFil
 	}
 }
 
+var legitimateProcessNames = []string{
+	"systemd",
+	"sudo",
+	"passwd",
+	"chpasswd",
+	"useradd",
+	"usermod",
+	"chage",
+	"sshd",
+	"login",
+	"su",
+	"groupadd",
+	"groupmod",
+	"dpkg",
+	"rpm",
+	"ansible",
+	"puppet-agent",
+	"chef-client",
+	"vipw",
+	"pwck",
+	"grpck",
+	"nscd",
+	"cron",
+	"crond",
+	"pam",
+	"snap",
+	"apk",
+	"yum",
+	"dnf",
+}
+
 func (rule *R0010UnexpectedSensitiveFileAccess) SetParameters(parameters map[string]interface{}) {
 	rule.BaseRule.SetParameters(parameters)
 
@@ -106,6 +137,12 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 
 	if !utils.IsSensitivePath(openEvent.FullPath, rule.additionalPaths) {
 		return nil
+	}
+
+	for _, processName := range legitimateProcessNames {
+		if processName == openEvent.Comm {
+			return nil
+		}
 	}
 
 	if objCache != nil {
