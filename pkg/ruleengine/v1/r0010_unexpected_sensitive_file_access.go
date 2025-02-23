@@ -48,6 +48,37 @@ func CreateRuleR0010UnexpectedSensitiveFileAccess() *R0010UnexpectedSensitiveFil
 	}
 }
 
+var legitimateProcessNames = []string{
+	"systemd",
+	"sudo",
+	"passwd",
+	"chpasswd",
+	"useradd",
+	"usermod",
+	"chage",
+	"sshd",
+	"login",
+	"su",
+	"groupadd",
+	"groupmod",
+	"dpkg",
+	"rpm",
+	"ansible",
+	"puppet-agent",
+	"chef-client",
+	"vipw",
+	"pwck",
+	"grpck",
+	"nscd",
+	"cron",
+	"crond",
+	"pam",
+	"snap",
+	"apk",
+	"yum",
+	"dnf",
+}
+
 func (rule *R0010UnexpectedSensitiveFileAccess) SetParameters(parameters map[string]interface{}) {
 	rule.BaseRule.SetParameters(parameters)
 
@@ -101,6 +132,13 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 		appProfileOpenList, err = GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
 		if err != nil {
 			return nil
+		}
+	} else {
+		// Running without application profile, to avoid false positives check if the process name is legitimate
+		for _, processName := range legitimateProcessNames {
+			if processName == openEvent.Comm {
+				return nil
+			}
 		}
 	}
 
