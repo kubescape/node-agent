@@ -49,7 +49,21 @@ func (rule *R1000ExecFromMaliciousSource) ID() string {
 	return R1000ID
 }
 
-func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, _ objectcache.ObjectCache) ruleengine.RuleFailure {
+var whitelistedProcessesForMaliciousSource = []string{
+	"systemd",
+	"docker",
+	"containerd",
+	"snap-confine",
+	"nginx",
+	"apache2",
+	"bash",
+	"dash",
+	"sh",
+	"perl",
+	"supervisord",
+}
+
+func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
 		return nil
 	}
@@ -61,6 +75,16 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 
 	var maliciousExecPathPrefixes = []string{
 		"/dev/shm",
+		"/proc/self/fd",
+	}
+
+	if objCache == nil {
+		// Running without object cache, to avoid false positives check if the process name is legitimate
+		for _, processName := range whitelistedProcessesForMaliciousSource {
+			if processName == execEvent.Comm {
+				return nil
+			}
+		}
 	}
 
 	execPath := GetExecFullPathFromEvent(execEvent)
