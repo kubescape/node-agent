@@ -27,7 +27,8 @@ jobs:
       GO111MODULE: "on"
       BUILD_PLATFORM: linux/amd64,linux/arm64
       GO_VERSION: "1.23"
-      REQUIRED_TESTS: '[]'
+      REQUIRED_TESTS: ''
+      FORCE: true
       COSIGN: true
       HELM_E2E_TEST: true
     secrets: inherit
