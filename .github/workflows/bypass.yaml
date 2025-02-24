@@ -13,7 +13,7 @@ jobs:
       id: get-build
       uses: mlilback/build-number@v1
       with:
-        base: -144
+        base: 254
         run-id: ${{ github.run_number }}
 
   pr-merged:
