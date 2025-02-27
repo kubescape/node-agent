@@ -330,16 +330,16 @@ func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 }
 
 func (ap *ApplicationProfileCacheImpl) initContainerIdToName(pod *corev1.Pod) {
-	for i, container := range pod.Spec.Containers {
-		ap.containerToName.Set(utils.TrimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID), container.Name)
+	// if the pod isn't fully started, we could be missing some *ContainerStatuses
+	for i, status := range pod.Status.ContainerStatuses {
+		ap.containerToName.Set(utils.TrimRuntimePrefix(status.ContainerID), pod.Spec.Containers[i].Name)
 	}
-	for i, container := range pod.Spec.InitContainers {
-		ap.containerToName.Set(utils.TrimRuntimePrefix(pod.Status.InitContainerStatuses[i].ContainerID), container.Name)
+	for i, status := range pod.Status.InitContainerStatuses {
+		ap.containerToName.Set(utils.TrimRuntimePrefix(status.ContainerID), pod.Spec.InitContainers[i].Name)
 	}
-	for i, container := range pod.Spec.EphemeralContainers {
-		ap.containerToName.Set(utils.TrimRuntimePrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID), container.Name)
+	for i, status := range pod.Status.EphemeralContainerStatuses {
+		ap.containerToName.Set(utils.TrimRuntimePrefix(status.ContainerID), pod.Spec.EphemeralContainers[i].Name)
 	}
-
 }
 
 func (ap *ApplicationProfileCacheImpl) deletePod(obj runtime.Object) {
