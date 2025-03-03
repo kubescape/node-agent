@@ -176,7 +176,6 @@ func (t *Tracer) GroupEvents(bpfEvent *http_snifferHttpevent) *types.Event {
 	} else if eventType == types.Response {
 		if exists, ok := t.eventsMap.Get(GetUniqueIdentifier(bpfEvent)); ok {
 			grouped := exists
-
 			response, err := ParseHTTPResponse(FromCString(bpfEvent.Buf[:]), grouped.Request)
 			if err != nil {
 				msg := fmt.Sprintf("Error parsing response: %s", err)

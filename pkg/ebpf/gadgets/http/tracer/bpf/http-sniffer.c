@@ -346,7 +346,6 @@ static __always_inline int process_msg(struct trace_event_raw_sys_exit *ctx, cha
     if (!msg)
         return 0;
 
-    // Loop through iovec structures
     for (__u64 i = 0; i < msg->iovlen && i < 28; i++)
     {
         struct iovec iov = {};
@@ -363,10 +362,10 @@ static __always_inline int process_msg(struct trace_event_raw_sys_exit *ctx, cha
         if (ret < 0)
             break;
 
-        // Check if this segment is an HTTP message
         int type = get_http_type(ctx, buffer, seg_len);
         if (type)
         {
+            seg_len = iov.iov_len;
             __u32 zero = 0;
             struct httpevent *dataevent = bpf_map_lookup_elem(&event_data, &zero);
             if (!dataevent)
@@ -384,8 +383,10 @@ static __always_inline int process_msg(struct trace_event_raw_sys_exit *ctx, cha
             bpf_probe_read(dataevent->buf, copy_len, buffer);
             bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
             bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, dataevent, sizeof(*dataevent));
+            break;
         }
     }
+
     bpf_map_delete_elem(&msg_packets, &id);
     return 0;
 }

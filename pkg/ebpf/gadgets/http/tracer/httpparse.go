@@ -75,6 +75,16 @@ func ParseHTTPResponse(data []byte, req *http.Request) (*http.Response, error) {
 
 	resp, err := http.ReadResponse(bufReader, req)
 	if err != nil {
+		lastNewline := bytes.LastIndex(data, []byte("\n"))
+		if lastNewline != -1 {
+			cleanedData := data[:lastNewline+1]
+			bufReader = bufio.NewReader(bytes.NewReader(PatchHTTPPacket(cleanedData)))
+			resp, err = http.ReadResponse(bufReader, req)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read response even after removing last line: %w", err)
+			}
+			return resp, nil
+		}
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
