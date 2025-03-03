@@ -136,37 +136,37 @@ func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, con
 	index := ap.containerCallStacks.Get(containerID)
 
 	// Find the container in the profile and index its call stacks
-	for i := range appProfile.Spec.Containers {
-		if appProfile.Spec.Containers[i].Name == containerName {
+	for _, c := range appProfile.Spec.Containers {
+		if c.Name == containerName {
 			// Index all call stacks
-			for _, stack := range appProfile.Spec.Containers[i].IdentifiedCallStacks {
+			for _, stack := range c.IdentifiedCallStacks {
 				index.searchTree.AddCallStack(stack)
 			}
 
 			// Clear the call stacks to free memory
-			appProfile.Spec.Containers[i].IdentifiedCallStacks = nil
+			c.IdentifiedCallStacks = nil
 			break
 		}
 	}
 
 	// Also check init containers
-	for i := range appProfile.Spec.InitContainers {
-		if appProfile.Spec.InitContainers[i].Name == containerName {
-			for _, stack := range appProfile.Spec.InitContainers[i].IdentifiedCallStacks {
+	for _, c := range appProfile.Spec.InitContainers {
+		if c.Name == containerName {
+			for _, stack := range c.IdentifiedCallStacks {
 				index.searchTree.AddCallStack(stack)
 			}
-			appProfile.Spec.InitContainers[i].IdentifiedCallStacks = nil
+			c.IdentifiedCallStacks = nil
 			break
 		}
 	}
 
 	// And ephemeral containers
-	for i := range appProfile.Spec.EphemeralContainers {
-		if appProfile.Spec.EphemeralContainers[i].Name == containerName {
-			for _, stack := range appProfile.Spec.EphemeralContainers[i].IdentifiedCallStacks {
+	for _, c := range appProfile.Spec.EphemeralContainers {
+		if c.Name == containerName {
+			for _, stack := range c.IdentifiedCallStacks {
 				index.searchTree.AddCallStack(stack)
 			}
-			appProfile.Spec.EphemeralContainers[i].IdentifiedCallStacks = nil
+			c.IdentifiedCallStacks = nil
 			break
 		}
 	}
@@ -331,14 +331,14 @@ func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 
 func (ap *ApplicationProfileCacheImpl) initContainerIdToName(pod *corev1.Pod) {
 	// if the pod isn't fully started, we could be missing some *ContainerStatuses
-	for i, status := range pod.Status.ContainerStatuses {
-		ap.containerToName.Set(utils.TrimRuntimePrefix(status.ContainerID), pod.Spec.Containers[i].Name)
+	for _, s := range pod.Status.ContainerStatuses {
+		ap.containerToName.Set(utils.TrimRuntimePrefix(s.ContainerID), s.Name)
 	}
-	for i, status := range pod.Status.InitContainerStatuses {
-		ap.containerToName.Set(utils.TrimRuntimePrefix(status.ContainerID), pod.Spec.InitContainers[i].Name)
+	for _, s := range pod.Status.InitContainerStatuses {
+		ap.containerToName.Set(utils.TrimRuntimePrefix(s.ContainerID), s.Name)
 	}
-	for i, status := range pod.Status.EphemeralContainerStatuses {
-		ap.containerToName.Set(utils.TrimRuntimePrefix(status.ContainerID), pod.Spec.EphemeralContainers[i].Name)
+	for _, s := range pod.Status.EphemeralContainerStatuses {
+		ap.containerToName.Set(utils.TrimRuntimePrefix(s.ContainerID), s.Name)
 	}
 }
 

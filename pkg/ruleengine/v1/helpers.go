@@ -47,38 +47,38 @@ func GetExecFullPathFromEvent(event *events.ExecEvent) string {
 }
 
 func GetContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containerName string) (v1beta1.ApplicationProfileContainer, error) {
-	for i := range ap.Spec.Containers {
-		if ap.Spec.Containers[i].Name == containerName {
-			return ap.Spec.Containers[i], nil
+	for _, s := range ap.Spec.Containers {
+		if s.Name == containerName {
+			return s, nil
 		}
 	}
-	for i := range ap.Spec.InitContainers {
-		if ap.Spec.InitContainers[i].Name == containerName {
-			return ap.Spec.InitContainers[i], nil
+	for _, s := range ap.Spec.InitContainers {
+		if s.Name == containerName {
+			return s, nil
 		}
 	}
-	for i := range ap.Spec.EphemeralContainers {
-		if ap.Spec.EphemeralContainers[i].Name == containerName {
-			return ap.Spec.EphemeralContainers[i], nil
+	for _, s := range ap.Spec.EphemeralContainers {
+		if s.Name == containerName {
+			return s, nil
 		}
 	}
 	return v1beta1.ApplicationProfileContainer{}, ContainerNotFound
 }
 
 func GetContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, containerName string) (v1beta1.NetworkNeighborhoodContainer, error) {
-	for i := range nn.Spec.Containers {
-		if nn.Spec.Containers[i].Name == containerName {
-			return nn.Spec.Containers[i], nil
+	for _, c := range nn.Spec.Containers {
+		if c.Name == containerName {
+			return c, nil
 		}
 	}
-	for i := range nn.Spec.InitContainers {
-		if nn.Spec.InitContainers[i].Name == containerName {
-			return nn.Spec.InitContainers[i], nil
+	for _, c := range nn.Spec.InitContainers {
+		if c.Name == containerName {
+			return c, nil
 		}
 	}
-	for i := range nn.Spec.EphemeralContainers {
-		if nn.Spec.EphemeralContainers[i].Name == containerName {
-			return nn.Spec.EphemeralContainers[i], nil
+	for _, c := range nn.Spec.EphemeralContainers {
+		if c.Name == containerName {
+			return c, nil
 		}
 	}
 	return v1beta1.NetworkNeighborhoodContainer{}, ContainerNotFound
