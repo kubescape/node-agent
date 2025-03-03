@@ -116,7 +116,6 @@ func ToTime(t eventtypes.Time) time.Time {
 }
 
 func PatchHTTPPacket(data []byte) []byte {
-
 	if bytes.HasSuffix(data, []byte("\r\n\r\n")) {
 		return data
 	}
