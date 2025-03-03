@@ -71,7 +71,7 @@ func ParseHTTPRequest(data []byte) (*http.Request, error) {
 }
 
 func ParseHTTPResponse(data []byte, req *http.Request) (*http.Response, error) {
-	bufReader := bufio.NewReader(bytes.NewReader(data))
+	bufReader := bufio.NewReader(bytes.NewReader(PatchHTTPPacket(data)))
 
 	resp, err := http.ReadResponse(bufReader, req)
 	if err != nil {
@@ -113,4 +113,25 @@ func GetUniqueIdentifier(event *http_snifferHttpevent) string {
 
 func ToTime(t eventtypes.Time) time.Time {
 	return time.Unix(0, int64(t))
+}
+
+func PatchHTTPPacket(data []byte) []byte {
+
+	if bytes.HasSuffix(data, []byte("\r\n\r\n")) {
+		return data
+	}
+
+	if bytes.HasSuffix(data, []byte("\n\n")) {
+		return bytes.ReplaceAll(data, []byte("\n\n"), []byte("\r\n\r\n"))
+	}
+
+	if bytes.HasSuffix(data, []byte("\r\n")) {
+		return append(data, []byte("\r\n")...)
+	}
+
+	if bytes.HasSuffix(data, []byte("\n")) {
+		return append(data, []byte("\r\n")...)
+	}
+
+	return append(data, []byte("\r\n\r\n")...)
 }
