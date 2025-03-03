@@ -258,13 +258,14 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 		watchedContainer.ContainerInfos = make(map[ContainerType][]ContainerInfo)
 	}
 	checkContainers := func(containers iter.Seq2[int, v1.Container], containerStatuses []v1.ContainerStatus, containerType ContainerType) error {
+		statusesMap := MapContainerStatuses(containerStatuses)
 		var containersInfo []ContainerInfo
 		for i, c := range containers {
 			normalizedImageName := NormalizeImageName(c.Image)
 			containersInfo = append(containersInfo, ContainerInfo{
 				Name:     c.Name,
 				ImageTag: normalizedImageName,
-				ImageID:  containerStatuses[i].ImageID,
+				ImageID:  statusesMap[c.Name].ImageID,
 			})
 			if c.Name == containerName {
 				watchedContainer.ContainerIndex = i
@@ -273,7 +274,7 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 					watchedContainer.SeccompProfilePath = c.SecurityContext.SeccompProfile.LocalhostProfile
 				}
 				watchedContainer.ImageTag = normalizedImageName
-				watchedContainer.ImageID = containerStatuses[i].ImageID
+				watchedContainer.ImageID = statusesMap[c.Name].ImageID
 			}
 		}
 		watchedContainer.ContainerInfos[containerType] = containersInfo
@@ -762,4 +763,12 @@ func IsSensitivePath(fullPath string, paths []string) bool {
 		}
 	}
 	return false
+}
+
+func MapContainerStatuses(statuses []v1.ContainerStatus) map[string]v1.ContainerStatus {
+	statusesMap := make(map[string]v1.ContainerStatus)
+	for _, s := range statuses {
+		statusesMap[s.Name] = s
+	}
+	return statusesMap
 }

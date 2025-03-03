@@ -82,7 +82,7 @@ func (n *NodeProfileManager) getProfile() (*armotypes.NodeProfile, error) {
 			}
 		}
 		state, reason, message, transitionTime := getPodState(pod.Status.Conditions)
-		statusesMap := mapContainerStatuses(utils.GetContainerStatuses(pod.Status))
+		statusesMap := utils.MapContainerStatuses(utils.GetContainerStatuses(pod.Status))
 		podStatus := armotypes.PodStatus{
 			CustomerGUID:               n.clusterData.AccountID,
 			Cluster:                    n.clusterData.ClusterName,
@@ -130,14 +130,6 @@ func getPodState(conditions []v1.PodCondition) (string, string, string, time.Tim
 		}
 	}
 	return "", "", "", time.Time{}
-}
-
-func mapContainerStatuses(statuses []v1.ContainerStatus) map[string]v1.ContainerStatus {
-	statusesMap := make(map[string]v1.ContainerStatus)
-	for _, s := range statuses {
-		statusesMap[s.Name] = s
-	}
-	return statusesMap
 }
 
 func (n *NodeProfileManager) getContainers(namespace, name string, containers []v1.Container, statusesMap map[string]v1.ContainerStatus) []armotypes.PodContainer {

@@ -21,14 +21,14 @@ func MetaUniqueName(obj metav1.Object) string {
 func ListContainersIDs(pod *corev1.Pod) []string {
 	var containers []string
 
-	for i := range pod.Status.ContainerStatuses {
-		containers = append(containers, utils.TrimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID))
+	for _, s := range pod.Status.ContainerStatuses {
+		containers = append(containers, utils.TrimRuntimePrefix(s.ContainerID))
 	}
-	for i := range pod.Status.InitContainerStatuses {
-		containers = append(containers, utils.TrimRuntimePrefix(pod.Status.InitContainerStatuses[i].ContainerID))
+	for _, s := range pod.Status.InitContainerStatuses {
+		containers = append(containers, utils.TrimRuntimePrefix(s.ContainerID))
 	}
-	for i := range pod.Status.EphemeralContainerStatuses {
-		containers = append(containers, utils.TrimRuntimePrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID))
+	for _, s := range pod.Status.EphemeralContainerStatuses {
+		containers = append(containers, utils.TrimRuntimePrefix(s.ContainerID))
 	}
 	return containers
 }
@@ -37,19 +37,19 @@ func ListContainersIDs(pod *corev1.Pod) []string {
 func ListTerminatedContainers(pod *corev1.Pod) []string {
 	var containers []string
 
-	for i := range pod.Status.ContainerStatuses {
-		if pod.Status.ContainerStatuses[i].State.Terminated != nil {
-			containers = append(containers, utils.TrimRuntimePrefix(pod.Status.ContainerStatuses[i].ContainerID))
+	for _, s := range pod.Status.ContainerStatuses {
+		if s.State.Terminated != nil {
+			containers = append(containers, utils.TrimRuntimePrefix(s.ContainerID))
 		}
 	}
-	for i := range pod.Status.InitContainerStatuses {
-		if pod.Status.InitContainerStatuses[i].State.Terminated != nil {
-			containers = append(containers, utils.TrimRuntimePrefix(pod.Status.InitContainerStatuses[i].ContainerID))
+	for _, s := range pod.Status.InitContainerStatuses {
+		if s.State.Terminated != nil {
+			containers = append(containers, utils.TrimRuntimePrefix(s.ContainerID))
 		}
 	}
-	for i := range pod.Status.EphemeralContainerStatuses {
-		if pod.Status.EphemeralContainerStatuses[i].State.Terminated != nil {
-			containers = append(containers, utils.TrimRuntimePrefix(pod.Status.EphemeralContainerStatuses[i].ContainerID))
+	for _, s := range pod.Status.EphemeralContainerStatuses {
+		if s.State.Terminated != nil {
+			containers = append(containers, utils.TrimRuntimePrefix(s.ContainerID))
 		}
 	}
 	return containers
@@ -67,17 +67,17 @@ func GetTerminationExitCode(k8sObjectsCache K8sObjectCache, namespace, podName, 
 	// check only container status
 	// in case the terminated container is an init or ephemeral container
 	// return -1 to avoid setting the status later to completed
-	for i := range podStatus.ContainerStatuses {
-		if podStatus.ContainerStatuses[i].Name != containerName {
+	for _, s := range podStatus.ContainerStatuses {
+		if s.Name != containerName {
 			continue
 		}
-		if podStatus.ContainerStatuses[i].State.Running != nil {
+		if s.State.Running != nil {
 			return notFound
 		}
-		if podStatus.ContainerStatuses[i].LastTerminationState.Terminated != nil {
+		if s.LastTerminationState.Terminated != nil {
 			// trim ID
-			if containerID == utils.TrimRuntimePrefix(podStatus.ContainerStatuses[i].LastTerminationState.Terminated.ContainerID) {
-				return podStatus.ContainerStatuses[i].LastTerminationState.Terminated.ExitCode
+			if containerID == utils.TrimRuntimePrefix(s.LastTerminationState.Terminated.ContainerID) {
+				return s.LastTerminationState.Terminated.ExitCode
 			}
 		}
 	}
