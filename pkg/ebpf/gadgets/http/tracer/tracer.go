@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/consts"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go  -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type active_connection_info -type packet_buffer -type httpevent http_sniffer bpf/http-sniffer.c -- -I./bpf/
@@ -164,8 +165,15 @@ func (t *Tracer) Run(gadgetCtx gadgets.GadgetContext) error {
 
 func (t *Tracer) GroupEvents(bpfEvent *http_snifferHttpevent) *types.Event {
 	eventType := types.HTTPDataType(bpfEvent.Type)
+	syscall := gadgets.FromCString(bpfEvent.Syscall[:])
+	direction, err := types.GetPacketDirection(syscall)
+	if err != nil {
+		logger.L().Debug("http Tracer.GroupEvents - error getting packet direction", helpers.Error(err),
+			helpers.String("syscall", syscall))
+		return nil
+	}
 
-	if eventType == types.Request {
+	if eventType == types.Request && direction == consts.Inbound {
 		event, err := CreateEventFromRequest(bpfEvent)
 		if err != nil {
 			msg := fmt.Sprintf("Error parsing request: %s", err)
@@ -176,8 +184,7 @@ func (t *Tracer) GroupEvents(bpfEvent *http_snifferHttpevent) *types.Event {
 	} else if eventType == types.Response {
 		if exists, ok := t.eventsMap.Get(GetUniqueIdentifier(bpfEvent)); ok {
 			grouped := exists
-
-			response, err := ParseHTTPResponse(FromCString(bpfEvent.Buf[:]), grouped.Request)
+			response, err := ParseHttpResponse(FromCString(bpfEvent.Buf[:]), grouped.Request)
 			if err != nil {
 				msg := fmt.Sprintf("Error parsing response: %s", err)
 				t.eventCallback(types.Base(eventtypes.Warn(msg)))

@@ -119,6 +119,7 @@ type http_snifferMapSpecs struct {
 	AcceptedSocketsMap       *ebpf.MapSpec `ebpf:"accepted_sockets_map"`
 	ActiveConnectionsArgsMap *ebpf.MapSpec `ebpf:"active_connections_args_map"`
 	BufferPackets            *ebpf.MapSpec `ebpf:"buffer_packets"`
+	EmptyBuffer              *ebpf.MapSpec `ebpf:"empty_buffer"`
 	EmptyChar                *ebpf.MapSpec `ebpf:"empty_char"`
 	EventData                *ebpf.MapSpec `ebpf:"event_data"`
 	Events                   *ebpf.MapSpec `ebpf:"events"`
@@ -158,6 +159,7 @@ type http_snifferMaps struct {
 	AcceptedSocketsMap       *ebpf.Map `ebpf:"accepted_sockets_map"`
 	ActiveConnectionsArgsMap *ebpf.Map `ebpf:"active_connections_args_map"`
 	BufferPackets            *ebpf.Map `ebpf:"buffer_packets"`
+	EmptyBuffer              *ebpf.Map `ebpf:"empty_buffer"`
 	EmptyChar                *ebpf.Map `ebpf:"empty_char"`
 	EventData                *ebpf.Map `ebpf:"event_data"`
 	Events                   *ebpf.Map `ebpf:"events"`
@@ -171,6 +173,7 @@ func (m *http_snifferMaps) Close() error {
 		m.AcceptedSocketsMap,
 		m.ActiveConnectionsArgsMap,
 		m.BufferPackets,
+		m.EmptyBuffer,
 		m.EmptyChar,
 		m.EventData,
 		m.Events,
