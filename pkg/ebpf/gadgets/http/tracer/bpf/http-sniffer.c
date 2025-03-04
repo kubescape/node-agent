@@ -64,6 +64,14 @@ struct {
     __type(value, char[PACKET_CHUNK_SIZE]);
 } empty_char SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, u8[MAX_DATAEVENT_BUFFER]);
+} empty_buffer SEC(".maps");
+
+
 // Declared to avoid compiler deletion
 const struct httpevent *unusedevent __attribute__((unused));
 
@@ -78,6 +86,22 @@ static __always_inline int should_discard()
     }
 
     return 0;
+}
+
+static __always_inline struct httpevent *get_dataevent()
+{
+    __u32 zero = 0;
+    struct httpevent *dataevent = bpf_map_lookup_elem(&event_data, &zero);
+    if (!dataevent)
+        return NULL;
+
+    u8 *empty = bpf_map_lookup_elem(&empty_buffer, &zero);
+    if (empty) {
+        bpf_probe_read(dataevent->buf, sizeof(dataevent->buf), empty);
+        bpf_probe_read(dataevent->syscall, sizeof(dataevent->syscall), empty);
+    }
+
+    return dataevent;
 }
 
 static __always_inline __u64 min_size(__u64 a, __u64 b) {
@@ -251,6 +275,9 @@ static __always_inline int get_http_type(struct trace_event_raw_sys_exit *ctx, v
 static __always_inline int process_packet(struct trace_event_raw_sys_exit *ctx, char *syscall)
 {
     __u64 id = bpf_get_current_pid_tgid();
+    char buf[PACKET_CHUNK_SIZE] = {0};
+    __u32 total_size = (__u32)ctx->ret;
+
     struct packet_buffer *packet = bpf_map_lookup_elem(&buffer_packets, &id);
     if (!packet)
         return 0;
@@ -258,16 +285,7 @@ static __always_inline int process_packet(struct trace_event_raw_sys_exit *ctx, 
     if (ctx->ret <= 0)
         return 0;
 
-    __u32 total_size = (__u32)ctx->ret;
-    __u32 key = 0;
-
     if (total_size < 1)
-    {
-        return 0;
-    }
-
-    char *buf = bpf_map_lookup_elem(&empty_char, &key);
-    if (!buf)
         return 0;
 
     if (packet->len < 1)
@@ -281,8 +299,7 @@ static __always_inline int process_packet(struct trace_event_raw_sys_exit *ctx, 
     if (!type)
         return 0;
 
-    __u32 zero = 0;
-    struct httpevent *dataevent = bpf_map_lookup_elem(&event_data, &zero);
+    struct httpevent *dataevent = get_dataevent();
     if (!dataevent)
         return 0;
 
@@ -366,10 +383,9 @@ static __always_inline int process_msg(struct trace_event_raw_sys_exit *ctx, cha
         if (type)
         {
             seg_len = iov.iov_len;
-            __u32 zero = 0;
-            struct httpevent *dataevent = bpf_map_lookup_elem(&event_data, &zero);
+            struct httpevent *dataevent = get_dataevent();
             if (!dataevent)
-                continue;
+                return 0;
 
             populate_httpevent(dataevent);
             enrich_ip_port(ctx, msg->fd, dataevent);
@@ -380,7 +396,7 @@ static __always_inline int process_msg(struct trace_event_raw_sys_exit *ctx, cha
             if (copy_len > MAX_DATAEVENT_BUFFER)
                 copy_len = MAX_DATAEVENT_BUFFER;
 
-            bpf_probe_read(dataevent->buf, copy_len, buffer);
+            bpf_probe_read(&dataevent->buf, copy_len, iov.iov_base);
             bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
             bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, dataevent, sizeof(*dataevent));
             break;
