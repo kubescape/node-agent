@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/prometheus/procfs"
@@ -21,6 +22,7 @@ const (
 	cleanupInterval = 1 * time.Minute
 	maxTreeDepth    = 50
 	runCCommPrefix  = "runc:["
+	realRuncComm    = "runc"
 )
 
 type ProcessManager struct {
@@ -279,18 +281,50 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid int) (apit
 	// If the process is runc, try to fetch the real process info.
 	// Intentionally we are doing this only once the process is asked for to avoid unnecessary calls to /proc and give time for the process to be created.
 	if strings.HasPrefix(result.Comm, runCCommPrefix) {
-		if process, err := p.getProcessFromProc(int(result.PID)); err == nil {
-			childerns := result.Children
-			upperLayer := result.UpperLayer
-			result = process
-			result.Children = childerns
-			result.UpperLayer = upperLayer
-			// Update the process in the tree
-			p.processTree.Set(result.PID, result)
+		if resolvedProcess, err := p.resolveRuncProcess(result); err == nil {
+			result = resolvedProcess
+		} else {
+			logger.L().Debug("ProcessManager - failed to resolve runc process",
+				helpers.Int("pid", int(result.PID)),
+				helpers.String("comm", result.Comm),
+				helpers.Error(err))
 		}
 	}
 
 	return result, nil
+}
+
+func (p *ProcessManager) resolveRuncProcess(process apitypes.Process) (apitypes.Process, error) {
+	err := backoff.Retry(func() error {
+		resolvedProcess, err := p.getProcessFromProc(int(process.PID))
+		if err != nil {
+			return err
+		}
+
+		if strings.HasPrefix(resolvedProcess.Comm, runCCommPrefix) {
+			return fmt.Errorf("runc process not resolved yet")
+		}
+
+		childerns := process.Children
+		upperLayer := process.UpperLayer
+		process = resolvedProcess
+		process.Children = childerns
+		process.UpperLayer = upperLayer
+
+		// Update the process in the tree
+		p.processTree.Set(process.PID, process)
+		return nil
+	}, backoff.NewExponentialBackOff(
+		backoff.WithInitialInterval(50*time.Millisecond),
+		backoff.WithMaxInterval(100*time.Millisecond),
+		backoff.WithMaxElapsedTime(2*time.Second),
+	))
+
+	if err != nil {
+		return apitypes.Process{}, fmt.Errorf("failed to resolve runc process: %v", err)
+	}
+
+	return process, nil
 }
 
 // ReportEvent handles process execution events from the system.
