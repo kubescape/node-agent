@@ -22,7 +22,6 @@ const (
 	cleanupInterval = 1 * time.Minute
 	maxTreeDepth    = 50
 	runCCommPrefix  = "runc:["
-	realRuncComm    = "runc"
 )
 
 type ProcessManager struct {
