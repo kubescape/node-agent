@@ -135,34 +135,31 @@ func runAllMaliciousBehaviors() error {
 		}
 	}
 
-	// Trigger exec from malicious source (R1000)
-	// Open kubectl as a file
-	fmt.Println("Opening kubectl as a file...")
-	file, err = os.Open("kubectl")
+	// Copy ls to /dev/shm and execute from there
+	fmt.Println("Copying ls to /dev/shm...")
+	err = copyFile("/bin/ls", "/dev/shm/ls")
 	if err != nil {
-		fmt.Printf("Failed to open kubectl: %v\n", err)
+		fmt.Printf("Failed to copy ls to /dev/shm: %v\n", err)
 	} else {
-		// Get the file descriptor
-		fd := file.Fd()
-		path := fmt.Sprintf("/proc/self/fd/%d", fd)
-		// Fork the process
-		switch child, _, _ := syscall.Syscall(syscall.SYS_FORK, 0, 0, 0); child {
-		case 0:
-			// Call execve on the file descriptor
-			fmt.Printf("Calling execve on %s...\n", path)
-			err = syscall.Exec(path, []string{"kubectl", "get", "secrets"}, os.Environ())
-			if err != nil {
-				fmt.Printf("Failed to call execve on kubectl: %v\n", err)
-			}
-		case 1:
-			fmt.Printf("Failed to fork process\n")
-		default:
-			// Wait for the child process to exit
-			var status syscall.WaitStatus
-			_, err = syscall.Wait4(int(child), &status, 0, nil)
-			if err != nil {
-				fmt.Printf("Failed to wait for child process: %v\n", err)
-			}
+		// Make the file executable
+		err = os.Chmod("/dev/shm/ls", 0755)
+		if err != nil {
+			fmt.Printf("Failed to make /dev/shm/ls executable: %v\n", err)
+		}
+
+		// Execute ls from /dev/shm
+		fmt.Println("Executing ls from /dev/shm...")
+		cmd := exec.Command("/dev/shm/ls")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			fmt.Printf("Failed to execute ls from /dev/shm: %v\n", err)
+		}
+		fmt.Println(string(output))
+
+		// Clean up
+		err = os.Remove("/dev/shm/ls")
+		if err != nil {
+			fmt.Printf("Failed to remove /dev/shm/ls: %v\n", err)
 		}
 	}
 

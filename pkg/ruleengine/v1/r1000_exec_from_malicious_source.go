@@ -74,7 +74,6 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 
 	var maliciousExecPathPrefixes = []string{
 		"/dev/shm",
-		"/proc/self/fd",
 	}
 
 	if objCache == nil {

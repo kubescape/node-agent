@@ -10,16 +10,20 @@ spec:
       labels:
         app: malicious-app
     spec:
+      hostIPC: true  # This enables IPC host mode (equivalent to --ipc="host")
       containers:
       - name: malicious-app
         # sourcecode: node-agent/tests/images/malicious-app
-        image: quay.io/kubescape/node-agent:maliciousapp2
+        image: quay.io/kubescape/node-agent:maliciousapp4
         imagePullPolicy: Always
         env:
           - name: WAIT_FOR_SIGTERM
             value: "true"
           - name: WAIT_BEFORE_START
             value: "3m"
+        securityContext:
+          capabilities:
+            add: ["IPC_OWNER"]
         volumeMounts:
           - mountPath: /podmount
             name: mount-for-alert
