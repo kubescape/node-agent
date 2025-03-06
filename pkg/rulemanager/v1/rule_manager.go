@@ -257,6 +257,56 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 		rm.metrics.ReportRuleProcessed(rule.Name())
 	}
 }
+
+func (rm *RuleManager) enrichRuleFailureWithContainerDetails(ruleFailure ruleengine.RuleFailure) {
+	isKubernetesWorkload := ruleFailure.GetTriggerEvent().K8s.PodName != "" && ruleFailure.GetTriggerEvent().K8s.Namespace != ""
+	// Enrich RuntimeAlertK8sDetails
+	runtimek8sdetails := ruleFailure.GetRuntimeAlertK8sDetails()
+	if runtimek8sdetails.Image == "" {
+		runtimek8sdetails.Image = ruleFailure.GetTriggerEvent().Runtime.ContainerImageName
+	}
+
+	if runtimek8sdetails.ImageDigest == "" {
+		runtimek8sdetails.ImageDigest = ruleFailure.GetTriggerEvent().Runtime.ContainerImageDigest
+	}
+
+	if runtimek8sdetails.Namespace == "" {
+		runtimek8sdetails.Namespace = ruleFailure.GetTriggerEvent().K8s.Namespace
+	}
+
+	if runtimek8sdetails.PodName == "" {
+		if isKubernetesWorkload {
+			runtimek8sdetails.PodName = ruleFailure.GetTriggerEvent().K8s.PodName
+		} else {
+			// TODO: This is a temporary solution to get the pod name for non-kubernetes workloads.
+			runtimek8sdetails.PodName = string(ruleFailure.GetTriggerEvent().Runtime.RuntimeName)
+		}
+	}
+
+	if runtimek8sdetails.PodNamespace == "" {
+		runtimek8sdetails.PodNamespace = ruleFailure.GetTriggerEvent().K8s.Namespace
+	}
+
+	if runtimek8sdetails.ContainerName == "" {
+		if isKubernetesWorkload {
+			runtimek8sdetails.ContainerName = ruleFailure.GetTriggerEvent().K8s.ContainerName
+		} else {
+			runtimek8sdetails.ContainerName = ruleFailure.GetTriggerEvent().Runtime.ContainerName
+		}
+	}
+
+	if runtimek8sdetails.ContainerID == "" {
+		runtimek8sdetails.ContainerID = ruleFailure.GetTriggerEvent().Runtime.ContainerID
+	}
+
+	if runtimek8sdetails.HostNetwork == nil {
+		hostNetwork := ruleFailure.GetTriggerEvent().K8s.HostNetwork
+		runtimek8sdetails.HostNetwork = &hostNetwork
+	}
+
+	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
+}
+
 func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
 	var err error
 	var path string
@@ -332,42 +382,8 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 
 	ruleFailure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	// Enrich RuntimeAlertK8sDetails
-	runtimek8sdetails := ruleFailure.GetRuntimeAlertK8sDetails()
-	if runtimek8sdetails.Image == "" {
-		runtimek8sdetails.Image = ruleFailure.GetTriggerEvent().Runtime.ContainerImageName
-	}
-
-	if runtimek8sdetails.ImageDigest == "" {
-		runtimek8sdetails.ImageDigest = ruleFailure.GetTriggerEvent().Runtime.ContainerImageDigest
-	}
-
-	if runtimek8sdetails.Namespace == "" {
-		runtimek8sdetails.Namespace = ruleFailure.GetTriggerEvent().K8s.Namespace
-	}
-
-	if runtimek8sdetails.PodName == "" {
-		runtimek8sdetails.PodName = ruleFailure.GetTriggerEvent().K8s.PodName
-	}
-
-	if runtimek8sdetails.PodNamespace == "" {
-		runtimek8sdetails.PodNamespace = ruleFailure.GetTriggerEvent().K8s.Namespace
-	}
-
-	if runtimek8sdetails.ContainerName == "" {
-		runtimek8sdetails.ContainerName = ruleFailure.GetTriggerEvent().K8s.ContainerName
-	}
-
-	if runtimek8sdetails.ContainerID == "" {
-		runtimek8sdetails.ContainerID = ruleFailure.GetTriggerEvent().Runtime.ContainerID
-	}
-
-	if runtimek8sdetails.HostNetwork == nil {
-		hostNetwork := ruleFailure.GetTriggerEvent().K8s.HostNetwork
-		runtimek8sdetails.HostNetwork = &hostNetwork
-	}
-
-	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
+	// Adding K8s and container details to the rule failure
+	rm.enrichRuleFailureWithContainerDetails(ruleFailure)
 
 	if cloudServices := rm.dnsManager.ResolveContainerProcessToCloudServices(ruleFailure.GetTriggerEvent().Runtime.ContainerID, runtimeProcessDetails.ProcessTree.PID); cloudServices != nil {
 		ruleFailure.SetCloudServices(cloudServices.ToSlice())
