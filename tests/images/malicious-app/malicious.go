@@ -135,33 +135,31 @@ func runAllMaliciousBehaviors() error {
 		}
 	}
 
-	// Trigger exec from malicious source (R1000)
-	// Copy kubectl to /dev/shm and execute from there
-	fmt.Println("Copying kubectl to /dev/shm...")
-	err = copyFile("kubectl", "/dev/shm/kubectl")
+	// Copy ls to /dev/shm and execute from there
+	fmt.Println("Copying ls to /dev/shm...")
+	err = copyFile("/bin/ls", "/dev/shm/ls")
 	if err != nil {
-		fmt.Printf("Failed to copy kubectl to /dev/shm: %v\n", err)
+		fmt.Printf("Failed to copy ls to /dev/shm: %v\n", err)
 	} else {
 		// Make the file executable
-		err = os.Chmod("/dev/shm/kubectl", 0755)
+		err = os.Chmod("/dev/shm/ls", 0755)
 		if err != nil {
-			fmt.Printf("Failed to make /dev/shm/kubectl executable: %v\n", err)
+			fmt.Printf("Failed to make /dev/shm/ls executable: %v\n", err)
 		}
 
-		// Execute kubectl from /dev/shm
-		fmt.Println("Executing kubectl from /dev/shm...")
-		output, err := runKubectl("/dev/shm/kubectl", "get", "secrets")
+		// Execute ls from /dev/shm
+		fmt.Println("Executing ls from /dev/shm...")
+		cmd := exec.Command("/dev/shm/ls")
+		output, err := cmd.CombinedOutput()
 		if err != nil {
-			fmt.Printf("Failed to execute kubectl from /dev/shm: %v\n", err)
+			fmt.Printf("Failed to execute ls from /dev/shm: %v\n", err)
 		}
-		if output != "" {
-			fmt.Print(output)
-		}
+		fmt.Println(string(output))
 
 		// Clean up
-		err = os.Remove("/dev/shm/kubectl")
+		err = os.Remove("/dev/shm/ls")
 		if err != nil {
-			fmt.Printf("Failed to remove /dev/shm/kubectl: %v\n", err)
+			fmt.Printf("Failed to remove /dev/shm/ls: %v\n", err)
 		}
 	}
 
