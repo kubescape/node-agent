@@ -10,6 +10,7 @@ spec:
       labels:
         app: malicious-app
     spec:
+      hostIPC: true  # This enables IPC host mode (equivalent to --ipc="host")
       containers:
       - name: malicious-app
         # sourcecode: node-agent/tests/images/malicious-app
@@ -20,6 +21,9 @@ spec:
             value: "true"
           - name: WAIT_BEFORE_START
             value: "3m"
+        securityContext:
+          capabilities:
+            add: ["IPC_OWNER"]
         volumeMounts:
           - mountPath: /podmount
             name: mount-for-alert
