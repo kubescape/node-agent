@@ -175,7 +175,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 		},
 		TriggerEvent: openEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Unexpected sensitive file access: %s in: %s", openEvent.FullPath, openEvent.GetContainer()),
+			RuleDescription: fmt.Sprintf("Unexpected sensitive file access: %s", openEvent.FullPath),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName:   openEvent.GetPod(),

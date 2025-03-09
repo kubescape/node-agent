@@ -198,7 +198,7 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 				},
 				TriggerEvent: dnsEvent.Event,
 				RuleAlert: apitypes.RuleAlert{
-					RuleDescription: fmt.Sprintf("Communication with a known crypto mining domain: %s in: %s", dnsEvent.DNSName, dnsEvent.GetContainer()),
+					RuleDescription: fmt.Sprintf("Communication with a known crypto mining domain: %s", dnsEvent.DNSName),
 				},
 				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 					PodName:   dnsEvent.GetPod(),

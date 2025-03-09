@@ -123,7 +123,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 		},
 		TriggerEvent: symlinkEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Symlink created over sensitive file: %s - %s in: %s", symlinkEvent.OldPath, symlinkEvent.NewPath, symlinkEvent.GetContainer()),
+			RuleDescription: fmt.Sprintf("Symlink created over sensitive file: %s - %s", symlinkEvent.OldPath, symlinkEvent.NewPath),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName:   symlinkEvent.GetPod(),
