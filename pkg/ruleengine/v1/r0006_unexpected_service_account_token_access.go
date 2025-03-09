@@ -157,10 +157,9 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		TriggerEvent: openEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
 			RuleDescription: fmt.Sprintf(
-				"Unexpected access to service account token: %s with flags: %s in: %s",
+				"Unexpected access to service account token: %s with flags: %s",
 				openEvent.FullPath,
 				strings.Join(openEvent.Flags, ","),
-				openEvent.GetContainer(),
 			),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{

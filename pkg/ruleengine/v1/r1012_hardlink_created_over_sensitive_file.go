@@ -121,7 +121,7 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 		},
 		TriggerEvent: hardlinkEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Hardlink created over sensitive file: %s - %s in: %s", hardlinkEvent.OldPath, hardlinkEvent.NewPath, hardlinkEvent.GetContainer()),
+			RuleDescription: fmt.Sprintf("Hardlink created over sensitive file: %s - %s", hardlinkEvent.OldPath, hardlinkEvent.NewPath),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName:   hardlinkEvent.GetPod(),

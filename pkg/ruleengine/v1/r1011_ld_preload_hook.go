@@ -158,7 +158,7 @@ func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *events.ExecEvent
 		},
 		TriggerEvent: execEvent.Event.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is using the environment variable %s", execEvent.Comm, execEvent.GetContainer(), fmt.Sprintf("%s=%s", ldHookVar, envVars[ldHookVar])),
+			RuleDescription: fmt.Sprintf("Process (%s) was executed and is using the environment variable %s", execEvent.Comm, fmt.Sprintf("%s=%s", ldHookVar, envVars[ldHookVar])),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName:   execEvent.GetPod(),
@@ -193,7 +193,7 @@ func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.E
 		},
 		TriggerEvent: openEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Process (%s) was executed in: %s and is opening the file %s", openEvent.Comm, openEvent.GetContainer(), openEvent.Path),
+			RuleDescription: fmt.Sprintf("Process (%s) was executed and is opening the file %s", openEvent.Comm, openEvent.Path),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName:   openEvent.GetPod(),
