@@ -73,7 +73,7 @@ func ParseHttpRequest(data []byte) (*http.Request, error) {
 func ParseHttpResponse(data []byte, req *http.Request) (*http.Response, error) {
 	resp, err := readResponse(data, req)
 	if err != nil {
-		return fallbackReadResponse(data, req)
+		return nil, err
 	}
 
 	return resp, nil
@@ -134,47 +134,17 @@ func PatchHTTPPacket(data []byte) []byte {
 }
 
 func fallbackReadRequest(data []byte) (*http.Request, error) {
-	cleanedData, err := cleanCorrupted(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to clean request data: %w", err)
-	}
-
-	bufReader := bufio.NewReader(bytes.NewReader(PatchHTTPPacket(cleanedData)))
+	bufReader := bufio.NewReader(bytes.NewReader(PatchHTTPPacket(data)))
 	req, err := http.ReadRequest(bufReader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read request even after removing last line: %w", err)
+		return nil, fmt.Errorf("failed to read request: %w", err)
 	}
 
 	return req, nil
-}
-
-func fallbackReadResponse(data []byte, req *http.Request) (*http.Response, error) {
-	cleanedData, err := cleanCorrupted(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to clean response data: %w", err)
-	}
-
-	resp, err := readResponse(cleanedData, req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response even after removing last line: %w", err)
-	}
-
-	return resp, nil
 }
 
 func readResponse(data []byte, req *http.Request) (*http.Response, error) {
 	bufReader := bufio.NewReader(bytes.NewReader(PatchHTTPPacket(data)))
 	resp, err := http.ReadResponse(bufReader, req)
 	return resp, err
-}
-
-func cleanCorrupted(data []byte) ([]byte, error) {
-	lastNewline := bytes.LastIndex(data, []byte("\n"))
-	if lastNewline == -1 {
-		return nil, fmt.Errorf("failed to find newline in request data")
-	}
-
-	cleanedData := data[:lastNewline+1]
-
-	return cleanedData, nil
 }
