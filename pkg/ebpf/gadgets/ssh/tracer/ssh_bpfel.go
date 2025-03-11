@@ -62,9 +62,10 @@ func loadSshObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
 type sshSpecs struct {
 	sshProgramSpecs
 	sshMapSpecs
+	sshVariableSpecs
 }
 
-// sshSpecs contains programs before they are loaded into the kernel.
+// sshProgramSpecs contains programs before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type sshProgramSpecs struct {
@@ -81,12 +82,20 @@ type sshMapSpecs struct {
 	GadgetSockets *ebpf.MapSpec `ebpf:"gadget_sockets"`
 }
 
+// sshVariableSpecs contains global variables before they are loaded into the kernel.
+//
+// It can be passed ebpf.CollectionSpec.Assign.
+type sshVariableSpecs struct {
+	Unusedevent *ebpf.VariableSpec `ebpf:"unusedevent"`
+}
+
 // sshObjects contains all objects after they have been loaded into the kernel.
 //
 // It can be passed to loadSshObjects or ebpf.CollectionSpec.LoadAndAssign.
 type sshObjects struct {
 	sshPrograms
 	sshMaps
+	sshVariables
 }
 
 func (o *sshObjects) Close() error {
@@ -113,6 +122,13 @@ func (m *sshMaps) Close() error {
 		m.GadgetHeap,
 		m.GadgetSockets,
 	)
+}
+
+// sshVariables contains all global variables after they have been loaded into the kernel.
+//
+// It can be passed to loadSshObjects or ebpf.CollectionSpec.LoadAndAssign.
+type sshVariables struct {
+	Unusedevent *ebpf.Variable `ebpf:"unusedevent"`
 }
 
 // sshPrograms contains all programs after they have been loaded into the kernel.

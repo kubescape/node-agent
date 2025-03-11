@@ -22,9 +22,9 @@ type hardlinkEvent struct {
 	Gid        uint32
 	UpperLayer bool
 	Comm       [16]uint8
-	Exepath    [4096]uint8
-	Oldpath    [4096]uint8
-	Newpath    [4096]uint8
+	Exepath    [512]uint8
+	Oldpath    [512]uint8
+	Newpath    [512]uint8
 	_          [3]byte
 }
 
@@ -63,9 +63,10 @@ func loadHardlinkObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
 type hardlinkSpecs struct {
 	hardlinkProgramSpecs
 	hardlinkMapSpecs
+	hardlinkVariableSpecs
 }
 
-// hardlinkSpecs contains programs before they are loaded into the kernel.
+// hardlinkProgramSpecs contains programs before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type hardlinkProgramSpecs struct {
@@ -84,12 +85,22 @@ type hardlinkMapSpecs struct {
 	GadgetMntnsFilterMap *ebpf.MapSpec `ebpf:"gadget_mntns_filter_map"`
 }
 
+// hardlinkVariableSpecs contains global variables before they are loaded into the kernel.
+//
+// It can be passed ebpf.CollectionSpec.Assign.
+type hardlinkVariableSpecs struct {
+	GadgetFilterByMntns *ebpf.VariableSpec `ebpf:"gadget_filter_by_mntns"`
+	TargUid             *ebpf.VariableSpec `ebpf:"targ_uid"`
+	Unusedevent         *ebpf.VariableSpec `ebpf:"unusedevent"`
+}
+
 // hardlinkObjects contains all objects after they have been loaded into the kernel.
 //
 // It can be passed to loadHardlinkObjects or ebpf.CollectionSpec.LoadAndAssign.
 type hardlinkObjects struct {
 	hardlinkPrograms
 	hardlinkMaps
+	hardlinkVariables
 }
 
 func (o *hardlinkObjects) Close() error {
@@ -118,6 +129,15 @@ func (m *hardlinkMaps) Close() error {
 		m.GadgetHeap,
 		m.GadgetMntnsFilterMap,
 	)
+}
+
+// hardlinkVariables contains all global variables after they have been loaded into the kernel.
+//
+// It can be passed to loadHardlinkObjects or ebpf.CollectionSpec.LoadAndAssign.
+type hardlinkVariables struct {
+	GadgetFilterByMntns *ebpf.Variable `ebpf:"gadget_filter_by_mntns"`
+	TargUid             *ebpf.Variable `ebpf:"targ_uid"`
+	Unusedevent         *ebpf.Variable `ebpf:"unusedevent"`
 }
 
 // hardlinkPrograms contains all programs after they have been loaded into the kernel.
