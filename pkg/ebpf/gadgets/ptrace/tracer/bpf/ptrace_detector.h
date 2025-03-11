@@ -9,7 +9,7 @@
 #include "../../../../include/buffer.h"
 
 #define TASK_COMM_LEN 16
-#define MAX_STRING_SIZE    4096       
+#define MAX_STRING_SIZE    512       
 
 #ifndef PTRACE_SETREGS
 #define PTRACE_SETREGS 13

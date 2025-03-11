@@ -9,7 +9,7 @@
 // Defined in include/uapi/linux/magic.h
 #define OVERLAYFS_SUPER_MAGIC 0x794c7630
 #ifndef PATH_MAX
-#define PATH_MAX 4096
+#define PATH_MAX 512
 #endif
 #define SSH_SIGNATURE "SSH-"
 #define SSH_SIG_LEN 4

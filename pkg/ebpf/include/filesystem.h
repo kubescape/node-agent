@@ -6,7 +6,8 @@
 
 // clang-format off
 #define MAX_PERCPU_BUFSIZE (1 << 15)  // set by the kernel as an upper bound
-#define MAX_STRING_SIZE    4096       // same as PATH_MAX
+#define MAX_STRING_SIZE    512       // same as PATH_MAX
+#define GADGET_PATH_MAX    512        // smaller than PATH_MAX to reduce memory consumption
 #define MAX_BYTES_ARR_SIZE 4096       // max size of bytes array (arbitrarily chosen)
 #define MAX_STR_FILTER_SIZE 16        // bounded to size of the compared values (comm)
 #define MAX_BIN_PATH_SIZE   256       // max binary path size

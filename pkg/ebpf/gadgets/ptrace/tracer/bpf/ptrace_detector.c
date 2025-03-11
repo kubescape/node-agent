@@ -52,7 +52,6 @@ SEC("tracepoint/syscalls/sys_enter_ptrace")
 int trace_enter_ptrace(struct trace_event_raw_sys_enter *ctx)
 {
     long request = (long)ctx->args[0];
-    long pid = (long)ctx->args[1];
     
     if (should_discard()) {
         return 0;

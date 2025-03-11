@@ -21,7 +21,7 @@ type ptraceEvent struct {
 	Gid       uint32
 	Request   uint32
 	Comm      [16]uint8
-	Exepath   [4096]uint8
+	Exepath   [512]uint8
 	_         [4]byte
 }
 
@@ -60,9 +60,10 @@ func loadPtraceObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
 type ptraceSpecs struct {
 	ptraceProgramSpecs
 	ptraceMapSpecs
+	ptraceVariableSpecs
 }
 
-// ptraceSpecs contains programs before they are loaded into the kernel.
+// ptraceProgramSpecs contains programs before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type ptraceProgramSpecs struct {
@@ -80,12 +81,20 @@ type ptraceMapSpecs struct {
 	GadgetMntnsFilterMap *ebpf.MapSpec `ebpf:"gadget_mntns_filter_map"`
 }
 
+// ptraceVariableSpecs contains global variables before they are loaded into the kernel.
+//
+// It can be passed ebpf.CollectionSpec.Assign.
+type ptraceVariableSpecs struct {
+	GadgetFilterByMntns *ebpf.VariableSpec `ebpf:"gadget_filter_by_mntns"`
+}
+
 // ptraceObjects contains all objects after they have been loaded into the kernel.
 //
 // It can be passed to loadPtraceObjects or ebpf.CollectionSpec.LoadAndAssign.
 type ptraceObjects struct {
 	ptracePrograms
 	ptraceMaps
+	ptraceVariables
 }
 
 func (o *ptraceObjects) Close() error {
@@ -114,6 +123,13 @@ func (m *ptraceMaps) Close() error {
 		m.GadgetHeap,
 		m.GadgetMntnsFilterMap,
 	)
+}
+
+// ptraceVariables contains all global variables after they have been loaded into the kernel.
+//
+// It can be passed to loadPtraceObjects or ebpf.CollectionSpec.LoadAndAssign.
+type ptraceVariables struct {
+	GadgetFilterByMntns *ebpf.Variable `ebpf:"gadget_filter_by_mntns"`
 }
 
 // ptracePrograms contains all programs after they have been loaded into the kernel.

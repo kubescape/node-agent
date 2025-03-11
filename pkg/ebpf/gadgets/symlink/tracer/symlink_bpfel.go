@@ -22,9 +22,9 @@ type symlinkEvent struct {
 	Gid        uint32
 	UpperLayer bool
 	Comm       [16]uint8
-	Exepath    [4096]uint8
-	Oldpath    [4096]uint8
-	Newpath    [4096]uint8
+	Exepath    [512]uint8
+	Oldpath    [512]uint8
+	Newpath    [512]uint8
 	_          [3]byte
 }
 
@@ -63,9 +63,10 @@ func loadSymlinkObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
 type symlinkSpecs struct {
 	symlinkProgramSpecs
 	symlinkMapSpecs
+	symlinkVariableSpecs
 }
 
-// symlinkSpecs contains programs before they are loaded into the kernel.
+// symlinkProgramSpecs contains programs before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type symlinkProgramSpecs struct {
@@ -84,12 +85,22 @@ type symlinkMapSpecs struct {
 	GadgetMntnsFilterMap *ebpf.MapSpec `ebpf:"gadget_mntns_filter_map"`
 }
 
+// symlinkVariableSpecs contains global variables before they are loaded into the kernel.
+//
+// It can be passed ebpf.CollectionSpec.Assign.
+type symlinkVariableSpecs struct {
+	GadgetFilterByMntns *ebpf.VariableSpec `ebpf:"gadget_filter_by_mntns"`
+	TargUid             *ebpf.VariableSpec `ebpf:"targ_uid"`
+	Unusedevent         *ebpf.VariableSpec `ebpf:"unusedevent"`
+}
+
 // symlinkObjects contains all objects after they have been loaded into the kernel.
 //
 // It can be passed to loadSymlinkObjects or ebpf.CollectionSpec.LoadAndAssign.
 type symlinkObjects struct {
 	symlinkPrograms
 	symlinkMaps
+	symlinkVariables
 }
 
 func (o *symlinkObjects) Close() error {
@@ -118,6 +129,15 @@ func (m *symlinkMaps) Close() error {
 		m.GadgetHeap,
 		m.GadgetMntnsFilterMap,
 	)
+}
+
+// symlinkVariables contains all global variables after they have been loaded into the kernel.
+//
+// It can be passed to loadSymlinkObjects or ebpf.CollectionSpec.LoadAndAssign.
+type symlinkVariables struct {
+	GadgetFilterByMntns *ebpf.Variable `ebpf:"gadget_filter_by_mntns"`
+	TargUid             *ebpf.Variable `ebpf:"targ_uid"`
+	Unusedevent         *ebpf.Variable `ebpf:"unusedevent"`
 }
 
 // symlinkPrograms contains all programs after they have been loaded into the kernel.

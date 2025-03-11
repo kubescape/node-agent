@@ -19,7 +19,7 @@ type randomxEvent struct {
 	Uid        uint32
 	Gid        uint32
 	UpperLayer bool
-	Exepath    [4096]uint8
+	Exepath    [512]uint8
 	Comm       [16]uint8
 	_          [7]byte
 }
@@ -59,9 +59,10 @@ func loadRandomxObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
 type randomxSpecs struct {
 	randomxProgramSpecs
 	randomxMapSpecs
+	randomxVariableSpecs
 }
 
-// randomxSpecs contains programs before they are loaded into the kernel.
+// randomxProgramSpecs contains programs before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type randomxProgramSpecs struct {
@@ -79,12 +80,22 @@ type randomxMapSpecs struct {
 	GadgetMntnsFilterMap *ebpf.MapSpec `ebpf:"gadget_mntns_filter_map"`
 }
 
+// randomxVariableSpecs contains global variables before they are loaded into the kernel.
+//
+// It can be passed ebpf.CollectionSpec.Assign.
+type randomxVariableSpecs struct {
+	GadgetFilterByMntns *ebpf.VariableSpec `ebpf:"gadget_filter_by_mntns"`
+	TargUid             *ebpf.VariableSpec `ebpf:"targ_uid"`
+	Unusedevent         *ebpf.VariableSpec `ebpf:"unusedevent"`
+}
+
 // randomxObjects contains all objects after they have been loaded into the kernel.
 //
 // It can be passed to loadRandomxObjects or ebpf.CollectionSpec.LoadAndAssign.
 type randomxObjects struct {
 	randomxPrograms
 	randomxMaps
+	randomxVariables
 }
 
 func (o *randomxObjects) Close() error {
@@ -113,6 +124,15 @@ func (m *randomxMaps) Close() error {
 		m.GadgetHeap,
 		m.GadgetMntnsFilterMap,
 	)
+}
+
+// randomxVariables contains all global variables after they have been loaded into the kernel.
+//
+// It can be passed to loadRandomxObjects or ebpf.CollectionSpec.LoadAndAssign.
+type randomxVariables struct {
+	GadgetFilterByMntns *ebpf.Variable `ebpf:"gadget_filter_by_mntns"`
+	TargUid             *ebpf.Variable `ebpf:"targ_uid"`
+	Unusedevent         *ebpf.Variable `ebpf:"unusedevent"`
 }
 
 // randomxPrograms contains all programs after they have been loaded into the kernel.
