@@ -135,32 +135,42 @@ func runAllMaliciousBehaviors() error {
 		}
 	}
 
-	// Copy ls to /dev/shm and execute from there
-	fmt.Println("Copying ls to /dev/shm...")
-	err = copyFile("/bin/ls", "/dev/shm/ls")
+	// Symlink ls to /dev/shm and execute from there
+	fmt.Println("Creating symbolic link to ls in /dev/shm...")
+	// Remove existing file if it exists
+	os.Remove("/dev/shm/ls")
+
+	// Create symbolic link instead of copying
+	err = os.Symlink("/bin/ls", "/dev/shm/ls")
 	if err != nil {
-		fmt.Printf("Failed to copy ls to /dev/shm: %v\n", err)
+		fmt.Printf("Failed to create symbolic link in /dev/shm: %v\n", err)
+		return err
+	}
+
+	// Try to execute the symlink first
+	fmt.Println("Executing ls from /dev/shm...")
+	cmd := exec.Command("/dev/shm/ls")
+	cmdoutput, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("Failed to execute ls from /dev/shm: %v\n", err)
+
+		// If that fails, use the fallback
+		fmt.Println("Fallback: using sh -c")
+		cmd = exec.Command("sh", "-c", "cd /dev/shm && ./ls")
+		cmdoutput, err = cmd.CombinedOutput()
+		if err != nil {
+			fmt.Printf("Fallback also failed: %v\n", err)
+		} else {
+			fmt.Println(string(cmdoutput))
+		}
 	} else {
-		// Make the file executable
-		err = os.Chmod("/dev/shm/ls", 0755)
-		if err != nil {
-			fmt.Printf("Failed to make /dev/shm/ls executable: %v\n", err)
-		}
+		fmt.Println(string(cmdoutput))
+	}
 
-		// Execute ls from /dev/shm
-		fmt.Println("Executing ls from /dev/shm...")
-		cmd := exec.Command("/dev/shm/ls")
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			fmt.Printf("Failed to execute ls from /dev/shm: %v\n", err)
-		}
-		fmt.Println(string(output))
-
-		// Clean up
-		err = os.Remove("/dev/shm/ls")
-		if err != nil {
-			fmt.Printf("Failed to remove /dev/shm/ls: %v\n", err)
-		}
+	// Clean up
+	err = os.Remove("/dev/shm/ls")
+	if err != nil {
+		fmt.Printf("Failed to remove symlink /dev/shm/ls: %v\n", err)
 	}
 
 	// Trigger load kernel module (R1002)
