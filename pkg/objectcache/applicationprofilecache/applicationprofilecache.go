@@ -374,9 +374,7 @@ func (ap *ApplicationProfileCacheImpl) removeContainer(containerID string) {
 // ------------------ watch application profile methods -----------------------
 
 func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1beta1.ApplicationProfile, apName string) {
-	// Check if there's a pending user-managed profile to merge
-	if ap.userManagedProfiles.Has(apName) {
-		userManagedProfile := ap.userManagedProfiles.Get(apName)
+	if userManagedProfile, exists := ap.userManagedProfiles.Load(apName); exists {
 		appProfile = ap.performMerge(appProfile, userManagedProfile)
 		// Clean up the user-managed profile after successful merge
 		ap.userManagedProfiles.Delete(apName)
@@ -384,10 +382,16 @@ func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1b
 	}
 
 	ap.slugToAppProfile.Set(apName, appProfile)
-	for _, i := range ap.slugToContainers.Get(apName).ToSlice() {
-		ap.containerToSlug.Set(i, apName)
-		ap.indexContainerCallStacks(i, ap.containerToName.Get(i), appProfile)
+
+	if containerSet, exists := ap.slugToContainers.Load(apName); exists {
+		for _, i := range containerSet.ToSlice() {
+			ap.containerToSlug.Set(i, apName)
+			ap.indexContainerCallStacks(i, ap.containerToName.Get(i), appProfile)
+		}
+	} else {
+		logger.L().Debug("ApplicationProfileCacheImpl - no containers found for application profile", helpers.String("name", apName))
 	}
+
 	logger.L().Debug("ApplicationProfileCacheImpl - added pod to application profile cache", helpers.String("name", apName))
 }
 
