@@ -449,12 +449,11 @@ func CreateIGContainerWatcher(cfg config.Config,
 
 	// Create a ebpf top worker pool
 	ebpftopWorkerPool, err := ants.NewPoolWithFunc(defaultWorkerPoolSize, func(i interface{}) {
-		event := i.(*top.Event[toptypes.Stats])
-		metrics.ReportEbpfStats(event)
+		event := i.(top.Event[toptypes.Stats])
+		metrics.ReportEbpfStats(&event)
 	})
-
 	if err != nil {
-		return nil, fmt.Errorf("creating ptrace worker pool: %w", err)
+		return nil, fmt.Errorf("creating ebpftop worker pool: %w", err)
 	}
 
 	// Create a iouring worker pool

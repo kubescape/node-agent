@@ -39,8 +39,6 @@ type PrometheusMetric struct {
 	// Program ID metrics
 	programRuntimeGauge       *prometheus.GaugeVec
 	programRunCountGauge      *prometheus.GaugeVec
-	programCumulRuntimeGauge  *prometheus.GaugeVec
-	programCumulRunCountGauge *prometheus.GaugeVec
 	programTotalRuntimeGauge  *prometheus.GaugeVec
 	programTotalRunCountGauge *prometheus.GaugeVec
 	programMapMemoryGauge     *prometheus.GaugeVec
@@ -103,16 +101,6 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Help: "Current run count of programs by program ID",
 		}, []string{programIdLabel, programTypeLabel, programNameLabel}),
 
-		programCumulRuntimeGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "node_agent_program_cumulative_runtime",
-			Help: "Cumulative runtime of programs by program ID",
-		}, []string{programIdLabel, programTypeLabel, programNameLabel}),
-
-		programCumulRunCountGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "node_agent_program_cumulative_run_count",
-			Help: "Cumulative run count of programs by program ID",
-		}, []string{programIdLabel, programTypeLabel, programNameLabel}),
-
 		programTotalRuntimeGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "node_agent_program_total_runtime",
 			Help: "Total runtime of programs by program ID",
@@ -169,8 +157,6 @@ func (p *PrometheusMetric) Destroy() {
 	// Unregister program ID metrics
 	prometheus.Unregister(p.programRuntimeGauge)
 	prometheus.Unregister(p.programRunCountGauge)
-	prometheus.Unregister(p.programCumulRuntimeGauge)
-	prometheus.Unregister(p.programCumulRunCountGauge)
 	prometheus.Unregister(p.programTotalRuntimeGauge)
 	prometheus.Unregister(p.programTotalRunCountGauge)
 	prometheus.Unregister(p.programMapMemoryGauge)
@@ -211,10 +197,7 @@ func (p *PrometheusMetric) ReportRuleAlert(ruleID string) {
 }
 
 func (p *PrometheusMetric) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
-	if stats.Error != "" {
-		logger.L().Warning(stats.Error)
-		return
-	}
+	logger.L().Debug("reporting ebpf stats", helpers.Int("stats_count", len(stats.Stats)))
 
 	for _, stat := range stats.Stats {
 		programIDStr := strconv.FormatUint(uint64(stat.ProgramID), 10)
@@ -227,8 +210,6 @@ func (p *PrometheusMetric) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
 
 		p.programRuntimeGauge.With(labels).Set(float64(stat.CurrentRuntime))
 		p.programRunCountGauge.With(labels).Set(float64(stat.CurrentRunCount))
-		p.programCumulRuntimeGauge.With(labels).Set(float64(stat.CumulativeRuntime))
-		p.programCumulRunCountGauge.With(labels).Set(float64(stat.CumulativeRunCount))
 		p.programTotalRuntimeGauge.With(labels).Set(float64(stat.TotalRuntime))
 		p.programTotalRunCountGauge.With(labels).Set(float64(stat.TotalRunCount))
 		p.programMapMemoryGauge.With(labels).Set(float64(stat.MapMemory))
