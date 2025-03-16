@@ -2,6 +2,7 @@ package containerwatcher
 
 import (
 	"fmt"
+	"strings"
 
 	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
@@ -16,7 +17,9 @@ func (ch *IGContainerWatcher) openEventCallback(event *traceropentype.Event) {
 
 	openEvent := &events.OpenEvent{Event: *event}
 	ch.enrichEvent(openEvent, []uint64{SYS_OPEN, SYS_OPENAT})
-	fmt.Println("openEventCallback", openEvent.FullPath, openEvent.Runtime.ContainerName)
+	if openEvent.Runtime.ContainerName == "malicious-app" || strings.Contains(openEvent.Runtime.ContainerName, "malicious-app") {
+		fmt.Println("openEventCallback", openEvent.FullPath, openEvent.Runtime.ContainerName)
+	}
 	if event.Err > -1 && event.FullPath != "" {
 		ch.openWorkerChan <- openEvent
 	}

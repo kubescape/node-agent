@@ -48,7 +48,7 @@ func runAllMaliciousBehaviors() error {
 	// Run the malicious behaviors
 
 	fmt.Println("Running malicious behaviors...")
-
+	fmt.Println("Running more malicious behaviors...adasdsad")
 	// Trigger unexpected process launch (R0001)
 	// Trigger exec binary not in base image (R1001)
 	// Trigger unexpected service account use (R0006)
@@ -201,6 +201,40 @@ func runAllMaliciousBehaviors() error {
 		}
 	}
 
+	fmt.Println("Running more malicious behaviors...")
+
+	fmt.Println("Reading service account token again")
+	for i := 0; i < 10; i++ {
+		// Open the service account token file
+		// Open the service account token file
+		fmt.Println("Opening service account token file...")
+		file, err := os.Open("/run/secrets/kubernetes.io/serviceaccount/token")
+		if err != nil {
+			fmt.Printf("Failed to open service account token file: %v\n", err)
+		} else {
+			// Close the file
+			err = file.Close()
+			if err != nil {
+				fmt.Printf("Failed to close service account token file: %v\n", err)
+			}
+		}
+	}
+
+	fmt.Println("Reading /etc/shadow")
+	for i := 0; i < 10; i++ {
+		// Open the /etc/shadow file
+		fmt.Println("Opening /etc/shadow file...")
+		file, err := os.Open("/etc/shadow")
+		if err != nil {
+			fmt.Printf("Failed to open /etc/shadow file: %v\n", err)
+		} else {
+			// Close the file
+			err = file.Close()
+			if err != nil {
+				fmt.Printf("Failed to close /etc/shadow file: %v\n", err)
+			}
+		}
+	}
 	// Trigger crypto mining (R1007)
 	// Do a TCP connect to stratum+tcp://xmr.pool.minergate.com:45700
 	fmt.Println("Connecting to stratum+tcp://xmr.pool.minergate.com:45700...")

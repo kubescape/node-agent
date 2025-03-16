@@ -14,7 +14,7 @@ spec:
       containers:
       - name: malicious-app
         # sourcecode: node-agent/tests/images/malicious-app
-        image: quay.io/kubescape/node-agent:maliciousapp5
+        image: armoafekb/afek-b-tests:maliciousapp90
         imagePullPolicy: Always
         env:
           - name: WAIT_FOR_SIGTERM

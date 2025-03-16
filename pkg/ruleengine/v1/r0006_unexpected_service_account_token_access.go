@@ -105,6 +105,10 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		return nil
 	}
 
+	if convertedEvent.Runtime.ContainerName == "malicious-app" || strings.Contains(convertedEvent.Runtime.ContainerName, "malicious-app") {
+		fmt.Println("R0006UnexpectedServiceAccountTokenAccess", convertedEvent.FullPath, convertedEvent.Runtime.ContainerName)
+	}
+
 	openEvent := convertedEvent.Event
 
 	// Check if this is a token path - using optimized check
