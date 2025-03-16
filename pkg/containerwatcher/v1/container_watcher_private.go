@@ -384,6 +384,14 @@ func (ch *IGContainerWatcher) startTracers() error {
 		logger.L().Info("started http tracing")
 	}
 
+	if ch.cfg.EnablePrometheusExporter {
+		if err := ch.startTopTracing(); err != nil {
+			logger.L().Error("IGContainerWatcher - error starting top tracing", helpers.Error(err))
+			return err
+		}
+		logger.L().Info("started top tracing")
+	}
+
 	return nil
 }
 
@@ -481,6 +489,15 @@ func (ch *IGContainerWatcher) stopTracers() error {
 			errs = errors.Join(errs, err)
 		}
 	}
+
+	if ch.cfg.EnablePrometheusExporter {
+		// Stop top tracer
+		if err := ch.stopTopTracing(); err != nil {
+			logger.L().Error("IGContainerWatcher - error stopping top tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+	}
+
 	return errs
 }
 

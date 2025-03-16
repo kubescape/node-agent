@@ -6,11 +6,15 @@ import (
 	"reflect"
 	"time"
 
+	toptracer "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/tracer"
+
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top"
+	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	tracerdns "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/tracer"
@@ -70,6 +74,7 @@ const (
 	sshTraceName               = "trace_ssh"
 	httpTraceName              = "trace_http"
 	iouringTraceName           = "trace_iouring"
+	topTraceName               = "trace_top"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
 	openWorkerPoolSize         = 8
@@ -116,6 +121,7 @@ type IGContainerWatcher struct {
 	syscallTracer      *tracerseccomp.Tracer
 	networkTracer      *tracernetwork.Tracer
 	dnsTracer          *tracerdns.Tracer
+	topTracer          *toptracer.Tracer
 	randomxTracer      *tracerandomx.Tracer
 	symlinkTracer      *tracersymlink.Tracer
 	hardlinkTracer     *tracerhardlink.Tracer
@@ -136,6 +142,7 @@ type IGContainerWatcher struct {
 	capabilitiesWorkerPool *ants.PoolWithFunc
 	execWorkerPool         *ants.PoolWithFunc
 	openWorkerPool         *ants.PoolWithFunc
+	topWorkerPool          *ants.PoolWithFunc
 	ptraceWorkerPool       *ants.PoolWithFunc
 	networkWorkerPool      *ants.PoolWithFunc
 	dnsWorkerPool          *ants.PoolWithFunc
@@ -149,6 +156,7 @@ type IGContainerWatcher struct {
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *events.ExecEvent
 	openWorkerChan         chan *events.OpenEvent
+	topWorkerChan          chan *top.Event[toptypes.Stats]
 	ptraceWorkerChan       chan *tracerptracetype.Event
 	networkWorkerChan      chan *tracernetworktype.Event
 	dnsWorkerChan          chan *tracerdnstype.Event
@@ -439,6 +447,19 @@ func CreateIGContainerWatcher(cfg config.Config,
 		return nil, fmt.Errorf("creating ptrace worker pool: %w", err)
 	}
 
+	// Create a ebpf top worker pool
+	ebpftopWorkerPool, err := ants.NewPoolWithFunc(defaultWorkerPoolSize, func(i interface{}) {
+		event := i.(tracerptracetype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		ruleManager.ReportEvent(utils.PtraceEventType, &event)
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("creating ptrace worker pool: %w", err)
+	}
+
 	// Create a iouring worker pool
 	iouringWorkerPool, err := ants.NewPoolWithFunc(defaultWorkerPoolSize, func(i interface{}) {
 		event := i.(traceriouringtype.Event)
@@ -492,6 +513,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		sshdWorkerPool:         sshWorkerPool,
 		httpWorkerPool:         httpWorkerPool,
 		ptraceWorkerPool:       ptraceWorkerPool,
+		topWorkerPool:          ebpftopWorkerPool,
 		iouringWorkerPool:      iouringWorkerPool,
 		metrics:                metrics,
 
@@ -499,6 +521,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		capabilitiesWorkerChan: make(chan *tracercapabilitiestype.Event, 1000),
 		execWorkerChan:         make(chan *events.ExecEvent, 10000),
 		openWorkerChan:         make(chan *events.OpenEvent, 500000),
+		topWorkerChan:          make(chan *top.Event[toptypes.Stats], 1000),
 		ptraceWorkerChan:       make(chan *tracerptracetype.Event, 1000),
 		networkWorkerChan:      make(chan *tracernetworktype.Event, 500000),
 		dnsWorkerChan:          make(chan *tracerdnstype.Event, 100000),
