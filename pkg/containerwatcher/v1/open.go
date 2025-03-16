@@ -16,7 +16,7 @@ func (ch *IGContainerWatcher) openEventCallback(event *traceropentype.Event) {
 
 	openEvent := &events.OpenEvent{Event: *event}
 	ch.enrichEvent(openEvent, []uint64{SYS_OPEN, SYS_OPENAT})
-
+	fmt.Println("openEventCallback", openEvent.FullPath, openEvent.Runtime.ContainerName)
 	if event.Err > -1 && event.FullPath != "" {
 		ch.openWorkerChan <- openEvent
 	}
