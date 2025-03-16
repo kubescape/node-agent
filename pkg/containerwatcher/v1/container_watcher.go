@@ -449,11 +449,8 @@ func CreateIGContainerWatcher(cfg config.Config,
 
 	// Create a ebpf top worker pool
 	ebpftopWorkerPool, err := ants.NewPoolWithFunc(defaultWorkerPoolSize, func(i interface{}) {
-		event := i.(tracerptracetype.Event)
-		if event.K8s.ContainerName == "" {
-			return
-		}
-		ruleManager.ReportEvent(utils.PtraceEventType, &event)
+		event := i.(*top.Event[toptypes.Stats])
+		metrics.ReportEbpfStats(event)
 	})
 
 	if err != nil {

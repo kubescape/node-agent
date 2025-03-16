@@ -212,7 +212,7 @@ func (p *PrometheusMetric) ReportRuleAlert(ruleID string) {
 
 func (p *PrometheusMetric) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
 	if stats.Error != "" {
-		logger.L().Error(stats.Error)
+		logger.L().Warning(stats.Error)
 		return
 	}
 
