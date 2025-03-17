@@ -35,7 +35,7 @@ spec:
                     self.send_response(200)
                     self.send_header("Content-type", "text/plain")
                     self.end_headers()
-                    self.wfile.write(b"GET request received successfully")
+                    self.wfile.write(b"Method GET request received successfully")
                 def do_POST(self):
                     content_length = int(self.headers["Content-Length"])
                     post_data = self.rfile.read(content_length)
@@ -43,7 +43,7 @@ spec:
                     self.send_response(200)
                     self.send_header("Content-type", "text/plain")
                     self.end_headers()
-                    self.wfile.write(b"POST request received successfully")
+                    self.wfile.write(b"Method POST request received successfully")
             def run_server(port=80):
                 server_address = ("", port)
                 httpd = HTTPServer(server_address, SimpleHTTPRequestHandler)
