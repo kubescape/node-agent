@@ -133,7 +133,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
 	}
 
-	// Malicious activity will be detected in 3 minutes + X seconds to wait for the alerts to be generated
+	// Malicious activity will be detected in 3 minutes + 300 seconds to wait for the alerts to be generated
 	maliciousAppWaitBeforeStart := time.Minute * 3
 	waitBeforeLookingForAlerts := time.Minute * 5
 	timer := time.NewTimer(maliciousAppWaitBeforeStart + waitBeforeLookingForAlerts)
