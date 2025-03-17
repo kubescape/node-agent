@@ -3,6 +3,8 @@ package metricsmanager
 import (
 	"sync/atomic"
 
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top"
+	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/goradd/maps"
@@ -47,4 +49,7 @@ func (m *MetricsMock) ReportRuleProcessed(ruleID string) {
 
 func (m *MetricsMock) ReportRuleAlert(ruleID string) {
 	m.RuleAlertCounter.Set(ruleID, m.RuleAlertCounter.Get(ruleID)+1)
+}
+
+func (m *MetricsMock) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
 }

@@ -2,12 +2,14 @@ package metricsmanager
 
 import (
 	"net/http"
+	"strconv"
 
-	"github.com/kubescape/node-agent/pkg/metricsmanager"
-	"github.com/kubescape/node-agent/pkg/utils"
-
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top"
+	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/metricsmanager"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -15,6 +17,11 @@ import (
 
 const (
 	prometheusRuleIdLabel = "rule_id"
+	programIdLabel        = "program_id"
+	programTypeLabel      = "program_type"
+	programNameLabel      = "program_name"
+	processName           = "process_name"
+	processId             = "process_id"
 )
 
 var _ metricsmanager.MetricsManager = (*PrometheusMetric)(nil)
@@ -30,6 +37,16 @@ type PrometheusMetric struct {
 	ebpfFailedCounter     prometheus.Counter
 	ruleCounter           *prometheus.CounterVec
 	alertCounter          *prometheus.CounterVec
+
+	// Program ID metrics
+	programRuntimeGauge       *prometheus.GaugeVec
+	programRunCountGauge      *prometheus.GaugeVec
+	programTotalRuntimeGauge  *prometheus.GaugeVec
+	programTotalRunCountGauge *prometheus.GaugeVec
+	programMapMemoryGauge     *prometheus.GaugeVec
+	programMapCountGauge      *prometheus.GaugeVec
+	programCpuUsageGauge      *prometheus.GaugeVec
+	programPerCpuUsageGauge   *prometheus.GaugeVec
 }
 
 func NewPrometheusMetric() *PrometheusMetric {
@@ -74,8 +91,50 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Name: "node_agent_alert_counter",
 			Help: "The total number of alerts sent by the engine",
 		}, []string{prometheusRuleIdLabel}),
+
+		// Program ID metrics
+		programRuntimeGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "node_agent_program_current_runtime",
+			Help: "Current runtime of programs by program ID",
+		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+
+		programRunCountGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "node_agent_program_current_run_count",
+			Help: "Current run count of programs by program ID",
+		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+
+		programTotalRuntimeGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "node_agent_program_total_runtime",
+			Help: "Total runtime of programs by program ID",
+		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+
+		programTotalRunCountGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "node_agent_program_total_run_count",
+			Help: "Total run count of programs by program ID",
+		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+
+		programMapMemoryGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "node_agent_program_map_memory",
+			Help: "Map memory usage of programs by program ID",
+		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+
+		programMapCountGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "node_agent_program_map_count",
+			Help: "Map count of programs by program ID",
+		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+
+		programCpuUsageGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "node_agent_program_total_cpu_usage",
+			Help: "Total CPU usage of programs by program ID",
+		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+
+		programPerCpuUsageGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "node_agent_program_per_cpu_usage",
+			Help: "Per-CPU usage of programs by program ID",
+		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
 	}
 }
+
 func (p *PrometheusMetric) Start() {
 	// Start prometheus metrics server
 	go func() {
@@ -96,6 +155,16 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.ebpfFailedCounter)
 	prometheus.Unregister(p.ruleCounter)
 	prometheus.Unregister(p.alertCounter)
+
+	// Unregister program ID metrics
+	prometheus.Unregister(p.programRuntimeGauge)
+	prometheus.Unregister(p.programRunCountGauge)
+	prometheus.Unregister(p.programTotalRuntimeGauge)
+	prometheus.Unregister(p.programTotalRunCountGauge)
+	prometheus.Unregister(p.programMapMemoryGauge)
+	prometheus.Unregister(p.programMapCountGauge)
+	prometheus.Unregister(p.programCpuUsageGauge)
+	prometheus.Unregister(p.programPerCpuUsageGauge)
 }
 
 func (p *PrometheusMetric) ReportEvent(eventType utils.EventType) {
@@ -127,4 +196,36 @@ func (p *PrometheusMetric) ReportRuleProcessed(ruleID string) {
 
 func (p *PrometheusMetric) ReportRuleAlert(ruleID string) {
 	p.alertCounter.With(prometheus.Labels{prometheusRuleIdLabel: ruleID}).Inc()
+}
+
+func (p *PrometheusMetric) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
+	logger.L().Debug("reporting ebpf stats", helpers.Int("stats_count", len(stats.Stats)))
+
+	for _, stat := range stats.Stats {
+		programIDStr := strconv.FormatUint(uint64(stat.ProgramID), 10)
+
+		labels := prometheus.Labels{
+			programIdLabel:   programIDStr,
+			programTypeLabel: stat.Type,
+			programNameLabel: stat.Name,
+			processId:        "unknown",
+			processName:      "unknown",
+		}
+
+		if len(stat.Processes) > 0 {
+			pid := stat.Processes[0].Pid
+			pname := stat.Processes[0].Comm
+			labels[processId] = strconv.Itoa(int(pid))
+			labels[processName] = pname
+		}
+
+		p.programRuntimeGauge.With(labels).Set(float64(stat.CurrentRuntime))
+		p.programRunCountGauge.With(labels).Set(float64(stat.CurrentRunCount))
+		p.programTotalRuntimeGauge.With(labels).Set(float64(stat.TotalRuntime))
+		p.programTotalRunCountGauge.With(labels).Set(float64(stat.TotalRunCount))
+		p.programMapMemoryGauge.With(labels).Set(float64(stat.MapMemory))
+		p.programMapCountGauge.With(labels).Set(float64(stat.MapCount))
+		p.programCpuUsageGauge.With(labels).Set(stat.TotalCpuUsage)
+		p.programPerCpuUsageGauge.With(labels).Set(stat.PerCpuUsage)
+	}
 }

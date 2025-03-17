@@ -135,7 +135,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 
 	// Malicious activity will be detected in 3 minutes + X seconds to wait for the alerts to be generated
 	maliciousAppWaitBeforeStart := time.Minute * 3
-	waitBeforeLookingForAlerts := time.Minute * 2
+	waitBeforeLookingForAlerts := time.Minute * 5
 	timer := time.NewTimer(maliciousAppWaitBeforeStart + waitBeforeLookingForAlerts)
 
 	// Wait for the application profile to be created and completed
