@@ -171,6 +171,11 @@ func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *container
 	return &watchedContainer, nil
 }
 
+func blockingCallback(event containercollection.PubSubEvent) {
+	logger.L().Debug("blockingCallback - received container event", helpers.String("event", fmt.Sprintf("%+v", event)), helpers.String("container", fmt.Sprintf("%+v", event.Container)))
+	time.Sleep(1 * time.Hour)
+}
+
 func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) error {
 	ch.ctx = ctx
 
@@ -190,6 +195,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.sbomManager.ContainerCallback,
 		ch.processManager.ContainerCallback,
 		ch.dnsManager.ContainerCallback,
+		//blockingCallback,
 	}
 
 	for receiver := range ch.thirdPartyContainerReceivers.Iter() {
