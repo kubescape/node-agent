@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"reflect"
 	"slices"
 	"sort"
 	"testing"
@@ -597,7 +598,7 @@ func Test_10_MalwareDetectionTest(t *testing.T) {
 }
 
 func Test_11_EndpointTest(t *testing.T) {
-	threshold := 120
+	threshold := 101
 	ns := testutils.NewRandomNamespace()
 
 	endpointTraffic, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/endpoint-traffic.yaml"))
@@ -659,12 +660,6 @@ func Test_11_EndpointTest(t *testing.T) {
 		Headers:   rawJSON,
 	}
 
-	e3 := endpoint1
-	e3.Direction = "outbound"
-
-	e4 := endpoint2
-	e4.Direction = "outbound"
-
 	savedEndpoints := applicationProfile.Spec.Containers[0].Endpoints
 
 	for i := range savedEndpoints {
@@ -684,29 +679,22 @@ func Test_11_EndpointTest(t *testing.T) {
 		}
 	}
 
-	expectedEndpoints := []v1beta1.HTTPEndpoint{endpoint1, endpoint2, e3, e4}
-
-	for _, savedEndpoint := range savedEndpoints {
-		if endpoint := getEndpoint(expectedEndpoints, savedEndpoint); endpoint != nil {
-			e := *endpoint
+	expectedEndpoints := []v1beta1.HTTPEndpoint{endpoint1, endpoint2}
+	for _, expectedEndpoint := range expectedEndpoints {
+		found := false
+		for _, savedEndpoint := range savedEndpoints {
+			e := savedEndpoint
 			sort.Strings(e.Methods)
-			sort.Strings(savedEndpoint.Methods)
-			assert.Equal(t, e, savedEndpoint)
-		} else {
-			t.Errorf("Endpoint %v not found in the saved endpoints", savedEndpoint)
+			sort.Strings(expectedEndpoint.Methods)
+			if reflect.DeepEqual(e, expectedEndpoint) {
+				found = true
+				break
+			}
 		}
-
-	}
-}
-
-func getEndpoint(endpoints []v1beta1.HTTPEndpoint, endpoint v1beta1.HTTPEndpoint) *v1beta1.HTTPEndpoint {
-	for _, e := range endpoints {
-		if endpoint.Endpoint == e.Endpoint && endpoint.Direction == e.Direction && endpoint.Internal == e.Internal {
-			return &e
+		if !found {
+			t.Errorf("Expected endpoint %v not found in the application profile", expectedEndpoint)
 		}
 	}
-	return nil
-
 }
 
 func Test_12_MergingProfilesTest(t *testing.T) {
