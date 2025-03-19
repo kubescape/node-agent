@@ -23,7 +23,6 @@ require (
 	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
 	github.com/evanphx/json-patch v5.9.0+incompatible
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
-	github.com/gammazero/workerpool v1.1.3
 	github.com/go-openapi/strfmt v0.23.0
 	github.com/google/go-containerregistry v0.20.3
 	github.com/google/uuid v1.6.0
@@ -36,6 +35,7 @@ require (
 	github.com/kubescape/go-logger v0.0.23
 	github.com/kubescape/k8s-interface v0.0.195
 	github.com/kubescape/storage v0.0.179
+	github.com/kubescape/workerpool v0.0.0-20250508133046-be5bcbd29751
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
@@ -155,7 +155,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.7 // indirect
-	github.com/gammazero/deque v0.2.0 // indirect
+	github.com/gammazero/deque v1.0.0 // indirect
 	github.com/github/go-spdx/v2 v2.3.2 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-fonts/liberation v0.3.2 // indirect

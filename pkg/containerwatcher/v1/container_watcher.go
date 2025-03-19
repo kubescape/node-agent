@@ -7,7 +7,6 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/gammazero/workerpool"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
@@ -59,6 +58,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/workerpool"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -544,7 +544,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		thirdPartyContainerReceivers: mapset.NewSet[containerwatcher.ContainerReceiver](),
 		thirdPartyEnricher:           thirdPartyEnricher,
 		processManager:               processManager,
-		pool:                         workerpool.New(cfg.WorkerPoolSize),
+		pool:                         workerpool.NewWithMaxRunningTime(cfg.WorkerPoolSize, 30*time.Second),
 		objectCache:                  objectCache,
 	}, nil
 }
