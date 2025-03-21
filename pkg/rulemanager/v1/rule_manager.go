@@ -308,12 +308,15 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	err = backoff.Retry(func() error {
 		tree, err := rm.processManager.GetProcessTreeForPID(
 			ruleFailure.GetRuntimeProcessDetails().ContainerID,
-			int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID),
+			armotypes.CommPID{
+				Comm: ruleFailure.GetRuntimeProcessDetails().ProcessTree.Comm,
+				PID:  ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID,
+			},
 		)
 		if err != nil {
 			return err
 		}
-		runtimeProcessDetails.ProcessTree = tree
+		runtimeProcessDetails.ProcessTree = *tree
 		return nil
 	}, backoff.NewExponentialBackOff(
 		backoff.WithInitialInterval(50*time.Millisecond),
