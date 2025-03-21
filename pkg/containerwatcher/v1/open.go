@@ -7,6 +7,7 @@ import (
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 func (ch *IGContainerWatcher) openEventCallback(event *traceropentype.Event) {
@@ -14,11 +15,9 @@ func (ch *IGContainerWatcher) openEventCallback(event *traceropentype.Event) {
 		return
 	}
 
-	openEvent := &events.OpenEvent{Event: *event}
-	ch.enrichEvent(openEvent, []uint64{SYS_OPEN, SYS_OPENAT})
-
 	if event.Err > -1 && event.FullPath != "" {
-		ch.openWorkerChan <- openEvent
+		openEvent := &events.OpenEvent{Event: *event}
+		ch.handleEvent(openEvent, []uint64{SYS_OPEN, SYS_OPENAT}, ch.openEnricherCallback)
 	}
 }
 
@@ -55,4 +54,8 @@ func (ch *IGContainerWatcher) stopOpenTracing() error {
 	}
 	ch.openTracer.Stop()
 	return nil
+}
+
+func (ch *IGContainerWatcher) openEnricherCallback(event utils.EnrichEvent) {
+	ch.openWorkerChan <- event.(*events.OpenEvent)
 }

@@ -136,7 +136,7 @@ type IGContainerWatcher struct {
 	// Third party container receivers
 	thirdPartyContainerReceivers mapset.Set[containerwatcher.ContainerReceiver]
 	// Third party event enrichers
-	thirdPartyEnricher containerwatcher.ThirdPartyEnricher
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 
 	// Worker pools
 	capabilitiesWorkerPool *ants.PoolWithFunc
@@ -187,7 +187,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 	malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient,
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig,
 	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
-	thirdPartyEnricher containerwatcher.ThirdPartyEnricher, processManager processmanager.ProcessManagerClient,
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher, processManager processmanager.ProcessManagerClient,
 	clusterName string, objectCache objectcache.ObjectCache) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
 
 	containerCollection := &containercollection.ContainerCollection{}
@@ -618,9 +618,11 @@ func (ch *IGContainerWatcher) Ready() bool {
 	return ch.running
 }
 
-func (ch *IGContainerWatcher) enrichEvent(event utils.EnrichEvent, syscalls []uint64) {
+func (ch *IGContainerWatcher) handleEvent(event utils.EnrichEvent, syscalls []uint64, callback containerwatcher.ResultCallback) {
 	if ch.thirdPartyEnricher != nil && !reflect.ValueOf(ch.thirdPartyEnricher).IsNil() {
-		ch.thirdPartyEnricher.Enrich(event, syscalls)
+		ch.thirdPartyEnricher.SubmitEnrichmentTask(event, syscalls, callback)
+	} else {
+		callback(event)
 	}
 }
 
