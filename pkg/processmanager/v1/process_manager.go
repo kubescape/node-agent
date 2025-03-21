@@ -120,7 +120,7 @@ func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		containerPID := uint32(notif.Container.ContainerPid())
+		containerPID := notif.Container.ContainerPid()
 		if process, err := p.getProcessFromProc(int(containerPID)); err == nil {
 			shimPID := process.PPID
 			p.containerIdToShimPid.Set(containerID, shimPID)
@@ -145,13 +145,15 @@ func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent
 func (p *ProcessManager) removeProcessesUnderShim(shimPID uint32) {
 	var pidsToRemove []uint32
 
+	// CAREFUL this is locking the map, do not call other methods that lock the map
+	// TODO refactor to use DeleteFunc instead
 	p.processTree.Range(func(pid uint32, process apitypes.Process) bool {
 		currentPID := pid
 		visited := make(map[uint32]bool)
 
 		for currentPID != 0 && !visited[currentPID] {
 			visited[currentPID] = true
-			if proc, exists := p.processTree.Load(currentPID); exists {
+			if proc, exists := p.processTree.Load(currentPID); exists { // FIXME the map is already locked by Range
 				if proc.PPID == shimPID {
 					pidsToRemove = append(pidsToRemove, pid)
 					break
@@ -248,15 +250,15 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid int) (apit
 	}
 
 	targetPID := uint32(pid)
-	if !p.processTree.Has(targetPID) {
+	result, exists := p.processTree.Load(targetPID)
+	if !exists {
 		process, err := p.getProcessFromProc(pid)
 		if err != nil {
 			return apitypes.Process{}, fmt.Errorf("process %d not found: %v", pid, err)
 		}
 		p.addProcess(process)
+		result = process
 	}
-
-	result := p.processTree.Get(targetPID)
 	currentPID := result.PPID
 	seen := make(map[uint32]bool)
 
@@ -266,8 +268,7 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid int) (apit
 		}
 		seen[currentPID] = true
 
-		if p.processTree.Has(currentPID) {
-			parent := p.processTree.Get(currentPID)
+		if parent, exists := p.processTree.Load(currentPID); exists {
 			parentCopy := parent
 			parentCopy.Children = []apitypes.Process{result}
 			result = parentCopy
@@ -304,10 +305,10 @@ func (p *ProcessManager) resolveRuncProcess(process apitypes.Process) (apitypes.
 			return fmt.Errorf("runc process not resolved yet")
 		}
 
-		childerns := process.Children
+		children := process.Children
 		upperLayer := process.UpperLayer
 		process = resolvedProcess
-		process.Children = childerns
+		process.Children = children
 		process.UpperLayer = upperLayer
 
 		// Update the process in the tree
@@ -340,8 +341,8 @@ func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sE
 	}
 
 	process := apitypes.Process{
-		PID:        uint32(execEvent.Pid),
-		PPID:       uint32(execEvent.Ppid),
+		PID:        execEvent.Pid,
+		PPID:       execEvent.Ppid,
 		Comm:       execEvent.Comm,
 		Uid:        &execEvent.Uid,
 		Gid:        &execEvent.Gid,
@@ -379,6 +380,7 @@ func (p *ProcessManager) startCleanupRoutine(ctx context.Context) {
 // process in the tree is still alive in the system.
 func (p *ProcessManager) cleanup() {
 	deadPids := make(map[uint32]bool)
+	// CAREFUL this is locking the map, do not call other methods that lock the map
 	p.processTree.Range(func(pid uint32, _ apitypes.Process) bool {
 		if !isProcessAlive(int(pid)) {
 			deadPids[pid] = true
@@ -408,12 +410,9 @@ func getProcessFromProc(pid int) (apitypes.Process, error) {
 
 	var uid, gid uint32
 	if status, err := proc.NewStatus(); err == nil {
-		if len(status.UIDs) > 1 {
-			uid = uint32(status.UIDs[1])
-		}
-		if len(status.GIDs) > 1 {
-			gid = uint32(status.GIDs[1])
-		}
+		// UIDs and GIDs have a fixed length of 4 elements
+		uid = uint32(status.UIDs[1])
+		gid = uint32(status.GIDs[1])
 	}
 
 	cmdline, _ := proc.CmdLine()
