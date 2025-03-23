@@ -9,6 +9,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
+type ResultCallback func(utils.EnrichEvent)
+
 type ContainerWatcher interface {
 	Ready() bool
 	Start(ctx context.Context) error
@@ -37,6 +39,6 @@ type ContainerReceiver interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
 }
 
-type ThirdPartyEnricher interface {
-	Enrich(event utils.EnrichEvent, syscall []uint64)
+type TaskBasedEnricher interface {
+	SubmitEnrichmentTask(event utils.EnrichEvent, syscalls []uint64, callback ResultCallback)
 }

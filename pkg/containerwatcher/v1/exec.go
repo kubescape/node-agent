@@ -7,6 +7,7 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 func (ch *IGContainerWatcher) execEventCallback(event *tracerexectype.Event) {
@@ -16,8 +17,7 @@ func (ch *IGContainerWatcher) execEventCallback(event *tracerexectype.Event) {
 
 	if event.Retval > -1 && event.Comm != "" {
 		execEvent := &events.ExecEvent{Event: *event}
-		ch.enrichEvent(execEvent, []uint64{SYS_FORK})
-		ch.execWorkerChan <- execEvent
+		ch.handleEvent(execEvent, []uint64{SYS_FORK}, ch.execEnricherCallback)
 	}
 }
 
@@ -54,4 +54,8 @@ func (ch *IGContainerWatcher) stopExecTracing() error {
 	}
 	ch.execTracer.Stop()
 	return nil
+}
+
+func (ch *IGContainerWatcher) execEnricherCallback(event utils.EnrichEvent) {
+	ch.execWorkerChan <- event.(*events.ExecEvent)
 }
