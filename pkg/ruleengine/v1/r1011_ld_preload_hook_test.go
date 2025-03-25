@@ -27,6 +27,11 @@ func TestR1011LdPreloadHook(t *testing.T) {
 				Containers: []v1beta1.ApplicationProfileContainer{
 					{
 						Name: "test",
+						PolicyByRuleId: map[string]v1beta1.RulePolicy{
+							R1011ID: {
+								AllowedProcesses: []string{"x"},
+							},
+						},
 					},
 				},
 			},

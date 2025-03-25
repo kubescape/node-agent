@@ -169,6 +169,11 @@ func IsAllowed(event *eventtypes.Event, objCache objectcache.ObjectCache, proces
 		return false, err
 	}
 
+	// rule policy does not exists, allowed by default
+	if _, ok := appProfile.PolicyByRuleId[ruleId]; !ok {
+		return true, nil
+	}
+
 	if policy, ok := appProfile.PolicyByRuleId[ruleId]; ok {
 		if policy.AllowedContainer || slices.Contains(policy.AllowedProcesses, process) {
 			logger.L().Debug("isAllowed - process is allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
