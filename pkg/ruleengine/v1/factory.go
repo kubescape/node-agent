@@ -39,7 +39,6 @@ func NewRuleCreator() *RuleCreatorImpl {
 			R1011LdPreloadHookRuleDescriptor,
 			R1012HardlinkCreatedOverSensitiveFileRuleDescriptor,
 			R1015MaliciousPtraceUsageRuleDescriptor,
-			R1030UnexpectedIouringOperationRuleDescriptor,
 		},
 	}
 }
