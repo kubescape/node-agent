@@ -220,8 +220,8 @@ github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e/go.mod h1:nSuG5e5P
 github.com/chzyer/readline v1.5.1/go.mod h1:Eh+b79XXUwfKfcPLepksvw2tcLE/Ct21YObkaSkeBlk=
 github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1/go.mod h1:Q3SI9o4m/ZMnBNeIyt5eFwwo7qiLfzFZmjNmxjkiQlU=
 github.com/chzyer/test v1.0.0/go.mod h1:2JlltgoNkt4TW/z9V/IzDdFaMTM2JPIi26O1pF38GC8=
-github.com/cilium/cilium v1.16.6 h1:KRQn5knO48ERxB6SusQo02nYmE0NO0qiLlvqhwBTXbI=
-github.com/cilium/cilium v1.16.6/go.mod h1:NnDWQiYmPef24+pX2U/V85uL8eUTJSFUUjMEy41lGPA=
+github.com/cilium/cilium v1.16.8 h1:1WXUifatYSpSz1OEn4Fh7BOra6R9wuJOXBp2AVOMqCw=
+github.com/cilium/cilium v1.16.8/go.mod h1:sMtwt0KtKFetmeEAB8Z/Wj3WwaFdkRDiqxa0sqtbK3g=
 github.com/cilium/ebpf v0.17.3 h1:FnP4r16PWYSE4ux6zN+//jMcW4nMVRvuTLVTvCjyyjg=
 github.com/cilium/ebpf v0.17.3/go.mod h1:G5EDHij8yiLzaqn0WjyfJHvRa+3aDlReIaLVRMvOyJk=
 github.com/circonus-labs/circonus-gometrics v2.3.1+incompatible/go.mod h1:nmEj6Dob7S7YxXgwXpfOuvO54S+tGdZdw9fuRZt25Ag=
