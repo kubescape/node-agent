@@ -60,6 +60,10 @@ func (ch *IGContainerWatcher) stopIouringTracing() error {
 	if err := ch.tracerCollection.RemoveTracer(iouringTraceName); err != nil {
 		return fmt.Errorf("removing tracer: %w", err)
 	}
-	ch.iouringTracer.Stop()
+
+	if ch.iouringTracer != nil {
+		ch.iouringTracer.Stop()
+	}
+
 	return nil
 }
