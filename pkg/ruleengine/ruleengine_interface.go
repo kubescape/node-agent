@@ -105,6 +105,8 @@ type RuleFailure interface {
 	GetCloudServices() []string
 	// Get Http Details
 	GetHttpRuleAlert() apitypes.HttpRuleAlert
+	// Get Alert Platform
+	GetAlertPlatform() apitypes.AlertSourcePlatform
 	// Get Extra
 	GetExtra() interface{}
 
@@ -122,4 +124,6 @@ type RuleFailure interface {
 	SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails)
 	// Set Cloud Services
 	SetCloudServices(cloudServices []string)
+	// Set Alert Platform
+	SetAlertPlatform(alertPlatform apitypes.AlertSourcePlatform)
 }
