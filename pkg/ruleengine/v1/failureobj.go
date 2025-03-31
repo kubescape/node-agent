@@ -13,6 +13,7 @@ var _ ruleengine.RuleFailure = (*GenericRuleFailure)(nil)
 type GenericRuleFailure struct {
 	BaseRuntimeAlert       apitypes.BaseRuntimeAlert
 	AlertType              apitypes.AlertType
+	AlertPlatform          apitypes.AlertSourcePlatform
 	RuntimeProcessDetails  apitypes.ProcessTree
 	TriggerEvent           igtypes.Event
 	RuleAlert              apitypes.RuleAlert
@@ -63,6 +64,10 @@ func (rule *GenericRuleFailure) GetAlertType() apitypes.AlertType {
 	return rule.AlertType
 }
 
+func (rule *GenericRuleFailure) GetAlertPlatform() apitypes.AlertSourcePlatform {
+	return rule.AlertPlatform
+}
+
 func (rule *GenericRuleFailure) SetCloudServices(cloudServices []string) {
 	rule.CloudServices = cloudServices
 }
@@ -96,4 +101,8 @@ func (rule *GenericRuleFailure) SetWorkloadDetails(workloadDetails string) {
 	rule.RuntimeAlertK8sDetails.WorkloadKind = wlid.GetKindFromWlid(workloadDetails)
 	rule.RuntimeAlertK8sDetails.WorkloadNamespace = wlid.GetNamespaceFromWlid(workloadDetails)
 	rule.RuntimeAlertK8sDetails.WorkloadName = wlid.GetNameFromWlid(workloadDetails)
+}
+
+func (rule *GenericRuleFailure) SetAlertPlatform(alertPlatform apitypes.AlertSourcePlatform) {
+	rule.AlertPlatform = alertPlatform
 }

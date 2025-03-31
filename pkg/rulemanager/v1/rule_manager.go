@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/cenkalti/backoff/v4"
 	backoffv5 "github.com/cenkalti/backoff/v5"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -261,6 +262,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	var err error
 	var path string
 	var hostPath string
+	ruleFailure.SetAlertPlatform(armotypes.AlertSourcePlatformK8s)
 	if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path == "" {
 		path, err = utils.GetPathFromPid(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID)
 	}

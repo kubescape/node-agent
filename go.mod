@@ -6,7 +6,7 @@ require (
 	github.com/DmitriyVTitov/size v1.5.0
 	github.com/anchore/syft v1.18.1
 	github.com/aquilax/truncate v1.0.0
-	github.com/armosec/armoapi-go v0.0.527
+	github.com/armosec/armoapi-go v0.0.548
 	github.com/armosec/utils-k8s-go v0.0.30
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cenkalti/backoff/v4 v4.3.0
