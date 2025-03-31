@@ -311,7 +311,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 		if err != nil {
 			return err
 		}
-		runtimeProcessDetails.ProcessTree = tree
+		runtimeProcessDetails.ProcessTree = *tree
 		return nil
 	}, backoff.NewExponentialBackOff(
 		backoff.WithInitialInterval(50*time.Millisecond),
