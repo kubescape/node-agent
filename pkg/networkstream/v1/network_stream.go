@@ -14,7 +14,6 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v5"
-	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
@@ -25,7 +24,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type NetworkStream struct {
@@ -38,8 +36,6 @@ type NetworkStream struct {
 	k8sInventory         common.K8sInventoryCache
 	k8sClient            k8sclient.K8sClientInterface
 
-	// Cache for owner references to avoid repeated lookups
-	ownerCache maps.SafeMap[string, *metav1.OwnerReference]
 	nodeName   string
 	httpClient *http.Client
 }
@@ -87,8 +83,6 @@ func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent
 		ns.eventsStorageMutex.Lock()
 		delete(ns.networkEventsStorage.Containers, notif.Container.Runtime.ContainerID)
 		ns.eventsStorageMutex.Unlock()
-		// Invalidate the cache for the owner reference (it's okay if there are pods with multiple containers, we will just do the lookup again).
-		ns.invalidateOwnerCache(notif.Container.K8s.Namespace, notif.Container.K8s.PodName)
 	}
 }
 
@@ -228,32 +222,19 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 			networkEvent.PodName = slimPod.Name
 			networkEvent.PodNamespace = slimPod.Namespace
 
-			// Use the cache to get the top owner reference
-			cacheKey := ns.getPodCacheKey(slimPod.Namespace, slimPod.Name)
-			topOwner := ns.getCachedOwnerReference(cacheKey)
+			workloadKind := ""
+			workloadName := ""
 
-			if topOwner == nil {
-				// Cache miss - look up the owner and cache the result
-				var err error
-				topOwner, err = ns.getTopOwnerReference(slimPod.Namespace, slimPod.Name, slimPod.OwnerReferences)
-				if err != nil {
-					logger.L().Error("Failed to get top owner reference",
-						helpers.Error(err),
-						helpers.String("pod", slimPod.Name),
-						helpers.String("namespace", slimPod.Namespace))
-				} else if topOwner != nil {
-					// Cache the result for future lookups
-					ns.cacheOwnerReference(cacheKey, topOwner)
+			if len(slimPod.OwnerReferences) > 0 {
+				workloadKind = slimPod.OwnerReferences[0].Kind
+				if utils.WorkloadKind(workloadKind) == utils.ReplicaSet {
+					workloadKind = string(utils.Deployment)
 				}
+				workloadName = utils.ExtractWorkloadName(slimPod.Name, utils.WorkloadKind(workloadKind))
 			}
 
-			if topOwner != nil {
-				networkEvent.WorkloadName = topOwner.Name
-				networkEvent.WorkloadKind = topOwner.Kind
-				logger.L().Debug("NetworkStream - found top owner reference", helpers.String("workload name", topOwner.Name),
-					helpers.String("workload kind", topOwner.Kind), helpers.String("pod name", slimPod.Name),
-					helpers.String("pod namespace", slimPod.Namespace))
-			}
+			networkEvent.WorkloadName = workloadName
+			networkEvent.WorkloadKind = workloadKind
 		}
 	} else if apitypes.EndpointKind(event.DstEndpoint.Kind) == apitypes.EndpointKindService {
 		slimService := ns.k8sInventory.GetSvcByIp(event.DstEndpoint.Addr)
@@ -266,30 +247,6 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 	networkEvent.Kind = apitypes.EndpointKind(event.DstEndpoint.Kind)
 
 	return networkEvent
-}
-
-// Helper function to generate a cache key for a pod
-func (ns *NetworkStream) getPodCacheKey(namespace, name string) string {
-	return namespace + "/" + name
-}
-
-// Get an owner reference from the cache
-func (ns *NetworkStream) getCachedOwnerReference(key string) *metav1.OwnerReference {
-	if owner, exists := ns.ownerCache.Load(key); exists {
-		return owner
-	}
-	return nil
-}
-
-// Store an owner reference in the cache
-func (ns *NetworkStream) cacheOwnerReference(key string, owner *metav1.OwnerReference) {
-	ns.ownerCache.Set(key, owner)
-}
-
-// Invalidate cache entries when needed
-func (ns *NetworkStream) invalidateOwnerCache(namespace, podName string) {
-	key := ns.getPodCacheKey(namespace, podName)
-	ns.ownerCache.Delete(key)
 }
 
 func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkTrafficEvents) error {
@@ -333,4 +290,8 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkTraffic
 		return fmt.Errorf("clear response body: %w", err)
 	}
 	return nil
+}
+
+func getNetworkEndpointIdentifier(event *tracernetworktype.Event) string {
+	return fmt.Sprintf("%s/%d/%s", event.DstEndpoint.Addr, event.Port, event.Proto)
 }
