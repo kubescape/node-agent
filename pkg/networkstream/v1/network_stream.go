@@ -14,6 +14,7 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v5"
+	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
@@ -29,7 +30,7 @@ import (
 
 type NetworkStream struct {
 	networkEventsStorage apitypes.NetworkTrafficEvents
-	containerMapMutex    sync.RWMutex // Mutex to protect access to networkEventsStorage.Containers
+	eventsStorageMutex   sync.RWMutex // Mutex to protect access to networkEventsStorage.Containers
 	cfg                  config.Config
 	ctx                  context.Context
 	k8sObjectCache       objectcache.K8sObjectCache
@@ -38,10 +39,9 @@ type NetworkStream struct {
 	k8sClient            k8sclient.K8sClientInterface
 
 	// Cache for owner references to avoid repeated lookups
-	ownerCache   map[string]*metav1.OwnerReference
-	ownerCacheMu sync.RWMutex
-	nodeName     string
-	httpClient   *http.Client
+	ownerCache maps.SafeMap[string, *metav1.OwnerReference]
+	nodeName   string
+	httpClient *http.Client
 }
 
 func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, k8sClient k8sclient.K8sClientInterface, nodeName string) (*NetworkStream, error) {
@@ -61,14 +61,17 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 		dnsResolver:    dnsResolver,
 		k8sInventory:   k8sInventory,
 		k8sClient:      k8sClient,
-		ownerCache:     make(map[string]*metav1.OwnerReference),
+		httpClient: &http.Client{
+			Timeout: time.Duration(cfg.Exporters.HTTPExporterConfig.TimeoutSeconds) * time.Second,
+		},
+		nodeName: nodeName,
 	}, nil
 }
 
 func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		ns.containerMapMutex.Lock()
+		ns.eventsStorageMutex.Lock()
 		ns.networkEventsStorage.Containers[notif.Container.Runtime.ContainerID] = apitypes.NetworkTrafficEventContainer{
 			ContainerName: notif.Container.Runtime.ContainerName,
 			ContainerID:   notif.Container.Runtime.ContainerID,
@@ -77,13 +80,13 @@ func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent
 			Inbound:       make(map[string]apitypes.NetworkTrafficEvent),
 			Outbound:      make(map[string]apitypes.NetworkTrafficEvent),
 		}
-		ns.containerMapMutex.Unlock()
+		ns.eventsStorageMutex.Unlock()
 
 		go ns.enrichWorkloadDetails(notif.Container.Runtime.ContainerID)
 	case containercollection.EventTypeRemoveContainer:
-		ns.containerMapMutex.Lock()
+		ns.eventsStorageMutex.Lock()
 		delete(ns.networkEventsStorage.Containers, notif.Container.Runtime.ContainerID)
-		ns.containerMapMutex.Unlock()
+		ns.eventsStorageMutex.Unlock()
 		// Invalidate the cache for the owner reference (it's okay if there are pods with multiple containers, we will just do the lookup again).
 		ns.invalidateOwnerCache(notif.Container.K8s.Namespace, notif.Container.K8s.PodName)
 	}
@@ -102,10 +105,10 @@ func (ns *NetworkStream) enrichWorkloadDetails(containerID string) {
 		return
 	}
 
-	ns.containerMapMutex.Lock()
+	ns.eventsStorageMutex.Lock()
 	container, exists := ns.networkEventsStorage.Containers[containerID]
 	if !exists {
-		ns.containerMapMutex.Unlock()
+		ns.eventsStorageMutex.Unlock()
 		logger.L().Error("NetworkStream - container no longer exists", helpers.String("container ID", containerID))
 		return
 	}
@@ -113,7 +116,7 @@ func (ns *NetworkStream) enrichWorkloadDetails(containerID string) {
 	container.WorkloadName = wlid.GetNameFromWlid(sharedData.Wlid)
 	container.WorkloadKind = wlid.GetKindFromWlid(sharedData.Wlid)
 	ns.networkEventsStorage.Containers[containerID] = container
-	ns.containerMapMutex.Unlock()
+	ns.eventsStorageMutex.Unlock()
 }
 
 func (ns *NetworkStream) waitForSharedContainerData(containerID string) (*utils.WatchedContainerData, error) {
@@ -136,7 +139,7 @@ func (ns *NetworkStream) Start() {
 				logger.L().Info("NetworkStream - stopping")
 				return
 			case <-ticker.C:
-				ns.containerMapMutex.Lock()
+				ns.eventsStorageMutex.Lock()
 				if err := ns.sendNetworkEvent(&ns.networkEventsStorage); err != nil {
 					logger.L().Error("NetworkStream - failed to send network events", helpers.Error(err))
 				}
@@ -147,7 +150,7 @@ func (ns *NetworkStream) Start() {
 					container.Outbound = make(map[string]apitypes.NetworkTrafficEvent)
 					ns.networkEventsStorage.Containers[containerID] = container
 				}
-				ns.containerMapMutex.Unlock()
+				ns.eventsStorageMutex.Unlock()
 				logger.L().Debug("NetworkStream - sent network events")
 			}
 		}
@@ -170,8 +173,8 @@ func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sE
 func (ns *NetworkStream) handleNetworkEvent(event *tracernetworktype.Event) {
 	endpointID := getNetworkEndpointIdentifier(event)
 
-	ns.containerMapMutex.Lock()
-	defer ns.containerMapMutex.Unlock()
+	ns.eventsStorageMutex.Lock()
+	defer ns.eventsStorageMutex.Unlock()
 
 	container, ok := ns.networkEventsStorage.Containers[event.Runtime.ContainerID]
 	if !ok {
@@ -247,7 +250,7 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 			if topOwner != nil {
 				networkEvent.WorkloadName = topOwner.Name
 				networkEvent.WorkloadKind = topOwner.Kind
-				logger.L().Info("NetworkStream - found top owner reference", helpers.String("workload name", topOwner.Name),
+				logger.L().Debug("NetworkStream - found top owner reference", helpers.String("workload name", topOwner.Name),
 					helpers.String("workload kind", topOwner.Kind), helpers.String("pod name", slimPod.Name),
 					helpers.String("pod namespace", slimPod.Namespace))
 			}
@@ -262,12 +265,6 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 
 	networkEvent.Kind = apitypes.EndpointKind(event.DstEndpoint.Kind)
 
-	logger.L().Info("NetworkStream", helpers.String("ip address", event.DstEndpoint.Addr),
-		helpers.String("port", fmt.Sprintf("%d", event.Port)),
-		helpers.String("protocol", event.Proto),
-		helpers.String("kind", string(networkEvent.Kind)),
-	)
-
 	return networkEvent
 }
 
@@ -278,10 +275,7 @@ func (ns *NetworkStream) getPodCacheKey(namespace, name string) string {
 
 // Get an owner reference from the cache
 func (ns *NetworkStream) getCachedOwnerReference(key string) *metav1.OwnerReference {
-	ns.ownerCacheMu.RLock()
-	defer ns.ownerCacheMu.RUnlock()
-
-	if owner, exists := ns.ownerCache[key]; exists {
+	if owner, exists := ns.ownerCache.Load(key); exists {
 		return owner
 	}
 	return nil
@@ -289,20 +283,13 @@ func (ns *NetworkStream) getCachedOwnerReference(key string) *metav1.OwnerRefere
 
 // Store an owner reference in the cache
 func (ns *NetworkStream) cacheOwnerReference(key string, owner *metav1.OwnerReference) {
-	ns.ownerCacheMu.Lock()
-	defer ns.ownerCacheMu.Unlock()
-
-	ns.ownerCache[key] = owner
+	ns.ownerCache.Set(key, owner)
 }
 
 // Invalidate cache entries when needed
 func (ns *NetworkStream) invalidateOwnerCache(namespace, podName string) {
 	key := ns.getPodCacheKey(namespace, podName)
-
-	ns.ownerCacheMu.Lock()
-	defer ns.ownerCacheMu.Unlock()
-
-	delete(ns.ownerCache, key)
+	ns.ownerCache.Delete(key)
 }
 
 func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkTrafficEvents) error {
