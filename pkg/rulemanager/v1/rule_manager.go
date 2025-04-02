@@ -429,7 +429,7 @@ func (rm *RuleManager) EvaluateRulesForEvent(eventType utils.EventType, event ut
 			continue
 		}
 
-		if rule.EvaluateRule(eventType, event, rm.objectCache.K8sObjectCache()) {
+		if ok, _ := rule.EvaluateRule(eventType, event, rm.objectCache.K8sObjectCache()); ok {
 			results = append(results, rule.ID())
 		}
 	}

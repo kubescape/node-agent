@@ -61,7 +61,7 @@ func (rule *R1011LdPreloadHook) DeleteRule() {
 }
 
 func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if !rule.EvaluateRule(eventType, event, objectCache.K8sObjectCache()) {
+	if ok, _ := rule.EvaluateRule(eventType, event, objectCache.K8sObjectCache()); !ok {
 		return nil
 	}
 
@@ -96,24 +96,24 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 	return nil
 }
 
-func (rule *R1011LdPreloadHook) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) bool {
+func (rule *R1011LdPreloadHook) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
 	switch eventType {
 	case utils.ExecveEventType:
 		execEvent, ok := event.(*events.ExecEvent)
 		if !ok {
-			return false
+			return false, nil
 		}
-		return rule.shouldAlertExec(execEvent, k8sObjCache)
+		return rule.shouldAlertExec(execEvent, k8sObjCache), nil
 
 	case utils.OpenEventType:
 		openEvent, ok := event.(*events.OpenEvent)
 		if !ok {
-			return false
+			return false, nil
 		}
-		return rule.shouldAlertOpen(openEvent)
+		return rule.shouldAlertOpen(openEvent), nil
 
 	default:
-		return false
+		return false, nil
 	}
 }
 

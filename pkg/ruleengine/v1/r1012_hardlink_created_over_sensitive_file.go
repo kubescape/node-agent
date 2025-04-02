@@ -84,7 +84,7 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 	} else {
 		k8sCache = objCache.K8sObjectCache()
 	}
-	if !rule.EvaluateRule(eventType, event, k8sCache) {
+	if ok, _ := rule.EvaluateRule(eventType, event, k8sCache); !ok {
 		return nil
 	}
 
@@ -132,22 +132,22 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 	}
 }
 
-func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) bool {
+func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.HardlinkEventType {
-		return false
+		return false, nil
 	}
 
 	hardlinkEvent, ok := event.(*tracerhardlinktype.Event)
 	if !ok {
-		return false
+		return false, nil
 	}
 
 	for _, path := range rule.additionalPaths {
 		if strings.HasPrefix(hardlinkEvent.OldPath, path) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func (rule *R1012HardlinkCreatedOverSensitiveFile) Requirements() ruleengine.RuleSpec {

@@ -53,6 +53,7 @@ type RuleCreator interface {
 	RegisterRule(rule RuleDescriptor)
 	CreateRulesByEventType(eventType utils.EventType) []RuleEvaluator
 	CreateAllRules() []RuleEvaluator
+	GetAllRuleIDs() []string
 }
 
 type RuleEvaluator interface {
@@ -76,7 +77,7 @@ type RuleEvaluator interface {
 }
 
 type RuleCondition interface {
-	EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) bool
+	EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{})
 	ID() string
 }
 

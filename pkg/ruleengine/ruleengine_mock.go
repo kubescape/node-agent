@@ -36,6 +36,10 @@ func (r *RuleCreatorMock) CreateAllRules() []RuleEvaluator {
 	return []RuleEvaluator{}
 }
 
+func (r *RuleCreatorMock) GetAllRuleIDs() []string {
+	return []string{}
+}
+
 var _ RuleEvaluator = (*RuleMock)(nil)
 
 type RuleMock struct {

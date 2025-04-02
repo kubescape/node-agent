@@ -21,16 +21,6 @@ import (
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
 
-func NewCacheMock(nodeName string) *RBCache {
-	return &RBCache{
-		nodeName:     nodeName,
-		allPods:      mapset.NewSet[string](),
-		k8sClient:    k8sinterface.NewKubernetesApiMock(),
-		ruleCreator:  &ruleengine.RuleCreatorMock{},
-		podToRBNames: maps.SafeMap[string, mapset.Set[string]]{},
-		rbNameToPods: maps.SafeMap[string, mapset.Set[string]]{},
-	}
-}
 func TestRuntimeObjAddHandler(t *testing.T) {
 	type rules struct {
 		ruleID string
