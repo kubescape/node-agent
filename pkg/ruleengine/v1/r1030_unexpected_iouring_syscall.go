@@ -64,7 +64,7 @@ func (rule *R1030UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 	} else {
 		k8sCache = objCache.K8sObjectCache()
 	}
-	if !rule.EvaluateRule(eventType, event, k8sCache) {
+	if ok, _ := rule.EvaluateRule(eventType, event, k8sCache); !ok {
 		return nil
 	}
 
@@ -118,18 +118,18 @@ func (rule *R1030UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 
 }
 
-func (rule *R1030UnexpectedIouringOperation) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) bool {
+func (rule *R1030UnexpectedIouringOperation) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.IoUringEventType {
-		return false
+		return false, nil
 	}
 
 	iouringEvent, ok := event.(*traceriouringtype.Event)
 	if !ok {
-		return ok
+		return false, nil
 	}
 
 	ok, _ = iouring.GetOpcodeName(uint8(iouringEvent.Opcode))
-	return ok
+	return ok, nil
 }
 
 func (rule *R1030UnexpectedIouringOperation) Requirements() ruleengine.RuleSpec {
