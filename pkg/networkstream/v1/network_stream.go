@@ -27,7 +27,7 @@ import (
 )
 
 type NetworkStream struct {
-	networkEventsStorage apitypes.NetworkTrafficEvents
+	networkEventsStorage apitypes.NetworkStream
 	eventsStorageMutex   sync.RWMutex // Mutex to protect access to networkEventsStorage.Containers
 	cfg                  config.Config
 	ctx                  context.Context
@@ -48,8 +48,8 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 	k8sInventory.Start() // We do not stop it here, as we need it to be running for the whole lifetime of the NetworkStream.
 
 	return &NetworkStream{
-		networkEventsStorage: apitypes.NetworkTrafficEvents{
-			Containers: make(map[string]apitypes.NetworkTrafficEventContainer),
+		networkEventsStorage: apitypes.NetworkStream{
+			Entities: make(map[string]apitypes.NetworkStreamEntity),
 		},
 		cfg:            cfg,
 		ctx:            ctx,
@@ -68,20 +68,23 @@ func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		ns.eventsStorageMutex.Lock()
-		ns.networkEventsStorage.Containers[notif.Container.Runtime.ContainerID] = apitypes.NetworkTrafficEventContainer{
-			ContainerName: notif.Container.Runtime.ContainerName,
-			ContainerID:   notif.Container.Runtime.ContainerID,
-			PodNamespace:  notif.Container.K8s.Namespace,
-			PodName:       notif.Container.K8s.PodName,
-			Inbound:       make(map[string]apitypes.NetworkTrafficEvent),
-			Outbound:      make(map[string]apitypes.NetworkTrafficEvent),
+		ns.networkEventsStorage.Entities[notif.Container.Runtime.ContainerID] = apitypes.NetworkStreamEntity{
+			Kind: apitypes.NetworkStreamEntityKindContainer,
+			NetworkStreamEntityContainer: apitypes.NetworkStreamEntityContainer{
+				ContainerName: notif.Container.Runtime.ContainerName,
+				ContainerID:   notif.Container.Runtime.ContainerID,
+				PodNamespace:  notif.Container.K8s.Namespace,
+				PodName:       notif.Container.K8s.PodName,
+			},
+			Inbound:  make(map[string]apitypes.NetworkStreamEvent),
+			Outbound: make(map[string]apitypes.NetworkStreamEvent),
 		}
 		ns.eventsStorageMutex.Unlock()
 
 		go ns.enrichWorkloadDetails(notif.Container.Runtime.ContainerID)
 	case containercollection.EventTypeRemoveContainer:
 		ns.eventsStorageMutex.Lock()
-		delete(ns.networkEventsStorage.Containers, notif.Container.Runtime.ContainerID)
+		delete(ns.networkEventsStorage.Entities, notif.Container.Runtime.ContainerID)
 		ns.eventsStorageMutex.Unlock()
 	}
 }
@@ -100,7 +103,7 @@ func (ns *NetworkStream) enrichWorkloadDetails(containerID string) {
 	}
 
 	ns.eventsStorageMutex.Lock()
-	container, exists := ns.networkEventsStorage.Containers[containerID]
+	container, exists := ns.networkEventsStorage.Entities[containerID]
 	if !exists {
 		ns.eventsStorageMutex.Unlock()
 		logger.L().Error("NetworkStream - container no longer exists", helpers.String("container ID", containerID))
@@ -109,7 +112,7 @@ func (ns *NetworkStream) enrichWorkloadDetails(containerID string) {
 
 	container.WorkloadName = wlid.GetNameFromWlid(sharedData.Wlid)
 	container.WorkloadKind = wlid.GetKindFromWlid(sharedData.Wlid)
-	ns.networkEventsStorage.Containers[containerID] = container
+	ns.networkEventsStorage.Entities[containerID] = container
 	ns.eventsStorageMutex.Unlock()
 }
 
@@ -138,11 +141,11 @@ func (ns *NetworkStream) Start() {
 					logger.L().Error("NetworkStream - failed to send network events", helpers.Error(err))
 				}
 				// Clear the storage
-				for containerID := range ns.networkEventsStorage.Containers {
-					container := ns.networkEventsStorage.Containers[containerID]
-					container.Inbound = make(map[string]apitypes.NetworkTrafficEvent)
-					container.Outbound = make(map[string]apitypes.NetworkTrafficEvent)
-					ns.networkEventsStorage.Containers[containerID] = container
+				for containerID := range ns.networkEventsStorage.Entities {
+					container := ns.networkEventsStorage.Entities[containerID]
+					container.Inbound = make(map[string]apitypes.NetworkStreamEvent)
+					container.Outbound = make(map[string]apitypes.NetworkStreamEvent)
+					ns.networkEventsStorage.Entities[containerID] = container
 				}
 				ns.eventsStorageMutex.Unlock()
 				logger.L().Debug("NetworkStream - sent network events")
@@ -170,7 +173,7 @@ func (ns *NetworkStream) handleNetworkEvent(event *tracernetworktype.Event) {
 	ns.eventsStorageMutex.Lock()
 	defer ns.eventsStorageMutex.Unlock()
 
-	container, ok := ns.networkEventsStorage.Containers[event.Runtime.ContainerID]
+	container, ok := ns.networkEventsStorage.Entities[event.Runtime.ContainerID]
 	if !ok {
 		logger.L().Error("NetworkStream - container not found", helpers.String("container ID", event.Runtime.ContainerID))
 		return
@@ -191,10 +194,10 @@ func (ns *NetworkStream) handleNetworkEvent(event *tracernetworktype.Event) {
 		networkEvent := ns.buildNetworkEvent(event)
 		container.Inbound[endpointID] = networkEvent
 	}
-	ns.networkEventsStorage.Containers[event.Runtime.ContainerID] = container
+	ns.networkEventsStorage.Entities[event.Runtime.ContainerID] = container
 }
 
-func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apitypes.NetworkTrafficEvent {
+func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apitypes.NetworkStreamEvent {
 	domain, ok := ns.dnsResolver.ResolveIPAddress(event.DstEndpoint.Addr)
 	if !ok {
 		// Try to resolve the domain name
@@ -208,12 +211,12 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 		}
 	}
 
-	networkEvent := apitypes.NetworkTrafficEvent{
+	networkEvent := apitypes.NetworkStreamEvent{
 		Timestamp: time.Unix(0, int64(event.Timestamp)),
 		IPAddress: event.DstEndpoint.Addr,
 		DNSName:   domain,
 		Port:      int32(event.Port),
-		Protocol:  apitypes.NetworkTrafficEventProtocol(event.Proto),
+		Protocol:  apitypes.NetworkStreamEventProtocol(event.Proto),
 	}
 
 	if apitypes.EndpointKind(event.DstEndpoint.Kind) == apitypes.EndpointKindPod {
@@ -249,9 +252,9 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 	return networkEvent
 }
 
-func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkTrafficEvents) error {
-	// create a GenericCRD with NetworkTrafficEvents as Spec
-	crd := apitypes.GenericCRD[apitypes.NetworkTrafficEvents]{
+func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream) error {
+	// create a GenericCRD with NetworkStream as Spec
+	crd := apitypes.GenericCRD[apitypes.NetworkStream]{
 		Kind:       "NetworkStream",
 		ApiVersion: "kubescape.io/v1",
 		Metadata: apitypes.Metadata{
