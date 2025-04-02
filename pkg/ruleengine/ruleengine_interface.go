@@ -53,6 +53,7 @@ type RuleCreator interface {
 	RegisterRule(rule RuleDescriptor)
 	CreateRulesByEventType(eventType utils.EventType) []RuleEvaluator
 	CreateAllRules() []RuleEvaluator
+	GetAllRuleIDs() []string
 }
 
 type RuleEvaluator interface {
