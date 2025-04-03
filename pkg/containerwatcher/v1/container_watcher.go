@@ -52,6 +52,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
+	"github.com/kubescape/node-agent/pkg/networkstream"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
@@ -108,6 +109,7 @@ type IGContainerWatcher struct {
 	ruleManager               rulemanager.RuleManagerClient
 	malwareManager            malwaremanager.MalwareManagerClient
 	sbomManager               sbommanager.SbomManagerClient
+	networkStreamClient       networkstream.NetworkStreamClient
 
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
@@ -188,7 +190,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig,
 	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher, processManager processmanager.ProcessManagerClient,
-	clusterName string, objectCache objectcache.ObjectCache) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
+	clusterName string, objectCache objectcache.ObjectCache, networkStreamClient networkstream.NetworkStreamClient) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
 
 	containerCollection := &containercollection.ContainerCollection{}
 
@@ -304,6 +306,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		metrics.ReportEvent(utils.NetworkEventType)
 		networkManagerClient.ReportNetworkEvent(k8sContainerID, event)
 		ruleManager.ReportEvent(utils.NetworkEventType, &event)
+		networkStreamClient.ReportEvent(utils.NetworkEventType, &event)
 
 		// Report network events to event receivers
 		reportEventToThirdPartyTracers(utils.NetworkEventType, &event, thirdPartyEventReceivers)
@@ -494,6 +497,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		ruleManager:               ruleManager,
 		malwareManager:            malwareManager,
 		sbomManager:               sbomManager,
+		networkStreamClient:       networkStreamClient,
 		// IG Collections
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,

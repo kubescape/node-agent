@@ -29,6 +29,7 @@ type Config struct {
 	EnableRuntimeDetection   bool                      `mapstructure:"runtimeDetectionEnabled"`
 	EnableHttpDetection      bool                      `mapstructure:"httpDetectionEnabled"`
 	EnableNetworkTracing     bool                      `mapstructure:"networkServiceEnabled"`
+	EnableNetworkStreaming   bool                      `mapstructure:"networkStreamingEnabled"`
 	EnableNodeProfile        bool                      `mapstructure:"nodeProfileServiceEnabled"`
 	EnableHostMalwareSensor  bool                      `mapstructure:"hostMalwareSensorEnabled"`
 	EnableHostNetworkSensor  bool                      `mapstructure:"hostNetworkSensorEnabled"`
@@ -61,6 +62,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("podName", os.Getenv(PodNameEnvVar))
 	viper.SetDefault("hostMalwareSensorEnabled", false)
 	viper.SetDefault("hostNetworkSensorEnabled", false)
+	viper.SetDefault("networkStreamingEnabled", false)
 	viper.SetDefault("kubernetesMode", true)
 
 	viper.AutomaticEnv()
