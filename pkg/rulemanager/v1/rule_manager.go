@@ -291,16 +291,6 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 		baseRuntimeAlert.Size = humanize.Bytes(uint64(size))
 	}
 
-	if size != 0 && size < maxFileSize && hostPath != "" {
-		if baseRuntimeAlert.MD5Hash == "" || baseRuntimeAlert.SHA1Hash == "" {
-			sha1hash, md5hash, err := utils.CalculateFileHashes(hostPath)
-			if err == nil {
-				baseRuntimeAlert.MD5Hash = md5hash
-				baseRuntimeAlert.SHA1Hash = sha1hash
-			}
-		}
-	}
-
 	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
 	runtimeProcessDetails := ruleFailure.GetRuntimeProcessDetails()
@@ -313,7 +303,13 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 		if err != nil {
 			return err
 		}
-		runtimeProcessDetails.ProcessTree = tree
+
+		if runtimeProcessDetails.ProcessTree.Cmdline == "" {
+			runtimeProcessDetails.ProcessTree = tree
+		} else {
+			runtimeProcessDetails.ProcessTree.Children = tree.Children
+		}
+
 		return nil
 	}, backoff.NewExponentialBackOff(
 		backoff.WithInitialInterval(50*time.Millisecond),
@@ -333,6 +329,16 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	}
 
 	ruleFailure.SetRuntimeProcessDetails(runtimeProcessDetails)
+
+	if size != 0 && size < maxFileSize && hostPath != "" {
+		if baseRuntimeAlert.MD5Hash == "" || baseRuntimeAlert.SHA1Hash == "" {
+			sha1hash, md5hash, err := utils.CalculateFileHashes(hostPath)
+			if err == nil {
+				baseRuntimeAlert.MD5Hash = md5hash
+				baseRuntimeAlert.SHA1Hash = sha1hash
+			}
+		}
+	}
 
 	// Enrich RuntimeAlertK8sDetails
 	runtimek8sdetails := ruleFailure.GetRuntimeAlertK8sDetails()
