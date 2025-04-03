@@ -270,7 +270,7 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream)
 	bodyReader := bytes.NewReader(bodyBytes)
 	// prepare the request
 	req, err := http.NewRequest(ns.cfg.Exporters.HTTPExporterConfig.Method,
-		ns.cfg.Exporters.HTTPExporterConfig.URL+"/v1/networkstream", bodyReader)
+		ns.cfg.Exporters.HTTPExporterConfig.URL+"/v1/networkstreams", bodyReader)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
