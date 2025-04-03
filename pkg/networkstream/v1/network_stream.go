@@ -238,6 +238,7 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 
 			networkEvent.WorkloadName = workloadName
 			networkEvent.WorkloadKind = workloadKind
+			networkEvent.WorkloadNamespace = slimPod.Namespace
 		}
 	} else if apitypes.EndpointKind(event.DstEndpoint.Kind) == apitypes.EndpointKindService {
 		slimService := ns.k8sInventory.GetSvcByIp(event.DstEndpoint.Addr)
@@ -253,6 +254,10 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 }
 
 func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream) error {
+	if isEmptyNetworkStream(networkStream) {
+		logger.L().Debug("no events in network stream, skipping")
+	}
+
 	// create a GenericCRD with NetworkStream as Spec
 	crd := apitypes.GenericCRD[apitypes.NetworkStream]{
 		Kind:       "NetworkStreams",
@@ -297,4 +302,16 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream)
 
 func getNetworkEndpointIdentifier(event *tracernetworktype.Event) string {
 	return fmt.Sprintf("%s/%d/%s", event.DstEndpoint.Addr, event.Port, event.Proto)
+}
+
+func isEmptyNetworkStream(networkStream *apitypes.NetworkStream) bool {
+	if len(networkStream.Entities) == 0 {
+		return true
+	}
+	for _, entity := range networkStream.Entities {
+		if len(entity.Inbound) > 0 || len(entity.Outbound) > 0 {
+			return false
+		}
+	}
+	return true
 }
