@@ -255,7 +255,7 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream) error {
 	// create a GenericCRD with NetworkStream as Spec
 	crd := apitypes.GenericCRD[apitypes.NetworkStream]{
-		Kind:       "NetworkStream",
+		Kind:       "NetworkStreams",
 		ApiVersion: "kubescape.io/v1",
 		Metadata: apitypes.Metadata{
 			Name: ns.nodeName,
