@@ -249,9 +249,15 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid int) (apit
 
 	targetPID := uint32(pid)
 	if !p.processTree.Has(targetPID) {
+		logger.L().Debug("ProcessManager - process not found in tree, fetching from /proc",
+			helpers.Int("pid", pid))
 		process, err := p.getProcessFromProc(pid)
 		if err != nil {
 			return apitypes.Process{}, fmt.Errorf("process %d not found: %v", pid, err)
+		}
+
+		if strings.HasPrefix(process.Comm, runCCommPrefix) {
+			return apitypes.Process{}, fmt.Errorf("process %d is a runc process, not supported", pid)
 		}
 		p.addProcess(process)
 	}
