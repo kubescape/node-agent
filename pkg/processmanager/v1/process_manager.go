@@ -12,9 +12,9 @@ import (
 	"github.com/prometheus/procfs"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -334,7 +334,7 @@ func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sE
 		return
 	}
 
-	execEvent, ok := event.(*tracerexectype.Event)
+	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
 		return
 	}
@@ -350,7 +350,7 @@ func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sE
 		Path:       execEvent.ExePath,
 		Cwd:        execEvent.Cwd,
 		Pcomm:      execEvent.Pcomm,
-		Cmdline:    strings.Join(execEvent.Args, " "),
+		Cmdline:    fmt.Sprintf("%s %s", utils.GetExecPathFromEvent(&execEvent.Event), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 		Children:   []apitypes.Process{},
 	}
 
