@@ -29,9 +29,10 @@ type NodeProfileManager struct {
 	k8sObjectCache objectcache.K8sObjectCache
 	nodeName       string
 	ruleManager    rulemanager.RuleManagerClient
+	cloudMetadata  *armotypes.CloudMetadata
 }
 
-func NewNodeProfileManager(config config.Config, clusterData armometadata.ClusterConfig, nodeName string, k8sObjectCache objectcache.K8sObjectCache, ruleManager rulemanager.RuleManagerClient) *NodeProfileManager {
+func NewNodeProfileManager(config config.Config, clusterData armometadata.ClusterConfig, nodeName string, k8sObjectCache objectcache.K8sObjectCache, ruleManager rulemanager.RuleManagerClient, cloudMetadata *armotypes.CloudMetadata) *NodeProfileManager {
 	return &NodeProfileManager{
 		clusterData: clusterData,
 		config:      config,
@@ -41,6 +42,7 @@ func NewNodeProfileManager(config config.Config, clusterData armometadata.Cluste
 		k8sObjectCache: k8sObjectCache,
 		nodeName:       nodeName,
 		ruleManager:    ruleManager,
+		cloudMetadata:  cloudMetadata,
 	}
 }
 
@@ -70,6 +72,7 @@ func (n *NodeProfileManager) getProfile() (*armotypes.NodeProfile, error) {
 		CurrentState:            "Running",
 		NodeAgentRunning:        true,
 		RuntimeDetectionEnabled: n.config.EnableRuntimeDetection,
+		CloudMetadata:           n.cloudMetadata,
 	}
 	for _, pod := range n.k8sObjectCache.GetPods() {
 		var app string

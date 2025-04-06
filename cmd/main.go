@@ -275,7 +275,7 @@ func main() {
 	var profileManager nodeprofilemanager.NodeProfileManagerClient
 	if cfg.EnableNodeProfile {
 		// FIXME validate the HTTPExporterConfig before we use it ?
-		profileManager = nodeprofilemanagerv1.NewNodeProfileManager(cfg, *clusterData, cfg.NodeName, k8sObjectCache, ruleManager)
+		profileManager = nodeprofilemanagerv1.NewNodeProfileManager(cfg, *clusterData, cfg.NodeName, k8sObjectCache, ruleManager, cloudMetadata)
 	} else {
 		profileManager = nodeprofilemanager.NewNodeProfileManagerMock()
 	}
