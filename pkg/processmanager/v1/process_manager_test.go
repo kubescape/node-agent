@@ -13,6 +13,7 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -218,10 +219,12 @@ func TestProcessRemoval(t *testing.T) {
 
 	// Add processes
 	for _, proc := range processes {
-		event := &tracerexectype.Event{
-			Pid:  proc.pid,
-			Ppid: proc.ppid,
-			Comm: proc.comm,
+		event := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  proc.pid,
+				Ppid: proc.ppid,
+				Comm: proc.comm,
+			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, event)
 	}
@@ -291,10 +294,12 @@ func TestContainerRemoval(t *testing.T) {
 	}
 
 	for _, proc := range processes {
-		event := &tracerexectype.Event{
-			Pid:  proc.pid,
-			Ppid: proc.ppid,
-			Comm: proc.comm,
+		event := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  proc.pid,
+				Ppid: proc.ppid,
+				Comm: proc.comm,
+			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, event)
 	}
@@ -350,15 +355,19 @@ func TestMultipleContainers(t *testing.T) {
 		})
 
 		// Add some processes to each container
-		event1 := &tracerexectype.Event{
-			Pid:  c.containerPID + 1,
-			Ppid: c.containerPID,
-			Comm: "process-1",
+		event1 := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  c.containerPID + 1,
+				Ppid: c.containerPID,
+				Comm: "process-1",
+			},
 		}
-		event2 := &tracerexectype.Event{
-			Pid:  c.containerPID + 2,
-			Ppid: c.shimPID,
-			Comm: "exec-process",
+		event2 := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  c.containerPID + 2,
+				Ppid: c.shimPID,
+				Comm: "exec-process",
+			},
 		}
 
 		pm.ReportEvent(utils.ExecveEventType, event1)
@@ -435,10 +444,12 @@ func TestErrorCases(t *testing.T) {
 		})
 
 		// Add process with non-existent parent
-		event := &tracerexectype.Event{
-			Pid:  2000,
-			Ppid: 1500, // Non-existent PPID
-			Comm: "orphan",
+		event := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  2000,
+				Ppid: 1500, // Non-existent PPID
+				Comm: "orphan",
+			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, event)
 
@@ -516,10 +527,12 @@ func TestRaceConditions(t *testing.T) {
 			mu.Lock()
 			state := processStates[pid]
 			if !state.removed {
-				event := &tracerexectype.Event{
-					Pid:  pid,
-					Ppid: shimPID,
-					Comm: fmt.Sprintf("process-%d", i),
+				event := &events.ExecEvent{
+					Event: tracerexectype.Event{
+						Pid:  pid,
+						Ppid: shimPID,
+						Comm: fmt.Sprintf("process-%d", i),
+					},
 				}
 				state.added = true
 				processStates[pid] = state
@@ -607,20 +620,24 @@ func TestDuplicateProcessHandling(t *testing.T) {
 
 	t.Run("update process with same parent", func(t *testing.T) {
 		// First add a parent process
-		parentEvent := &tracerexectype.Event{
-			Pid:  1001,
-			Ppid: containerPID,
-			Comm: "parent-process",
-			Args: []string{"parent-process", "--initial"},
+		parentEvent := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  1001,
+				Ppid: containerPID,
+				Comm: "parent-process",
+				Args: []string{"parent-process", "--initial"},
+			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, parentEvent)
 
 		// Add child process
-		childEvent := &tracerexectype.Event{
-			Pid:  1002,
-			Ppid: 1001,
-			Comm: "child-process",
-			Args: []string{"child-process", "--initial"},
+		childEvent := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  1002,
+				Ppid: 1001,
+				Comm: "child-process",
+				Args: []string{"child-process", "--initial"},
+			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, childEvent)
 
@@ -633,11 +650,13 @@ func TestDuplicateProcessHandling(t *testing.T) {
 		assert.Equal(t, uint32(1002), parent.Children[0].PID)
 
 		// Add same child process again with different arguments
-		updatedChildEvent := &tracerexectype.Event{
-			Pid:  1002,
-			Ppid: 1001,
-			Comm: "child-process",
-			Args: []string{"child-process", "--updated"},
+		updatedChildEvent := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  1002,
+				Ppid: 1001,
+				Comm: "child-process",
+				Args: []string{"child-process", "--updated"},
+			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, updatedChildEvent)
 
@@ -655,11 +674,13 @@ func TestDuplicateProcessHandling(t *testing.T) {
 
 	t.Run("update process with different parent", func(t *testing.T) {
 		// Move process to different parent
-		differentParentEvent := &tracerexectype.Event{
-			Pid:  1002,
-			Ppid: containerPID,
-			Comm: "child-process",
-			Args: []string{"child-process", "--new-parent"},
+		differentParentEvent := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  1002,
+				Ppid: containerPID,
+				Comm: "child-process",
+				Args: []string{"child-process", "--new-parent"},
+			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, differentParentEvent)
 
@@ -715,31 +736,37 @@ func TestProcessReparenting(t *testing.T) {
 
 		// Create grandparent process
 		grandparentPID := uint32(2000)
-		grandparentEvent := &tracerexectype.Event{
-			Pid:  grandparentPID,
-			Ppid: shimPID,
-			Comm: "grandparent",
-			Args: []string{"grandparent"},
+		grandparentEvent := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  grandparentPID,
+				Ppid: shimPID,
+				Comm: "grandparent",
+				Args: []string{"grandparent"},
+			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, grandparentEvent)
 
 		// Create parent process
 		parentPID := uint32(2001)
-		parentEvent := &tracerexectype.Event{
-			Pid:  parentPID,
-			Ppid: grandparentPID,
-			Comm: "parent",
-			Args: []string{"parent"},
+		parentEvent := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  parentPID,
+				Ppid: grandparentPID,
+				Comm: "parent",
+				Args: []string{"parent"},
+			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, parentEvent)
 
 		// Create child process
 		childPID := uint32(2002)
-		childEvent := &tracerexectype.Event{
-			Pid:  childPID,
-			Ppid: parentPID,
-			Comm: "child",
-			Args: []string{"child"},
+		childEvent := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  childPID,
+				Ppid: parentPID,
+				Comm: "child",
+				Args: []string{"child"},
+			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, childEvent)
 
@@ -783,33 +810,39 @@ func TestProcessReparenting(t *testing.T) {
 	t.Run("reparent multiple children", func(t *testing.T) {
 		// Create a parent with multiple children
 		parentPID := uint32(3000)
-		parentEvent := &tracerexectype.Event{
-			Pid:  parentPID,
-			Ppid: shimPID,
-			Comm: "parent",
-			Args: []string{"parent"},
+		parentEvent := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  parentPID,
+				Ppid: shimPID,
+				Comm: "parent",
+				Args: []string{"parent"},
+			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, parentEvent)
 
 		// Create several children
 		childPIDs := []uint32{3001, 3002, 3003}
 		for _, pid := range childPIDs {
-			childEvent := &tracerexectype.Event{
-				Pid:  pid,
-				Ppid: parentPID,
-				Comm: fmt.Sprintf("child-%d", pid),
-				Args: []string{"child"},
+			childEvent := &events.ExecEvent{
+				Event: tracerexectype.Event{
+					Pid:  pid,
+					Ppid: parentPID,
+					Comm: fmt.Sprintf("child-%d", pid),
+					Args: []string{"child"},
+				},
 			}
 			pm.ReportEvent(utils.ExecveEventType, childEvent)
 		}
 
 		// Create a subprocess under one of the children
 		grandchildPID := uint32(3004)
-		grandchildEvent := &tracerexectype.Event{
-			Pid:  grandchildPID,
-			Ppid: childPIDs[0],
-			Comm: "grandchild",
-			Args: []string{"grandchild"},
+		grandchildEvent := &events.ExecEvent{
+			Event: tracerexectype.Event{
+				Pid:  grandchildPID,
+				Ppid: childPIDs[0],
+				Comm: "grandchild",
+				Args: []string{"grandchild"},
+			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, grandchildEvent)
 
