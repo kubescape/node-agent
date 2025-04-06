@@ -244,11 +244,12 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
+		// ProcessManager must be notified before the event is reported to the other managers.
+		processManager.ReportEvent(utils.ExecveEventType, &event)
+
 		ruleManager.ReportEvent(utils.ExecveEventType, &event)
 		malwareManager.ReportEvent(utils.ExecveEventType, &event)
-
 		metrics.ReportEvent(utils.ExecveEventType)
-		processManager.ReportEvent(utils.ExecveEventType, &event)
 		applicationProfileManager.ReportFileExec(k8sContainerID, event)
 		rulePolicyReporter.ReportEvent(utils.ExecveEventType, &event, k8sContainerID, event.Comm)
 
