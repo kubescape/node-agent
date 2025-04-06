@@ -116,16 +116,18 @@ func TestProcessTracking(t *testing.T) {
 
 	testCases := []struct {
 		name   string
-		event  tracerexectype.Event
+		event  events.ExecEvent
 		verify func(t *testing.T, pm *ProcessManager)
 	}{
 		{
 			name: "Container child process",
-			event: tracerexectype.Event{
-				Pid:  1001,
-				Ppid: containerPID,
-				Comm: "nginx",
-				Args: []string{"nginx", "-g", "daemon off;"},
+			event: events.ExecEvent{
+				Event: tracerexectype.Event{
+					Pid:  1001,
+					Ppid: containerPID,
+					Comm: "nginx",
+					Args: []string{"nginx", "-g", "daemon off;"},
+				},
 			},
 			verify: func(t *testing.T, pm *ProcessManager) {
 				proc, exists := pm.processTree.Load(1001)
@@ -136,11 +138,13 @@ func TestProcessTracking(t *testing.T) {
 		},
 		{
 			name: "Exec process (direct child of shim)",
-			event: tracerexectype.Event{
-				Pid:  1002,
-				Ppid: shimPID,
-				Comm: "bash",
-				Args: []string{"bash"},
+			event: events.ExecEvent{
+				Event: tracerexectype.Event{
+					Pid:  1002,
+					Ppid: shimPID,
+					Comm: "bash",
+					Args: []string{"bash"},
+				},
 			},
 			verify: func(t *testing.T, pm *ProcessManager) {
 				proc, exists := pm.processTree.Load(1002)
@@ -151,11 +155,13 @@ func TestProcessTracking(t *testing.T) {
 		},
 		{
 			name: "Nested process",
-			event: tracerexectype.Event{
-				Pid:  1003,
-				Ppid: 1001,
-				Comm: "nginx-worker",
-				Args: []string{"nginx", "worker process"},
+			event: events.ExecEvent{
+				Event: tracerexectype.Event{
+					Pid:  1003,
+					Ppid: 1001,
+					Comm: "nginx-worker",
+					Args: []string{"nginx", "worker process"},
+				},
 			},
 			verify: func(t *testing.T, pm *ProcessManager) {
 				proc, exists := pm.processTree.Load(1003)
