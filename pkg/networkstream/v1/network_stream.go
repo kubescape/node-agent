@@ -161,6 +161,11 @@ func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sE
 		if !ok {
 			return
 		}
+
+		if networkEvent.PktType == "HOST" && networkEvent.PodHostIP == networkEvent.DstEndpoint.Addr {
+			return // Ignore localhost events
+		}
+
 		ns.handleNetworkEvent(networkEvent)
 	default:
 		logger.L().Error("NetworkStream - unknown event type", helpers.String("event type", string(eventType)))
@@ -198,17 +203,23 @@ func (ns *NetworkStream) handleNetworkEvent(event *tracernetworktype.Event) {
 }
 
 func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apitypes.NetworkStreamEvent {
-	domain, ok := ns.dnsResolver.ResolveIPAddress(event.DstEndpoint.Addr)
-	if !ok {
-		// Try to resolve the domain name
-		domains, err := net.LookupAddr(event.DstEndpoint.Addr)
-		if err != nil {
-			domain = ""
-		} else {
-			if len(domains) > 0 {
-				domain = domains[0]
+	var domain string
+	var ok bool
+	if event.PktType == "OUTGOING" {
+		domain, ok = ns.dnsResolver.ResolveIPAddress(event.DstEndpoint.Addr)
+		if !ok {
+			// Try to resolve the domain name
+			domains, err := net.LookupAddr(event.DstEndpoint.Addr)
+			if err != nil {
+				domain = ""
+			} else {
+				if len(domains) > 0 {
+					domain = domains[0]
+				}
 			}
 		}
+	} else {
+		domain, _ = ns.dnsResolver.ResolveIPAddress(event.DstEndpoint.Addr)
 	}
 
 	networkEvent := apitypes.NetworkStreamEvent{
@@ -233,6 +244,7 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 				if utils.WorkloadKind(workloadKind) == utils.ReplicaSet {
 					workloadKind = string(utils.Deployment)
 				}
+				// TODO: handle similar cases for CronJob -> Job -> Pod.
 				workloadName = utils.ExtractWorkloadName(slimPod.Name, utils.WorkloadKind(workloadKind))
 			}
 
