@@ -187,10 +187,15 @@ func main() {
 		seccompManager = seccompmanager.NewSeccompManagerMock()
 	}
 
+	var ruleBindingCache *rulebindingcachev1.RBCache
+	if cfg.EnableRuntimeDetection {
+		ruleBindingCache = rulebindingcachev1.NewCache(cfg.NodeName, k8sClient)
+	}
+
 	// Create the application profile manager
 	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
 	if cfg.EnableApplicationProfile {
-		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, k8sObjectCache, seccompManager, nil)
+		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, k8sObjectCache, seccompManager, nil, ruleBindingCache)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the application profile manager", helpers.Error(err))
 		}
@@ -236,9 +241,6 @@ func main() {
 
 		// create exporter
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
-
-		// create ruleBinding cache
-		ruleBindingCache := rulebindingcachev1.NewCache(cfg.NodeName, k8sClient)
 		dWatcher.AddAdaptor(ruleBindingCache)
 
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
@@ -275,7 +277,7 @@ func main() {
 	var profileManager nodeprofilemanager.NodeProfileManagerClient
 	if cfg.EnableNodeProfile {
 		// FIXME validate the HTTPExporterConfig before we use it ?
-		profileManager = nodeprofilemanagerv1.NewNodeProfileManager(cfg, *clusterData, cfg.NodeName, k8sObjectCache, ruleManager)
+		profileManager = nodeprofilemanagerv1.NewNodeProfileManager(cfg, *clusterData, cfg.NodeName, k8sObjectCache, ruleManager, cloudMetadata)
 	} else {
 		profileManager = nodeprofilemanager.NewNodeProfileManagerMock()
 	}

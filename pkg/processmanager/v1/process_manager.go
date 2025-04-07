@@ -12,9 +12,9 @@ import (
 	"github.com/prometheus/procfs"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -249,9 +249,15 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid int) (apit
 
 	targetPID := uint32(pid)
 	if !p.processTree.Has(targetPID) {
+		logger.L().Debug("ProcessManager - process not found in tree, fetching from /proc",
+			helpers.Int("pid", pid))
 		process, err := p.getProcessFromProc(pid)
 		if err != nil {
 			return apitypes.Process{}, fmt.Errorf("process %d not found: %v", pid, err)
+		}
+
+		if strings.HasPrefix(process.Comm, runCCommPrefix) {
+			return apitypes.Process{}, fmt.Errorf("process %d is a runc process, not supported", pid)
 		}
 		p.addProcess(process)
 	}
@@ -334,7 +340,7 @@ func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sE
 		return
 	}
 
-	execEvent, ok := event.(*tracerexectype.Event)
+	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
 		return
 	}
@@ -350,7 +356,7 @@ func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sE
 		Path:       execEvent.ExePath,
 		Cwd:        execEvent.Cwd,
 		Pcomm:      execEvent.Pcomm,
-		Cmdline:    strings.Join(execEvent.Args, " "),
+		Cmdline:    fmt.Sprintf("%s %s", utils.GetExecPathFromEvent(&execEvent.Event), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 		Children:   []apitypes.Process{},
 	}
 

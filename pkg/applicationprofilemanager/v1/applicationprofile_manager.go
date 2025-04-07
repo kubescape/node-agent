@@ -25,6 +25,7 @@ import (
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
@@ -70,11 +71,12 @@ type ApplicationProfileManager struct {
 	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
 	seccompManager           seccompmanager.SeccompManagerClient
 	enricher                 applicationprofilemanager.Enricher
+	ruleCache                rulebindingmanager.RuleBindingCache
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
 
-func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient, enricher applicationprofilemanager.Enricher) (*ApplicationProfileManager, error) {
+func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clusterName string, k8sClient k8sclient.K8sClientInterface, storageClient storage.StorageClient, k8sObjectCache objectcache.K8sObjectCache, seccompManager seccompmanager.SeccompManagerClient, enricher applicationprofilemanager.Enricher, ruleCache rulebindingmanager.RuleBindingCache) (*ApplicationProfileManager, error) {
 	return &ApplicationProfileManager{
 		cfg:                     cfg,
 		clusterName:             clusterName,
@@ -88,6 +90,7 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		droppedEventsContainers: mapset.NewSet[string](),
 		seccompManager:          seccompManager,
 		enricher:                enricher,
+		ruleCache:               ruleCache,
 	}, nil
 }
 
@@ -137,7 +140,7 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 	}
 	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
 
-	initOps := GetInitOperations(watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+	initOps := GetInitOperations(am.ruleCache, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 
 	for {
 		select {

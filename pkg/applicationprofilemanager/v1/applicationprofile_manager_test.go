@@ -26,6 +26,7 @@ import (
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -95,7 +96,8 @@ func TestApplicationProfileManager(t *testing.T) {
 	storageClient := &storage.StorageHttpClientMock{}
 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
 	seccompManagerMock := &seccompmanager.SeccompManagerMock{}
-	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil)
+	ruleBindingCache := rulebindingcachev1.NewCacheMock("node1")
+	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil, ruleBindingCache)
 	assert.NoError(t, err)
 	// prepare container
 	container := &containercollection.Container{
@@ -525,7 +527,8 @@ func TestReportRulePolicy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil)
+			ruleBindingCache := rulebindingcachev1.NewCacheMock("node1")
+			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil, ruleBindingCache)
 			assert.NoError(t, err)
 
 			am.savedRulePolicies.Set(tt.k8sContainerID, istiocache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
@@ -730,7 +733,8 @@ func TestReportIdentifiedCallStack(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil)
+			ruleBindingCache := rulebindingcachev1.NewCacheMock("node1")
+			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil, ruleBindingCache)
 			if err != nil {
 				t.Fatalf("Failed to create ApplicationProfileManager: %v", err)
 			}
@@ -813,8 +817,9 @@ func TestApplicationProfileManagerWithCallStacks(t *testing.T) {
 	storageClient := &storage.StorageHttpClientMock{}
 	k8sObjectCacheMock := &objectcache.K8sObjectCacheMock{}
 	seccompManagerMock := &seccompmanager.SeccompManagerMock{}
+	ruleBindingCache := rulebindingcachev1.NewCacheMock("node1")
 
-	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil)
+	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil, ruleBindingCache)
 	if err != nil {
 		t.Fatalf("Failed to create ApplicationProfileManager: %v", err)
 	}

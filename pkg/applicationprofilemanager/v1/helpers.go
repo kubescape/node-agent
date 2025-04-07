@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -15,7 +16,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	tracerhttphelper "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -106,10 +107,13 @@ func IsPolicyIncluded(existingPolicy, newPolicy *v1beta1.RulePolicy) bool {
 	return true
 }
 
-func GetInitOperations(containerType string, containerIndex int) []utils.PatchOperation {
+func GetInitOperations(ruleCache rulebindingmanager.RuleBindingCache, containerType string, containerIndex int) []utils.PatchOperation {
 	var operations []utils.PatchOperation
+	if reflect.ValueOf(ruleCache).IsNil() {
+		return operations
+	}
 
-	ids := ruleengine.NewRuleCreator().GetAllRuleIDs()
+	ids := ruleCache.GetRuleCreator().GetAllRuleIDs()
 	rulePoliciesMap := make(map[string]v1beta1.RulePolicy)
 	for _, id := range ids {
 		rulePoliciesMap[id] = v1beta1.RulePolicy{
