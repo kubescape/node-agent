@@ -41,6 +41,7 @@ type Config struct {
 	NodeName                 string                    `mapstructure:"nodeName"`
 	PodName                  string                    `mapstructure:"podName"`
 	KubernetesMode           bool                      `mapstructure:"kubernetesMode"`
+	WorkerPoolSize           int                       `mapstructure:"workerPoolSize"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -62,6 +63,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("hostMalwareSensorEnabled", false)
 	viper.SetDefault("hostNetworkSensorEnabled", false)
 	viper.SetDefault("kubernetesMode", true)
+	viper.SetDefault("workerPoolSize", 10)
 
 	viper.AutomaticEnv()
 

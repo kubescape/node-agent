@@ -53,6 +53,7 @@ func TestLoadConfig(t *testing.T) {
 						URL: "http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io",
 					},
 				},
+				WorkerPoolSize: 10,
 			},
 			wantErr: false,
 		},

@@ -39,7 +39,25 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		}
 		return
 	}
+	// scale up the pool size if needed pkg/config/config.go:66
+	callbacks := []containercollection.FuncNotify{
+		ch.containerCallbackAsync,
+		ch.applicationProfileManager.ContainerCallback,
+		ch.networkManager.ContainerCallback,
+		ch.malwareManager.ContainerCallback,
+		ch.ruleManager.ContainerCallback,
+		ch.sbomManager.ContainerCallback,
+		ch.processManager.ContainerCallback,
+		ch.dnsManager.ContainerCallback,
+	}
+	for _, callback := range callbacks {
+		ch.pool.Submit(func() {
+			callback(notif)
+		})
+	}
+}
 
+func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.PubSubEvent) {
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 
 	switch notif.Type {
@@ -183,13 +201,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 	// Start the container collection
 	containerEventFuncs := []containercollection.FuncNotify{
 		ch.containerCallback,
-		ch.applicationProfileManager.ContainerCallback,
-		ch.networkManager.ContainerCallback,
-		ch.malwareManager.ContainerCallback,
-		ch.ruleManager.ContainerCallback,
-		ch.sbomManager.ContainerCallback,
-		ch.processManager.ContainerCallback,
-		ch.dnsManager.ContainerCallback,
+		// other callbacks are now called from ch.containerCallback
 	}
 
 	for receiver := range ch.thirdPartyContainerReceivers.Iter() {
