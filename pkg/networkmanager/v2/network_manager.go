@@ -8,6 +8,7 @@ import (
 
 	"github.com/cenkalti/backoff/v5"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/gammazero/workerpool"
 	"github.com/google/uuid"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -48,6 +49,7 @@ type NetworkManager struct {
 	k8sObjectCache           objectcache.K8sObjectCache
 	storageClient            storage.StorageClient
 	dnsResolverClient        dnsmanager.DNSResolver
+	pool                     *workerpool.WorkerPool
 }
 
 var _ networkmanager.NetworkManagerClient = (*NetworkManager)(nil)
@@ -65,6 +67,7 @@ func CreateNetworkManager(ctx context.Context, cfg config.Config, clusterName st
 		trackedContainers:       mapset.NewSet[string](),
 		removedContainers:       mapset.NewSet[string](),
 		droppedEventsContainers: mapset.NewSet[string](),
+		pool:                    workerpool.New(1),
 	}
 }
 
@@ -464,7 +467,12 @@ func (nm *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 	if nm.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
 		return
 	}
+	nm.pool.Submit(func() {
+		nm.containerCallbackAsync(notif)
+	})
+}
 
+func (nm *NetworkManager) containerCallbackAsync(notif containercollection.PubSubEvent) {
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 	ctx, span := otel.Tracer("").Start(nm.ctx, "NetworkManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
 	defer span.End()

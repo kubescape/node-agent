@@ -39,7 +39,12 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		}
 		return
 	}
+	ch.pool.Submit(func() {
+		ch.containerCallbackAsync(notif)
+	})
+}
 
+func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.PubSubEvent) {
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 
 	switch notif.Type {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/gammazero/workerpool"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/prometheus/procfs"
@@ -29,11 +30,13 @@ type ProcessManager struct {
 	processTree          maps.SafeMap[uint32, apitypes.Process]
 	// For testing purposes we allow to override the function that gets process info from /proc.
 	getProcessFromProc func(pid int) (apitypes.Process, error)
+	pool               *workerpool.WorkerPool
 }
 
 func CreateProcessManager(ctx context.Context) *ProcessManager {
 	pm := &ProcessManager{
 		getProcessFromProc: getProcessFromProc,
+		pool:               workerpool.New(1),
 	}
 	go pm.startCleanupRoutine(ctx)
 	return pm
@@ -116,6 +119,12 @@ func (p *ProcessManager) isDescendantOfShim(pid uint32, ppid uint32, shimPIDs ma
 // For new containers, it identifies the container's shim process and adds it to the tracking system.
 // For removed containers, it cleans up the associated processes from the process tree.
 func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent) {
+	p.pool.Submit(func() {
+		p.containerCallbackAsync(notif)
+	})
+}
+
+func (p *ProcessManager) containerCallbackAsync(notif containercollection.PubSubEvent) {
 	containerID := notif.Container.Runtime.BasicRuntimeMetadata.ContainerID
 
 	switch notif.Type {

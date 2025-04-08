@@ -12,6 +12,7 @@ import (
 	backoffv5 "github.com/cenkalti/backoff/v5"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/dustin/go-humanize"
+	"github.com/gammazero/workerpool"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
@@ -56,6 +57,7 @@ type RuleManager struct {
 	enricher             ruleenginetypes.Enricher
 	processManager       processmanager.ProcessManagerClient
 	dnsManager           dnsmanager.DNSResolver
+	pool                 *workerpool.WorkerPool
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
@@ -75,6 +77,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		enricher:          enricher,
 		processManager:    processManager,
 		dnsManager:        dnsManager,
+		pool:              workerpool.New(1),
 	}, nil
 }
 
@@ -184,7 +187,12 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 	if rm.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
 		return
 	}
+	rm.pool.Submit(func() {
+		rm.containerCallbackAsync(notif)
+	})
+}
 
+func (rm *RuleManager) containerCallbackAsync(notif containercollection.PubSubEvent) {
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 
 	switch notif.Type {
