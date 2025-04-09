@@ -6,6 +6,8 @@
 // Used to send http events to user space
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+    __uint(key_size, sizeof(u32));
+    __uint(value_size, sizeof(u32));
 } events SEC(".maps");
 
 // Used to manage pre accept connections from client
