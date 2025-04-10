@@ -366,6 +366,14 @@ func (ch *IGContainerWatcher) startTracers() error {
 		}
 		logger.L().Info("started io_uring tracing")
 
+		if ch.cfg.EnableHttpDetection {
+			if err := ch.startHttpTracing(); err != nil {
+				logger.L().Error("IGContainerWatcher - error starting http tracing", helpers.Error(err))
+				return err
+			}
+			logger.L().Info("started http tracing")
+		}
+
 		// Start third party tracers
 		for tracer := range ch.thirdPartyTracers.Iter() {
 			if err := tracer.Start(); err != nil {
@@ -374,14 +382,6 @@ func (ch *IGContainerWatcher) startTracers() error {
 			}
 			logger.L().Info("started custom tracer", helpers.String("tracer", tracer.Name()))
 		}
-	}
-
-	if ch.cfg.EnableHttpDetection {
-		if err := ch.startHttpTracing(); err != nil {
-			logger.L().Error("IGContainerWatcher - error starting http tracing", helpers.Error(err))
-			return err
-		}
-		logger.L().Info("started http tracing")
 	}
 
 	if ch.cfg.EnablePrometheusExporter {
