@@ -12,6 +12,7 @@ import (
 
 	"github.com/cenkalti/backoff/v5"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/gammazero/workerpool"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
@@ -72,6 +73,7 @@ type ApplicationProfileManager struct {
 	seccompManager           seccompmanager.SeccompManagerClient
 	enricher                 applicationprofilemanager.Enricher
 	ruleCache                rulebindingmanager.RuleBindingCache
+	pool                     *workerpool.WorkerPool
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
@@ -91,6 +93,7 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		seccompManager:          seccompManager,
 		enricher:                enricher,
 		ruleCache:               ruleCache,
+		pool:                    workerpool.New(1),
 	}, nil
 }
 
@@ -698,7 +701,12 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 	if am.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
 		return
 	}
+	am.pool.Submit(func() {
+		am.containerCallbackAsync(notif)
+	})
+}
 
+func (am *ApplicationProfileManager) containerCallbackAsync(notif containercollection.PubSubEvent) {
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 	ctx, span := otel.Tracer("").Start(am.ctx, "ApplicationProfileManager.ContainerCallback", trace.WithAttributes(attribute.String("containerID", notif.Container.Runtime.ContainerID), attribute.String("k8s workload", k8sContainerID)))
 	defer span.End()

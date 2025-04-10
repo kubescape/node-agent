@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"
@@ -82,6 +83,7 @@ func TestProcessManagerBasics(t *testing.T) {
 			},
 		},
 	})
+	time.Sleep(time.Second)
 
 	// Verify shim was recorded
 	assert.True(t, pm.containerIdToShimPid.Has(containerID))
@@ -322,6 +324,7 @@ func TestContainerRemoval(t *testing.T) {
 			},
 		},
 	})
+	time.Sleep(time.Second)
 
 	// Verify all processes were removed
 	for _, proc := range processes {
@@ -379,6 +382,7 @@ func TestMultipleContainers(t *testing.T) {
 		pm.ReportEvent(utils.ExecveEventType, event1)
 		pm.ReportEvent(utils.ExecveEventType, event2)
 	}
+	time.Sleep(time.Second)
 
 	// Verify each container's processes
 	for _, c := range containers {
@@ -410,6 +414,7 @@ func TestMultipleContainers(t *testing.T) {
 			},
 		},
 	})
+	time.Sleep(time.Second)
 
 	// Verify first container's processes are gone
 	assert.False(t, pm.processTree.Has(containers[0].containerPID))
