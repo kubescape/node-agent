@@ -288,9 +288,15 @@ func (nn *NetworkNeighborhoodCacheImpl) addFullNetworkNeighborhood(netNeighborho
 	}
 
 	nn.slugToNetworkNeighborhood.Set(nnName, netNeighborhood)
-	for _, i := range nn.slugToContainers.Get(nnName).ToSlice() {
-		nn.containerToSlug.Set(i, nnName)
+
+	if containerSet, exists := nn.slugToContainers.Load(nnName); exists {
+		for _, i := range containerSet.ToSlice() {
+			nn.containerToSlug.Set(i, nnName)
+		}
+	} else {
+		logger.L().Debug("NetworkNeighborhoodCacheImpl - no containers found for network neighborhood", helpers.String("name", nnName))
 	}
+
 	logger.L().Debug("NetworkNeighborhoodCacheImpl - added pod to network neighborhood cache", helpers.String("name", nnName))
 }
 
