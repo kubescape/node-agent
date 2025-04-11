@@ -13,6 +13,7 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/goradd/maps"
 	"github.com/grafana/pyroscope-go"
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -254,9 +255,9 @@ func main() {
 
 		// create object cache
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
-
+		containerIdToPidMap := maps.NewSafeMap[string, uint32]()
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processManager, dnsResolver, nil)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processManager, dnsResolver, nil, containerIdToPidMap)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}

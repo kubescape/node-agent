@@ -52,7 +52,7 @@ type RuleManager struct {
 	nodeName             string
 	clusterName          string
 	containerIdToShimPid maps.SafeMap[string, uint32]
-	containerIdToPid     maps.SafeMap[string, uint32]
+	containerIdToPid     *maps.SafeMap[string, uint32]
 	enricher             ruleenginetypes.Enricher
 	processManager       processmanager.ProcessManagerClient
 	dnsManager           dnsmanager.DNSResolver
@@ -60,7 +60,7 @@ type RuleManager struct {
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher, containerIdToPidMap *maps.SafeMap[string, uint32]) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		ctx:               ctx,
@@ -75,6 +75,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		enricher:          enricher,
 		processManager:    processManager,
 		dnsManager:        dnsManager,
+		containerIdToPid:  containerIdToPidMap,
 	}, nil
 }
 
