@@ -28,6 +28,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
+	"github.com/kubescape/node-agent/pkg/hostmanager"
+	hostmanagerv1 "github.com/kubescape/node-agent/pkg/hostmanager/v1"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -316,6 +318,17 @@ func main() {
 		sbomManager = sbommanager.CreateSbomManagerMock()
 	}
 
+	// Create the host manager
+	var hostManager hostmanager.HostManagerClient
+	if cfg.EnableHostManager {
+		hostManager, err = hostmanagerv1.CreateHostManager(ctx, cfg, storageClient)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating HostManager", helpers.Error(err))
+		}
+	} else {
+		hostManager = hostmanager.CreateHostManagerMock()
+	}
+
 	// Create the container handler
 	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
 		igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager,
@@ -331,6 +344,9 @@ func main() {
 
 	// Start the prometheusExporter
 	prometheusExporter.Start()
+
+	// Start the host manager
+	hostManager.Start(ctx)
 
 	// Start the container handler
 	err = mainHandler.Start(ctx)
