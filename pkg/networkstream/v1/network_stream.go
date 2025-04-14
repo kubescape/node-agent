@@ -462,11 +462,13 @@ func isEmptyNetworkStream(networkStream *apitypes.NetworkStream) bool {
 
 func removeProcessTreeFromEvents(networkStream *apitypes.NetworkStream) {
 	for entityId, entity := range networkStream.Entities {
-		for _, event := range entity.Inbound {
+		for eventId, event := range entity.Inbound {
 			event.ProcessTree = nil
+			entity.Inbound[eventId] = event
 		}
-		for _, event := range entity.Outbound {
+		for eventId, event := range entity.Outbound {
 			event.ProcessTree = nil
+			entity.Outbound[eventId] = event
 		}
 		networkStream.Entities[entityId] = entity
 	}
