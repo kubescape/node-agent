@@ -14,64 +14,6 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestStorage_PatchNetworkNeighbors(t *testing.T) {
-	type args struct {
-		name      string
-		neighbors *v1beta1.NetworkNeighbors
-	}
-	tests := []struct {
-		name    string
-		args    args
-		wantErr bool
-	}{
-		{
-			name: "test",
-			args: args{
-				name: storage.NginxKey,
-				neighbors: &v1beta1.NetworkNeighbors{
-					Spec: v1beta1.NetworkNeighborsSpec{
-						Ingress: []v1beta1.NetworkNeighbor{
-							{
-								Ports: []v1beta1.NetworkPort{
-									{Name: "test2"},
-									{Name: "test3"},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sc, _ := CreateFakeStorage("kubescape")
-			existingProfile := &v1beta1.NetworkNeighbors{
-				ObjectMeta: v1.ObjectMeta{
-					Name: tt.args.name,
-				},
-				Spec: v1beta1.NetworkNeighborsSpec{
-					Ingress: []v1beta1.NetworkNeighbor{
-						{
-							Ports: []v1beta1.NetworkPort{
-								{Name: "test"},
-								{Name: "test1"},
-							},
-						},
-					},
-				},
-			}
-			_, _ = sc.StorageClient.NetworkNeighborses("default").Create(context.Background(), existingProfile, v1.CreateOptions{})
-			if err := sc.PatchNetworkNeighborsIngressAndEgress(tt.args.name, "default", tt.args.neighbors); (err != nil) != tt.wantErr {
-				t.Errorf("PatchNetworkNeighborsIngressAndEgress() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			got, err := sc.StorageClient.NetworkNeighborses("default").Get(context.Background(), tt.args.name, v1.GetOptions{})
-			assert.NoError(t, err)
-			assert.Equal(t, 4, len(got.Spec.Ingress[0].Ports))
-		})
-	}
-}
-
 func TestStorage_PatchApplicationProfile(t *testing.T) {
 	type args struct {
 		name       string
@@ -212,7 +154,7 @@ func TestStorage_PatchApplicationProfile(t *testing.T) {
 			}
 			_, _ = sc.StorageClient.ApplicationProfiles("default").Create(context.Background(), existingProfile, v1.CreateOptions{})
 			if err := sc.PatchApplicationProfile(tt.args.name, "default", tt.args.operations, nil); (err != nil) != tt.wantErr {
-				t.Errorf("PatchNetworkNeighborsIngressAndEgress() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("PatchApplicationProfile() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			got, err := sc.StorageClient.ApplicationProfiles("default").Get(context.Background(), tt.args.name, v1.GetOptions{})
 			assert.NoError(t, err)

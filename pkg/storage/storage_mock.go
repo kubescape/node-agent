@@ -24,16 +24,6 @@ type StorageHttpClientMock struct {
 
 var _ StorageClient = (*StorageHttpClientMock)(nil)
 
-func (sc *StorageHttpClientMock) CreateApplicationActivity(activity *spdxv1beta1.ApplicationActivity, _ string) error {
-	sc.ApplicationActivities = append(sc.ApplicationActivities, activity)
-	return nil
-}
-
-func (sc *StorageHttpClientMock) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, _ string) error {
-	sc.NetworkNeighborses = append(sc.NetworkNeighborses, networkNeighbors)
-	return nil
-}
-
 func (sc *StorageHttpClientMock) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
 	sc.SyftSBOMs = append(sc.SyftSBOMs, SBOM)
 	return SBOM, nil
@@ -64,22 +54,4 @@ func (sc *StorageHttpClientMock) DecrementImageUse(imageID string) {
 		sc.ImageCounters[imageID] = 0
 	}
 	sc.ImageCounters[imageID]--
-
-}
-
-func (sc *StorageHttpClientMock) GetNetworkNeighbors(_, name string) (*v1beta1.NetworkNeighbors, error) {
-	for _, nn := range sc.NetworkNeighborses {
-		if nn.Name == name {
-			return nn, nil
-		}
-	}
-	return nil, nil
-}
-
-func (sc *StorageHttpClientMock) PatchNetworkNeighborsMatchLabels(_, _ string, _ *v1beta1.NetworkNeighbors) error {
-	return nil
-}
-
-func (sc *StorageHttpClientMock) PatchNetworkNeighborsIngressAndEgress(_, _ string, _ *v1beta1.NetworkNeighbors) error {
-	return nil
 }
