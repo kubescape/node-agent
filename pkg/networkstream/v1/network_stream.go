@@ -165,6 +165,12 @@ func (ns *NetworkStream) Start() {
 					container.Outbound = make(map[string]apitypes.NetworkStreamEvent)
 					ns.networkEventsStorage.Entities[containerID] = container
 				}
+				// Re-create the host entity
+				ns.networkEventsStorage.Entities[ns.nodeName] = apitypes.NetworkStreamEntity{
+					Kind:     apitypes.NetworkStreamEntityKindHost,
+					Inbound:  make(map[string]apitypes.NetworkStreamEvent),
+					Outbound: make(map[string]apitypes.NetworkStreamEvent),
+				}
 				ns.eventsStorageMutex.Unlock()
 				logger.L().Debug("NetworkStream - sent network events")
 			}
