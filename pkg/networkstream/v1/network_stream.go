@@ -159,11 +159,11 @@ func (ns *NetworkStream) Start() {
 					ns.eventsNotificationChannel <- ns.networkEventsStorage
 				}
 				// Clear the storage
-				for containerID := range ns.networkEventsStorage.Entities {
-					container := ns.networkEventsStorage.Entities[containerID]
-					container.Inbound = make(map[string]apitypes.NetworkStreamEvent)
-					container.Outbound = make(map[string]apitypes.NetworkStreamEvent)
-					ns.networkEventsStorage.Entities[containerID] = container
+				for entityId := range ns.networkEventsStorage.Entities {
+					entity := ns.networkEventsStorage.Entities[entityId]
+					entity.Inbound = make(map[string]apitypes.NetworkStreamEvent)
+					entity.Outbound = make(map[string]apitypes.NetworkStreamEvent)
+					ns.networkEventsStorage.Entities[entityId] = entity
 				}
 				// Re-create the host entity
 				ns.networkEventsStorage.Entities[ns.nodeName] = apitypes.NetworkStreamEntity{
