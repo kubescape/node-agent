@@ -23,7 +23,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
-	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -37,7 +36,6 @@ type NetworkStream struct {
 	k8sObjectCache            objectcache.K8sObjectCache
 	dnsResolver               dnsmanager.DNSResolver
 	k8sInventory              common.K8sInventoryCache
-	k8sClient                 k8sclient.K8sClientInterface
 	nodeName                  string
 	httpClient                *http.Client
 	eventsNotificationChannel chan apitypes.NetworkStream
@@ -45,7 +43,7 @@ type NetworkStream struct {
 	processTreeManager        processmanager.ProcessManagerClient
 }
 
-func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, k8sClient k8sclient.K8sClientInterface, nodeName string, eventsNotificationChannel chan apitypes.NetworkStream, dnsSupport bool, processTreeManager processmanager.ProcessManagerClient) (*NetworkStream, error) {
+func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, nodeName string, eventsNotificationChannel chan apitypes.NetworkStream, dnsSupport bool, processTreeManager processmanager.ProcessManagerClient) (*NetworkStream, error) {
 	k8sInventory, err := common.GetK8sInventoryCache()
 	if err != nil || k8sInventory == nil {
 		return nil, fmt.Errorf("creating k8s inventory cache: %w", err)
@@ -61,7 +59,6 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 		k8sObjectCache: k8sObjectCache,
 		dnsResolver:    dnsResolver,
 		k8sInventory:   k8sInventory,
-		k8sClient:      k8sClient,
 		httpClient: &http.Client{
 			Timeout: time.Duration(cfg.Exporters.HTTPExporterConfig.TimeoutSeconds) * time.Second,
 		},
@@ -97,8 +94,9 @@ func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent
 			Outbound: make(map[string]apitypes.NetworkStreamEvent),
 		}
 		ns.eventsStorageMutex.Unlock()
-
-		go ns.enrichWorkloadDetails(notif.Container.Runtime.ContainerID)
+		if ns.k8sObjectCache != nil {
+			go ns.enrichWorkloadDetails(notif.Container.Runtime.ContainerID)
+		}
 	case containercollection.EventTypeRemoveContainer:
 		ns.eventsStorageMutex.Lock()
 		delete(ns.networkEventsStorage.Entities, notif.Container.Runtime.ContainerID)
