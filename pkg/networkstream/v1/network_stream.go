@@ -155,6 +155,8 @@ func (ns *NetworkStream) Start() {
 				// Send the network events to the notification channel
 				if ns.eventsNotificationChannel != nil {
 					ns.eventsNotificationChannel <- ns.networkEventsStorage
+					// Add a small delay to ensure consumers have time to process
+					time.Sleep(100 * time.Millisecond)
 				}
 
 				// Remove process tree from events (to reduce size)
@@ -193,7 +195,7 @@ func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sE
 			return
 		}
 
-		if networkEvent.PktType == "HOST" && networkEvent.PodHostIP == networkEvent.DstEndpoint.Addr {
+		if networkEvent.PktType == "HOST" && networkEvent.PodHostIP == networkEvent.DstEndpoint.Addr || networkEvent.DstEndpoint.Addr == "127.0.0.1" {
 			return // Ignore localhost events
 		}
 
@@ -223,7 +225,7 @@ func (ns *NetworkStream) handleDnsEvent(event *tracerdnstype.Event) {
 	defer ns.eventsStorageMutex.Unlock()
 
 	entityId := event.Runtime.ContainerID
-	if entityId == "" {
+	if entityId == "" || ns.k8sObjectCache == nil {
 		entityId = ns.nodeName
 	}
 
@@ -277,7 +279,7 @@ func (ns *NetworkStream) handleNetworkEvent(event *tracernetworktype.Event) {
 	defer ns.eventsStorageMutex.Unlock()
 
 	entityId := event.Runtime.ContainerID
-	if entityId == "" {
+	if entityId == "" || ns.k8sObjectCache == nil {
 		entityId = ns.nodeName
 	}
 
@@ -372,7 +374,9 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 }
 
 func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid int) apitypes.ProcessTree {
-	if containerID == "" {
+	if containerID == "" || ns.k8sObjectCache == nil {
+		// If we don't have a container ID, we can't get the process tree
+		// So we just return the PID
 		return apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
 				PID: uint32(pid),
@@ -396,6 +400,10 @@ func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid int) apityp
 }
 
 func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream) error {
+	if !ns.cfg.KubernetesMode {
+		return nil
+	}
+
 	if isEmptyNetworkStream(networkStream) {
 		logger.L().Debug("no events in network stream, skipping")
 	}
