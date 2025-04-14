@@ -25,6 +25,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/processmanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -41,9 +42,10 @@ type NetworkStream struct {
 	httpClient                *http.Client
 	eventsNotificationChannel chan apitypes.NetworkStream
 	dnsSupport                bool
+	processTreeManager        processmanager.ProcessManagerClient
 }
 
-func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, k8sClient k8sclient.K8sClientInterface, nodeName string, eventsNotificationChannel chan apitypes.NetworkStream, dnsSupport bool) (*NetworkStream, error) {
+func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, k8sClient k8sclient.K8sClientInterface, nodeName string, eventsNotificationChannel chan apitypes.NetworkStream, dnsSupport bool, processTreeManager processmanager.ProcessManagerClient) (*NetworkStream, error) {
 	k8sInventory, err := common.GetK8sInventoryCache()
 	if err != nil || k8sInventory == nil {
 		return nil, fmt.Errorf("creating k8s inventory cache: %w", err)
@@ -66,6 +68,7 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 		nodeName:                  nodeName,
 		eventsNotificationChannel: eventsNotificationChannel,
 		dnsSupport:                dnsSupport,
+		processTreeManager:        processTreeManager,
 	}
 
 	// Create the host entity
@@ -151,13 +154,19 @@ func (ns *NetworkStream) Start() {
 				return
 			case <-ticker.C:
 				ns.eventsStorageMutex.Lock()
-				if err := ns.sendNetworkEvent(&ns.networkEventsStorage); err != nil {
-					logger.L().Error("NetworkStream - failed to send network events", helpers.Error(err))
-				}
 				// Send the network events to the notification channel
 				if ns.eventsNotificationChannel != nil {
 					ns.eventsNotificationChannel <- ns.networkEventsStorage
 				}
+
+				// Remove process tree from events (to reduce size)
+				removeProcessTreeFromEvents(&ns.networkEventsStorage)
+
+				// Send the network events to the exporter
+				if err := ns.sendNetworkEvent(&ns.networkEventsStorage); err != nil {
+					logger.L().Error("NetworkStream - failed to send network events", helpers.Error(err))
+				}
+
 				// Clear the storage
 				for entityId := range ns.networkEventsStorage.Entities {
 					entity := ns.networkEventsStorage.Entities[entityId]
@@ -239,6 +248,9 @@ func (ns *NetworkStream) handleDnsEvent(event *tracerdnstype.Event) {
 		Protocol:  apitypes.NetworkStreamEventProtocolDNS,
 		Kind:      apitypes.EndpointKindRaw,
 	}
+
+	processTree := ns.getProcessTreeByPid(event.Runtime.ContainerID, int(event.Pid))
+	networkEvent.ProcessTree = &processTree
 
 	entity.Outbound[event.DNSName] = networkEvent
 	ns.networkEventsStorage.Entities[entityId] = entity
@@ -355,7 +367,34 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 
 	networkEvent.Kind = apitypes.EndpointKind(event.DstEndpoint.Kind)
 
+	processTree := ns.getProcessTreeByPid(event.Runtime.ContainerID, int(event.Pid))
+	networkEvent.ProcessTree = &processTree
+
 	return networkEvent
+}
+
+func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid int) apitypes.ProcessTree {
+	if containerID == "" {
+		return apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				PID: uint32(pid),
+			},
+		}
+	}
+
+	processTree, err := ns.processTreeManager.GetProcessTreeForPID(containerID, pid)
+	if err != nil {
+		logger.L().Debug("NetworkStream - failed to get process tree", helpers.Error(err), helpers.Int("pid", pid))
+		return apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				PID: uint32(pid),
+			},
+		}
+	}
+
+	return apitypes.ProcessTree{
+		ProcessTree: processTree,
+	}
 }
 
 func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream) error {
@@ -419,4 +458,16 @@ func isEmptyNetworkStream(networkStream *apitypes.NetworkStream) bool {
 		}
 	}
 	return true
+}
+
+func removeProcessTreeFromEvents(networkStream *apitypes.NetworkStream) {
+	for entityId, entity := range networkStream.Entities {
+		for _, event := range entity.Inbound {
+			event.ProcessTree = nil
+		}
+		for _, event := range entity.Outbound {
+			event.ProcessTree = nil
+		}
+		networkStream.Entities[entityId] = entity
+	}
 }
