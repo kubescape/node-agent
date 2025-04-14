@@ -285,7 +285,7 @@ func main() {
 	// Create the network streaming manager
 	var networkStreamClient networkstream.NetworkStreamClient
 	if cfg.EnableNetworkStreaming {
-		networkStreamClient, err = networkstreamv1.NewNetworkStream(ctx, cfg, k8sObjectCache, dnsResolver, k8sClient, cfg.NodeName)
+		networkStreamClient, err = networkstreamv1.NewNetworkStream(ctx, cfg, k8sObjectCache, dnsResolver, k8sClient, cfg.NodeName, nil, false)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating NetworkManager", helpers.Error(err))
 		}

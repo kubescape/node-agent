@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff/v5"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/common"
 	"github.com/kubescape/go-logger"
@@ -27,27 +29,28 @@ import (
 )
 
 type NetworkStream struct {
-	networkEventsStorage apitypes.NetworkStream
-	eventsStorageMutex   sync.RWMutex // Mutex to protect access to networkEventsStorage.Containers
-	cfg                  config.Config
-	ctx                  context.Context
-	k8sObjectCache       objectcache.K8sObjectCache
-	dnsResolver          dnsmanager.DNSResolver
-	k8sInventory         common.K8sInventoryCache
-	k8sClient            k8sclient.K8sClientInterface
-
-	nodeName   string
-	httpClient *http.Client
+	networkEventsStorage      apitypes.NetworkStream
+	eventsStorageMutex        sync.RWMutex // Mutex to protect access to networkEventsStorage.Containers
+	cfg                       config.Config
+	ctx                       context.Context
+	k8sObjectCache            objectcache.K8sObjectCache
+	dnsResolver               dnsmanager.DNSResolver
+	k8sInventory              common.K8sInventoryCache
+	k8sClient                 k8sclient.K8sClientInterface
+	nodeName                  string
+	httpClient                *http.Client
+	eventsNotificationChannel chan apitypes.NetworkStream
+	dnsSupport                bool
 }
 
-func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, k8sClient k8sclient.K8sClientInterface, nodeName string) (*NetworkStream, error) {
+func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, k8sClient k8sclient.K8sClientInterface, nodeName string, eventsNotificationChannel chan apitypes.NetworkStream, dnsSupport bool) (*NetworkStream, error) {
 	k8sInventory, err := common.GetK8sInventoryCache()
 	if err != nil || k8sInventory == nil {
 		return nil, fmt.Errorf("creating k8s inventory cache: %w", err)
 	}
 	k8sInventory.Start() // We do not stop it here, as we need it to be running for the whole lifetime of the NetworkStream.
 
-	return &NetworkStream{
+	ns := NetworkStream{
 		networkEventsStorage: apitypes.NetworkStream{
 			Entities: make(map[string]apitypes.NetworkStreamEntity),
 		},
@@ -60,8 +63,19 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 		httpClient: &http.Client{
 			Timeout: time.Duration(cfg.Exporters.HTTPExporterConfig.TimeoutSeconds) * time.Second,
 		},
-		nodeName: nodeName,
-	}, nil
+		nodeName:                  nodeName,
+		eventsNotificationChannel: eventsNotificationChannel,
+		dnsSupport:                dnsSupport,
+	}
+
+	// Create the host entity
+	ns.networkEventsStorage.Entities[nodeName] = apitypes.NetworkStreamEntity{
+		Kind:     apitypes.NetworkStreamEntityKindHost,
+		Inbound:  make(map[string]apitypes.NetworkStreamEvent),
+		Outbound: make(map[string]apitypes.NetworkStreamEvent),
+	}
+
+	return &ns, nil
 }
 
 func (ns *NetworkStream) ContainerCallback(notif containercollection.PubSubEvent) {
@@ -140,6 +154,10 @@ func (ns *NetworkStream) Start() {
 				if err := ns.sendNetworkEvent(&ns.networkEventsStorage); err != nil {
 					logger.L().Error("NetworkStream - failed to send network events", helpers.Error(err))
 				}
+				// Send the network events to the notification channel
+				if ns.eventsNotificationChannel != nil {
+					ns.eventsNotificationChannel <- ns.networkEventsStorage
+				}
 				// Clear the storage
 				for containerID := range ns.networkEventsStorage.Entities {
 					container := ns.networkEventsStorage.Entities[containerID]
@@ -167,9 +185,73 @@ func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sE
 		}
 
 		ns.handleNetworkEvent(networkEvent)
+	case utils.DnsEventType:
+		if !ns.dnsSupport {
+			return
+		}
+
+		dnsEvent, ok := event.(*tracerdnstype.Event)
+		if !ok {
+			return
+		}
+		if !ns.shouldReportDnsEvent(dnsEvent) {
+			return
+		}
+
+		ns.handleDnsEvent(dnsEvent)
+
 	default:
 		logger.L().Error("NetworkStream - unknown event type", helpers.String("event type", string(eventType)))
 	}
+}
+
+func (ns *NetworkStream) handleDnsEvent(event *tracerdnstype.Event) {
+	ns.eventsStorageMutex.Lock()
+	defer ns.eventsStorageMutex.Unlock()
+
+	entityId := event.Runtime.ContainerID
+	if entityId == "" {
+		entityId = ns.nodeName
+	}
+
+	entity, ok := ns.networkEventsStorage.Entities[entityId]
+	if !ok {
+		logger.L().Error("NetworkStream - entity not found", helpers.String("entity ID", entityId))
+		return
+	}
+
+	// We get only DNS response events, so we put them in the outbound map
+	if _, exists := entity.Outbound[event.DNSName]; exists {
+		// If the event already exists, we can skip it
+		return
+	}
+
+	networkEvent := apitypes.NetworkStreamEvent{
+		Timestamp: time.Unix(0, int64(event.Timestamp)),
+		DNSName:   event.DNSName,
+		Port:      int32(event.DstPort),
+		Protocol:  apitypes.NetworkStreamEventProtocolDNS,
+		Kind:      apitypes.EndpointKindRaw,
+	}
+
+	entity.Outbound[event.DNSName] = networkEvent
+	ns.networkEventsStorage.Entities[entityId] = entity
+}
+
+func (hns *NetworkStream) shouldReportDnsEvent(dnsEvent *tracerdnstype.Event) bool {
+	if dnsEvent.DNSName == "" {
+		return false
+	}
+
+	if strings.HasSuffix(dnsEvent.DNSName, "in-addr.arpa.") {
+		return false
+	}
+
+	if strings.HasSuffix(dnsEvent.DNSName, "svc.cluster.local.") {
+		return false
+	}
+
+	return true
 }
 
 func (ns *NetworkStream) handleNetworkEvent(event *tracernetworktype.Event) {
@@ -178,28 +260,33 @@ func (ns *NetworkStream) handleNetworkEvent(event *tracernetworktype.Event) {
 	ns.eventsStorageMutex.Lock()
 	defer ns.eventsStorageMutex.Unlock()
 
-	container, ok := ns.networkEventsStorage.Entities[event.Runtime.ContainerID]
+	entityId := event.Runtime.ContainerID
+	if entityId == "" {
+		entityId = ns.nodeName
+	}
+
+	entity, ok := ns.networkEventsStorage.Entities[entityId]
 	if !ok {
-		logger.L().Error("NetworkStream - container not found", helpers.String("container ID", event.Runtime.ContainerID))
+		logger.L().Error("NetworkStream - entity not found", helpers.String("entity ID", entityId))
 		return
 	}
 
 	if event.PktType == "OUTGOING" {
-		if _, exists := container.Outbound[endpointID]; exists {
+		if _, exists := entity.Outbound[endpointID]; exists {
 			// If the event already exists, we can skip it
 			return
 		}
 		networkEvent := ns.buildNetworkEvent(event)
-		container.Outbound[endpointID] = networkEvent
+		entity.Outbound[endpointID] = networkEvent
 	} else {
-		if _, exists := container.Inbound[endpointID]; exists {
+		if _, exists := entity.Inbound[endpointID]; exists {
 			// If the event already exists, we can skip it
 			return
 		}
 		networkEvent := ns.buildNetworkEvent(event)
-		container.Inbound[endpointID] = networkEvent
+		entity.Inbound[endpointID] = networkEvent
 	}
-	ns.networkEventsStorage.Entities[event.Runtime.ContainerID] = container
+	ns.networkEventsStorage.Entities[entityId] = entity
 }
 
 func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apitypes.NetworkStreamEvent {

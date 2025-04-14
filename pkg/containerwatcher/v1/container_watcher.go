@@ -336,6 +336,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		metrics.ReportEvent(utils.DnsEventType)
 		dnsManagerClient.ReportEvent(event)
 		ruleManager.ReportEvent(utils.DnsEventType, &event)
+		networkStreamClient.ReportEvent(utils.DnsEventType, &event)
 
 		// Report DNS events to event receivers
 		reportEventToThirdPartyTracers(utils.DnsEventType, &event, thirdPartyEventReceivers)
