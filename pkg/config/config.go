@@ -41,6 +41,7 @@ type Config struct {
 	NodeName                 string                    `mapstructure:"nodeName"`
 	PodName                  string                    `mapstructure:"podName"`
 	KubernetesMode           bool                      `mapstructure:"kubernetesMode"`
+	EnableHostManager        bool                      `mapstructure:"hostManagerEnabled"`
 }
 
 // LoadConfig reads configuration from file or environment variables.

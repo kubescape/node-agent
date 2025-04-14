@@ -340,7 +340,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 	wipSbom.Spec.Metadata.Report.CreatedAt = wipSbom.CreationTimestamp
 	wipSbom.Spec.Metadata.Tool.Name = "syft"
 	wipSbom.Spec.Metadata.Tool.Version = s.version
-	wipSbom.Spec.Syft = toSyftDocument(syftSBOM)
+	wipSbom.Spec.Syft = ToSyftDocument(syftSBOM)
 	// check the size of the SBOM
 	sz := size.Of(wipSbom)
 	wipSbom.Annotations[helpersv1.ResourceSizeMetadataKey] = fmt.Sprintf("%d", sz)
@@ -575,7 +575,9 @@ func toLocations(l []file.Location) []v1beta1.Location {
 	return locations
 }
 
-func toSyftDocument(sbomSBOM *sbom.SBOM) v1beta1.SyftDocument {
+// ToSyftDocument converts a syft.SBOM to a v1beta1.SyftDocument.
+// TODO move to utils?
+func ToSyftDocument(sbomSBOM *sbom.SBOM) v1beta1.SyftDocument {
 	doc := syftjson.ToFormatModel(*sbomSBOM, syftjson.EncoderConfig{
 		Pretty: false,
 		Legacy: false,
