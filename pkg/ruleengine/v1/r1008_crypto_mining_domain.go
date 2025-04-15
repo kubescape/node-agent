@@ -182,6 +182,12 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 					AlertName:   rule.Name(),
 					InfectedPID: dnsEvent.Pid,
 					Severity:    R1008CryptoMiningDomainCommunicationRuleDescriptor.Priority,
+					Arguments: map[string]interface{}{
+						"domain":    dnsEvent.DNSName,
+						"addresses": dnsEvent.Addresses,
+						"protocol":  dnsEvent.Protocol,
+						"port":      dnsEvent.DstPort,
+					},
 				},
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{

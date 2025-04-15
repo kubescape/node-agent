@@ -105,9 +105,10 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 				AlertName:   rule.Name(),
 				InfectedPID: networkEvent.Pid,
 				Arguments: map[string]interface{}{
-					"ip":    networkEvent.DstEndpoint.Addr,
-					"port":  networkEvent.Port,
-					"proto": networkEvent.Proto,
+					"ip":     networkEvent.DstEndpoint.Addr,
+					"port":   networkEvent.Port,
+					"proto":  networkEvent.Proto,
+					"domain": domain,
 				},
 				Severity: R0011UnexpectedEgressNetworkTrafficRuleDescriptor.Priority,
 			},
