@@ -679,7 +679,13 @@ func Test_11_EndpointTest(t *testing.T) {
 		}
 	}
 
-	expectedEndpoints := []v1beta1.HTTPEndpoint{endpoint1, endpoint2}
+	e3 := endpoint1
+	e3.Direction = "outbound"
+
+	e4 := endpoint2
+	e4.Direction = "outbound"
+
+	expectedEndpoints := []v1beta1.HTTPEndpoint{endpoint1, endpoint2, e3, e4}
 	for _, expectedEndpoint := range expectedEndpoints {
 		found := false
 		for _, savedEndpoint := range savedEndpoints {
