@@ -30,6 +30,7 @@ func TestLoadConfig(t *testing.T) {
 				EnableHostNetworkSensor:  false,
 				EnableNetworkStreaming:   false,
 				KubernetesMode:           true,
+				NetworkStreamingInterval: 2 * time.Minute,
 				InitialDelay:             2 * time.Minute,
 				MaxSniffingTime:          6 * time.Hour,
 				UpdateDataPeriod:         1 * time.Minute,

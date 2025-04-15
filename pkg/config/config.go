@@ -42,6 +42,7 @@ type Config struct {
 	NodeName                 string                    `mapstructure:"nodeName"`
 	PodName                  string                    `mapstructure:"podName"`
 	KubernetesMode           bool                      `mapstructure:"kubernetesMode"`
+	NetworkStreamingInterval time.Duration             `mapstructure:"networkStreamingInterval"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -64,6 +65,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("hostNetworkSensorEnabled", false)
 	viper.SetDefault("networkStreamingEnabled", false)
 	viper.SetDefault("kubernetesMode", true)
+	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
 
 	viper.AutomaticEnv()
 

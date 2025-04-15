@@ -143,7 +143,7 @@ func (ns *NetworkStream) waitForSharedContainerData(containerID string) (*utils.
 // Periodically send the network events to the exporter
 func (ns *NetworkStream) Start() {
 	go func() {
-		ticker := time.NewTicker(ns.cfg.UpdateDataPeriod)
+		ticker := time.NewTicker(ns.cfg.NetworkStreamingInterval)
 		defer ticker.Stop()
 		for {
 			select {
