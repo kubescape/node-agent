@@ -26,17 +26,17 @@ func setupTestProcessManager(t *testing.T) (*ProcessManager, mockProcessAdder) {
 	pm := CreateProcessManager(ctx)
 
 	// Create process mock map
-	mockProcesses := make(map[int]apitypes.Process)
+	mockProcesses := make(map[int]*apitypes.Process)
 
 	// Store original function
 	originalGetProcessFromProc := pm.getProcessFromProc
 
 	// Replace with mock version
-	pm.getProcessFromProc = func(pid int) (apitypes.Process, error) {
+	pm.getProcessFromProc = func(pid int) (*apitypes.Process, error) {
 		if proc, exists := mockProcesses[pid]; exists {
 			return proc, nil
 		}
-		return apitypes.Process{}, fmt.Errorf("mock process not found: %d", pid)
+		return nil, fmt.Errorf("mock process not found: %d", pid)
 	}
 
 	// Set up cleanup
@@ -49,13 +49,14 @@ func setupTestProcessManager(t *testing.T) (*ProcessManager, mockProcessAdder) {
 	return pm, func(pid int, ppid uint32, comm string) {
 		uid := uint32(1000)
 		gid := uint32(1000)
-		mockProcesses[pid] = apitypes.Process{
-			PID:     uint32(pid),
-			PPID:    ppid,
-			Comm:    comm,
-			Cmdline: comm,
-			Uid:     &uid,
-			Gid:     &gid,
+		mockProcesses[pid] = &apitypes.Process{
+			PID:         uint32(pid),
+			PPID:        ppid,
+			Comm:        comm,
+			Cmdline:     comm,
+			Uid:         &uid,
+			Gid:         &gid,
+			ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
 		}
 	}
 }
@@ -85,10 +86,10 @@ func TestProcessManagerBasics(t *testing.T) {
 
 	// Verify shim was recorded
 	assert.True(t, pm.containerIdToShimPid.Has(containerID))
-	assert.Equal(t, shimPID, pm.containerIdToShimPid.Get(containerID))
+	assert.Equal(t, apitypes.CommPID{PID: shimPID}, pm.containerIdToShimPid.Get(containerID))
 
 	// Verify container process was added
-	containerProc, exists := pm.processTree.Load(containerPID)
+	containerProc, exists := pm.processTree.Load(apitypes.CommPID{Comm: "container-main", PID: containerPID})
 	assert.True(t, exists)
 	assert.Equal(t, shimPID, containerProc.PPID)
 }
@@ -130,7 +131,7 @@ func TestProcessTracking(t *testing.T) {
 				},
 			},
 			verify: func(t *testing.T, pm *ProcessManager) {
-				proc, exists := pm.processTree.Load(1001)
+				proc, exists := pm.processTree.Load(apitypes.CommPID{Comm: "nginx", PID: 1001})
 				require.True(t, exists)
 				assert.Equal(t, containerPID, proc.PPID)
 				assert.Equal(t, "nginx", proc.Comm)
@@ -147,7 +148,7 @@ func TestProcessTracking(t *testing.T) {
 				},
 			},
 			verify: func(t *testing.T, pm *ProcessManager) {
-				proc, exists := pm.processTree.Load(1002)
+				proc, exists := pm.processTree.Load(apitypes.CommPID{Comm: "bash", PID: 1002})
 				require.True(t, exists)
 				assert.Equal(t, shimPID, proc.PPID)
 				assert.Equal(t, "bash", proc.Comm)
@@ -157,21 +158,22 @@ func TestProcessTracking(t *testing.T) {
 			name: "Nested process",
 			event: events.ExecEvent{
 				Event: tracerexectype.Event{
-					Pid:  1003,
-					Ppid: 1001,
-					Comm: "nginx-worker",
-					Args: []string{"nginx", "worker process"},
+					Pid:   1003,
+					Ppid:  1001,
+					Comm:  "nginx-worker",
+					Pcomm: "nginx",
+					Args:  []string{"nginx", "worker process"},
 				},
 			},
 			verify: func(t *testing.T, pm *ProcessManager) {
-				proc, exists := pm.processTree.Load(1003)
+				proc, exists := pm.processTree.Load(apitypes.CommPID{Comm: "nginx-worker", PID: 1003})
 				require.True(t, exists)
 				assert.Equal(t, uint32(1001), proc.PPID)
 
-				parent, exists := pm.processTree.Load(1001)
+				parent, exists := pm.processTree.Load(apitypes.CommPID{Comm: "nginx", PID: 1001})
 				require.True(t, exists)
 				hasChild := false
-				for _, child := range parent.Children {
+				for _, child := range parent.ChildrenMap {
 					if child.PID == 1003 {
 						hasChild = true
 						break
@@ -213,23 +215,25 @@ func TestProcessRemoval(t *testing.T) {
 
 	// Create a process tree
 	processes := []struct {
-		pid  uint32
-		ppid uint32
-		comm string
+		pid   uint32
+		ppid  uint32
+		comm  string
+		pcomm string
 	}{
-		{1001, containerPID, "parent"},
-		{1002, 1001, "child1"},
-		{1003, 1002, "grandchild1"},
-		{1004, 1002, "grandchild2"},
+		{1001, containerPID, "parent", "container-main"},
+		{1002, 1001, "child1", "parent"},
+		{1003, 1002, "grandchild1", "child1"},
+		{1004, 1002, "grandchild2", "child1"},
 	}
 
 	// Add processes
 	for _, proc := range processes {
 		event := &events.ExecEvent{
 			Event: tracerexectype.Event{
-				Pid:  proc.pid,
-				Ppid: proc.ppid,
-				Comm: proc.comm,
+				Pid:   proc.pid,
+				Ppid:  proc.ppid,
+				Comm:  proc.comm,
+				Pcomm: proc.pcomm,
 			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, event)
@@ -237,29 +241,29 @@ func TestProcessRemoval(t *testing.T) {
 
 	// Verify initial structure
 	for _, proc := range processes {
-		assert.True(t, pm.processTree.Has(proc.pid))
+		assert.True(t, pm.processTree.Has(apitypes.CommPID{Comm: proc.comm, PID: proc.pid}))
 	}
 
 	// Remove middle process and verify tree reorganization
-	pm.removeProcess(1002)
+	pm.removeProcess(apitypes.CommPID{Comm: "child1", PID: 1002})
 
 	// Verify process was removed
-	assert.False(t, pm.processTree.Has(1002))
+	assert.False(t, pm.processTree.Has(apitypes.CommPID{Comm: "child1", PID: 1002}))
 
 	// Verify children were reassigned to parent
-	parent, exists := pm.processTree.Load(1001)
+	parent, exists := pm.processTree.Load(apitypes.CommPID{Comm: "parent", PID: 1001})
 	require.True(t, exists)
 
 	// Should now have both grandchildren
 	childPIDs := make(map[uint32]bool)
-	for _, child := range parent.Children {
+	for _, child := range parent.ChildrenMap {
 		childPIDs[child.PID] = true
 	}
 	assert.True(t, childPIDs[1003])
 	assert.True(t, childPIDs[1004])
 
 	// Verify grandchildren's PPID was updated
-	for _, pid := range []uint32{1003, 1004} {
+	for _, pid := range []apitypes.CommPID{{Comm: "grandchild1", PID: 1003}, {Comm: "grandchild2", PID: 1004}} {
 		proc, exists := pm.processTree.Load(pid)
 		require.True(t, exists)
 		assert.Equal(t, uint32(1001), proc.PPID)
@@ -289,22 +293,24 @@ func TestContainerRemoval(t *testing.T) {
 
 	// Create various processes under the container
 	processes := []struct {
-		pid  uint32
-		ppid uint32
-		comm string
+		pid   uint32
+		ppid  uint32
+		comm  string
+		pcomm string
 	}{
-		{containerPID, shimPID, "container-main"},
-		{1001, containerPID, "app"},
-		{1002, 1001, "worker"},
-		{1003, shimPID, "exec"}, // direct child of shim
+		{containerPID, shimPID, "container-main", ""},
+		{1001, containerPID, "app", "container-main"},
+		{1002, 1001, "worker", "app"},
+		{1003, shimPID, "exec", ""}, // direct child of shim
 	}
 
 	for _, proc := range processes {
 		event := &events.ExecEvent{
 			Event: tracerexectype.Event{
-				Pid:  proc.pid,
-				Ppid: proc.ppid,
-				Comm: proc.comm,
+				Pid:   proc.pid,
+				Ppid:  proc.ppid,
+				Comm:  proc.comm,
+				Pcomm: proc.pcomm,
 			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, event)
@@ -325,7 +331,7 @@ func TestContainerRemoval(t *testing.T) {
 
 	// Verify all processes were removed
 	for _, proc := range processes {
-		assert.False(t, pm.processTree.Has(proc.pid))
+		assert.False(t, pm.processTree.Has(apitypes.CommPID{Comm: proc.comm, PID: proc.pid}))
 	}
 
 	// Verify container was removed from mapping
@@ -363,9 +369,10 @@ func TestMultipleContainers(t *testing.T) {
 		// Add some processes to each container
 		event1 := &events.ExecEvent{
 			Event: tracerexectype.Event{
-				Pid:  c.containerPID + 1,
-				Ppid: c.containerPID,
-				Comm: "process-1",
+				Pid:   c.containerPID + 1,
+				Ppid:  c.containerPID,
+				Comm:  "process-1",
+				Pcomm: "container-container-1",
 			},
 		}
 		event2 := &events.ExecEvent{
@@ -383,17 +390,17 @@ func TestMultipleContainers(t *testing.T) {
 	// Verify each container's processes
 	for _, c := range containers {
 		// Check container process
-		proc, exists := pm.processTree.Load(c.containerPID)
+		proc, exists := pm.processTree.Load(apitypes.CommPID{Comm: "container-" + c.id, PID: c.containerPID})
 		require.True(t, exists)
 		assert.Equal(t, c.shimPID, proc.PPID)
 
 		// Check child process
-		childProc, exists := pm.processTree.Load(c.containerPID + 1)
+		childProc, exists := pm.processTree.Load(apitypes.CommPID{Comm: "process-1", PID: c.containerPID + 1})
 		require.True(t, exists)
 		assert.Equal(t, c.containerPID, childProc.PPID)
 
 		// Check exec process
-		execProc, exists := pm.processTree.Load(c.containerPID + 2)
+		execProc, exists := pm.processTree.Load(apitypes.CommPID{Comm: "exec-process", PID: c.containerPID + 2})
 		require.True(t, exists)
 		assert.Equal(t, c.shimPID, execProc.PPID)
 	}
@@ -412,21 +419,21 @@ func TestMultipleContainers(t *testing.T) {
 	})
 
 	// Verify first container's processes are gone
-	assert.False(t, pm.processTree.Has(containers[0].containerPID))
-	assert.False(t, pm.processTree.Has(containers[0].containerPID+1))
-	assert.False(t, pm.processTree.Has(containers[0].containerPID+2))
+	assert.False(t, pm.processTree.Has(apitypes.CommPID{Comm: "container-" + containers[0].id, PID: containers[0].containerPID}))
+	assert.False(t, pm.processTree.Has(apitypes.CommPID{Comm: "process-1", PID: containers[0].containerPID + 1}))
+	assert.False(t, pm.processTree.Has(apitypes.CommPID{Comm: "exec-process", PID: containers[0].containerPID + 2}))
 
 	// Verify second container's processes remain
-	assert.True(t, pm.processTree.Has(containers[1].containerPID))
-	assert.True(t, pm.processTree.Has(containers[1].containerPID+1))
-	assert.True(t, pm.processTree.Has(containers[1].containerPID+2))
+	assert.True(t, pm.processTree.Has(apitypes.CommPID{Comm: "container-" + containers[1].id, PID: containers[1].containerPID}))
+	assert.True(t, pm.processTree.Has(apitypes.CommPID{Comm: "process-1", PID: containers[1].containerPID + 1}))
+	assert.True(t, pm.processTree.Has(apitypes.CommPID{Comm: "exec-process", PID: containers[1].containerPID + 2}))
 }
 
 func TestErrorCases(t *testing.T) {
 	pm, addMockProcess := setupTestProcessManager(t)
 
 	t.Run("get non-existent process tree", func(t *testing.T) {
-		_, err := pm.GetProcessTreeForPID("non-existent", 1000)
+		_, err := pm.GetProcessTreeForPID("non-existent", apitypes.CommPID{PID: 1000})
 		assert.Error(t, err)
 	})
 
@@ -460,7 +467,7 @@ func TestErrorCases(t *testing.T) {
 		pm.ReportEvent(utils.ExecveEventType, event)
 
 		// Process should still be added
-		assert.True(t, pm.processTree.Has(2000))
+		assert.True(t, pm.processTree.Has(apitypes.CommPID{Comm: "orphan", PID: 2000}))
 	})
 }
 
@@ -487,14 +494,14 @@ func TestRaceConditions(t *testing.T) {
 
 	processCount := 100
 	var mu sync.Mutex
-	processStates := make(map[uint32]struct {
+	processStates := make(map[apitypes.CommPID]struct {
 		added   bool
 		removed bool
 	})
 
 	// Pre-populate process states
 	for i := 0; i < processCount; i++ {
-		pid := uint32(2000 + i)
+		pid := apitypes.CommPID{Comm: fmt.Sprintf("process-%d", i), PID: uint32(2000 + i)}
 		processStates[pid] = struct {
 			added   bool
 			removed bool
@@ -507,9 +514,8 @@ func TestRaceConditions(t *testing.T) {
 
 	// Goroutine to remove processes (run first)
 	go func() {
-		for i := 0; i < processCount; i++ {
-			if i%2 == 0 {
-				pid := uint32(2000 + i)
+		for pid := range processStates {
+			if pid.PID%2 == 0 {
 				mu.Lock()
 				if state, exists := processStates[pid]; exists {
 					state.removed = true
@@ -527,17 +533,16 @@ func TestRaceConditions(t *testing.T) {
 
 	// Goroutine to add processes
 	go func() {
-		for i := 0; i < processCount; i++ {
-			pid := uint32(2000 + i)
+		for pid := range processStates {
 			// Only add if not marked for removal
 			mu.Lock()
 			state := processStates[pid]
 			if !state.removed {
 				event := &events.ExecEvent{
 					Event: tracerexectype.Event{
-						Pid:  pid,
+						Pid:  pid.PID,
 						Ppid: shimPID,
-						Comm: fmt.Sprintf("process-%d", i),
+						Comm: pid.Comm,
 					},
 				}
 				state.added = true
@@ -556,17 +561,17 @@ func TestRaceConditions(t *testing.T) {
 
 	// Verify final state
 	remainingCount := 0
-	pm.processTree.Range(func(pid uint32, process apitypes.Process) bool {
-		if pid >= 2000 && pid < 2000+uint32(processCount) {
+	pm.processTree.Range(func(pid apitypes.CommPID, process *apitypes.Process) bool {
+		if pid.PID >= 2000 && pid.PID < 2000+uint32(processCount) {
 			mu.Lock()
 			state := processStates[pid]
 			mu.Unlock()
 
 			if state.removed {
-				t.Errorf("Process %d exists but was marked for removal", pid)
+				t.Errorf("Process %d exists but was marked for removal", pid.PID)
 			}
 			if !state.added {
-				t.Errorf("Process %d exists but was not marked as added", pid)
+				t.Errorf("Process %d exists but was not marked as added", pid.PID)
 			}
 			remainingCount++
 		}
@@ -578,11 +583,11 @@ func TestRaceConditions(t *testing.T) {
 	for pid, state := range processStates {
 		if state.removed {
 			if pm.processTree.Has(pid) {
-				t.Errorf("Process %d was marked for removal but still exists", pid)
+				t.Errorf("Process %d was marked for removal but still exists", pid.PID)
 			}
 		} else if state.added {
 			if !pm.processTree.Has(pid) {
-				t.Errorf("Process %d was marked as added but doesn't exist", pid)
+				t.Errorf("Process %d was marked as added but doesn't exist", pid.PID)
 			}
 		}
 	}
@@ -594,10 +599,10 @@ func TestRaceConditions(t *testing.T) {
 		"Expected exactly %d processes, got %d", expectedCount, remainingCount)
 
 	// Verify all remaining processes have correct parent
-	pm.processTree.Range(func(pid uint32, process apitypes.Process) bool {
-		if pid >= 2000 && pid < 2000+uint32(processCount) {
+	pm.processTree.Range(func(pid apitypes.CommPID, process *apitypes.Process) bool {
+		if pid.PID >= 2000 && pid.PID < 2000+uint32(processCount) {
 			assert.Equal(t, shimPID, process.PPID,
-				"Process %d should have shim as parent", pid)
+				"Process %d should have shim as parent", pid.PID)
 		}
 		return true
 	})
@@ -628,10 +633,11 @@ func TestDuplicateProcessHandling(t *testing.T) {
 		// First add a parent process
 		parentEvent := &events.ExecEvent{
 			Event: tracerexectype.Event{
-				Pid:  1001,
-				Ppid: containerPID,
-				Comm: "parent-process",
-				Args: []string{"parent-process", "--initial"},
+				Pid:   1001,
+				Ppid:  containerPID,
+				Comm:  "parent-process",
+				Pcomm: "container-main",
+				Args:  []string{"parent-process", "--initial"},
 			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, parentEvent)
@@ -639,73 +645,76 @@ func TestDuplicateProcessHandling(t *testing.T) {
 		// Add child process
 		childEvent := &events.ExecEvent{
 			Event: tracerexectype.Event{
-				Pid:  1002,
-				Ppid: 1001,
-				Comm: "child-process",
-				Args: []string{"child-process", "--initial"},
+				Pid:   1002,
+				Ppid:  1001,
+				Comm:  "child-process",
+				Pcomm: "parent-process",
+				Args:  []string{"child-process", "--initial"},
 			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, childEvent)
 
 		// Verify initial state
-		parent, exists := pm.processTree.Load(1001)
+		parent, exists := pm.processTree.Load(apitypes.CommPID{Comm: "parent-process", PID: 1001})
 		require.True(t, exists)
 		assert.Equal(t, "parent-process", parent.Comm)
 		assert.Equal(t, "parent-process --initial", parent.Cmdline)
-		assert.Len(t, parent.Children, 1)
-		assert.Equal(t, uint32(1002), parent.Children[0].PID)
+		assert.Len(t, parent.ChildrenMap, 1)
+		assert.Equal(t, uint32(1002), parent.ChildrenMap[apitypes.CommPID{Comm: "child-process", PID: 1002}].PID)
 
 		// Add same child process again with different arguments
 		updatedChildEvent := &events.ExecEvent{
 			Event: tracerexectype.Event{
-				Pid:  1002,
-				Ppid: 1001,
-				Comm: "child-process",
-				Args: []string{"child-process", "--updated"},
+				Pid:   1002,
+				Ppid:  1001,
+				Comm:  "child-process",
+				Pcomm: "parent-process",
+				Args:  []string{"child-process", "--updated"},
 			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, updatedChildEvent)
 
 		// Verify the process was updated
-		updatedChild, exists := pm.processTree.Load(1002)
+		updatedChild, exists := pm.processTree.Load(apitypes.CommPID{Comm: "child-process", PID: 1002})
 		require.True(t, exists)
 		assert.Equal(t, "child-process --updated", updatedChild.Cmdline)
 
 		// Verify parent's children list was updated
-		updatedParent, exists := pm.processTree.Load(1001)
+		updatedParent, exists := pm.processTree.Load(apitypes.CommPID{Comm: "parent-process", PID: 1001})
 		require.True(t, exists)
-		assert.Len(t, updatedParent.Children, 1)
-		assert.Equal(t, "child-process --updated", updatedParent.Children[0].Cmdline)
+		assert.Len(t, updatedParent.ChildrenMap, 1)
+		assert.Equal(t, "child-process --updated", updatedParent.ChildrenMap[apitypes.CommPID{Comm: "child-process", PID: 1002}].Cmdline)
 	})
 
 	t.Run("update process with different parent", func(t *testing.T) {
 		// Move process to different parent
 		differentParentEvent := &events.ExecEvent{
 			Event: tracerexectype.Event{
-				Pid:  1002,
-				Ppid: containerPID,
-				Comm: "child-process",
-				Args: []string{"child-process", "--new-parent"},
+				Pid:   1002,
+				Ppid:  containerPID,
+				Comm:  "child-process",
+				Pcomm: "container-main",
+				Args:  []string{"child-process", "--new-parent"},
 			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, differentParentEvent)
 
 		// Verify process was updated with new parent
-		movedChild, exists := pm.processTree.Load(1002)
+		movedChild, exists := pm.processTree.Load(apitypes.CommPID{Comm: "child-process", PID: 1002})
 		require.True(t, exists)
 		assert.Equal(t, containerPID, movedChild.PPID)
 		assert.Equal(t, "child-process --new-parent", movedChild.Cmdline)
 
 		// Verify old parent no longer has the child
-		oldParent, exists := pm.processTree.Load(1001)
+		oldParent, exists := pm.processTree.Load(apitypes.CommPID{Comm: "parent-process", PID: 1001})
 		require.True(t, exists)
-		assert.Empty(t, oldParent.Children, "Old parent should have no children")
+		assert.Empty(t, oldParent.ChildrenMap, "Old parent should have no children")
 
 		// Verify new parent has the child
-		containerProcess, exists := pm.processTree.Load(containerPID)
+		containerProcess, exists := pm.processTree.Load(apitypes.CommPID{Comm: "container-main", PID: containerPID})
 		require.True(t, exists)
 		hasChild := false
-		for _, child := range containerProcess.Children {
+		for _, child := range containerProcess.ChildrenMap {
 			if child.PID == 1002 {
 				hasChild = true
 				assert.Equal(t, "child-process --new-parent", child.Cmdline)
@@ -756,10 +765,11 @@ func TestProcessReparenting(t *testing.T) {
 		parentPID := uint32(2001)
 		parentEvent := &events.ExecEvent{
 			Event: tracerexectype.Event{
-				Pid:  parentPID,
-				Ppid: grandparentPID,
-				Comm: "parent",
-				Args: []string{"parent"},
+				Pid:   parentPID,
+				Ppid:  grandparentPID,
+				Comm:  "parent",
+				Pcomm: "grandparent",
+				Args:  []string{"parent"},
 			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, parentEvent)
@@ -768,36 +778,37 @@ func TestProcessReparenting(t *testing.T) {
 		childPID := uint32(2002)
 		childEvent := &events.ExecEvent{
 			Event: tracerexectype.Event{
-				Pid:  childPID,
-				Ppid: parentPID,
-				Comm: "child",
-				Args: []string{"child"},
+				Pid:   childPID,
+				Ppid:  parentPID,
+				Comm:  "child",
+				Pcomm: "parent",
+				Args:  []string{"child"},
 			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, childEvent)
 
 		// Verify initial hierarchy
-		child, exists := pm.processTree.Load(childPID)
+		child, exists := pm.processTree.Load(apitypes.CommPID{Comm: "child", PID: childPID})
 		require.True(t, exists)
 		assert.Equal(t, parentPID, child.PPID)
 
-		parent, exists := pm.processTree.Load(parentPID)
+		parent, exists := pm.processTree.Load(apitypes.CommPID{Comm: "parent", PID: parentPID})
 		require.True(t, exists)
 		assert.Equal(t, grandparentPID, parent.PPID)
 
 		// When parent dies, child should be reparented to grandparent
-		pm.removeProcess(parentPID)
+		pm.removeProcess(apitypes.CommPID{Comm: "parent", PID: parentPID})
 
 		// Verify child was reparented to grandparent
-		child, exists = pm.processTree.Load(childPID)
+		child, exists = pm.processTree.Load(apitypes.CommPID{Comm: "child", PID: childPID})
 		require.True(t, exists)
 		assert.Equal(t, grandparentPID, child.PPID, "Child should be reparented to grandparent")
 
 		// Verify grandparent has the child in its children list
-		grandparent, exists := pm.processTree.Load(grandparentPID)
+		grandparent, exists := pm.processTree.Load(apitypes.CommPID{Comm: "grandparent", PID: grandparentPID})
 		require.True(t, exists)
 		hasChild := false
-		for _, c := range grandparent.Children {
+		for _, c := range grandparent.ChildrenMap {
 			if c.PID == childPID {
 				hasChild = true
 				break
@@ -806,9 +817,9 @@ func TestProcessReparenting(t *testing.T) {
 		assert.True(t, hasChild, "Grandparent should have the reparented child")
 
 		// Now if grandparent dies too, child should be reparented to shim
-		pm.removeProcess(grandparentPID)
+		pm.removeProcess(apitypes.CommPID{Comm: "grandparent", PID: grandparentPID})
 
-		child, exists = pm.processTree.Load(childPID)
+		child, exists = pm.processTree.Load(apitypes.CommPID{Comm: "child", PID: childPID})
 		require.True(t, exists)
 		assert.Equal(t, shimPID, child.PPID, "Child should be reparented to shim when grandparent dies")
 	})
@@ -831,10 +842,11 @@ func TestProcessReparenting(t *testing.T) {
 		for _, pid := range childPIDs {
 			childEvent := &events.ExecEvent{
 				Event: tracerexectype.Event{
-					Pid:  pid,
-					Ppid: parentPID,
-					Comm: fmt.Sprintf("child-%d", pid),
-					Args: []string{"child"},
+					Pid:   pid,
+					Ppid:  parentPID,
+					Comm:  fmt.Sprintf("child-%d", pid),
+					Pcomm: "parent",
+					Args:  []string{"child"},
 				},
 			}
 			pm.ReportEvent(utils.ExecveEventType, childEvent)
@@ -844,28 +856,29 @@ func TestProcessReparenting(t *testing.T) {
 		grandchildPID := uint32(3004)
 		grandchildEvent := &events.ExecEvent{
 			Event: tracerexectype.Event{
-				Pid:  grandchildPID,
-				Ppid: childPIDs[0],
-				Comm: "grandchild",
-				Args: []string{"grandchild"},
+				Pid:   grandchildPID,
+				Ppid:  childPIDs[0],
+				Comm:  "grandchild",
+				Pcomm: fmt.Sprintf("child-%d", childPIDs[0]),
+				Args:  []string{"grandchild"},
 			},
 		}
 		pm.ReportEvent(utils.ExecveEventType, grandchildEvent)
 
 		// When parent dies, all direct children should be reparented to shim
-		pm.removeProcess(parentPID)
+		pm.removeProcess(apitypes.CommPID{Comm: "parent", PID: parentPID})
 
 		// Verify all children were reparented to shim
 		for _, childPID := range childPIDs {
-			child, exists := pm.processTree.Load(childPID)
+			child, exists := pm.processTree.Load(apitypes.CommPID{Comm: fmt.Sprintf("child-%d", childPID), PID: childPID})
 			require.True(t, exists)
 			assert.Equal(t, shimPID, child.PPID, "Child should be reparented to shim")
 		}
 
 		// When first child dies, its grandchild should be reparented to shim too
-		pm.removeProcess(childPIDs[0])
+		pm.removeProcess(apitypes.CommPID{Comm: fmt.Sprintf("child-%d", childPIDs[0]), PID: childPIDs[0]})
 
-		grandchild, exists := pm.processTree.Load(grandchildPID)
+		grandchild, exists := pm.processTree.Load(apitypes.CommPID{Comm: "grandchild", PID: grandchildPID})
 		require.True(t, exists)
 		assert.Equal(t, shimPID, grandchild.PPID, "Grandchild should be reparented to shim")
 	})
@@ -874,43 +887,43 @@ func TestProcessReparenting(t *testing.T) {
 func TestRemoveProcessesUnderShim(t *testing.T) {
 	tests := []struct {
 		name         string
-		initialTree  map[uint32]apitypes.Process
+		initialTree  map[apitypes.CommPID]*apitypes.Process
 		shimPID      uint32
-		expectedTree map[uint32]apitypes.Process
+		expectedTree map[apitypes.CommPID]*apitypes.Process
 		description  string
 	}{
 		{
 			name: "simple_process_tree",
-			initialTree: map[uint32]apitypes.Process{
-				100: {PID: 100, PPID: 1, Comm: "shim", Children: []apitypes.Process{}},     // shim process
-				200: {PID: 200, PPID: 100, Comm: "parent", Children: []apitypes.Process{}}, // direct child of shim
-				201: {PID: 201, PPID: 200, Comm: "child1", Children: []apitypes.Process{}}, // child of parent
-				202: {PID: 202, PPID: 200, Comm: "child2", Children: []apitypes.Process{}}, // another child of parent
+			initialTree: map[apitypes.CommPID]*apitypes.Process{
+				{PID: 100}: {PID: 100, PPID: 1, Comm: "shim", ChildrenMap: map[apitypes.CommPID]*apitypes.Process{}},     // shim process
+				{PID: 200}: {PID: 200, PPID: 100, Comm: "parent", ChildrenMap: map[apitypes.CommPID]*apitypes.Process{}}, // direct child of shim
+				{PID: 201}: {PID: 201, PPID: 200, Comm: "child1", ChildrenMap: map[apitypes.CommPID]*apitypes.Process{}}, // child of parent
+				{PID: 202}: {PID: 202, PPID: 200, Comm: "child2", ChildrenMap: map[apitypes.CommPID]*apitypes.Process{}}, // another child of parent
 			},
 			shimPID: 100,
-			expectedTree: map[uint32]apitypes.Process{
-				100: {PID: 100, PPID: 1, Comm: "shim", Children: []apitypes.Process{}}, // only shim remains
+			expectedTree: map[apitypes.CommPID]*apitypes.Process{
+				{PID: 100}: {PID: 100, PPID: 1, Comm: "shim", ChildrenMap: map[apitypes.CommPID]*apitypes.Process{}}, // only shim remains
 			},
 			description: "Should remove all processes under shim including children of children",
 		},
 		{
 			name:         "empty_tree",
-			initialTree:  map[uint32]apitypes.Process{},
+			initialTree:  map[apitypes.CommPID]*apitypes.Process{},
 			shimPID:      100,
-			expectedTree: map[uint32]apitypes.Process{},
+			expectedTree: map[apitypes.CommPID]*apitypes.Process{},
 			description:  "Should handle empty process tree gracefully",
 		},
 		{
 			name: "orphaned_processes",
-			initialTree: map[uint32]apitypes.Process{
-				100: {PID: 100, PPID: 1, Comm: "shim", Children: []apitypes.Process{}},     // shim process
-				200: {PID: 200, PPID: 100, Comm: "parent", Children: []apitypes.Process{}}, // direct child of shim
-				201: {PID: 201, PPID: 999, Comm: "orphan", Children: []apitypes.Process{}}, // orphaned process (parent doesn't exist)
+			initialTree: map[apitypes.CommPID]*apitypes.Process{
+				{PID: 100}: {PID: 100, PPID: 1, Comm: "shim", ChildrenMap: map[apitypes.CommPID]*apitypes.Process{}},     // shim process
+				{PID: 200}: {PID: 200, PPID: 100, Comm: "parent", ChildrenMap: map[apitypes.CommPID]*apitypes.Process{}}, // direct child of shim
+				{PID: 201}: {PID: 201, PPID: 999, Comm: "orphan", ChildrenMap: map[apitypes.CommPID]*apitypes.Process{}}, // orphaned process (parent doesn't exist)
 			},
 			shimPID: 100,
-			expectedTree: map[uint32]apitypes.Process{
-				100: {PID: 100, PPID: 1, Comm: "shim", Children: []apitypes.Process{}},     // shim remains
-				201: {PID: 201, PPID: 999, Comm: "orphan", Children: []apitypes.Process{}}, // orphan unaffected
+			expectedTree: map[apitypes.CommPID]*apitypes.Process{
+				{PID: 100}: {PID: 100, PPID: 1, Comm: "shim", ChildrenMap: map[apitypes.CommPID]*apitypes.Process{}},     // shim remains
+				{PID: 201}: {PID: 201, PPID: 999, Comm: "orphan", ChildrenMap: map[apitypes.CommPID]*apitypes.Process{}}, // orphan unaffected
 			},
 			description: "Should handle orphaned processes correctly",
 		},
@@ -927,7 +940,7 @@ func TestRemoveProcessesUnderShim(t *testing.T) {
 			}
 
 			// Call the function under test
-			pm.removeProcessesUnderShim(tc.shimPID)
+			pm.removeProcessesUnderShim(apitypes.CommPID{PID: tc.shimPID})
 
 			// Verify results
 			assert.Equal(t, len(tc.expectedTree), len(pm.processTree.Keys()),
@@ -942,7 +955,7 @@ func TestRemoveProcessesUnderShim(t *testing.T) {
 			}
 
 			// Verify no unexpected processes remain
-			pm.processTree.Range(func(pid uint32, process apitypes.Process) bool {
+			pm.processTree.Range(func(pid apitypes.CommPID, process *apitypes.Process) bool {
 				_, shouldExist := tc.expectedTree[pid]
 				assert.True(t, shouldExist,
 					"Unexpected process %d found in tree", pid)
@@ -955,8 +968,8 @@ func TestRemoveProcessesUnderShim(t *testing.T) {
 func TestIsDescendantOfShim(t *testing.T) {
 	tests := []struct {
 		name        string
-		processes   map[uint32]apitypes.Process
-		shimPIDs    map[uint32]struct{}
+		processes   map[apitypes.CommPID]*apitypes.Process
+		shimPIDs    map[apitypes.CommPID]struct{}
 		pid         uint32
 		ppid        uint32
 		expected    bool
@@ -964,12 +977,12 @@ func TestIsDescendantOfShim(t *testing.T) {
 	}{
 		{
 			name: "direct_child_of_shim",
-			processes: map[uint32]apitypes.Process{
-				100: {PID: 100, PPID: 1, Comm: "shim"},
-				200: {PID: 200, PPID: 100, Comm: "child"},
+			processes: map[apitypes.CommPID]*apitypes.Process{
+				{PID: 100}: {PID: 100, PPID: 1, Comm: "shim"},
+				{PID: 200}: {PID: 200, PPID: 100, Comm: "child"},
 			},
-			shimPIDs: map[uint32]struct{}{
-				100: {},
+			shimPIDs: map[apitypes.CommPID]struct{}{
+				{PID: 100}: {},
 			},
 			pid:         200,
 			ppid:        100,
@@ -978,13 +991,13 @@ func TestIsDescendantOfShim(t *testing.T) {
 		},
 		{
 			name: "indirect_descendant",
-			processes: map[uint32]apitypes.Process{
-				100: {PID: 100, PPID: 1, Comm: "shim"},
-				200: {PID: 200, PPID: 100, Comm: "parent"},
-				300: {PID: 300, PPID: 200, Comm: "child"},
+			processes: map[apitypes.CommPID]*apitypes.Process{
+				{PID: 100}: {PID: 100, PPID: 1, Comm: "shim"},
+				{PID: 200}: {PID: 200, PPID: 100, Comm: "parent"},
+				{PID: 300}: {PID: 300, PPID: 200, Comm: "child"},
 			},
-			shimPIDs: map[uint32]struct{}{
-				100: {},
+			shimPIDs: map[apitypes.CommPID]struct{}{
+				{PID: 100}: {},
 			},
 			pid:         300,
 			ppid:        200,
@@ -993,12 +1006,12 @@ func TestIsDescendantOfShim(t *testing.T) {
 		},
 		{
 			name: "not_a_descendant",
-			processes: map[uint32]apitypes.Process{
-				100: {PID: 100, PPID: 1, Comm: "shim"},
-				200: {PID: 200, PPID: 2, Comm: "unrelated"},
+			processes: map[apitypes.CommPID]*apitypes.Process{
+				{PID: 100}: {PID: 100, PPID: 1, Comm: "shim"},
+				{PID: 200}: {PID: 200, PPID: 2, Comm: "unrelated"},
 			},
-			shimPIDs: map[uint32]struct{}{
-				100: {},
+			shimPIDs: map[apitypes.CommPID]struct{}{
+				{PID: 100}: {},
 			},
 			pid:         200,
 			ppid:        2,
@@ -1007,13 +1020,13 @@ func TestIsDescendantOfShim(t *testing.T) {
 		},
 		{
 			name: "circular_reference",
-			processes: map[uint32]apitypes.Process{
-				100: {PID: 100, PPID: 1, Comm: "shim"},
-				200: {PID: 200, PPID: 300, Comm: "circular1"},
-				300: {PID: 300, PPID: 200, Comm: "circular2"},
+			processes: map[apitypes.CommPID]*apitypes.Process{
+				{PID: 100}: {PID: 100, PPID: 1, Comm: "shim"},
+				{PID: 200}: {PID: 200, PPID: 300, Comm: "circular1"},
+				{PID: 300}: {PID: 300, PPID: 200, Comm: "circular2"},
 			},
-			shimPIDs: map[uint32]struct{}{
-				100: {},
+			shimPIDs: map[apitypes.CommPID]struct{}{
+				{PID: 100}: {},
 			},
 			pid:         200,
 			ppid:        300,
@@ -1022,11 +1035,11 @@ func TestIsDescendantOfShim(t *testing.T) {
 		},
 		{
 			name: "process_chain_exceeds_max_depth",
-			processes: func() map[uint32]apitypes.Process {
+			processes: func() map[apitypes.CommPID]*apitypes.Process {
 				// Create a chain where the target process is maxTreeDepth + 1 steps away from any shim
-				procs := map[uint32]apitypes.Process{
-					1: {PID: 1, PPID: 0, Comm: "init"}, // init process
-					2: {PID: 2, PPID: 1, Comm: "shim"}, // shim process
+				procs := map[apitypes.CommPID]*apitypes.Process{
+					{PID: 1}: {PID: 1, PPID: 0, Comm: "init"}, // init process
+					{PID: 2}: {PID: 2, PPID: 1, Comm: "shim"}, // shim process
 				}
 				// Create a chain starting far from the shim
 				currentPPID := uint32(100) // Start with a different base to avoid conflicts
@@ -1034,22 +1047,22 @@ func TestIsDescendantOfShim(t *testing.T) {
 
 				// Build the chain backwards from target to base
 				for pid := targetPID; pid > currentPPID; pid-- {
-					procs[pid] = apitypes.Process{
+					procs[apitypes.CommPID{PID: pid}] = &apitypes.Process{
 						PID:  pid,
 						PPID: pid - 1,
 						Comm: fmt.Sprintf("process-%d", pid),
 					}
 				}
 				// Add the base process that's not connected to shim
-				procs[currentPPID] = apitypes.Process{
+				procs[apitypes.CommPID{PID: currentPPID}] = &apitypes.Process{
 					PID:  currentPPID,
 					PPID: currentPPID - 1,
 					Comm: fmt.Sprintf("process-%d", currentPPID),
 				}
 				return procs
 			}(),
-			shimPIDs: map[uint32]struct{}{
-				2: {}, // Shim PID
+			shimPIDs: map[apitypes.CommPID]struct{}{
+				{PID: 2}: {}, // Shim PID
 			},
 			pid:         uint32(100 + maxTreeDepth + 1), // Target process at the end of chain
 			ppid:        uint32(100 + maxTreeDepth),     // Its immediate parent
@@ -1058,15 +1071,15 @@ func TestIsDescendantOfShim(t *testing.T) {
 		},
 		{
 			name: "multiple_shims",
-			processes: map[uint32]apitypes.Process{
-				100: {PID: 100, PPID: 1, Comm: "shim1"},
-				101: {PID: 101, PPID: 1, Comm: "shim2"},
-				200: {PID: 200, PPID: 100, Comm: "child1"},
-				201: {PID: 201, PPID: 101, Comm: "child2"},
+			processes: map[apitypes.CommPID]*apitypes.Process{
+				{PID: 100}: {PID: 100, PPID: 1, Comm: "shim1"},
+				{PID: 101}: {PID: 101, PPID: 1, Comm: "shim2"},
+				{PID: 200}: {PID: 200, PPID: 100, Comm: "child1"},
+				{PID: 201}: {PID: 201, PPID: 101, Comm: "child2"},
 			},
-			shimPIDs: map[uint32]struct{}{
-				100: {},
-				101: {},
+			shimPIDs: map[apitypes.CommPID]struct{}{
+				{PID: 100}: {},
+				{PID: 101}: {},
 			},
 			pid:         200,
 			ppid:        100,
@@ -1078,7 +1091,7 @@ func TestIsDescendantOfShim(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			pm := &ProcessManager{}
-			result := pm.isDescendantOfShim(tc.pid, tc.ppid, tc.shimPIDs, tc.processes)
+			result := pm.isDescendantOfShim(apitypes.CommPID{PID: tc.pid}, apitypes.CommPID{PID: tc.ppid}, tc.shimPIDs, tc.processes)
 			assert.Equal(t, tc.expected, result, tc.description)
 		})
 	}

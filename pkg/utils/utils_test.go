@@ -244,11 +244,11 @@ func TestGetProcessFromProcessTree(t *testing.T) {
 			args: args{
 				process: &apitypes.Process{
 					PID: 1,
-					Children: []apitypes.Process{
-						{
+					ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+						{PID: 2}: {
 							PID: 2,
 						},
-						{
+						{PID: 3}: {
 							PID: 3,
 						},
 					},
@@ -264,11 +264,11 @@ func TestGetProcessFromProcessTree(t *testing.T) {
 			args: args{
 				process: &apitypes.Process{
 					PID: 1,
-					Children: []apitypes.Process{
-						{
+					ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+						{PID: 2}: {
 							PID: 2,
 						},
-						{
+						{PID: 3}: {
 							PID: 3,
 						},
 					},
