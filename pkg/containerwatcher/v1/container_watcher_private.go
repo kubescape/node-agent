@@ -39,7 +39,26 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		}
 		return
 	}
+	// scale up the pool size if needed pkg/config/config.go:66
+	callbacks := []containercollection.FuncNotify{
+		ch.containerCallbackAsync,
+		ch.applicationProfileManager.ContainerCallback,
+		ch.networkManager.ContainerCallback,
+		ch.malwareManager.ContainerCallback,
+		ch.ruleManager.ContainerCallback,
+		ch.sbomManager.ContainerCallback,
+		ch.processManager.ContainerCallback,
+		ch.dnsManager.ContainerCallback,
+		ch.networkStreamClient.ContainerCallback,
+	}
+	for _, callback := range callbacks {
+		ch.pool.Submit(func() {
+			callback(notif)
+		})
+	}
+}
 
+func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.PubSubEvent) {
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 
 	switch notif.Type {
@@ -183,14 +202,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 	// Start the container collection
 	containerEventFuncs := []containercollection.FuncNotify{
 		ch.containerCallback,
-		ch.applicationProfileManager.ContainerCallback,
-		ch.networkManager.ContainerCallback,
-		ch.malwareManager.ContainerCallback,
-		ch.ruleManager.ContainerCallback,
-		ch.sbomManager.ContainerCallback,
-		ch.processManager.ContainerCallback,
-		ch.dnsManager.ContainerCallback,
-		ch.networkStreamClient.ContainerCallback,
+		// other callbacks are now called from ch.containerCallback
 	}
 
 	for receiver := range ch.thirdPartyContainerReceivers.Iter() {
@@ -367,6 +379,14 @@ func (ch *IGContainerWatcher) startTracers() error {
 		}
 		logger.L().Info("started io_uring tracing")
 
+		if ch.cfg.EnableHttpDetection {
+			if err := ch.startHttpTracing(); err != nil {
+				logger.L().Error("IGContainerWatcher - error starting http tracing", helpers.Error(err))
+				return err
+			}
+			logger.L().Info("started http tracing")
+		}
+
 		// Start third party tracers
 		for tracer := range ch.thirdPartyTracers.Iter() {
 			if err := tracer.Start(); err != nil {
@@ -375,14 +395,6 @@ func (ch *IGContainerWatcher) startTracers() error {
 			}
 			logger.L().Info("started custom tracer", helpers.String("tracer", tracer.Name()))
 		}
-	}
-
-	if ch.cfg.EnableHttpDetection {
-		if err := ch.startHttpTracing(); err != nil {
-			logger.L().Error("IGContainerWatcher - error starting http tracing", helpers.Error(err))
-			return err
-		}
-		logger.L().Info("started http tracing")
 	}
 
 	if ch.cfg.EnablePrometheusExporter {

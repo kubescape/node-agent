@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -20,7 +19,6 @@ import (
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -83,70 +81,6 @@ func CreateFakeStorage(namespace string) (*Storage, error) {
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
 		namespace:     namespace,
 	}, nil
-}
-
-func (sc Storage) CreateNetworkNeighbors(networkNeighbors *v1beta1.NetworkNeighbors, namespace string) error {
-	sc.modifyNameP(&networkNeighbors.Name)
-	defer sc.modifyNameP(&networkNeighbors.Name)
-
-	_, err := sc.StorageClient.NetworkNeighborses(namespace).Create(context.Background(), networkNeighbors, metav1.CreateOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (sc Storage) GetNetworkNeighbors(namespace, name string) (*v1beta1.NetworkNeighbors, error) {
-	nn, err := sc.StorageClient.NetworkNeighborses(namespace).Get(context.Background(), sc.modifyName(name), metav1.GetOptions{})
-	if nn != nil {
-		sc.revertNameP(&nn.Name)
-	}
-	return nn, err
-}
-
-func (sc Storage) PatchNetworkNeighborsIngressAndEgress(name, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
-	sc.modifyNameP(&networkNeighbors.Name)
-	defer sc.revertNameP(&networkNeighbors.Name)
-
-	bytes, err := json.Marshal(networkNeighbors)
-	if err != nil {
-		return err
-	}
-
-	_, err = sc.StorageClient.NetworkNeighborses(namespace).Patch(context.Background(), sc.modifyName(name), types.StrategicMergePatchType, bytes, metav1.PatchOptions{})
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (sc Storage) PatchNetworkNeighborsMatchLabels(_, namespace string, networkNeighbors *v1beta1.NetworkNeighbors) error {
-	sc.modifyNameP(&networkNeighbors.Name)
-	defer sc.revertNameP(&networkNeighbors.Name)
-	_, err := sc.StorageClient.NetworkNeighborses(namespace).Update(context.Background(), networkNeighbors, metav1.UpdateOptions{})
-
-	return err
-}
-
-func (sc Storage) CreateApplicationActivity(activity *v1beta1.ApplicationActivity, namespace string) error {
-	sc.modifyNameP(&activity.Name)
-	defer sc.revertNameP(&activity.Name)
-
-	_, err := sc.StorageClient.ApplicationActivities(namespace).Create(context.Background(), activity, metav1.CreateOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (sc Storage) GetApplicationActivity(namespace, name string) (*v1beta1.ApplicationActivity, error) {
-
-	aa, err := sc.StorageClient.ApplicationActivities(namespace).Get(context.Background(), sc.modifyName(name), metav1.GetOptions{})
-	if aa != nil {
-		sc.revertNameP(&aa.Name)
-	}
-	return aa, err
 }
 
 func (sc Storage) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {

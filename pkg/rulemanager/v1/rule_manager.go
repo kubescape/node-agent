@@ -207,7 +207,9 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		go rm.startRuleManager(notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:
 		rm.trackedContainers.Remove(k8sContainerID)
-		rm.podToWlid.Delete(utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName))
+		time.AfterFunc(10*time.Minute, func() {
+			rm.podToWlid.Delete(utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName))
+		})
 		rm.containerIdToShimPid.Delete(notif.Container.Runtime.ContainerID)
 		rm.containerIdToPid.Delete(notif.Container.Runtime.ContainerID)
 	}
@@ -238,6 +240,12 @@ func (rm *RuleManager) ReportEvent(eventType utils.EventType, event utils.K8sEve
 }
 
 func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEvent, rules []ruleengine.RuleEvaluator) {
+	podId := utils.CreateK8sPodID(event.GetNamespace(), event.GetPod())
+	details, ok := rm.podToWlid.Load(podId)
+	if !ok {
+		logger.L().Debug("RuleManager - pod not present in podToWlid, skipping event", helpers.String("podId", podId))
+		return
+	}
 	for _, rule := range rules {
 		if rule == nil {
 			continue
@@ -250,7 +258,7 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 		res := rule.ProcessEvent(eventType, event, rm.objectCache)
 		if res != nil {
 			res = rm.enrichRuleFailure(res)
-			res.SetWorkloadDetails(rm.podToWlid.Get(utils.CreateK8sPodID(res.GetRuntimeAlertK8sDetails().Namespace, res.GetRuntimeAlertK8sDetails().PodName)))
+			res.SetWorkloadDetails(details)
 			rm.exporter.SendRuleAlert(res)
 
 			rm.metrics.ReportRuleAlert(rule.Name())
@@ -258,6 +266,7 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 		rm.metrics.ReportRuleProcessed(rule.Name())
 	}
 }
+
 func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
 	var err error
 	var path string
@@ -308,12 +317,15 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	err = backoff.Retry(func() error {
 		tree, err := rm.processManager.GetProcessTreeForPID(
 			ruleFailure.GetRuntimeProcessDetails().ContainerID,
-			int(ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID),
+			armotypes.CommPID{
+				Comm: ruleFailure.GetRuntimeProcessDetails().ProcessTree.Comm,
+				PID:  ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID,
+			},
 		)
 		if err != nil {
 			return err
 		}
-		runtimeProcessDetails.ProcessTree = tree
+		runtimeProcessDetails.ProcessTree = *tree
 		return nil
 	}, backoff.NewExponentialBackOff(
 		backoff.WithInitialInterval(50*time.Millisecond),

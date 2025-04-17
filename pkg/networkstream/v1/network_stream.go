@@ -249,7 +249,7 @@ func (ns *NetworkStream) handleDnsEvent(event *tracerdnstype.Event) {
 		Kind:      apitypes.EndpointKindRaw,
 	}
 
-	processTree := ns.getProcessTreeByPid(event.Runtime.ContainerID, int(event.Pid))
+	processTree := ns.getProcessTreeByPid(event.Runtime.ContainerID, event.Pid, event.Comm)
 	networkEvent.ProcessTree = &processTree
 
 	entity.Outbound[event.DNSName] = networkEvent
@@ -367,13 +367,13 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 
 	networkEvent.Kind = apitypes.EndpointKind(event.DstEndpoint.Kind)
 
-	processTree := ns.getProcessTreeByPid(event.Runtime.ContainerID, int(event.Pid))
+	processTree := ns.getProcessTreeByPid(event.Runtime.ContainerID, event.Pid, event.Comm)
 	networkEvent.ProcessTree = &processTree
 
 	return networkEvent
 }
 
-func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid int) apitypes.ProcessTree {
+func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid uint32, comm string) apitypes.ProcessTree {
 	if containerID == "" || ns.k8sObjectCache == nil {
 		// If we don't have a container ID, we can't get the process tree
 		// So we just return the PID
@@ -384,9 +384,9 @@ func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid int) apityp
 		}
 	}
 
-	processTree, err := ns.processTreeManager.GetProcessTreeForPID(containerID, pid)
+	processTree, err := ns.processTreeManager.GetProcessTreeForPID(containerID, apitypes.CommPID{Comm: comm, PID: pid})
 	if err != nil {
-		logger.L().Debug("NetworkStream - failed to get process tree", helpers.Error(err), helpers.Int("pid", pid))
+		logger.L().Debug("NetworkStream - failed to get process tree", helpers.Error(err), helpers.Int("pid", int(pid)))
 		return apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
 				PID: uint32(pid),
@@ -395,7 +395,7 @@ func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid int) apityp
 	}
 
 	return apitypes.ProcessTree{
-		ProcessTree: processTree,
+		ProcessTree: *processTree,
 	}
 }
 

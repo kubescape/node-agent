@@ -6,14 +6,14 @@ import (
 	"reflect"
 	"time"
 
-	toptracer "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/tracer"
-
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/gammazero/workerpool"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top"
+	toptracer "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/tracer"
 	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
@@ -169,6 +169,7 @@ type IGContainerWatcher struct {
 	httpWorkerChan         chan *tracerhttptype.Event
 	iouringWorkerChan      chan *traceriouringtype.Event
 
+	pool            *workerpool.WorkerPool
 	objectCache     objectcache.ObjectCache
 	ruleManagedPods mapset.Set[string] // list of pods to track based on rules
 	metrics         metricsmanager.MetricsManager
@@ -542,6 +543,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		thirdPartyContainerReceivers: mapset.NewSet[containerwatcher.ContainerReceiver](),
 		thirdPartyEnricher:           thirdPartyEnricher,
 		processManager:               processManager,
+		pool:                         workerpool.New(cfg.WorkerPoolSize),
 		objectCache:                  objectCache,
 	}, nil
 }

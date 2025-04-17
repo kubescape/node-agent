@@ -41,7 +41,6 @@ jobs:
                         "relevancy_enabled_stop_sniffing",
                         "relevant_data_is_appended",
                         "relevancy_large_image",
-                        "relevancy_extra_large_image",
                         "relevancy_fix_vuln",
                         "relevancy_python",
                         "relevancy_golang",
