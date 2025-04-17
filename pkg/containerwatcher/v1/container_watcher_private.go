@@ -49,6 +49,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		ch.sbomManager.ContainerCallback,
 		ch.processManager.ContainerCallback,
 		ch.dnsManager.ContainerCallback,
+		ch.networkStreamClient.ContainerCallback,
 	}
 	for _, callback := range callbacks {
 		ch.pool.Submit(func() {

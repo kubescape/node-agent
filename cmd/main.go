@@ -34,6 +34,8 @@ import (
 	metricprometheus "github.com/kubescape/node-agent/pkg/metricsmanager/prometheus"
 	"github.com/kubescape/node-agent/pkg/networkmanager"
 	networkmanagerv2 "github.com/kubescape/node-agent/pkg/networkmanager/v2"
+	"github.com/kubescape/node-agent/pkg/networkstream"
+	networkstreamv1 "github.com/kubescape/node-agent/pkg/networkstream/v1"
 	"github.com/kubescape/node-agent/pkg/nodeprofilemanager"
 	nodeprofilemanagerv1 "github.com/kubescape/node-agent/pkg/nodeprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -280,6 +282,17 @@ func main() {
 		profileManager = nodeprofilemanager.NewNodeProfileManagerMock()
 	}
 
+	// Create the network streaming manager
+	var networkStreamClient networkstream.NetworkStreamClient
+	if cfg.EnableNetworkStreaming {
+		networkStreamClient, err = networkstreamv1.NewNetworkStream(ctx, cfg, k8sObjectCache, dnsResolver, cfg.NodeName, nil, false, processManager)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating NetworkManager", helpers.Error(err))
+		}
+	} else {
+		networkStreamClient = networkstream.CreateNetworkStreamMock()
+	}
+
 	// Create the malware manager
 	var malwareManager malwaremanager.MalwareManagerClient
 	if cfg.EnableMalwareDetection {
@@ -320,7 +333,7 @@ func main() {
 	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
 		igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager,
 		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
-		processManager, clusterData.ClusterName, objCache)
+		processManager, clusterData.ClusterName, objCache, networkStreamClient)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
@@ -328,6 +341,9 @@ func main() {
 
 	// Start the profileManager
 	profileManager.Start(ctx)
+
+	// Start the networkStream
+	networkStreamClient.Start()
 
 	// Start the prometheusExporter
 	prometheusExporter.Start()
