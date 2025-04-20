@@ -22,13 +22,15 @@ func (ch *IGContainerWatcher) httpEventCallback(event *tracerhttptype.Event) {
 	}
 
 	if isDroppedEvent(event.Type, event.Message) {
-		logger.L().Ctx(ch.ctx).Warning("http tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
+		logger.L().Warning("http tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
 	}
 
-	if event.Response == nil || (event.Response.StatusCode < StatusOK || event.Response.StatusCode >= StatusBadRequest) {
-		logger.L().Ctx(ch.ctx).Debug("http tracer got empty response or bad status code", helpers.Interface("event", event))
-		return
+	if event.Response != nil {
+		if event.Response.StatusCode < StatusOK || event.Response.StatusCode >= StatusBadRequest {
+			logger.L().Debug("http tracer got bad status code", helpers.Interface("event", event))
+			return
+		}
 	}
 
 	ch.httpWorkerChan <- event

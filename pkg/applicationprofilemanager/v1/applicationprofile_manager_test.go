@@ -195,8 +195,14 @@ func TestApplicationProfileManager(t *testing.T) {
 		Header: map[string][]string{},
 	}
 
+	response := &http.Response{
+		StatusCode: 200,
+		Header:     map[string][]string{},
+	}
+
 	testEvent := &tracerhttptype.Event{
 		Request:  request,
+		Response: response,
 		Internal: false,
 
 		Direction: "inbound",
@@ -214,6 +220,7 @@ func TestApplicationProfileManager(t *testing.T) {
 
 	testEvent = &tracerhttptype.Event{
 		Request:  request,
+		Response: response,
 		Internal: false,
 
 		Direction: "inbound",
@@ -233,6 +240,7 @@ func TestApplicationProfileManager(t *testing.T) {
 
 	testEvent = &tracerhttptype.Event{
 		Request:   request,
+		Response:  response,
 		Internal:  false,
 		Direction: "inbound",
 	}
@@ -250,6 +258,7 @@ func TestApplicationProfileManager(t *testing.T) {
 
 	testEvent = &tracerhttptype.Event{
 		Request:   request,
+		Response:  response,
 		Internal:  false,
 		Direction: "inbound",
 	}
@@ -267,6 +276,7 @@ func TestApplicationProfileManager(t *testing.T) {
 
 	testEvent = &tracerhttptype.Event{
 		Request:   request,
+		Response:  response,
 		Internal:  false,
 		Direction: "inbound",
 	}

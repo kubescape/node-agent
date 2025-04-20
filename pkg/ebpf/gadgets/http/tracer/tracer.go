@@ -54,7 +54,7 @@ func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 		enricher:        enricher,
 		eventCallback:   eventCallback,
 		eventsMap:       cache,
-		timeoutDuration: 1 * time.Minute,
+		timeoutDuration: 5 * time.Second,
 	}
 
 	if err := t.install(); err != nil {
@@ -62,8 +62,8 @@ func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 		return nil, err
 	}
 
-	t.timeoutTicker = time.NewTicker(30 * time.Second)
-	go t.cleanupOldRequests()
+	t.timeoutTicker = time.NewTicker(5 * time.Second)
+	go t.transmitOrphenRequests()
 
 	go t.run()
 
@@ -138,7 +138,6 @@ func (t *Tracer) run() {
 		}
 
 		bpfEvent := (*http_snifferHttpevent)(unsafe.Pointer(&record.RawSample[0]))
-
 		if grouped := t.GroupEvents(bpfEvent); grouped != nil {
 			// We'll only enrich by request properties
 			if t.enricher != nil {
@@ -157,7 +156,7 @@ func (t *Tracer) Run(gadgetCtx gadgets.GadgetContext) error {
 
 	go t.run()
 	gadgetcontext.WaitForTimeoutOrDone(gadgetCtx)
-	go t.cleanupOldRequests()
+	go t.transmitOrphenRequests()
 
 	return nil
 }
@@ -188,12 +187,16 @@ func (t *Tracer) GroupEvents(bpfEvent *http_snifferHttpevent) *types.Event {
 	return nil
 }
 
-func (t *Tracer) cleanupOldRequests() {
+func (t *Tracer) transmitOrphenRequests() {
 	for range t.timeoutTicker.C {
 		keys := t.eventsMap.Keys()
 		for _, key := range keys {
 			if event, ok := t.eventsMap.Peek(key); ok {
 				if time.Since(ToTime(event.Timestamp)) > t.timeoutDuration {
+					if t.enricher != nil {
+						t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
+					}
+					t.eventCallback(event)
 					t.eventsMap.Remove(key)
 				}
 			}

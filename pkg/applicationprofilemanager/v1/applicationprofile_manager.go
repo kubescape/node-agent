@@ -836,6 +836,11 @@ func (am *ApplicationProfileManager) ReportHTTPEvent(k8sContainerID string, even
 		return
 	}
 
+	if event.Response == nil {
+		logger.L().Debug("ApplicationProfileManager - HTTP event without response", helpers.String("container ID", k8sContainerID))
+		return
+	}
+
 	endpointIdentifier, err := GetEndpointIdentifier(event)
 	if err != nil {
 		logger.L().Ctx(am.ctx).Warning("ApplicationProfileManager - failed to get endpoint identifier", helpers.Error(err))
