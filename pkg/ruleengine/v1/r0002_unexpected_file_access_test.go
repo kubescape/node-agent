@@ -172,4 +172,29 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since file is ignored")
 	}
+
+	// Test with include prefixes
+	e.FullPath = "/var/test1"
+	includePrefixes := []interface{}{"/etc"}
+	r.SetParameters(map[string]interface{}{"ignoreMounts": false, "ignorePrefixes": ignorePrefixes, "includePrefixes": includePrefixes})
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since file is not included")
+	}
+
+	// Test the case where the path is included
+	e.FullPath = "/etc/passwd"
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
+	if ruleResult == nil {
+		t.Errorf("Expected ruleResult to not be nil since file is included")
+	}
+
+	// Test the case where the path is included but ignored
+	e.FullPath = "/etc/some/random/path/passwd"
+	ignorePrefixes = []interface{}{"/etc/some"}
+	r.SetParameters(map[string]interface{}{"ignoreMounts": false, "ignorePrefixes": ignorePrefixes, "includePrefixes": includePrefixes})
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
+	if ruleResult != nil {
+		t.Errorf("Expected ruleResult to be nil since file is ignored")
+	}
 }
