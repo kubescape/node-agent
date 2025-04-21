@@ -41,12 +41,14 @@ type R0002UnexpectedFileAccess struct {
 	BaseRule
 	shouldIgnoreMounts bool
 	ignorePrefixes     []string
+	includePrefixes    []string
 }
 
 func CreateRuleR0002UnexpectedFileAccess() *R0002UnexpectedFileAccess {
 	return &R0002UnexpectedFileAccess{
 		shouldIgnoreMounts: false,
 		ignorePrefixes:     []string{},
+		includePrefixes:    []string{},
 	}
 }
 
@@ -63,18 +65,25 @@ func (rule *R0002UnexpectedFileAccess) SetParameters(parameters map[string]inter
 	rule.shouldIgnoreMounts = fmt.Sprintf("%v", rule.GetParameters()["ignoreMounts"]) == "true"
 
 	ignorePrefixesInterface := rule.GetParameters()["ignorePrefixes"]
-	if ignorePrefixesInterface == nil {
-		return
+	if ignorePrefixesInterface != nil {
+		ignorePrefixes, ok := InterfaceToStringSlice(ignorePrefixesInterface)
+		if ok {
+			rule.ignorePrefixes = ignorePrefixes
+		} else {
+			logger.L().Warning("failed to convert ignorePrefixes to []string", helpers.String("ruleID", rule.ID()))
+		}
 	}
 
-	ignorePrefixes, ok := InterfaceToStringSlice(ignorePrefixesInterface)
-	if ok {
-		for _, prefix := range ignorePrefixes {
-			rule.ignorePrefixes = append(rule.ignorePrefixes, fmt.Sprintf("%v", prefix))
+	includePrefixesInterface := rule.GetParameters()["includePrefixes"]
+	if includePrefixesInterface != nil {
+		includePrefixes, ok := InterfaceToStringSlice(includePrefixesInterface)
+		if ok {
+			rule.includePrefixes = includePrefixes
+		} else {
+			logger.L().Warning("failed to convert includePrefixes to []string", helpers.String("ruleID", rule.ID()))
 		}
-	} else {
-		logger.L().Warning("failed to convert ignorePrefixes to []string", helpers.String("ruleID", rule.ID()))
 	}
+
 }
 
 func (rule *R0002UnexpectedFileAccess) DeleteRule() {
@@ -91,6 +100,19 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 	}
 
 	openEvent := fullEvent.Event
+
+	// Check if we have include prefixes and if the path is not in the include prefixes, return nil
+	if len(rule.includePrefixes) > 0 {
+		include := false
+		for _, prefix := range rule.includePrefixes {
+			if strings.HasPrefix(openEvent.FullPath, prefix) {
+				include = true
+			}
+		}
+		if !include {
+			return nil
+		}
+	}
 
 	// Check if path is ignored
 	for _, prefix := range rule.ignorePrefixes {
