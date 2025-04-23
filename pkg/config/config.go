@@ -44,6 +44,7 @@ type Config struct {
 	KubernetesMode           bool                      `mapstructure:"kubernetesMode"`
 	NetworkStreamingInterval time.Duration             `mapstructure:"networkStreamingInterval"`
 	WorkerPoolSize           int                       `mapstructure:"workerPoolSize"`
+	TestMode                 bool                      `mapstructure:"testMode"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -68,7 +69,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("kubernetesMode", true)
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
 	viper.SetDefault("workerPoolSize", 10)
-
+	viper.SetDefault("testMode", false)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()
