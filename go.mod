@@ -49,6 +49,7 @@ require (
 	go.opentelemetry.io/otel v1.35.0
 	go.opentelemetry.io/otel/trace v1.35.0
 	go.uber.org/multierr v1.11.0
+	go.vallahaye.net/batcher v0.6.0
 	golang.org/x/net v0.38.0
 	golang.org/x/sys v0.31.0
 	gonum.org/v1/plot v0.14.0

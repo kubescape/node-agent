@@ -61,6 +61,9 @@ type HTTPExporter struct {
 	httpClient    *http.Client
 	alertMetrics  *alertMetrics
 	cloudMetadata *apitypes.CloudMetadata
+	ruleBatcher   *RuleBatcher
+	batcherCtx    context.Context
+	batcherCancel context.CancelFunc
 }
 
 type alertMetrics struct {
@@ -88,7 +91,7 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	return &HTTPExporter{
+	exporter := &HTTPExporter{
 		config:      config,
 		nodeName:    nodeName,
 		clusterName: clusterName,
@@ -97,7 +100,18 @@ func NewHTTPExporter(config HTTPExporterConfig, clusterName, nodeName string, cl
 		},
 		alertMetrics:  &alertMetrics{},
 		cloudMetadata: cloudMetadata,
-	}, nil
+	}
+
+	// Set up the batcher context and batcher
+	exporter.batcherCtx, exporter.batcherCancel = context.WithCancel(context.Background())
+	exporter.ruleBatcher = NewRuleBatcher(
+		100,
+		time.Minute,
+		exporter.sendRuleAlertBatch,
+	)
+	exporter.ruleBatcher.Start(exporter.batcherCtx)
+
+	return exporter, nil
 }
 
 func (config *HTTPExporterConfig) Validate() error {
@@ -132,12 +146,7 @@ func (config *HTTPExporterConfig) Validate() error {
 
 // SendRuleAlert implements the Exporter interface
 func (e *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
-	defer cancel()
-
-	if err := e.sendRuleAlertWithContext(ctx, failedRule); err != nil {
-		logger.L().Warning("HTTPExporter.SendRuleAlert - failed to send rule alert", helpers.Error(err))
-	}
+	_ = e.ruleBatcher.Add(context.Background(), failedRule)
 }
 
 // SendMalwareAlert implements the Exporter interface
@@ -148,16 +157,6 @@ func (e *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResu
 	if err := e.sendMalwareAlertWithContext(ctx, malwareResult); err != nil {
 		logger.L().Warning("HTTPExporter.SendRuleAlert - failed to send malware alert", helpers.Error(err))
 	}
-}
-
-// Internal methods with context support
-func (e *HTTPExporter) sendRuleAlertWithContext(ctx context.Context, failedRule ruleengine.RuleFailure) error {
-	if e.shouldSendLimitAlert() {
-		return e.sendAlertLimitReached(ctx)
-	}
-
-	alert := e.createRuleAlert(failedRule)
-	return e.sendAlert(ctx, alert, failedRule.GetRuntimeProcessDetails(), failedRule.GetCloudServices())
 }
 
 func (e *HTTPExporter) sendMalwareAlertWithContext(ctx context.Context, result malwaremanager.MalwareResult) error {
@@ -347,4 +346,37 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		helpers.String("since", e.alertMetrics.startTime.Format(time.RFC3339)))
 
 	return e.sendAlert(ctx, alert, apitypes.ProcessTree{}, nil)
+}
+
+func (e *HTTPExporter) sendRuleAlertBatch(batch []ruleengine.RuleFailure) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
+	defer cancel()
+
+	if len(batch) == 0 {
+		return
+	}
+
+	alerts := make([]apitypes.RuntimeAlert, 0, len(batch))
+	var processTree apitypes.ProcessTree
+	var cloudServices []string
+
+	for _, rule := range batch {
+		alerts = append(alerts, e.createRuleAlert(rule))
+		processTree = rule.GetRuntimeProcessDetails()
+		if services := rule.GetCloudServices(); services != nil {
+			cloudServices = append(cloudServices, services...)
+		}
+	}
+
+	payload := e.createAlertPayload(alerts, processTree, cloudServices)
+	if err := e.sendHTTPRequest(ctx, payload); err != nil {
+		logger.L().Warning("HTTPExporter.sendRuleAlertBatch - failed to send batch", helpers.Error(err))
+	}
+}
+
+// Optionally, add a Close method to clean up the batcher
+func (e *HTTPExporter) Close() {
+	if e.batcherCancel != nil {
+		e.batcherCancel()
+	}
 }
