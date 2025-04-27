@@ -618,7 +618,7 @@ func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, proce
 	}
 
 	if processTree != nil {
-		currentProcess.ChildrenMap[apitypes.CommPID{Comm: processTree.Comm, PID: processTree.PID}] = processTree
+		currentProcess.ChildrenMap.Set(apitypes.CommPID{Comm: processTree.Comm, PID: processTree.PID}, processTree)
 	}
 
 	return buildProcessTree(parent, procfs, shimPid, &currentProcess)
@@ -667,8 +667,8 @@ func GetProcessFromProcessTree(process *apitypes.Process, pid uint32) *apitypes.
 		return process
 	}
 
-	for i := range process.ChildrenMap {
-		if p := GetProcessFromProcessTree(process.ChildrenMap[i], pid); p != nil {
+	for _, p := range process.ChildrenMap.Values() {
+		if p := GetProcessFromProcessTree(p, pid); p != nil {
 			return p
 		}
 	}
