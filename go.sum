@@ -155,8 +155,8 @@ github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj
 github.com/armon/go-radix v1.0.0/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5/go.mod h1:wHh0iHkYZB8zMSxRWpUBQtwG5a7fFgvEO+odwuTv2gs=
-github.com/armosec/armoapi-go v0.0.559 h1:mRyHw1fuD+jNgIn+ZSqf2w+51Jk2rFsx+aBQ9t9yHM4=
-github.com/armosec/armoapi-go v0.0.559/go.mod h1:SYyDaNaZ7jc8D40dySr9Lz0hw+qkach+wt5G6lIqS7o=
+github.com/armosec/armoapi-go v0.0.561-0.20250427080700-11cf78b71e34 h1:p4fBJ+Gay3fk+YMm8LJ1uz3Hg1itx7fQuK+K+q5Dtc8=
+github.com/armosec/armoapi-go v0.0.561-0.20250427080700-11cf78b71e34/go.mod h1:EOPRXLyxGrBlt2L1kqMCD1+m5Hw0lX2G35QQOYp2/Co=
 github.com/armosec/gojay v1.2.17 h1:VSkLBQzD1c2V+FMtlGFKqWXNsdNvIKygTKJI9ysY8eM=
 github.com/armosec/gojay v1.2.17/go.mod h1:vuvX3DlY0nbVrJ0qCklSS733AWMoQboq3cFyuQW9ybc=
 github.com/armosec/utils-go v0.0.58 h1:g9RnRkxZAmzTfPe2ruMo2OXSYLwVSegQSkSavOfmaIE=
@@ -579,8 +579,8 @@ github.com/gookit/color v1.5.4/go.mod h1:pZJOeOS8DM43rXbp4AZo1n9zCU2qjpcRko0b6/Q
 github.com/gopacket/gopacket v1.3.2-0.20241202175635-b43272ae1eb8 h1:PoilRl1aPz9JlypuskS97qoGuXbEGBGza7YmXQyAwP8=
 github.com/gopacket/gopacket v1.3.2-0.20241202175635-b43272ae1eb8/go.mod h1:3I13qcqSpB2R9fFQg866OOgzylYkZxLTmkvcXhvf6qg=
 github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1/go.mod h1:wJfORRmW1u3UXTncJ5qlYoELFm8eSnnEO6hX4iZ3EWY=
-github.com/goradd/maps v1.0.0 h1:21HC3xxKFk3p6BdQsELZXg/ByANMVYhCl0Mylzt0R38=
-github.com/goradd/maps v1.0.0/go.mod h1:O3i5k17BAjHa9h5dzGWWfRJizF03umiBDZsNSqFdbVA=
+github.com/goradd/maps v1.2.0 h1:oYGfDONzuRYpy4i+Ct1YMFR+eiI0VkNwghDu1KF03OQ=
+github.com/goradd/maps v1.2.0/go.mod h1:O3i5k17BAjHa9h5dzGWWfRJizF03umiBDZsNSqFdbVA=
 github.com/gorilla/websocket v1.5.1 h1:gmztn0JnHVt9JZquRuzLw3g4wouNVzKL15iLr/zn/QY=
 github.com/gorilla/websocket v1.5.1/go.mod h1:x3kM2JMyaluk02fnUJpQuwD2dCS5NDG2ZHL0uE0tcaY=
 github.com/grafana/pyroscope-go v1.2.0 h1:aILLKjTj8CS8f/24OPMGPewQSYlhmdQMBmol1d3KGj8=

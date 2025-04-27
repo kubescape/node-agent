@@ -77,7 +77,7 @@ func (p *ProcessManager) PopulateInitialProcesses() error {
 		ppid := apitypes.CommPID{Comm: process.Pcomm, PID: process.PPID}
 		if p.isDescendantOfShim(pid, ppid, shimPIDs, tempProcesses) {
 			if parent, exists := tempProcesses[ppid]; exists {
-				parent.ChildrenMap[pid] = process
+				parent.ChildrenMap.Set(pid, process)
 			}
 			p.processTree.Set(pid, process)
 		}
@@ -181,7 +181,7 @@ func (p *ProcessManager) addProcess(process *apitypes.Process) {
 	if existingProc, exists := p.processTree.Load(pid); exists && existingProc.PPID != process.PPID {
 		// Remove from old parent's children list
 		if oldParent, exists := p.processTree.Load(apitypes.CommPID{Comm: existingProc.Pcomm, PID: existingProc.PPID}); exists {
-			delete(oldParent.ChildrenMap, pid)
+			oldParent.ChildrenMap.Delete(pid)
 		}
 	}
 
@@ -190,7 +190,7 @@ func (p *ProcessManager) addProcess(process *apitypes.Process) {
 
 	// Update new parent's children list
 	if parent, exists := p.processTree.Load(apitypes.CommPID{Comm: process.Pcomm, PID: process.PPID}); exists {
-		parent.ChildrenMap[pid] = process
+		parent.ChildrenMap.Set(pid, process)
 	}
 }
 
@@ -200,16 +200,17 @@ func (p *ProcessManager) addProcess(process *apitypes.Process) {
 func (p *ProcessManager) removeProcess(pid apitypes.CommPID) {
 	if process, exists := p.processTree.Load(pid); exists {
 		if parent, exists := p.processTree.Load(apitypes.CommPID{Comm: process.Pcomm, PID: process.PPID}); exists {
-			delete(parent.ChildrenMap, pid)
+			parent.ChildrenMap.Delete(pid)
 		}
 
-		for _, child := range process.ChildrenMap {
-			if childProcess, exists := p.processTree.Load(apitypes.CommPID{Comm: child.Comm, PID: child.PID}); exists {
+		process.ChildrenMap.Range(func(child apitypes.CommPID, _ *apitypes.Process) bool {
+			if childProcess, exists := p.processTree.Load(child); exists {
 				childProcess.PPID = process.PPID
 				childProcess.Pcomm = process.Pcomm
 				p.addProcess(childProcess)
 			}
-		}
+			return true
+		})
 
 		p.processTree.Delete(pid)
 	}
@@ -250,7 +251,7 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid apitypes.C
 
 		if parent, exists := p.processTree.Load(currentPID); exists {
 			parentCopy := parent
-			parentCopy.ChildrenMap = map[apitypes.CommPID]*apitypes.Process{apitypes.CommPID{Comm: result.Comm, PID: result.PID}: result}
+			parentCopy.ChildrenMap.Set(apitypes.CommPID{Comm: result.Comm, PID: result.PID}, result)
 			result = parentCopy
 			currentPID = apitypes.CommPID{Comm: parent.Pcomm, PID: parent.PPID}
 		} else {
@@ -321,18 +322,17 @@ func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sE
 	}
 
 	process := apitypes.Process{
-		PID:         execEvent.Pid,
-		PPID:        execEvent.Ppid,
-		Comm:        execEvent.Comm,
-		Uid:         &execEvent.Uid,
-		Gid:         &execEvent.Gid,
-		Hardlink:    execEvent.ExePath,
-		UpperLayer:  &execEvent.UpperLayer,
-		Path:        execEvent.ExePath,
-		Cwd:         execEvent.Cwd,
-		Pcomm:       execEvent.Pcomm,
-		Cmdline:     fmt.Sprintf("%s %s", utils.GetExecPathFromEvent(&execEvent.Event), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
-		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+		PID:        execEvent.Pid,
+		PPID:       execEvent.Ppid,
+		Comm:       execEvent.Comm,
+		Uid:        &execEvent.Uid,
+		Gid:        &execEvent.Gid,
+		Hardlink:   execEvent.ExePath,
+		UpperLayer: &execEvent.UpperLayer,
+		Path:       execEvent.ExePath,
+		Cwd:        execEvent.Cwd,
+		Pcomm:      execEvent.Pcomm,
+		Cmdline:    fmt.Sprintf("%s %s", utils.GetExecPathFromEvent(&execEvent.Event), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 	}
 
 	p.addProcess(&process)
@@ -421,16 +421,15 @@ func getProcessFromProc(pid int) (*apitypes.Process, error) {
 	}()
 
 	return &apitypes.Process{
-		PID:         uint32(pid),
-		PPID:        uint32(stat.PPID),
-		Comm:        stat.Comm,
-		Pcomm:       pcomm,
-		Uid:         &uid,
-		Gid:         &gid,
-		Cmdline:     strings.Join(cmdline, " "),
-		Cwd:         cwd,
-		Path:        path,
-		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+		PID:     uint32(pid),
+		PPID:    uint32(stat.PPID),
+		Comm:    stat.Comm,
+		Pcomm:   pcomm,
+		Uid:     &uid,
+		Gid:     &gid,
+		Cmdline: strings.Join(cmdline, " "),
+		Cwd:     cwd,
+		Path:    path,
 	}, nil
 }
 
