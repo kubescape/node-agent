@@ -4,18 +4,18 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"github.com/prometheus/procfs"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/prometheus/procfs"
 )
 
 const (
@@ -27,6 +27,7 @@ const (
 type ProcessManager struct {
 	containerIdToShimPid maps.SafeMap[string, apitypes.CommPID]
 	processTree          maps.SafeMap[apitypes.CommPID, *apitypes.Process]
+	processTreeMutex     sync.Mutex
 	// For testing purposes we allow to override the function that gets process info from /proc.
 	getProcessFromProc func(pid int) (*apitypes.Process, error)
 }
@@ -46,6 +47,10 @@ func (p *ProcessManager) PopulateInitialProcesses() error {
 	if len(p.containerIdToShimPid.Keys()) == 0 {
 		return nil
 	}
+
+	// Prevent concurrent access to the process tree
+	p.processTreeMutex.Lock()
+	defer p.processTreeMutex.Unlock()
 
 	fs, err := procfs.NewFS("/proc")
 	if err != nil {
@@ -116,6 +121,10 @@ func (p *ProcessManager) isDescendantOfShim(pid apitypes.CommPID, ppid apitypes.
 // For new containers, it identifies the container's shim process and adds it to the tracking system.
 // For removed containers, it cleans up the associated processes from the process tree.
 func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent) {
+	// Prevent concurrent access to the process tree
+	p.processTreeMutex.Lock()
+	defer p.processTreeMutex.Unlock()
+
 	containerID := notif.Container.Runtime.BasicRuntimeMetadata.ContainerID
 
 	switch notif.Type {
@@ -223,6 +232,10 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid apitypes.C
 		return nil, fmt.Errorf("container ID %s not found", containerID)
 	}
 
+	// Prevent concurrent access to the process tree
+	p.processTreeMutex.Lock()
+	defer p.processTreeMutex.Unlock()
+
 	result, exists := p.processTree.Load(pid)
 	if !exists {
 		logger.L().Debug("ProcessManager - process not found in tree, fetching from /proc",
@@ -320,6 +333,10 @@ func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sE
 		return
 	}
 
+	// Prevent concurrent access to the process tree
+	p.processTreeMutex.Lock()
+	defer p.processTreeMutex.Unlock()
+
 	process := apitypes.Process{
 		PID:         execEvent.Pid,
 		PPID:        execEvent.Ppid,
@@ -359,6 +376,10 @@ func (p *ProcessManager) startCleanupRoutine(ctx context.Context) {
 // cleanup removes dead processes from the process tree by checking if each
 // process in the tree is still alive in the system.
 func (p *ProcessManager) cleanup() {
+	// Prevent concurrent access to the process tree
+	p.processTreeMutex.Lock()
+	defer p.processTreeMutex.Unlock()
+
 	deadPids := make(map[apitypes.CommPID]bool)
 	// CAREFUL this is RLocking the map, do not call other methods that Lock the map
 	p.processTree.Range(func(pid apitypes.CommPID, _ *apitypes.Process) bool {
