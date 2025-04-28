@@ -78,7 +78,7 @@ nodeAgent:
       memory: 180Mi
     limits:
       cpu: 500m
-      memory: 700Mi
+      memory: 1500Mi
 
   env:
     - name: NodeName
