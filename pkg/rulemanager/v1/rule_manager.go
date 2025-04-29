@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -189,7 +190,11 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		if rm.trackedContainers.Contains(notif.Container.Runtime.ContainerID) {
+		logger.L().Debug("RuleManager - add container",
+			helpers.String("container ID", notif.Container.Runtime.ContainerID),
+			helpers.String("k8s workload", k8sContainerID))
+
+		if rm.trackedContainers.Contains(k8sContainerID) {
 			logger.L().Debug("RuleManager - container already exist in memory",
 				helpers.String("container ID", notif.Container.Runtime.ContainerID),
 				helpers.String("k8s workload", k8sContainerID))
@@ -206,10 +211,26 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		rm.containerIdToPid.Set(notif.Container.Runtime.ContainerID, notif.Container.ContainerPid())
 		go rm.startRuleManager(notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:
+		logger.L().Debug("RuleManager - remove container",
+			helpers.String("container ID", notif.Container.Runtime.ContainerID),
+			helpers.String("k8s workload", k8sContainerID))
+
 		rm.trackedContainers.Remove(k8sContainerID)
+		podID := utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName)
 		time.AfterFunc(10*time.Minute, func() {
-			rm.podToWlid.Delete(utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName))
+			stillTracked := false
+			rm.trackedContainers.Each(func(id string) bool {
+				if strings.HasPrefix(id, podID) {
+					stillTracked = true
+					return false
+				}
+				return true
+			})
+			if !stillTracked {
+				rm.podToWlid.Delete(podID)
+			}
 		})
+
 		rm.containerIdToShimPid.Delete(notif.Container.Runtime.ContainerID)
 		rm.containerIdToPid.Delete(notif.Container.Runtime.ContainerID)
 	}
