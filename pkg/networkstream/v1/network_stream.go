@@ -379,7 +379,7 @@ func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid uint32, com
 		// So we just return the PID
 		return apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
-				PID: uint32(pid),
+				PID: pid,
 			},
 		}
 	}
@@ -389,13 +389,13 @@ func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid uint32, com
 		logger.L().Debug("NetworkStream - failed to get process tree", helpers.Error(err), helpers.Int("pid", int(pid)))
 		return apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
-				PID: uint32(pid),
+				PID: pid,
 			},
 		}
 	}
 
 	return apitypes.ProcessTree{
-		ProcessTree: *processTree,
+		ProcessTree: processTree,
 	}
 }
 

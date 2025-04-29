@@ -531,48 +531,48 @@ func hashToString(h hash.Hash) string {
 
 // Creates a process tree from a process.
 // The process tree will be built from scanning the /proc filesystem.
-func CreateProcessTree(process *apitypes.Process, shimPid uint32) (*apitypes.Process, error) {
+func CreateProcessTree(process *apitypes.Process, shimPid uint32) (apitypes.Process, error) {
 	pfs, err := procfs.NewFS("/proc")
 	if err != nil {
-		return nil, err
+		return apitypes.Process{}, err
 	}
 
 	proc, err := pfs.Proc(int(process.PID))
 	if err != nil {
 		logger.L().Debug("Failed to get process", helpers.String("error", err.Error()))
-		return nil, err
+		return apitypes.Process{}, err
 	}
 
 	// build the process tree
 	treeRoot, err := buildProcessTree(proc, &pfs, shimPid, nil)
 	if err != nil {
-		return nil, err
+		return apitypes.Process{}, err
 	}
 
 	return treeRoot, nil
 }
 
 // Recursively build the process tree.
-func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, processTree *apitypes.Process) (*apitypes.Process, error) {
+func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, processTree *apitypes.Process) (apitypes.Process, error) {
 	// If the current process is the shim, return the process tree.
 	if proc.PID == int(shimPid) {
-		return processTree, nil
+		return *processTree.DeepCopy(), nil
 	}
 
 	stat, err := proc.Stat()
 	if err != nil {
-		return nil, err
+		return apitypes.Process{}, err
 	}
 
 	parent, err := procfs.Proc(stat.PPID)
 	if err != nil {
-		return nil, err
+		return apitypes.Process{}, err
 	}
 
 	var uid, gid uint32
 	status, err := proc.NewStatus()
 	if err != nil {
-		return nil, err
+		return apitypes.Process{}, err
 	} else {
 		uid = uint32(status.UIDs[1])
 		gid = uint32(status.GIDs[1])
