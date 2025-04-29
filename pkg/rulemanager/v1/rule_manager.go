@@ -216,18 +216,29 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 			helpers.String("k8s workload", k8sContainerID))
 
 		rm.trackedContainers.Remove(k8sContainerID)
-		podID := utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName)
+		namespace := notif.Container.K8s.Namespace
+		podName := notif.Container.K8s.PodName
+		podID := utils.CreateK8sPodID(namespace, podName)
+
 		time.AfterFunc(10*time.Minute, func() {
 			stillTracked := false
 			rm.trackedContainers.Each(func(id string) bool {
-				if strings.HasPrefix(id, podID) {
+				// Parse the container ID to reliably extract the pod info
+				parts := strings.Split(id, "/")
+				if len(parts) == 3 && parts[0] == namespace && parts[1] == podName {
 					stillTracked = true
-					return false
+					return false // Stop iteration
 				}
-				return true
+				return true // Continue iteration
 			})
+
 			if !stillTracked {
+				logger.L().Debug("RuleManager - removing pod from podToWlid map",
+					helpers.String("podID", podID))
 				rm.podToWlid.Delete(podID)
+			} else {
+				logger.L().Debug("RuleManager - keeping pod in podToWlid map due to active containers",
+					helpers.String("podID", podID))
 			}
 		})
 

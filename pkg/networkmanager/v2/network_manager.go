@@ -48,6 +48,7 @@ type NetworkManager struct {
 	k8sObjectCache           objectcache.K8sObjectCache
 	storageClient            storage.StorageClient
 	dnsResolverClient        dnsmanager.DNSResolver
+	containerVersions        maps.SafeMap[string, int64] // key is k8sContainerID, value is timestamp
 }
 
 var _ networkmanager.NetworkManagerClient = (*NetworkManager)(nil)
@@ -65,6 +66,7 @@ func CreateNetworkManager(ctx context.Context, cfg config.Config, clusterName st
 		trackedContainers:       mapset.NewSet[string](),
 		removedContainers:       mapset.NewSet[string](),
 		droppedEventsContainers: mapset.NewSet[string](),
+		containerVersions:       maps.SafeMap[string, int64]{},
 	}
 }
 
@@ -72,6 +74,18 @@ func (nm *NetworkManager) deleteResources(watchedContainer *utils.WatchedContain
 	// make sure we don't run deleteResources and saveProfile at the same time
 	nm.containerMutexes.Lock(watchedContainer.K8sContainerID)
 	defer nm.containerMutexes.Unlock(watchedContainer.K8sContainerID)
+
+	// Check if this container version is still the current one
+	currentVersion, exists := nm.containerVersions.Load(watchedContainer.K8sContainerID)
+	if !exists || currentVersion != watchedContainer.ContainerVersion {
+		// A newer container with the same ID has been added, don't delete resources
+		logger.L().Debug("NetworkManager - skipping resource deletion for outdated container",
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		return
+	}
+
+	// Now safe to delete resources
 	nm.removedContainers.Add(watchedContainer.K8sContainerID)
 	// delete resources
 	watchedContainer.UpdateDataTicker.Stop()
@@ -477,11 +491,19 @@ func (nm *NetworkManager) ContainerCallback(notif containercollection.PubSubEven
 				helpers.String("k8s workload", k8sContainerID))
 			return
 		}
+		// Set container version
+		containerVersion := time.Now().UnixNano()
+		nm.containerVersions.Set(k8sContainerID, containerVersion)
+
 		nm.savedEvents.Set(k8sContainerID, cache.NewTTL(5*nm.cfg.UpdateDataPeriod, nm.cfg.UpdateDataPeriod))
 		nm.toSaveEvents.Set(k8sContainerID, mapset.NewSet[networkmanager.NetworkEvent]())
 		nm.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		nm.trackedContainers.Add(k8sContainerID)
 		go nm.startNetworkMonitoring(ctx, notif.Container, k8sContainerID)
+
+		// Store version in shared data
+		sharedData, _ := nm.waitForSharedContainerData(notif.Container.Runtime.ContainerID)
+		sharedData.ContainerVersion = containerVersion
 	case containercollection.EventTypeRemoveContainer:
 		channel := nm.watchedContainerChannels.Get(notif.Container.Runtime.ContainerID)
 		if channel != nil {
