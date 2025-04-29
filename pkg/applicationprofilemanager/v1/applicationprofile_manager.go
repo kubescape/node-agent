@@ -72,6 +72,7 @@ type ApplicationProfileManager struct {
 	seccompManager           seccompmanager.SeccompManagerClient
 	enricher                 applicationprofilemanager.Enricher
 	ruleCache                rulebindingmanager.RuleBindingCache
+	containerVersions        maps.SafeMap[string, int64] // key is k8sContainerID, value is timestamp or version
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
@@ -91,15 +92,26 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		seccompManager:          seccompManager,
 		enricher:                enricher,
 		ruleCache:               ruleCache,
+		containerVersions:       maps.SafeMap[string, int64]{},
 	}, nil
 }
 
 func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
-	// make sure we don't run deleteResources and saveProfile at the same time
 	am.containerMutexes.Lock(watchedContainer.K8sContainerID)
 	defer am.containerMutexes.Unlock(watchedContainer.K8sContainerID)
+
+	// Check if this container version is still the current one
+	currentVersion, exists := am.containerVersions.Load(watchedContainer.K8sContainerID)
+	if !exists || currentVersion != watchedContainer.ContainerVersion {
+		// A newer container with the same ID has been added, don't delete resources
+		logger.L().Debug("ApplicationProfileManager - skipping resource deletion for outdated container",
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		return
+	}
+
+	// Now it's safe to delete resources
 	am.removedContainers.Add(watchedContainer.K8sContainerID)
-	// delete resources
 	watchedContainer.UpdateDataTicker.Stop()
 	am.trackedContainers.Remove(watchedContainer.K8sContainerID)
 	am.droppedEventsContainers.Remove(watchedContainer.K8sContainerID)
@@ -708,6 +720,10 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		if am.watchedContainerChannels.Has(notif.Container.Runtime.ContainerID) {
 			return
 		}
+		// Set a new version for this container (current timestamp)
+		containerVersion := time.Now().UnixNano()
+		am.containerVersions.Set(k8sContainerID, containerVersion)
+
 		am.savedCapabilities.Set(k8sContainerID, cache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
 		am.savedEndpoints.Set(k8sContainerID, cache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
 		am.savedExecs.Set(k8sContainerID, cache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
@@ -723,6 +739,14 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.toSaveCallStacks.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.IdentifiedCallStack]))
 		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		am.trackedContainers.Add(k8sContainerID)
+
+		if am.removedContainers.Contains(k8sContainerID) {
+			am.removedContainers.Remove(k8sContainerID)
+		}
+
+		// Store the version in the watched container data
+		sharedData, _ := am.waitForSharedContainerData(notif.Container.Runtime.ContainerID)
+		sharedData.ContainerVersion = containerVersion
 
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
 
