@@ -325,7 +325,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 		if err != nil {
 			return err
 		}
-		runtimeProcessDetails.ProcessTree = *tree
+		runtimeProcessDetails.ProcessTree = tree
 		return nil
 	}, backoff.NewExponentialBackOff(
 		backoff.WithInitialInterval(50*time.Millisecond),
@@ -340,7 +340,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 
 		if tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree,
 			rm.containerIdToShimPid.Get(ruleFailure.GetRuntimeProcessDetails().ContainerID)); err == nil {
-			runtimeProcessDetails.ProcessTree = *tree
+			runtimeProcessDetails.ProcessTree = tree
 		}
 	}
 

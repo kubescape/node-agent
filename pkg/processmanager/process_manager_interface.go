@@ -10,7 +10,7 @@ import (
 // It provides methods to get process tree for a container or a PID.
 // The manager is responsible for maintaining the process tree for all containers.
 type ProcessManagerClient interface {
-	GetProcessTreeForPID(containerID string, pid apitypes.CommPID) (*apitypes.Process, error)
+	GetProcessTreeForPID(containerID string, pid apitypes.CommPID) (apitypes.Process, error)
 	// PopulateInitialProcesses is called to populate the initial process tree (parsed from /proc) for all containers.
 	PopulateInitialProcesses() error
 

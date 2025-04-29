@@ -15,8 +15,8 @@ func CreateProcessManagerMock() *ProcessManagerMock {
 	return &ProcessManagerMock{}
 }
 
-func (p *ProcessManagerMock) GetProcessTreeForPID(containerID string, pid apitypes.CommPID) (*apitypes.Process, error) {
-	return nil, nil
+func (p *ProcessManagerMock) GetProcessTreeForPID(containerID string, pid apitypes.CommPID) (apitypes.Process, error) {
+	return apitypes.Process{}, nil
 }
 
 func (p *ProcessManagerMock) PopulateInitialProcesses() error {
