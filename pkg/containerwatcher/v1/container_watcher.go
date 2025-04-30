@@ -169,6 +169,7 @@ type IGContainerWatcher struct {
 	httpWorkerChan         chan *tracerhttptype.Event
 	iouringWorkerChan      chan *traceriouringtype.Event
 
+	callbacks       []containercollection.FuncNotify
 	pool            *workerpool.WorkerPool
 	objectCache     objectcache.ObjectCache
 	ruleManagedPods mapset.Set[string] // list of pods to track based on rules
