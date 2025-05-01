@@ -43,8 +43,6 @@ func ensureInstanceID(container *containercollection.Container, watchedContainer
 			return fmt.Errorf("failed to set container info: %w", err)
 		}
 	}
-	// get pod template hash
-	watchedContainer.TemplateHash, _ = pod.GetLabel("pod-template-hash")
 	// find parentWlid
 	kind, name, err := k8sclient.CalculateWorkloadParentRecursive(pod)
 	if err != nil {
