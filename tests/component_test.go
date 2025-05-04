@@ -1207,3 +1207,33 @@ func Test_15_CompletedApCannotBecomeReadyAgain(t *testing.T) {
 	assert.NoError(t, err)                                                             // patch should succeed
 	assert.Equal(t, helpersv1.Completed, ap2.Annotations[helpersv1.StatusMetadataKey]) // but the status should not change
 }
+
+func Test_16_ApNotStuckOnRestart(t *testing.T) {
+	ns := testutils.NewRandomNamespace()
+
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	time.Sleep(20 * time.Second)
+
+	_, _, err = wl.ExecIntoPod([]string{"service", "nginx", "stop"}, "")
+	assert.NoError(t, err)
+
+	wl.WaitForReady(80)
+
+	wl.WaitForApplicationProfileCompletion(80)
+
+	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
+	assert.NoError(t, err)
+
+	time.Sleep(30 * time.Second)
+
+	alerts, err := testutils.GetAlerts(wl.Namespace)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx")
+}
