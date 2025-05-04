@@ -72,7 +72,7 @@ type ApplicationProfileManager struct {
 	seccompManager                  seccompmanager.SeccompManagerClient
 	enricher                        applicationprofilemanager.Enricher
 	ruleCache                       rulebindingmanager.RuleBindingCache
-	applicationProfileMetadataCache maps.SafeMap[string, []v1beta1.ApplicationProfile] // key is namespace
+	applicationProfileMetadataCache maps.SafeMap[string, APMetadata] // key is WLID
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
@@ -127,30 +127,20 @@ func (am *ApplicationProfileManager) ContainerReachedMaxTime(containerID string)
 }
 
 func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	var cachedAp *v1beta1.ApplicationProfile
 	var initOps []utils.PatchOperation
-	if aps, ok := am.applicationProfileMetadataCache.Load(container.K8s.Namespace); ok {
-		for _, ap := range aps {
-			if ap.Annotations[helpersv1.WlidMetadataKey] == watchedContainer.Wlid {
-				cachedAp = &ap
-				break
-			}
+	if metadata, ok := am.applicationProfileMetadataCache.Load(watchedContainer.Wlid); ok {
+		if metadata.Status == string(utils.WatchedContainerStatusCompleted) {
+			logger.L().Debug("ApplicationProfileManager - found completed cached application profile", helpers.String("wlid", watchedContainer.Wlid))
+			return utils.ObjectCompleted
+		} else if metadata.CompletionStatus == string(utils.WatchedContainerCompletionStatusFull) {
+			logger.L().Debug("ApplicationProfileManager - found full cached application profile", helpers.String("wlid", watchedContainer.Wlid))
+			watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
+		} else {
+			logger.L().Debug("ApplicationProfileManager - found partial cached application profile", helpers.String("wlid", watchedContainer.Wlid))
+			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
+			watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
 		}
-	} else {
-		logger.L().Debug("ApplicationProfileManager - no cached application profiles found for namespace", helpers.String("namespace", container.K8s.Namespace))
-	}
-
-	if cachedAp != nil && cachedAp.Annotations[helpersv1.StatusMetadataKey] == string(utils.WatchedContainerStatusCompleted) {
-		logger.L().Debug("ApplicationProfileManager - found completed cached application profile", helpers.String("wlid", watchedContainer.Wlid))
-		return utils.ObjectCompleted
-	} else if cachedAp != nil && cachedAp.Annotations[helpersv1.CompletionMetadataKey] == string(utils.WatchedContainerCompletionStatusFull) {
-		logger.L().Debug("ApplicationProfileManager - found full cached application profile", helpers.String("wlid", watchedContainer.Wlid))
-		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
-		watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
-	} else if cachedAp != nil {
-		logger.L().Debug("ApplicationProfileManager - found partial cached application profile", helpers.String("wlid", watchedContainer.Wlid))
-		watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
-		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
 	} else {
 		logger.L().Debug("ApplicationProfileManager - cached application profile not found for wlid", helpers.String("wlid", watchedContainer.Wlid))
 		initOps = GetInitOperations(am.ruleCache, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
@@ -761,7 +751,22 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 			return
 		}
 
-		am.applicationProfileMetadataCache.Set(notif.Container.K8s.Namespace, aps.Items)
+		// Update this section to populate the new metadata cache with APMetadata
+		for _, ap := range aps.Items {
+			wlid, ok := ap.Annotations[helpersv1.WlidMetadataKey]
+			if !ok {
+				continue
+			}
+
+			status := ap.Annotations[helpersv1.StatusMetadataKey]
+			completionStatus := ap.Annotations[helpersv1.CompletionMetadataKey]
+
+			am.applicationProfileMetadataCache.Set(wlid, APMetadata{
+				Status:           status,
+				CompletionStatus: completionStatus,
+				Wlid:             wlid,
+			})
+		}
 
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
 
