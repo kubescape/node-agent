@@ -59,7 +59,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 }
 
 func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.PubSubEvent) {
-	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
+	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.Runtime.ContainerID)
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
