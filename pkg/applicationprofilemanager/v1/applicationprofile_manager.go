@@ -131,11 +131,13 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 	var initOps []utils.PatchOperation
 	if aps, ok := am.applicationProfileMetadataCache.Load(container.K8s.Namespace); ok {
 		for _, ap := range aps {
-			if ap.Labels[helpersv1.WlidMetadataKey] == watchedContainer.Wlid {
+			if ap.Annotations[helpersv1.WlidMetadataKey] == watchedContainer.Wlid {
 				cachedAp = &ap
 				break
 			}
 		}
+	} else {
+		logger.L().Debug("ApplicationProfileManager - no cached application profiles found for namespace", helpers.String("namespace", container.K8s.Namespace))
 	}
 
 	if cachedAp != nil && cachedAp.Annotations[helpersv1.StatusMetadataKey] == string(utils.WatchedContainerStatusCompleted) {
@@ -150,6 +152,7 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 		watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
 		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
 	} else {
+		logger.L().Debug("ApplicationProfileManager - cached application profile not found for wlid", helpers.String("wlid", watchedContainer.Wlid))
 		initOps = GetInitOperations(am.ruleCache, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 		if watchedContainer.PreRunningContainer {
 			watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
@@ -639,7 +642,10 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				helpers.String("slug", slug),
 				helpers.Int("container index", watchedContainer.ContainerIndex),
 				helpers.String("container ID", watchedContainer.ContainerID),
-				helpers.String("k8s workload", watchedContainer.K8sContainerID))
+				helpers.String("k8s workload", watchedContainer.K8sContainerID),
+				helpers.String("status", string(watchedContainer.GetStatus())),
+				helpers.String("completion status", string(watchedContainer.GetCompletionStatus())),
+			)
 		}
 	}
 }
@@ -755,7 +761,7 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 			return
 		}
 
-		am.applicationProfileMetadataCache.Set(k8sContainerID, aps.Items)
+		am.applicationProfileMetadataCache.Set(notif.Container.K8s.Namespace, aps.Items)
 
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
 
