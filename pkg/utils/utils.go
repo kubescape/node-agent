@@ -145,8 +145,8 @@ func CurrentDir() string {
 	return filepath.Dir(filename)
 }
 
-func CreateK8sContainerID(namespaceName string, podName string, containerName string) string {
-	return strings.Join([]string{namespaceName, podName, containerName}, "/")
+func CreateK8sContainerID(namespaceName string, podName string, containerId string) string {
+	return strings.Join([]string{namespaceName, podName, containerId}, "/")
 }
 
 func CreateK8sPodID(namespaceName string, podName string) string {

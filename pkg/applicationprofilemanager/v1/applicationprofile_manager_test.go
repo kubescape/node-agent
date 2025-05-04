@@ -99,6 +99,7 @@ func TestApplicationProfileManager(t *testing.T) {
 	ruleBindingCache := rulebindingcachev1.NewCacheMock("node1")
 	am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil, ruleBindingCache)
 	assert.NoError(t, err)
+	containerID := "cont"
 	// prepare container
 	container := &containercollection.Container{
 		K8s: containercollection.K8sMetadata{
@@ -110,7 +111,7 @@ func TestApplicationProfileManager(t *testing.T) {
 		},
 		Runtime: containercollection.RuntimeMetadata{
 			BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-				ContainerID:        "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+				ContainerID:        containerID,
 				ContainerStartedAt: eventtypes.Time(time.Now().UnixNano()),
 			},
 		},
@@ -134,6 +135,9 @@ func TestApplicationProfileManager(t *testing.T) {
 						BasicK8sMetadata: eventtypes.BasicK8sMetadata{
 							ContainerName: "cont",
 						},
+					},
+					Runtime: eventtypes.BasicRuntimeMetadata{
+						ContainerID: "cont",
 					},
 				},
 			},
@@ -845,7 +849,7 @@ func TestApplicationProfileManagerWithCallStacks(t *testing.T) {
 		},
 		Runtime: containercollection.RuntimeMetadata{
 			BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-				ContainerID:        "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+				ContainerID:        "cont",
 				ContainerStartedAt: eventtypes.Time(time.Now().UnixNano()),
 			},
 		},

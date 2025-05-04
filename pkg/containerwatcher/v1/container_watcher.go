@@ -212,7 +212,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		}
 
 		metrics.ReportEvent(utils.CapabilitiesEventType)
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
 		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
 		ruleManager.ReportEvent(utils.CapabilitiesEventType, &event)
 
@@ -240,7 +240,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
 
 		if isDroppedEvent(event.Type, event.Message) {
 			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
@@ -269,7 +269,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		if event.K8s.ContainerName == "" {
 			return
 		}
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
 
 		if isDroppedEvent(event.Type, event.Message) {
 			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
@@ -299,7 +299,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		if event.K8s.ContainerName == "" {
 			return
 		}
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
 
 		if isDroppedEvent(event.Type, event.Message) {
 			networkManagerClient.ReportDroppedEvent(k8sContainerID)
@@ -366,7 +366,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		if event.K8s.ContainerName == "" {
 			return
 		}
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
 
 		metrics.ReportEvent(utils.SymlinkEventType)
 		applicationProfileManager.ReportSymlinkEvent(k8sContainerID, &event)
@@ -385,7 +385,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
 
 		metrics.ReportEvent(utils.HardlinkEventType)
 		applicationProfileManager.ReportHardlinkEvent(k8sContainerID, &event)
@@ -422,7 +422,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
 
 		if isDroppedEvent(event.Type, event.Message) {
 			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
@@ -469,7 +469,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.K8s.ContainerName)
+		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
 
 		if isDroppedEvent(event.Type, event.Message) {
 			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
