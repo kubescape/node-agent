@@ -49,6 +49,14 @@ func (sc Storage) PatchApplicationProfile(name, namespace string, operations []u
 	return nil
 }
 
+func (sc Storage) ListApplicationProfiles(namespace string) (*v1beta1.ApplicationProfileList, error) {
+	aps, err := sc.StorageClient.ApplicationProfiles(namespace).List(context.Background(), v1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return aps, nil
+}
+
 func (sc Storage) patchApplicationProfile(name, namespace string, operations []utils.PatchOperation, channel chan error) error {
 	patch, err := json.Marshal(operations)
 	if err != nil {
