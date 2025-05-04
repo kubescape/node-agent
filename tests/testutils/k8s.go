@@ -560,3 +560,55 @@ func PrintNodeAgentLogs(t *testing.T) {
 		readCloser.Close()
 	}
 }
+
+// RestartDaemonSet restarts a DaemonSet by adding a restart annotation to trigger a rollout
+func RestartDaemonSet(namespace, name string) error {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	ctx := context.TODO()
+
+	// Get the daemonset
+	daemonset, err := k8sClient.KubernetesClient.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get daemonset %s/%s: %w", namespace, name, err)
+	}
+
+	// Add or update the restart annotation
+	if daemonset.Spec.Template.ObjectMeta.Annotations == nil {
+		daemonset.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+	}
+	daemonset.Spec.Template.ObjectMeta.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
+
+	// Update the daemonset
+	_, err = k8sClient.KubernetesClient.AppsV1().DaemonSets(namespace).Update(ctx, daemonset, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update daemonset %s/%s: %w", namespace, name, err)
+	}
+
+	// Wait for the daemonset to be ready
+	err = backoff.RetryNotify(func() error {
+		updatedDS, err := k8sClient.KubernetesClient.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		if updatedDS.Status.NumberReady != updatedDS.Status.DesiredNumberScheduled {
+			return fmt.Errorf("daemonset %s/%s not ready: %d/%d pods ready",
+				namespace, name, updatedDS.Status.NumberReady, updatedDS.Status.DesiredNumberScheduled)
+		}
+
+		if updatedDS.Status.UpdatedNumberScheduled != updatedDS.Status.DesiredNumberScheduled {
+			return fmt.Errorf("daemonset %s/%s not updated: %d/%d pods updated",
+				namespace, name, updatedDS.Status.UpdatedNumberScheduled, updatedDS.Status.DesiredNumberScheduled)
+		}
+
+		return nil
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), 30), func(err error, d time.Duration) {
+		logger.L().Info("waiting for daemonset to be ready",
+			helpers.String("daemonset", name),
+			helpers.String("namespace", namespace),
+			helpers.Error(err),
+			helpers.String("retry in", d.String()))
+	})
+
+	return err
+}

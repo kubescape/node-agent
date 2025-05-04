@@ -44,7 +44,7 @@ func tearDownTest(t *testing.T, startTime time.Time) {
 	if err != nil {
 		t.Errorf("Error plotting memory usage: %v", err)
 	}
-	
+
 	testutils.PrintNodeAgentLogs(t)
 }
 
@@ -1223,6 +1223,37 @@ func Test_16_ApNotStuckOnRestart(t *testing.T) {
 	assert.NoError(t, wl.WaitForApplicationProfileCompletion(80))
 
 	time.Sleep(30 * time.Second)
+
+	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
+	assert.NoError(t, err)
+
+	time.Sleep(30 * time.Second)
+
+	alerts, err := testutils.GetAlerts(wl.Namespace)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx")
+}
+
+func Test_17_ApCompletedToPartialUpdateTest(t *testing.T) {
+	ns := testutils.NewRandomNamespace()
+
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	time.Sleep(30 * time.Second)
+	assert.NoError(t, wl.WaitForReady(80))
+
+	err = testutils.RestartDaemonSet("kubescape", "node-agent")
+	assert.NoError(t, err)
+
+	time.Sleep(30 * time.Second)
+
+	assert.NoError(t, wl.WaitForApplicationProfileCompletion(160))
 
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
 	assert.NoError(t, err)
