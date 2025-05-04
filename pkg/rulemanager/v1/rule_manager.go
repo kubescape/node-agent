@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -185,11 +186,15 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		return
 	}
 
-	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.Runtime.ContainerID)
+	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		if rm.trackedContainers.Contains(notif.Container.Runtime.ContainerID) {
+		logger.L().Debug("RuleManager - add container",
+			helpers.String("container ID", notif.Container.Runtime.ContainerID),
+			helpers.String("k8s workload", k8sContainerID))
+
+		if rm.trackedContainers.Contains(k8sContainerID) {
 			logger.L().Debug("RuleManager - container already exist in memory",
 				helpers.String("container ID", notif.Container.Runtime.ContainerID),
 				helpers.String("k8s workload", k8sContainerID))
@@ -206,10 +211,37 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		rm.containerIdToPid.Set(notif.Container.Runtime.ContainerID, notif.Container.ContainerPid())
 		go rm.startRuleManager(notif.Container, k8sContainerID)
 	case containercollection.EventTypeRemoveContainer:
+		logger.L().Debug("RuleManager - remove container",
+			helpers.String("container ID", notif.Container.Runtime.ContainerID),
+			helpers.String("k8s workload", k8sContainerID))
+
 		rm.trackedContainers.Remove(k8sContainerID)
+		namespace := notif.Container.K8s.Namespace
+		podName := notif.Container.K8s.PodName
+		podID := utils.CreateK8sPodID(namespace, podName)
+
 		time.AfterFunc(10*time.Minute, func() {
-			rm.podToWlid.Delete(utils.CreateK8sPodID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName))
+			stillTracked := false
+			rm.trackedContainers.Each(func(id string) bool {
+				// Parse the container ID to reliably extract the pod info
+				parts := strings.Split(id, "/")
+				if len(parts) == 3 && parts[0] == namespace && parts[1] == podName {
+					stillTracked = true
+					return false // Stop iteration
+				}
+				return true // Continue iteration
+			})
+
+			if !stillTracked {
+				logger.L().Debug("RuleManager - removing pod from podToWlid map",
+					helpers.String("podID", podID))
+				rm.podToWlid.Delete(podID)
+			} else {
+				logger.L().Debug("RuleManager - keeping pod in podToWlid map due to active containers",
+					helpers.String("podID", podID))
+			}
 		})
+
 		rm.containerIdToShimPid.Delete(notif.Container.Runtime.ContainerID)
 		rm.containerIdToPid.Delete(notif.Container.Runtime.ContainerID)
 	}
