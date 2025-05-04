@@ -1236,3 +1236,4 @@ func Test_16_ApNotStuckOnRestart(t *testing.T) {
 
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx")
 }
+

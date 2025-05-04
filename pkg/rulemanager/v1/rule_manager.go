@@ -186,7 +186,7 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 		return
 	}
 
-	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.ContainerName)
+	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.Runtime.ContainerID)
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
