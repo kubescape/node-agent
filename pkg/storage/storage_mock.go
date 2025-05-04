@@ -55,3 +55,7 @@ func (sc *StorageHttpClientMock) DecrementImageUse(imageID string) {
 	}
 	sc.ImageCounters[imageID]--
 }
+
+func (sc *StorageHttpClientMock) ListApplicationProfiles(namespace string) (*v1beta1.ApplicationProfileList, error) {
+	return &v1beta1.ApplicationProfileList{}, nil
+}

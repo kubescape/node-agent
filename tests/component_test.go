@@ -44,7 +44,7 @@ func tearDownTest(t *testing.T, startTime time.Time) {
 	if err != nil {
 		t.Errorf("Error plotting memory usage: %v", err)
 	}
-
+	
 	testutils.PrintNodeAgentLogs(t)
 }
 

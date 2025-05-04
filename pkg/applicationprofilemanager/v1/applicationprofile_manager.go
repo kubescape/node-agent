@@ -128,6 +128,7 @@ func (am *ApplicationProfileManager) ContainerReachedMaxTime(containerID string)
 
 func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	var cachedAp *v1beta1.ApplicationProfile
+	var initOps []utils.PatchOperation
 	if aps, ok := am.applicationProfileMetadataCache.Load(container.K8s.Namespace); ok {
 		for _, ap := range aps {
 			if ap.Labels[helpersv1.WlidMetadataKey] == watchedContainer.Wlid {
@@ -140,11 +141,23 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 	if cachedAp != nil && cachedAp.Annotations[helpersv1.StatusMetadataKey] == string(utils.WatchedContainerStatusCompleted) {
 		logger.L().Debug("ApplicationProfileManager - found completed cached application profile", helpers.String("wlid", watchedContainer.Wlid))
 		return utils.ObjectCompleted
+	} else if cachedAp != nil && cachedAp.Annotations[helpersv1.CompletionMetadataKey] == string(utils.WatchedContainerCompletionStatusFull) {
+		logger.L().Debug("ApplicationProfileManager - found full cached application profile", helpers.String("wlid", watchedContainer.Wlid))
+		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+		watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
+	} else if cachedAp != nil {
+		logger.L().Debug("ApplicationProfileManager - found partial cached application profile", helpers.String("wlid", watchedContainer.Wlid))
+		watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
+		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
+	} else {
+		initOps = GetInitOperations(am.ruleCache, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
+		if watchedContainer.PreRunningContainer {
+			watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
+		} else {
+			watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+		}
+		watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
 	}
-
-	
-
-	initOps := GetInitOperations(am.ruleCache, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
 
 	logger.L().Debug("ApplicationProfileManager - start monitor on container",
 		helpers.Interface("preRunning", watchedContainer.PreRunningContainer),
@@ -153,12 +166,6 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 		helpers.String("k8s workload", watchedContainer.K8sContainerID))
 
 	// set completion status & status as soon as we start monitoring the container
-	if watchedContainer.PreRunningContainer {
-		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
-	} else {
-		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
-	}
-	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
 
 	for {
 		select {
