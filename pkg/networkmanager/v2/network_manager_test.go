@@ -106,7 +106,7 @@ func TestCreateNetworkManager(t *testing.T) {
 		},
 		Runtime: containercollection.RuntimeMetadata{
 			BasicRuntimeMetadata: types.BasicRuntimeMetadata{
-				ContainerID:        "5fff6a395ce4e6984a9447cc6cfb09f473eaf278498243963fcc944889bc8400",
+				ContainerID:        "cont",
 				ContainerStartedAt: types.Time(time.Now().UnixNano()),
 			},
 		},
