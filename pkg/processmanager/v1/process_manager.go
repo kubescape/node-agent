@@ -227,9 +227,9 @@ func (p *ProcessManager) removeProcess(pid apitypes.CommPID) {
 // GetProcessTreeForPID retrieves the process tree for a specific PID within a container.
 // It returns the process and all its ancestors up to the container's shim process.
 // If the process is not in the tree, it attempts to fetch it from /proc.
-func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid apitypes.CommPID) (*apitypes.Process, error) {
+func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid apitypes.CommPID) (apitypes.Process, error) {
 	if !p.containerIdToShimPid.Has(containerID) {
-		return nil, fmt.Errorf("container ID %s not found", containerID)
+		return apitypes.Process{}, fmt.Errorf("container ID %s not found", containerID)
 	}
 
 	// Prevent concurrent access to the process tree
@@ -242,11 +242,11 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid apitypes.C
 			helpers.Interface("pid", pid))
 		process, err := p.getProcessFromProc(int(pid.PID))
 		if err != nil {
-			return nil, fmt.Errorf("process %d not found: %v", pid.PID, err)
+			return apitypes.Process{}, fmt.Errorf("process %d not found: %v", pid.PID, err)
 		}
 
 		if strings.HasPrefix(process.Comm, runCCommPrefix) {
-			return nil, fmt.Errorf("process %d is a runc process, not supported", pid.PID)
+			return apitypes.Process{}, fmt.Errorf("process %d is a runc process, not supported", pid.PID)
 		}
 		p.addProcess(process)
 		result = process
@@ -284,7 +284,7 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid apitypes.C
 		}
 	}
 
-	return result, nil
+	return *result.DeepCopy(), nil
 }
 
 func (p *ProcessManager) resolveRuncProcess(process *apitypes.Process) (*apitypes.Process, error) {

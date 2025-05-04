@@ -44,11 +44,16 @@ type NetworkStream struct {
 }
 
 func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, nodeName string, eventsNotificationChannel chan apitypes.NetworkStream, dnsSupport bool, processTreeManager processmanager.ProcessManagerClient) (*NetworkStream, error) {
-	k8sInventory, err := common.GetK8sInventoryCache()
-	if err != nil || k8sInventory == nil {
-		return nil, fmt.Errorf("creating k8s inventory cache: %w", err)
+	var k8sInventory common.K8sInventoryCache
+
+	if cfg.KubernetesMode {
+		var err error
+		k8sInventory, err = common.GetK8sInventoryCache()
+		if err != nil || k8sInventory == nil {
+			return nil, fmt.Errorf("creating k8s inventory cache: %w", err)
+		}
+		k8sInventory.Start() // We do not stop it here, as we need it to be running for the whole lifetime of the NetworkStream.
 	}
-	k8sInventory.Start() // We do not stop it here, as we need it to be running for the whole lifetime of the NetworkStream.
 
 	ns := NetworkStream{
 		networkEventsStorage: apitypes.NetworkStream{
@@ -379,7 +384,7 @@ func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid uint32, com
 		// So we just return the PID
 		return apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
-				PID: uint32(pid),
+				PID: pid,
 			},
 		}
 	}
@@ -389,13 +394,13 @@ func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid uint32, com
 		logger.L().Debug("NetworkStream - failed to get process tree", helpers.Error(err), helpers.Int("pid", int(pid)))
 		return apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
-				PID: uint32(pid),
+				PID: pid,
 			},
 		}
 	}
 
 	return apitypes.ProcessTree{
-		ProcessTree: *processTree,
+		ProcessTree: processTree,
 	}
 }
 

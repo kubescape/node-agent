@@ -1216,14 +1216,13 @@ func Test_16_ApNotStuckOnRestart(t *testing.T) {
 		t.Errorf("Error creating workload: %v", err)
 	}
 
-	time.Sleep(20 * time.Second)
+	time.Sleep(30 * time.Second)
 
-	_, _, err = wl.ExecIntoPod([]string{"service", "nginx", "stop"}, "")
-	assert.NoError(t, err)
+	_, _, _ = wl.ExecIntoPod([]string{"service", "nginx", "stop"}, "") // suppose to get error
+	assert.NoError(t, wl.WaitForReady(80))
+	assert.NoError(t, wl.WaitForApplicationProfileCompletion(80))
 
-	wl.WaitForReady(80)
-
-	wl.WaitForApplicationProfileCompletion(80)
+	time.Sleep(30 * time.Second)
 
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
 	assert.NoError(t, err)
