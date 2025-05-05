@@ -9,8 +9,8 @@ func IsComplete(annotations map[string]string, newCompletionStatus utils.Watched
 	// check if the profile is already completed (completed and partial)
 	if c, ok := annotations[helpers.CompletionMetadataKey]; ok {
 		if s, ok := annotations[helpers.StatusMetadataKey]; ok {
-			return s == helpers.Complete && c == helpers.Completed ||
-				s == helpers.Complete && c == helpers.Partial && newCompletionStatus == helpers.Partial
+			return s == helpers.Completed && c == helpers.Complete ||
+				s == helpers.Completed && c == helpers.Partial && newCompletionStatus == helpers.Partial
 		}
 	}
 	return false
