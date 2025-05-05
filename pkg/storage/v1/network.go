@@ -78,14 +78,13 @@ func (sc Storage) patchNetworkNeighborhood(name, namespace string, operations []
 	}
 
 	// check if returned neighborhood is completed
-	if s, ok := neighborhood.Annotations[helpers.StatusMetadataKey]; ok && s == helpers.Complete {
+	if IsComplete(neighborhood.Annotations, watchedContainer) {
 		watchedContainer.SyncChannel <- utils.ObjectCompleted
 		return nil
 	}
 
 	// retrigger the patch if the storage profile is complete and the locally stored profile is partial
-	if completion, ok := neighborhood.Annotations[helpers.CompletionMetadataKey]; ok && completion == helpers.Complete &&
-		watchedContainer.GetCompletionStatus() == helpers.Partial {
+	if IsSeenFromStart(neighborhood.Annotations, watchedContainer) {
 		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
 		logger.L().Debug("Storage - retriggering patch",
 			loggerhelpers.String("name", name),

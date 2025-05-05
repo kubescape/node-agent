@@ -79,16 +79,15 @@ func (sc Storage) patchApplicationProfile(name, namespace string, operations []u
 	}
 
 	// check if returned profile is completed
-	if s, ok := profile.Annotations[helpers.StatusMetadataKey]; ok && s == helpers.Complete {
+	if IsComplete(profile.Annotations, watchedContainer) {
 		watchedContainer.SyncChannel <- utils.ObjectCompleted
 		return nil
 	}
 
 	// retrigger the patch if the storage profile is complete and the locally stored profile is partial
-	if completion, ok := profile.Annotations[helpers.CompletionMetadataKey]; ok && completion == helpers.Complete &&
-		watchedContainer.GetCompletionStatus() == helpers.Partial {
+	if IsSeenFromStart(profile.Annotations, watchedContainer) {
 		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
-		logger.L().Debug("Storage - retriggering patch",
+		logger.L().Debug("Storage - patching application profile",
 			loggerhelpers.String("name", name),
 			loggerhelpers.String("namespace", namespace),
 			loggerhelpers.String("watchedContainer", watchedContainer.ContainerID),
