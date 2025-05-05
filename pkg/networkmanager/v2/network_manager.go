@@ -239,6 +239,23 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 		var gotErr error
 		if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, operations, watchedContainer.SyncChannel); err != nil {
 			switch {
+			case IsStatusCompletedError(err):
+				logger.L().Ctx(ctx).Debug("NetworkManager - status completed", helpers.Error(err),
+					helpers.String("slug", slug),
+					helpers.Int("container index", watchedContainer.ContainerIndex),
+					helpers.String("container ID", watchedContainer.ContainerID),
+					helpers.String("k8s workload", watchedContainer.K8sContainerID))
+				watchedContainer.SyncChannel <- utils.ObjectCompleted
+				return
+			case IsStatusPartialError(err):
+				logger.L().Ctx(ctx).Debug("NetworkManager - mismatched status: local partial, storage complete", helpers.Error(err),
+					helpers.String("slug", slug),
+					helpers.Int("container index", watchedContainer.ContainerIndex),
+					helpers.String("container ID", watchedContainer.ContainerID),
+					helpers.String("k8s workload", watchedContainer.K8sContainerID))
+				watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+				nm.saveNetworkEvents(ctx, watchedContainer, namespace)
+				return
 			case apierrors.IsTimeout(err):
 				// backoff timeout, we have already retried for maxElapsedTime
 				gotErr = err

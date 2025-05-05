@@ -337,6 +337,23 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		var gotErr error
 		if err := am.storageClient.PatchApplicationProfile(slug, namespace, operations, watchedContainer.SyncChannel); err != nil {
 			switch {
+			case IsStatusCompletedError(err):
+				logger.L().Ctx(ctx).Debug("ApplicationProfileManager - status completed", helpers.Error(err),
+					helpers.String("slug", slug),
+					helpers.Int("container index", watchedContainer.ContainerIndex),
+					helpers.String("container ID", watchedContainer.ContainerID),
+					helpers.String("k8s workload", watchedContainer.K8sContainerID))
+				watchedContainer.SyncChannel <- utils.ObjectCompleted
+				return
+			case IsStatusPartialError(err):
+				logger.L().Ctx(ctx).Debug("ApplicationProfileManager - mismatched status: local partial, storage complete", helpers.Error(err),
+					helpers.String("slug", slug),
+					helpers.Int("container index", watchedContainer.ContainerIndex),
+					helpers.String("container ID", watchedContainer.ContainerID),
+					helpers.String("k8s workload", watchedContainer.K8sContainerID))
+				watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+				am.saveProfile(ctx, watchedContainer, namespace, operations)
+				return
 			case apierrors.IsTimeout(err):
 				// backoff timeout, we have already retried for maxElapsedTime
 				gotErr = err
