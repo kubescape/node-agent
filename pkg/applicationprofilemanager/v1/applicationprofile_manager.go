@@ -96,7 +96,15 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 
 func (am *ApplicationProfileManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
 	// make sure we don't run deleteResources and saveProfile at the same time
-	am.containerMutexes.Lock(watchedContainer.K8sContainerID)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := am.containerMutexes.Lock(ctx, watchedContainer.K8sContainerID)
+	if err != nil {
+		logger.L().Debug("ApplicationProfileManager - failed to lock container mutex", helpers.Error(err),
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		return
+	}
 	defer am.containerMutexes.Unlock(watchedContainer.K8sContainerID)
 	am.removedContainers.Add(watchedContainer.K8sContainerID)
 	// delete resources
@@ -189,7 +197,15 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	defer span.End()
 
 	// make sure we don't run deleteResources and saveProfile at the same time
-	am.containerMutexes.Lock(watchedContainer.K8sContainerID)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := am.containerMutexes.Lock(ctx, watchedContainer.K8sContainerID)
+	if err != nil {
+		logger.L().Debug("ApplicationProfileManager - failed to lock container mutex", helpers.Error(err),
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		return
+	}
 	defer am.containerMutexes.Unlock(watchedContainer.K8sContainerID)
 
 	// verify the container hasn't already been deleted
@@ -650,7 +666,6 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		K8sContainerID:         k8sContainerID,
 		NsMntId:                container.Mntns,
 		InstanceID:             sharedData.InstanceID,
-		TemplateHash:           sharedData.TemplateHash,
 		Wlid:                   sharedData.Wlid,
 		ParentResourceVersion:  sharedData.ParentResourceVersion,
 		ContainerInfos:         sharedData.ContainerInfos,

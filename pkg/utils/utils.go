@@ -87,7 +87,6 @@ type WatchedContainerData struct {
 	ImageTag                                   string
 	ImageID                                    string
 	Wlid                                       string
-	TemplateHash                               string
 	K8sContainerID                             string
 	ContainerType                              ContainerType
 	ContainerIndex                             int
@@ -203,10 +202,6 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 	if watchedContainer.ParentResourceVersion != "" {
 		labels[helpersv1.ResourceVersionMetadataKey] = watchedContainer.ParentResourceVersion
 	}
-	if watchedContainer.TemplateHash != "" {
-		labels[helpersv1.TemplateHashKey] = watchedContainer.TemplateHash
-	}
-
 	return labels
 }
 

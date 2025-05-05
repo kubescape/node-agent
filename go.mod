@@ -35,7 +35,7 @@ require (
 	github.com/kubescape/backend v0.0.25
 	github.com/kubescape/go-logger v0.0.23
 	github.com/kubescape/k8s-interface v0.0.192
-	github.com/kubescape/storage v0.0.179-0.20250505130453-95af7305f339
+	github.com/kubescape/storage v0.0.179
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
