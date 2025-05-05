@@ -7,7 +7,7 @@ import (
 
 type StorageClient interface {
 	CreateApplicationProfile(profile *v1beta1.ApplicationProfile, namespace string) error
-	PatchApplicationProfile(name, namespace string, operations []utils.PatchOperation, channel chan error) error
+	PatchApplicationProfile(name, namespace string, operations []utils.PatchOperation, watchedContainer *utils.WatchedContainerData) error
 	GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error)
 	CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error)
 	GetSBOM(name string) (*v1beta1.SBOMSyft, error)
@@ -17,5 +17,5 @@ type StorageClient interface {
 	DecrementImageUse(imageID string)
 	GetNetworkNeighborhood(namespace, name string) (*v1beta1.NetworkNeighborhood, error)
 	CreateNetworkNeighborhood(neighborhood *v1beta1.NetworkNeighborhood, namespace string) error
-	PatchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, channel chan error) error
+	PatchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, watchedContainer *utils.WatchedContainerData) error
 }

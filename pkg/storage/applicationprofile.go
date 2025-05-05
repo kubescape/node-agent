@@ -34,7 +34,7 @@ func (sc *StorageHttpClientMock) CreateApplicationProfile(profile *v1beta1.Appli
 	return nil
 }
 
-func (sc *StorageHttpClientMock) PatchApplicationProfile(name, _ string, operations []utils.PatchOperation, _ chan error) error {
+func (sc *StorageHttpClientMock) PatchApplicationProfile(name, _ string, operations []utils.PatchOperation, _ *utils.WatchedContainerData) error {
 	if len(sc.ApplicationProfiles) == 0 {
 		return errors2.NewNotFound(v1beta1.Resource("applicationprofile"), name)
 	}

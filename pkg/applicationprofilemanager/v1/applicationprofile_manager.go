@@ -335,7 +335,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 
 		// 1. try to patch object
 		var gotErr error
-		if err := am.storageClient.PatchApplicationProfile(slug, namespace, operations, watchedContainer.SyncChannel); err != nil {
+		if err := am.storageClient.PatchApplicationProfile(slug, namespace, operations, watchedContainer); err != nil {
 			switch {
 			case apierrors.IsTimeout(err):
 				// backoff timeout, we have already retried for maxElapsedTime
@@ -516,7 +516,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 						})
 					}
 
-					if err := am.storageClient.PatchApplicationProfile(slug, namespace, replaceOperations, watchedContainer.SyncChannel); err != nil {
+					if err := am.storageClient.PatchApplicationProfile(slug, namespace, replaceOperations, watchedContainer); err != nil {
 						gotErr = err
 						logger.L().Ctx(ctx).Warning("ApplicationProfileManager - failed to patch application profile", helpers.Error(err),
 							helpers.String("slug", slug),
