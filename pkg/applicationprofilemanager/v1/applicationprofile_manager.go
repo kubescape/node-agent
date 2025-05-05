@@ -43,6 +43,12 @@ import (
 
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
 
+type APMetadata struct {
+	Status           string
+	CompletionStatus string
+	Wlid             string
+}
+
 type ApplicationProfileManager struct {
 	cfg                      config.Config
 	clusterName              string
@@ -72,7 +78,7 @@ type ApplicationProfileManager struct {
 	seccompManager           seccompmanager.SeccompManagerClient
 	enricher                 applicationprofilemanager.Enricher
 	ruleCache                rulebindingmanager.RuleBindingCache
-	apMetadataCache          *APMetadataCache // Changed from applicationProfileMetadataCache maps.SafeMap[string, APMetadata]
+	apMetadataCache          *objectcache.CRDMetadataCache[APMetadata] // Changed from applicationProfileMetadataCache maps.SafeMap[string, APMetadata]
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
@@ -92,6 +98,7 @@ func CreateApplicationProfileManager(ctx context.Context, cfg config.Config, clu
 		seccompManager:          seccompManager,
 		enricher:                enricher,
 		ruleCache:               ruleCache,
+		apMetadataCache:         objectcache.NewCRDMetadataCache[APMetadata](),
 	}, nil
 }
 
