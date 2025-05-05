@@ -78,7 +78,7 @@ type ApplicationProfileManager struct {
 	seccompManager           seccompmanager.SeccompManagerClient
 	enricher                 applicationprofilemanager.Enricher
 	ruleCache                rulebindingmanager.RuleBindingCache
-	apMetadataCache          *objectcache.CRDMetadataCache[APMetadata] // Changed from applicationProfileMetadataCache maps.SafeMap[string, APMetadata]
+	apMetadataCache          *objectcache.CRDMetadataCache[APMetadata]
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
@@ -192,17 +192,37 @@ func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, conta
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				}
 				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, nil)
+				am.apMetadataCache.Set(watchedContainer.Wlid, APMetadata{
+					Status:           string(watchedContainer.GetStatus()),
+					CompletionStatus: string(watchedContainer.GetCompletionStatus()),
+					Wlid:             watchedContainer.Wlid,
+				})
 				return err
 			case errors.Is(err, utils.ContainerReachedMaxTime):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				am.saveProfile(ctx, watchedContainer, container.K8s.Namespace, nil)
+				am.apMetadataCache.Set(watchedContainer.Wlid, APMetadata{
+					Status:           string(watchedContainer.GetStatus()),
+					CompletionStatus: string(watchedContainer.GetCompletionStatus()),
+					Wlid:             watchedContainer.Wlid,
+				})
 				return err
 			case errors.Is(err, utils.ObjectCompleted):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+				am.apMetadataCache.Set(watchedContainer.Wlid, APMetadata{
+					Status:           string(watchedContainer.GetStatus()),
+					CompletionStatus: string(watchedContainer.GetCompletionStatus()),
+					Wlid:             watchedContainer.Wlid,
+				})
 				return err
 			case errors.Is(err, utils.TooLargeObjectError):
 				logger.L().Debug("ApplicationProfileManager - object is too large")
 				watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
+				am.apMetadataCache.Set(watchedContainer.Wlid, APMetadata{
+					Status:           string(watchedContainer.GetStatus()),
+					CompletionStatus: string(watchedContainer.GetCompletionStatus()),
+					Wlid:             watchedContainer.Wlid,
+				})
 				return err
 			}
 		}

@@ -33,6 +33,13 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+// NNMetadata represents cached metadata for NetworkNeighborhood objects
+type NNMetadata struct {
+	Status           string
+	CompletionStatus string
+	Wlid             string
+}
+
 type NetworkManager struct {
 	cfg                      config.Config
 	clusterName              string
@@ -48,6 +55,7 @@ type NetworkManager struct {
 	k8sObjectCache           objectcache.K8sObjectCache
 	storageClient            storage.StorageClient
 	dnsResolverClient        dnsmanager.DNSResolver
+	nnMetadataCache          *objectcache.CRDMetadataCache[NNMetadata] // Cache for network neighborhood metadata
 }
 
 var _ networkmanager.NetworkManagerClient = (*NetworkManager)(nil)
@@ -65,6 +73,7 @@ func CreateNetworkManager(ctx context.Context, cfg config.Config, clusterName st
 		trackedContainers:       mapset.NewSet[string](),
 		removedContainers:       mapset.NewSet[string](),
 		droppedEventsContainers: mapset.NewSet[string](),
+		nnMetadataCache:         objectcache.NewCRDMetadataCache[NNMetadata](),
 	}
 }
 
@@ -110,19 +119,39 @@ func (nm *NetworkManager) isValidEvent(event tracernetworktype.Event) bool {
 }
 
 func (nm *NetworkManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+	// Check if we have cached metadata for this workload
+	if metadata, ok := nm.nnMetadataCache.Get(watchedContainer.Wlid); ok {
+		if metadata.Status == string(utils.WatchedContainerStatusCompleted) {
+			logger.L().Debug("NetworkManager - found completed cached network neighborhood",
+				helpers.String("wlid", watchedContainer.Wlid))
+			return utils.ObjectCompleted
+		} else if metadata.CompletionStatus == string(utils.WatchedContainerCompletionStatusFull) {
+			logger.L().Debug("NetworkManager - found full cached network neighborhood",
+				helpers.String("wlid", watchedContainer.Wlid))
+			watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
+		} else {
+			logger.L().Debug("NetworkManager - found partial cached network neighborhood",
+				helpers.String("wlid", watchedContainer.Wlid))
+			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
+			watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
+		}
+	} else {
+		// set completion status & status as soon as we start monitoring the container
+		if watchedContainer.PreRunningContainer {
+			watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
+		} else {
+			watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+		}
+		watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
+	}
+
 	logger.L().Debug("NetworkManager - start monitor on container",
 		helpers.Interface("preRunning", watchedContainer.PreRunningContainer),
 		helpers.Int("container index", watchedContainer.ContainerIndex),
 		helpers.String("container ID", watchedContainer.ContainerID),
 		helpers.String("k8s workload", watchedContainer.K8sContainerID))
 
-	// set completion status & status as soon as we start monitoring the container
-	if watchedContainer.PreRunningContainer {
-		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
-	} else {
-		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
-	}
-	watchedContainer.SetStatus(utils.WatchedContainerStatusInitializing)
 	nm.saveNetworkEvents(ctx, watchedContainer, container.K8s.Namespace)
 
 	for {
@@ -141,18 +170,42 @@ func (nm *NetworkManager) monitorContainer(ctx context.Context, container *conta
 				// if exit code is 0 we set the status to completed
 				if objectcache.GetTerminationExitCode(nm.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName, container.Runtime.ContainerID) == 0 {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+					// Update the cache with completed status
+					nm.nnMetadataCache.Set(watchedContainer.Wlid, NNMetadata{
+						Status:           string(watchedContainer.GetStatus()),
+						CompletionStatus: string(watchedContainer.GetCompletionStatus()),
+						Wlid:             watchedContainer.Wlid,
+					})
 				}
 				nm.saveNetworkEvents(ctx, watchedContainer, container.K8s.Namespace)
 				return err
 			case errors.Is(err, utils.ContainerReachedMaxTime):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+				// Update the cache with completed status
+				nm.nnMetadataCache.Set(watchedContainer.Wlid, NNMetadata{
+					Status:           string(watchedContainer.GetStatus()),
+					CompletionStatus: string(watchedContainer.GetCompletionStatus()),
+					Wlid:             watchedContainer.Wlid,
+				})
 				nm.saveNetworkEvents(ctx, watchedContainer, container.K8s.Namespace)
 				return err
 			case errors.Is(err, utils.ObjectCompleted):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+				// Update the cache with completed status
+				nm.nnMetadataCache.Set(watchedContainer.Wlid, NNMetadata{
+					Status:           string(watchedContainer.GetStatus()),
+					CompletionStatus: string(watchedContainer.GetCompletionStatus()),
+					Wlid:             watchedContainer.Wlid,
+				})
 				return err
 			case errors.Is(err, utils.TooLargeObjectError):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
+				// Update the cache with too large status
+				nm.nnMetadataCache.Set(watchedContainer.Wlid, NNMetadata{
+					Status:           string(watchedContainer.GetStatus()),
+					CompletionStatus: string(watchedContainer.GetCompletionStatus()),
+					Wlid:             watchedContainer.Wlid,
+				})
 				return err
 			}
 		}
@@ -402,6 +455,33 @@ func (nm *NetworkManager) startNetworkMonitoring(ctx context.Context, container 
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
 		return
+	}
+
+	// Check if we have the cache for this namespace
+	if !nm.nnMetadataCache.Has(sharedData.Wlid) && !nm.nnMetadataCache.IsNamespaceFetched(container.K8s.Namespace) {
+		nns, err := nm.storageClient.ListNetworkNeighborhoods(container.K8s.Namespace)
+		if err != nil {
+			logger.L().Ctx(nm.ctx).Warning("NetworkManager - failed to list network neighborhoods", helpers.Error(err))
+		} else {
+			// Populate the metadata cache with NetworkNeighborhood data
+			for _, nn := range nns.Items {
+				wlid, ok := nn.Annotations[helpersv1.WlidMetadataKey]
+				if !ok {
+					continue
+				}
+
+				status := nn.Annotations[helpersv1.StatusMetadataKey]
+				completionStatus := nn.Annotations[helpersv1.CompletionMetadataKey]
+
+				nm.nnMetadataCache.Set(wlid, NNMetadata{
+					Status:           status,
+					CompletionStatus: completionStatus,
+					Wlid:             wlid,
+				})
+			}
+
+			nm.nnMetadataCache.MarkNamespaceFetched(container.K8s.Namespace)
+		}
 	}
 
 	syncChannel := make(chan error, 10)

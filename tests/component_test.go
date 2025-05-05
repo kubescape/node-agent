@@ -1221,7 +1221,7 @@ func Test_16_ApNotStuckOnRestart(t *testing.T) {
 	_, _, _ = wl.ExecIntoPod([]string{"service", "nginx", "stop"}, "") // suppose to get error
 	assert.NoError(t, wl.WaitForReady(80))
 	assert.NoError(t, wl.WaitForApplicationProfileCompletion(80))
-
+	assert.NoError(t, wl.WaitForNetworkNeighborhoodCompletion(80))
 	time.Sleep(30 * time.Second)
 
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
@@ -1247,13 +1247,15 @@ func Test_17_ApCompletedToPartialUpdateTest(t *testing.T) {
 
 	time.Sleep(30 * time.Second)
 	assert.NoError(t, wl.WaitForReady(80))
+	assert.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"))
 
 	err = testutils.RestartDaemonSet("kubescape", "node-agent")
 	assert.NoError(t, err)
 
-	time.Sleep(30 * time.Second)
-
 	assert.NoError(t, wl.WaitForApplicationProfileCompletion(160))
+	assert.NoError(t, wl.WaitForNetworkNeighborhoodCompletion(160))
+
+	time.Sleep(30 * time.Second)
 
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
 	assert.NoError(t, err)
