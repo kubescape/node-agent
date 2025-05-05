@@ -44,35 +44,35 @@ import (
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
 
 type ApplicationProfileManager struct {
-	cfg                             config.Config
-	clusterName                     string
-	ctx                             context.Context
-	containerMutexes                storageUtils.MapMutex[string]                                             // key is k8sContainerID
-	trackedContainers               mapset.Set[string]                                                        // key is k8sContainerID
-	removedContainers               mapset.Set[string]                                                        // key is k8sContainerID
-	droppedEventsContainers         mapset.Set[string]                                                        // key is k8sContainerID
-	savedCapabilities               maps.SafeMap[string, cache.ExpiringCache]                                 // key is k8sContainerID
-	savedEndpoints                  maps.SafeMap[string, cache.ExpiringCache]                                 // key is k8sContainerID
-	savedExecs                      maps.SafeMap[string, cache.ExpiringCache]                                 // key is k8sContainerID
-	savedOpens                      maps.SafeMap[string, cache.ExpiringCache]                                 // key is k8sContainerID
-	savedSyscalls                   maps.SafeMap[string, mapset.Set[string]]                                  // key is k8sContainerID
-	savedRulePolicies               maps.SafeMap[string, cache.ExpiringCache]                                 // key is k8sContainerID
-	savedCallStacks                 maps.SafeMap[string, cache.ExpiringCache]                                 // key is k8sContainerID
-	toSaveCapabilities              maps.SafeMap[string, mapset.Set[string]]                                  // key is k8sContainerID
-	toSaveEndpoints                 maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.HTTPEndpoint]]        // key is k8sContainerID
-	toSaveExecs                     maps.SafeMap[string, *maps.SafeMap[string, []string]]                     // key is k8sContainerID
-	toSaveOpens                     maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]]           // key is k8sContainerID
-	toSaveRulePolicies              maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.RulePolicy]]          // key is k8sContainerID
-	toSaveCallStacks                maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.IdentifiedCallStack]] // key is k8sContainerID
-	watchedContainerChannels        maps.SafeMap[string, chan error]                                          // key is ContainerID
-	k8sClient                       k8sclient.K8sClientInterface
-	k8sObjectCache                  objectcache.K8sObjectCache
-	storageClient                   storage.StorageClient
-	syscallPeekFunc                 func(nsMountId uint64) ([]string, error)
-	seccompManager                  seccompmanager.SeccompManagerClient
-	enricher                        applicationprofilemanager.Enricher
-	ruleCache                       rulebindingmanager.RuleBindingCache
-	applicationProfileMetadataCache maps.SafeMap[string, APMetadata] // key is WLID
+	cfg                      config.Config
+	clusterName              string
+	ctx                      context.Context
+	containerMutexes         storageUtils.MapMutex[string]                                             // key is k8sContainerID
+	trackedContainers        mapset.Set[string]                                                        // key is k8sContainerID
+	removedContainers        mapset.Set[string]                                                        // key is k8sContainerID
+	droppedEventsContainers  mapset.Set[string]                                                        // key is k8sContainerID
+	savedCapabilities        maps.SafeMap[string, cache.ExpiringCache]                                 // key is k8sContainerID
+	savedEndpoints           maps.SafeMap[string, cache.ExpiringCache]                                 // key is k8sContainerID
+	savedExecs               maps.SafeMap[string, cache.ExpiringCache]                                 // key is k8sContainerID
+	savedOpens               maps.SafeMap[string, cache.ExpiringCache]                                 // key is k8sContainerID
+	savedSyscalls            maps.SafeMap[string, mapset.Set[string]]                                  // key is k8sContainerID
+	savedRulePolicies        maps.SafeMap[string, cache.ExpiringCache]                                 // key is k8sContainerID
+	savedCallStacks          maps.SafeMap[string, cache.ExpiringCache]                                 // key is k8sContainerID
+	toSaveCapabilities       maps.SafeMap[string, mapset.Set[string]]                                  // key is k8sContainerID
+	toSaveEndpoints          maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.HTTPEndpoint]]        // key is k8sContainerID
+	toSaveExecs              maps.SafeMap[string, *maps.SafeMap[string, []string]]                     // key is k8sContainerID
+	toSaveOpens              maps.SafeMap[string, *maps.SafeMap[string, mapset.Set[string]]]           // key is k8sContainerID
+	toSaveRulePolicies       maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.RulePolicy]]          // key is k8sContainerID
+	toSaveCallStacks         maps.SafeMap[string, *maps.SafeMap[string, *v1beta1.IdentifiedCallStack]] // key is k8sContainerID
+	watchedContainerChannels maps.SafeMap[string, chan error]                                          // key is ContainerID
+	k8sClient                k8sclient.K8sClientInterface
+	k8sObjectCache           objectcache.K8sObjectCache
+	storageClient            storage.StorageClient
+	syscallPeekFunc          func(nsMountId uint64) ([]string, error)
+	seccompManager           seccompmanager.SeccompManagerClient
+	enricher                 applicationprofilemanager.Enricher
+	ruleCache                rulebindingmanager.RuleBindingCache
+	apMetadataCache          *APMetadataCache // Changed from applicationProfileMetadataCache maps.SafeMap[string, APMetadata]
 }
 
 var _ applicationprofilemanager.ApplicationProfileManagerClient = (*ApplicationProfileManager)(nil)
@@ -128,7 +128,7 @@ func (am *ApplicationProfileManager) ContainerReachedMaxTime(containerID string)
 
 func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	var initOps []utils.PatchOperation
-	if metadata, ok := am.applicationProfileMetadataCache.Load(watchedContainer.Wlid); ok {
+	if metadata, ok := am.apMetadataCache.Get(watchedContainer.Wlid); ok {
 		if metadata.Status == string(utils.WatchedContainerStatusCompleted) {
 			logger.L().Debug("ApplicationProfileManager - found completed cached application profile", helpers.String("wlid", watchedContainer.Wlid))
 			return utils.ObjectCompleted
@@ -682,7 +682,7 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		PreRunningContainer:    sharedData.PreRunningContainer,
 	}
 
-	if !am.applicationProfileMetadataCache.Has(watchedContainer.Wlid) {
+	if !am.apMetadataCache.Has(watchedContainer.Wlid) && !am.apMetadataCache.IsNamespaceFetched(container.K8s.Namespace) {
 		aps, err := am.storageClient.ListApplicationProfiles(container.K8s.Namespace)
 		if err != nil {
 			logger.L().Ctx(am.ctx).Warning("ApplicationProfileManager - failed to list application profiles", helpers.Error(err))
@@ -699,12 +699,14 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 			status := ap.Annotations[helpersv1.StatusMetadataKey]
 			completionStatus := ap.Annotations[helpersv1.CompletionMetadataKey]
 
-			am.applicationProfileMetadataCache.Set(wlid, APMetadata{
+			am.apMetadataCache.Set(wlid, APMetadata{
 				Status:           status,
 				CompletionStatus: completionStatus,
 				Wlid:             wlid,
 			})
 		}
+
+		am.apMetadataCache.MarkNamespaceFetched(container.K8s.Namespace)
 	}
 
 	if err := am.monitorContainer(ctx, container, watchedContainer); err != nil {
