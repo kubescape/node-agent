@@ -16,7 +16,7 @@ type StorageHttpClientMock struct {
 	ApplicationProfiles   []*spdxv1beta1.ApplicationProfile
 	SyftSBOMs             []*spdxv1beta1.SBOMSyft
 	NetworkNeighborhoods  []*v1beta1.NetworkNeighborhood
-	NetworkNeighborses    []*v1beta1.NetworkNeighbors
+	NetworkNeighbors      []*v1beta1.NetworkNeighbor
 	ImageCounters         map[string]int
 	mockSBOM              *v1beta1.SBOMSyft
 	failedOnce            bool
