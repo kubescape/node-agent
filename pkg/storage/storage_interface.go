@@ -19,4 +19,5 @@ type StorageClient interface {
 	CreateNetworkNeighborhood(neighborhood *v1beta1.NetworkNeighborhood, namespace string) error
 	PatchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, channel chan error) error
 	ListApplicationProfiles(namespace string) (*v1beta1.ApplicationProfileList, error)
+	ListNetworkNeighborhoods(namespace string) (*v1beta1.NetworkNeighborhoodList, error)
 }

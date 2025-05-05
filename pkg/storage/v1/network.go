@@ -49,6 +49,14 @@ func (sc Storage) PatchNetworkNeighborhood(name, namespace string, operations []
 	return nil
 }
 
+func (sc Storage) ListNetworkNeighborhoods(namespace string) (*v1beta1.NetworkNeighborhoodList, error) {
+	nn, err := sc.StorageClient.NetworkNeighborhoods(namespace).List(context.Background(), v1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return nn, nil
+}
+
 func (sc Storage) patchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, channel chan error) error {
 	patch, err := json.Marshal(operations)
 	if err != nil {

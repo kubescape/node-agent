@@ -59,3 +59,7 @@ func (sc *StorageHttpClientMock) DecrementImageUse(imageID string) {
 func (sc *StorageHttpClientMock) ListApplicationProfiles(namespace string) (*v1beta1.ApplicationProfileList, error) {
 	return &v1beta1.ApplicationProfileList{}, nil
 }
+
+func (sc *StorageHttpClientMock) ListNetworkNeighborhoods(namespace string) (*v1beta1.NetworkNeighborhoodList, error) {
+	return &v1beta1.NetworkNeighborhoodList{}, nil
+}

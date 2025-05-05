@@ -682,6 +682,31 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		PreRunningContainer:    sharedData.PreRunningContainer,
 	}
 
+	if !am.applicationProfileMetadataCache.Has(watchedContainer.Wlid) {
+		aps, err := am.storageClient.ListApplicationProfiles(container.K8s.Namespace)
+		if err != nil {
+			logger.L().Ctx(am.ctx).Warning("ApplicationProfileManager - failed to list application profiles", helpers.Error(err))
+			return
+		}
+
+		// Update this section to populate the new metadata cache with APMetadata
+		for _, ap := range aps.Items {
+			wlid, ok := ap.Annotations[helpersv1.WlidMetadataKey]
+			if !ok {
+				continue
+			}
+
+			status := ap.Annotations[helpersv1.StatusMetadataKey]
+			completionStatus := ap.Annotations[helpersv1.CompletionMetadataKey]
+
+			am.applicationProfileMetadataCache.Set(wlid, APMetadata{
+				Status:           status,
+				CompletionStatus: completionStatus,
+				Wlid:             wlid,
+			})
+		}
+	}
+
 	if err := am.monitorContainer(ctx, container, watchedContainer); err != nil {
 		logger.L().Debug("ApplicationProfileManager - stop monitor on container", helpers.String("reason", err.Error()),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
@@ -744,29 +769,6 @@ func (am *ApplicationProfileManager) ContainerCallback(notif containercollection
 		am.toSaveCallStacks.Set(k8sContainerID, new(maps.SafeMap[string, *v1beta1.IdentifiedCallStack]))
 		am.removedContainers.Remove(k8sContainerID) // make sure container is not in the removed list
 		am.trackedContainers.Add(k8sContainerID)
-
-		aps, err := am.storageClient.ListApplicationProfiles(notif.Container.K8s.Namespace)
-		if err != nil {
-			logger.L().Ctx(am.ctx).Warning("ApplicationProfileManager - failed to list application profiles", helpers.Error(err))
-			return
-		}
-
-		// Update this section to populate the new metadata cache with APMetadata
-		for _, ap := range aps.Items {
-			wlid, ok := ap.Annotations[helpersv1.WlidMetadataKey]
-			if !ok {
-				continue
-			}
-
-			status := ap.Annotations[helpersv1.StatusMetadataKey]
-			completionStatus := ap.Annotations[helpersv1.CompletionMetadataKey]
-
-			am.applicationProfileMetadataCache.Set(wlid, APMetadata{
-				Status:           status,
-				CompletionStatus: completionStatus,
-				Wlid:             wlid,
-			})
-		}
 
 		go am.startApplicationProfiling(ctx, notif.Container, k8sContainerID)
 
