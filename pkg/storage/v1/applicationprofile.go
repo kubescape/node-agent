@@ -79,7 +79,7 @@ func (sc Storage) patchApplicationProfile(name, namespace string, operations []u
 	}
 
 	// check if returned profile is completed
-	if IsComplete(profile.Annotations, watchedContainer) {
+	if IsComplete(profile.Annotations, watchedContainer.GetCompletionStatus()) {
 		watchedContainer.SyncChannel <- utils.ObjectCompleted
 		return nil
 	}

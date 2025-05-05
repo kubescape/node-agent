@@ -5,12 +5,12 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-func IsComplete(annotations map[string]string, watchedContainer *utils.WatchedContainerData) bool {
+func IsComplete(annotations map[string]string, newCompletionStatus utils.WatchedContainerCompletionStatus) bool {
 	// check if the profile is already completed (completed and partial)
 	if c, ok := annotations[helpers.CompletionMetadataKey]; ok {
 		if s, ok := annotations[helpers.StatusMetadataKey]; ok {
 			return s == helpers.Complete && c == helpers.Completed ||
-				s == helpers.Complete && c == helpers.Partial && watchedContainer.GetCompletionStatus() == helpers.Partial
+				s == helpers.Complete && c == helpers.Partial && newCompletionStatus == helpers.Partial
 		}
 	}
 	return false

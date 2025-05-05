@@ -78,7 +78,7 @@ func (sc Storage) patchNetworkNeighborhood(name, namespace string, operations []
 	}
 
 	// check if returned neighborhood is completed
-	if IsComplete(neighborhood.Annotations, watchedContainer) {
+	if IsComplete(neighborhood.Annotations, watchedContainer.GetCompletionStatus()) {
 		watchedContainer.SyncChannel <- utils.ObjectCompleted
 		return nil
 	}

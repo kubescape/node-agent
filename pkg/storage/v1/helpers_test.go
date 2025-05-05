@@ -73,7 +73,7 @@ func TestIsComplete(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsComplete(tt.annotations, tt.containerData)
+			result := IsComplete(tt.annotations, tt.containerData.GetCompletionStatus())
 			assert.Equal(t, tt.expectedComplete, result)
 		})
 	}
