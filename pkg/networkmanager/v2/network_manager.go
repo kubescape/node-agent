@@ -255,7 +255,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 
 		// 1. try to patch object
 		var gotErr error
-		if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, operations, watchedContainer.SyncChannel); err != nil {
+		if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, operations, watchedContainer); err != nil {
 			switch {
 			case apierrors.IsTimeout(err):
 				// backoff timeout, we have already retried for maxElapsedTime
@@ -369,7 +369,7 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 
 					replaceOperations = utils.AppendStatusAnnotationPatchOperations(replaceOperations, watchedContainer)
 
-					if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, replaceOperations, watchedContainer.SyncChannel); err != nil {
+					if err := nm.storageClient.PatchNetworkNeighborhood(slug, namespace, replaceOperations, watchedContainer); err != nil {
 						gotErr = err
 						logger.L().Ctx(ctx).Warning("NetworkManager - failed to patch network neighborhood", helpers.Error(err),
 							helpers.String("slug", slug),

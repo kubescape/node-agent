@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/evanphx/json-patch"
+	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	errors2 "k8s.io/apimachinery/pkg/api/errors"
@@ -41,7 +41,7 @@ func (sc *StorageHttpClientMock) CreateNetworkNeighborhood(neighborhood *v1beta1
 	return nil
 }
 
-func (sc *StorageHttpClientMock) PatchNetworkNeighborhood(name, _ string, operations []utils.PatchOperation, _ chan error) error {
+func (sc *StorageHttpClientMock) PatchNetworkNeighborhood(name, _ string, operations []utils.PatchOperation, _ *utils.WatchedContainerData) error {
 	if len(sc.NetworkNeighborhoods) == 0 {
 		return errors2.NewNotFound(v1beta1.Resource("networkneighborhood"), name)
 	}

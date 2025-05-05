@@ -38,18 +38,18 @@ func (sc Storage) CreateNetworkNeighborhood(neighborhood *v1beta1.NetworkNeighbo
 	return nil
 }
 
-func (sc Storage) PatchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, channel chan error) error {
+func (sc Storage) PatchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, watchedContainer *utils.WatchedContainerData) error {
 	logger.L().Debug("Storage - patching network neighborhood", loggerhelpers.String("name", name), loggerhelpers.String("namespace", namespace), loggerhelpers.Int("operations", len(operations)))
 	// split operations into max JSON operations batches
 	for _, chunk := range utils.ChunkBy(operations, sc.maxJsonPatchOperations) {
-		if err := sc.patchNetworkNeighborhood(name, namespace, chunk, channel); err != nil {
+		if err := sc.patchNetworkNeighborhood(name, namespace, chunk, watchedContainer); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (sc Storage) patchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, channel chan error) error {
+func (sc Storage) patchNetworkNeighborhood(name, namespace string, operations []utils.PatchOperation, watchedContainer *utils.WatchedContainerData) error {
 	patch, err := json.Marshal(operations)
 	if err != nil {
 		return fmt.Errorf("marshal patch: %w", err)
@@ -73,19 +73,26 @@ func (sc Storage) patchNetworkNeighborhood(name, namespace string, operations []
 	}
 	// check if returned neighborhood is full
 	if status, ok := neighborhood.Annotations[helpers.StatusMetadataKey]; ok && status == helpers.TooLarge {
-		if channel != nil {
-			channel <- utils.TooLargeObjectError
-		}
+		watchedContainer.SyncChannel <- utils.TooLargeObjectError
 		return nil
 	}
+
 	// check if returned neighborhood is completed
-	if c, ok := neighborhood.Annotations[helpers.CompletionMetadataKey]; ok {
-		if s, ok := neighborhood.Annotations[helpers.StatusMetadataKey]; ok && s == helpers.Complete && c == helpers.Completed {
-			if channel != nil {
-				channel <- utils.ObjectCompleted
-			}
-			return nil
-		}
+	if IsComplete(neighborhood.Annotations, watchedContainer.GetCompletionStatus()) {
+		watchedContainer.SyncChannel <- utils.ObjectCompleted
+		return nil
 	}
+
+	// retrigger the patch if the storage profile is complete and the locally stored profile is partial
+	if IsSeenFromStart(neighborhood.Annotations, watchedContainer) {
+		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+		logger.L().Debug("Storage - retriggering patch",
+			loggerhelpers.String("name", name),
+			loggerhelpers.String("namespace", namespace),
+			loggerhelpers.String("watchedContainer", watchedContainer.ContainerID),
+			loggerhelpers.String("completion", helpers.Complete))
+		sc.patchNetworkNeighborhood(name, namespace, operations, watchedContainer)
+	}
+
 	return nil
 }

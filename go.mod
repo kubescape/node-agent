@@ -2,7 +2,7 @@ module github.com/kubescape/node-agent
 
 go 1.23.3
 
-toolchain go1.24.2
+toolchain go1.23.8
 
 require (
 	github.com/DmitriyVTitov/size v1.5.0
@@ -34,8 +34,8 @@ require (
 	github.com/inspektor-gadget/inspektor-gadget v0.39.0
 	github.com/kubescape/backend v0.0.25
 	github.com/kubescape/go-logger v0.0.23
-	github.com/kubescape/k8s-interface v0.0.193
-	github.com/kubescape/storage v0.0.178
+	github.com/kubescape/k8s-interface v0.0.192
+	github.com/kubescape/storage v0.0.179
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
