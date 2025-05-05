@@ -70,7 +70,16 @@ func CreateNetworkManager(ctx context.Context, cfg config.Config, clusterName st
 
 func (nm *NetworkManager) deleteResources(watchedContainer *utils.WatchedContainerData) {
 	// make sure we don't run deleteResources and saveProfile at the same time
-	nm.containerMutexes.Lock(watchedContainer.K8sContainerID)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := nm.containerMutexes.Lock(ctx, watchedContainer.K8sContainerID)
+	if err != nil {
+		logger.L().Ctx(ctx).Debug("NetworkManager - failed to lock container mutex", helpers.Error(err),
+			helpers.Int("container index", watchedContainer.ContainerIndex),
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		return
+	}
 	defer nm.containerMutexes.Unlock(watchedContainer.K8sContainerID)
 	nm.removedContainers.Add(watchedContainer.K8sContainerID)
 	// delete resources
@@ -164,7 +173,16 @@ func (nm *NetworkManager) saveNetworkEvents(ctx context.Context, watchedContaine
 	defer span.End()
 
 	// make sure we don't run deleteResources and saveProfile at the same time
-	nm.containerMutexes.Lock(watchedContainer.K8sContainerID)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := nm.containerMutexes.Lock(ctx, watchedContainer.K8sContainerID)
+	if err != nil {
+		logger.L().Ctx(ctx).Debug("NetworkManager - failed to lock container mutex", helpers.Error(err),
+			helpers.Int("container index", watchedContainer.ContainerIndex),
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+		return
+	}
 	defer nm.containerMutexes.Unlock(watchedContainer.K8sContainerID)
 
 	// verify the container hasn't already been deleted
