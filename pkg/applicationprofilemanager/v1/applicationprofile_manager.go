@@ -650,7 +650,6 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		K8sContainerID:         k8sContainerID,
 		NsMntId:                container.Mntns,
 		InstanceID:             sharedData.InstanceID,
-		TemplateHash:           sharedData.TemplateHash,
 		Wlid:                   sharedData.Wlid,
 		ParentResourceVersion:  sharedData.ParentResourceVersion,
 		ContainerInfos:         sharedData.ContainerInfos,

@@ -148,8 +148,6 @@ func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *container
 			return nil, fmt.Errorf("failed to set container info: %w", err)
 		}
 	}
-	// get pod template hash
-	watchedContainer.TemplateHash, _ = pod.GetPodLabel("pod-template-hash")
 	// find parentWlid
 	kind, name, err := ch.k8sClient.CalculateWorkloadParentRecursive(pod)
 	if err != nil {
