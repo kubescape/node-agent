@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -54,23 +55,21 @@ type ContainerCallStackIndex struct {
 }
 
 type ApplicationProfileCacheImpl struct {
+	cfg                 config.Config
 	containerToSlug     maps.SafeMap[string, string]                      // cache the containerID to slug mapping, this will enable a quick lookup of the application profile
 	slugToAppProfile    maps.SafeMap[string, *v1beta1.ApplicationProfile] // cache the application profile
 	slugToContainers    maps.SafeMap[string, mapset.Set[string]]          // cache the containerIDs that belong to the application profile, this will enable removing from cache AP without pods
 	slugToState         maps.SafeMap[string, applicationProfileState]     // cache the containerID to slug mapping, this will enable a quick lookup of the application profile
 	storageClient       versioned.SpdxV1beta1Interface
 	allProfiles         mapset.Set[string] // cache all the application profiles that are ready. this will enable removing from cache AP without pods that are running on the same node
-	nodeName            string
-	maxDelaySeconds     int // maximum delay in seconds before getting the full object from the storage
 	userManagedProfiles maps.SafeMap[string, *v1beta1.ApplicationProfile]
 	containerCallStacks maps.SafeMap[string, *ContainerCallStackIndex] // cache the containerID to call stack search tree mapping
 	containerToName     maps.SafeMap[string, string]                   // cache the containerID to container name mapping
 }
 
-func NewApplicationProfileCache(nodeName string, storageClient versioned.SpdxV1beta1Interface, maxDelaySeconds int) *ApplicationProfileCacheImpl {
+func NewApplicationProfileCache(cfg config.Config, storageClient versioned.SpdxV1beta1Interface) *ApplicationProfileCacheImpl {
 	return &ApplicationProfileCacheImpl{
-		nodeName:            nodeName,
-		maxDelaySeconds:     maxDelaySeconds,
+		cfg:                 cfg,
 		storageClient:       storageClient,
 		containerToSlug:     maps.SafeMap[string, string]{},
 		slugToAppProfile:    maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
@@ -196,7 +195,7 @@ func (ap *ApplicationProfileCacheImpl) addApplicationProfile(obj runtime.Object)
 	ap.allProfiles.Add(apName)
 
 	if ap.slugToContainers.Has(apName) {
-		time.AfterFunc(utils.RandomDuration(ap.maxDelaySeconds, time.Second), func() {
+		time.AfterFunc(utils.RandomDuration(ap.cfg.MaxDelaySeconds, time.Second), func() {
 			ap.addFullApplicationProfile(appProfile, apName)
 		})
 	}
@@ -230,7 +229,7 @@ func (ap *ApplicationProfileCacheImpl) WatchResources() []watcher.WatchResource 
 		Resource: "pods",
 	},
 		metav1.ListOptions{
-			FieldSelector: "spec.nodeName=" + ap.nodeName,
+			FieldSelector: "spec.nodeName=" + ap.cfg.NodeName,
 		},
 	)
 	w = append(w, p)
@@ -273,7 +272,7 @@ func (ap *ApplicationProfileCacheImpl) DeleteHandler(_ context.Context, obj runt
 func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
 	pod := obj.(*corev1.Pod)
 
-	slug, err := getSlug(pod)
+	slug, err := ap.getSlug(pod)
 	if err != nil {
 		logger.L().Warning("ApplicationProfileCacheImpl - failed to get slug", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod", pod.GetName()), helpers.Error(err))
 		return
@@ -476,7 +475,7 @@ func (ap *ApplicationProfileCacheImpl) getApplicationProfile(namespace, name str
 	return ap.storageClient.ApplicationProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func getSlug(p *corev1.Pod) (string, error) {
+func (ap *ApplicationProfileCacheImpl) getSlug(p *corev1.Pod) (string, error) {
 	// need to set APIVersion and Kind before unstructured conversion, preparing for instanceID extraction
 	p.APIVersion = "v1"
 	p.Kind = "Pod"
@@ -491,7 +490,7 @@ func getSlug(p *corev1.Pod) (string, error) {
 	}
 
 	// get instanceIDs
-	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
+	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod, ap.cfg.ExcludeJsonPaths)
 	if err != nil {
 		return "", err
 	}

@@ -45,6 +45,7 @@ type Config struct {
 	NetworkStreamingInterval time.Duration             `mapstructure:"networkStreamingInterval"`
 	WorkerPoolSize           int                       `mapstructure:"workerPoolSize"`
 	TestMode                 bool                      `mapstructure:"testMode"`
+	ExcludeJsonPaths         []string                  `mapstructure:"excludeJsonPaths"`
 }
 
 // LoadConfig reads configuration from file or environment variables.

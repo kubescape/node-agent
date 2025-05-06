@@ -9,6 +9,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/node-agent/mocks"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -81,7 +82,7 @@ func Test_AddHandlers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.obj.(metav1.Object).SetNamespace("default")
 			storageClient := fake.NewSimpleClientset().SpdxV1beta1()
-			ap := NewApplicationProfileCache("", storageClient, 0)
+			ap := NewApplicationProfileCache(config.Config{}, storageClient)
 			ap.slugToContainers.Set(tt.slug, mapset.NewSet[string]())
 
 			tt.f(ap, context.Background(), tt.obj)
@@ -180,7 +181,7 @@ func Test_addApplicationProfile(t *testing.T) {
 
 			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			ap := NewApplicationProfileCache("", storageClient, 0)
+			ap := NewApplicationProfileCache(config.Config{}, storageClient)
 
 			for i := range tt.preCreatedPods {
 				ap.addPod(tt.preCreatedPods[i])
@@ -255,7 +256,7 @@ func Test_deleteApplicationProfile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ap := NewApplicationProfileCache("", nil, 0)
+			ap := NewApplicationProfileCache(config.Config{}, nil)
 
 			ap.allProfiles.Append(tt.slugs...)
 			for _, i := range tt.slugs {
@@ -318,7 +319,7 @@ func Test_deletePod(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ap := NewApplicationProfileCache("", nil, 0)
+			ap := NewApplicationProfileCache(config.Config{}, nil)
 			for _, i := range tt.otherSlugs {
 				ap.slugToContainers.Set(i, mapset.NewSet[string]())
 				ap.slugToAppProfile.Set(i, &v1beta1.ApplicationProfile{})
@@ -426,7 +427,7 @@ func Test_GetApplicationProfile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ap := NewApplicationProfileCache("", fake.NewSimpleClientset().SpdxV1beta1(), 0)
+			ap := NewApplicationProfileCache(config.Config{}, fake.NewSimpleClientset().SpdxV1beta1())
 
 			for _, c := range tt.pods {
 				ap.containerToSlug.Set(c.containerID, c.slug)
@@ -505,7 +506,7 @@ func Test_addApplicationProfile_existing(t *testing.T) {
 
 			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			ap := NewApplicationProfileCache("", storageClient, 0)
+			ap := NewApplicationProfileCache(config.Config{}, storageClient)
 
 			// add pods
 			for i := range tt.pods {
@@ -583,7 +584,7 @@ func Test_getApplicationProfile(t *testing.T) {
 }
 
 func Test_WatchResources(t *testing.T) {
-	ap := NewApplicationProfileCache("test-node", nil, 0)
+	ap := NewApplicationProfileCache(config.Config{NodeName: "test-node"}, nil)
 
 	expectedPodWatchResource := watcher.NewWatchResource(schema.GroupVersionResource{
 		Group:    "",
@@ -630,7 +631,8 @@ func TestGetSlug(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.obj.(metav1.Object).SetNamespace("default")
-			result, err := getSlug(tt.obj.(*corev1.Pod))
+			ap := NewApplicationProfileCache(config.Config{}, nil)
+			result, err := ap.getSlug(tt.obj.(*corev1.Pod))
 			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
@@ -704,7 +706,7 @@ func Test_addPod(t *testing.T) {
 
 			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			ap := NewApplicationProfileCache("", storageClient, 0)
+			ap := NewApplicationProfileCache(config.Config{}, storageClient)
 
 			ap.addApplicationProfile(tt.preCreatedAP)
 			time.Sleep(1 * time.Second) // add is async
@@ -898,7 +900,7 @@ func Test_MergeApplicationProfiles(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cache := NewApplicationProfileCache("test-node", nil, 0)
+			cache := NewApplicationProfileCache(config.Config{NodeName: "test-node"}, nil)
 			merged := cache.performMerge(tt.normalProfile, tt.userProfile)
 
 			// Verify object metadata

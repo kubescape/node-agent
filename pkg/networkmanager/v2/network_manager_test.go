@@ -28,7 +28,7 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-func ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData, k8sclient *k8sclient.K8sClientMock, clusterName string) error {
+func ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData, k8sclient *k8sclient.K8sClientMock, clusterName string, excludeJsonPaths []string) error {
 	if watchedContainer.InstanceID != nil {
 		return nil
 	}
@@ -66,7 +66,7 @@ func ensureInstanceID(container *containercollection.Container, watchedContainer
 	}
 	watchedContainer.ParentWorkloadSelector = selector
 	// find instanceID - this has to be the last one
-	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
+	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod, excludeJsonPaths)
 	if err != nil {
 		return fmt.Errorf("failed to generate instanceID: %w", err)
 	}
@@ -110,7 +110,7 @@ func TestCreateNetworkManager(t *testing.T) {
 		},
 	}
 	sharedWatchedContainerData := &utils.WatchedContainerData{}
-	err := ensureInstanceID(container, sharedWatchedContainerData, k8sClient, "cluster")
+	err := ensureInstanceID(container, sharedWatchedContainerData, k8sClient, "cluster", nil)
 	assert.NoError(t, err)
 	k8sObjectCacheMock.SetSharedContainerData(container.Runtime.ContainerID, sharedWatchedContainerData)
 	// report network event

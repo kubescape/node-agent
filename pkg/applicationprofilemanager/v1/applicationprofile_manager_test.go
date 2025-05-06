@@ -68,7 +68,7 @@ func ensureInstanceID(container *containercollection.Container, watchedContainer
 	}
 	watchedContainer.ParentResourceVersion = w.GetResourceVersion()
 	// find instanceID - this has to be the last one
-	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
+	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod, nil)
 	if err != nil {
 		return fmt.Errorf("failed to generate instanceID: %w", err)
 	}

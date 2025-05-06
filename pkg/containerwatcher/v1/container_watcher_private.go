@@ -162,7 +162,7 @@ func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *container
 	preRunning := time.Unix(0, int64(container.Runtime.ContainerStartedAt)).Before(ch.agentStartTime)
 	watchedContainer.PreRunningContainer = preRunning
 	// find instanceID - this has to be the last one
-	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
+	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod, ch.cfg.ExcludeJsonPaths)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate instance id: %w", err)
 	}

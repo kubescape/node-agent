@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
@@ -48,21 +49,19 @@ func newNetworkNeighborhoodState(nn *v1beta1.NetworkNeighborhood) networkNeighbo
 }
 
 type NetworkNeighborhoodCacheImpl struct {
+	cfg                            config.Config
 	containerToSlug                maps.SafeMap[string, string]                       // cache the containerID to slug mapping, this will enable a quick lookup of the network neighborhood
 	slugToNetworkNeighborhood      maps.SafeMap[string, *v1beta1.NetworkNeighborhood] // cache the network neighborhood
 	slugToContainers               maps.SafeMap[string, mapset.Set[string]]           // cache the containerIDs that belong to the network neighborhood, this will enable removing from cache NN without pods
 	slugToState                    maps.SafeMap[string, networkNeighborhoodState]     // cache the containerID to slug mapping, this will enable a quick lookup of the network neighborhood
 	storageClient                  versioned.SpdxV1beta1Interface
 	allNetworkNeighborhoods        mapset.Set[string] // cache all the NN that are ready. this will enable removing from cache NN without pods that are running on the same node
-	nodeName                       string
-	maxDelaySeconds                int // maximum delay in seconds before getting the full object from the storage
 	userManagedNetworkNeighborhood maps.SafeMap[string, *v1beta1.NetworkNeighborhood]
 }
 
-func NewNetworkNeighborhoodCache(nodeName string, storageClient versioned.SpdxV1beta1Interface, maxDelaySeconds int) *NetworkNeighborhoodCacheImpl {
+func NewNetworkNeighborhoodCache(cfg config.Config, storageClient versioned.SpdxV1beta1Interface) *NetworkNeighborhoodCacheImpl {
 	return &NetworkNeighborhoodCacheImpl{
-		nodeName:                       nodeName,
-		maxDelaySeconds:                maxDelaySeconds,
+		cfg:                            cfg,
 		storageClient:                  storageClient,
 		containerToSlug:                maps.SafeMap[string, string]{},
 		slugToContainers:               maps.SafeMap[string, mapset.Set[string]]{},
@@ -128,7 +127,7 @@ func (nn *NetworkNeighborhoodCacheImpl) addNetworkNeighborhood(_ context.Context
 	nn.allNetworkNeighborhoods.Add(nnName)
 
 	if nn.slugToContainers.Has(nnName) {
-		time.AfterFunc(utils.RandomDuration(nn.maxDelaySeconds, time.Second), func() {
+		time.AfterFunc(utils.RandomDuration(nn.cfg.MaxDelaySeconds, time.Second), func() {
 			nn.addFullNetworkNeighborhood(netNeighborhood, nnName)
 		})
 	}
@@ -155,7 +154,7 @@ func (nn *NetworkNeighborhoodCacheImpl) WatchResources() []watcher.WatchResource
 		Resource: "pods",
 	},
 		metav1.ListOptions{
-			FieldSelector: "spec.nodeName=" + nn.nodeName,
+			FieldSelector: "spec.nodeName=" + nn.cfg.NodeName,
 		},
 	)
 	w = append(w, p)
@@ -198,7 +197,7 @@ func (nn *NetworkNeighborhoodCacheImpl) DeleteHandler(_ context.Context, obj run
 func (nn *NetworkNeighborhoodCacheImpl) addPod(obj runtime.Object) {
 	pod := obj.(*corev1.Pod)
 
-	slug, err := getSlug(pod)
+	slug, err := nn.getSlug(pod)
 	if err != nil {
 		logger.L().Warning("NetworkNeighborhoodCacheImpl - failed to get slug", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod", pod.GetName()), helpers.Error(err))
 		return
@@ -499,7 +498,7 @@ func (nn *NetworkNeighborhoodCacheImpl) getNetworkNeighborhood(namespace, name s
 	return nn.storageClient.NetworkNeighborhoods(namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func getSlug(p *corev1.Pod) (string, error) {
+func (nn *NetworkNeighborhoodCacheImpl) getSlug(p *corev1.Pod) (string, error) {
 	// need to set APIVersion and Kind before unstructured conversion, preparing for instanceID extraction
 	p.APIVersion = "v1"
 	p.Kind = "Pod"
@@ -514,7 +513,7 @@ func getSlug(p *corev1.Pod) (string, error) {
 	}
 
 	// get instanceIDs
-	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod)
+	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod, nn.cfg.ExcludeJsonPaths)
 	if err != nil {
 		return "", err
 	}
