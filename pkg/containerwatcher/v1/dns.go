@@ -2,6 +2,7 @@ package containerwatcher
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection/networktracer"
 	tracerdns "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/tracer"
@@ -21,8 +22,16 @@ func (ch *IGContainerWatcher) dnsEventCallback(event *tracerdnstype.Event) {
 		return
 	}
 
+	if strings.Contains(event.DNSName, "xmr.pool.minergate.com") {
+		logger.L().Info("R1008 EnrichByMntNs",
+			helpers.Interface("event.CommonData", event.CommonData),
+			helpers.String("event.MountNsID", fmt.Sprintf("%d", event.MountNsID)),
+			helpers.String("event.NetNsID", fmt.Sprintf("%d", event.NetNsID)),
+		)
+	}
+
 	ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
-	ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
+	// ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
 
 	ch.dnsWorkerChan <- event
 }

@@ -5,6 +5,8 @@ import (
 	"slices"
 
 	"github.com/goradd/maps"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -172,11 +174,12 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 	}
 
 	if dnsEvent, ok := event.(*tracerdnstype.Event); ok {
-		if rule.alertedDomains.Has(dnsEvent.DNSName) {
-			return nil
-		}
 
 		if slices.Contains(commonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
+			logger.L().Info("R1008CryptoMiningDomainCommunication",
+				helpers.String("dnsEvent", dnsEvent.GetPod()),
+				helpers.String("dnsName", dnsEvent.DNSName))
+
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					AlertName:   rule.Name(),

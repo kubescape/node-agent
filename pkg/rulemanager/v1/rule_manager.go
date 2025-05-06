@@ -408,6 +408,13 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 		runtimek8sdetails.ContainerID = ruleFailure.GetTriggerEvent().Runtime.ContainerID
 	}
 
+	if ruleFailure.GetRuleId() == "R1008" {
+		logger.L().Info("R1008 EnrichRuntimeAlertK8sDetails",
+			helpers.Interface("GetTriggerEvent().K8s", ruleFailure.GetTriggerEvent().K8s),
+			helpers.String("runtimekContainerName8sdetails", ruleFailure.GetTriggerEvent().K8s.ContainerName),
+		)
+	}
+
 	if runtimek8sdetails.HostNetwork == nil {
 		hostNetwork := ruleFailure.GetTriggerEvent().K8s.HostNetwork
 		runtimek8sdetails.HostNetwork = &hostNetwork
