@@ -9,6 +9,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/node-agent/mocks"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -81,7 +82,7 @@ func Test_AddHandlers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.obj.(metav1.Object).SetNamespace("default")
 			storageClient := fake.NewSimpleClientset().SpdxV1beta1()
-			nn := NewNetworkNeighborhoodCache("", storageClient, 0)
+			nn := NewNetworkNeighborhoodCache(config.Config{}, storageClient)
 			nn.slugToContainers.Set(tt.slug, mapset.NewSet[string]())
 
 			tt.f(nn, context.Background(), tt.obj)
@@ -180,7 +181,7 @@ func Test_addNetworkNeighborhood(t *testing.T) {
 
 			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			nn := NewNetworkNeighborhoodCache("", storageClient, 0)
+			nn := NewNetworkNeighborhoodCache(config.Config{}, storageClient)
 
 			for i := range tt.preCreatedPods {
 				nn.addPod(tt.preCreatedPods[i])
@@ -255,7 +256,7 @@ func Test_deleteNetworkNeighborhood(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			nn := NewNetworkNeighborhoodCache("", nil, 0)
+			nn := NewNetworkNeighborhoodCache(config.Config{}, nil)
 
 			nn.allNetworkNeighborhoods.Append(tt.slugs...)
 			for _, i := range tt.slugs {
@@ -318,7 +319,7 @@ func Test_deletePod(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			nn := NewNetworkNeighborhoodCache("", nil, 0)
+			nn := NewNetworkNeighborhoodCache(config.Config{}, nil)
 			for _, i := range tt.otherSlugs {
 				nn.slugToContainers.Set(i, mapset.NewSet[string]())
 				nn.slugToNetworkNeighborhood.Set(i, &v1beta1.NetworkNeighborhood{})
@@ -426,7 +427,7 @@ func Test_GetNetworkNeighborhood(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			nn := NewNetworkNeighborhoodCache("", fake.NewSimpleClientset().SpdxV1beta1(), 0)
+			nn := NewNetworkNeighborhoodCache(config.Config{}, fake.NewSimpleClientset().SpdxV1beta1())
 
 			for _, c := range tt.pods {
 				nn.containerToSlug.Set(c.containerID, c.slug)
@@ -505,7 +506,7 @@ func Test_addNetworkNeighborhood_existing(t *testing.T) {
 
 			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			nn := NewNetworkNeighborhoodCache("", storageClient, 0)
+			nn := NewNetworkNeighborhoodCache(config.Config{}, storageClient)
 
 			// add pods
 			for i := range tt.pods {
@@ -583,7 +584,7 @@ func Test_getNetworkNeighborhood(t *testing.T) {
 }
 
 func Test_WatchResources(t *testing.T) {
-	nn := NewNetworkNeighborhoodCache("test-node", nil, 0)
+	nn := NewNetworkNeighborhoodCache(config.Config{NodeName: "test-node"}, nil)
 
 	expectedPodWatchResource := watcher.NewWatchResource(schema.GroupVersionResource{
 		Group:    "",
@@ -630,7 +631,8 @@ func TestGetSlug(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.obj.(metav1.Object).SetNamespace("default")
-			result, err := getSlug(tt.obj.(*corev1.Pod))
+			nn := NewNetworkNeighborhoodCache(config.Config{}, nil)
+			result, err := nn.getSlug(tt.obj.(*corev1.Pod))
 			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
@@ -704,7 +706,7 @@ func Test_addPod(t *testing.T) {
 
 			storageClient := fake.NewSimpleClientset(runtimeObjs...).SpdxV1beta1()
 
-			nn := NewNetworkNeighborhoodCache("", storageClient, 0)
+			nn := NewNetworkNeighborhoodCache(config.Config{}, storageClient)
 
 			nn.addNetworkNeighborhood(context.Background(), tt.preCreatedNN)
 			time.Sleep(1 * time.Second) // add is async
@@ -960,7 +962,7 @@ func Test_performMerge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			nn := NewNetworkNeighborhoodCache("test-node", nil, 0)
+			nn := NewNetworkNeighborhoodCache(config.Config{NodeName: "test-node"}, nil)
 			result := nn.performMerge(tt.baseNN, tt.userNN)
 
 			if tt.validateResults != nil {
