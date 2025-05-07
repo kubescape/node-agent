@@ -22,16 +22,25 @@ func (ch *IGContainerWatcher) dnsEventCallback(event *tracerdnstype.Event) {
 		return
 	}
 
+	ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
+
 	if strings.Contains(event.DNSName, "xmr.pool.minergate.com") {
 		logger.L().Info("R1008 EnrichByMntNs",
-			helpers.Interface("event.CommonData", event.CommonData),
+			helpers.Interface("event.GetPod()", event.GetPod()),
 			helpers.String("event.MountNsID", fmt.Sprintf("%d", event.MountNsID)),
 			helpers.String("event.NetNsID", fmt.Sprintf("%d", event.NetNsID)),
 		)
 	}
 
-	ch.containerCollection.EnrichByMntNs(&event.CommonData, event.MountNsID)
-	// ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
+	ch.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
+
+	if strings.Contains(event.DNSName, "xmr.pool.minergate.com") {
+		logger.L().Info("R1008 EnrichByNetNs",
+			helpers.Interface("event.GetPod()", event.GetPod()),
+			helpers.String("event.MountNsID", fmt.Sprintf("%d", event.MountNsID)),
+			helpers.String("event.NetNsID", fmt.Sprintf("%d", event.NetNsID)),
+		)
+	}
 
 	ch.dnsWorkerChan <- event
 }
