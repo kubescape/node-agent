@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -818,4 +819,29 @@ func ExtractWorkloadName(podName string, kind WorkloadKind) string {
 	}
 
 	return podName
+}
+
+func FuncName(i interface{}) string {
+	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
+}
+
+func TimedWrapper(funcName string, timeout time.Duration, task func()) {
+	logger.L().Info("starting function", helpers.String("function", funcName), helpers.Interface("timeout", timeout))
+	done := make(chan struct{})
+	go func() {
+		task()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return
+	case <-time.After(timeout):
+		logger.L().Warning("function hasn't finished, printing details and wait until finished", helpers.String("function", funcName), helpers.Interface("timeout", timeout))
+		// Print all goroutines
+		buf := make([]byte, 1<<16)
+		n := runtime.Stack(buf, true)
+		fmt.Printf("%s", buf[:n])
+	}
+	<-done // Wait for the task to finish
 }
