@@ -591,17 +591,28 @@ func (ch *IGContainerWatcher) UnregisterContainerReceiver(receiver containerwatc
 
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	if !ch.running {
-		if err := ch.startContainerCollection(ctx); err != nil {
+		var err error
+
+		utils.TimedWrapper(utils.FuncName(ch.startContainerCollection), 1*time.Second, func() {
+			err = ch.startContainerCollection(ctx)
+		})
+		if err != nil {
 			return fmt.Errorf("setting up container collection: %w", err)
 		}
 
 		// We want to populate the initial processes before starting the tracers but after retrieving the shims.
-		if err := ch.processManager.PopulateInitialProcesses(); err != nil {
+		utils.TimedWrapper(utils.FuncName(ch.processManager.PopulateInitialProcesses), 1*time.Second, func() {
+			err = ch.processManager.PopulateInitialProcesses()
+		})
+		if err != nil {
 			ch.stopContainerCollection()
 			return fmt.Errorf("populating initial processes: %w", err)
 		}
 
-		if err := ch.startTracers(); err != nil {
+		utils.TimedWrapper(utils.FuncName(ch.startTracers), 1*time.Second, func() {
+			err = ch.startTracers()
+		})
+		if err != nil {
 			ch.stopContainerCollection()
 			return fmt.Errorf("starting app behavior tracing: %w", err)
 		}
