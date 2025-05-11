@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.storage.name }}
+  namespace: {{ .Values.ksNamespace }}
+  labels:
+    kubescape.io/ignore: "true"
+    kubescape.io/tier: "core"
+data:
+  config.json: |
+    {
+      "cleanupInterval": "{{ .Values.storage.cleanupInterval }}"
+    }

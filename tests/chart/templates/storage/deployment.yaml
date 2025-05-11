@@ -33,8 +33,6 @@ spec:
           allowPrivilegeEscalation: false
           runAsNonRoot: true
         env:
-          - name: "CLEANUP_INTERVAL"
-            value: "{{ .Values.storage.cleanupInterval }}"
           - name: "GOMEMLIMIT"
             value: "{{ .Values.storage.resources.requests.memory }}B"
           - name: KS_LOGGER_LEVEL
@@ -45,8 +43,13 @@ spec:
           - name: "data"
             mountPath: "/data"
           - name: {{ .Values.global.cloudConfig }}
-            mountPath: /etc/config
+            mountPath: /etc/config/clusterData.json
             readOnly: true
+            subPath: "clusterData.json"
+          - name: config
+            mountPath: /etc/config/config.json
+            readOnly: true
+            subPath: "config.json"
         resources:
 {{ toYaml .Values.storage.resources | indent 12 }}
       nodeSelector:
@@ -75,3 +78,9 @@ spec:
             items:
             - key: "clusterData"
               path: "clusterData.json"
+        - name: config
+          configMap:
+            name: {{ .Values.storage.name }}
+            items:
+            - key: "config.json"
+              path: "config.json"
