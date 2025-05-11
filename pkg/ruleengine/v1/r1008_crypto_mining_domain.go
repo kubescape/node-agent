@@ -179,7 +179,7 @@ func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.E
 		if slices.Contains(commonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-					UniqueID:    fmt.Sprintf("%s%s", dnsEvent.DNSName, dnsEvent.Comm),
+					UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", dnsEvent.DNSName, dnsEvent.Comm)),
 					AlertName:   rule.Name(),
 					InfectedPID: dnsEvent.Pid,
 					Severity:    R1008CryptoMiningDomainCommunicationRuleDescriptor.Priority,
