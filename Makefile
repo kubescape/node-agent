@@ -9,10 +9,10 @@ binary:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME) ./cmd/main.go
 
 docker-build:
-	docker buildx build --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
+	docker buildx build --push --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
 
 docker-build-arm:
-	docker buildx build --platform linux/arm64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
+	docker buildx build --push --platform linux/arm64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load . 
 
 docker-push:
 	docker push $(IMAGE):$(TAG)
