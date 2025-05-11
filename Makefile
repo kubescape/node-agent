@@ -11,5 +11,8 @@ binary:
 docker-build:
 	docker buildx build --platform linux/amd64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
 
+docker-build-arm:
+	docker buildx build --platform linux/arm64 -t $(IMAGE):$(TAG) -f $(DOCKERFILE_PATH) --load .
+
 docker-push:
 	docker push $(IMAGE):$(TAG)
