@@ -100,7 +100,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s%s", symlinkEvent.Comm, symlinkEvent.OldPath, symlinkEvent.NewPath)),
+			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", symlinkEvent.Comm, symlinkEvent.OldPath)),
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"oldPath": symlinkEvent.OldPath,
