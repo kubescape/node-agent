@@ -94,6 +94,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
 			AlertName:   rule.Name(),
 			InfectedPID: execEvent.Pid,
 			Arguments: map[string]interface{}{

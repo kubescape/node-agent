@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"crypto/md5"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -186,4 +187,13 @@ func IsAllowed(event *eventtypes.Event, objCache objectcache.ObjectCache, proces
 
 	logger.L().Debug("isAllowed - process is not allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
 	return false, nil
+}
+
+func HashStringToMD5(str string) string {
+	// Create an md5 hash of the string
+	hash := md5.Sum([]byte(str))
+	// Convert the hash to a hexadecimal string
+	hashString := fmt.Sprintf("%x", hash)
+	// Return the hash string
+	return hashString
 }

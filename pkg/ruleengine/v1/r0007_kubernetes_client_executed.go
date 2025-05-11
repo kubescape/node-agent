@@ -81,6 +81,7 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s%d", event.Comm, event.DstEndpoint.Addr, event.Port)),
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"dstIP": event.DstEndpoint.Addr,
@@ -133,6 +134,7 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *events.ExecEve
 
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", event.Comm, execPath, event.Pcomm)),
 				AlertName:   rule.Name(),
 				InfectedPID: event.Pid,
 				Arguments: map[string]interface{}{

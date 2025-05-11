@@ -96,6 +96,7 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 		if networkEvent.Proto == "TCP" && networkEvent.PktType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+					UniqueID:  HashStringToMD5(fmt.Sprintf("%s%d", networkEvent.Comm, networkEvent.Port)),
 					AlertName: rule.Name(),
 					Arguments: map[string]interface{}{
 						"port":  networkEvent.Port,

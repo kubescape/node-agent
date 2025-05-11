@@ -94,6 +94,7 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+					UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execPath, execEvent.Pcomm)),
 					AlertName:   rule.Name(),
 					InfectedPID: execEvent.Pid,
 					Arguments: map[string]interface{}{

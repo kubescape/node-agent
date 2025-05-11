@@ -83,6 +83,7 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", capEvent.Comm, capEvent.CapName)),
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"syscall":    capEvent.Syscall,

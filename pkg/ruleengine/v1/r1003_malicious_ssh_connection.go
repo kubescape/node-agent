@@ -171,6 +171,7 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 		rule.requests.Set(sshEvent.SrcIP, sshEvent.DstIP)
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s%d", sshEvent.Comm, sshEvent.DstIP, sshEvent.DstPort)),
 				AlertName: rule.Name(),
 				Arguments: map[string]interface{}{
 					"srcIP":   sshEvent.SrcIP,

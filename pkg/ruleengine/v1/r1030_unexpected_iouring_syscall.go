@@ -86,6 +86,7 @@ func (rule *R1030UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:  fmt.Sprintf("%s%s", name, iouringEvent.Comm),
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"opcode":    iouringEvent.Opcode,
