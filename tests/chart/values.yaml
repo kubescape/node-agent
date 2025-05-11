@@ -14,7 +14,7 @@ capabilities:
   httpDetection: enable
 
 configurations:
-  persistence: enable
+  persistence: disable # Because github runners doesn't want to create pvcs 
   prometheusAnnotations: disable
 
 persistence:
