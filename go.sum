@@ -109,6 +109,8 @@ github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc/go.mod h1:LOuy
 github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751/go.mod h1:LOuyumcjzFXgccqObfd/Ljyb9UuFJ6TxHnclSeseNhc=
 github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
 github.com/alecthomas/units v0.0.0-20190717042225-c3de453c63f4/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
+github.com/amirmalka/inspektor-gadget v0.39.1-0.20250511132413-c7a2a761237a h1:2vLghsSw+mIAiMElWRn64YqLFo6L3hFPWXh1EQe4dhc=
+github.com/amirmalka/inspektor-gadget v0.39.1-0.20250511132413-c7a2a761237a/go.mod h1:4XWD/ylSvywkRlIv01nl3QAAS9VhObi5Pha2pAbednA=
 github.com/anchore/archiver/v3 v3.5.3-0.20241210171143-5b1d8d1c7c51 h1:yhk+P8lF3ZiROjmaVRao9WGTRo4b/wYjoKEiAHWrKwc=
 github.com/anchore/archiver/v3 v3.5.3-0.20241210171143-5b1d8d1c7c51/go.mod h1:nwuGSd7aZp0rtYt79YggCGafz1RYsclE7pi3fhLwvuw=
 github.com/anchore/clio v0.0.0-20241115144204-29e89f9fa837 h1:bIG3WsfosZsJ5LMC7PB9J/ekFM3a0j0ZEDvN3ID6GTI=
@@ -646,8 +648,6 @@ github.com/iceber/iouring-go v0.0.0-20230403020409-002cfd2e2a90/go.mod h1:LEzdaZ
 github.com/inconshreveable/mousetrap v1.0.0/go.mod h1:PxqpIevigyE2G7u3NXJIT2ANytuPF1OarO4DADm73n8=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/inspektor-gadget/inspektor-gadget v0.39.0 h1:nLw0uVC8Yl4CacXJrzhI8JhvUBWErjhocSVtOmBfY3Q=
-github.com/inspektor-gadget/inspektor-gadget v0.39.0/go.mod h1:4XWD/ylSvywkRlIv01nl3QAAS9VhObi5Pha2pAbednA=
 github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6 h1:fQqkJ+WkYfzy6BoUh32fr9uYrXfOGtsfw0skMQkfOic=
 github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6/go.mod h1:SpkAiCQRtJ6TvvxPnOSyH3BMl6unz3xZlaprSwhNNJM=
 github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 h1:BQSFePA1RWJOlocH6Fxy8MmwDt+yVQYULKfN0RoTN8A=
