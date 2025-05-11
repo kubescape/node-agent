@@ -90,6 +90,7 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 		rule.alreadyNotified = true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", syscallEvent.Comm, syscallEvent.SyscallName)),
 				AlertName: rule.Name(),
 				Arguments: map[string]interface{}{
 					"syscall": syscallEvent.SyscallName,

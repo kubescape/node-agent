@@ -135,6 +135,7 @@ func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *events.ExecEvent
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
 			AlertName:   rule.Name(),
 			Arguments:   map[string]interface{}{"envVar": ldHookVar},
 			InfectedPID: execEvent.Pid,
@@ -174,6 +175,7 @@ func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *events.ExecEvent
 func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.Event, extra interface{}) ruleengine.RuleFailure {
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", openEvent.Comm, openEvent.FullPath)),
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"path":  openEvent.FullPath,

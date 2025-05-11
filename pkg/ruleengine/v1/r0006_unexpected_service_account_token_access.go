@@ -137,6 +137,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 	// If we get here, the access was not whitelisted - create an alert
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", openEvent.Comm, openEvent.FullPath)),
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"path":  openEvent.FullPath,

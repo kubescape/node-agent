@@ -92,6 +92,7 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:  HashStringToMD5(syscallEvent.SyscallName),
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"syscall": syscallEvent.SyscallName,

@@ -77,6 +77,7 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event ut
 			upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+					UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
 					AlertName:   rule.Name(),
 					InfectedPID: execEvent.Pid,
 					Arguments: map[string]interface{}{

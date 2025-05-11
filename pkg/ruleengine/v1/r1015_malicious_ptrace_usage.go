@@ -69,6 +69,7 @@ func (rule *R1015MaliciousPtraceUsage) ProcessEvent(eventType utils.EventType, e
 
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", ptraceEvent.ExePath, ptraceEvent.Comm)),
 			AlertName:   rule.Name(),
 			InfectedPID: ptraceEvent.Pid,
 			Severity:    R1015MaliciousPtraceUsageRuleDescriptor.Priority,

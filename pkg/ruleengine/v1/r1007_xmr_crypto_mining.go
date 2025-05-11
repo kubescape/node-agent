@@ -62,6 +62,7 @@ func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event 
 	if randomXEvent, ok := event.(*tracerrandomxtype.Event); ok {
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", randomXEvent.ExePath, randomXEvent.Comm)),
 				AlertName:   rule.Name(),
 				InfectedPID: randomXEvent.Pid,
 				Severity:    R1007XMRCryptoMiningRuleDescriptor.Priority,

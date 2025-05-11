@@ -92,6 +92,7 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", domainEvent.Comm, domainEvent.DNSName)),
 			AlertName:   rule.Name(),
 			InfectedPID: domainEvent.Pid,
 			Arguments: map[string]interface{}{

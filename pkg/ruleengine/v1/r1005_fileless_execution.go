@@ -90,6 +90,7 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *events.ExecEven
 		upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
 				AlertName:   rule.Name(),
 				InfectedPID: execEvent.Pid,
 				Arguments: map[string]interface{}{

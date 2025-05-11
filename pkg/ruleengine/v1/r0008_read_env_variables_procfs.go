@@ -89,6 +89,7 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", openEvent.Comm, openEvent.FullPath)),
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"path":  openEvent.FullPath,

@@ -98,6 +98,7 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", hardlinkEvent.Comm, hardlinkEvent.OldPath)),
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"oldPath": hardlinkEvent.OldPath,

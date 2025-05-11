@@ -70,6 +70,7 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 		rule.alerted = true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				UniqueID:    HashStringToMD5(syscallEvent.SyscallName),
 				AlertName:   rule.Name(),
 				InfectedPID: syscallEvent.Pid,
 				Severity:    R1002LoadKernelModuleRuleDescriptor.Priority,

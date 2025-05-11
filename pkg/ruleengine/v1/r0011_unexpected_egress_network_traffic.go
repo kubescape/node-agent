@@ -102,6 +102,7 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 		rule.alertedAdresses.Set(endpoint, true)
 		return &GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%d", networkEvent.Comm, networkEvent.DstEndpoint.Addr, networkEvent.Port)),
 				AlertName:   rule.Name(),
 				InfectedPID: networkEvent.Pid,
 				Arguments: map[string]interface{}{

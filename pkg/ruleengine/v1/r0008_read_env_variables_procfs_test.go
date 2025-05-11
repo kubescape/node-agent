@@ -7,6 +7,7 @@ import (
 
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
@@ -52,7 +53,7 @@ func TestR0008ReadingEnvVariablesFromProcFS(t *testing.T) {
 			Name: "test",
 			Opens: []v1beta1.OpenCalls{
 				{
-					Path:  "/proc/1/environ",
+					Path:  "/proc/" + dynamicpathdetector.DynamicIdentifier + "/environ",
 					Flags: []string{"O_RDONLY"},
 				},
 			},
