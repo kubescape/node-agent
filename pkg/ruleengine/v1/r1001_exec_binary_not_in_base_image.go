@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -65,16 +66,31 @@ func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventTyp
 	if execEvent.UpperLayer || execEvent.PupperLayer {
 		// Check if the event is expected, if so return nil
 		// No application profile also returns nil
-		if whiteListed, err := IsExecEventInProfile(execEvent, objectCache, false); whiteListed || errors.Is(err, ProfileNotFound) {
+		var profileMetadata *apitypes.ProfileMetadata
+		whiteListed, err := IsExecEventInProfile(execEvent, objectCache, false)
+		if whiteListed {
 			return nil
+		} else if err != nil && !errors.Is(err, ProfileNotFound) {
+			ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
+			if ap != nil {
+				profileMetadata = &apitypes.ProfileMetadata{
+					Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+					Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+					Name:               ap.Name,
+					Type:               apitypes.ApplicationProfile,
+					IsProfileDependent: true,
+				}
+			}
 		}
+
 		upperLayer := true
 		ruleFailure := GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
-				AlertName:   rule.Name(),
-				InfectedPID: execEvent.Pid,
-				Severity:    R1001ExecBinaryNotInBaseImageRuleDescriptor.Priority,
+				UniqueID:        HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
+				AlertName:       rule.Name(),
+				InfectedPID:     execEvent.Pid,
+				Severity:        R1001ExecBinaryNotInBaseImageRuleDescriptor.Priority,
+				ProfileMetadata: profileMetadata,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{

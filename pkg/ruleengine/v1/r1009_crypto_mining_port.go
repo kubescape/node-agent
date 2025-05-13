@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -42,6 +43,7 @@ var _ ruleengine.RuleEvaluator = (*R1009CryptoMiningRelatedPort)(nil)
 
 type R1009CryptoMiningRelatedPort struct {
 	BaseRule
+	alreadyNotified bool
 }
 
 func CreateRuleR1009CryptoMiningRelatedPort() *R1009CryptoMiningRelatedPort {
@@ -69,31 +71,42 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 		return nil
 	}
 
+	if rule.alreadyNotified {
+		return nil
+	}
+
+	var profileMetadata *apitypes.ProfileMetadata
 	nn := objectcache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
-	if nn == nil {
-		return nil
-	}
+	if nn != nil {
+		profileMetadata = &apitypes.ProfileMetadata{
+			Status:             nn.GetAnnotations()[helpersv1.StatusMetadataKey],
+			Completion:         nn.GetAnnotations()[helpersv1.CompletionMetadataKey],
+			Name:               nn.Name,
+			Type:               apitypes.NetworkProfile,
+			IsProfileDependent: true,
+		}
+		nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
+		if err != nil {
+			return nil
+		}
 
-	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
-	if err != nil {
-		return nil
-	}
+		// Check if the port is in the egress list.
+		for _, nn := range nnContainer.Egress {
+			for _, port := range nn.Ports {
+				if port.Port == nil {
+					continue
+				}
 
-	// Check if the port is in the egress list.
-	for _, nn := range nnContainer.Egress {
-		for _, port := range nn.Ports {
-			if port.Port == nil {
-				continue
-			}
-
-			if networkEvent.Port == uint16(*port.Port) {
-				return nil
+				if networkEvent.Port == uint16(*port.Port) {
+					return nil
+				}
 			}
 		}
 	}
 
 	if networkEvent, ok := event.(*tracernetworktype.Event); ok {
 		if networkEvent.Proto == "TCP" && networkEvent.PktType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
+			rule.alreadyNotified = true
 			ruleFailure := GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					UniqueID:  HashStringToMD5(fmt.Sprintf("%s%d", networkEvent.Comm, networkEvent.Port)),
@@ -103,8 +116,9 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 						"proto": networkEvent.Proto,
 						"ip":    networkEvent.DstEndpoint.Addr,
 					},
-					InfectedPID: networkEvent.Pid,
-					Severity:    R1009CryptoMiningRelatedPortRuleDescriptor.Priority,
+					InfectedPID:     networkEvent.Pid,
+					Severity:        R1009CryptoMiningRelatedPortRuleDescriptor.Priority,
+					ProfileMetadata: profileMetadata,
 				},
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{

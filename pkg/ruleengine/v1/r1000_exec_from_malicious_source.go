@@ -101,6 +101,9 @@ func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType
 						"hardlink": execEvent.ExePath,
 					},
 					Severity: R1000ExecFromMaliciousSourceDescriptor.Priority,
+					ProfileMetadata: &apitypes.ProfileMetadata{
+						IsProfileDependent: false,
+					},
 				},
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{

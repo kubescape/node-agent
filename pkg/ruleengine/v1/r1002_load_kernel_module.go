@@ -74,6 +74,9 @@ func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event
 				AlertName:   rule.Name(),
 				InfectedPID: syscallEvent.Pid,
 				Severity:    R1002LoadKernelModuleRuleDescriptor.Priority,
+				ProfileMetadata: &apitypes.ProfileMetadata{
+					IsProfileDependent: false,
+				},
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{

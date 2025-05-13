@@ -76,6 +76,9 @@ func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event u
 				AlertName:   rule.Name(),
 				InfectedPID: syscallEvent.Pid,
 				Severity:    R1006UnshareSyscallRuleDescriptor.Priority,
+				ProfileMetadata: &apitypes.ProfileMetadata{
+					IsProfileDependent: false,
+				},
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{

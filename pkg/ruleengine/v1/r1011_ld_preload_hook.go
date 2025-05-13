@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -71,26 +72,48 @@ func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event ut
 			return nil
 		}
 
+		var profileMetadata *apitypes.ProfileMetadata
 		if allowed, err := IsAllowed(&execEvent.Event.Event, objectCache, execEvent.Comm, R1011ID); err != nil {
-			return nil
+			ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
+			if ap != nil {
+				profileMetadata = &apitypes.ProfileMetadata{
+					Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+					Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+					Name:               ap.Name,
+					Type:               apitypes.ApplicationProfile,
+					IsProfileDependent: true,
+				}
+			}
+
 		} else if allowed {
 			return nil
 		}
 
-		return rule.ruleFailureExecEvent(execEvent)
+		return rule.ruleFailureExecEvent(execEvent, profileMetadata)
 	} else if eventType == utils.OpenEventType {
 		openEvent, ok := event.(*events.OpenEvent)
 		if !ok {
 			return nil
 		}
 
+		var profileMetadata *apitypes.ProfileMetadata
 		if allowed, err := IsAllowed(&openEvent.Event.Event, objectCache, openEvent.Comm, R1011ID); err != nil {
-			return nil
+			ap := objectCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
+			if ap != nil {
+				profileMetadata = &apitypes.ProfileMetadata{
+					Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+					Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+					Name:               ap.Name,
+					Type:               apitypes.ApplicationProfile,
+					IsProfileDependent: true,
+				}
+			}
+
 		} else if allowed {
 			return nil
 		}
 
-		return rule.ruleFailureOpenEvent(&openEvent.Event, openEvent.GetExtra())
+		return rule.ruleFailureOpenEvent(&openEvent.Event, openEvent.GetExtra(), profileMetadata)
 	}
 
 	return nil
@@ -123,7 +146,7 @@ func (rule *R1011LdPreloadHook) Requirements() ruleengine.RuleSpec {
 	}
 }
 
-func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *events.ExecEvent) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *events.ExecEvent, profileMetadata *apitypes.ProfileMetadata) ruleengine.RuleFailure {
 	envVars, err := utils.GetProcessEnv(int(execEvent.Pid))
 	if err != nil {
 		return nil
@@ -135,11 +158,12 @@ func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *events.ExecEvent
 
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
-			AlertName:   rule.Name(),
-			Arguments:   map[string]interface{}{"envVar": ldHookVar},
-			InfectedPID: execEvent.Pid,
-			Severity:    R1011LdPreloadHookRuleDescriptor.Priority,
+			UniqueID:        HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
+			AlertName:       rule.Name(),
+			Arguments:       map[string]interface{}{"envVar": ldHookVar},
+			InfectedPID:     execEvent.Pid,
+			Severity:        R1011LdPreloadHookRuleDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -172,7 +196,7 @@ func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *events.ExecEvent
 	return &ruleFailure
 }
 
-func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.Event, extra interface{}) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.Event, extra interface{}, profileMetadata *apitypes.ProfileMetadata) ruleengine.RuleFailure {
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", openEvent.Comm, openEvent.FullPath)),
@@ -181,8 +205,9 @@ func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.E
 				"path":  openEvent.FullPath,
 				"flags": openEvent.Flags,
 			},
-			InfectedPID: openEvent.Pid,
-			Severity:    R1011LdPreloadHookRuleDescriptor.Priority,
+			InfectedPID:     openEvent.Pid,
+			Severity:        R1011LdPreloadHookRuleDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

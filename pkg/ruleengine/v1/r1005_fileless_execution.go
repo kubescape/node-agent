@@ -97,6 +97,9 @@ func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *events.ExecEven
 					"hardlink": execEvent.ExePath,
 				},
 				Severity: R1005FilelessExecutionRuleDescriptor.Priority,
+				ProfileMetadata: &apitypes.ProfileMetadata{
+					IsProfileDependent: false,
+				},
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{

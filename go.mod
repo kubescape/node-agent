@@ -364,3 +364,5 @@ replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5
 replace github.com/mholt/archiver/v3 v3.5.1 => github.com/anchore/archiver/v3 v3.5.2
 
 replace github.com/inspektor-gadget/inspektor-gadget => github.com/amirmalka/inspektor-gadget v0.39.1-0.20250511132413-c7a2a761237a
+
+replace github.com/armosec/armoapi-go => github.com/armosec/armoapi-go v0.0.577-0.20250513090939-a6ad7c990ec2

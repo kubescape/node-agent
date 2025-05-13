@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/goradd/maps"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -81,6 +82,14 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		}
 	}
 
+	profileMetadata := &apitypes.ProfileMetadata{
+		Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+		Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+		Name:               ap.Name,
+		Type:               apitypes.ApplicationProfile,
+		IsProfileDependent: true,
+	}
+
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", capEvent.Comm, capEvent.CapName)),
@@ -89,8 +98,9 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 				"syscall":    capEvent.Syscall,
 				"capability": capEvent.CapName,
 			},
-			InfectedPID: capEvent.Pid,
-			Severity:    R0004UnexpectedCapabilityUsedRuleDescriptor.Priority,
+			InfectedPID:     capEvent.Pid,
+			Severity:        R0004UnexpectedCapabilityUsedRuleDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

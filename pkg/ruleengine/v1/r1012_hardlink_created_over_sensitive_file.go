@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -90,8 +91,19 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 
 	hardlinkEvent, _ := event.(*tracerhardlinktype.Event)
 
+	var profileMetadata *apitypes.ProfileMetadata
 	if allowed, err := IsAllowed(&hardlinkEvent.Event, objCache, hardlinkEvent.Comm, R1012ID); err != nil {
-		return nil
+		ap := objCache.ApplicationProfileCache().GetApplicationProfile(hardlinkEvent.Runtime.ContainerID)
+		if ap != nil {
+			profileMetadata = &apitypes.ProfileMetadata{
+				Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+				Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+				Name:               ap.Name,
+				Type:               apitypes.ApplicationProfile,
+				IsProfileDependent: true,
+			}
+		}
+
 	} else if allowed {
 		return nil
 	}
@@ -104,8 +116,9 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 				"oldPath": hardlinkEvent.OldPath,
 				"newPath": hardlinkEvent.NewPath,
 			},
-			InfectedPID: hardlinkEvent.Pid,
-			Severity:    R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
+			InfectedPID:     hardlinkEvent.Pid,
+			Severity:        R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
