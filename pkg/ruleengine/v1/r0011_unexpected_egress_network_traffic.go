@@ -8,6 +8,7 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -98,6 +99,13 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 			}
 		}
 
+		profileMetadata := &apitypes.ProfileMetadata{
+			Status:             nn.GetAnnotations()[helpersv1.StatusMetadataKey],
+			Completion:         nn.GetAnnotations()[helpersv1.CompletionMetadataKey],
+			Name:               nn.Name,
+			Type:               apitypes.NetworkProfile,
+			IsProfileDependent: true,
+		}
 		// Alert on the address.
 		rule.alertedAdresses.Set(endpoint, true)
 		return &GenericRuleFailure{
@@ -110,7 +118,8 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent
 					"port":  networkEvent.Port,
 					"proto": networkEvent.Proto,
 				},
-				Severity: R0011UnexpectedEgressNetworkTrafficRuleDescriptor.Priority,
+				Severity:        R0011UnexpectedEgressNetworkTrafficRuleDescriptor.Priority,
+				ProfileMetadata: profileMetadata,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -161,6 +162,14 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 		}
 	}
 
+	profileMetadata := &apitypes.ProfileMetadata{
+		Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+		Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+		Name:               ap.Name,
+		Type:               apitypes.ApplicationProfile,
+		IsProfileDependent: true,
+	}
+
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", openEvent.Comm, openEvent.FullPath)),
@@ -170,7 +179,8 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 				"flags": openEvent.Flags,
 				"path":  openEvent.FullPath,
 			},
-			Severity: R0002UnexpectedFileAccessRuleDescriptor.Priority,
+			Severity:        R0002UnexpectedFileAccessRuleDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

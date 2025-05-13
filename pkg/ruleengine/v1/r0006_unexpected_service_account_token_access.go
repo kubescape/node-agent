@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 )
 
 const (
@@ -112,39 +113,47 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		return nil
 	}
 
+	var profileMetadata *apitypes.ProfileMetadata
+
 	// Get the application profile
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
-	if ap == nil {
-		return nil
-	}
-
-	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
-	if err != nil {
-		return nil
-	}
-
-	// Normalize the accessed path once
-	normalizedAccessedPath := normalizeTimestampPath(openEvent.FullPath)
-
-	// Check against whitelisted paths
-	for _, open := range appProfileOpenList.Opens {
-		normalizedWhitelistedPath := normalizeTimestampPath(open.Path)
-		if dynamicpathdetector.CompareDynamic(filepath.Dir(normalizedWhitelistedPath), filepath.Dir(normalizedAccessedPath)) {
+	if ap != nil {
+		profileMetadata = &apitypes.ProfileMetadata{
+			Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+			Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+			Name:               ap.Name,
+			Type:               apitypes.ApplicationProfile,
+			IsProfileDependent: true,
+		}
+		appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
+		if err != nil {
 			return nil
+		}
+
+		// Normalize the accessed path once
+		normalizedAccessedPath := normalizeTimestampPath(openEvent.FullPath)
+
+		// Check against whitelisted paths
+		for _, open := range appProfileOpenList.Opens {
+			normalizedWhitelistedPath := normalizeTimestampPath(open.Path)
+			if dynamicpathdetector.CompareDynamic(filepath.Dir(normalizedWhitelistedPath), filepath.Dir(normalizedAccessedPath)) {
+				return nil
+			}
 		}
 	}
 
 	// If we get here, the access was not whitelisted - create an alert
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", openEvent.Comm, openEvent.FullPath)),
+			UniqueID:  HashStringToMD5(openEvent.Comm),
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"path":  openEvent.FullPath,
 				"flags": openEvent.Flags,
 			},
-			InfectedPID: openEvent.Pid,
-			Severity:    R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
+			InfectedPID:     openEvent.Pid,
+			Severity:        R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

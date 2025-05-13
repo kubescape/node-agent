@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -63,14 +64,25 @@ func (rule *R0007KubernetesClientExecuted) DeleteRule() {
 }
 
 func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetworktype.Event, nn *v1beta1.NetworkNeighborhood, k8sObjCache objectcache.K8sObjectCache) *GenericRuleFailure {
-	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, event.GetContainer())
-	if err != nil {
-		return nil
-	}
+	var profileMetadata *apitypes.ProfileMetadata
 
-	for _, egress := range nnContainer.Egress {
-		if egress.IPAddress == event.DstEndpoint.Addr {
+	if nn != nil {
+		profileMetadata = &apitypes.ProfileMetadata{
+			Status:             nn.GetAnnotations()[helpersv1.StatusMetadataKey],
+			Completion:         nn.GetAnnotations()[helpersv1.CompletionMetadataKey],
+			Name:               nn.Name,
+			Type:               apitypes.NetworkProfile,
+			IsProfileDependent: true,
+		}
+		nnContainer, err := GetContainerFromNetworkNeighborhood(nn, event.GetContainer())
+		if err != nil {
 			return nil
+		}
+
+		for _, egress := range nnContainer.Egress {
+			if egress.IPAddress == event.DstEndpoint.Addr {
+				return nil
+			}
 		}
 	}
 
@@ -88,8 +100,9 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 				"port":  event.Port,
 				"proto": event.Proto,
 			},
-			InfectedPID: event.Pid,
-			Severity:    R0007KubernetesClientExecutedDescriptor.Priority,
+			InfectedPID:     event.Pid,
+			Severity:        R0007KubernetesClientExecutedDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -115,16 +128,25 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 }
 
 func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *events.ExecEvent, ap *v1beta1.ApplicationProfile) *GenericRuleFailure {
-	whitelistedExecs, err := GetContainerFromApplicationProfile(ap, event.GetContainer())
-	if err != nil {
-		logger.L().Error("R0007KubernetesClientExecuted.handleExecEvent - failed to get container from application profile", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
-		return nil
-	}
-
+	var profileMetadata *apitypes.ProfileMetadata
 	execPath := GetExecPathFromEvent(event)
-	for _, whitelistedExec := range whitelistedExecs.Execs {
-		if whitelistedExec.Path == execPath {
+	if ap != nil {
+		profileMetadata = &apitypes.ProfileMetadata{
+			Status:     ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+			Completion: ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+			Name:       ap.Name,
+			Type:       apitypes.ApplicationProfile,
+		}
+		whitelistedExecs, err := GetContainerFromApplicationProfile(ap, event.GetContainer())
+		if err != nil {
+			logger.L().Error("R0007KubernetesClientExecuted.handleExecEvent - failed to get container from application profile", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
 			return nil
+		}
+
+		for _, whitelistedExec := range whitelistedExecs.Execs {
+			if whitelistedExec.Path == execPath {
+				return nil
+			}
 		}
 	}
 
@@ -141,7 +163,8 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *events.ExecEve
 					"exec": execPath,
 					"args": event.Args,
 				},
-				Severity: R0007KubernetesClientExecutedDescriptor.Priority,
+				Severity:        R0007KubernetesClientExecutedDescriptor.Priority,
+				ProfileMetadata: profileMetadata,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
@@ -189,9 +212,6 @@ func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventTyp
 		}
 
 		ap := objCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
-		if ap == nil {
-			return nil
-		}
 		result := rule.handleExecEvent(execEvent, ap)
 		if result != nil {
 			return result
@@ -209,9 +229,6 @@ func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
-	if nn == nil {
-		return nil
-	}
 
 	result := rule.handleNetworkEvent(networkEvent, nn, objCache.K8sObjectCache())
 	if result != nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -62,8 +63,21 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event ut
 
 	// Check if the event is expected, if so return nil
 	// No application profile also returns nil
-	if whiteListed, err := IsExecEventInProfile(execEvent, objCache, false); whiteListed || errors.Is(err, ProfileNotFound) {
+	var profileMetadata *apitypes.ProfileMetadata
+	whiteListed, err := IsExecEventInProfile(execEvent, objCache, false)
+	if whiteListed {
 		return nil
+	} else if err != nil && !errors.Is(err, ProfileNotFound) {
+		ap := objCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
+		if ap != nil {
+			profileMetadata = &apitypes.ProfileMetadata{
+				Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+				Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+				Name:               ap.Name,
+				Type:               apitypes.ApplicationProfile,
+				IsProfileDependent: true,
+			}
+		}
 	}
 
 	mounts, err := GetContainerMountPaths(execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer(), objCache.K8sObjectCache())
@@ -84,7 +98,8 @@ func (rule *R1004ExecFromMount) ProcessEvent(eventType utils.EventType, event ut
 						"exec": execEvent.ExePath,
 						"args": execEvent.Args,
 					},
-					Severity: R1004ExecFromMountRuleDescriptor.Priority,
+					Severity:        R1004ExecFromMountRuleDescriptor.Priority,
+					ProfileMetadata: profileMetadata,
 				},
 				RuntimeProcessDetails: apitypes.ProcessTree{
 					ProcessTree: apitypes.Process{

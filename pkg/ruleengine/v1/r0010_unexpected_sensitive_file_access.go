@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -123,15 +124,22 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 	var appProfileOpenList v1beta1.ApplicationProfileContainer
 	var err error
 
+	var profileMetadata *apitypes.ProfileMetadata
+
 	if objCache != nil {
 		ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
-		if ap == nil {
-			return nil
-		}
-
-		appProfileOpenList, err = GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
-		if err != nil {
-			return nil
+		if ap != nil {
+			profileMetadata = &apitypes.ProfileMetadata{
+				Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+				Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+				Name:               ap.Name,
+				Type:               apitypes.ApplicationProfile,
+				IsProfileDependent: true,
+			}
+			appProfileOpenList, err = GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
+			if err != nil {
+				return nil
+			}
 		}
 	} else {
 		// Running without application profile, to avoid false positives check if the process name is legitimate
@@ -162,8 +170,9 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 				"path":  openEvent.FullPath,
 				"flags": openEvent.Flags,
 			},
-			InfectedPID: openEvent.Pid,
-			Severity:    R0010UnexpectedSensitiveFileAccessRuleDescriptor.Priority,
+			InfectedPID:     openEvent.Pid,
+			Severity:        R0010UnexpectedSensitiveFileAccessRuleDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

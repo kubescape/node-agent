@@ -9,6 +9,7 @@ import (
 
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger/helpers"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -139,23 +140,29 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 		return nil
 	}
 
+	var profileMetadata *apitypes.ProfileMetadata
 	if objectCache != nil {
 		nn := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(sshEvent.Runtime.ContainerID)
-		if nn == nil {
-			return nil
-		}
+		if nn != nil {
+			profileMetadata = &apitypes.ProfileMetadata{
+				Status:             nn.GetAnnotations()[helpersv1.StatusMetadataKey],
+				Completion:         nn.GetAnnotations()[helpersv1.CompletionMetadataKey],
+				Name:               nn.Name,
+				Type:               apitypes.NetworkProfile,
+				IsProfileDependent: true,
+			}
+			nnContainer, err := GetContainerFromNetworkNeighborhood(nn, sshEvent.GetContainer())
+			if err != nil {
+				return nil
+			}
 
-		nnContainer, err := GetContainerFromNetworkNeighborhood(nn, sshEvent.GetContainer())
-		if err != nil {
-			return nil
-		}
-
-		for _, egress := range nnContainer.Egress {
-			if egress.IPAddress == sshEvent.DstIP {
-				for _, port := range egress.Ports {
-					if port.Port != nil {
-						if uint16(*port.Port) == sshEvent.DstPort {
-							return nil
+			for _, egress := range nnContainer.Egress {
+				if egress.IPAddress == sshEvent.DstIP {
+					for _, port := range egress.Ports {
+						if port.Port != nil {
+							if uint16(*port.Port) == sshEvent.DstPort {
+								return nil
+							}
 						}
 					}
 				}
@@ -179,8 +186,9 @@ func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType,
 					"dstPort": sshEvent.DstPort,
 					"srcPort": sshEvent.SrcPort,
 				},
-				InfectedPID: sshEvent.Pid,
-				Severity:    R1003MaliciousSSHConnectionRuleDescriptor.Priority,
+				InfectedPID:     sshEvent.Pid,
+				Severity:        R1003MaliciousSSHConnectionRuleDescriptor.Priority,
+				ProfileMetadata: profileMetadata,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{

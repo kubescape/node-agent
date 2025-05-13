@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/goradd/maps"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -90,6 +91,14 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		}
 	}
 
+	profileMetadata := &apitypes.ProfileMetadata{
+		Status:             nn.GetAnnotations()[helpersv1.StatusMetadataKey],
+		Completion:         nn.GetAnnotations()[helpersv1.CompletionMetadataKey],
+		Name:               nn.Name,
+		Type:               apitypes.NetworkProfile,
+		IsProfileDependent: true,
+	}
+
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", domainEvent.Comm, domainEvent.DNSName)),
@@ -101,7 +110,8 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 				"protocol":  domainEvent.Protocol,
 				"port":      domainEvent.DstPort,
 			},
-			Severity: R0005UnexpectedDomainRequestRuleDescriptor.Priority,
+			Severity:        R0005UnexpectedDomainRequestRuleDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

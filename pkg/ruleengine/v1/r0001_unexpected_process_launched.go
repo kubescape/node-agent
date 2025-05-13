@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -89,6 +90,14 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		}
 	}
 
+	profileMetadata := &apitypes.ProfileMetadata{
+		Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+		Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+		Name:               ap.Name,
+		Type:               apitypes.ApplicationProfile,
+		IsProfileDependent: true,
+	}
+
 	// If the parent process  is in the upper layer, the child process is also in the upper layer.
 	upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
 
@@ -102,7 +111,8 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 				"exec":   execPath,
 				"args":   execEvent.Args,
 			},
-			Severity: R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
+			Severity:        R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

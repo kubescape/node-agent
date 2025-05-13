@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -90,6 +91,14 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 		return nil
 	}
 
+	profileMetadata := &apitypes.ProfileMetadata{
+		Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+		Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+		Name:               ap.Name,
+		Type:               apitypes.ApplicationProfile,
+		IsProfileDependent: true,
+	}
+
 	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:  HashStringToMD5(syscallEvent.SyscallName),
@@ -97,8 +106,9 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 			Arguments: map[string]interface{}{
 				"syscall": syscallEvent.SyscallName,
 			},
-			InfectedPID: syscallEvent.Pid,
-			Severity:    R0003UnexpectedSystemCallRuleDescriptor.Priority,
+			InfectedPID:     syscallEvent.Pid,
+			Severity:        R0003UnexpectedSystemCallRuleDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

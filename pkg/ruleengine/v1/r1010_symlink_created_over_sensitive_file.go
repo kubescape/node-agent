@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -90,10 +91,19 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 	}
 
 	symlinkEvent, _ := event.(*tracersymlinktype.Event)
-
+	var profileMetadata *apitypes.ProfileMetadata
 	if allowed, err := IsAllowed(&symlinkEvent.Event, objCache, symlinkEvent.Comm, R1010ID); err != nil {
-		logger.L().Debug("R1010SymlinkCreatedOverSensitiveFile.ProcessEvent - failed to check if symlink is allowed", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
-		return nil
+		ap := objCache.ApplicationProfileCache().GetApplicationProfile(symlinkEvent.Runtime.ContainerID)
+		if ap != nil {
+			profileMetadata = &apitypes.ProfileMetadata{
+				Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+				Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+				Name:               ap.Name,
+				Type:               apitypes.ApplicationProfile,
+				IsProfileDependent: true,
+			}
+		}
+
 	} else if allowed {
 		return nil
 	}
@@ -106,8 +116,9 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 				"oldPath": symlinkEvent.OldPath,
 				"newPath": symlinkEvent.NewPath,
 			},
-			InfectedPID: symlinkEvent.Pid,
-			Severity:    R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
+			InfectedPID:     symlinkEvent.Pid,
+			Severity:        R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

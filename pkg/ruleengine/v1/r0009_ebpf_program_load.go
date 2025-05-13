@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -69,20 +70,26 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 		return nil
 	}
 
+	var profileMetadata *apitypes.ProfileMetadata
 	if objCache != nil {
 		ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEvent.Runtime.ContainerID)
-		if ap == nil {
-			return nil
-		}
+		if ap != nil {
+			profileMetadata = &apitypes.ProfileMetadata{
+				Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+				Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+				Name:               ap.Name,
+				Type:               apitypes.ApplicationProfile,
+				IsProfileDependent: true,
+			}
+			appProfileSyscallList, err := GetContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
+			if err != nil {
+				return nil
+			}
 
-		appProfileSyscallList, err := GetContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
-		if err != nil {
-			return nil
-		}
-
-		// Check if the syscall is in the list of allowed syscalls
-		if slices.Contains(appProfileSyscallList.Syscalls, syscallEvent.SyscallName) {
-			return nil
+			// Check if the syscall is in the list of allowed syscalls
+			if slices.Contains(appProfileSyscallList.Syscalls, syscallEvent.SyscallName) {
+				return nil
+			}
 		}
 	}
 
@@ -95,8 +102,9 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 				Arguments: map[string]interface{}{
 					"syscall": syscallEvent.SyscallName,
 				},
-				InfectedPID: syscallEvent.Pid,
-				Severity:    R0009EbpfProgramLoadRuleDescriptor.Priority,
+				InfectedPID:     syscallEvent.Pid,
+				Severity:        R0009EbpfProgramLoadRuleDescriptor.Priority,
+				ProfileMetadata: profileMetadata,
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{

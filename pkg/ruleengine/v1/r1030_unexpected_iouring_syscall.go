@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -73,8 +74,19 @@ func (rule *R1030UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 		return nil
 	}
 
-	if allowed, err := IsAllowed(&iouringEvent.Event, objCache, iouringEvent.Identifier, R1030ID); err != nil {
-		return nil
+	var profileMetadata *apitypes.ProfileMetadata
+	if allowed, err := IsAllowed(&iouringEvent.Event, objCache, iouringEvent.Comm, R1030ID); err != nil {
+		ap := objCache.ApplicationProfileCache().GetApplicationProfile(iouringEvent.Runtime.ContainerID)
+		if ap != nil {
+			profileMetadata = &apitypes.ProfileMetadata{
+				Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+				Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+				Name:               ap.Name,
+				Type:               apitypes.ApplicationProfile,
+				IsProfileDependent: true,
+			}
+		}
+
 	} else if allowed {
 		return nil
 	}
@@ -93,8 +105,9 @@ func (rule *R1030UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 				"flags":     iouringEvent.Flags,
 				"operation": name,
 			},
-			InfectedPID: iouringEvent.Pid,
-			Severity:    R1030UnexpectedIouringOperationRuleDescriptor.Priority,
+			InfectedPID:     iouringEvent.Pid,
+			Severity:        R1030UnexpectedIouringOperationRuleDescriptor.Priority,
+			ProfileMetadata: profileMetadata,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

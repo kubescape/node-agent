@@ -73,6 +73,9 @@ func (rule *R1015MaliciousPtraceUsage) ProcessEvent(eventType utils.EventType, e
 			AlertName:   rule.Name(),
 			InfectedPID: ptraceEvent.Pid,
 			Severity:    R1015MaliciousPtraceUsageRuleDescriptor.Priority,
+			ProfileMetadata: &apitypes.ProfileMetadata{
+				IsProfileDependent: false,
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

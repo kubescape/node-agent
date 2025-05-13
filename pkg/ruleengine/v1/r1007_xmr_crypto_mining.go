@@ -66,6 +66,9 @@ func (rule *R1007XMRCryptoMining) ProcessEvent(eventType utils.EventType, event 
 				AlertName:   rule.Name(),
 				InfectedPID: randomXEvent.Pid,
 				Severity:    R1007XMRCryptoMiningRuleDescriptor.Priority,
+				ProfileMetadata: &apitypes.ProfileMetadata{
+					IsProfileDependent: false,
+				},
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
