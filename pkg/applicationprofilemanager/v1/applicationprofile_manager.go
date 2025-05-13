@@ -630,7 +630,9 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 				helpers.String("slug", slug),
 				helpers.Int("container index", watchedContainer.ContainerIndex),
 				helpers.String("container ID", watchedContainer.ContainerID),
-				helpers.String("k8s workload", watchedContainer.K8sContainerID))
+				helpers.String("k8s workload", watchedContainer.K8sContainerID),
+				helpers.String("Status", string(watchedContainer.GetStatus())),
+				helpers.String("Completion Status", string(watchedContainer.GetCompletionStatus())))
 		}
 	}
 }

@@ -39,7 +39,12 @@ func (sc Storage) CreateApplicationProfile(profile *v1beta1.ApplicationProfile, 
 }
 
 func (sc Storage) PatchApplicationProfile(name, namespace string, operations []utils.PatchOperation, watchedContainer *utils.WatchedContainerData) error {
-	logger.L().Debug("Storage - patching application profile", loggerhelpers.String("name", name), loggerhelpers.String("namespace", namespace), loggerhelpers.Int("operations", len(operations)))
+	logger.L().Debug("Storage - patching application profile",
+		loggerhelpers.String("name", name),
+		loggerhelpers.String("namespace", namespace),
+		loggerhelpers.Int("operations", len(operations)),
+		loggerhelpers.String("status", string(watchedContainer.GetStatus())),
+		loggerhelpers.String("completion status", string(watchedContainer.GetCompletionStatus())))
 	// split operations into max JSON operations batches
 	for _, chunk := range utils.ChunkBy(operations, sc.maxJsonPatchOperations) {
 		if err := sc.patchApplicationProfile(name, namespace, chunk, watchedContainer); err != nil {
@@ -80,6 +85,12 @@ func (sc Storage) patchApplicationProfile(name, namespace string, operations []u
 
 	// check if returned profile is completed
 	if IsComplete(profile.Annotations, watchedContainer.GetCompletionStatus()) {
+		logger.L().Debug("ApplicationProfile - profile already completed",
+			loggerhelpers.String("name", name),
+			loggerhelpers.String("namespace", namespace),
+			loggerhelpers.String("watchedContainer", watchedContainer.ContainerID),
+			loggerhelpers.String("completion", string(watchedContainer.GetCompletionStatus())),
+			loggerhelpers.String("status", string(watchedContainer.GetStatus())))
 		watchedContainer.SyncChannel <- utils.ObjectCompleted
 		return nil
 	}
@@ -87,11 +98,12 @@ func (sc Storage) patchApplicationProfile(name, namespace string, operations []u
 	// retrigger the patch if the storage profile is complete and the locally stored profile is partial
 	if IsSeenFromStart(profile.Annotations, watchedContainer) {
 		watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
-		logger.L().Debug("Storage - patching application profile",
+		logger.L().Debug("ApplicationProfile - retriggering patch because profile is complete from start",
 			loggerhelpers.String("name", name),
 			loggerhelpers.String("namespace", namespace),
 			loggerhelpers.String("watchedContainer", watchedContainer.ContainerID),
-			loggerhelpers.String("completion", helpers.Complete))
+			loggerhelpers.String("completion", helpers.Complete),
+			loggerhelpers.String("status", string(watchedContainer.GetStatus())))
 		sc.patchApplicationProfile(name, namespace, operations, watchedContainer)
 	}
 
