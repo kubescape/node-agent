@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
+	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"net"
 	"os"
 	"path/filepath"
@@ -324,6 +326,10 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 	cfg := syft.DefaultCreateSBOMConfig()
 	cfg.ToolName = "syft"
 	cfg.ToolVersion = s.version
+	if s.cfg.EnableEmbeddedSboms {
+		// ask Syft to also scan the image for embedded SBOMs
+		cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
+	}
 	syftSBOM, err := syft.CreateSBOM(context.Background(), src, cfg)
 	if err != nil {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to generate SBOM",

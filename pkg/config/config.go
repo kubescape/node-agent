@@ -38,6 +38,7 @@ type Config struct {
 	ExcludeNamespaces        []string                  `mapstructure:"excludeNamespaces"`
 	IncludeNamespaces        []string                  `mapstructure:"includeNamespaces"`
 	EnableSbomGeneration     bool                      `mapstructure:"sbomGenerationEnabled"`
+	EnableEmbeddedSboms      bool                      `mapstructure:"enableEmbeddedSBOMs"`
 	NamespaceName            string                    `mapstructure:"namespaceName"`
 	NodeName                 string                    `mapstructure:"nodeName"`
 	PodName                  string                    `mapstructure:"podName"`
@@ -71,6 +72,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
 	viper.SetDefault("workerPoolSize", 10)
 	viper.SetDefault("testMode", false)
+	viper.SetDefault("enableEmbeddedSBOMs", false)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()
