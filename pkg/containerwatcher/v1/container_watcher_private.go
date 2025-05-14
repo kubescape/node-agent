@@ -52,7 +52,7 @@ func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.P
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		logger.L().Info("start monitor on container",
+		logger.L().Debug("IGContainerWatcher.containerCallback - add container event received",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID),
 			helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
@@ -71,15 +71,21 @@ func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.P
 		go ch.setSharedWatchedContainerData(notif.Container)
 
 		time.AfterFunc(sniffingTime, func() {
-			logger.L().Info("stop monitor on container - monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+			logger.L().Debug("IGContainerWatcher.containerCallback - monitoring time ended",
+				helpers.String("container ID", notif.Container.Runtime.ContainerID),
+				helpers.String("k8s workload", k8sContainerID),
+				helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
+				helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
 			ch.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.networkManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.unregisterContainer(notif.Container)
 		})
 	case containercollection.EventTypeRemoveContainer:
-		logger.L().Info("stop monitor on container - container has terminated",
+		logger.L().Debug("IGContainerWatcher.containerCallback - remove container event received",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
-			helpers.String("k8s workload", k8sContainerID))
+			helpers.String("k8s workload", k8sContainerID),
+			helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
+			helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
 		ch.objectCache.K8sObjectCache().DeleteSharedContainerData(notif.Container.Runtime.ContainerID)
 	}
 }
