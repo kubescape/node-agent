@@ -152,7 +152,7 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 		return
 	}
 	// check if the container should be ignored
-	if s.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+	if s.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		return
 	}
 	// enqueue the container for processing

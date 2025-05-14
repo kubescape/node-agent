@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -32,7 +30,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		return
 	}
 	// check if the container should be ignored
-	if ch.ignoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName) {
+	if ch.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		// avoid loops when the container is being removed
 		if notif.Type == containercollection.EventTypeAddContainer {
 			ch.unregisterContainer(notif.Container)
@@ -256,7 +254,7 @@ func (ch *IGContainerWatcher) addRunningContainers(notf *rulebindingmanager.Rule
 	pod := notf.GetPod()
 
 	// skip containers that should be ignored
-	if ch.ignoreContainer(pod.GetNamespace(), pod.GetName()) {
+	if ch.cfg.IgnoreContainer(pod.GetNamespace(), pod.GetName(), pod.GetLabels()) {
 		logger.L().Debug("IGContainerWatcher - skipping pod", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod name", pod.GetName()))
 		return
 	}
@@ -540,19 +538,4 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 
 	ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
 	ch.objectCache.K8sObjectCache().DeleteSharedContainerData(container.Runtime.ContainerID)
-}
-
-func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {
-	// do not trace any of our pods
-	if namespace == ch.namespace {
-		return true
-	}
-	// do not trace the node-agent pods if MULTIPLY is set
-	if m := os.Getenv("MULTIPLY"); m == "true" {
-		if strings.HasPrefix(name, "node-agent") {
-			return true
-		}
-	}
-	// check if config excludes the namespace
-	return ch.cfg.SkipNamespace(namespace)
 }
