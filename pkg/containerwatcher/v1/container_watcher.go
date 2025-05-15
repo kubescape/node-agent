@@ -7,7 +7,6 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/gammazero/workerpool"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
@@ -59,6 +58,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/workerpool"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -544,7 +544,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		thirdPartyContainerReceivers: mapset.NewSet[containerwatcher.ContainerReceiver](),
 		thirdPartyEnricher:           thirdPartyEnricher,
 		processManager:               processManager,
-		pool:                         workerpool.New(cfg.WorkerPoolSize),
+		pool:                         workerpool.NewWithMaxRunningTime(cfg.WorkerPoolSize, 30*time.Second),
 		objectCache:                  objectCache,
 	}, nil
 }
@@ -591,17 +591,28 @@ func (ch *IGContainerWatcher) UnregisterContainerReceiver(receiver containerwatc
 
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	if !ch.running {
-		if err := ch.startContainerCollection(ctx); err != nil {
+		var err error
+
+		logger.L().TimedWrapper(utils.FuncName(ch.startContainerCollection), 5*time.Second, func() {
+			err = ch.startContainerCollection(ctx)
+		})
+		if err != nil {
 			return fmt.Errorf("setting up container collection: %w", err)
 		}
 
 		// We want to populate the initial processes before starting the tracers but after retrieving the shims.
-		if err := ch.processManager.PopulateInitialProcesses(); err != nil {
+		logger.L().TimedWrapper(utils.FuncName(ch.processManager.PopulateInitialProcesses), 5*time.Second, func() {
+			err = ch.processManager.PopulateInitialProcesses()
+		})
+		if err != nil {
 			ch.stopContainerCollection()
 			return fmt.Errorf("populating initial processes: %w", err)
 		}
 
-		if err := ch.startTracers(); err != nil {
+		logger.L().TimedWrapper(utils.FuncName(ch.startTracers), 10*time.Second, func() {
+			err = ch.startTracers()
+		})
+		if err != nil {
 			ch.stopContainerCollection()
 			return fmt.Errorf("starting app behavior tracing: %w", err)
 		}

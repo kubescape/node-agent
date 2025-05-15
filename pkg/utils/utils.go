@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -818,4 +819,8 @@ func ExtractWorkloadName(podName string, kind WorkloadKind) string {
 	}
 
 	return podName
+}
+
+func FuncName(i interface{}) string {
+	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 }
