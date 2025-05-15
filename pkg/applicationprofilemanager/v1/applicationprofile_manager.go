@@ -134,7 +134,7 @@ func (am *ApplicationProfileManager) ContainerReachedMaxTime(containerID string)
 }
 
 func (am *ApplicationProfileManager) monitorContainer(ctx context.Context, container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
-	logger.L().Debug("ApplicationProfileManager - start monitor on container",
+	logger.L().Info("ApplicationProfileManager - start monitor on container",
 		helpers.Interface("preRunning", watchedContainer.PreRunningContainer),
 		helpers.Int("container index", watchedContainer.ContainerIndex),
 		helpers.String("container ID", watchedContainer.ContainerID),
@@ -677,7 +677,7 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 	}
 
 	if err := am.monitorContainer(ctx, container, watchedContainer); err != nil {
-		logger.L().Debug("ApplicationProfileManager - stop monitor on container", helpers.String("reason", err.Error()),
+		logger.L().Info("ApplicationProfileManager - stop monitor on container", helpers.String("reason", err.Error()),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
