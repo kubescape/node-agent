@@ -710,7 +710,7 @@ func (am *ApplicationProfileManager) waitForSharedContainerData(containerID stri
 
 func (am *ApplicationProfileManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	// check if the container should be ignored
-	if am.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+	if am.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		return
 	}
 

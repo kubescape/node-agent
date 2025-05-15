@@ -95,8 +95,6 @@ type IGContainerWatcher struct {
 	cfg               config.Config
 	containerSelector containercollection.ContainerSelector
 	ctx               context.Context
-	podName           string
-	namespace         string
 	clusterName       string
 	agentStartTime    time.Time
 

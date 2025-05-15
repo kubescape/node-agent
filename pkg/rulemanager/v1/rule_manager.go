@@ -182,7 +182,7 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 
 func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	// check if the container should be ignored
-	if rm.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+	if rm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		return
 	}
 
