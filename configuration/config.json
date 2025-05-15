@@ -13,6 +13,7 @@
   "httpDetectionEnabled": "true",
   "nodeProfileInterval": "1m",
   "seccompServiceEnabled": "true",
+  "enableEmbeddedSBOMs": "false",
   "exporters": {
     "syslogExporterURL": "http://syslog.kubescape.svc.cluster.local:514",
     "stdoutExporter": "false",
