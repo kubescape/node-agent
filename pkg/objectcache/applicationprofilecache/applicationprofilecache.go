@@ -202,6 +202,17 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 					return false // Stop iteration
 				}
 			}
+			// Fetch the full profile from storage
+			fullProfile, err := apc.storageClient.ApplicationProfiles(profile.Namespace).Get(context.Background(), profile.Name, metav1.GetOptions{})
+			if err != nil {
+				logger.L().Error("failed to get user-managed profile",
+					helpers.String("workloadID", wlid),
+					helpers.String("namespace", profile.Namespace),
+					helpers.String("profileName", profile.Name),
+					helpers.Error(err))
+				return false // Stop iteration
+			}
+			profile = fullProfile
 			// Merge the user-managed profile with the normal profile
 			mergedProfile := apc.performMerge(originalProfile, profile)
 			apc.workloadIDToProfile.Set(wlid, mergedProfile)
