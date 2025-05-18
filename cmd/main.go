@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
@@ -247,7 +246,7 @@ func main() {
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
-		apc := applicationprofilecache.NewApplicationProfileCache(cfg, storageClient.StorageClient, k8sObjectCache, 1*time.Minute)
+		apc := applicationprofilecache.NewApplicationProfileCache(cfg, storageClient.StorageClient, k8sObjectCache)
 		apc.Start(ctx)
 		// dWatcher.AddAdaptor(apc)
 
