@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 
@@ -43,7 +44,6 @@ func TestAddRunningContainers(t *testing.T) {
 		},
 	}
 	type ignore struct {
-		name      string
 		namespace string
 	}
 	tests := []struct {
@@ -127,7 +127,6 @@ func TestAddRunningContainers(t *testing.T) {
 			expectedRuleManagedPods: []string{},
 			expectedPreRunning:      []string{},
 			ignore: ignore{
-				name:      "pod1",
 				namespace: "namespace1",
 			},
 			notify: &rulebindingmanager.RuleBindingNotify{
@@ -145,11 +144,10 @@ func TestAddRunningContainers(t *testing.T) {
 			slices.Sort(tt.containersToRemove)
 
 			ch := IGContainerWatcher{
+				cfg:                 config.Config{NamespaceName: tt.ignore.namespace},
 				ruleManagedPods:     mapset.NewSet[string](tt.preRuleManagedPods...),
 				containerCollection: &containercollection.ContainerCollection{},
 				tracerCollection:    &tracercollection.TracerCollection{},
-				namespace:           tt.ignore.namespace,
-				podName:             tt.ignore.name,
 				objectCache:         &objectcache.ObjectCacheMock{},
 			}
 

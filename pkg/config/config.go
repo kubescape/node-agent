@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/exporters"
@@ -35,9 +36,11 @@ type Config struct {
 	EnableHostNetworkSensor  bool                      `mapstructure:"hostNetworkSensorEnabled"`
 	NodeProfileInterval      time.Duration             `mapstructure:"nodeProfileInterval"`
 	EnableSeccomp            bool                      `mapstructure:"seccompServiceEnabled"`
+	ExcludeLabels            map[string]string         `mapstructure:"excludeLabels"`
 	ExcludeNamespaces        []string                  `mapstructure:"excludeNamespaces"`
 	IncludeNamespaces        []string                  `mapstructure:"includeNamespaces"`
 	EnableSbomGeneration     bool                      `mapstructure:"sbomGenerationEnabled"`
+	EnableEmbeddedSboms      bool                      `mapstructure:"enableEmbeddedSBOMs"`
 	NamespaceName            string                    `mapstructure:"namespaceName"`
 	NodeName                 string                    `mapstructure:"nodeName"`
 	PodName                  string                    `mapstructure:"podName"`
@@ -73,6 +76,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("workerPoolSize", 10)
 	viper.SetDefault("testMode", false)
 	viper.SetDefault("profilesCacheRefreshRate", 1*time.Minute)
+	viper.SetDefault("enableEmbeddedSBOMs", false)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()
@@ -83,6 +87,32 @@ func LoadConfig(path string) (Config, error) {
 	var config Config
 	err = viper.Unmarshal(&config)
 	return config, err
+}
+
+func (c *Config) IgnoreContainer(ns, podName string, labels map[string]string) bool {
+	// do not trace any of our pods
+	if ns == c.NamespaceName {
+		return true
+	}
+	// do not trace the node-agent pods if MULTIPLY is set
+	if m := os.Getenv("MULTIPLY"); m == "true" {
+		if strings.HasPrefix(podName, "node-agent") {
+			return true
+		}
+	}
+	// check if config excludes the namespace
+	if c.SkipNamespace(ns) {
+		return true
+	}
+	// check if config excludes the pod labels
+	for k, v := range c.ExcludeLabels {
+		if labelValue, ok := labels[k]; ok {
+			if strings.EqualFold(labelValue, v) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *Config) SkipNamespace(ns string) bool {

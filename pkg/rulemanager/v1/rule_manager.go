@@ -182,7 +182,7 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 
 func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	// check if the container should be ignored
-	if rm.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+	if rm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		return
 	}
 
@@ -227,9 +227,9 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 				parts := strings.Split(id, "/")
 				if len(parts) == 3 && parts[0] == namespace && parts[1] == podName {
 					stillTracked = true
-					return false // Stop iteration
+					return true // We found a match, can stop iteration
 				}
-				return true // Continue iteration
+				return false // No match yet, continue looking
 			})
 
 			if !stillTracked {

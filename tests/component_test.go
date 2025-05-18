@@ -1270,3 +1270,18 @@ func Test_17_ApCompletedToPartialUpdateTest(t *testing.T) {
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx")
 }
 
+func Test_18_ShortLivedJobTest(t *testing.T) {
+	ns := testutils.NewRandomNamespace()
+
+	// Create a short-lived job
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/echo-job.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	// Application profile should be created and completed
+	err = wl.WaitForApplicationProfileCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+}
