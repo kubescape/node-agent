@@ -110,6 +110,9 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 		for _, profile := range profileList.Items {
 			// Handle user-managed profiles
 			if isUserManagedProfile(&profile) {
+				logger.L().Debug("found user-managed profile, merging",
+					helpers.String("namespace", namespace),
+					helpers.String("profileName", profile.Name))
 				apc.handleUserManagedProfile(&profile)
 				continue
 			}
@@ -165,7 +168,9 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			apc.workloadIDToProfile.Set(workloadID, fullProfile)
 			logger.L().Debug("updated profile in cache",
 				helpers.String("workloadID", workloadID),
-				helpers.String("namespace", namespace))
+				helpers.String("namespace", namespace),
+				helpers.String("status", profile.Annotations[helpersv1.StatusMetadataKey]),
+				helpers.String("completion", profile.Annotations[helpersv1.CompletionMetadataKey]))
 
 			// Update call stack search trees for containers using this workload ID
 			for containerID := range containerSet.Iter() {
@@ -454,20 +459,18 @@ func isUserManagedProfile(appProfile *v1beta1.ApplicationProfile) bool {
 // GetApplicationProfile gets the application profile for a container
 func (apc *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string) *v1beta1.ApplicationProfile {
 	// Get container info
-	containerInfo, exists := apc.containerIDToInfo.Load(containerID)
-	if !exists {
-		return nil
-	}
+	if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists {
+		workloadID := containerInfo.WorkloadID
+		if workloadID == "" {
+			return nil
+		}
 
-	workloadID := containerInfo.WorkloadID
-	if workloadID == "" {
-		return nil
-	}
-
-	// Try to get profile from cache
-	profile, exists := apc.workloadIDToProfile.Load(workloadID)
-	if exists && profile != nil {
-		return profile
+		// Try to get profile from cache
+		if profile, exists := apc.workloadIDToProfile.Load(workloadID); exists {
+			if profile != nil {
+				return profile
+			}
+		}
 	}
 
 	return nil
