@@ -106,7 +106,7 @@ func FromCString(in []byte) []byte {
 }
 
 func GetUniqueIdentifier(event *http_snifferHttpevent) string {
-	return strconv.FormatUint(uint64(event.Pid), 10) + strconv.FormatUint(uint64(event.SockFd), 10)
+	return strconv.FormatUint(uint64(event.SocketInode), 10) + strconv.FormatUint(uint64(event.SockFd), 10)
 }
 
 func ToTime(t eventtypes.Time) time.Time {

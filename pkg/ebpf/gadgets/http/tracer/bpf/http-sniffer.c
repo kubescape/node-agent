@@ -10,30 +10,6 @@ struct {
     __uint(value_size, sizeof(u32));
 } events SEC(".maps");
 
-// Used to manage pre accept connections from client
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 8192);
-    __type(key, __u64);
-    __type(value, struct pre_accept_args);
-} pre_accept_args_map SEC(".maps");
-
-// Used to manage active http connections to monitor
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 8192);
-    __type(key, __u64);
-    __type(value, struct pre_connect_args);
-} active_connections_args_map SEC(".maps");
-
-// Used to manage active http connections to monitor as server
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 8192);
-    __type(key, __u64);
-    __type(value, struct active_connection_info);
-} accepted_sockets_map SEC(".maps");
-
 // Used to store the buffer of packets 
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -73,7 +49,6 @@ struct {
     __type(value, u8[MAX_DATAEVENT_BUFFER]);
 } empty_buffer SEC(".maps");
 
-
 // Declared to avoid compiler deletion
 const struct httpevent *unusedevent __attribute__((unused));
 
@@ -110,10 +85,37 @@ static __always_inline __u64 min_size(__u64 a, __u64 b) {
     return a < b ? a : b;
 }
 
-static __always_inline __u64 generate_unique_connection_id(__u64 pid_tgid, __u32 sockfd)
-{
-    __u32 pid = pid_tgid >> 32; 
-    return ((__u64)pid << 32) | sockfd;
+// Get inode number for a socket file descriptor
+static __always_inline int get_socket_inode(__u32 sockfd, __u64 *inode) {
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (!task)
+        return -1;
+
+    struct files_struct *files = BPF_CORE_READ(task, files);
+    if (!files)
+        return -1;
+
+    struct fdtable *fdt = BPF_CORE_READ(files, fdt);
+    if (!fdt)
+        return -1;
+
+    struct file **fd_array = BPF_CORE_READ(fdt, fd);
+    if (!fd_array)
+        return -1;
+
+    struct file *file;
+    void *ptr;
+    bpf_probe_read(&ptr, sizeof(ptr), &fd_array[sockfd]);
+    file = ptr;
+    if (!file)
+        return -1;
+
+    struct inode *inode_ptr = BPF_CORE_READ(file, f_inode);
+    if (!inode_ptr)
+        return -1;
+
+    *inode = BPF_CORE_READ(inode_ptr, i_ino);
+    return 0;
 }
 
 static __always_inline void get_namespace_ids(u64 *mnt_ns_id)
@@ -138,7 +140,7 @@ static __always_inline bool is_msg_peek(__u32 flags)
     return flags & MSG_PEEK;
 }
 
-static __always_inline int populate_httpevent(struct httpevent *event)
+static __always_inline int populate_httpevent(struct httpevent *event, __u32 sockfd)
 {
     if (!event)
         return -1;
@@ -155,95 +157,16 @@ static __always_inline int populate_httpevent(struct httpevent *event)
     event->uid = uid_gid & 0xFFFFFFFF;
     event->gid = uid_gid >> 32;
     event->timestamp = bpf_ktime_get_boot_ns();
+    
+    // Get and store socket inode
+    __u64 socket_inode = 0;
+    if (get_socket_inode(sockfd, &socket_inode) == 0) {
+        event->socket_inode = socket_inode;
+    } else {
+        event->socket_inode = 0;
+    }
 
     return 0;
-}
-
-static __always_inline void enrich_ip_port(struct syscall_trace_exit *ctx, __u32 sockfd, struct httpevent *event)
-{
-    __u64 id = bpf_get_current_pid_tgid();
-    __u64 unique_connection_id = generate_unique_connection_id(id, sockfd);
-    struct active_connection_info *conn_info = bpf_map_lookup_elem(&accepted_sockets_map, &unique_connection_id);
-    if (conn_info)
-    {
-        event->other_ip = conn_info->addr.sin_addr.s_addr;
-        event->other_port = bpf_ntohs(conn_info->addr.sin_port);
-    }
-}
-
-static void inline enter_connect(struct syscall_trace_enter *ctx)
-{
-    __u64 id = bpf_get_current_pid_tgid();
-    struct pre_connect_args connect_args = {};
-    connect_args.sockfd = (int)ctx->args[0]; // socketfd to connect with
-    bpf_probe_read_user(&connect_args.addr, sizeof(connect_args.addr), (void *)ctx->args[1]);
-    bpf_map_update_elem(&active_connections_args_map, &id, &connect_args, BPF_ANY);
-}
-
-static void inline exit_connect(struct syscall_trace_exit *ctx)
-{
-    __u64 id = bpf_get_current_pid_tgid();
-    struct active_connection_info conn_info = {};
-
-    if (ctx->ret == 0 || ctx->ret == EINPROGRESS)
-    {
-        struct pre_connect_args *args = bpf_map_lookup_elem(&active_connections_args_map, &id);
-
-        if (args)
-        {
-            __u32 sockfd = (__u32)args->sockfd; // For connect, we stored the sockfd earlier.
-            __u64 unique_connection_id = generate_unique_connection_id(id, sockfd);
-            conn_info.sockfd = sockfd;
-            bpf_probe_read_kernel(&conn_info.addr, sizeof(conn_info.addr), &args->addr);
-            bpf_map_update_elem(&accepted_sockets_map, &unique_connection_id, &conn_info, BPF_ANY);
-        }
-    }
-
-    bpf_map_delete_elem(&active_connections_args_map, &id);
-}
-
-static void inline enter_accept(struct syscall_trace_enter *ctx)
-{
-    __u64 id = bpf_get_current_pid_tgid();
-    struct pre_accept_args accept_args = {};
-    accept_args.addr_ptr = (uint64_t)ctx->args[1];
-    bpf_map_update_elem(&pre_accept_args_map, &id, &accept_args, BPF_ANY);
-}
-
-static void inline exit_accept(struct syscall_trace_exit *ctx)
-{
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    struct active_connection_info conn_info = {};
-    if (ctx->ret >= 0)
-    {
-        __u32 sockfd = (__u32)ctx->ret; // new socket for accepted connection
-        struct pre_accept_args *args = bpf_map_lookup_elem(&pre_accept_args_map, &pid_tgid);
-        if (args)
-        {
-            __u64 unique_connection_id = generate_unique_connection_id(pid_tgid, sockfd);
-            conn_info.sockfd = sockfd;
-            bpf_probe_read_user(&conn_info.addr, sizeof(conn_info.addr), (void *)args->addr_ptr);
-            bpf_map_update_elem(&accepted_sockets_map, &unique_connection_id, &conn_info, BPF_ANY);
-        }
-    }
-    bpf_map_delete_elem(&pre_accept_args_map, &pid_tgid);
-}
-
-// Store the arguments of the receive syscalls in a map
-static void inline pre_receive_syscalls(struct syscall_trace_enter *ctx)
-{
-    __u64 id = bpf_get_current_pid_tgid();
-    __u32 sockfd = (__u32)ctx->args[0]; // For read, recv, recvfrom, write, send, sendto, sockfd is the first argument
-    __u64 unique_connection_id = generate_unique_connection_id(id, sockfd);
-    struct active_connection_info *conn_info = bpf_map_lookup_elem(&accepted_sockets_map, &unique_connection_id);
-    if (conn_info)
-    {
-        struct packet_buffer packet = {};
-        packet.sockfd = sockfd;
-        packet.buf = (__u64)ctx->args[1];
-        packet.len = ctx->args[2];
-        bpf_map_update_elem(&buffer_packets, &id, &packet, BPF_ANY);
-    }
 }
 
 static __always_inline int get_http_type(struct syscall_trace_exit *ctx, void *data, int size)
@@ -272,6 +195,20 @@ static __always_inline int get_http_type(struct syscall_trace_exit *ctx, void *d
     }
 
     return 0;
+}
+
+// Store the arguments of the receive syscalls in a map
+static void inline pre_receive_syscalls(struct syscall_trace_enter *ctx)
+{
+    __u64 id = bpf_get_current_pid_tgid();
+    __u32 sockfd = (__u32)ctx->args[0]; // For read, recv, recvfrom, write, send, sendto, sockfd is the first argument
+    
+    // No need to check if socket is being tracked - track all sockets
+    struct packet_buffer packet = {};
+    packet.sockfd = sockfd;
+    packet.buf = (__u64)ctx->args[1];
+    packet.len = ctx->args[2];
+    bpf_map_update_elem(&buffer_packets, &id, &packet, BPF_ANY);
 }
 
 static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *syscall)
@@ -305,10 +242,13 @@ static __always_inline int process_packet(struct syscall_trace_exit *ctx, char *
     if (!dataevent)
         return 0;
 
-    populate_httpevent(dataevent);
-    enrich_ip_port(ctx, packet->sockfd, dataevent);
+    // Populate event with socket inode for tracking
+    populate_httpevent(dataevent, packet->sockfd);
+    
     dataevent->type = type;
     dataevent->sock_fd = packet->sockfd;
+    
+    // We're no longer looking up or using connections from accepted_sockets_map
 
     bpf_probe_read_str(&dataevent->syscall, sizeof(dataevent->syscall), syscall);
     bpf_probe_read_user(&dataevent->buf, min_size(total_size, MAX_DATAEVENT_BUFFER), (void *)packet->buf);
@@ -321,23 +261,20 @@ static __always_inline int pre_process_msg(struct syscall_trace_enter *ctx)
 {
     __u64 id = bpf_get_current_pid_tgid();
     __u32 sockfd = (__u32)ctx->args[0]; // For sendmsg and recvmsg, sockfd is the first argument
-    __u64 unique_connection_id = generate_unique_connection_id(id, sockfd);
-    struct active_connection_info *conn_info = bpf_map_lookup_elem(&accepted_sockets_map, &unique_connection_id);
-    if (conn_info)
+    
+    // No need to check if socket is being tracked - track all sockets
+    struct packet_msg write_args = {};
+    write_args.fd = sockfd;
+
+    struct user_msghdr msghdr = {};
+    if (bpf_probe_read_user(&msghdr, sizeof(msghdr), (void *)ctx->args[1]) != 0)
     {
-        struct packet_msg write_args = {};
-        write_args.fd = sockfd;
-
-        struct user_msghdr msghdr = {};
-        if (bpf_probe_read_user(&msghdr, sizeof(msghdr), (void *)ctx->args[1]) != 0)
-        {
-            return 0;
-        }
-
-        write_args.iovec_ptr = (uint64_t)(msghdr.msg_iov);
-        write_args.iovlen = msghdr.msg_iovlen;
-        bpf_map_update_elem(&msg_packets, &id, &write_args, BPF_ANY);
+        return 0;
     }
+
+    write_args.iovec_ptr = (uint64_t)(msghdr.msg_iov);
+    write_args.iovlen = msghdr.msg_iovlen;
+    bpf_map_update_elem(&msg_packets, &id, &write_args, BPF_ANY);
     return 0;
 }
 
@@ -345,16 +282,13 @@ static __always_inline int pre_process_iovec(struct syscall_trace_enter *ctx)
 {
     __u64 id = bpf_get_current_pid_tgid();
     __u32 sockfd = (__u32)ctx->args[0]; // For writev and readv, sockfd is the first argument
-    __u64 unique_connection_id = generate_unique_connection_id(id, sockfd);
-    struct active_connection_info *conn_info = bpf_map_lookup_elem(&accepted_sockets_map, &unique_connection_id);
-    if (conn_info)
-    {
-        struct packet_msg write_args = {};
-        write_args.fd = sockfd;
-        write_args.iovec_ptr = (__u64)ctx->args[1];
-        write_args.iovlen = (__u64)ctx->args[2];
-        bpf_map_update_elem(&msg_packets, &id, &write_args, BPF_ANY);
-    }
+    
+    // No need to check if socket is being tracked - track all sockets
+    struct packet_msg write_args = {};
+    write_args.fd = sockfd;
+    write_args.iovec_ptr = (__u64)ctx->args[1];
+    write_args.iovlen = (__u64)ctx->args[2];
+    bpf_map_update_elem(&msg_packets, &id, &write_args, BPF_ANY);
     return 0;
 }
 
@@ -389,10 +323,13 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
             if (!dataevent)
                 return 0;
 
-            populate_httpevent(dataevent);
-            enrich_ip_port(ctx, msg->fd, dataevent);
+            // Populate event with socket inode for tracking
+            populate_httpevent(dataevent, msg->fd);
+            
             dataevent->type = type;
             dataevent->sock_fd = msg->fd;
+            
+            // We're no longer looking up or using connections from accepted_sockets_map
 
             __u64 copy_len = seg_len;
             if (copy_len > MAX_DATAEVENT_BUFFER)
@@ -406,59 +343,6 @@ static __always_inline int process_msg(struct syscall_trace_exit *ctx, char *sys
     }
 
     bpf_map_delete_elem(&msg_packets, &id);
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_accept")
-int sys_enter_accept(struct syscall_trace_enter *ctx)
-{
-    if (should_discard())
-        return 0;
-
-    enter_accept(ctx);
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_exit_accept")
-int sys_exit_accept(struct syscall_trace_exit *ctx)
-{
-    if (should_discard())
-        return 0;
-
-    exit_accept(ctx);
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_accept4")
-int sys_enter_accept4(struct syscall_trace_enter *ctx)
-{
-    if (should_discard())
-        return 0;
-
-    enter_accept(ctx);
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_exit_accept4")
-int sys_exit_accept4(struct syscall_trace_exit *ctx)
-{
-    if (should_discard())
-        return 0;
-
-    exit_accept(ctx);
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_close")
-int sys_enter_close(struct syscall_trace_enter *ctx)
-{
-    if (should_discard())
-        return 0;
-
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    __u32 sockfd = (__u32)ctx->args[0];
-    __u64 unique_connection_id = generate_unique_connection_id(pid_tgid, sockfd);
-    bpf_map_delete_elem(&accepted_sockets_map, &unique_connection_id);
     return 0;
 }
 
@@ -541,26 +425,6 @@ int syscall__probe_ret_sendto(struct syscall_trace_exit *ctx)
         return 0;
 
     process_packet(ctx, "sendto");
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_connect")
-int syscall__probe_entry_connect(struct syscall_trace_enter *ctx)
-{
-    if (should_discard())
-        return 0;
-
-    enter_connect(ctx);
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_exit_connect")
-int syscall__probe_ret_connect(struct syscall_trace_exit *ctx)
-{
-    if (should_discard())
-        return 0;
-
-    exit_connect(ctx);
     return 0;
 }
 
