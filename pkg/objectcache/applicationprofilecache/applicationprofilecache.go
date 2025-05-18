@@ -202,6 +202,8 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 					return false // Stop iteration
 				}
 			}
+			// Store the user-managed profile unique identifier to prevent merging it again
+			apc.profileToUserManagedIdentifier.Set(originalProfile.Name, userManagedProfileUniqueIdentifier)
 			// Fetch the full profile from storage
 			fullProfile, err := apc.storageClient.ApplicationProfiles(profile.Namespace).Get(context.Background(), profile.Name, metav1.GetOptions{})
 			if err != nil {
