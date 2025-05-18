@@ -248,7 +248,6 @@ func main() {
 
 		apc := applicationprofilecache.NewApplicationProfileCache(cfg, storageClient.StorageClient, k8sObjectCache)
 		apc.Start(ctx)
-		// dWatcher.AddAdaptor(apc)
 
 		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(cfg, storageClient.StorageClient)
 		dWatcher.AddAdaptor(nnc)
