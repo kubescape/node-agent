@@ -4,49 +4,30 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v5"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/utils"
-	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	versioned "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-var groupVersionResource = schema.GroupVersionResource{
-	Group:    "spdx.softwarecomposition.kubescape.io",
-	Version:  "v1beta1",
-	Resource: "applicationprofiles",
-}
-
-var _ objectcache.ApplicationProfileCache = (*ApplicationProfileCacheImpl)(nil)
-var _ watcher.Adaptor = (*ApplicationProfileCacheImpl)(nil)
-
-type applicationProfileState struct {
-	status string
-	mode   string
-}
-
-func newApplicationProfileState(ap *v1beta1.ApplicationProfile) applicationProfileState {
-	mode := ap.Annotations[helpersv1.CompletionMetadataKey]
-	status := ap.Annotations[helpersv1.StatusMetadataKey]
-	return applicationProfileState{
-		status: status,
-		mode:   mode,
-	}
+// ContainerInfo holds container metadata we need for application profile mapping
+type ContainerInfo struct {
+	ContainerID string
+	WorkloadID  string
+	Namespace   string
 }
 
 // ContainerCallStackIndex maintains call stack search trees for a container
@@ -55,69 +36,206 @@ type ContainerCallStackIndex struct {
 }
 
 type ApplicationProfileCacheImpl struct {
-	cfg                 config.Config
-	containerToSlug     maps.SafeMap[string, string]                      // cache the containerID to slug mapping, this will enable a quick lookup of the application profile
-	slugToAppProfile    maps.SafeMap[string, *v1beta1.ApplicationProfile] // cache the application profile
-	slugToContainers    maps.SafeMap[string, mapset.Set[string]]          // cache the containerIDs that belong to the application profile, this will enable removing from cache AP without pods
-	slugToState         maps.SafeMap[string, applicationProfileState]     // cache the containerID to slug mapping, this will enable a quick lookup of the application profile
-	storageClient       versioned.SpdxV1beta1Interface
-	allProfiles         mapset.Set[string] // cache all the application profiles that are ready. this will enable removing from cache AP without pods that are running on the same node
-	userManagedProfiles maps.SafeMap[string, *v1beta1.ApplicationProfile]
-	containerCallStacks maps.SafeMap[string, *ContainerCallStackIndex] // cache the containerID to call stack search tree mapping
-	containerToName     maps.SafeMap[string, string]                   // cache the containerID to container name mapping
+	cfg                            config.Config
+	workloadIDToProfile            maps.SafeMap[string, *v1beta1.ApplicationProfile]
+	containerIDToInfo              maps.SafeMap[string, *ContainerInfo]
+	namespaceToContainers          maps.SafeMap[string, mapset.Set[string]] // namespace -> set of containerIDs
+	profileToUserManagedIdentifier maps.SafeMap[string, string]             // profileName -> user-managed profile unique identifier (This is used to prevent merging the same user-managed profile multiple times)
+	containerToCallStackIndex      maps.SafeMap[string, *ContainerCallStackIndex]
+	storageClient                  versioned.SpdxV1beta1Interface
+	k8sObjectCache                 objectcache.K8sObjectCache
+	updateInterval                 time.Duration
+	mutex                          sync.Mutex // For operations that need additional synchronization
 }
 
-func NewApplicationProfileCache(cfg config.Config, storageClient versioned.SpdxV1beta1Interface) *ApplicationProfileCacheImpl {
-	return &ApplicationProfileCacheImpl{
-		cfg:                 cfg,
-		storageClient:       storageClient,
-		containerToSlug:     maps.SafeMap[string, string]{},
-		slugToAppProfile:    maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
-		slugToContainers:    maps.SafeMap[string, mapset.Set[string]]{},
-		slugToState:         maps.SafeMap[string, applicationProfileState]{},
-		allProfiles:         mapset.NewSet[string](),
-		userManagedProfiles: maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
-		containerCallStacks: maps.SafeMap[string, *ContainerCallStackIndex]{},
-		containerToName:     maps.SafeMap[string, string]{},
+// NewApplicationProfileCache creates a new application profile cache with periodic updates
+func NewApplicationProfileCache(cfg config.Config, storageClient versioned.SpdxV1beta1Interface, k8sObjectCache objectcache.K8sObjectCache) *ApplicationProfileCacheImpl {
+	updateInterval := utils.AddJitter(cfg.ProfilesCacheRefreshRate, 10) // Add 10% jitter to avoid high load on the storage
+
+	apc := &ApplicationProfileCacheImpl{
+		cfg:                       cfg,
+		workloadIDToProfile:       maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
+		containerIDToInfo:         maps.SafeMap[string, *ContainerInfo]{},
+		namespaceToContainers:     maps.SafeMap[string, mapset.Set[string]]{},
+		containerToCallStackIndex: maps.SafeMap[string, *ContainerCallStackIndex]{},
+		storageClient:             storageClient,
+		k8sObjectCache:            k8sObjectCache,
+		updateInterval:            updateInterval,
 	}
+
+	return apc
 }
 
-// ------------------ objectcache.ApplicationProfileCache methods -----------------------
+// Start begins the periodic update process
+func (apc *ApplicationProfileCacheImpl) Start(ctx context.Context) {
+	go apc.periodicUpdate(ctx)
+}
 
-func (ap *ApplicationProfileCacheImpl) handleUserManagedProfile(appProfile *v1beta1.ApplicationProfile) {
-	baseProfileName := strings.TrimPrefix(appProfile.GetName(), "ug-")
-	baseProfileUniqueName := objectcache.UniqueName(appProfile.GetNamespace(), baseProfileName)
+// periodicUpdate periodically fetches and updates application profiles from storage
+func (apc *ApplicationProfileCacheImpl) periodicUpdate(ctx context.Context) {
+	ticker := time.NewTicker(apc.updateInterval)
+	defer ticker.Stop()
 
-	// Store the user-managed profile temporarily
-	ap.userManagedProfiles.Set(baseProfileUniqueName, appProfile)
-
-	// If we have the base profile cached, fetch a fresh copy and merge.
-	// If the base profile is not cached yet, the merge will be attempted when it's added.
-	if ap.slugToAppProfile.Has(baseProfileUniqueName) {
-		// Fetch fresh base profile from cluster
-		freshBaseProfile, err := ap.getApplicationProfile(appProfile.GetNamespace(), baseProfileName)
-		if err != nil {
-			logger.L().Warning("ApplicationProfileCacheImpl - failed to get fresh base profile for merging",
-				helpers.String("name", baseProfileName),
-				helpers.String("namespace", appProfile.GetNamespace()),
-				helpers.Error(err))
+	for {
+		select {
+		case <-ticker.C:
+			apc.updateAllProfiles(ctx)
+		case <-ctx.Done():
 			return
 		}
-
-		mergedProfile := ap.performMerge(freshBaseProfile, appProfile)
-		ap.slugToAppProfile.Set(baseProfileUniqueName, mergedProfile)
-
-		// Clean up the user-managed profile after successful merge
-		ap.userManagedProfiles.Delete(baseProfileUniqueName)
-
-		logger.L().Debug("ApplicationProfileCacheImpl - merged user-managed profile with fresh base profile",
-			helpers.String("name", baseProfileName),
-			helpers.String("namespace", appProfile.GetNamespace()))
 	}
+}
+
+// updateAllProfiles fetches all application profiles from storage and updates the cache
+func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
+	// Process namespace by namespace to optimize LIST operations
+	apc.namespaceToContainers.Range(func(namespace string, containerSet mapset.Set[string]) bool {
+		// Skip empty namespaces
+		if containerSet.Cardinality() == 0 {
+			return true
+		}
+
+		logger.L().Debug("updating profiles for namespace", helpers.String("namespace", namespace))
+
+		// Get profiles list for this namespace
+		profileList, err := apc.storageClient.ApplicationProfiles(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			logger.L().Error("failed to list application profiles",
+				helpers.String("namespace", namespace),
+				helpers.Error(err))
+			return true // Continue to next namespace
+		}
+
+		// Process each profile
+		for _, profile := range profileList.Items {
+			// Handle user-managed profiles
+			if isUserManagedProfile(&profile) {
+				logger.L().Debug("found user-managed profile, merging",
+					helpers.String("namespace", namespace),
+					helpers.String("profileName", profile.Name))
+				apc.handleUserManagedProfile(&profile)
+				continue
+			}
+
+			// Only consider completed profiles
+			if profile.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
+				continue
+			}
+
+			// Get the workload ID from profile
+			workloadID := profile.Annotations[helpersv1.WlidMetadataKey]
+			if workloadID == "" {
+				continue
+			}
+
+			// Check if this workload ID is used by any container in this namespace
+			workloadIDInUse := false
+			for containerID := range containerSet.Iter() {
+				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
+					containerInfo.WorkloadID == workloadID {
+					workloadIDInUse = true
+					break
+				}
+			}
+
+			if !workloadIDInUse {
+				continue
+			}
+
+			// Update the profile in the cache
+			if existingProfile, exists := apc.workloadIDToProfile.Load(workloadID); exists {
+				// If the profile already exists and it's complete/completed, continue to the next one
+				if existingProfile.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Complete {
+					continue
+				}
+
+				// If the new profile is not complete and we already have a completed/partial one, skip it
+				if profile.Annotations[helpersv1.CompletionMetadataKey] != helpersv1.Complete {
+					continue
+				}
+			}
+
+			// Fetch the profile from storage
+			fullProfile, err := apc.storageClient.ApplicationProfiles(namespace).Get(ctx, profile.Name, metav1.GetOptions{})
+			if err != nil {
+				logger.L().Error("failed to get application profile",
+					helpers.String("workloadID", workloadID),
+					helpers.String("namespace", namespace),
+					helpers.Error(err))
+				continue
+			}
+
+			apc.workloadIDToProfile.Set(workloadID, fullProfile)
+			logger.L().Debug("updated profile in cache",
+				helpers.String("workloadID", workloadID),
+				helpers.String("namespace", namespace),
+				helpers.String("status", profile.Annotations[helpersv1.StatusMetadataKey]),
+				helpers.String("completion", profile.Annotations[helpersv1.CompletionMetadataKey]))
+
+			// Update call stack search trees for containers using this workload ID
+			for containerID := range containerSet.Iter() {
+				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
+					containerInfo.WorkloadID == workloadID {
+					// Create or update call stack search tree if not exists
+					if _, exists := apc.containerToCallStackIndex.Load(containerID); !exists {
+						// Index the call stacks for this container
+						apc.indexContainerCallStacks(containerID, containerInfo.ContainerID, fullProfile)
+						logger.L().Debug("created call stack search tree for container",
+							helpers.String("containerID", containerID))
+					}
+				}
+			}
+		}
+		return true // Continue to next namespace
+	})
+}
+
+// handleUserManagedProfile handles user-managed profiles
+func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta1.ApplicationProfile) {
+	normalizedProfileName := strings.TrimPrefix(profile.Name, "ug-")
+	userManagedProfileUniqueIdentifier := profile.ResourceVersion + string(profile.UID)
+
+	apc.workloadIDToProfile.Range(func(wlid string, originalProfile *v1beta1.ApplicationProfile) bool {
+		if originalProfile.Name == normalizedProfileName && originalProfile.Namespace == profile.Namespace {
+			// Check if we already merged this user-managed profile
+			if userManagedProfileUniqueId, exists := apc.profileToUserManagedIdentifier.Load(originalProfile.Name); exists {
+				if userManagedProfileUniqueId == userManagedProfileUniqueIdentifier {
+					logger.L().Debug("user-managed profile already merged, skipping",
+						helpers.String("workloadID", wlid),
+						helpers.String("namespace", profile.Namespace),
+						helpers.String("profileName", profile.Name))
+					return false // Stop iteration
+				}
+			}
+			// Fetch the full profile from storage
+			fullProfile, err := apc.storageClient.ApplicationProfiles(profile.Namespace).Get(context.Background(), profile.Name, metav1.GetOptions{})
+			if err != nil {
+				logger.L().Error("failed to get user-managed profile",
+					helpers.String("workloadID", wlid),
+					helpers.String("namespace", profile.Namespace),
+					helpers.String("profileName", profile.Name),
+					helpers.Error(err))
+				return false // Stop iteration
+			}
+			profile = fullProfile
+			// Merge the user-managed profile with the normal profile
+			mergedProfile := apc.performMerge(originalProfile, profile)
+			apc.workloadIDToProfile.Set(wlid, mergedProfile)
+			// Store the user-managed profile unique identifier to prevent merging it again
+			apc.profileToUserManagedIdentifier.Set(originalProfile.Name, userManagedProfileUniqueIdentifier)
+			logger.L().Debug("merged user-managed profile with normal profile",
+				helpers.String("workloadID", wlid),
+				helpers.String("namespace", profile.Namespace),
+				helpers.String("profileName", profile.Name))
+			return false // Stop iteration
+		}
+		return true // Continue iteration
+	},
+	)
 }
 
 // indexContainerCallStacks builds the search index for a container's call stacks and removes them from the profile
-func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, containerName string, appProfile *v1beta1.ApplicationProfile) {
+func (apc *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, containerName string, appProfile *v1beta1.ApplicationProfile) {
 	if appProfile == nil {
 		logger.L().Warning("ApplicationProfileCacheImpl - application profile is nil",
 			helpers.String("containerID", containerID),
@@ -125,21 +243,19 @@ func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, con
 		return
 	}
 
-	// Initialize container index if needed
-	if !ap.containerCallStacks.Has(containerID) {
-		ap.containerCallStacks.Set(containerID, &ContainerCallStackIndex{
-			searchTree: callstackcache.NewCallStackSearchTree(),
-		})
-	}
+	// Create a new call stack search tree
+	callStackSearchTree := callstackcache.NewCallStackSearchTree()
+	apc.containerToCallStackIndex.Set(containerID, &ContainerCallStackIndex{
+		searchTree: callStackSearchTree,
+	})
 
-	index := ap.containerCallStacks.Get(containerID)
-
+	// Iterate over the containers in the application profile
 	// Find the container in the profile and index its call stacks
 	for _, c := range appProfile.Spec.Containers {
 		if c.Name == containerName {
 			// Index all call stacks
 			for _, stack := range c.IdentifiedCallStacks {
-				index.searchTree.AddCallStack(stack)
+				callStackSearchTree.AddCallStack(stack)
 			}
 
 			// Clear the call stacks to free memory
@@ -152,8 +268,10 @@ func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, con
 	for _, c := range appProfile.Spec.InitContainers {
 		if c.Name == containerName {
 			for _, stack := range c.IdentifiedCallStacks {
-				index.searchTree.AddCallStack(stack)
+				callStackSearchTree.AddCallStack(stack)
 			}
+
+			// Clear the call stacks to free memory
 			c.IdentifiedCallStacks = nil
 			break
 		}
@@ -163,249 +281,138 @@ func (ap *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, con
 	for _, c := range appProfile.Spec.EphemeralContainers {
 		if c.Name == containerName {
 			for _, stack := range c.IdentifiedCallStacks {
-				index.searchTree.AddCallStack(stack)
+				callStackSearchTree.AddCallStack(stack)
 			}
+
+			// Clear the call stacks to free memory
 			c.IdentifiedCallStacks = nil
 			break
 		}
 	}
 }
 
-func (ap *ApplicationProfileCacheImpl) addApplicationProfile(obj runtime.Object) {
-	appProfile := obj.(*v1beta1.ApplicationProfile)
-	apName := objectcache.MetaUniqueName(appProfile)
-
-	if isUserManagedProfile(appProfile) {
-		ap.handleUserManagedProfile(appProfile)
-		return
-	}
-
-	// Original behavior for normal profiles
-	apState := newApplicationProfileState(appProfile)
-	ap.slugToState.Set(apName, apState)
-
-	if apState.status != helpersv1.Completed {
-		if ap.slugToAppProfile.Has(apName) {
-			ap.slugToAppProfile.Delete(apName)
-			ap.allProfiles.Remove(apName)
-		}
-		return
-	}
-
-	ap.allProfiles.Add(apName)
-
-	if ap.slugToContainers.Has(apName) {
-		time.AfterFunc(utils.RandomDuration(ap.cfg.MaxDelaySeconds, time.Second), func() {
-			ap.addFullApplicationProfile(appProfile, apName)
-		})
-	}
-}
-
-func (ap *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string) *v1beta1.ApplicationProfile {
-	if s := ap.containerToSlug.Get(containerID); s != "" {
-		return ap.slugToAppProfile.Get(s)
-	}
-	return nil
-}
-
-func (ap *ApplicationProfileCacheImpl) GetCallStackSearchTree(containerID string) *callstackcache.CallStackSearchTree {
-	if index := ap.containerCallStacks.Get(containerID); index != nil {
-		return index.searchTree
-	}
-	return nil
-}
-
-// ------------------ watcher.Adaptor methods -----------------------
-
-// ------------------ watcher.WatchResources methods -----------------------
-
-func (ap *ApplicationProfileCacheImpl) WatchResources() []watcher.WatchResource {
-	var w []watcher.WatchResource
-
-	// add pod
-	p := watcher.NewWatchResource(schema.GroupVersionResource{
-		Group:    "",
-		Version:  "v1",
-		Resource: "pods",
-	},
-		metav1.ListOptions{
-			FieldSelector: "spec.nodeName=" + ap.cfg.NodeName,
-		},
-	)
-	w = append(w, p)
-
-	// add application profile
-	apl := watcher.NewWatchResource(groupVersionResource, metav1.ListOptions{})
-	w = append(w, apl)
-
-	return w
-}
-
-// ------------------ watcher.Watcher methods -----------------------
-
-func (ap *ApplicationProfileCacheImpl) AddHandler(ctx context.Context, obj runtime.Object) {
-	if pod, ok := obj.(*corev1.Pod); ok {
-		ap.addPod(pod)
-	} else if appProfile, ok := obj.(*v1beta1.ApplicationProfile); ok {
-		ap.addApplicationProfile(appProfile)
-	}
-}
-
-func (ap *ApplicationProfileCacheImpl) ModifyHandler(ctx context.Context, obj runtime.Object) {
-	if pod, ok := obj.(*corev1.Pod); ok {
-		ap.addPod(pod)
-	} else if appProfile, ok := obj.(*v1beta1.ApplicationProfile); ok {
-		ap.addApplicationProfile(appProfile)
-	}
-}
-
-func (ap *ApplicationProfileCacheImpl) DeleteHandler(_ context.Context, obj runtime.Object) {
-	if pod, ok := obj.(*corev1.Pod); ok {
-		ap.deletePod(pod)
-	} else if appProfile, ok := obj.(*v1beta1.ApplicationProfile); ok {
-		ap.deleteApplicationProfile(appProfile)
-	}
-}
-
-// ------------------ watch pod methods -----------------------
-
-func (ap *ApplicationProfileCacheImpl) addPod(obj runtime.Object) {
-	pod := obj.(*corev1.Pod)
-
-	slug, err := ap.getSlug(pod)
-	if err != nil {
-		logger.L().Warning("ApplicationProfileCacheImpl - failed to get slug", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod", pod.GetName()), helpers.Error(err))
-		return
-	}
-
-	uniqueSlug := objectcache.UniqueName(pod.GetNamespace(), slug)
-
-	// in case of modified pod, remove the old containers
-	terminatedContainers := objectcache.ListTerminatedContainers(pod)
-	for _, container := range terminatedContainers {
-		ap.removeContainer(container)
-	}
-
-	containers := objectcache.ListContainersIDs(pod)
-	ap.initContainerIdToName(pod)
-	for _, container := range containers {
-
-		if !ap.slugToContainers.Has(uniqueSlug) {
-			ap.slugToContainers.Set(uniqueSlug, mapset.NewSet[string]())
-		}
-		ap.slugToContainers.Get(uniqueSlug).Add(container)
-
-		if s := ap.slugToState.Get(uniqueSlug); s.mode != helpersv1.Complete {
-			// if application profile is not complete, do not cache the pod
-			continue
-		}
-
-		// add the container to the cache
-		if ap.containerToSlug.Has(container) {
-			continue
-		}
-		ap.containerToSlug.Set(container, uniqueSlug)
-
-		// if application profile exists but is not cached
-		if ap.allProfiles.Contains(uniqueSlug) && !ap.slugToAppProfile.Has(uniqueSlug) {
-
-			// get the application profile
-			appProfile, err := ap.getApplicationProfile(pod.GetNamespace(), slug)
-			if err != nil {
-				logger.L().Warning("ApplicationProfileCacheImpl - failed to get application profile", helpers.Error(err))
-				continue
+// ContainerCallback handles container lifecycle events
+func (apc *ApplicationProfileCacheImpl) ContainerCallback(notif containercollection.PubSubEvent) {
+	switch notif.Type {
+	case containercollection.EventTypeAddContainer:
+		go func() {
+			if err := apc.addContainer(notif.Container); err != nil {
+				logger.L().Error("failed to add container to the cache", helpers.Error(err))
 			}
+		}()
+	case containercollection.EventTypeRemoveContainer:
+		apc.deleteContainer(notif.Container.Runtime.ContainerID)
+	}
+}
 
-			ap.slugToAppProfile.Set(uniqueSlug, appProfile)
+// addContainer adds a container to the cache
+func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollection.Container) error {
+	// Get container ID and namespace directly from container
+	containerID := container.Runtime.ContainerID
+	namespace := container.K8s.Namespace
+
+	// Get workload ID from shared data
+	sharedData, err := apc.waitForSharedContainerData(containerID)
+	if err != nil {
+		logger.L().Error("failed to get shared data for container",
+			helpers.String("containerID", containerID),
+			helpers.Error(err))
+		return err
+	}
+
+	workloadID := sharedData.Wlid
+	if workloadID == "" {
+		logger.L().Debug("empty workloadID for container", helpers.String("containerID", containerID))
+		return nil
+	}
+
+	// Create container info
+	containerInfo := &ContainerInfo{
+		ContainerID: containerID,
+		WorkloadID:  workloadID,
+		Namespace:   namespace,
+	}
+
+	// Add to container info map
+	apc.containerIDToInfo.Set(containerID, containerInfo)
+
+	// Add to namespace -> containers mapping
+	apc.mutex.Lock()
+	containerSet, exists := apc.namespaceToContainers.Load(namespace)
+	if !exists || containerSet == nil {
+		containerSet = mapset.NewSet[string]()
+		apc.namespaceToContainers.Set(namespace, containerSet)
+	}
+	containerSet.Add(containerID)
+	apc.mutex.Unlock()
+
+	logger.L().Debug("container added to cache",
+		helpers.String("containerID", containerID),
+		helpers.String("workloadID", workloadID),
+		helpers.String("namespace", namespace))
+
+	return nil
+}
+
+// deleteContainer deletes a container from the cache
+func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
+	// Get container info
+	containerInfo, exists := apc.containerIDToInfo.Load(containerID)
+	if !exists {
+		logger.L().Debug("containerID not found in cache", helpers.String("containerID", containerID))
+		return
+	}
+
+	// Clean up namespace -> containers mapping
+	apc.mutex.Lock()
+	if containerSet, exists := apc.namespaceToContainers.Load(containerInfo.Namespace); exists {
+		containerSet.Remove(containerID)
+	}
+	apc.mutex.Unlock()
+
+	// Clean up container info and call stack index
+	apc.containerIDToInfo.Delete(containerID)
+	apc.containerToCallStackIndex.Delete(containerID)
+
+	// Check if any other container is using the same workload ID
+	workloadStillInUse := false
+	apc.containerIDToInfo.Range(func(_ string, info *ContainerInfo) bool {
+		if info.WorkloadID == containerInfo.WorkloadID {
+			workloadStillInUse = true
+			return false // Stop iteration
 		}
+		return true // Continue iteration
+	})
 
-		appProfile := ap.slugToAppProfile.Get(uniqueSlug)
-		state := ap.slugToState.Get(uniqueSlug)
-		if appProfile != nil && state.status == helpersv1.Completed {
-			ap.indexContainerCallStacks(container, ap.containerToName.Get(container), appProfile)
+	// If no other container is using the same workload ID, delete it from the cache
+	if !workloadStillInUse {
+		apc.workloadIDToProfile.Delete(containerInfo.WorkloadID)
+		logger.L().Debug("deleted workloadID from cache", helpers.String("workloadID", containerInfo.WorkloadID))
+	}
+}
+
+// waitForSharedContainerData waits for shared container data to be available
+func (apc *ApplicationProfileCacheImpl) waitForSharedContainerData(containerID string) (*utils.WatchedContainerData, error) {
+	return backoff.Retry(context.Background(), func() (*utils.WatchedContainerData, error) {
+		if sharedData := apc.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
+			return sharedData, nil
 		}
-	}
-
+		return nil, fmt.Errorf("container %s not found in shared data", containerID)
+	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
 }
 
-func (ap *ApplicationProfileCacheImpl) initContainerIdToName(pod *corev1.Pod) {
-	// if the pod isn't fully started, we could be missing some *ContainerStatuses
-	for _, s := range pod.Status.ContainerStatuses {
-		ap.containerToName.Set(utils.TrimRuntimePrefix(s.ContainerID), s.Name)
-	}
-	for _, s := range pod.Status.InitContainerStatuses {
-		ap.containerToName.Set(utils.TrimRuntimePrefix(s.ContainerID), s.Name)
-	}
-	for _, s := range pod.Status.EphemeralContainerStatuses {
-		ap.containerToName.Set(utils.TrimRuntimePrefix(s.ContainerID), s.Name)
-	}
-}
-
-func (ap *ApplicationProfileCacheImpl) deletePod(obj runtime.Object) {
-	pod := obj.(*corev1.Pod)
-
-	containers := objectcache.ListContainersIDs(pod)
-	for _, container := range containers {
-		ap.removeContainer(container)
-	}
-}
-
-func (ap *ApplicationProfileCacheImpl) removeContainer(containerID string) {
-
-	uniqueSlug := ap.containerToSlug.Get(containerID)
-	ap.containerToSlug.Delete(containerID)
-	ap.containerCallStacks.Delete(containerID)
-	ap.containerToName.Delete(containerID)
-
-	// remove pod form the application profile mapping
-	if ap.slugToContainers.Has(uniqueSlug) {
-		ap.slugToContainers.Get(uniqueSlug).Remove(containerID)
-		if ap.slugToContainers.Get(uniqueSlug).Cardinality() == 0 {
-			// remove full application profile from cache
-			ap.slugToContainers.Delete(uniqueSlug)
-			ap.allProfiles.Remove(uniqueSlug)
-			ap.slugToAppProfile.Delete(uniqueSlug)
-			logger.L().Debug("ApplicationProfileCacheImpl - deleted pod from application profile cache", helpers.String("containerID", containerID), helpers.String("uniqueSlug", uniqueSlug))
-		}
-	}
-}
-
-// ------------------ watch application profile methods -----------------------
-
-func (ap *ApplicationProfileCacheImpl) addFullApplicationProfile(appProfile *v1beta1.ApplicationProfile, apName string) {
-	if userManagedProfile, exists := ap.userManagedProfiles.Load(apName); exists {
-		appProfile = ap.performMerge(appProfile, userManagedProfile)
-		// Clean up the user-managed profile after successful merge
-		ap.userManagedProfiles.Delete(apName)
-		logger.L().Debug("ApplicationProfileCacheImpl - merged pending user-managed profile", helpers.String("name", apName))
-	}
-
-	ap.slugToAppProfile.Set(apName, appProfile)
-
-	if containerSet, exists := ap.slugToContainers.Load(apName); exists {
-		for _, i := range containerSet.ToSlice() {
-			ap.containerToSlug.Set(i, apName)
-			ap.indexContainerCallStacks(i, ap.containerToName.Get(i), appProfile)
-		}
-	} else {
-		logger.L().Debug("ApplicationProfileCacheImpl - no containers found for application profile", helpers.String("name", apName))
-	}
-
-	logger.L().Debug("ApplicationProfileCacheImpl - added pod to application profile cache", helpers.String("name", apName))
-}
-
-func (ap *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedProfile *v1beta1.ApplicationProfile) *v1beta1.ApplicationProfile {
+func (apc *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedProfile *v1beta1.ApplicationProfile) *v1beta1.ApplicationProfile {
 	mergedProfile := normalProfile.DeepCopy()
 
 	// Merge spec
-	mergedProfile.Spec.Containers = ap.mergeContainers(mergedProfile.Spec.Containers, userManagedProfile.Spec.Containers)
-	mergedProfile.Spec.InitContainers = ap.mergeContainers(mergedProfile.Spec.InitContainers, userManagedProfile.Spec.InitContainers)
-	mergedProfile.Spec.EphemeralContainers = ap.mergeContainers(mergedProfile.Spec.EphemeralContainers, userManagedProfile.Spec.EphemeralContainers)
+	mergedProfile.Spec.Containers = apc.mergeContainers(mergedProfile.Spec.Containers, userManagedProfile.Spec.Containers)
+	mergedProfile.Spec.InitContainers = apc.mergeContainers(mergedProfile.Spec.InitContainers, userManagedProfile.Spec.InitContainers)
+	mergedProfile.Spec.EphemeralContainers = apc.mergeContainers(mergedProfile.Spec.EphemeralContainers, userManagedProfile.Spec.EphemeralContainers)
 
 	return mergedProfile
 }
 
-func (ap *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.ApplicationProfileContainer) []v1beta1.ApplicationProfileContainer {
+func (apc *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.ApplicationProfileContainer) []v1beta1.ApplicationProfileContainer {
 	if len(userManagedContainers) != len(normalContainers) {
 		// If the number of containers don't match, we can't merge
 		logger.L().Warning("ApplicationProfileCacheImpl - failed to merge user-managed profile with base profile",
@@ -420,7 +427,7 @@ func (ap *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userMan
 	for i := range normalContainers {
 		for _, userContainer := range userManagedContainers {
 			if normalContainers[i].Name == userContainer.Name {
-				ap.mergeContainer(&normalContainers[i], &userContainer)
+				apc.mergeContainer(&normalContainers[i], &userContainer)
 				break
 			}
 		}
@@ -428,7 +435,7 @@ func (ap *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userMan
 	return normalContainers
 }
 
-func (ap *ApplicationProfileCacheImpl) mergeContainer(normalContainer, userContainer *v1beta1.ApplicationProfileContainer) {
+func (apc *ApplicationProfileCacheImpl) mergeContainer(normalContainer, userContainer *v1beta1.ApplicationProfileContainer) {
 	normalContainer.Capabilities = append(normalContainer.Capabilities, userContainer.Capabilities...)
 	normalContainer.Execs = append(normalContainer.Execs, userContainer.Execs...)
 	normalContainer.Opens = append(normalContainer.Opens, userContainer.Opens...)
@@ -443,90 +450,40 @@ func (ap *ApplicationProfileCacheImpl) mergeContainer(normalContainer, userConta
 	}
 }
 
-func (ap *ApplicationProfileCacheImpl) deleteApplicationProfile(obj runtime.Object) {
-	appProfile := obj.(*v1beta1.ApplicationProfile)
-	apName := objectcache.MetaUniqueName(appProfile)
-
-	if isUserManagedProfile(appProfile) {
-		// For user-managed profiles, we need to use the base name for cleanup
-		baseProfileName := strings.TrimPrefix(appProfile.GetName(), "ug-")
-		baseProfileUniqueName := objectcache.UniqueName(appProfile.GetNamespace(), baseProfileName)
-		ap.userManagedProfiles.Delete(baseProfileUniqueName)
-
-		logger.L().Debug("ApplicationProfileCacheImpl - deleted user-managed profile from cache",
-			helpers.String("profileName", appProfile.GetName()),
-			helpers.String("baseProfile", baseProfileName))
-	} else {
-		// For normal profiles, clean up all related data
-		ap.slugToAppProfile.Delete(apName)
-		ap.slugToState.Delete(apName)
-		ap.allProfiles.Remove(apName)
-
-		// Log the deletion of normal profile
-		logger.L().Debug("ApplicationProfileCacheImpl - deleted application profile from cache",
-			helpers.String("uniqueSlug", apName))
-	}
-
-	// Clean up any orphaned user-managed profiles
-	ap.cleanupOrphanedUserManagedProfiles()
-}
-
-func (ap *ApplicationProfileCacheImpl) getApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
-	return ap.storageClient.ApplicationProfiles(namespace).Get(context.Background(), name, metav1.GetOptions{})
-}
-
-func (ap *ApplicationProfileCacheImpl) getSlug(p *corev1.Pod) (string, error) {
-	// need to set APIVersion and Kind before unstructured conversion, preparing for instanceID extraction
-	p.APIVersion = "v1"
-	p.Kind = "Pod"
-
-	unstructuredObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&p)
-	if err != nil {
-		return "", fmt.Errorf("failed to convert runtime object to unstructured: %w", err)
-	}
-	pod := workloadinterface.NewWorkloadObj(unstructuredObj)
-	if pod == nil {
-		return "", fmt.Errorf("failed to get workload object")
-	}
-
-	// get instanceIDs
-	instanceIDs, err := instanceidhandler.GenerateInstanceID(pod, ap.cfg.ExcludeJsonPaths)
-	if err != nil {
-		return "", err
-	}
-	if len(instanceIDs) == 0 {
-		return "", fmt.Errorf("instanceIDs is empty")
-	}
-
-	// a single pod can have multiple instanceIDs (because of the containers), but we only need one
-	instanceID := instanceIDs[0]
-	slug, err := instanceID.GetSlug(true)
-	if err != nil {
-		return "", fmt.Errorf("failed to get slug")
-	}
-	return slug, nil
-}
-
-// Add cleanup method for any orphaned user-managed profiles
-func (ap *ApplicationProfileCacheImpl) cleanupOrphanedUserManagedProfiles() {
-	// This could be called periodically or during certain operations
-	ap.userManagedProfiles.Range(func(key string, value *v1beta1.ApplicationProfile) bool {
-		if ap.slugToAppProfile.Has(key) {
-			// If base profile exists but merge didn't happen for some reason,
-			// attempt merge again and cleanup
-			if baseProfile := ap.slugToAppProfile.Get(key); baseProfile != nil {
-				mergedProfile := ap.performMerge(baseProfile, value)
-				ap.slugToAppProfile.Set(key, mergedProfile)
-				ap.userManagedProfiles.Delete(key)
-				logger.L().Debug("ApplicationProfileCacheImpl - cleaned up orphaned user-managed profile", helpers.String("name", key))
-			}
-		}
-		return true
-	})
-}
-
 func isUserManagedProfile(appProfile *v1beta1.ApplicationProfile) bool {
 	return appProfile.Annotations != nil &&
 		appProfile.Annotations["kubescape.io/managed-by"] == "User" &&
 		strings.HasPrefix(appProfile.GetName(), "ug-")
 }
+
+// GetApplicationProfile gets the application profile for a container
+func (apc *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string) *v1beta1.ApplicationProfile {
+	// Get container info
+	if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists {
+		workloadID := containerInfo.WorkloadID
+		if workloadID == "" {
+			return nil
+		}
+
+		// Try to get profile from cache
+		if profile, exists := apc.workloadIDToProfile.Load(workloadID); exists {
+			if profile != nil {
+				return profile
+			}
+		}
+	}
+
+	return nil
+}
+
+// GetCallStackSearchTree gets the call stack index for a container
+func (apc *ApplicationProfileCacheImpl) GetCallStackSearchTree(containerID string) *callstackcache.CallStackSearchTree {
+	if index, exist := apc.containerToCallStackIndex.Load(containerID); exist {
+		return index.searchTree
+	}
+
+	return nil
+}
+
+// Ensure ApplicationProfileCacheImpl implements the ApplicationProfileCache interface
+var _ objectcache.ApplicationProfileCache = (*ApplicationProfileCacheImpl)(nil)
