@@ -287,12 +287,26 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 			continue
 		}
 
-		res := rule.ProcessEvent(eventType, event, rm.objectCache)
+		if rule.Requirements().GetProfileRequirements().Required || rule.Requirements().GetProfileRequirements().Optional {
+			ok, _ = rule.EvaluateRuleWithProfile(eventType, event, rm.objectCache)
+			if !ok {
+				continue
+			}
+		}
+
+		if !rule.Requirements().GetProfileRequirements().Required {
+			ok, _ := rule.EvaluateRule(eventType, event, rm.objectCache.K8sObjectCache())
+			if !ok {
+				continue
+			}
+		}
+
+		// Create and process the failure
+		res := rule.CreateRuleFailure(eventType, event, rm.objectCache)
 		if res != nil {
 			res = rm.enrichRuleFailure(rule, res)
 			res.SetWorkloadDetails(details)
 			rm.exporter.SendRuleAlert(res)
-
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())

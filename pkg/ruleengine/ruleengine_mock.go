@@ -60,7 +60,15 @@ func (rule *RuleMock) ID() string {
 func (rule *RuleMock) DeleteRule() {
 }
 
-func (rule *RuleMock) ProcessEvent(_ utils.EventType, _ utils.K8sEvent, _ objectcache.ObjectCache) RuleFailure {
+func (rule *RuleMock) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+	return false, nil
+}
+
+func (rule *RuleMock) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}) {
+	return false, nil
+}
+
+func (rule *RuleMock) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) RuleFailure {
 	return nil
 }
 

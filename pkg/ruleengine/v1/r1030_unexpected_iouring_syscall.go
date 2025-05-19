@@ -59,29 +59,39 @@ func (rule *R1030UnexpectedIouringOperation) ID() string {
 func (rule *R1030UnexpectedIouringOperation) DeleteRule() {
 }
 
-func (rule *R1030UnexpectedIouringOperation) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	var k8sCache objectcache.K8sObjectCache
-	if objCache == nil {
-		k8sCache = nil
-	} else {
-		k8sCache = objCache.K8sObjectCache()
-	}
-	if ok, _ := rule.EvaluateRule(eventType, event, k8sCache); !ok {
-		return nil
+func (rule *R1030UnexpectedIouringOperation) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) (bool, interface{}) {
+	if eventType != utils.IoUringEventType {
+		return false, nil
 	}
 
 	iouringEvent, ok := event.(*traceriouringtype.Event)
 	if !ok {
-		return nil
+		return false, nil
 	}
 
-	var profileMetadata *apitypes.ProfileMetadata
+	ok, _ = iouring.GetOpcodeName(uint8(iouringEvent.Opcode))
+	return ok, nil
+}
+
+func (rule *R1030UnexpectedIouringOperation) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}) {
+	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil
+	}
+
+	iouringEvent, _ := event.(*traceriouringtype.Event)
 	if allowed, err := IsAllowed(&iouringEvent.Event, objCache, iouringEvent.Comm, R1030ID); err != nil {
 		logger.L().Error("RuleManager - failed to check if iouring event is allowed", helpers.Error(err))
+		return false, nil
 	} else if allowed {
-		return nil
+		return false, nil
 	}
 
+	return true, nil
+}
+
+func (rule *R1030UnexpectedIouringOperation) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	iouringEvent, _ := event.(*traceriouringtype.Event)
 	ok, name := iouring.GetOpcodeName(uint8(iouringEvent.Opcode))
 	if !ok {
 		return nil
@@ -98,7 +108,7 @@ func (rule *R1030UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 			},
 			InfectedPID:     iouringEvent.Pid,
 			Severity:        R1030UnexpectedIouringOperationRuleDescriptor.Priority,
-			ProfileMetadata: profileMetadata,
+			ProfileMetadata: nil,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -120,21 +130,6 @@ func (rule *R1030UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 		},
 		RuleID: rule.ID(),
 	}
-
-}
-
-func (rule *R1030UnexpectedIouringOperation) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) (bool, interface{}) {
-	if eventType != utils.IoUringEventType {
-		return false, nil
-	}
-
-	iouringEvent, ok := event.(*traceriouringtype.Event)
-	if !ok {
-		return false, nil
-	}
-
-	ok, _ = iouring.GetOpcodeName(uint8(iouringEvent.Opcode))
-	return ok, nil
 }
 
 func (rule *R1030UnexpectedIouringOperation) Requirements() ruleengine.RuleSpec {

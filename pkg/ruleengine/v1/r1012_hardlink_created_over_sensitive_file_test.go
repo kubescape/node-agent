@@ -60,7 +60,7 @@ func TestR1012HardlinkCreatedOverSensitiveFile(t *testing.T) {
 		NewPath: "test",
 	}
 
-	ruleResult := r.ProcessEvent(utils.HardlinkEventType, e, &objCache)
+	ruleResult := ProcessRuleEvaluationTest(r, utils.HardlinkEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since hardlink path is not sensitive")
@@ -70,7 +70,7 @@ func TestR1012HardlinkCreatedOverSensitiveFile(t *testing.T) {
 	// Create a hardlink event with sensitive file path
 	e.OldPath = "/etc/shadow"
 	e.NewPath = "/etc/abc"
-	ruleResult = r.ProcessEvent(utils.HardlinkEventType, e, &objCache)
+	ruleResult = ProcessRuleEvaluationTest(r, utils.HardlinkEventType, e, &objCache)
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of hardlink is used over sensitive file")
@@ -78,7 +78,7 @@ func TestR1012HardlinkCreatedOverSensitiveFile(t *testing.T) {
 	}
 
 	e.OldPath = "/etc/abc"
-	ruleResult = r.ProcessEvent(utils.HardlinkEventType, e, &objCache)
+	ruleResult = ProcessRuleEvaluationTest(r, utils.HardlinkEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since hardlink is not used over sensitive file")
@@ -89,7 +89,7 @@ func TestR1012HardlinkCreatedOverSensitiveFile(t *testing.T) {
 	e.Comm = "/usr/sbin/groupadd"
 	e.OldPath = "/etc/shadow"
 	e.NewPath = "/etc/abc"
-	ruleResult = r.ProcessEvent(utils.HardlinkEventType, e, &objCache)
+	ruleResult = ProcessRuleEvaluationTest(r, utils.HardlinkEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since file is whitelisted and not sensitive")

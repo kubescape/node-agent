@@ -107,7 +107,7 @@ func TestR1030UnexpectedIouringOperation(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ruleResult := r.ProcessEvent(utils.IoUringEventType, tc.event, &objCache)
+			ruleResult := ProcessRuleEvaluationTest(r, utils.IoUringEventType, tc.event, &objCache)
 
 			if tc.expectedAlert && ruleResult == nil {
 				t.Errorf("Expected alert for io_uring operation but got nil")
@@ -120,7 +120,7 @@ func TestR1030UnexpectedIouringOperation(t *testing.T) {
 
 	// Test wrong event type
 	wrongEvent := &traceriouringtype.Event{}
-	ruleResult := r.ProcessEvent(utils.HardlinkEventType, wrongEvent, &objCache)
+	ruleResult := ProcessRuleEvaluationTest(r, utils.HardlinkEventType, wrongEvent, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected no alert for wrong event type but got: %v", ruleResult)
 	}

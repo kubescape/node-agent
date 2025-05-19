@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -78,35 +77,43 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ID() string {
 func (rule *R1012HardlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
-func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	var k8sCache objectcache.K8sObjectCache
-	if objCache == nil {
-		k8sCache = nil
-	} else {
-		k8sCache = objCache.K8sObjectCache()
+func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) (bool, interface{}) {
+	if eventType != utils.HardlinkEventType {
+		return false, nil
 	}
-	if ok, _ := rule.EvaluateRule(eventType, event, k8sCache); !ok {
-		return nil
+
+	hardlinkEvent, ok := event.(*tracerhardlinktype.Event)
+	if !ok {
+		return false, nil
+	}
+
+	for _, path := range rule.additionalPaths {
+		if strings.HasPrefix(hardlinkEvent.OldPath, path) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}) {
+	// First do basic evaluation
+	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil
 	}
 
 	hardlinkEvent, _ := event.(*tracerhardlinktype.Event)
-
-	var profileMetadata *apitypes.ProfileMetadata
 	if allowed, err := IsAllowed(&hardlinkEvent.Event, objCache, hardlinkEvent.Comm, R1012ID); err != nil {
-		ap := objCache.ApplicationProfileCache().GetApplicationProfile(hardlinkEvent.Runtime.ContainerID)
-		if ap != nil {
-			profileMetadata = &apitypes.ProfileMetadata{
-				Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
-				Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
-				Name:               ap.Name,
-				Type:               apitypes.ApplicationProfile,
-				IsProfileDependent: true,
-			}
-		}
-
+		return true, nil // If we can't check profile, we still want to alert
 	} else if allowed {
-		return nil
+		return false, nil
 	}
+
+	return true, nil
+}
+
+func (rule *R1012HardlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	hardlinkEvent, _ := event.(*tracerhardlinktype.Event)
 
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
@@ -116,9 +123,8 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 				"oldPath": hardlinkEvent.OldPath,
 				"newPath": hardlinkEvent.NewPath,
 			},
-			InfectedPID:     hardlinkEvent.Pid,
-			Severity:        R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
-			ProfileMetadata: profileMetadata,
+			InfectedPID: hardlinkEvent.Pid,
+			Severity:    R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -144,24 +150,6 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.
 		RuleID: rule.ID(),
 		Extra:  hardlinkEvent.GetExtra(),
 	}
-}
-
-func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) (bool, interface{}) {
-	if eventType != utils.HardlinkEventType {
-		return false, nil
-	}
-
-	hardlinkEvent, ok := event.(*tracerhardlinktype.Event)
-	if !ok {
-		return false, nil
-	}
-
-	for _, path := range rule.additionalPaths {
-		if strings.HasPrefix(hardlinkEvent.OldPath, path) {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func (rule *R1012HardlinkCreatedOverSensitiveFile) Requirements() ruleengine.RuleSpec {

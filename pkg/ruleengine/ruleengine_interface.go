@@ -75,8 +75,14 @@ type RuleEvaluator interface {
 	// Rule Name
 	Name() string
 
-	// Rule processing
-	ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) RuleFailure
+	// EvaluateRule evaluates the rule without profile
+	EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{})
+
+	// EvaluateRuleWithProfile evaluates the rule with profile
+	EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{})
+
+	// CreateRuleFailure creates a rule failure
+	CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) RuleFailure
 
 	// Rule requirements
 	Requirements() RuleSpec

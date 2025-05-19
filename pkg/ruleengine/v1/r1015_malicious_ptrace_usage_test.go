@@ -71,7 +71,7 @@ func TestR1015MaliciousPtraceUsage(t *testing.T) {
 		Request: PTRACE_SETREGS, // Malicious ptrace request
 	}
 
-	ruleResult := r.ProcessEvent(utils.PtraceEventType, e, &objCache)
+	ruleResult := ProcessRuleEvaluationTest(r, utils.PtraceEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to be Failure because of malicious ptrace request: %d", e.Request)
 		return
@@ -94,7 +94,7 @@ func TestR1015MaliciousPtraceUsage(t *testing.T) {
 	// Test with a disallowed request but recognized process
 	e.Comm = "processA"         // Allowed process
 	e.Request = PTRACE_POKETEXT // Malicious ptrace request
-	ruleResult = r.ProcessEvent(utils.PtraceEventType, e, &objCache)
+	ruleResult = ProcessRuleEvaluationTest(r, utils.PtraceEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to be Failure because of malicious ptrace request: %d, even though process is allowed", e.Request)
 		return
@@ -103,7 +103,7 @@ func TestR1015MaliciousPtraceUsage(t *testing.T) {
 	// Test with an unrecognized process and malicious request
 	e.Comm = "unknown_process"
 	e.Request = PTRACE_POKEDATA // Malicious ptrace request
-	ruleResult = r.ProcessEvent(utils.PtraceEventType, e, &objCache)
+	ruleResult = ProcessRuleEvaluationTest(r, utils.PtraceEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to be Failure because of unknown process with malicious ptrace request: %d", e.Request)
 	}
