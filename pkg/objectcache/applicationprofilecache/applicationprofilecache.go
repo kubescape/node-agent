@@ -95,8 +95,6 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			return true
 		}
 
-		logger.L().Debug("updating profiles for namespace", helpers.String("namespace", namespace))
-
 		// Get profiles list for this namespace
 		profileList, err := apc.storageClient.ApplicationProfiles(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
@@ -196,6 +194,12 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 	userManagedProfileUniqueIdentifier := profile.ResourceVersion + string(profile.UID)
 
 	apc.workloadIDToProfile.Range(func(wlid string, originalProfile *v1beta1.ApplicationProfile) bool {
+		logger.L().Debug("checking for user-managed profile",
+			helpers.String("workloadID", wlid),
+			helpers.String("namespace", profile.Namespace),
+			helpers.String("profileName", profile.Name),
+			helpers.String("normalizedProfileName", normalizedProfileName),
+			helpers.String("userManagedProfileUniqueIdentifier", userManagedProfileUniqueIdentifier))
 		if originalProfile.Name == normalizedProfileName && originalProfile.Namespace == profile.Namespace {
 			// Check if we already merged this user-managed profile
 			if userManagedProfileUniqueId, exists := apc.profileToUserManagedIdentifier.Load(originalProfile.Name); exists {
