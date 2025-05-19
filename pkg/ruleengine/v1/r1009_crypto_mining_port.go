@@ -99,9 +99,10 @@ func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType
 					UniqueID:  HashStringToMD5(fmt.Sprintf("%s%d", networkEvent.Comm, networkEvent.Port)),
 					AlertName: rule.Name(),
 					Arguments: map[string]interface{}{
-						"port":  networkEvent.Port,
-						"proto": networkEvent.Proto,
-						"ip":    networkEvent.DstEndpoint.Addr,
+						"port":   networkEvent.Port,
+						"proto":  networkEvent.Proto,
+						"ip":     networkEvent.DstEndpoint.Addr,
+						"domain": networkEvent.DstEndpoint.Addr,
 					},
 					InfectedPID: networkEvent.Pid,
 					Severity:    R1009CryptoMiningRelatedPortRuleDescriptor.Priority,
