@@ -2,6 +2,7 @@ package rulemanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -182,7 +183,7 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 
 func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	// check if the container should be ignored
-	if rm.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+	if rm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		return
 	}
 
@@ -227,9 +228,9 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 				parts := strings.Split(id, "/")
 				if len(parts) == 3 && parts[0] == namespace && parts[1] == podName {
 					stillTracked = true
-					return false // Stop iteration
+					return true // We found a match, can stop iteration
 				}
-				return true // Continue iteration
+				return false // No match yet, continue looking
 			})
 
 			if !stillTracked {
@@ -309,8 +310,10 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 		res := rule.CreateRuleFailure(eventType, event, rm.objectCache)
 		if res != nil {
 			res = rm.enrichRuleFailure(rule, res)
-			res.SetWorkloadDetails(details)
-			rm.exporter.SendRuleAlert(res)
+			if res != nil {
+				res.SetWorkloadDetails(details)
+				rm.exporter.SendRuleAlert(res)
+			}
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())
@@ -437,7 +440,11 @@ func (rm *RuleManager) enrichRuleFailure(rule ruleengine.RuleEvaluator, ruleFail
 	}
 
 	if rm.enricher != nil && !reflect.ValueOf(rm.enricher).IsNil() {
-		rm.enricher.EnrichRuleFailure(ruleFailure)
+		if err := rm.enricher.EnrichRuleFailure(ruleFailure); err != nil {
+			if errors.Is(err, ErrRuleShouldNotBeAlerted) {
+				return nil
+			}
+		}
 	}
 
 	return ruleFailure

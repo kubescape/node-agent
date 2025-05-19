@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
+	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"net"
 	"os"
 	"path/filepath"
@@ -26,7 +28,6 @@ import (
 	securejoin "github.com/cyphar/filepath-securejoin"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/distribution/distribution/reference"
-	"github.com/gammazero/workerpool"
 	"github.com/google/go-containerregistry/pkg/name"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
@@ -39,6 +40,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/workerpool"
 	"github.com/moby/sys/mountinfo"
 	"github.com/opencontainers/go-digest"
 	"github.com/spf13/afero"
@@ -152,7 +154,7 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 		return
 	}
 	// check if the container should be ignored
-	if s.cfg.SkipNamespace(notif.Container.K8s.Namespace) {
+	if s.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		return
 	}
 	// enqueue the container for processing
@@ -324,6 +326,10 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 	cfg := syft.DefaultCreateSBOMConfig()
 	cfg.ToolName = "syft"
 	cfg.ToolVersion = s.version
+	if s.cfg.EnableEmbeddedSboms {
+		// ask Syft to also scan the image for embedded SBOMs
+		cfg.WithCatalogers(pkgcataloging.NewCatalogerReference(sbomcataloger.NewCataloger(), []string{pkgcataloging.ImageTag}))
+	}
 	syftSBOM, err := syft.CreateSBOM(context.Background(), src, cfg)
 	if err != nil {
 		logger.L().Ctx(s.ctx).Error("SbomManager - failed to generate SBOM",

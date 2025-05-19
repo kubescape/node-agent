@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff"
+	"github.com/google/uuid"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
@@ -32,7 +31,7 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 		return
 	}
 	// check if the container should be ignored
-	if ch.ignoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName) {
+	if ch.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 		// avoid loops when the container is being removed
 		if notif.Type == containercollection.EventTypeAddContainer {
 			ch.unregisterContainer(notif.Container)
@@ -41,8 +40,13 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 	}
 	// scale up the pool size if needed pkg/config/config.go:66
 	for _, callback := range ch.callbacks {
+		// generate a unique ID for the callback invocation
+		name := utils.FuncName(callback)
+		id := uuid.New().String()
 		ch.pool.Submit(func() {
+			logger.L().Debug("IGContainerWatcher - callback started", helpers.String("callback", name), helpers.String("id", id))
 			callback(notif)
+			logger.L().Debug("IGContainerWatcher - callback finished", helpers.String("callback", name), helpers.String("id", id))
 		})
 	}
 }
@@ -52,7 +56,7 @@ func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.P
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		logger.L().Info("start monitor on container",
+		logger.L().Debug("IGContainerWatcher.containerCallback - add container event received",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID),
 			helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
@@ -71,15 +75,21 @@ func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.P
 		go ch.setSharedWatchedContainerData(notif.Container)
 
 		time.AfterFunc(sniffingTime, func() {
-			logger.L().Info("stop monitor on container - monitoring time ended", helpers.String("container ID", notif.Container.Runtime.ContainerID), helpers.String("k8s workload", k8sContainerID))
+			logger.L().Debug("IGContainerWatcher.containerCallback - monitoring time ended",
+				helpers.String("container ID", notif.Container.Runtime.ContainerID),
+				helpers.String("k8s workload", k8sContainerID),
+				helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
+				helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
 			ch.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.networkManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ch.unregisterContainer(notif.Container)
 		})
 	case containercollection.EventTypeRemoveContainer:
-		logger.L().Info("stop monitor on container - container has terminated",
+		logger.L().Debug("IGContainerWatcher.containerCallback - remove container event received",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
-			helpers.String("k8s workload", k8sContainerID))
+			helpers.String("k8s workload", k8sContainerID),
+			helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
+			helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
 		ch.objectCache.K8sObjectCache().DeleteSharedContainerData(notif.Container.Runtime.ContainerID)
 	}
 }
@@ -188,7 +198,11 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 	// Start the container collection
 	containerEventFuncs := []containercollection.FuncNotify{
-		ch.containerCallback,
+		func(event containercollection.PubSubEvent) {
+			logger.L().TimedWrapper("synchronous containerCallback", 5*time.Second, func() {
+				ch.containerCallback(event)
+			})
+		},
 		// other callbacks should be put in ch.callbacks to be called from ch.containerCallback
 	}
 
@@ -256,7 +270,7 @@ func (ch *IGContainerWatcher) addRunningContainers(notf *rulebindingmanager.Rule
 	pod := notf.GetPod()
 
 	// skip containers that should be ignored
-	if ch.ignoreContainer(pod.GetNamespace(), pod.GetName()) {
+	if ch.cfg.IgnoreContainer(pod.GetNamespace(), pod.GetName(), pod.GetLabels()) {
 		logger.L().Debug("IGContainerWatcher - skipping pod", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod name", pod.GetName()))
 		return
 	}
@@ -540,19 +554,4 @@ func (ch *IGContainerWatcher) unregisterContainer(container *containercollection
 
 	ch.containerCollection.RemoveContainer(container.Runtime.ContainerID)
 	ch.objectCache.K8sObjectCache().DeleteSharedContainerData(container.Runtime.ContainerID)
-}
-
-func (ch *IGContainerWatcher) ignoreContainer(namespace, name string) bool {
-	// do not trace any of our pods
-	if namespace == ch.namespace {
-		return true
-	}
-	// do not trace the node-agent pods if MULTIPLY is set
-	if m := os.Getenv("MULTIPLY"); m == "true" {
-		if strings.HasPrefix(name, "node-agent") {
-			return true
-		}
-	}
-	// check if config excludes the namespace
-	return ch.cfg.SkipNamespace(namespace)
 }
