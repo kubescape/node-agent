@@ -196,12 +196,18 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 	apc.workloadIDToProfile.Range(func(wlid string, originalProfile *v1beta1.ApplicationProfile) bool {
 		logger.L().Debug("checking for user-managed profile",
 			helpers.String("workloadID", wlid),
-			helpers.String("namespace", profile.Namespace),
-			helpers.String("profileName", profile.Name),
+			helpers.String("namespace", originalProfile.Namespace),
+			helpers.String("profileName", originalProfile.Name),
 			helpers.String("normalizedProfileName", normalizedProfileName),
 			helpers.String("userManagedProfileUniqueIdentifier", userManagedProfileUniqueIdentifier))
 		if originalProfile.Name == normalizedProfileName && originalProfile.Namespace == profile.Namespace {
 			// Check if we already merged this user-managed profile
+			logger.L().Debug("found matching profile, checking for merge",
+				helpers.String("workloadID", wlid),
+				helpers.String("namespace", originalProfile.Namespace),
+				helpers.String("profileName", originalProfile.Name),
+				helpers.String("normalizedProfileName", normalizedProfileName),
+				helpers.String("userManagedProfileUniqueIdentifier", userManagedProfileUniqueIdentifier))
 			if userManagedProfileUniqueId, exists := apc.profileToUserManagedIdentifier.Load(originalProfile.Name); exists {
 				if userManagedProfileUniqueId == userManagedProfileUniqueIdentifier {
 					logger.L().Debug("user-managed profile already merged, skipping",
@@ -222,6 +228,12 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 				return false // Stop iteration
 			}
 			profile = fullProfile
+			logger.L().Debug("fetched user-managed profile from storage",
+				helpers.String("workloadID", wlid),
+				helpers.String("namespace", profile.Namespace),
+				helpers.String("profileName", profile.Name),
+				helpers.String("normalizedProfileName", normalizedProfileName),
+				helpers.String("userManagedProfileUniqueIdentifier", userManagedProfileUniqueIdentifier))
 			// Merge the user-managed profile with the normal profile
 			mergedProfile := apc.performMerge(originalProfile, profile)
 			apc.workloadIDToProfile.Set(wlid, mergedProfile)
@@ -406,6 +418,11 @@ func (apc *ApplicationProfileCacheImpl) waitForSharedContainerData(containerID s
 }
 
 func (apc *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedProfile *v1beta1.ApplicationProfile) *v1beta1.ApplicationProfile {
+	logger.L().Debug("merging application profiles",
+		helpers.String("normalProfileName", normalProfile.Name),
+		helpers.String("userManagedProfileName", userManagedProfile.Name),
+		helpers.String("normalProfileNamespace", normalProfile.Namespace),
+		helpers.String("userManagedProfileNamespace", userManagedProfile.Namespace))
 	mergedProfile := normalProfile.DeepCopy()
 
 	// Merge spec
