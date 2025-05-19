@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -165,12 +166,12 @@ func IsAllowed(event *eventtypes.Event, objCache objectcache.ObjectCache, proces
 	}
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(event.Runtime.ContainerID)
 	if ap == nil {
-		return false, errors.New("application profile not found")
+		return false, rulemanager.NoProfileAvailable
 	}
 
 	appProfile, err := GetContainerFromApplicationProfile(ap, event.GetContainer())
 	if err != nil {
-		return false, err
+		return false, rulemanager.NoProfileAvailable
 	}
 
 	// rule policy does not exists, allowed by default

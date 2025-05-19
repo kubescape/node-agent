@@ -288,18 +288,15 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 			continue
 		}
 
+		evaluated := false
 		if rule.Requirements().GetProfileRequirements().Required || rule.Requirements().GetProfileRequirements().Optional {
 			ok, _, err := rule.EvaluateRuleWithProfile(eventType, event, rm.objectCache)
-			if !ok {
+			if !ok && !errors.Is(err, rulemanager.NoProfileAvailable) {
 				continue
 			}
+		}
 
-			if err != nil {
-				logger.L().Error("RuleManager - failed to evaluate rule with profile", helpers.Error(err))
-				continue
-			}
-			
-		} else if !rule.Requirements().GetProfileRequirements().Required {
+		if !rule.Requirements().GetProfileRequirements().Required && !evaluated {
 			ok, _ := rule.EvaluateRule(eventType, event, rm.objectCache.K8sObjectCache())
 			if !ok {
 				continue
@@ -441,7 +438,7 @@ func (rm *RuleManager) enrichRuleFailure(rule ruleengine.RuleEvaluator, ruleFail
 
 	if rm.enricher != nil && !reflect.ValueOf(rm.enricher).IsNil() {
 		if err := rm.enricher.EnrichRuleFailure(ruleFailure); err != nil {
-			if errors.Is(err, ErrRuleShouldNotBeAlerted) {
+			if errors.Is(err, rulemanager.ErrRuleShouldNotBeAlerted) {
 				return nil
 			}
 		}

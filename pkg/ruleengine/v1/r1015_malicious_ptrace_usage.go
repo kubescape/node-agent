@@ -70,6 +70,7 @@ func (rule *R1015MaliciousPtraceUsage) EvaluateRule(eventType utils.EventType, e
 	return true, nil
 }
 
+// Won't be used, because the rule is not profile dependent
 func (rule *R1015MaliciousPtraceUsage) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
 	ok, data := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
 	return ok, data, nil

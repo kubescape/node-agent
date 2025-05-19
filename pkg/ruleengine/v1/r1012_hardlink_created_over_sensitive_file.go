@@ -104,7 +104,7 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRuleWithProfile(event
 
 	hardlinkEvent, _ := event.(*tracerhardlinktype.Event)
 	if allowed, err := IsAllowed(&hardlinkEvent.Event, objCache, hardlinkEvent.Comm, R1012ID); err != nil {
-		return true, nil, nil // If we can't check profile, we still want to alert
+		return false, nil, err // If we can't check profile, we still want to alert
 	} else if allowed {
 		return false, nil, nil
 	}

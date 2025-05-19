@@ -92,7 +92,7 @@ func (rule *R1011LdPreloadHook) EvaluateRuleWithProfile(eventType utils.EventTyp
 	case utils.ExecveEventType:
 		execEvent, _ := event.(*events.ExecEvent)
 		if allowed, err := IsAllowed(&execEvent.Event.Event, objCache, execEvent.Comm, R1011ID); err != nil {
-			return true, nil, nil // If we can't check profile, we still want to alert
+			return false, nil, err
 		} else if allowed {
 			return false, nil, nil
 		}
@@ -101,7 +101,7 @@ func (rule *R1011LdPreloadHook) EvaluateRuleWithProfile(eventType utils.EventTyp
 	case utils.OpenEventType:
 		openEvent, _ := event.(*events.OpenEvent)
 		if allowed, err := IsAllowed(&openEvent.Event.Event, objCache, openEvent.Comm, R1011ID); err != nil {
-			return true, nil, nil
+			return false, nil, err
 		} else if allowed {
 			return false, nil, nil
 		}
@@ -124,12 +124,6 @@ func (rule *R1011LdPreloadHook) CreateRuleFailure(eventType utils.EventType, eve
 
 	default:
 		return nil
-	}
-}
-
-func (rule *R1011LdPreloadHook) Requirements() ruleengine.RuleSpec {
-	return &RuleRequirements{
-		EventTypes: R1011LdPreloadHookRuleDescriptor.Requirements.RequiredEventTypes(),
 	}
 }
 
@@ -265,4 +259,10 @@ func GetLdHookVar(envVars map[string]string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func (rule *R1011LdPreloadHook) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes: R1011LdPreloadHookRuleDescriptor.Requirements.RequiredEventTypes(),
+	}
 }

@@ -1,22 +1,23 @@
 package ruleengine
 
 import (
+	"errors"
+
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 func ProcessRuleEvaluationTest(rule ruleengine.RuleEvaluator, eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	// First check if we need profile evaluation
+
 	if rule.Requirements().GetProfileRequirements().Required || (rule.Requirements().GetProfileRequirements().Optional) {
 		ok, _, err := rule.EvaluateRuleWithProfile(eventType, event, objCache)
-		if err != nil {
+		if !ok && !errors.Is(err, rulemanager.NoProfileAvailable) {
 			return nil
 		}
-		if !ok {
-			return nil
-		}
-		
+
 	}
 
 	// If profile is not required, do basic evaluation
