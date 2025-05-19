@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -79,34 +78,44 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ID() string {
 func (rule *R1010SymlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
-func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	var k8sCache objectcache.K8sObjectCache
-	if objCache == nil {
-		k8sCache = nil
-	} else {
-		k8sCache = objCache.K8sObjectCache()
-	}
-	if ok, _ := rule.EvaluateRule(eventType, event, k8sCache); !ok {
-		return nil
+func (rule *R1010SymlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+	if eventType != utils.SymlinkEventType {
+		return false, nil
 	}
 
-	symlinkEvent, _ := event.(*tracersymlinktype.Event)
-	var profileMetadata *apitypes.ProfileMetadata
-	if allowed, err := IsAllowed(&symlinkEvent.Event, objCache, symlinkEvent.Comm, R1010ID); err != nil {
-		ap := objCache.ApplicationProfileCache().GetApplicationProfile(symlinkEvent.Runtime.ContainerID)
-		if ap != nil {
-			profileMetadata = &apitypes.ProfileMetadata{
-				Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
-				Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
-				Name:               ap.Name,
-				Type:               apitypes.ApplicationProfile,
-				IsProfileDependent: true,
-			}
+	symlinkEvent, ok := event.(*tracersymlinktype.Event)
+	if !ok {
+		return false, nil
+	}
+
+	for _, path := range rule.additionalPaths {
+		if strings.HasPrefix(symlinkEvent.OldPath, path) {
+			return true, symlinkEvent
 		}
-
-	} else if allowed {
-		return nil
 	}
+
+	return false, nil
+}
+
+func (rule *R1010SymlinkCreatedOverSensitiveFile) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	// First do basic evaluation
+	ok, symlinkEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
+	}
+
+	symlinkEventTyped, _ := symlinkEvent.(*tracersymlinktype.Event)
+	if allowed, err := IsAllowed(&symlinkEventTyped.Event, objCache, symlinkEventTyped.Comm, R1010ID); err != nil {
+		return false, nil, err
+	} else if allowed {
+		return false, nil, nil
+	}
+
+	return true, nil, nil
+}
+
+func (rule *R1010SymlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	symlinkEvent, _ := event.(*tracersymlinktype.Event)
 
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
@@ -116,9 +125,8 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 				"oldPath": symlinkEvent.OldPath,
 				"newPath": symlinkEvent.NewPath,
 			},
-			InfectedPID:     symlinkEvent.Pid,
-			Severity:        R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
-			ProfileMetadata: profileMetadata,
+			InfectedPID: symlinkEvent.Pid,
+			Severity:    R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -146,27 +154,12 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) ProcessEvent(eventType utils.E
 	}
 }
 
-func (rule *R1010SymlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) (bool, interface{}) {
-	if eventType != utils.SymlinkEventType {
-		return false, nil
-	}
-
-	symlinkEvent, ok := event.(*tracersymlinktype.Event)
-	if !ok {
-		return false, nil
-	}
-
-	for _, path := range rule.additionalPaths {
-		if strings.HasPrefix(symlinkEvent.OldPath, path) {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
 func (rule *R1010SymlinkCreatedOverSensitiveFile) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			Optional:    true,
+			ProfileType: apitypes.ApplicationProfile,
+		},
 	}
 }

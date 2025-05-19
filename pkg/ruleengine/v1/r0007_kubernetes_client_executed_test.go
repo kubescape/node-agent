@@ -54,7 +54,7 @@ func TestR0007KubernetesClientExecuted(t *testing.T) {
 		objCache.SetApplicationProfile(profile)
 	}
 
-	ruleResult := r.ProcessEvent(utils.ExecveEventType, e, &objCache)
+	ruleResult := ProcessRuleEvaluationTest(r, utils.ExecveEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since test is not a k8s client")
 		return
@@ -62,7 +62,7 @@ func TestR0007KubernetesClientExecuted(t *testing.T) {
 
 	e.Comm = "kubectl"
 
-	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &objCache)
+	ruleResult = ProcessRuleEvaluationTest(r, utils.ExecveEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult since exec is a k8s client")
 		return

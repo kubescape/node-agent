@@ -34,7 +34,7 @@ func TestR0005UnexpectedDomainRequest(t *testing.T) {
 	}
 
 	// Test with nil appProfileAccess
-	ruleResult := r.ProcessEvent(utils.DnsEventType, e, &RuleObjectCacheMock{})
+	ruleResult := ProcessRuleEvaluationTest(r, utils.DnsEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to not be nil since no appProfile")
 	}
@@ -57,7 +57,7 @@ func TestR0005UnexpectedDomainRequest(t *testing.T) {
 		objCache.SetNetworkNeighborhood(nn)
 	}
 
-	ruleResult = r.ProcessEvent(utils.DnsEventType, e, &objCache)
+	ruleResult = ProcessRuleEvaluationTest(r, utils.DnsEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since domain is whitelisted")
 	}

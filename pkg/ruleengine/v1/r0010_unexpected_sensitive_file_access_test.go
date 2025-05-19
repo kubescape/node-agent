@@ -260,7 +260,7 @@ func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 				})
 			}
 
-			result := rule.ProcessEvent(utils.OpenEventType, tt.event, objCache)
+			result := ProcessRuleEvaluationTest(rule, utils.OpenEventType, tt.event, objCache)
 
 			if tt.expectAlert && result == nil {
 				t.Errorf("%s: expected alert but got none", tt.description)

@@ -54,60 +54,75 @@ func (rule *R1006UnshareSyscall) ID() string {
 func (rule *R1006UnshareSyscall) DeleteRule() {
 }
 
-func (rule *R1006UnshareSyscall) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1006UnshareSyscall) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
 	if rule.alreadyNotified {
-		return nil
+		return false, nil
 	}
 
 	if eventType != utils.SyscallEventType {
-		return nil
+		return false, nil
 	}
 
 	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
-		return nil
+		return false, nil
 	}
 
 	if syscallEvent.SyscallName == "unshare" {
-		rule.alreadyNotified = true
-		ruleFailure := GenericRuleFailure{
-			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				UniqueID:    HashStringToMD5(syscallEvent.SyscallName),
-				AlertName:   rule.Name(),
-				InfectedPID: syscallEvent.Pid,
-				Severity:    R1006UnshareSyscallRuleDescriptor.Priority,
-				ProfileMetadata: &apitypes.ProfileMetadata{
-					IsProfileDependent: false,
-				},
-			},
-			RuntimeProcessDetails: apitypes.ProcessTree{
-				ProcessTree: apitypes.Process{
-					Comm: syscallEvent.Comm,
-					Gid:  &syscallEvent.Gid,
-					PID:  syscallEvent.Pid,
-					Uid:  &syscallEvent.Uid,
-				},
-				ContainerID: syscallEvent.Runtime.ContainerID,
-			},
-			TriggerEvent: syscallEvent.Event,
-			RuleAlert: apitypes.RuleAlert{
-				RuleDescription: fmt.Sprintf("unshare system call executed in %s", syscallEvent.GetContainer()),
-			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName:   syscallEvent.GetPod(),
-				PodLabels: syscallEvent.K8s.PodLabels,
-			},
-			RuleID: rule.ID(),
-		}
-
-		return &ruleFailure
+		return true, syscallEvent
 	}
 
-	return nil
+	return false, nil
+}
+
+func (rule *R1006UnshareSyscall) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	// First do basic evaluation
+	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
+	}
+
+	// This rule doesn't need profile evaluation since it's based on direct detection
+	return true, nil, nil
+}
+
+func (rule *R1006UnshareSyscall) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	syscallEvent, _ := event.(*ruleenginetypes.SyscallEvent)
+	rule.alreadyNotified = true
+
+	return &GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:    HashStringToMD5(syscallEvent.SyscallName),
+			AlertName:   rule.Name(),
+			InfectedPID: syscallEvent.Pid,
+			Severity:    R1006UnshareSyscallRuleDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				Comm: syscallEvent.Comm,
+				Gid:  &syscallEvent.Gid,
+				PID:  syscallEvent.Pid,
+				Uid:  &syscallEvent.Uid,
+			},
+			ContainerID: syscallEvent.Runtime.ContainerID,
+		},
+		TriggerEvent: syscallEvent.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: fmt.Sprintf("unshare system call executed in %s", syscallEvent.GetContainer()),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName:   syscallEvent.GetPod(),
+			PodLabels: syscallEvent.K8s.PodLabels,
+		},
+		RuleID: rule.ID(),
+	}
 }
 
 func (rule *R1006UnshareSyscall) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1006UnshareSyscallRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			ProfileType: apitypes.ApplicationProfile,
+		},
 	}
 }

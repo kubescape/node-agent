@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -53,81 +52,86 @@ func (rule *R1001ExecBinaryNotInBaseImage) ID() string {
 func (rule *R1001ExecBinaryNotInBaseImage) DeleteRule() {
 }
 
-func (rule *R1001ExecBinaryNotInBaseImage) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1001ExecBinaryNotInBaseImage) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.ExecveEventType {
-		return nil
+		return false, nil
 	}
 
 	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
-		return nil
+		return false, nil
 	}
 
 	if execEvent.UpperLayer || execEvent.PupperLayer {
-		// Check if the event is expected, if so return nil
-		// No application profile also returns nil
-		var profileMetadata *apitypes.ProfileMetadata
-		whiteListed, err := IsExecEventInProfile(execEvent, objectCache, false)
-		if whiteListed {
-			return nil
-		} else if err != nil && !errors.Is(err, ProfileNotFound) {
-			ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
-			if ap != nil {
-				profileMetadata = &apitypes.ProfileMetadata{
-					Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
-					Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
-					Name:               ap.Name,
-					Type:               apitypes.ApplicationProfile,
-					IsProfileDependent: true,
-				}
-			}
-		}
-
-		upperLayer := true
-		ruleFailure := GenericRuleFailure{
-			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				UniqueID:        HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
-				AlertName:       rule.Name(),
-				InfectedPID:     execEvent.Pid,
-				Severity:        R1001ExecBinaryNotInBaseImageRuleDescriptor.Priority,
-				ProfileMetadata: profileMetadata,
-			},
-			RuntimeProcessDetails: apitypes.ProcessTree{
-				ProcessTree: apitypes.Process{
-					Comm:       execEvent.Comm,
-					Gid:        &execEvent.Gid,
-					PID:        execEvent.Pid,
-					Uid:        &execEvent.Uid,
-					UpperLayer: &upperLayer,
-					PPID:       execEvent.Ppid,
-					Pcomm:      execEvent.Pcomm,
-					Cwd:        execEvent.Cwd,
-					Hardlink:   execEvent.ExePath,
-					Path:       GetExecFullPathFromEvent(execEvent),
-					Cmdline:    fmt.Sprintf("%s %s", GetExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
-				},
-				ContainerID: execEvent.Runtime.ContainerID,
-			},
-			TriggerEvent: execEvent.Event.Event,
-			RuleAlert: apitypes.RuleAlert{
-				RuleDescription: fmt.Sprintf("Process (%s) was executed and is not part of the image", execEvent.Comm),
-			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName:   execEvent.GetPod(),
-				PodLabels: execEvent.K8s.PodLabels,
-			},
-			RuleID: rule.ID(),
-			Extra:  execEvent.GetExtra(),
-		}
-
-		return &ruleFailure
+		return true, execEvent
 	}
 
-	return nil
+	return false, nil
+}
+
+func (rule *R1001ExecBinaryNotInBaseImage) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	ok, execEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
+	}
+
+	// Check if the event is expected, if so return nil
+	whiteListed, err := IsExecEventInProfile(execEvent.(*events.ExecEvent), objCache, false)
+	if whiteListed {
+		return false, nil, nil
+	} else if err != nil && !errors.Is(err, ProfileNotFound) {
+		return false, nil, err
+	}
+
+	return true, nil, nil
+}
+
+func (rule *R1001ExecBinaryNotInBaseImage) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	execEvent, _ := event.(*events.ExecEvent)
+	upperLayer := true
+
+	return &GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
+			AlertName:   rule.Name(),
+			InfectedPID: execEvent.Pid,
+			Severity:    R1001ExecBinaryNotInBaseImageRuleDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				Comm:       execEvent.Comm,
+				Gid:        &execEvent.Gid,
+				PID:        execEvent.Pid,
+				Uid:        &execEvent.Uid,
+				UpperLayer: &upperLayer,
+				PPID:       execEvent.Ppid,
+				Pcomm:      execEvent.Pcomm,
+				Cwd:        execEvent.Cwd,
+				Hardlink:   execEvent.ExePath,
+				Path:       GetExecFullPathFromEvent(execEvent),
+				Cmdline:    fmt.Sprintf("%s %s", GetExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+			},
+			ContainerID: execEvent.Runtime.ContainerID,
+		},
+		TriggerEvent: execEvent.Event.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: fmt.Sprintf("Process (%s) was executed and is not part of the image", execEvent.Comm),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName:   execEvent.GetPod(),
+			PodLabels: execEvent.K8s.PodLabels,
+		},
+		RuleID: rule.ID(),
+		Extra:  execEvent.GetExtra(),
+	}
 }
 
 func (rule *R1001ExecBinaryNotInBaseImage) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1001ExecBinaryNotInBaseImageRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			Optional:    true,
+			ProfileType: apitypes.ApplicationProfile,
+		},
 	}
 }

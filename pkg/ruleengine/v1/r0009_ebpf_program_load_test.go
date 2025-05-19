@@ -56,7 +56,7 @@ func TestR0009EbpfProgramLoad(t *testing.T) {
 		SyscallName: "test",
 	}
 
-	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, &objCache)
+	ruleResult := ProcessRuleEvaluationTest(r, utils.SyscallEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since syscall is not bpf")
@@ -66,7 +66,7 @@ func TestR0009EbpfProgramLoad(t *testing.T) {
 	// Create a syscall event with bpf syscall
 	e.SyscallName = "bpf"
 
-	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &objCache)
+	ruleResult = ProcessRuleEvaluationTest(r, utils.SyscallEventType, e, &objCache)
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of bpf is used")

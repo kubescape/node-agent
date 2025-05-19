@@ -204,7 +204,7 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 				mockCache.SetApplicationProfile(tt.profile)
 			}
 
-			result := r.ProcessEvent(utils.OpenEventType, tt.event, mockCache)
+			result := ProcessRuleEvaluationTest(r, utils.OpenEventType, tt.event, mockCache)
 
 			if tt.expectFailure && result == nil {
 				t.Error("Expected rule failure but got nil")

@@ -22,7 +22,7 @@ func TestR1007XMRCryptoMining(t *testing.T) {
 		Comm: "test",
 	}
 
-	ruleResult := r.ProcessEvent(utils.RandomXEventType, e3, &RuleObjectCacheMock{})
+	ruleResult := ProcessRuleEvaluationTest(r, utils.RandomXEventType, e3, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of RandomX event")

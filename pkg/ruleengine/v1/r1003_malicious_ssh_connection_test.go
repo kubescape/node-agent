@@ -62,21 +62,21 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 		objCache.SetNetworkNeighborhood(nn)
 	}
 
-	failure := rule.ProcessEvent(utils.SSHEventType, sshEvent, &objCache)
+	failure := ProcessRuleEvaluationTest(rule, utils.SSHEventType, sshEvent, &objCache)
 	if failure != nil {
 		t.Errorf("Expected nil since the SSH connection is to an allowed port, got %v", failure)
 	}
 
 	// Test disallowed port
 	sshEvent.DstPort = 1234
-	failure = rule.ProcessEvent(utils.SSHEventType, sshEvent, &objCache)
+	failure = ProcessRuleEvaluationTest(rule, utils.SSHEventType, sshEvent, &objCache)
 	if failure == nil {
 		t.Errorf("Expected failure since the SSH connection is to a disallowed port, got nil")
 	}
 
 	// Test disallowed port that is in the egress list
 	sshEvent.DstPort = 2023
-	failure = rule.ProcessEvent(utils.SSHEventType, sshEvent, &objCache)
+	failure = ProcessRuleEvaluationTest(rule, utils.SSHEventType, sshEvent, &objCache)
 	if failure == nil {
 		t.Errorf("Expected failure since the SSH connection is to a disallowed port, got nil")
 	}
@@ -84,7 +84,7 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 	// Test allowed port
 	sshEvent.DstPort = 2022
 	sshEvent.DstIP = "3.3.3.3"
-	failure = rule.ProcessEvent(utils.SSHEventType, sshEvent, &objCache)
+	failure = ProcessRuleEvaluationTest(rule, utils.SSHEventType, sshEvent, &objCache)
 	if failure != nil {
 		t.Errorf("Expected nil since the SSH connection is to an allowed port, got %v", failure)
 	}

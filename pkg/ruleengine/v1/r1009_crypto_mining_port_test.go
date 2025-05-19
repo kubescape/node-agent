@@ -17,7 +17,7 @@ func TestR1009CryptoMiningRelatedPort(t *testing.T) {
 	// Test when eventType is not NetworkEventType
 	eventType := utils.RandomXEventType
 	event := &tracernetworktype.Event{}
-	result := rule.ProcessEvent(eventType, event, &RuleObjectCacheMock{})
+	result := ProcessRuleEvaluationTest(rule, eventType, event, &RuleObjectCacheMock{})
 	if result != nil {
 		t.Errorf("Expected nil, got %v", result)
 	}
@@ -25,7 +25,7 @@ func TestR1009CryptoMiningRelatedPort(t *testing.T) {
 	// Test when event is not of type *tracernetworktype.Event
 	eventType = utils.NetworkEventType
 	event2 := &tracerexectype.Event{}
-	result = rule.ProcessEvent(eventType, event2, &RuleObjectCacheMock{})
+	result = ProcessRuleEvaluationTest(rule, eventType, event2, &RuleObjectCacheMock{})
 	if result != nil {
 		t.Errorf("Expected nil, got %v", result)
 	}
@@ -75,7 +75,7 @@ func TestR1009CryptoMiningRelatedPort(t *testing.T) {
 		Pid:     1,
 		Uid:     1,
 	}
-	result = rule.ProcessEvent(eventType, event, &objCache)
+	result = ProcessRuleEvaluationTest(rule, eventType, event, &objCache)
 	if result == nil {
 		t.Errorf("Expected ruleFailure, got nil")
 	}
@@ -83,7 +83,7 @@ func TestR1009CryptoMiningRelatedPort(t *testing.T) {
 	// Test when event does not meet conditions to return a ruleFailure
 	port = 3333
 	objCache.nn.Spec.Containers[0].Egress[0].Ports[0].Port = &port
-	result = rule.ProcessEvent(eventType, event, &objCache)
+	result = ProcessRuleEvaluationTest(rule, eventType, event, &objCache)
 	if result != nil {
 		t.Errorf("Expected nil, got %v", result)
 	}

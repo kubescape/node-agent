@@ -33,7 +33,7 @@ func TestR1001ExecBinaryNotInBaseImage(t *testing.T) {
 	}
 
 	// Test with non-existing binary
-	ruleResult := r.ProcessEvent(utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult := ProcessRuleEvaluationTest(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since exec is not in the upper layer")
 	}

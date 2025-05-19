@@ -3,9 +3,9 @@ package ruleengine
 import (
 	"fmt"
 
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
@@ -59,56 +59,66 @@ func (rule *R0003UnexpectedSystemCall) ID() string {
 func (rule *R0003UnexpectedSystemCall) DeleteRule() {
 }
 
-func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0003UnexpectedSystemCall) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.SyscallEventType {
-		return nil
+		return false, nil
 	}
 
 	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
-		return nil
-	}
-
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEvent.Runtime.ContainerID)
-	if ap == nil {
-		return nil
-	}
-
-	container, err := GetContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
-	if err != nil {
-		return nil
-	}
-
-	// If the syscall is whitelisted, return nil
-	for _, syscall := range container.Syscalls {
-		if syscall == syscallEvent.SyscallName {
-			return nil
-		}
+		return false, nil
 	}
 
 	// We have already alerted for this syscall
 	if rule.listOfAlertedSyscalls.ContainsOne(syscallEvent.SyscallName) {
-		return nil
+		return false, nil
 	}
 
-	profileMetadata := &apitypes.ProfileMetadata{
-		Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
-		Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
-		Name:               ap.Name,
-		Type:               apitypes.ApplicationProfile,
-		IsProfileDependent: true,
+	return true, syscallEvent
+}
+
+func (rule *R0003UnexpectedSystemCall) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	// First do basic evaluation
+	ok, syscallEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
 	}
 
-	ruleFailure := GenericRuleFailure{
+	syscallEventTyped, _ := syscallEvent.(*ruleenginetypes.SyscallEvent)
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEventTyped.Runtime.ContainerID)
+	if ap == nil {
+		return false, nil, rulemanager.NoProfileAvailable
+	}
+
+	container, err := GetContainerFromApplicationProfile(ap, syscallEventTyped.GetContainer())
+	if err != nil {
+		return false, nil, err
+	}
+
+	// If the syscall is whitelisted, return nil
+	for _, syscall := range container.Syscalls {
+		if syscall == syscallEventTyped.SyscallName {
+			return false, nil, nil
+		}
+	}
+
+	return true, nil, nil
+}
+
+func (rule *R0003UnexpectedSystemCall) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	syscallEvent, _ := event.(*ruleenginetypes.SyscallEvent)
+
+	rule.listOfAlertedSyscalls.Add(syscallEvent.SyscallName)
+
+	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:  HashStringToMD5(syscallEvent.SyscallName),
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"syscall": syscallEvent.SyscallName,
 			},
-			InfectedPID:     syscallEvent.Pid,
-			Severity:        R0003UnexpectedSystemCallRuleDescriptor.Priority,
-			ProfileMetadata: profileMetadata,
+			InfectedPID: syscallEvent.Pid,
+			Severity:    R0003UnexpectedSystemCallRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -125,14 +135,14 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 		},
 		RuleID: rule.ID(),
 	}
-
-	rule.listOfAlertedSyscalls.Add(syscallEvent.SyscallName)
-
-	return &ruleFailure
 }
 
 func (rule *R0003UnexpectedSystemCall) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0003UnexpectedSystemCallRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			Required:    true,
+			ProfileType: apitypes.ApplicationProfile,
+		},
 	}
 }

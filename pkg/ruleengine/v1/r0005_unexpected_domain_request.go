@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/goradd/maps"
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -55,51 +55,61 @@ func (rule *R0005UnexpectedDomainRequest) ID() string {
 func (rule *R0005UnexpectedDomainRequest) DeleteRule() {
 }
 
-func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0005UnexpectedDomainRequest) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.DnsEventType {
-		return nil
+		return false, nil
 	}
 
 	domainEvent, ok := event.(*tracerdnstype.Event)
 	if !ok {
-		return nil
+		return false, nil
 	}
 
 	if rule.alertedDomains.Has(domainEvent.DNSName) {
-		return nil
+		return false, nil
 	}
 
 	// TODO: fix this, currently we are ignoring in-cluster communication
 	if strings.HasSuffix(domainEvent.DNSName, "svc.cluster.local.") {
-		return nil
+		return false, nil
 	}
 
-	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(domainEvent.Runtime.ContainerID)
+	return true, domainEvent
+}
+
+func (rule *R0005UnexpectedDomainRequest) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	// First do basic evaluation
+	ok, domainEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
+	}
+
+	domainEventTyped, _ := domainEvent.(*tracerdnstype.Event)
+	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(domainEventTyped.Runtime.ContainerID)
 	if nn == nil {
-		return nil
+		return false, nil, rulemanager.NoProfileAvailable
 	}
 
-	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, domainEvent.GetContainer())
+	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, domainEventTyped.GetContainer())
 	if err != nil {
-		return nil
+		return false, nil, err
 	}
 
 	// Check that the domain is in the network neighbors
 	for _, dns := range nnContainer.Egress {
-		if dns.DNS == domainEvent.DNSName || slices.Contains(dns.DNSNames, domainEvent.DNSName) {
-			return nil
+		if dns.DNS == domainEventTyped.DNSName || slices.Contains(dns.DNSNames, domainEventTyped.DNSName) {
+			return false, nil, nil
 		}
 	}
 
-	profileMetadata := &apitypes.ProfileMetadata{
-		Status:             nn.GetAnnotations()[helpersv1.StatusMetadataKey],
-		Completion:         nn.GetAnnotations()[helpersv1.CompletionMetadataKey],
-		Name:               nn.Name,
-		Type:               apitypes.NetworkProfile,
-		IsProfileDependent: true,
-	}
+	return true, nil, nil
+}
 
-	ruleFailure := GenericRuleFailure{
+func (rule *R0005UnexpectedDomainRequest) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	domainEvent, _ := event.(*tracerdnstype.Event)
+	rule.alertedDomains.Set(domainEvent.DNSName, true)
+
+	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", domainEvent.Comm, domainEvent.DNSName)),
 			AlertName:   rule.Name(),
@@ -110,8 +120,7 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 				"protocol":  domainEvent.Protocol,
 				"port":      domainEvent.DstPort,
 			},
-			Severity:        R0005UnexpectedDomainRequestRuleDescriptor.Priority,
-			ProfileMetadata: profileMetadata,
+			Severity: R0005UnexpectedDomainRequestRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -136,14 +145,14 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		},
 		RuleID: rule.ID(),
 	}
-
-	rule.alertedDomains.Set(domainEvent.DNSName, true)
-
-	return &ruleFailure
 }
 
 func (rule *R0005UnexpectedDomainRequest) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0005UnexpectedDomainRequestRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			Required:    true,
+			ProfileType: apitypes.NetworkProfile,
+		},
 	}
 }

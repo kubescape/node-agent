@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
@@ -90,14 +90,14 @@ func (rule *R0002UnexpectedFileAccess) SetParameters(parameters map[string]inter
 func (rule *R0002UnexpectedFileAccess) DeleteRule() {
 }
 
-func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0002UnexpectedFileAccess) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.OpenEventType {
-		return nil
+		return false, nil
 	}
 
 	fullEvent, ok := event.(*events.OpenEvent)
 	if !ok {
-		return nil
+		return false, nil
 	}
 
 	openEvent := fullEvent.Event
@@ -111,43 +111,54 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 			}
 		}
 		if !include {
-			return nil
+			return false, nil
 		}
 	}
 
 	// Check if path is ignored
 	for _, prefix := range rule.ignorePrefixes {
 		if strings.HasPrefix(openEvent.FullPath, prefix) {
-			return nil
+			return false, nil
 		}
 	}
 
 	if rule.shouldIgnoreMounts {
-		mounts, err := GetContainerMountPaths(openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer(), objCache.K8sObjectCache())
+		mounts, err := GetContainerMountPaths(openEvent.GetNamespace(), openEvent.GetPod(), openEvent.GetContainer(), k8sObjCache)
 		if err != nil {
-			return nil
+			return false, nil
 		}
 		for _, mount := range mounts {
 			if isPathContained(mount, openEvent.FullPath) {
-				return nil
+				return false, nil
 			}
 		}
 	}
 
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
-	if ap == nil {
-		return nil
+	return true, openEvent
+}
+
+func (rule *R0002UnexpectedFileAccess) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	// First do basic evaluation
+	ok, openEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
 	}
 
-	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
+	openEventTyped, _ := openEvent.(*events.OpenEvent)
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEventTyped.Runtime.ContainerID)
+	if ap == nil {
+		return false, nil, rulemanager.NoProfileAvailable
+	}
+
+	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEventTyped.GetContainer())
 	if err != nil {
-		return nil
+		return false, nil, err
 	}
 
 	for _, open := range appProfileOpenList.Opens {
-		if dynamicpathdetector.CompareDynamic(open.Path, openEvent.FullPath) {
+		if dynamicpathdetector.CompareDynamic(open.Path, openEventTyped.FullPath) {
 			found := 0
-			for _, eventOpenFlag := range openEvent.Flags {
+			for _, eventOpenFlag := range openEventTyped.Flags {
 				// Check that event open flag is in the open.Flags
 				for _, profileOpenFlag := range open.Flags {
 					if eventOpenFlag == profileOpenFlag {
@@ -155,54 +166,49 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 					}
 				}
 			}
-			if found == len(openEvent.Flags) {
-				return nil
+			if found == len(openEventTyped.Flags) {
+				return false, nil, nil
 			}
-			// TODO: optimize this list (so path will be only once in the list so we can break the loop)
 		}
 	}
 
-	profileMetadata := &apitypes.ProfileMetadata{
-		Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
-		Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
-		Name:               ap.Name,
-		Type:               apitypes.ApplicationProfile,
-		IsProfileDependent: true,
-	}
+	return true, nil, nil
+}
 
-	ruleFailure := GenericRuleFailure{
+func (rule *R0002UnexpectedFileAccess) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	openEvent, _ := event.(*events.OpenEvent)
+	openEventTyped := openEvent.Event
+
+	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", openEvent.Comm, openEvent.FullPath)),
+			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", openEventTyped.Comm, openEventTyped.FullPath)),
 			AlertName:   rule.Name(),
-			InfectedPID: openEvent.Pid,
+			InfectedPID: openEventTyped.Pid,
 			Arguments: map[string]interface{}{
-				"flags": openEvent.Flags,
-				"path":  openEvent.FullPath,
+				"flags": openEventTyped.Flags,
+				"path":  openEventTyped.FullPath,
 			},
-			Severity:        R0002UnexpectedFileAccessRuleDescriptor.Priority,
-			ProfileMetadata: profileMetadata,
+			Severity: R0002UnexpectedFileAccessRuleDescriptor.Priority,
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
-				Comm: openEvent.Comm,
-				Gid:  &openEvent.Gid,
-				PID:  openEvent.Pid,
-				Uid:  &openEvent.Uid,
+				Comm: openEventTyped.Comm,
+				Gid:  &openEventTyped.Gid,
+				PID:  openEventTyped.Pid,
+				Uid:  &openEventTyped.Uid,
 			},
-			ContainerID: openEvent.Runtime.ContainerID,
+			ContainerID: openEventTyped.Runtime.ContainerID,
 		},
-		TriggerEvent: openEvent.Event,
+		TriggerEvent: openEventTyped.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Unexpected file access: %s with flags %s", openEvent.FullPath, strings.Join(openEvent.Flags, ",")),
+			RuleDescription: fmt.Sprintf("Unexpected file access: %s with flags %s", openEventTyped.FullPath, strings.Join(openEventTyped.Flags, ",")),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName: openEvent.GetPod(),
+			PodName: openEventTyped.GetPod(),
 		},
 		RuleID: rule.ID(),
-		Extra:  fullEvent.GetExtra(),
+		Extra:  openEvent.GetExtra(),
 	}
-
-	return &ruleFailure
 }
 
 func isPathContained(basepath, targetpath string) bool {
@@ -212,5 +218,9 @@ func isPathContained(basepath, targetpath string) bool {
 func (rule *R0002UnexpectedFileAccess) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0002UnexpectedFileAccessRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			Required:    true,
+			ProfileType: apitypes.ApplicationProfile,
+		},
 	}
 }

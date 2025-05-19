@@ -10,6 +10,7 @@ import (
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -200,46 +201,174 @@ func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *events.ExecEve
 	return nil
 }
 
-func (rule *R0007KubernetesClientExecuted) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0007KubernetesClientExecuted) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.ExecveEventType && eventType != utils.NetworkEventType {
-		return nil
+		return false, nil
 	}
 
 	if eventType == utils.ExecveEventType {
 		execEvent, ok := event.(*events.ExecEvent)
 		if !ok {
-			return nil
+			return false, nil
 		}
 
-		ap := objCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
-		result := rule.handleExecEvent(execEvent, ap)
-		if result != nil {
-			return result
+		execPath := GetExecPathFromEvent(execEvent)
+		if slices.Contains(kubernetesClients, filepath.Base(execPath)) || slices.Contains(kubernetesClients, execEvent.ExePath) {
+			return true, execEvent
 		}
-
-		return nil
+		return false, nil
 	}
 
 	networkEvent, ok := event.(*tracernetworktype.Event)
 	if !ok {
-		return nil
+		return false, nil
 	}
 
 	if networkEvent.PktType != "OUTGOING" {
-		return nil
-	}
-	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
-
-	result := rule.handleNetworkEvent(networkEvent, nn, objCache.K8sObjectCache())
-	if result != nil {
-		return result
+		return false, nil
 	}
 
-	return nil
+	apiServerIP := k8sObjCache.GetApiServerIpAddress()
+	if apiServerIP == "" || networkEvent.DstEndpoint.Addr != apiServerIP {
+		return false, nil
+	}
+
+	return true, networkEvent
+}
+
+func (rule *R0007KubernetesClientExecuted) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	// First do basic evaluation
+	ok, eventData := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
+	}
+
+	if eventType == utils.ExecveEventType {
+		execEvent, _ := eventData.(*events.ExecEvent)
+		ap := objCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
+		if ap == nil {
+			return false, nil, rulemanager.NoProfileAvailable
+		}
+
+		whitelistedExecs, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())
+		if err != nil {
+			return false, nil, err
+		}
+
+		execPath := GetExecPathFromEvent(execEvent)
+		for _, whitelistedExec := range whitelistedExecs.Execs {
+			if whitelistedExec.Path == execPath {
+				return false, nil, nil
+			}
+		}
+	} else {
+		networkEvent, _ := eventData.(*tracernetworktype.Event)
+		nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
+		if nn == nil {
+			return false, nil, rulemanager.NoProfileAvailable
+		}
+
+		nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
+		if err != nil {
+			return false, nil, err
+		}
+
+		for _, egress := range nnContainer.Egress {
+			if egress.IPAddress == networkEvent.DstEndpoint.Addr {
+				return false, nil, nil
+			}
+		}
+	}
+
+	return true, nil, nil
+}
+
+func (rule *R0007KubernetesClientExecuted) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	if eventType == utils.ExecveEventType {
+		execEvent, _ := event.(*events.ExecEvent)
+		execPath := GetExecPathFromEvent(execEvent)
+		upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
+
+		return &GenericRuleFailure{
+			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execPath, execEvent.Pcomm)),
+				AlertName:   rule.Name(),
+				InfectedPID: execEvent.Pid,
+				Arguments: map[string]interface{}{
+					"exec": execPath,
+					"args": execEvent.Args,
+				},
+				Severity: R0007KubernetesClientExecutedDescriptor.Priority,
+			},
+			RuntimeProcessDetails: apitypes.ProcessTree{
+				ProcessTree: apitypes.Process{
+					Comm:       execEvent.Comm,
+					Gid:        &execEvent.Gid,
+					PID:        execEvent.Pid,
+					Uid:        &execEvent.Uid,
+					UpperLayer: &upperLayer,
+					PPID:       execEvent.Ppid,
+					Pcomm:      execEvent.Pcomm,
+					Cwd:        execEvent.Cwd,
+					Hardlink:   execEvent.ExePath,
+					Path:       execPath,
+					Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+				},
+				ContainerID: execEvent.Runtime.ContainerID,
+			},
+			TriggerEvent: execEvent.Event.Event,
+			RuleAlert: apitypes.RuleAlert{
+				RuleDescription: fmt.Sprintf("Kubernetes client %s was executed", execPath),
+			},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName:   execEvent.GetPod(),
+				PodLabels: execEvent.K8s.PodLabels,
+			},
+			RuleID: rule.ID(),
+			Extra:  execEvent.GetExtra(),
+		}
+	}
+
+	networkEvent, _ := event.(*tracernetworktype.Event)
+	return &GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s%d", networkEvent.Comm, networkEvent.DstEndpoint.Addr, networkEvent.Port)),
+			AlertName: rule.Name(),
+			Arguments: map[string]interface{}{
+				"dstIP": networkEvent.DstEndpoint.Addr,
+				"port":  networkEvent.Port,
+				"proto": networkEvent.Proto,
+			},
+			InfectedPID: networkEvent.Pid,
+			Severity:    R0007KubernetesClientExecutedDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				Comm: networkEvent.Comm,
+				Gid:  &networkEvent.Gid,
+				PID:  networkEvent.Pid,
+				Uid:  &networkEvent.Uid,
+			},
+			ContainerID: networkEvent.Runtime.ContainerID,
+		},
+		TriggerEvent: networkEvent.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: fmt.Sprintf("Kubernetes client executed: %s", networkEvent.Comm),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName:   networkEvent.GetPod(),
+			PodLabels: networkEvent.K8s.PodLabels,
+		},
+		RuleID: rule.ID(),
+	}
 }
 
 func (rule *R0007KubernetesClientExecuted) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0007KubernetesClientExecutedDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			Optional:    true,
+			ProfileType: apitypes.ApplicationProfile,
+		},
 	}
 }

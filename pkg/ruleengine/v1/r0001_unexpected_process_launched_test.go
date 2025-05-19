@@ -39,7 +39,7 @@ func TestR0001UnexpectedProcessLaunched(t *testing.T) {
 	}
 
 	// Test with nil appProfileAccess
-	ruleResult := r.ProcessEvent(utils.ExecveEventType, e, &objectcache.ObjectCacheMock{})
+	ruleResult := ProcessRuleEvaluationTest(r, utils.ExecveEventType, e, &objectcache.ObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to not be nil must have an appProfile")
 	}
@@ -62,7 +62,7 @@ func TestR0001UnexpectedProcessLaunched(t *testing.T) {
 	}
 
 	// Test with whitelisted exec
-	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &objCache)
+	ruleResult = ProcessRuleEvaluationTest(r, utils.ExecveEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since exec is whitelisted")
 	}
@@ -83,7 +83,7 @@ func TestR0001UnexpectedProcessLaunched(t *testing.T) {
 			Args: []string{"asdasd"},
 		},
 	}
-	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &objCache)
+	ruleResult = ProcessRuleEvaluationTest(r, utils.ExecveEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since exec is not whitelisted")
 	}
@@ -97,7 +97,7 @@ func TestR0001UnexpectedProcessLaunched(t *testing.T) {
 
 	e.Comm = "sh"
 	e.Args = []string{"/bin/sh", "-s", "unix:cmd"}
-	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &objCache)
+	ruleResult = ProcessRuleEvaluationTest(r, utils.ExecveEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since exec is whitelisted")
 	}
@@ -147,7 +147,7 @@ func TestR0001UnexpectedProcessLaunchedArgCompare(t *testing.T) {
 	}
 
 	// Test with whitelisted exec
-	ruleResult := r.ProcessEvent(utils.ExecveEventType, e, &objCache)
+	ruleResult := ProcessRuleEvaluationTest(r, utils.ExecveEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since exec is whitelisted and args are not enforced")
 	}
@@ -157,7 +157,7 @@ func TestR0001UnexpectedProcessLaunchedArgCompare(t *testing.T) {
 	r.SetParameters(map[string]interface{}{"enforceArgs": true})
 
 	// Test with whitelisted exec and enforceArgs set to true
-	ruleResult = r.ProcessEvent(utils.ExecveEventType, e, &objCache)
+	ruleResult = ProcessRuleEvaluationTest(r, utils.ExecveEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since exec is whitelisted but args are enforced")
 	}

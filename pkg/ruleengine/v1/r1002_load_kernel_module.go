@@ -52,60 +52,76 @@ func (rule *R1002LoadKernelModule) ID() string {
 func (rule *R1002LoadKernelModule) DeleteRule() {
 }
 
-func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1002LoadKernelModule) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
 	if rule.alerted {
-		return nil
+		return false, nil
 	}
 
 	if eventType != utils.SyscallEventType {
-		return nil
+		return false, nil
 	}
 
 	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
-		return nil
+		return false, nil
 	}
 
 	if syscallEvent.SyscallName == "init_module" || syscallEvent.SyscallName == "finit_module" {
-		rule.alerted = true
-		ruleFailure := GenericRuleFailure{
-			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				UniqueID:    HashStringToMD5(syscallEvent.SyscallName),
-				AlertName:   rule.Name(),
-				InfectedPID: syscallEvent.Pid,
-				Severity:    R1002LoadKernelModuleRuleDescriptor.Priority,
-				ProfileMetadata: &apitypes.ProfileMetadata{
-					IsProfileDependent: false,
-				},
-			},
-			RuntimeProcessDetails: apitypes.ProcessTree{
-				ProcessTree: apitypes.Process{
-					Comm: syscallEvent.Comm,
-					Gid:  &syscallEvent.Gid,
-					PID:  syscallEvent.Pid,
-					Uid:  &syscallEvent.Uid,
-				},
-				ContainerID: syscallEvent.Runtime.ContainerID,
-			},
-			TriggerEvent: syscallEvent.Event,
-			RuleAlert: apitypes.RuleAlert{
-				RuleDescription: fmt.Sprintf("Kernel module load syscall (%s) was called", syscallEvent.SyscallName),
-			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName:   syscallEvent.GetPod(),
-				PodLabels: syscallEvent.K8s.PodLabels,
-			},
-			RuleID: rule.ID(),
-		}
-
-		return &ruleFailure
+		return true, syscallEvent
 	}
 
-	return nil
+	return false, nil
+}
+
+func (rule *R1002LoadKernelModule) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	// First do basic evaluation
+	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
+	}
+
+	// This rule doesn't need profile evaluation since it's based on direct detection
+	return true, nil, nil
+}
+
+func (rule *R1002LoadKernelModule) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	syscallEvent, _ := event.(*ruleenginetypes.SyscallEvent)
+	rule.alerted = true
+
+	return &GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:    HashStringToMD5(syscallEvent.SyscallName),
+			AlertName:   rule.Name(),
+			InfectedPID: syscallEvent.Pid,
+			Severity:    R1002LoadKernelModuleRuleDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				Comm: syscallEvent.Comm,
+				Gid:  &syscallEvent.Gid,
+				PID:  syscallEvent.Pid,
+				Uid:  &syscallEvent.Uid,
+			},
+			ContainerID: syscallEvent.Runtime.ContainerID,
+		},
+		TriggerEvent: syscallEvent.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: fmt.Sprintf("Kernel module load syscall (%s) was called", syscallEvent.SyscallName),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName:   syscallEvent.GetPod(),
+			PodLabels: syscallEvent.K8s.PodLabels,
+		},
+		RuleID: rule.ID(),
+	}
 }
 
 func (rule *R1002LoadKernelModule) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1002LoadKernelModuleRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			Required:    false,
+			ProfileType: apitypes.ApplicationProfile,
+		},
 	}
 }
