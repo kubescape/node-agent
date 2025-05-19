@@ -18,5 +18,5 @@ type SyscallEvent struct {
 }
 
 type Enricher interface {
-	EnrichRuleFailure(rule ruleengine.RuleFailure)
+	EnrichRuleFailure(rule ruleengine.RuleFailure) error
 }

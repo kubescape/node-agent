@@ -2,6 +2,7 @@ package rulemanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -290,8 +291,10 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 		res := rule.ProcessEvent(eventType, event, rm.objectCache)
 		if res != nil {
 			res = rm.enrichRuleFailure(res)
-			res.SetWorkloadDetails(details)
-			rm.exporter.SendRuleAlert(res)
+			if res != nil {
+				res.SetWorkloadDetails(details)
+				rm.exporter.SendRuleAlert(res)
+			}
 
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}
@@ -420,7 +423,11 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	}
 
 	if rm.enricher != nil && !reflect.ValueOf(rm.enricher).IsNil() {
-		rm.enricher.EnrichRuleFailure(ruleFailure)
+		if err := rm.enricher.EnrichRuleFailure(ruleFailure); err != nil {
+			if errors.Is(err, ErrRuleShouldNotBeAlerted) {
+				return nil
+			}
+		}
 	}
 
 	return ruleFailure
