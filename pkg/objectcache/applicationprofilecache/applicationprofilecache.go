@@ -108,9 +108,6 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 		for _, profile := range profileList.Items {
 			// Handle user-managed profiles
 			if isUserManagedProfile(&profile) {
-				logger.L().Debug("found user-managed profile, merging",
-					helpers.String("namespace", namespace),
-					helpers.String("profileName", profile.Name))
 				apc.handleUserManagedProfile(&profile)
 				continue
 			}
@@ -178,8 +175,6 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 					if _, exists := apc.containerToCallStackIndex.Load(containerID); !exists {
 						// Index the call stacks for this container
 						apc.indexContainerCallStacks(containerID, containerInfo.ContainerID, fullProfile)
-						logger.L().Debug("created call stack search tree for container",
-							helpers.String("containerID", containerID))
 					}
 				}
 			}
@@ -199,20 +194,6 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 	// Check if we've already processed this exact version of the user-managed profile
 	if storedIdentifier, exists := apc.profileToUserManagedIdentifier.Load(profileKey); exists &&
 		storedIdentifier == userManagedProfileUniqueIdentifier {
-		logger.L().Debug("user-managed profile already merged, skipping",
-			helpers.String("namespace", profile.Namespace),
-			helpers.String("profileName", profile.Name))
-		return
-	}
-
-	// Fetch the full user profile
-	fullUserProfile, err := apc.storageClient.ApplicationProfiles(profile.Namespace).Get(
-		context.Background(), profile.Name, metav1.GetOptions{})
-	if err != nil {
-		logger.L().Error("failed to get user-managed profile",
-			helpers.String("namespace", profile.Namespace),
-			helpers.String("profileName", profile.Name),
-			helpers.Error(err))
 		return
 	}
 
@@ -238,9 +219,17 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 
 	// If we didn't find a matching profile, skip merging
 	if toMerge.profile == nil {
-		logger.L().Debug("no matching profile found for user-managed profile, skipping merge",
+		return
+	}
+
+	// Fetch the full user profile
+	fullUserProfile, err := apc.storageClient.ApplicationProfiles(profile.Namespace).Get(
+		context.Background(), profile.Name, metav1.GetOptions{})
+	if err != nil {
+		logger.L().Error("failed to get user-managed profile",
 			helpers.String("namespace", profile.Namespace),
-			helpers.String("profileName", profile.Name))
+			helpers.String("profileName", profile.Name),
+			helpers.Error(err))
 		return
 	}
 
@@ -423,6 +412,10 @@ func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
 
 	// If no other container is using the same workload ID, delete it from the cache
 	if !workloadStillInUse {
+		if profile, exists := apc.workloadIDToProfile.Load(containerInfo.WorkloadID); exists {
+			// Remove the profile from the cache
+			apc.profileToUserManagedIdentifier.Delete(profile.Name)
+		}
 		apc.workloadIDToProfile.Delete(containerInfo.WorkloadID)
 		logger.L().Debug("deleted workloadID from cache", helpers.String("workloadID", containerInfo.WorkloadID))
 	}
@@ -439,11 +432,6 @@ func (apc *ApplicationProfileCacheImpl) waitForSharedContainerData(containerID s
 }
 
 func (apc *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedProfile *v1beta1.ApplicationProfile) *v1beta1.ApplicationProfile {
-	logger.L().Debug("merging application profiles",
-		helpers.String("normalProfileName", normalProfile.Name),
-		helpers.String("userManagedProfileName", userManagedProfile.Name),
-		helpers.String("normalProfileNamespace", normalProfile.Namespace),
-		helpers.String("userManagedProfileNamespace", userManagedProfile.Namespace))
 	mergedProfile := normalProfile.DeepCopy()
 
 	// Merge spec
