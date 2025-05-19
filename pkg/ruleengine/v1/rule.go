@@ -21,11 +21,18 @@ var _ ruleengine.RuleSpec = (*RuleRequirements)(nil)
 type RuleRequirements struct {
 	// Needed events for the rule.
 	EventTypes []utils.EventType
+	// Profile requirements
+	ProfileRequirements ruleengine.ProfileRequirement
 }
 
 // Event types required for the rule
 func (r *RuleRequirements) RequiredEventTypes() []utils.EventType {
 	return r.EventTypes
+}
+
+// Profile requirements
+func (r *RuleRequirements) GetProfileRequirements() ruleengine.ProfileRequirement {
+	return r.ProfileRequirements
 }
 
 type BaseRule struct {

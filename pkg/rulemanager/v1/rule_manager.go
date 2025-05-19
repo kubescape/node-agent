@@ -289,7 +289,7 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 
 		res := rule.ProcessEvent(eventType, event, rm.objectCache)
 		if res != nil {
-			res = rm.enrichRuleFailure(res)
+			res = rm.enrichRuleFailure(rule, res)
 			res.SetWorkloadDetails(details)
 			rm.exporter.SendRuleAlert(res)
 
@@ -299,7 +299,7 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 	}
 }
 
-func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
+func (rm *RuleManager) enrichRuleFailure(rule ruleengine.RuleEvaluator, ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
 	var err error
 	var path string
 	var hostPath string
@@ -342,8 +342,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 		}
 	}
 
-	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
-
+	rm.setProfileMetadata(rule, ruleFailure)
 	runtimeProcessDetails := ruleFailure.GetRuntimeProcessDetails()
 
 	err = backoff.Retry(func() error {
@@ -479,4 +478,44 @@ func (rm *RuleManager) EvaluateRulesForEvent(eventType utils.EventType, event ut
 	}
 
 	return results
+}
+
+func (rm *RuleManager) setProfileMetadata(rule ruleengine.RuleEvaluator, ruleFailure ruleengine.RuleFailure) {
+	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
+	profileReq := rule.Requirements().GetProfileRequirements()
+
+	switch profileReq.ProfileType {
+	case armotypes.ApplicationProfile:
+		ap := rm.objectCache.ApplicationProfileCache().GetApplicationProfile(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
+		if ap != nil {
+			profileMetadata := &armotypes.ProfileMetadata{
+				Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+				Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+				Name:               ap.Name,
+				Type:               armotypes.ApplicationProfile,
+				IsProfileDependent: profileReq.Required,
+			}
+			baseRuntimeAlert.ProfileMetadata = profileMetadata
+		}
+
+	case armotypes.NetworkProfile:
+		nn := rm.objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
+		if nn != nil {
+			profileMetadata := &armotypes.ProfileMetadata{
+				Status:             nn.GetAnnotations()[helpersv1.StatusMetadataKey],
+				Completion:         nn.GetAnnotations()[helpersv1.CompletionMetadataKey],
+				Name:               nn.Name,
+				Type:               armotypes.NetworkProfile,
+				IsProfileDependent: profileReq.Required,
+			}
+			baseRuntimeAlert.ProfileMetadata = profileMetadata
+		}
+	default:
+		profileMetadata := &armotypes.ProfileMetadata{
+			IsProfileDependent: false,
+		}
+		baseRuntimeAlert.ProfileMetadata = profileMetadata
+	}
+
+	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
 }

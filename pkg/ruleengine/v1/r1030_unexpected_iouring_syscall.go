@@ -3,7 +3,8 @@ package ruleengine
 import (
 	"fmt"
 
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -76,17 +77,7 @@ func (rule *R1030UnexpectedIouringOperation) ProcessEvent(eventType utils.EventT
 
 	var profileMetadata *apitypes.ProfileMetadata
 	if allowed, err := IsAllowed(&iouringEvent.Event, objCache, iouringEvent.Comm, R1030ID); err != nil {
-		ap := objCache.ApplicationProfileCache().GetApplicationProfile(iouringEvent.Runtime.ContainerID)
-		if ap != nil {
-			profileMetadata = &apitypes.ProfileMetadata{
-				Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
-				Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
-				Name:               ap.Name,
-				Type:               apitypes.ApplicationProfile,
-				IsProfileDependent: true,
-			}
-		}
-
+		logger.L().Error("RuleManager - failed to check if iouring event is allowed", helpers.Error(err))
 	} else if allowed {
 		return nil
 	}
@@ -149,5 +140,9 @@ func (rule *R1030UnexpectedIouringOperation) EvaluateRule(eventType utils.EventT
 func (rule *R1030UnexpectedIouringOperation) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1030UnexpectedIouringOperationRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			Required:    true,
+			ProfileType: apitypes.ApplicationProfile,
+		},
 	}
 }

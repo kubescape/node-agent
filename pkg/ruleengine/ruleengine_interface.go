@@ -34,6 +34,18 @@ type RuleDescriptor struct {
 	RuleCreationFunc func() RuleEvaluator
 }
 
+// ProfileRequirement indicates how a rule uses profiles
+type ProfileRequirement struct {
+	// Required indicates if the rule must have a profile to run
+	Required bool
+
+	// Optional indicates if the rule can use a profile but doesn't require it
+	Optional bool
+
+	// ProfileType indicates what type of profile is needed (Application, Network, etc)
+	ProfileType apitypes.ProfileType
+}
+
 func (r *RuleDescriptor) HasTags(tags []string) bool {
 	for _, tag := range tags {
 		for _, ruleTag := range r.Tags {
@@ -85,6 +97,9 @@ type RuleCondition interface {
 type RuleSpec interface {
 	// Event types required for the rule
 	RequiredEventTypes() []utils.EventType
+
+	// Profile requirements
+	GetProfileRequirements() ProfileRequirement
 }
 
 type RuleFailure interface {

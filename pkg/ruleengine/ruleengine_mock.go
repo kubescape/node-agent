@@ -82,3 +82,7 @@ type RuleSpecMock struct {
 func (ruleSpec *RuleSpecMock) RequiredEventTypes() []utils.EventType {
 	return []utils.EventType{}
 }
+
+func (ruleSpec *RuleSpecMock) GetProfileRequirements() ProfileRequirement {
+	return ProfileRequirement{}
+}
