@@ -1,13 +1,9 @@
 package objectcache
 
 import (
-	"context"
-
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
-	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
 type ApplicationProfileCache interface {
@@ -29,22 +25,5 @@ func (ap *ApplicationProfileCacheMock) GetCallStackSearchTree(_ string) *callsta
 	return nil
 }
 
-func (ap *ApplicationProfileCacheMock) WatchResources() []watcher.WatchResource {
-	return nil
-}
-
-func (ap *ApplicationProfileCacheMock) AddHandler(_ context.Context, _ runtime.Object) {
-	return
-}
-
-func (ap *ApplicationProfileCacheMock) ModifyHandler(_ context.Context, _ runtime.Object) {
-	return
-}
-
-func (ap *ApplicationProfileCacheMock) DeleteHandler(_ context.Context, _ runtime.Object) {
-	return
-}
-
 func (ap *ApplicationProfileCacheMock) ContainerCallback(_ containercollection.PubSubEvent) {
-	return
 }

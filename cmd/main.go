@@ -249,8 +249,8 @@ func main() {
 		apc := applicationprofilecache.NewApplicationProfileCache(cfg, storageClient.StorageClient, k8sObjectCache)
 		apc.Start(ctx)
 
-		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(cfg, storageClient.StorageClient)
-		dWatcher.AddAdaptor(nnc)
+		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(cfg, storageClient.StorageClient, k8sObjectCache)
+		nnc.Start(ctx)
 
 		dc := dnscache.NewDnsCache(dnsResolver)
 
