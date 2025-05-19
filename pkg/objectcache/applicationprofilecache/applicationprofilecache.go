@@ -196,26 +196,16 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 	// Create a unique tracking key for this user profile
 	profileKey := fmt.Sprintf("%s/%s", profile.Namespace, normalizedProfileName)
 
-	// Check if we've already processed this user-managed profile by its unique identifier
-	if storedIdentifier, exists := apc.profileToUserManagedIdentifier.Load(profileKey); exists {
-		if storedIdentifier == userManagedProfileUniqueIdentifier {
-			logger.L().Debug("user-managed profile already merged globally, skipping",
-				helpers.String("namespace", profile.Namespace),
-				helpers.String("profileName", profile.Name),
-				helpers.String("normalizedProfileName", normalizedProfileName),
-				helpers.String("userManagedProfileUniqueIdentifier", userManagedProfileUniqueIdentifier))
-			return
-		}
-		// If identifier has changed, we need to re-merge
-		logger.L().Debug("user-managed profile identifier changed, will re-merge",
+	// Check if we've already processed this exact version of the user-managed profile
+	if storedIdentifier, exists := apc.profileToUserManagedIdentifier.Load(profileKey); exists &&
+		storedIdentifier == userManagedProfileUniqueIdentifier {
+		logger.L().Debug("user-managed profile already merged, skipping",
 			helpers.String("namespace", profile.Namespace),
-			helpers.String("profileName", profile.Name),
-			helpers.String("normalizedProfileName", normalizedProfileName),
-			helpers.String("oldIdentifier", storedIdentifier),
-			helpers.String("newIdentifier", userManagedProfileUniqueIdentifier))
+			helpers.String("profileName", profile.Name))
+		return
 	}
 
-	// Fetch the full profile early to avoid doing it multiple times
+	// Fetch the full user profile
 	fullUserProfile, err := apc.storageClient.ApplicationProfiles(profile.Namespace).Get(
 		context.Background(), profile.Name, metav1.GetOptions{})
 	if err != nil {
@@ -226,48 +216,58 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 		return
 	}
 
-	// Track the matches we need to update
-	var wlidsToUpdate []string
-	var originalProfiles []*v1beta1.ApplicationProfile
+	// Find and collect the profile to merge
+	var toMerge struct {
+		wlid    string
+		profile *v1beta1.ApplicationProfile
+	}
 
-	// Identify all workload profiles that need to be updated
 	apc.workloadIDToProfile.Range(func(wlid string, originalProfile *v1beta1.ApplicationProfile) bool {
 		if originalProfile.Name == normalizedProfileName && originalProfile.Namespace == profile.Namespace {
-			logger.L().Debug("found matching profile for merge",
+			toMerge.wlid = wlid
+			toMerge.profile = originalProfile
+			logger.L().Debug("found matching profile for user-managed profile",
 				helpers.String("workloadID", wlid),
 				helpers.String("namespace", originalProfile.Namespace),
 				helpers.String("profileName", originalProfile.Name))
-
-			wlidsToUpdate = append(wlidsToUpdate, wlid)
-			originalProfiles = append(originalProfiles, originalProfile)
+			// Stop iteration
+			return false
 		}
-		return true // Continue iteration to find all matching profiles
+		return true
 	})
 
-	// Skip if no matches found
-	if len(wlidsToUpdate) == 0 {
-		logger.L().Debug("no matching profiles found for user-managed profile",
+	// If we didn't find a matching profile, skip merging
+	if toMerge.profile == nil {
+		logger.L().Debug("no matching profile found for user-managed profile, skipping merge",
 			helpers.String("namespace", profile.Namespace),
-			helpers.String("profileName", profile.Name),
-			helpers.String("normalizedProfileName", normalizedProfileName))
+			helpers.String("profileName", profile.Name))
 		return
 	}
 
-	// Now update all matches outside of the Range() iteration
-	for i, wlid := range wlidsToUpdate {
-		// Merge the user-managed profile with the original profile
-		mergedProfile := apc.performMerge(originalProfiles[i], fullUserProfile)
+	// Merge the user-managed profile with the normal profile
 
-		// Update the profile in the cache
-		apc.workloadIDToProfile.Set(wlid, mergedProfile)
-
-		logger.L().Debug("merged user-managed profile with normal profile",
-			helpers.String("workloadID", wlid),
-			helpers.String("namespace", profile.Namespace),
-			helpers.String("profileName", profile.Name))
+	// First, pull the original profile from the storage
+	originalProfile, err := apc.storageClient.ApplicationProfiles(toMerge.profile.Namespace).Get(
+		context.Background(), toMerge.profile.Name, metav1.GetOptions{})
+	if err != nil {
+		logger.L().Error("failed to get original profile",
+			helpers.String("namespace", toMerge.profile.Namespace),
+			helpers.String("profileName", toMerge.profile.Name),
+			helpers.Error(err))
+		return
 	}
+	// Merge the profiles
+	mergedProfile := apc.performMerge(originalProfile, fullUserProfile)
+	// Update the cache with the merged profile
+	apc.workloadIDToProfile.Set(toMerge.wlid, mergedProfile)
+	logger.L().Debug("merged user-managed profile with normal profile",
+		helpers.String("workloadID", toMerge.wlid),
+		helpers.String("namespace", profile.Namespace),
+		helpers.String("profileName", profile.Name))
 
-	// Update the tracking map with the new identifier for this user-managed profile
+	// We need to index the call stacks for the merged profile here, but currently we don't support that.
+
+	// Record that we've processed this version of the profile
 	apc.profileToUserManagedIdentifier.Set(profileKey, userManagedProfileUniqueIdentifier)
 }
 
