@@ -264,5 +264,9 @@ func GetLdHookVar(envVars map[string]string) (string, bool) {
 func (rule *R1011LdPreloadHook) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1011LdPreloadHookRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			Optional:    true,
+			ProfileType: apitypes.ApplicationProfile,
+		},
 	}
 }

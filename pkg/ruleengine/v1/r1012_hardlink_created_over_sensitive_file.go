@@ -155,5 +155,9 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType u
 func (rule *R1012HardlinkCreatedOverSensitiveFile) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			Optional:    true,
+			ProfileType: apitypes.ApplicationProfile,
+		},
 	}
 }
