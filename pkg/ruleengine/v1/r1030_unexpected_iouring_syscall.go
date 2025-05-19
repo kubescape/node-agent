@@ -73,21 +73,21 @@ func (rule *R1030UnexpectedIouringOperation) EvaluateRule(eventType utils.EventT
 	return ok, nil
 }
 
-func (rule *R1030UnexpectedIouringOperation) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}) {
+func (rule *R1030UnexpectedIouringOperation) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
 	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
 	if !ok {
-		return false, nil
+		return false, nil, nil
 	}
 
 	iouringEvent, _ := event.(*traceriouringtype.Event)
 	if allowed, err := IsAllowed(&iouringEvent.Event, objCache, iouringEvent.Comm, R1030ID); err != nil {
 		logger.L().Error("RuleManager - failed to check if iouring event is allowed", helpers.Error(err))
-		return false, nil
+		return false, nil, err
 	} else if allowed {
-		return false, nil
+		return false, nil, nil
 	}
 
-	return true, nil
+	return true, nil, nil
 }
 
 func (rule *R1030UnexpectedIouringOperation) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {

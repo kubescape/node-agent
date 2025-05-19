@@ -81,34 +81,34 @@ func (rule *R1011LdPreloadHook) EvaluateRule(eventType utils.EventType, event ut
 	}
 }
 
-func (rule *R1011LdPreloadHook) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}) {
+func (rule *R1011LdPreloadHook) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
 	// First do basic evaluation
 	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
 	if !ok {
-		return false, nil
+		return false, nil, nil
 	}
 
 	switch eventType {
 	case utils.ExecveEventType:
 		execEvent, _ := event.(*events.ExecEvent)
 		if allowed, err := IsAllowed(&execEvent.Event.Event, objCache, execEvent.Comm, R1011ID); err != nil {
-			return true, nil // If we can't check profile, we still want to alert
+			return true, nil, nil // If we can't check profile, we still want to alert
 		} else if allowed {
-			return false, nil
+			return false, nil, nil
 		}
-		return true, nil
+		return true, nil, nil
 
 	case utils.OpenEventType:
 		openEvent, _ := event.(*events.OpenEvent)
 		if allowed, err := IsAllowed(&openEvent.Event.Event, objCache, openEvent.Comm, R1011ID); err != nil {
-			return true, nil
+			return true, nil, nil
 		} else if allowed {
-			return false, nil
+			return false, nil, nil
 		}
-		return true, nil
+		return true, nil, nil
 
 	default:
-		return false, nil
+		return false, nil, nil
 	}
 }
 

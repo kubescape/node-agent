@@ -288,13 +288,17 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 		}
 
 		if rule.Requirements().GetProfileRequirements().Required || rule.Requirements().GetProfileRequirements().Optional {
-			ok, _ = rule.EvaluateRuleWithProfile(eventType, event, rm.objectCache)
+			ok, _, err := rule.EvaluateRuleWithProfile(eventType, event, rm.objectCache)
 			if !ok {
 				continue
 			}
-		}
 
-		if !rule.Requirements().GetProfileRequirements().Required {
+			if err != nil {
+				logger.L().Error("RuleManager - failed to evaluate rule with profile", helpers.Error(err))
+				continue
+			}
+			
+		} else if !rule.Requirements().GetProfileRequirements().Required {
 			ok, _ := rule.EvaluateRule(eventType, event, rm.objectCache.K8sObjectCache())
 			if !ok {
 				continue

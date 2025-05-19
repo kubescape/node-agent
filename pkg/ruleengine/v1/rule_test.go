@@ -8,11 +8,15 @@ import (
 
 func ProcessRuleEvaluationTest(rule ruleengine.RuleEvaluator, eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	// First check if we need profile evaluation
-	if rule.Requirements().GetProfileRequirements().Required || rule.Requirements().GetProfileRequirements().Optional {
-		ok, _ := rule.EvaluateRuleWithProfile(eventType, event, objCache)
+	if rule.Requirements().GetProfileRequirements().Required || (rule.Requirements().GetProfileRequirements().Optional) {
+		ok, _, err := rule.EvaluateRuleWithProfile(eventType, event, objCache)
+		if err != nil {
+			return nil
+		}
 		if !ok {
 			return nil
 		}
+		
 	}
 
 	// If profile is not required, do basic evaluation

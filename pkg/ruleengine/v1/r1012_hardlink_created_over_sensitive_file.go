@@ -95,21 +95,21 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.
 	return false, nil
 }
 
-func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}) {
+func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
 	// First do basic evaluation
 	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
 	if !ok {
-		return false, nil
+		return false, nil, nil
 	}
 
 	hardlinkEvent, _ := event.(*tracerhardlinktype.Event)
 	if allowed, err := IsAllowed(&hardlinkEvent.Event, objCache, hardlinkEvent.Comm, R1012ID); err != nil {
-		return true, nil // If we can't check profile, we still want to alert
+		return true, nil, nil // If we can't check profile, we still want to alert
 	} else if allowed {
-		return false, nil
+		return false, nil, nil
 	}
 
-	return true, nil
+	return true, nil, nil
 }
 
 func (rule *R1012HardlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {

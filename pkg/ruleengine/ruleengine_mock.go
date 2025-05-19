@@ -64,8 +64,8 @@ func (rule *RuleMock) EvaluateRule(eventType utils.EventType, event utils.K8sEve
 	return false, nil
 }
 
-func (rule *RuleMock) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}) {
-	return false, nil
+func (rule *RuleMock) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	return false, nil, nil
 }
 
 func (rule *RuleMock) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) RuleFailure {
