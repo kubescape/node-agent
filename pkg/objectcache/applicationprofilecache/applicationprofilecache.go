@@ -453,7 +453,7 @@ func (apc *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedP
 		helpers.String("userManagedProfileName", userManagedProfile.Name),
 		helpers.String("normalProfileNamespace", normalProfile.Namespace),
 		helpers.String("userManagedProfileNamespace", userManagedProfile.Namespace))
-	mergedProfile := normalProfile
+	mergedProfile := normalProfile.DeepCopy()
 
 	// Merge spec
 	mergedProfile.Spec.Containers = apc.mergeContainers(mergedProfile.Spec.Containers, userManagedProfile.Spec.Containers)
