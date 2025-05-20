@@ -46,6 +46,8 @@ type ApplicationProfileCacheImpl struct {
 	k8sObjectCache                 objectcache.K8sObjectCache
 	updateInterval                 time.Duration
 	mutex                          sync.Mutex // For operations that need additional synchronization
+	updateInProgress               bool       // Flag to track if update is in progress
+	updateMutex                    sync.Mutex // Mutex to protect the flag
 }
 
 // NewApplicationProfileCache creates a new application profile cache with periodic updates
@@ -79,7 +81,29 @@ func (apc *ApplicationProfileCacheImpl) periodicUpdate(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			apc.updateAllProfiles(ctx)
+			// Check if an update is already in progress
+			apc.updateMutex.Lock()
+			if apc.updateInProgress {
+				// Skip this update cycle
+				logger.L().Debug("skipping profile update: previous update still in progress")
+				apc.updateMutex.Unlock()
+				continue
+			}
+
+			// Set the flag and release the lock
+			apc.updateInProgress = true
+			apc.updateMutex.Unlock()
+
+			// Run the update in a goroutine
+			go func() {
+				apc.updateAllProfiles(ctx)
+
+				// Mark the update as complete
+				apc.updateMutex.Lock()
+				apc.updateInProgress = false
+				apc.updateMutex.Unlock()
+			}()
+
 		case <-ctx.Done():
 			return
 		}
@@ -393,6 +417,9 @@ func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
 	apc.mutex.Lock()
 	if containerSet, exists := apc.namespaceToContainers.Load(containerInfo.Namespace); exists {
 		containerSet.Remove(containerID)
+		if containerSet.Cardinality() == 0 {
+			apc.namespaceToContainers.Delete(containerInfo.Namespace)
+		}
 	}
 	apc.mutex.Unlock()
 
@@ -414,7 +441,8 @@ func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
 	if !workloadStillInUse {
 		if profile, exists := apc.workloadIDToProfile.Load(containerInfo.WorkloadID); exists {
 			// Remove the profile from the cache
-			apc.profileToUserManagedIdentifier.Delete(profile.Name)
+			profileKey := fmt.Sprintf("%s/%s", profile.Namespace, strings.TrimPrefix(profile.Name, "ug-"))
+			apc.profileToUserManagedIdentifier.Delete(profileKey)
 		}
 		apc.workloadIDToProfile.Delete(containerInfo.WorkloadID)
 		logger.L().Debug("deleted workloadID from cache", helpers.String("workloadID", containerInfo.WorkloadID))

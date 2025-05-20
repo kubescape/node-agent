@@ -40,6 +40,8 @@ type NetworkNeighborhoodCacheImpl struct {
 	k8sObjectCache                             objectcache.K8sObjectCache
 	updateInterval                             time.Duration
 	mutex                                      sync.Mutex // For operations that need additional synchronization
+	updateInProgress                           bool       // Flag to track if update is in progress
+	updateMutex                                sync.Mutex // Mutex to protect the flag
 }
 
 // NewNetworkNeighborhoodCache creates a new network neighborhood cache with periodic updates
@@ -73,7 +75,29 @@ func (nnc *NetworkNeighborhoodCacheImpl) periodicUpdate(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			nnc.updateAllNetworkNeighborhoods(ctx)
+			// Check if an update is already in progress
+			nnc.updateMutex.Lock()
+			if nnc.updateInProgress {
+				// Skip this update cycle
+				logger.L().Debug("skipping NetworkNeighborhoods update: previous update still in progress")
+				nnc.updateMutex.Unlock()
+				continue
+			}
+
+			// Set the flag and release the lock
+			nnc.updateInProgress = true
+			nnc.updateMutex.Unlock()
+
+			// Run the update in a goroutine
+			go func() {
+				nnc.updateAllNetworkNeighborhoods(ctx)
+
+				// Mark the update as complete
+				nnc.updateMutex.Lock()
+				nnc.updateInProgress = false
+				nnc.updateMutex.Unlock()
+			}()
+
 		case <-ctx.Done():
 			return
 		}
@@ -316,6 +340,9 @@ func (nnc *NetworkNeighborhoodCacheImpl) deleteContainer(containerID string) {
 	nnc.mutex.Lock()
 	if containerSet, exists := nnc.namespaceToContainers.Load(containerInfo.Namespace); exists {
 		containerSet.Remove(containerID)
+		if containerSet.Cardinality() == 0 {
+			nnc.namespaceToContainers.Delete(containerInfo.Namespace)
+		}
 	}
 	nnc.mutex.Unlock()
 
