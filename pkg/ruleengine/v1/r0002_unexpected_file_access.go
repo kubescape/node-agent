@@ -134,7 +134,7 @@ func (rule *R0002UnexpectedFileAccess) EvaluateRule(eventType utils.EventType, e
 		}
 	}
 
-	return true, openEvent
+	return true, fullEvent
 }
 
 func (rule *R0002UnexpectedFileAccess) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
@@ -145,6 +145,7 @@ func (rule *R0002UnexpectedFileAccess) EvaluateRuleWithProfile(eventType utils.E
 	}
 
 	openEventTyped, _ := openEvent.(*events.OpenEvent)
+	fmt.Println("openEventTyped", openEventTyped.Runtime.ContainerID)
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEventTyped.Runtime.ContainerID)
 	if ap == nil {
 		return false, nil, rulemanager.NoProfileAvailable

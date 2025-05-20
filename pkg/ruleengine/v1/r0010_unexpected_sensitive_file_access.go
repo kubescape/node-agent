@@ -131,7 +131,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) EvaluateRule(eventType utils.Eve
 		}
 	}
 
-	return true, openEvent
+	return true, fullEvent
 }
 
 func (rule *R0010UnexpectedSensitiveFileAccess) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {

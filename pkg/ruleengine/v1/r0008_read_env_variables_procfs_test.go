@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
@@ -37,7 +38,7 @@ func TestR0008ReadingEnvVariablesFromProcFS(t *testing.T) {
 	}
 
 	// Test with nil appProfileAccess
-	ruleResult := ProcessRuleEvaluationTest(r, utils.OpenEventType, e, &RuleObjectCacheMock{})
+	ruleResult := rulemanager.ProcessRule(r, utils.OpenEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to not be nil since no appProfile")
 		return
@@ -62,21 +63,21 @@ func TestR0008ReadingEnvVariablesFromProcFS(t *testing.T) {
 		objCache.SetApplicationProfile(profile)
 	}
 
-	ruleResult = ProcessRuleEvaluationTest(r, utils.OpenEventType, e, &objCache)
+	ruleResult = rulemanager.ProcessRule(r, utils.OpenEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since file is whitelisted")
 	}
 
 	// Test with non-whitelisted file
 	e.FullPath = "/proc/2/environ"
-	ruleResult = ProcessRuleEvaluationTest(r, utils.OpenEventType, e, &objCache)
+	ruleResult = rulemanager.ProcessRule(r, utils.OpenEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to not be nil since there is a read from /environ")
 	}
 
 	// Test with non /proc file
 	e.FullPath = "/test"
-	ruleResult = ProcessRuleEvaluationTest(r, utils.OpenEventType, e, &objCache)
+	ruleResult = rulemanager.ProcessRule(r, utils.OpenEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since file is not /proc file")
 	}

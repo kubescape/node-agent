@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
@@ -58,14 +59,14 @@ func TestR1011LdPreloadHook(t *testing.T) {
 	}
 
 	// Test with existing ld_preload file
-	ruleResult := ProcessRuleEvaluationTest(r, utils.OpenEventType, e, &objCache)
+	ruleResult := rulemanager.ProcessRule(r, utils.OpenEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since ld_preload file is opened with write flag")
 	}
 
 	// Test with ld.so.preload file opened with read flag
 	e.FlagsRaw = 0
-	ruleResult = ProcessRuleEvaluationTest(r, utils.OpenEventType, e, &objCache)
+	ruleResult = rulemanager.ProcessRule(r, utils.OpenEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since ld_preload file is opened with read flag")
 	}
@@ -101,7 +102,7 @@ func TestR1011LdPreloadHook(t *testing.T) {
 		},
 	})
 	e.FullPath = "/var/test.so"
-	ruleResult = ProcessRuleEvaluationTest(r, utils.OpenEventType, e, &objCache)
+	ruleResult = rulemanager.ProcessRule(r, utils.OpenEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since LD_PRELOAD is set in pod spec")
 	}
@@ -122,7 +123,7 @@ func TestR1011LdPreloadHook(t *testing.T) {
 		},
 	}
 	// Test with exec event
-	ruleResult = ProcessRuleEvaluationTest(r, utils.ExecveEventType, e2, &objCache)
+	ruleResult = rulemanager.ProcessRule(r, utils.ExecveEventType, e2, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since exec event is on java")
 	}
@@ -164,7 +165,7 @@ func TestR1011LdPreloadHook(t *testing.T) {
 		objCache.SetApplicationProfile(profile)
 	}
 	// Test with exec event
-	ruleResult = ProcessRuleEvaluationTest(r, utils.OpenEventType, e3, &objCache)
+	ruleResult = rulemanager.ProcessRule(r, utils.OpenEventType, e3, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since exec event is on java")
 	}

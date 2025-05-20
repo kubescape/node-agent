@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
@@ -33,7 +34,7 @@ func TestR0004UnexpectedCapabilityUsed(t *testing.T) {
 	}
 
 	// Test with nil appProfileAccess
-	ruleResult := ProcessRuleEvaluationTest(r, utils.CapabilitiesEventType, e, &RuleObjectCacheMock{})
+	ruleResult := rulemanager.ProcessRule(r, utils.CapabilitiesEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since no appProfile is present")
 	}
@@ -51,7 +52,7 @@ func TestR0004UnexpectedCapabilityUsed(t *testing.T) {
 	}
 
 	// Test with mock appProfile
-	ruleResult = ProcessRuleEvaluationTest(r, utils.CapabilitiesEventType, e, &objCache)
+	ruleResult = rulemanager.ProcessRule(r, utils.CapabilitiesEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since capability is in the profile")
 	}

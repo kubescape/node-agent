@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
@@ -36,7 +37,7 @@ func TestR0003UnexpectedSystemCall(t *testing.T) {
 	}
 
 	// Test with nil application profile
-	ruleResult := ProcessRuleEvaluationTest(r, utils.SyscallEventType, e, &RuleObjectCacheMock{})
+	ruleResult := rulemanager.ProcessRule(r, utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since no syscall event")
 	}
@@ -59,7 +60,7 @@ func TestR0003UnexpectedSystemCall(t *testing.T) {
 		objCache.SetApplicationProfile(profile)
 	}
 	// Test with mock application activity and syscall
-	ruleResult = ProcessRuleEvaluationTest(r, utils.SyscallEventType, e, &objCache)
+	ruleResult = rulemanager.ProcessRule(r, utils.SyscallEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since syscall is whitelisted")
@@ -79,7 +80,7 @@ func TestR0003UnexpectedSystemCall(t *testing.T) {
 	})
 
 	// Test with mock application activity and syscall
-	ruleResult = ProcessRuleEvaluationTest(r, utils.SyscallEventType, e, &objCache)
+	ruleResult = rulemanager.ProcessRule(r, utils.SyscallEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since syscall is not whitelisted")
 	}

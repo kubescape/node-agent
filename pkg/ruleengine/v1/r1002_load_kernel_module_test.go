@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
@@ -23,7 +24,7 @@ func TestR1002LoadKernelModule(t *testing.T) {
 		SyscallName: "test",
 	}
 
-	ruleResult := ProcessRuleEvaluationTest(r, utils.SyscallEventType, e, &RuleObjectCacheMock{})
+	ruleResult := rulemanager.ProcessRule(r, utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since syscall is not init_module")
@@ -32,7 +33,7 @@ func TestR1002LoadKernelModule(t *testing.T) {
 	// Create a syscall event with init_module syscall
 	e.SyscallName = "init_module"
 
-	ruleResult = ProcessRuleEvaluationTest(r, utils.SyscallEventType, e, &RuleObjectCacheMock{})
+	ruleResult = rulemanager.ProcessRule(r, utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of init_module is not allowed")
@@ -42,7 +43,7 @@ func TestR1002LoadKernelModule(t *testing.T) {
 	r2 := CreateRuleR1002LoadKernelModule()
 	e.SyscallName = "finit_module"
 
-	ruleResult = ProcessRuleEvaluationTest(r2, utils.SyscallEventType, e, &RuleObjectCacheMock{})
+	ruleResult = rulemanager.ProcessRule(r2, utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of finit_module is not allowed")

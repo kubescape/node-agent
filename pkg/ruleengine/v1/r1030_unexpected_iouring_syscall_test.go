@@ -5,6 +5,7 @@ import (
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -107,7 +108,7 @@ func TestR1030UnexpectedIouringOperation(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ruleResult := ProcessRuleEvaluationTest(r, utils.IoUringEventType, tc.event, &objCache)
+			ruleResult := rulemanager.ProcessRule(r, utils.IoUringEventType, tc.event, &objCache)
 
 			if tc.expectedAlert && ruleResult == nil {
 				t.Errorf("Expected alert for io_uring operation but got nil")
@@ -120,7 +121,7 @@ func TestR1030UnexpectedIouringOperation(t *testing.T) {
 
 	// Test wrong event type
 	wrongEvent := &traceriouringtype.Event{}
-	ruleResult := ProcessRuleEvaluationTest(r, utils.HardlinkEventType, wrongEvent, &objCache)
+	ruleResult := rulemanager.ProcessRule(r, utils.HardlinkEventType, wrongEvent, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected no alert for wrong event type but got: %v", ruleResult)
 	}

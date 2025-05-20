@@ -288,23 +288,7 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 			continue
 		}
 
-		evaluated := false
-		if rule.Requirements().GetProfileRequirements().Required || rule.Requirements().GetProfileRequirements().Optional {
-			ok, _, err := rule.EvaluateRuleWithProfile(eventType, event, rm.objectCache)
-			if !ok && !errors.Is(err, rulemanager.NoProfileAvailable) {
-				continue
-			}
-		}
-
-		if !rule.Requirements().GetProfileRequirements().Required && !evaluated {
-			ok, _ := rule.EvaluateRule(eventType, event, rm.objectCache.K8sObjectCache())
-			if !ok {
-				continue
-			}
-		}
-
-		// Create and process the failure
-		res := rule.CreateRuleFailure(eventType, event, rm.objectCache)
+		res := rulemanager.ProcessRule(rule, eventType, event, rm.objectCache)
 		if res != nil {
 			res = rm.enrichRuleFailure(rule, res)
 			if res != nil {

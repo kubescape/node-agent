@@ -112,7 +112,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) EvaluateRule(eventType uti
 		return false, nil
 	}
 
-	return true, openEvent
+	return true, convertedEvent
 }
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
