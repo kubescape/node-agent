@@ -6,16 +6,15 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 )
 
 const (
@@ -148,7 +147,7 @@ func (rule *R0002UnexpectedFileAccess) EvaluateRuleWithProfile(eventType utils.E
 	fmt.Println("openEventTyped", openEventTyped.Runtime.ContainerID)
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEventTyped.Runtime.ContainerID)
 	if ap == nil {
-		return false, nil, rulemanager.NoProfileAvailable
+		return false, nil, ruleprocess.NoProfileAvailable
 	}
 
 	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEventTyped.GetContainer())
@@ -220,8 +219,8 @@ func (rule *R0002UnexpectedFileAccess) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0002UnexpectedFileAccessRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Required:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Required,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

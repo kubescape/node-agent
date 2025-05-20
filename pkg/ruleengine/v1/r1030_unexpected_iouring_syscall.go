@@ -33,6 +33,7 @@ var R1030UnexpectedIouringOperationRuleDescriptor = ruleengine.RuleDescriptor{
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1030UnexpectedIouringOperation()
 	},
+	RulePolicySupport: true,
 }
 
 var _ ruleengine.RuleEvaluator = (*R1030UnexpectedIouringOperation)(nil)
@@ -136,8 +137,8 @@ func (rule *R1030UnexpectedIouringOperation) Requirements() ruleengine.RuleSpec 
 	return &RuleRequirements{
 		EventTypes: R1030UnexpectedIouringOperationRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Required:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Required,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

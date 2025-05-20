@@ -5,14 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
@@ -125,7 +124,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) EvaluateRuleWithProfile(ev
 	openEventTyped, _ := openEvent.(*events.OpenEvent)
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEventTyped.Runtime.ContainerID)
 	if ap == nil {
-		return false, nil, rulemanager.NoProfileAvailable
+		return false, nil, ruleprocess.NoProfileAvailable
 	}
 
 	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEventTyped.GetContainer())
@@ -192,8 +191,8 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) Requirements() ruleengine.
 	return &RuleRequirements{
 		EventTypes: R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Optional:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

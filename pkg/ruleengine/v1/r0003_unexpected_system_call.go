@@ -5,13 +5,13 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 )
 
 const (
@@ -87,7 +87,7 @@ func (rule *R0003UnexpectedSystemCall) EvaluateRuleWithProfile(eventType utils.E
 	syscallEventTyped, _ := syscallEvent.(*ruleenginetypes.SyscallEvent)
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEventTyped.Runtime.ContainerID)
 	if ap == nil {
-		return false, nil, rulemanager.NoProfileAvailable
+		return false, nil, ruleprocess.NoProfileAvailable
 	}
 
 	container, err := GetContainerFromApplicationProfile(ap, syscallEventTyped.GetContainer())
@@ -141,8 +141,8 @@ func (rule *R0003UnexpectedSystemCall) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0003UnexpectedSystemCallRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Required:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Required,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

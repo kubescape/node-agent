@@ -85,9 +85,6 @@ func (rule *R1015MaliciousPtraceUsage) CreateRuleFailure(eventType utils.EventTy
 			AlertName:   rule.Name(),
 			InfectedPID: ptraceEvent.Pid,
 			Severity:    R1015MaliciousPtraceUsageRuleDescriptor.Priority,
-			ProfileMetadata: &apitypes.ProfileMetadata{
-				IsProfileDependent: false,
-			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -115,5 +112,8 @@ func (rule *R1015MaliciousPtraceUsage) CreateRuleFailure(eventType utils.EventTy
 func (rule *R1015MaliciousPtraceUsage) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1015MaliciousPtraceUsageRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			ProfileDependency: apitypes.NotRequired,
+		},
 	}
 }

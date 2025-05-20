@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
@@ -42,7 +42,7 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 	}
 
 	// Test with nil network neighborhood.
-	ruleResult := rulemanager.ProcessRule(r, utils.NetworkEventType, e, &RuleObjectCacheMock{})
+	ruleResult := ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to not be nil since no appProfile")
 	}
@@ -67,28 +67,28 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 		objCache.SetNetworkNeighborhood(nn)
 	}
 
-	ruleResult = rulemanager.ProcessRule(r, utils.NetworkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since domain/adress is whitelisted")
 	}
 
 	// Test with non-whitelisted address without dns cache.
 	e.DstEndpoint.Addr = "2.2.2.2"
-	ruleResult = rulemanager.ProcessRule(r, utils.NetworkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since domain/adress is not whitelisted")
 	}
 
 	// Test with whitelisted address with dns cache.
 	objCache.SetDnsCache(map[string]string{"2.2.2.2": "test.com"})
-	ruleResult = rulemanager.ProcessRule(r, utils.NetworkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since we are able to resolve the address")
 	}
 
 	// Test with incoming packet.
 	e.PktType = "INCOMING"
-	ruleResult = rulemanager.ProcessRule(r, utils.NetworkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since packet is incoming")
 	}
@@ -96,7 +96,7 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 	// Test with private address.
 	e.PktType = "OUTGOING"
 	e.DstEndpoint.Addr = "10.0.0.1"
-	ruleResult = rulemanager.ProcessRule(r, utils.NetworkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since address is private")
 	}
@@ -104,7 +104,7 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 	// Test with non-whitelisted address with dns cache empty.
 	e.DstEndpoint.Addr = "4.4.4.4"
 	objCache.SetDnsCache(map[string]string{})
-	ruleResult = rulemanager.ProcessRule(r, utils.NetworkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since we are not able to resolve the address")
 	}
@@ -112,7 +112,7 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 	// Test with non-whitelisted address with nil dns cache with different port.
 	e.DstEndpoint.Addr = "5.5.5.5"
 	e.Port = 443
-	ruleResult = rulemanager.ProcessRule(r, utils.NetworkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since it's not whitelisted")
 	}
@@ -120,7 +120,7 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 	// Test with non-whitelisted address with nil dns cache with different port.
 	e.DstEndpoint.Addr = "5.5.5.5"
 	e.Port = 80
-	ruleResult = rulemanager.ProcessRule(r, utils.NetworkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since it's not whitelisted and it's different port")
 	}
@@ -128,7 +128,7 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 	// Test with non-whitelisted address with nil dns cache with different port.
 	e.DstEndpoint.Addr = "5.5.5.5"
 	e.Port = 80
-	ruleResult = rulemanager.ProcessRule(r, utils.NetworkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since we already alerted on this port")
 	}
@@ -139,7 +139,7 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 	originalAnnotations := nn.GetAnnotations()
 	nn.Annotations = map[string]string{"kubescape.io/completion": string(utils.WatchedContainerCompletionStatusPartial)}
 	objCache.SetNetworkNeighborhood(nn)
-	ruleResult = rulemanager.ProcessRule(r, utils.NetworkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since it's a partially watched container")
 	}
@@ -150,7 +150,7 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 	e.DstEndpoint.Addr = "5.5.5.5"
 	e.Port = 80
 	e.Proto = "UDP"
-	ruleResult = rulemanager.ProcessRule(r, utils.NetworkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since it's a different protocol")
 	}

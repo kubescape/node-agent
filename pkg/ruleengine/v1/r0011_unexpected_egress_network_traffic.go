@@ -8,12 +8,11 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
-
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 )
 
 const (
@@ -95,7 +94,7 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) EvaluateRuleWithProfile(eventTy
 	networkEventTyped, _ := networkEvent.(*tracernetworktype.Event)
 	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEventTyped.Runtime.ContainerID)
 	if nn == nil {
-		return false, nil, rulemanager.NoProfileAvailable
+		return false, nil, ruleprocess.NoProfileAvailable
 	}
 
 	// Skip partially watched containers.
@@ -167,8 +166,8 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) Requirements() ruleengine.RuleS
 	return &RuleRequirements{
 		EventTypes: R0011UnexpectedEgressNetworkTrafficRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Required:    true,
-			ProfileType: apitypes.NetworkProfile,
+			ProfileDependency: apitypes.Required,
+			ProfileType:       apitypes.NetworkProfile,
 		},
 	}
 }

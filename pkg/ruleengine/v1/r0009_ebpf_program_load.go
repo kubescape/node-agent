@@ -6,12 +6,11 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 
-	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 )
 
 const (
@@ -87,7 +86,7 @@ func (rule *R0009EbpfProgramLoad) EvaluateRuleWithProfile(eventType utils.EventT
 	syscallEventTyped, _ := syscallEvent.(*ruleenginetypes.SyscallEvent)
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEventTyped.Runtime.ContainerID)
 	if ap == nil {
-		return false, nil, rulemanager.NoProfileAvailable
+		return false, nil, ruleprocess.NoProfileAvailable
 	}
 
 	appProfileSyscallList, err := GetContainerFromApplicationProfile(ap, syscallEventTyped.GetContainer())
@@ -140,8 +139,8 @@ func (rule *R0009EbpfProgramLoad) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0009EbpfProgramLoadRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Optional:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

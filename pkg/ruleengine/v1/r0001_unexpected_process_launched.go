@@ -5,13 +5,12 @@ import (
 	"slices"
 	"strings"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
@@ -82,7 +81,7 @@ func (rule *R0001UnexpectedProcessLaunched) EvaluateRuleWithProfile(eventType ut
 	execEvent, _ := event.(*events.ExecEvent)
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
 	if ap == nil {
-		return false, nil, rulemanager.NoProfileAvailable
+		return false, nil, ruleprocess.NoProfileAvailable
 	}
 
 	appProfileExecList, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())
@@ -155,8 +154,8 @@ func (rule *R0001UnexpectedProcessLaunched) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0001UnexpectedProcessLaunchedRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Required:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Required,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

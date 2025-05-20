@@ -34,6 +34,7 @@ var R1012HardlinkCreatedOverSensitiveFileRuleDescriptor = ruleengine.RuleDescrip
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1012HardlinkCreatedOverSensitiveFile()
 	},
+	RulePolicySupport: true,
 }
 var _ ruleengine.RuleEvaluator = (*R1012HardlinkCreatedOverSensitiveFile)(nil)
 
@@ -156,8 +157,8 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) Requirements() ruleengine.Rul
 	return &RuleRequirements{
 		EventTypes: R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Optional:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

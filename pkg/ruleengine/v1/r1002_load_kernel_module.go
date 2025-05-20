@@ -120,8 +120,8 @@ func (rule *R1002LoadKernelModule) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1002LoadKernelModuleRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Required:    false,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.NotRequired,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

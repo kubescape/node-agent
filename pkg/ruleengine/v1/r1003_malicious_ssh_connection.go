@@ -11,14 +11,13 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 
 	"github.com/kubescape/go-logger"
-
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 )
 
 const (
@@ -164,7 +163,7 @@ func (rule *R1003MaliciousSSHConnection) EvaluateRuleWithProfile(eventType utils
 	sshEventTyped, _ := sshEvent.(*tracersshtype.Event)
 	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(sshEventTyped.Runtime.ContainerID)
 	if nn == nil {
-		return false, nil, rulemanager.NoProfileAvailable
+		return false, nil, ruleprocess.NoProfileAvailable
 	}
 
 	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, sshEventTyped.GetContainer())
@@ -226,8 +225,8 @@ func (rule *R1003MaliciousSSHConnection) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1003MaliciousSSHConnectionRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Optional:    true,
-			ProfileType: apitypes.NetworkProfile,
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.NetworkProfile,
 		},
 	}
 }

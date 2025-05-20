@@ -1,4 +1,4 @@
-package rulemanager
+package ruleprocess
 
 import (
 	"errors"
@@ -26,12 +26,14 @@ func IsProfileExists(objCache objectcache.ObjectCache, containerID string, profi
 
 func ProcessRule(rule ruleengine.RuleEvaluator, eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	isRuleFailure := false
-	if rule.Requirements().GetProfileRequirements().Required || (rule.Requirements().GetProfileRequirements().Optional) {
+	if rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Required ||
+		(rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Optional) {
 		ok, _, err := rule.EvaluateRuleWithProfile(eventType, event, objCache)
 		// if profile is required and there is no profile available, return nil
 		// or if profile is optional and there is no profile available, continue
 		// or if profile is required and there is a profile available and no rule failure, continue
-		if !ok && (!errors.Is(err, NoProfileAvailable) || rule.Requirements().GetProfileRequirements().Required) {
+		if !ok && (!errors.Is(err, NoProfileAvailable) ||
+			rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Required) {
 			return nil
 		}
 
@@ -39,7 +41,7 @@ func ProcessRule(rule ruleengine.RuleEvaluator, eventType utils.EventType, event
 	}
 
 	// If profile is not required and there is no rule failure, do basic evaluation
-	if !rule.Requirements().GetProfileRequirements().Required && !isRuleFailure {
+	if !(rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Required) && !isRuleFailure {
 		ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
 		if !ok {
 			return nil

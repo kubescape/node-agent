@@ -38,6 +38,7 @@ var R1011LdPreloadHookRuleDescriptor = ruleengine.RuleDescriptor{
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1011LdPreloadHook()
 	},
+	RulePolicySupport: true,
 }
 var _ ruleengine.RuleEvaluator = (*R1011LdPreloadHook)(nil)
 
@@ -265,8 +266,8 @@ func (rule *R1011LdPreloadHook) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1011LdPreloadHookRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Optional:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

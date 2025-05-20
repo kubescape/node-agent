@@ -156,8 +156,8 @@ func (rule *R1000ExecFromMaliciousSource) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1000ExecFromMaliciousSourceDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Optional:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

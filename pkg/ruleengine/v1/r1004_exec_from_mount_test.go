@@ -3,7 +3,7 @@ package ruleengine
 import (
 	"testing"
 
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -38,7 +38,7 @@ func TestR1004ExecFromMount(t *testing.T) {
 	}
 
 	// Test case where path is not mounted
-	ruleResult := rulemanager.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult := ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since test is not from a mounted path")
 	}
@@ -71,7 +71,7 @@ func TestR1004ExecFromMount(t *testing.T) {
 			},
 		},
 	)
-	ruleResult = rulemanager.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult = ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since no application profile is found")
 	}
@@ -87,7 +87,7 @@ func TestR1004ExecFromMount(t *testing.T) {
 			},
 		},
 	})
-	ruleResult = rulemanager.ProcessRule(r, utils.ExecveEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult since exec is from a mounted path")
 	}

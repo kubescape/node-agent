@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -35,7 +35,7 @@ func TestR1000ExecFromMaliciousSource(t *testing.T) {
 		},
 	}
 
-	ruleResult := rulemanager.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult := ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since test is not a malicious exec")
 	}
@@ -44,28 +44,28 @@ func TestR1000ExecFromMaliciousSource(t *testing.T) {
 
 	e.Comm = "/run.sh"
 
-	ruleResult = rulemanager.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult = ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since exec is not malicious")
 	}
 
 	e.Comm = "./run.sh"
 
-	ruleResult = rulemanager.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult = ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since exec is not malicious")
 	}
 
 	e.Comm = "/dev/shm/run.sh"
 
-	ruleResult = rulemanager.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult = ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult since exec is malicious")
 	}
 
 	e.Comm = "./dev/shm/run.sh"
 
-	ruleResult = rulemanager.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult = ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult since exec is malicious")
 	}
@@ -73,14 +73,14 @@ func TestR1000ExecFromMaliciousSource(t *testing.T) {
 	e.Cwd = "/dev/shm"
 	e.Comm = "./run.sh"
 
-	ruleResult = rulemanager.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult = ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult since exec is malicious")
 	}
 
 	e.Comm = "./run.sh -al"
 
-	ruleResult = rulemanager.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult = ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult since exec is malicious")
 	}
@@ -105,7 +105,7 @@ func TestR1000ExecFromMaliciousSource(t *testing.T) {
 	}
 
 	// This should not trigger a rule failure
-	ruleResult = rulemanager.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult = ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Got false positive alert for legitimate motd execution:\nCwd: %s\nExePath: %s\nArgs: %v",
 			e.Cwd, e.ExePath, e.Args)
@@ -113,7 +113,7 @@ func TestR1000ExecFromMaliciousSource(t *testing.T) {
 
 	// For comparison, test a real malicious case
 	e.ExePath = "/dev/shm/malicious"
-	ruleResult = rulemanager.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult = ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		t.Errorf("Failed to detect actually malicious execution from /dev/shm")
 	}

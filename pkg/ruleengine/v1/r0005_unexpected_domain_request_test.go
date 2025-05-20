@@ -3,7 +3,7 @@ package ruleengine
 import (
 	"testing"
 
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
@@ -35,7 +35,7 @@ func TestR0005UnexpectedDomainRequest(t *testing.T) {
 	}
 
 	// Test with nil appProfileAccess
-	ruleResult := rulemanager.ProcessRule(r, utils.DnsEventType, e, &RuleObjectCacheMock{})
+	ruleResult := ruleprocess.ProcessRule(r, utils.DnsEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to not be nil since no appProfile")
 	}
@@ -58,7 +58,7 @@ func TestR0005UnexpectedDomainRequest(t *testing.T) {
 		objCache.SetNetworkNeighborhood(nn)
 	}
 
-	ruleResult = rulemanager.ProcessRule(r, utils.DnsEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.DnsEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since domain is whitelisted")
 	}

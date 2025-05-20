@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"strings"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
@@ -90,7 +89,7 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) EvaluateRuleWithProfile(eventTy
 	openEventTyped, _ := openEvent.(*traceropentype.Event)
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEventTyped.Runtime.ContainerID)
 	if ap == nil {
-		return false, nil, rulemanager.NoProfileAvailable
+		return false, nil, ruleprocess.NoProfileAvailable
 	}
 
 	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEventTyped.GetContainer())
@@ -151,8 +150,8 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) Requirements() ruleengine.RuleS
 	return &RuleRequirements{
 		EventTypes: R0008ReadEnvironmentVariablesProcFSRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Optional:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

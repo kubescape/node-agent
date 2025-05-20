@@ -34,6 +34,7 @@ var R1010SymlinkCreatedOverSensitiveFileRuleDescriptor = ruleengine.RuleDescript
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1010SymlinkCreatedOverSensitiveFile()
 	},
+	RulePolicySupport: true,
 }
 
 var _ ruleengine.RuleEvaluator = (*R1010SymlinkCreatedOverSensitiveFile)(nil)
@@ -158,8 +159,8 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) Requirements() ruleengine.Rule
 	return &RuleRequirements{
 		EventTypes: R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Optional:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

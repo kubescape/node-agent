@@ -130,8 +130,8 @@ func (rule *R1001ExecBinaryNotInBaseImage) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1001ExecBinaryNotInBaseImageRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Optional:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

@@ -32,15 +32,14 @@ type RuleDescriptor struct {
 	Requirements RuleSpec
 	// Create a rule function
 	RuleCreationFunc func() RuleEvaluator
+	// RulePolicySupport indicates if the rule supports policy
+	RulePolicySupport bool
 }
 
 // ProfileRequirement indicates how a rule uses profiles
 type ProfileRequirement struct {
-	// Required indicates if the rule must have a profile to run
-	Required bool
-
-	// Optional indicates if the rule can use a profile but doesn't require it
-	Optional bool
+	// ProfileDependency indicates if the rule requires a profile
+	ProfileDependency apitypes.ProfileDependency
 
 	// ProfileType indicates what type of profile is needed (Application, Network, etc)
 	ProfileType apitypes.ProfileType

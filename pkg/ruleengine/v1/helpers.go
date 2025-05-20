@@ -9,13 +9,13 @@ import (
 	"strings"
 
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -166,12 +166,12 @@ func IsAllowed(event *eventtypes.Event, objCache objectcache.ObjectCache, proces
 	}
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(event.Runtime.ContainerID)
 	if ap == nil {
-		return false, rulemanager.NoProfileAvailable
+		return false, ruleprocess.NoProfileAvailable
 	}
 
 	appProfile, err := GetContainerFromApplicationProfile(ap, event.GetContainer())
 	if err != nil {
-		return false, rulemanager.NoProfileAvailable
+		return false, ruleprocess.NoProfileAvailable
 	}
 
 	// rule policy does not exists, allowed by default

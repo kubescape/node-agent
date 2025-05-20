@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
@@ -57,7 +57,7 @@ func TestR0009EbpfProgramLoad(t *testing.T) {
 		SyscallName: "test",
 	}
 
-	ruleResult := rulemanager.ProcessRule(r, utils.SyscallEventType, e, &objCache)
+	ruleResult := ruleprocess.ProcessRule(r, utils.SyscallEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since syscall is not bpf")
@@ -67,7 +67,7 @@ func TestR0009EbpfProgramLoad(t *testing.T) {
 	// Create a syscall event with bpf syscall
 	e.SyscallName = "bpf"
 
-	ruleResult = rulemanager.ProcessRule(r, utils.SyscallEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.SyscallEventType, e, &objCache)
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of bpf is used")

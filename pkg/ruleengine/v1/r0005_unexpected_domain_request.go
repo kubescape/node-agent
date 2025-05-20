@@ -5,14 +5,13 @@ import (
 	"slices"
 	"strings"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
+	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 )
 
 const (
@@ -87,7 +86,7 @@ func (rule *R0005UnexpectedDomainRequest) EvaluateRuleWithProfile(eventType util
 	domainEventTyped, _ := domainEvent.(*tracerdnstype.Event)
 	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(domainEventTyped.Runtime.ContainerID)
 	if nn == nil {
-		return false, nil, rulemanager.NoProfileAvailable
+		return false, nil, ruleprocess.NoProfileAvailable
 	}
 
 	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, domainEventTyped.GetContainer())
@@ -151,8 +150,8 @@ func (rule *R0005UnexpectedDomainRequest) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0005UnexpectedDomainRequestRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Required:    true,
-			ProfileType: apitypes.NetworkProfile,
+			ProfileDependency: apitypes.Required,
+			ProfileType:       apitypes.NetworkProfile,
 		},
 	}
 }

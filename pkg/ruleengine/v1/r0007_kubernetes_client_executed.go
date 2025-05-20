@@ -6,15 +6,14 @@ import (
 	"slices"
 	"strings"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -68,13 +67,6 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 	var profileMetadata *apitypes.ProfileMetadata
 
 	if nn != nil {
-		profileMetadata = &apitypes.ProfileMetadata{
-			Status:             nn.GetAnnotations()[helpersv1.StatusMetadataKey],
-			Completion:         nn.GetAnnotations()[helpersv1.CompletionMetadataKey],
-			Name:               nn.Name,
-			Type:               apitypes.NetworkProfile,
-			IsProfileDependent: true,
-		}
 		nnContainer, err := GetContainerFromNetworkNeighborhood(nn, event.GetContainer())
 		if err != nil {
 			return nil
@@ -247,7 +239,7 @@ func (rule *R0007KubernetesClientExecuted) EvaluateRuleWithProfile(eventType uti
 		execEvent, _ := eventData.(*events.ExecEvent)
 		ap := objCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
 		if ap == nil {
-			return false, nil, rulemanager.NoProfileAvailable
+			return false, nil, ruleprocess.NoProfileAvailable
 		}
 
 		whitelistedExecs, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())
@@ -265,7 +257,7 @@ func (rule *R0007KubernetesClientExecuted) EvaluateRuleWithProfile(eventType uti
 		networkEvent, _ := eventData.(*tracernetworktype.Event)
 		nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
 		if nn == nil {
-			return false, nil, rulemanager.NoProfileAvailable
+			return false, nil, ruleprocess.NoProfileAvailable
 		}
 
 		nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
@@ -367,8 +359,8 @@ func (rule *R0007KubernetesClientExecuted) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0007KubernetesClientExecutedDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Optional:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

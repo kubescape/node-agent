@@ -31,6 +31,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -288,7 +289,7 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 			continue
 		}
 
-		res := rulemanager.ProcessRule(rule, eventType, event, rm.objectCache)
+		res := ruleprocess.ProcessRule(rule, eventType, event, rm.objectCache)
 		if res != nil {
 			res = rm.enrichRuleFailure(rule, res)
 			if res != nil {
@@ -422,7 +423,7 @@ func (rm *RuleManager) enrichRuleFailure(rule ruleengine.RuleEvaluator, ruleFail
 
 	if rm.enricher != nil && !reflect.ValueOf(rm.enricher).IsNil() {
 		if err := rm.enricher.EnrichRuleFailure(ruleFailure); err != nil {
-			if errors.Is(err, rulemanager.ErrRuleShouldNotBeAlerted) {
+			if errors.Is(err, ruleprocess.ErrRuleShouldNotBeAlerted) {
 				return nil
 			}
 		}
@@ -472,6 +473,7 @@ func (rm *RuleManager) EvaluateRulesForEvent(eventType utils.EventType, event ut
 	creator := rm.ruleBindingCache.GetRuleCreator()
 	rules := creator.CreateRulesByEventType(eventType)
 
+	// TODO: Rule policies should be applied here
 	for _, rule := range rules {
 		rule, ok := rule.(ruleengine.RuleCondition)
 		if !ok {
@@ -495,11 +497,11 @@ func (rm *RuleManager) setProfileMetadata(rule ruleengine.RuleEvaluator, ruleFai
 		ap := rm.objectCache.ApplicationProfileCache().GetApplicationProfile(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
 		if ap != nil {
 			profileMetadata := &armotypes.ProfileMetadata{
-				Status:             ap.GetAnnotations()[helpersv1.StatusMetadataKey],
-				Completion:         ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
-				Name:               ap.Name,
-				Type:               armotypes.ApplicationProfile,
-				IsProfileDependent: profileReq.Required,
+				Status:            ap.GetAnnotations()[helpersv1.StatusMetadataKey],
+				Completion:        ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
+				Name:              ap.Name,
+				Type:              armotypes.ApplicationProfile,
+				ProfileDependency: profileReq.ProfileDependency,
 			}
 			baseRuntimeAlert.ProfileMetadata = profileMetadata
 		}
@@ -508,17 +510,17 @@ func (rm *RuleManager) setProfileMetadata(rule ruleengine.RuleEvaluator, ruleFai
 		nn := rm.objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
 		if nn != nil {
 			profileMetadata := &armotypes.ProfileMetadata{
-				Status:             nn.GetAnnotations()[helpersv1.StatusMetadataKey],
-				Completion:         nn.GetAnnotations()[helpersv1.CompletionMetadataKey],
-				Name:               nn.Name,
-				Type:               armotypes.NetworkProfile,
-				IsProfileDependent: profileReq.Required,
+				Status:            nn.GetAnnotations()[helpersv1.StatusMetadataKey],
+				Completion:        nn.GetAnnotations()[helpersv1.CompletionMetadataKey],
+				Name:              nn.Name,
+				Type:              armotypes.NetworkProfile,
+				ProfileDependency: profileReq.ProfileDependency,
 			}
 			baseRuntimeAlert.ProfileMetadata = profileMetadata
 		}
 	default:
 		profileMetadata := &armotypes.ProfileMetadata{
-			IsProfileDependent: false,
+			ProfileDependency: profileReq.ProfileDependency,
 		}
 		baseRuntimeAlert.ProfileMetadata = profileMetadata
 	}

@@ -1,4 +1,4 @@
-package rulemanager
+package ruleprocess
 
 import "fmt"
 

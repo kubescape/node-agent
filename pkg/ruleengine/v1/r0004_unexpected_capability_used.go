@@ -3,14 +3,13 @@ package ruleengine
 import (
 	"fmt"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
+	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
-	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 )
 
 const (
@@ -79,7 +78,7 @@ func (rule *R0004UnexpectedCapabilityUsed) EvaluateRuleWithProfile(eventType uti
 	capEventTyped, _ := capEvent.(*tracercapabilitiestype.Event)
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(capEventTyped.Runtime.ContainerID)
 	if ap == nil {
-		return false, nil, rulemanager.NoProfileAvailable
+		return false, nil, ruleprocess.NoProfileAvailable
 	}
 
 	appProfileCapabilitiesList, err := GetContainerFromApplicationProfile(ap, capEventTyped.GetContainer())
@@ -135,8 +134,8 @@ func (rule *R0004UnexpectedCapabilityUsed) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0004UnexpectedCapabilityUsedRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			Required:    true,
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.Required,
+			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}
 }

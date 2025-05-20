@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
@@ -61,7 +61,7 @@ func TestR1012HardlinkCreatedOverSensitiveFile(t *testing.T) {
 		NewPath: "test",
 	}
 
-	ruleResult := rulemanager.ProcessRule(r, utils.HardlinkEventType, e, &objCache)
+	ruleResult := ruleprocess.ProcessRule(r, utils.HardlinkEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since hardlink path is not sensitive")
@@ -71,7 +71,7 @@ func TestR1012HardlinkCreatedOverSensitiveFile(t *testing.T) {
 	// Create a hardlink event with sensitive file path
 	e.OldPath = "/etc/shadow"
 	e.NewPath = "/etc/abc"
-	ruleResult = rulemanager.ProcessRule(r, utils.HardlinkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.HardlinkEventType, e, &objCache)
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of hardlink is used over sensitive file")
@@ -79,7 +79,7 @@ func TestR1012HardlinkCreatedOverSensitiveFile(t *testing.T) {
 	}
 
 	e.OldPath = "/etc/abc"
-	ruleResult = rulemanager.ProcessRule(r, utils.HardlinkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.HardlinkEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since hardlink is not used over sensitive file")
@@ -90,7 +90,7 @@ func TestR1012HardlinkCreatedOverSensitiveFile(t *testing.T) {
 	e.Comm = "/usr/sbin/groupadd"
 	e.OldPath = "/etc/shadow"
 	e.NewPath = "/etc/abc"
-	ruleResult = rulemanager.ProcessRule(r, utils.HardlinkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.HardlinkEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since file is whitelisted and not sensitive")
