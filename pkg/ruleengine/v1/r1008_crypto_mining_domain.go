@@ -198,7 +198,7 @@ func (rule *R1008CryptoMiningDomainCommunication) EvaluateRuleWithProfile(eventT
 	return true, nil, nil
 }
 
-func (rule *R1008CryptoMiningDomainCommunication) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1008CryptoMiningDomainCommunication) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	dnsEvent, _ := event.(*tracerdnstype.Event)
 	rule.alertedDomains.Set(dnsEvent.DNSName, true)
 

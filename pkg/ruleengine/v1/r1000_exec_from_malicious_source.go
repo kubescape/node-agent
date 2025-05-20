@@ -107,7 +107,7 @@ func (rule *R1000ExecFromMaliciousSource) EvaluateRuleWithProfile(eventType util
 	return true, nil, nil
 }
 
-func (rule *R1000ExecFromMaliciousSource) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1000ExecFromMaliciousSource) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	execEvent, _ := event.(*events.ExecEvent)
 	execPath := GetExecFullPathFromEvent(execEvent)
 	execPathDir := filepath.Dir(execPath)

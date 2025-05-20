@@ -114,7 +114,7 @@ func (rule *R1009CryptoMiningRelatedPort) EvaluateRuleWithProfile(eventType util
 	return true, nil, nil
 }
 
-func (rule *R1009CryptoMiningRelatedPort) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1009CryptoMiningRelatedPort) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	networkEvent, _ := event.(*tracernetworktype.Event)
 	rule.alreadyNotified = true
 

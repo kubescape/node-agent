@@ -161,7 +161,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) EvaluateRuleWithProfile(eventTyp
 	return true, nil, nil
 }
 
-func (rule *R0010UnexpectedSensitiveFileAccess) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0010UnexpectedSensitiveFileAccess) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	fullEvent, _ := event.(*events.OpenEvent)
 	openEvent := fullEvent.Event
 

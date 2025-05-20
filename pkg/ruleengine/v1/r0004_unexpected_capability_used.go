@@ -95,7 +95,7 @@ func (rule *R0004UnexpectedCapabilityUsed) EvaluateRuleWithProfile(eventType uti
 	return true, nil, nil
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0004UnexpectedCapabilityUsed) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	capEvent, _ := event.(*tracercapabilitiestype.Event)
 	rule.alertedCapabilities.Set(capEvent.CapName, true)
 

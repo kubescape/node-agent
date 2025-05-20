@@ -76,7 +76,7 @@ func (rule *R1015MaliciousPtraceUsage) EvaluateRuleWithProfile(eventType utils.E
 	return ok, data, nil
 }
 
-func (rule *R1015MaliciousPtraceUsage) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1015MaliciousPtraceUsage) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	ptraceEvent, _ := event.(*tracerptracetype.Event)
 
 	return &GenericRuleFailure{

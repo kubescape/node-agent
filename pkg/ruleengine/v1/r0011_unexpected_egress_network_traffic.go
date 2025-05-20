@@ -124,7 +124,7 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) EvaluateRuleWithProfile(eventTy
 	return true, nil, nil
 }
 
-func (rule *R0011UnexpectedEgressNetworkTraffic) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0011UnexpectedEgressNetworkTraffic) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	networkEvent, _ := event.(*tracernetworktype.Event)
 	endpoint := fmt.Sprintf("%s:%d:%s", networkEvent.DstEndpoint.Addr, networkEvent.Port, networkEvent.Proto)
 	rule.alertedAdresses.Set(endpoint, true)

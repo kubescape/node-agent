@@ -82,7 +82,7 @@ type RuleEvaluator interface {
 	EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error)
 
 	// CreateRuleFailure creates a rule failure
-	CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) RuleFailure
+	CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) RuleFailure
 
 	// Rule requirements
 	Requirements() RuleSpec

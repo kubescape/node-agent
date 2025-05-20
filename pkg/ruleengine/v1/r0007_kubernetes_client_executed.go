@@ -140,7 +140,7 @@ func (rule *R0007KubernetesClientExecuted) EvaluateRuleWithProfile(eventType uti
 	return true, nil, nil
 }
 
-func (rule *R0007KubernetesClientExecuted) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0007KubernetesClientExecuted) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	if eventType == utils.ExecveEventType {
 		execEvent, _ := event.(*events.ExecEvent)
 		execPath := GetExecPathFromEvent(execEvent)

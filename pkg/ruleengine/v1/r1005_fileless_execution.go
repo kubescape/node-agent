@@ -104,7 +104,7 @@ func (rule *R1005FilelessExecution) EvaluateRuleWithProfile(eventType utils.Even
 	return true, nil, nil
 }
 
-func (rule *R1005FilelessExecution) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1005FilelessExecution) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	execEvent, _ := event.(*events.ExecEvent)
 	execFullPath := GetExecFullPathFromEvent(execEvent)
 	execPathDir := filepath.Dir(execFullPath)

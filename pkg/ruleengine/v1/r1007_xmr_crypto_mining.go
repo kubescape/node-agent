@@ -78,7 +78,7 @@ func (rule *R1007XMRCryptoMining) EvaluateRuleWithProfile(eventType utils.EventT
 	return true, nil, nil
 }
 
-func (rule *R1007XMRCryptoMining) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1007XMRCryptoMining) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	randomXEvent, _ := event.(*tracerrandomxtype.Event)
 
 	return &GenericRuleFailure{

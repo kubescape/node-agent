@@ -105,7 +105,7 @@ func (rule *R0003UnexpectedSystemCall) EvaluateRuleWithProfile(eventType utils.E
 	return true, nil, nil
 }
 
-func (rule *R0003UnexpectedSystemCall) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0003UnexpectedSystemCall) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	syscallEvent, _ := event.(*ruleenginetypes.SyscallEvent)
 
 	rule.listOfAlertedSyscalls.Add(syscallEvent.SyscallName)

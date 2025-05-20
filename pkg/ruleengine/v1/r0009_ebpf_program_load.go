@@ -102,7 +102,7 @@ func (rule *R0009EbpfProgramLoad) EvaluateRuleWithProfile(eventType utils.EventT
 	return true, nil, nil
 }
 
-func (rule *R0009EbpfProgramLoad) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0009EbpfProgramLoad) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	syscallEvent, _ := event.(*ruleenginetypes.SyscallEvent)
 	rule.alreadyNotified = true
 

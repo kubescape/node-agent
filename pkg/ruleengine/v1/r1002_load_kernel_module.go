@@ -84,7 +84,7 @@ func (rule *R1002LoadKernelModule) EvaluateRuleWithProfile(eventType utils.Event
 	return true, nil, nil
 }
 
-func (rule *R1002LoadKernelModule) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1002LoadKernelModule) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	syscallEvent, _ := event.(*ruleenginetypes.SyscallEvent)
 	rule.alerted = true
 

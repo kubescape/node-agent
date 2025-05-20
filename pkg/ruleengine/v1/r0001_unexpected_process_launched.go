@@ -102,7 +102,7 @@ func (rule *R0001UnexpectedProcessLaunched) EvaluateRuleWithProfile(eventType ut
 	return true, nil, nil
 }
 
-func (rule *R0001UnexpectedProcessLaunched) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0001UnexpectedProcessLaunched) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	execEvent, _ := event.(*events.ExecEvent)
 	execPath := GetExecPathFromEvent(execEvent)
 

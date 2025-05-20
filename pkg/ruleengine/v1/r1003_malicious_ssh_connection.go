@@ -186,7 +186,7 @@ func (rule *R1003MaliciousSSHConnection) EvaluateRuleWithProfile(eventType utils
 	return true, nil, nil
 }
 
-func (rule *R1003MaliciousSSHConnection) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1003MaliciousSSHConnection) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	sshEvent, _ := event.(*tracersshtype.Event)
 
 	return &GenericRuleFailure{

@@ -113,7 +113,7 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRuleWithProfile(event
 	return true, nil, nil
 }
 
-func (rule *R1012HardlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1012HardlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	hardlinkEvent, _ := event.(*tracerhardlinktype.Event)
 
 	return &GenericRuleFailure{

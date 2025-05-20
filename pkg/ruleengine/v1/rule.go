@@ -72,6 +72,6 @@ func (br *BaseRule) EvaluateRuleWithProfile(eventType utils.EventType, event uti
 }
 
 // Create rule failure with available context
-func (br *BaseRule) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (br *BaseRule) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	return nil
 }

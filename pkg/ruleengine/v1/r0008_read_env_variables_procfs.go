@@ -107,7 +107,7 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) EvaluateRuleWithProfile(eventTy
 	return true, nil, nil
 }
 
-func (rule *R0008ReadEnvironmentVariablesProcFS) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0008ReadEnvironmentVariablesProcFS) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	fullEvent, _ := event.(*events.OpenEvent)
 	openEvent := fullEvent.Event
 

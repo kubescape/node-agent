@@ -104,7 +104,7 @@ func (rule *R0005UnexpectedDomainRequest) EvaluateRuleWithProfile(eventType util
 	return true, nil, nil
 }
 
-func (rule *R0005UnexpectedDomainRequest) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0005UnexpectedDomainRequest) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	domainEvent, _ := event.(*tracerdnstype.Event)
 	rule.alertedDomains.Set(domainEvent.DNSName, true)
 

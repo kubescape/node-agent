@@ -174,7 +174,7 @@ func (rule *R0002UnexpectedFileAccess) EvaluateRuleWithProfile(eventType utils.E
 	return true, nil, nil
 }
 
-func (rule *R0002UnexpectedFileAccess) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0002UnexpectedFileAccess) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	openEvent, _ := event.(*events.OpenEvent)
 	openEventTyped := openEvent.Event
 

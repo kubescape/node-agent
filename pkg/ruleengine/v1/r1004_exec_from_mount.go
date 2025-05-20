@@ -93,7 +93,7 @@ func (rule *R1004ExecFromMount) EvaluateRuleWithProfile(eventType utils.EventTyp
 	return true, execEvent, nil
 }
 
-func (rule *R1004ExecFromMount) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1004ExecFromMount) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	execEvent, _ := event.(*events.ExecEvent)
 	upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
 

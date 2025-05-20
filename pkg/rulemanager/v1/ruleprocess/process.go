@@ -27,9 +27,10 @@ func IsProfileExists(objCache objectcache.ObjectCache, containerID string, profi
 
 func ProcessRule(rule ruleengine.RuleEvaluator, eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	failOnProfile := false
+	var finalPayload interface{}
 	if rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Required ||
 		(rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Optional) {
-		ok, _, err := rule.EvaluateRuleWithProfile(eventType, event, objCache)
+		ok, payload, err := rule.EvaluateRuleWithProfile(eventType, event, objCache)
 		// if profile is required and there is no profile available, return nil
 		// or if profile is optional and there is no profile available, continue
 		// or if profile is required and there is a profile available and no rule failure, continue
@@ -37,20 +38,21 @@ func ProcessRule(rule ruleengine.RuleEvaluator, eventType utils.EventType, event
 			rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Required) {
 			return nil
 		}
-
+		finalPayload = payload
 		failOnProfile = ok
 	}
 
 	// If profile is not required and there is no rule failure, do basic evaluation
 	if !(rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Required) && !failOnProfile {
-		ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+		ok, payload := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
 		if !ok {
 			return nil
 		}
+		finalPayload = payload
 	}
 
 	// Create and return the failure
-	ruleFailure := rule.CreateRuleFailure(eventType, event, objCache)
+	ruleFailure := rule.CreateRuleFailure(eventType, event, objCache, finalPayload)
 	setProfileMetadata(rule, ruleFailure, objCache, failOnProfile)
 	return ruleFailure
 }

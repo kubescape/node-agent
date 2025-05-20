@@ -113,7 +113,7 @@ func (rule *R1011LdPreloadHook) EvaluateRuleWithProfile(eventType utils.EventTyp
 	}
 }
 
-func (rule *R1011LdPreloadHook) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	switch eventType {
 	case utils.ExecveEventType:
 		execEvent, _ := event.(*events.ExecEvent)

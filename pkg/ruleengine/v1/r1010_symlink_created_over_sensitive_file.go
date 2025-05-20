@@ -115,7 +115,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) EvaluateRuleWithProfile(eventT
 	return true, nil, nil
 }
 
-func (rule *R1010SymlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1010SymlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	symlinkEvent, _ := event.(*tracersymlinktype.Event)
 
 	return &GenericRuleFailure{

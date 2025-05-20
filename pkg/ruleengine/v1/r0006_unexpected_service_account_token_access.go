@@ -146,7 +146,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) EvaluateRuleWithProfile(ev
 	return true, nil, nil
 }
 
-func (rule *R0006UnexpectedServiceAccountTokenAccess) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0006UnexpectedServiceAccountTokenAccess) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	convertedEvent, _ := event.(*events.OpenEvent)
 	openEvent := convertedEvent.Event
 

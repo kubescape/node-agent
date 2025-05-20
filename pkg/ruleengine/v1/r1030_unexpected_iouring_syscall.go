@@ -91,7 +91,7 @@ func (rule *R1030UnexpectedIouringOperation) EvaluateRuleWithProfile(eventType u
 	return true, nil, nil
 }
 
-func (rule *R1030UnexpectedIouringOperation) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1030UnexpectedIouringOperation) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
 	iouringEvent, _ := event.(*traceriouringtype.Event)
 	ok, name := iouring.GetOpcodeName(uint8(iouringEvent.Opcode))
 	if !ok {
