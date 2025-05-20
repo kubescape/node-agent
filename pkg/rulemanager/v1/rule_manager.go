@@ -345,7 +345,7 @@ func (rm *RuleManager) enrichRuleFailure(rule ruleengine.RuleEvaluator, ruleFail
 		}
 	}
 
-	rm.setProfileMetadata(rule, ruleFailure)
+	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
 	runtimeProcessDetails := ruleFailure.GetRuntimeProcessDetails()
 
 	err = backoff.Retry(func() error {
@@ -486,44 +486,4 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	}
 
 	return results
-}
-
-func (rm *RuleManager) setProfileMetadata(rule ruleengine.RuleEvaluator, ruleFailure ruleengine.RuleFailure) {
-	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
-	profileReq := rule.Requirements().GetProfileRequirements()
-
-	switch profileReq.ProfileType {
-	case armotypes.ApplicationProfile:
-		ap := rm.objectCache.ApplicationProfileCache().GetApplicationProfile(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
-		if ap != nil {
-			profileMetadata := &armotypes.ProfileMetadata{
-				Status:            ap.GetAnnotations()[helpersv1.StatusMetadataKey],
-				Completion:        ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
-				Name:              ap.Name,
-				Type:              armotypes.ApplicationProfile,
-				ProfileDependency: profileReq.ProfileDependency,
-			}
-			baseRuntimeAlert.ProfileMetadata = profileMetadata
-		}
-
-	case armotypes.NetworkProfile:
-		nn := rm.objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
-		if nn != nil {
-			profileMetadata := &armotypes.ProfileMetadata{
-				Status:            nn.GetAnnotations()[helpersv1.StatusMetadataKey],
-				Completion:        nn.GetAnnotations()[helpersv1.CompletionMetadataKey],
-				Name:              nn.Name,
-				Type:              armotypes.NetworkProfile,
-				ProfileDependency: profileReq.ProfileDependency,
-			}
-			baseRuntimeAlert.ProfileMetadata = profileMetadata
-		}
-	default:
-		profileMetadata := &armotypes.ProfileMetadata{
-			ProfileDependency: profileReq.ProfileDependency,
-		}
-		baseRuntimeAlert.ProfileMetadata = profileMetadata
-	}
-
-	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
 }
