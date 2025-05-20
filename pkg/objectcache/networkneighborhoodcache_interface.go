@@ -7,6 +7,7 @@ import (
 
 type NetworkNeighborhoodCache interface {
 	GetNetworkNeighborhood(containerID string) *v1beta1.NetworkNeighborhood
+	GetNetworkNeighborhoodState(containerID string) *ProfileState
 	ContainerCallback(notif containercollection.PubSubEvent)
 }
 
@@ -20,4 +21,8 @@ func (nn *NetworkNeighborhoodCacheMock) GetNetworkNeighborhood(_ string) *v1beta
 }
 
 func (nn *NetworkNeighborhoodCacheMock) ContainerCallback(_ containercollection.PubSubEvent) {
+}
+
+func (nn *NetworkNeighborhoodCacheMock) GetNetworkNeighborhoodState(_ string) *ProfileState {
+	return nil
 }

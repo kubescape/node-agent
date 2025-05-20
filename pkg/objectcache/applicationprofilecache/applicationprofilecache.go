@@ -38,6 +38,7 @@ type ContainerCallStackIndex struct {
 type ApplicationProfileCacheImpl struct {
 	cfg                            config.Config
 	workloadIDToProfile            maps.SafeMap[string, *v1beta1.ApplicationProfile]
+	workloadIDToProfileState       maps.SafeMap[string, *objectcache.ProfileState] // Tracks profile state even if not in cache
 	containerIDToInfo              maps.SafeMap[string, *ContainerInfo]
 	namespaceToContainers          maps.SafeMap[string, mapset.Set[string]] // namespace -> set of containerIDs
 	profileToUserManagedIdentifier maps.SafeMap[string, string]             // profileName -> user-managed profile unique identifier (This is used to prevent merging the same user-managed profile multiple times)
@@ -57,6 +58,7 @@ func NewApplicationProfileCache(cfg config.Config, storageClient versioned.SpdxV
 	apc := &ApplicationProfileCacheImpl{
 		cfg:                       cfg,
 		workloadIDToProfile:       maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
+		workloadIDToProfileState:  maps.SafeMap[string, *objectcache.ProfileState]{},
 		containerIDToInfo:         maps.SafeMap[string, *ContainerInfo]{},
 		namespaceToContainers:     maps.SafeMap[string, mapset.Set[string]]{},
 		containerToCallStackIndex: maps.SafeMap[string, *ContainerCallStackIndex]{},
@@ -136,14 +138,23 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 				continue
 			}
 
-			// Only consider completed profiles
-			if profile.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
-				continue
-			}
-
 			// Get the workload ID from profile
 			workloadID := profile.Annotations[helpersv1.WlidMetadataKey]
 			if workloadID == "" {
+				continue
+			}
+
+			// Update profile state regardless of whether we'll update the full profile
+			profileState := &objectcache.ProfileState{
+				Completion: profile.Annotations[helpersv1.CompletionMetadataKey],
+				Status:     profile.Annotations[helpersv1.StatusMetadataKey],
+				Name:       profile.Name,
+				Error:      nil,
+			}
+			apc.workloadIDToProfileState.Set(workloadID, profileState)
+
+			// Only consider completed profiles
+			if profile.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
 				continue
 			}
 
@@ -181,6 +192,9 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 					helpers.String("workloadID", workloadID),
 					helpers.String("namespace", namespace),
 					helpers.Error(err))
+				// Update the profile state to indicate an error
+				profileState.Error = err
+				apc.workloadIDToProfileState.Set(workloadID, profileState)
 				continue
 			}
 
@@ -273,6 +287,15 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 	mergedProfile := apc.performMerge(originalProfile, fullUserProfile)
 	// Update the cache with the merged profile
 	apc.workloadIDToProfile.Set(toMerge.wlid, mergedProfile)
+	// Update profile state for the merged profile
+	profileState := &objectcache.ProfileState{
+		Completion: mergedProfile.Annotations[helpersv1.CompletionMetadataKey],
+		Status:     mergedProfile.Annotations[helpersv1.StatusMetadataKey],
+		Name:       mergedProfile.Name,
+		Error:      nil,
+	}
+	apc.workloadIDToProfileState.Set(toMerge.wlid, profileState)
+
 	logger.L().Debug("merged user-managed profile with normal profile",
 		helpers.String("workloadID", toMerge.wlid),
 		helpers.String("namespace", profile.Namespace),
@@ -396,6 +419,11 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 	containerSet.Add(containerID)
 	apc.mutex.Unlock()
 
+	// Create workload ID to state mapping
+	if _, exists := apc.workloadIDToProfileState.Load(workloadID); !exists {
+		apc.workloadIDToProfileState.Set(workloadID, nil)
+	}
+
 	logger.L().Debug("container added to cache",
 		helpers.String("containerID", containerID),
 		helpers.String("workloadID", workloadID),
@@ -444,6 +472,7 @@ func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
 			profileKey := fmt.Sprintf("%s/%s", profile.Namespace, strings.TrimPrefix(profile.Name, "ug-"))
 			apc.profileToUserManagedIdentifier.Delete(profileKey)
 		}
+		apc.workloadIDToProfileState.Delete(containerInfo.WorkloadID)
 		apc.workloadIDToProfile.Delete(containerInfo.WorkloadID)
 		logger.L().Debug("deleted workloadID from cache", helpers.String("workloadID", containerInfo.WorkloadID))
 	}
@@ -510,8 +539,8 @@ func (apc *ApplicationProfileCacheImpl) mergeContainer(normalContainer, userCont
 
 func isUserManagedProfile(appProfile *v1beta1.ApplicationProfile) bool {
 	return appProfile.Annotations != nil &&
-		appProfile.Annotations["kubescape.io/managed-by"] == "User" &&
-		strings.HasPrefix(appProfile.GetName(), "ug-")
+		appProfile.Annotations[helpersv1.ManagedByMetadataKey] == helpersv1.ManagedByUserValue &&
+		strings.HasPrefix(appProfile.GetName(), helpersv1.UserApplicationProfilePrefix)
 }
 
 // GetApplicationProfile gets the application profile for a container
@@ -532,6 +561,39 @@ func (apc *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string
 	}
 
 	return nil
+}
+
+// GetApplicationProfileState gets the profile state for a container
+func (apc *ApplicationProfileCacheImpl) GetApplicationProfileState(containerID string) *objectcache.ProfileState {
+	// Get container info
+	containerInfo, exists := apc.containerIDToInfo.Load(containerID)
+	if !exists {
+		return &objectcache.ProfileState{
+			Error: fmt.Errorf("container %s not found in cache", containerID),
+		}
+	}
+
+	workloadID := containerInfo.WorkloadID
+	if workloadID == "" {
+		return &objectcache.ProfileState{
+			Error: fmt.Errorf("no workload ID for container %s", containerID),
+		}
+	}
+
+	// Try to get profile state from cache
+	if profileState, exists := apc.workloadIDToProfileState.Load(workloadID); exists {
+		if profileState != nil {
+			return profileState
+		} else {
+			return &objectcache.ProfileState{
+				Error: fmt.Errorf("profile state not available - shouldn't happen"),
+			}
+		}
+	}
+
+	return &objectcache.ProfileState{
+		Error: fmt.Errorf("profile state not found for workload ID %s", workloadID),
+	}
 }
 
 // GetCallStackSearchTree gets the call stack index for a container

@@ -8,6 +8,7 @@ import (
 
 type ApplicationProfileCache interface {
 	GetApplicationProfile(containerID string) *v1beta1.ApplicationProfile
+	GetApplicationProfileState(containerID string) *ProfileState
 	GetCallStackSearchTree(containerID string) *callstackcache.CallStackSearchTree
 	ContainerCallback(notif containercollection.PubSubEvent)
 }
@@ -26,4 +27,8 @@ func (ap *ApplicationProfileCacheMock) GetCallStackSearchTree(_ string) *callsta
 }
 
 func (ap *ApplicationProfileCacheMock) ContainerCallback(_ containercollection.PubSubEvent) {
+}
+
+func (ap *ApplicationProfileCacheMock) GetApplicationProfileState(_ string) *ProfileState {
+	return nil
 }
