@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
-	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,10 +16,12 @@ import (
 
 	"github.com/DmitriyVTitov/size"
 	"github.com/anchore/syft/syft"
+	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
 	"github.com/anchore/syft/syft/file"
 	"github.com/anchore/syft/syft/format"
 	"github.com/anchore/syft/syft/format/syftjson"
 	"github.com/anchore/syft/syft/format/syftjson/model"
+	sbomcataloger "github.com/anchore/syft/syft/pkg/cataloger/sbom"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/aquilax/truncate"
 	"github.com/cenkalti/backoff/v5"
@@ -359,6 +359,8 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 			helpers.Int("maxImageSize", s.cfg.MaxSBOMSize),
 			helpers.Int("size", sz))
 		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.TooLarge
+		// clear the spec
+		wipSbom.Spec = v1beta1.SBOMSyftSpec{}
 	} else {
 		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Ready
 	}
