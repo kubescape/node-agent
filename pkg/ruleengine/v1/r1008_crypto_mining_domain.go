@@ -238,7 +238,7 @@ func (rule *R1008CryptoMiningDomainCommunication) Requirements() ruleengine.Rule
 	return &RuleRequirements{
 		EventTypes: R1008CryptoMiningDomainCommunicationRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileType: apitypes.NetworkProfile,
+			ProfileDependency: apitypes.NotRequired,
 		},
 	}
 }

@@ -122,7 +122,8 @@ func (rule *R1006UnshareSyscall) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1006UnshareSyscallRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileType:       apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.NotRequired,
 		},
 	}
 }

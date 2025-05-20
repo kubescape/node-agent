@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
+	"strconv"
 	"testing"
 )
 
@@ -91,13 +93,18 @@ func filterAlertsByLabel(alerts []Alert, labelKey, labelValue string) []Alert {
 	return filteredAlerts
 }
 
-func AssertContains(t *testing.T, alerts []Alert, expectedRuleName string, expectedCommand string, expectedContainerName string) {
+func AssertContains(t *testing.T, alerts []Alert, expectedRuleName string, expectedCommand string, expectedContainerName string, expectedFailOnProfile []bool) {
 	for _, alert := range alerts {
 		ruleName, ruleOk := alert.Labels["rule_name"]
 		command, cmdOk := alert.Labels["comm"]
 		containerName, containerOk := alert.Labels["container_name"]
-
-		if ruleOk && cmdOk && containerOk && ruleName == expectedRuleName && command == expectedCommand && containerName == expectedContainerName {
+		failOnProfile, failOnProfileOk := alert.Labels["fail_on_profile"]
+		failOnProfileBool, err := strconv.ParseBool(failOnProfile)
+		if err != nil {
+			t.Errorf("error parsing fail_on_profile: %v", err)
+		}
+		if ruleOk && cmdOk && containerOk && ruleName == expectedRuleName && command == expectedCommand && containerName == expectedContainerName &&
+			failOnProfileOk && slices.Contains(expectedFailOnProfile, failOnProfileBool) {
 			return
 		}
 	}
@@ -106,13 +113,18 @@ func AssertContains(t *testing.T, alerts []Alert, expectedRuleName string, expec
 	t.Logf("All alerts: %v", alerts)
 }
 
-func AssertNotContains(t *testing.T, alerts []Alert, notExpectedRuleName string, notExpectedCommand string, notExpectedContainerName string) {
+func AssertNotContains(t *testing.T, alerts []Alert, notExpectedRuleName string, notExpectedCommand string, notExpectedContainerName string, notExpectedFailOnProfile []bool) {
 	for _, alert := range alerts {
 		ruleName, ruleOk := alert.Labels["rule_name"]
 		command, cmdOk := alert.Labels["comm"]
 		containerName, containerOk := alert.Labels["container_name"]
-
-		if ruleOk && cmdOk && containerOk && ruleName == notExpectedRuleName && command == notExpectedCommand && containerName == notExpectedContainerName {
+		failOnProfile, failOnProfileOk := alert.Labels["fail_on_profile"]
+		failOnProfileBool, err := strconv.ParseBool(failOnProfile)
+		if err != nil {
+			t.Errorf("error parsing fail_on_profile: %v", err)
+		}
+		if ruleOk && cmdOk && containerOk && ruleName == notExpectedRuleName && command == notExpectedCommand && containerName == notExpectedContainerName &&
+			failOnProfileOk && slices.Contains(notExpectedFailOnProfile, failOnProfileBool) {
 			t.Error("did not expect an alert with rule name: ", notExpectedRuleName, " command: ", notExpectedCommand, " container name: ", notExpectedContainerName, " not found")
 			t.Logf("All alerts: %v", alerts)
 		}

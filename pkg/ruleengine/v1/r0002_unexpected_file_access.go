@@ -144,7 +144,6 @@ func (rule *R0002UnexpectedFileAccess) EvaluateRuleWithProfile(eventType utils.E
 	}
 
 	openEventTyped, _ := openEvent.(*events.OpenEvent)
-	fmt.Println("openEventTyped", openEventTyped.Runtime.ContainerID)
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEventTyped.Runtime.ContainerID)
 	if ap == nil {
 		return false, nil, ruleprocess.NoProfileAvailable

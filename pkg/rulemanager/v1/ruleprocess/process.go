@@ -7,7 +7,6 @@ import (
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -91,9 +90,9 @@ func setProfileMetadata(rule ruleengine.RuleEvaluator, ruleFailure ruleengine.Ru
 	default:
 		profileMetadata := &armotypes.ProfileMetadata{
 			ProfileDependency: profileReq.ProfileDependency,
+			FailOnProfile:     failOnProfile,
 		}
 		baseRuntimeAlert.ProfileMetadata = profileMetadata
 	}
-
 	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
 }

@@ -117,7 +117,8 @@ func (rule *R1007XMRCryptoMining) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1007XMRCryptoMiningRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileType:       apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.NotRequired,
 		},
 	}
 }

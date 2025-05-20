@@ -153,7 +153,8 @@ func (rule *R1005FilelessExecution) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1005FilelessExecutionRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileType: apitypes.ApplicationProfile,
+			ProfileType:       apitypes.ApplicationProfile,
+			ProfileDependency: apitypes.NotRequired,
 		},
 	}
 }
