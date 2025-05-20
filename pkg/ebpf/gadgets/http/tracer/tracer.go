@@ -20,7 +20,7 @@ import (
 	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go  -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type active_connection_info -type packet_buffer -type httpevent http_sniffer bpf/http-sniffer.c -- -I./bpf/
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go  -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type packet_buffer -type httpevent http_sniffer bpf/http-sniffer.c -- -I./bpf/
 
 type Config struct {
 	MountnsMap *ebpf.Map
