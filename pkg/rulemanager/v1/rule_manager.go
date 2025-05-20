@@ -467,11 +467,11 @@ func (rm *RuleManager) IsPodMonitored(namespace, pod string) bool {
 	return rm.podToWlid.Has(utils.CreateK8sPodID(namespace, pod))
 }
 
-func (rm *RuleManager) EvaluateRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string {
+func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string {
 	results := []string{}
 
 	creator := rm.ruleBindingCache.GetRuleCreator()
-	rules := creator.CreateRulesByEventType(eventType)
+	rules := creator.CreateRulePolicyRulesByEventType(eventType)
 
 	// TODO: Rule policies should be applied here
 	for _, rule := range rules {

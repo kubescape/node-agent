@@ -32,6 +32,10 @@ func (r *RuleCreatorMock) CreateRulesByEventType(eventType utils.EventType) []Ru
 	return []RuleEvaluator{}
 }
 
+func (r *RuleCreatorMock) CreateRulePolicyRulesByEventType(eventType utils.EventType) []RuleEvaluator {
+	return []RuleEvaluator{}
+}
+
 func (r *RuleCreatorMock) CreateAllRules() []RuleEvaluator {
 	return []RuleEvaluator{}
 }
