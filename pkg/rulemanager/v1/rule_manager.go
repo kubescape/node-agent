@@ -291,7 +291,7 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 
 		res := ruleprocess.ProcessRule(rule, eventType, event, rm.objectCache)
 		if res != nil {
-			res = rm.enrichRuleFailure(rule, res)
+			res = rm.enrichRuleFailure(res)
 			if res != nil {
 				res.SetWorkloadDetails(details)
 				rm.exporter.SendRuleAlert(res)
@@ -302,7 +302,7 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 	}
 }
 
-func (rm *RuleManager) enrichRuleFailure(rule ruleengine.RuleEvaluator, ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
+func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
 	var err error
 	var path string
 	var hostPath string

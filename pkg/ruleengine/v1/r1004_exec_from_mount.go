@@ -60,7 +60,19 @@ func (rule *R1004ExecFromMount) EvaluateRule(eventType utils.EventType, event ut
 		return false, nil
 	}
 
-	return true, execEvent
+	mounts, err := GetContainerMountPaths(execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer(), k8sObjCache)
+	if err != nil {
+		return false, nil
+	}
+
+	for _, mount := range mounts {
+		fullPath := GetExecFullPathFromEvent(execEvent)
+		if rule.isPathContained(fullPath, mount) || rule.isPathContained(execEvent.ExePath, mount) {
+			return true, execEvent
+		}
+	}
+
+	return false, nil
 }
 
 func (rule *R1004ExecFromMount) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
@@ -78,19 +90,7 @@ func (rule *R1004ExecFromMount) EvaluateRuleWithProfile(eventType utils.EventTyp
 		return false, nil, err
 	}
 
-	mounts, err := GetContainerMountPaths(execEventTyped.GetNamespace(), execEventTyped.GetPod(), execEventTyped.GetContainer(), objCache.K8sObjectCache())
-	if err != nil {
-		return false, nil, err
-	}
-
-	for _, mount := range mounts {
-		fullPath := GetExecFullPathFromEvent(execEventTyped)
-		if rule.isPathContained(fullPath, mount) || rule.isPathContained(execEventTyped.ExePath, mount) {
-			return true, nil, nil
-		}
-	}
-
-	return false, nil, nil
+	return true, execEvent, nil
 }
 
 func (rule *R1004ExecFromMount) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {

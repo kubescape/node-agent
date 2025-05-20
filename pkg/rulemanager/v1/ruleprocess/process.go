@@ -61,6 +61,7 @@ func setProfileMetadata(rule ruleengine.RuleEvaluator, ruleFailure ruleengine.Ru
 
 	switch profileReq.ProfileType {
 	case armotypes.ApplicationProfile:
+		// TODO: Use get profile metadata
 		ap := objectCache.ApplicationProfileCache().GetApplicationProfile(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
 		if ap != nil {
 			profileMetadata := &armotypes.ProfileMetadata{
@@ -75,6 +76,7 @@ func setProfileMetadata(rule ruleengine.RuleEvaluator, ruleFailure ruleengine.Ru
 		}
 
 	case armotypes.NetworkProfile:
+		// TODO: Use get profile metadata
 		nn := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
 		if nn != nil {
 			profileMetadata := &armotypes.ProfileMetadata{

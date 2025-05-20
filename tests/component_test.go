@@ -178,7 +178,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 		"Unexpected system call":                   []bool{true},
 		"Unexpected capability used":               []bool{true},
 		"Kubernetes Client Executed":               []bool{true},
-		"Exec from malicious source":               []bool{true},
+		"Exec from malicious source":               []bool{false},
 		"Kernel Module Load":                       []bool{false},
 		"Exec Binary Not In Base Image":            []bool{true},
 		"Exec from mount":                          []bool{true},

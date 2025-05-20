@@ -152,7 +152,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) CreateRuleFailure(eventTyp
 
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:  HashStringToMD5(openEvent.Comm),
+			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", openEvent.Comm, openEvent.FullPath)),
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"path":  openEvent.FullPath,
