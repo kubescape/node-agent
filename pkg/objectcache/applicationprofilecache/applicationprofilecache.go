@@ -28,6 +28,7 @@ type ContainerInfo struct {
 	ContainerID string
 	WorkloadID  string
 	Namespace   string
+	Name        string
 }
 
 // ContainerCallStackIndex maintains call stack search trees for a container
@@ -212,7 +213,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 					// Create or update call stack search tree if not exists
 					if _, exists := apc.containerToCallStackIndex.Load(containerID); !exists {
 						// Index the call stacks for this container
-						apc.indexContainerCallStacks(containerID, containerInfo.ContainerID, fullProfile)
+						apc.indexContainerCallStacks(containerID, containerInfo.Name, fullProfile)
 					}
 				}
 			}
@@ -404,6 +405,7 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 		ContainerID: containerID,
 		WorkloadID:  workloadID,
 		Namespace:   namespace,
+		Name:        container.Runtime.ContainerName,
 	}
 
 	// Add to container info map
