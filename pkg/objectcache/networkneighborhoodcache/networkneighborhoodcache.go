@@ -81,26 +81,25 @@ func (nnc *NetworkNeighborhoodCacheImpl) periodicUpdate(ctx context.Context) {
 			nnc.updateMutex.Lock()
 			if nnc.updateInProgress {
 				// Skip this update cycle
-				logger.L().Debug("skipping NetworkNeighborhoods update: previous update still in progress")
+				logger.L().Debug("skipping profile update: previous update still in progress")
 				nnc.updateMutex.Unlock()
 				continue
 			}
 
-			// Set the flag and release the lock
+			// Set the flag and release the lock before the potentially long-running call
 			nnc.updateInProgress = true
 			nnc.updateMutex.Unlock()
 
-			// Run the update in a goroutine
-			go func() {
-				nnc.updateAllNetworkNeighborhoods(ctx)
+			// Run the update directly
+			nnc.updateAllNetworkNeighborhoods(ctx)
 
-				// Mark the update as complete
-				nnc.updateMutex.Lock()
-				nnc.updateInProgress = false
-				nnc.updateMutex.Unlock()
-			}()
+			// Mark the update as complete
+			nnc.updateMutex.Lock()
+			nnc.updateInProgress = false
+			nnc.updateMutex.Unlock()
 
 		case <-ctx.Done():
+			logger.L().Info("NetworkNeighborhoodsCache periodic update stopped")
 			return
 		}
 	}

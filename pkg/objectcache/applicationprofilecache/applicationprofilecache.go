@@ -93,21 +93,20 @@ func (apc *ApplicationProfileCacheImpl) periodicUpdate(ctx context.Context) {
 				continue
 			}
 
-			// Set the flag and release the lock
+			// Set the flag and release the lock before the potentially long-running call
 			apc.updateInProgress = true
 			apc.updateMutex.Unlock()
 
-			// Run the update in a goroutine
-			go func() {
-				apc.updateAllProfiles(ctx)
+			// Run the update directly
+			apc.updateAllProfiles(ctx)
 
-				// Mark the update as complete
-				apc.updateMutex.Lock()
-				apc.updateInProgress = false
-				apc.updateMutex.Unlock()
-			}()
+			// Mark the update as complete
+			apc.updateMutex.Lock()
+			apc.updateInProgress = false
+			apc.updateMutex.Unlock()
 
 		case <-ctx.Done():
+			logger.L().Info("ApplicationProfileCache periodic update stopped")
 			return
 		}
 	}
