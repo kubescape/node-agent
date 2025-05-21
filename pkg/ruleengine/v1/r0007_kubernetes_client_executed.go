@@ -11,7 +11,6 @@ import (
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -106,9 +105,9 @@ func (rule *R0007KubernetesClientExecuted) EvaluateRuleWithProfile(eventType uti
 
 	if eventType == utils.ExecveEventType {
 		execEvent, _ := eventData.(*events.ExecEvent)
-		ap := objCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
-		if ap == nil {
-			return false, nil, ruleprocess.NoProfileAvailable
+		ap, err := GetApplicationProfile(execEvent.Runtime.ContainerID, objCache)
+		if err != nil {
+			return false, nil, err
 		}
 
 		whitelistedExecs, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())
@@ -124,9 +123,9 @@ func (rule *R0007KubernetesClientExecuted) EvaluateRuleWithProfile(eventType uti
 		}
 	} else {
 		networkEvent, _ := eventData.(*tracernetworktype.Event)
-		nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
-		if nn == nil {
-			return false, nil, ruleprocess.NoProfileAvailable
+		nn, err := GetNetworkNeighborhood(networkEvent.Runtime.ContainerID, objCache)
+		if err != nil {
+			return false, nil, err
 		}
 
 		nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())

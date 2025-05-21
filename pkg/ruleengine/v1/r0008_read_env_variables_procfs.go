@@ -8,7 +8,6 @@ import (
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -86,9 +85,9 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) EvaluateRuleWithProfile(eventTy
 	}
 
 	openEventTyped, _ := openEvent.(*events.OpenEvent)
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEventTyped.Runtime.ContainerID)
-	if ap == nil {
-		return false, nil, ruleprocess.NoProfileAvailable
+	ap, err := GetApplicationProfile(openEventTyped.Runtime.ContainerID, objCache)
+	if err != nil {
+		return false, nil, err
 	}
 
 	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEventTyped.GetContainer())

@@ -192,7 +192,7 @@ func TestR0006UnexpectedServiceAccountTokenMount(t *testing.T) {
 			name:          "no application profile",
 			event:         createTestEvent0006("test", "/run/secrets/kubernetes.io/serviceaccount/token", []string{"O_RDONLY"}),
 			profile:       nil,
-			expectFailure: true,
+			expectFailure: false,
 		},
 	}
 

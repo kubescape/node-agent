@@ -17,7 +17,6 @@ import (
 
 	"github.com/kubescape/go-logger"
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 )
 
 const (
@@ -161,9 +160,9 @@ func (rule *R1003MaliciousSSHConnection) EvaluateRuleWithProfile(eventType utils
 	}
 
 	sshEventTyped, _ := sshEvent.(*tracersshtype.Event)
-	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(sshEventTyped.Runtime.ContainerID)
-	if nn == nil {
-		return false, nil, ruleprocess.NoProfileAvailable
+	nn, err := GetNetworkNeighborhood(sshEventTyped.Runtime.ContainerID, objCache)
+	if err != nil {
+		return false, nil, err
 	}
 
 	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, sshEventTyped.GetContainer())

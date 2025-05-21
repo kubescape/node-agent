@@ -10,7 +10,6 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 )
 
 const (
@@ -84,9 +83,9 @@ func (rule *R0009EbpfProgramLoad) EvaluateRuleWithProfile(eventType utils.EventT
 	}
 
 	syscallEventTyped, _ := syscallEvent.(*ruleenginetypes.SyscallEvent)
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEventTyped.Runtime.ContainerID)
-	if ap == nil {
-		return false, nil, ruleprocess.NoProfileAvailable
+	ap, err := GetApplicationProfile(syscallEventTyped.Runtime.ContainerID, objCache)
+	if err != nil {
+		return false, nil, err
 	}
 
 	appProfileSyscallList, err := GetContainerFromApplicationProfile(ap, syscallEventTyped.GetContainer())

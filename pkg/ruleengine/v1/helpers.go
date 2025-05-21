@@ -5,17 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -127,31 +122,6 @@ func GetContainerMountPaths(namespace, podName, containerName string, k8sObjCach
 	return mountPaths, nil
 }
 
-func IsExecEventInProfile(execEvent *events.ExecEvent, objectCache objectcache.ObjectCache, compareArgs bool) (bool, error) {
-	// Check if the exec is whitelisted, if so, return nil
-	execPath := GetExecPathFromEvent(execEvent)
-
-	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
-	if ap == nil {
-		return false, ProfileNotFound
-	}
-
-	appProfileExecList, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())
-	if err != nil {
-		return false, ContainerNotFound
-	}
-
-	for _, exec := range appProfileExecList.Execs {
-		if exec.Path == execPath {
-			// Either compare args false or args match
-			if !compareArgs || slices.Compare(exec.Args, execEvent.Args) == 0 {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
-}
-
 func InterfaceToStringSlice(val interface{}) ([]string, bool) {
 	sliceOfInterfaces, ok := val.([]interface{})
 	if ok {
@@ -162,36 +132,6 @@ func InterfaceToStringSlice(val interface{}) ([]string, bool) {
 		return sliceOfStrings, true
 	}
 	return nil, false
-}
-
-func IsAllowed(event *eventtypes.Event, objCache objectcache.ObjectCache, process string, ruleId string) (bool, error) {
-	if objCache == nil {
-		return false, nil
-	}
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(event.Runtime.ContainerID)
-	if ap == nil {
-		return false, ruleprocess.NoProfileAvailable
-	}
-
-	appProfile, err := GetContainerFromApplicationProfile(ap, event.GetContainer())
-	if err != nil {
-		return false, ruleprocess.NoProfileAvailable
-	}
-
-	// rule policy does not exists, allowed by default
-	if _, ok := appProfile.PolicyByRuleId[ruleId]; !ok {
-		return true, nil
-	}
-
-	if policy, ok := appProfile.PolicyByRuleId[ruleId]; ok {
-		if policy.AllowedContainer || slices.Contains(policy.AllowedProcesses, process) {
-			logger.L().Debug("isAllowed - process is allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
-			return true, nil
-		}
-	}
-
-	logger.L().Debug("isAllowed - process is not allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
-	return false, nil
 }
 
 func HashStringToMD5(str string) string {

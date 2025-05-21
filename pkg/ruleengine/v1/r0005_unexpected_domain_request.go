@@ -10,7 +10,6 @@ import (
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -84,9 +83,9 @@ func (rule *R0005UnexpectedDomainRequest) EvaluateRuleWithProfile(eventType util
 	}
 
 	domainEventTyped, _ := domainEvent.(*tracerdnstype.Event)
-	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(domainEventTyped.Runtime.ContainerID)
-	if nn == nil {
-		return false, nil, ruleprocess.NoProfileAvailable
+	nn, err := GetNetworkNeighborhood(domainEventTyped.Runtime.ContainerID, objCache)
+	if err != nil {
+		return false, nil, err
 	}
 
 	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, domainEventTyped.GetContainer())

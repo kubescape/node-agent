@@ -9,7 +9,6 @@ import (
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -79,9 +78,9 @@ func (rule *R0001UnexpectedProcessLaunched) EvaluateRuleWithProfile(eventType ut
 	}
 
 	execEvent, _ := event.(*events.ExecEvent)
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
-	if ap == nil {
-		return false, nil, ruleprocess.NoProfileAvailable
+	ap, err := GetApplicationProfile(execEvent.Runtime.ContainerID, objCache)
+	if err != nil {
+		return false, nil, err
 	}
 
 	appProfileExecList, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())

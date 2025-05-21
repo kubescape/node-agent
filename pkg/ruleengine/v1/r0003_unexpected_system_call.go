@@ -11,7 +11,6 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 )
 
 const (
@@ -85,9 +84,9 @@ func (rule *R0003UnexpectedSystemCall) EvaluateRuleWithProfile(eventType utils.E
 	}
 
 	syscallEventTyped, _ := syscallEvent.(*ruleenginetypes.SyscallEvent)
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEventTyped.Runtime.ContainerID)
-	if ap == nil {
-		return false, nil, ruleprocess.NoProfileAvailable
+	ap, err := GetApplicationProfile(syscallEventTyped.Runtime.ContainerID, objCache)
+	if err != nil {
+		return false, nil, err
 	}
 
 	container, err := GetContainerFromApplicationProfile(ap, syscallEventTyped.GetContainer())

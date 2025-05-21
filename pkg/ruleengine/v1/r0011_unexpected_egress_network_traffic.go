@@ -11,7 +11,6 @@ import (
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -92,9 +91,9 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) EvaluateRuleWithProfile(eventTy
 	}
 
 	networkEventTyped, _ := networkEvent.(*tracernetworktype.Event)
-	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEventTyped.Runtime.ContainerID)
-	if nn == nil {
-		return false, nil, ruleprocess.NoProfileAvailable
+	nn, err := GetNetworkNeighborhood(networkEventTyped.Runtime.ContainerID, objCache)
+	if err != nil {
+		return false, nil, err
 	}
 
 	// Skip partially watched containers.

@@ -12,7 +12,6 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 )
 
 const (
@@ -142,9 +141,9 @@ func (rule *R0010UnexpectedSensitiveFileAccess) EvaluateRuleWithProfile(eventTyp
 	}
 
 	openEventTyped, _ := openEvent.(*events.OpenEvent)
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEventTyped.Runtime.ContainerID)
-	if ap == nil {
-		return false, nil, ruleprocess.NoProfileAvailable
+	ap, err := GetApplicationProfile(openEventTyped.Runtime.ContainerID, objCache)
+	if err != nil {
+		return false, nil, err
 	}
 
 	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEventTyped.GetContainer())
