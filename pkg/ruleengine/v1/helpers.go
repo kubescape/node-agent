@@ -90,6 +90,10 @@ func GetContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, contai
 }
 
 func GetContainerMountPaths(namespace, podName, containerName string, k8sObjCache objectcache.K8sObjectCache) ([]string, error) {
+	if k8sObjCache == nil {
+		return []string{}, fmt.Errorf("k8sObjCache is nil")
+	}
+
 	podSpec := k8sObjCache.GetPodSpec(namespace, podName)
 	if podSpec == nil {
 		return []string{}, fmt.Errorf("pod spec not available for %s/%s", namespace, podName)

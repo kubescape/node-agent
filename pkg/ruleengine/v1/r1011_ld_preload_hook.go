@@ -231,6 +231,10 @@ func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *events.ExecEvent, k8s
 
 	ldHookVar, shouldCheck := GetLdHookVar(envVars)
 	if shouldCheck {
+		if k8sObjCache == nil {
+			return false
+		}
+
 		podSpec := k8sObjCache.GetPodSpec(execEvent.GetNamespace(), execEvent.GetPod())
 		if podSpec != nil {
 			for _, container := range podSpec.Containers {

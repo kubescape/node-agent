@@ -85,6 +85,10 @@ func (rule *R0007KubernetesClientExecuted) EvaluateRule(eventType utils.EventTyp
 		return false, nil
 	}
 
+	if k8sObjCache == nil {
+		return false, nil
+	}
+
 	apiServerIP := k8sObjCache.GetApiServerIpAddress()
 	if apiServerIP == "" || networkEvent.DstEndpoint.Addr != apiServerIP {
 		return false, nil
