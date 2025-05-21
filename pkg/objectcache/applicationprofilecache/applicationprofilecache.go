@@ -221,11 +221,11 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 
 // handleUserManagedProfile handles user-managed profiles
 func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta1.ApplicationProfile) {
-	normalizedProfileName := strings.TrimPrefix(profile.Name, "ug-")
+	normalizedProfileName := strings.TrimPrefix(profile.Name, helpersv1.UserApplicationProfilePrefix)
 	userManagedProfileUniqueIdentifier := profile.ResourceVersion + string(profile.UID)
 
 	// Create a unique tracking key for this user profile
-	profileKey := fmt.Sprintf("%s/%s", profile.Namespace, normalizedProfileName)
+	profileKey := apc.profileKey(profile.Namespace, normalizedProfileName)
 
 	// Check if we've already processed this exact version of the user-managed profile
 	if storedIdentifier, exists := apc.profileToUserManagedIdentifier.Load(profileKey); exists &&
@@ -468,7 +468,7 @@ func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
 	if !workloadStillInUse {
 		if profile, exists := apc.workloadIDToProfile.Load(containerInfo.WorkloadID); exists {
 			// Remove the profile from the cache
-			profileKey := fmt.Sprintf("%s/%s", profile.Namespace, strings.TrimPrefix(profile.Name, "ug-"))
+			profileKey := apc.profileKey(profile.Namespace, profile.Name)
 			apc.profileToUserManagedIdentifier.Delete(profileKey)
 		}
 		apc.workloadIDToProfileState.Delete(containerInfo.WorkloadID)
@@ -485,6 +485,10 @@ func (apc *ApplicationProfileCacheImpl) waitForSharedContainerData(containerID s
 		}
 		return nil, fmt.Errorf("container %s not found in shared data", containerID)
 	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
+}
+
+func (apc *ApplicationProfileCacheImpl) profileKey(namespace, name string) string {
+	return fmt.Sprintf("%s/%s", namespace, name)
 }
 
 func (apc *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedProfile *v1beta1.ApplicationProfile) *v1beta1.ApplicationProfile {

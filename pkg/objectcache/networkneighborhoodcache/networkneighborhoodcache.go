@@ -204,11 +204,11 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 
 // handleUserManagedNetworkNeighborhood handles user-managed network neighborhoods
 func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood) {
-	normalizedNNName := strings.TrimPrefix(nn.Name, "ug-")
+	normalizedNNName := strings.TrimPrefix(nn.Name, helpersv1.UserNetworkNeighborhoodPrefix)
 	userManagedNNUniqueIdentifier := nn.ResourceVersion + string(nn.UID)
 
 	// Create a unique tracking key for this user network neighborhood
-	nnKey := fmt.Sprintf("%s/%s", nn.Namespace, normalizedNNName)
+	nnKey := nnc.networkNeighborhoodKey(nn.Namespace, normalizedNNName)
 
 	// Check if we've already processed this exact version of the user-managed network neighborhood
 	if storedIdentifier, exists := nnc.networkNeighborhoodToUserManagedIdentifier.Load(nnKey); exists &&
@@ -389,7 +389,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) deleteContainer(containerID string) {
 	if !workloadStillInUse {
 		if nn, exists := nnc.workloadIDToNetworkNeighborhood.Load(containerInfo.WorkloadID); exists {
 			// Remove any user managed identifiers related to this network neighborhood
-			nnKey := fmt.Sprintf("%s/%s", nn.Namespace, nn.Name)
+			nnKey := nnc.networkNeighborhoodKey(nn.Namespace, nn.Name)
 			nnc.networkNeighborhoodToUserManagedIdentifier.Delete(nnKey)
 		}
 		nnc.workloadIDToNetworkNeighborhood.Delete(containerInfo.WorkloadID)
@@ -406,6 +406,10 @@ func (nnc *NetworkNeighborhoodCacheImpl) waitForSharedContainerData(containerID 
 		}
 		return nil, fmt.Errorf("container %s not found in shared data", containerID)
 	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
+}
+
+func (apc *NetworkNeighborhoodCacheImpl) networkNeighborhoodKey(namespace, name string) string {
+	return fmt.Sprintf("%s/%s", namespace, name)
 }
 
 // GetNetworkNeighborhood gets the network neighborhood for a container
@@ -632,8 +636,8 @@ func (nnc *NetworkNeighborhoodCacheImpl) mergeNetworkPorts(normalPorts, userPort
 
 func isUserManagedNN(nn *v1beta1.NetworkNeighborhood) bool {
 	return nn.Annotations != nil &&
-		nn.Annotations["kubescape.io/managed-by"] == "User" &&
-		strings.HasPrefix(nn.GetName(), "ug-")
+		nn.Annotations[helpersv1.ManagedByMetadataKey] == helpersv1.ManagedByUserValue &&
+		strings.HasPrefix(nn.GetName(), helpersv1.UserNetworkNeighborhoodPrefix)
 }
 
 // Ensure NetworkNeighborhoodCacheImpl implements the NetworkNeighborhoodCache interface
