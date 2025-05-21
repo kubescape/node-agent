@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -76,7 +75,7 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) EvaluateRule(eventType utils.Ev
 		return false, nil
 	}
 
-	return true, openEvent
+	return true, fullEvent
 }
 
 func (rule *R0008ReadEnvironmentVariablesProcFS) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
@@ -86,7 +85,7 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) EvaluateRuleWithProfile(eventTy
 		return false, nil, nil
 	}
 
-	openEventTyped, _ := openEvent.(*traceropentype.Event)
+	openEventTyped, _ := openEvent.(*events.OpenEvent)
 	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEventTyped.Runtime.ContainerID)
 	if ap == nil {
 		return false, nil, ruleprocess.NoProfileAvailable

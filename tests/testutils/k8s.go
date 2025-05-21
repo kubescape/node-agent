@@ -15,6 +15,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	eventsv1 "k8s.io/api/events/v1"
 	"sigs.k8s.io/yaml"
 
 	"github.com/cenkalti/backoff/v4"
@@ -610,4 +611,41 @@ func RestartDaemonSet(namespace, name string) error {
 	})
 
 	return err
+}
+
+func (w *TestWorkload) Delete() error {
+	if w.client == nil {
+		return fmt.Errorf("workload client is nil, workload may not have been created properly")
+	}
+
+	// Delete the workload using the dynamic client
+	deletePolicy := metav1.DeletePropagationForeground
+	deleteOptions := metav1.DeleteOptions{
+		PropagationPolicy: &deletePolicy,
+	}
+
+	err := w.client.Delete(context.TODO(), w.WorkloadObj.GetName(), deleteOptions)
+	if err != nil {
+		return fmt.Errorf("failed to delete workload %s/%s: %w", w.Namespace, w.WorkloadObj.GetName(), err)
+	}
+
+	// Delete the namespace
+	k8sClient := k8sinterface.NewKubernetesApi()
+	err = k8sClient.KubernetesClient.CoreV1().Namespaces().Delete(context.TODO(), w.Namespace, metav1.DeleteOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to delete namespace %s: %w", w.Namespace, err)
+	}
+
+	return nil
+}
+
+func (w *TestWorkload) GetWorkloadEvents() ([]eventsv1.Event, error) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	events, err := k8sClient.KubernetesClient.EventsV1().Events(w.Namespace).List(context.TODO(), metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("regarding.kind=%s,regarding.name=%s", w.WorkloadObj.GetKind(), w.WorkloadObj.GetName()),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list events: %w", err)
+	}
+	return events.Items, nil
 }
