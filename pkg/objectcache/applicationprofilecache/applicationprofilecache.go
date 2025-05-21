@@ -211,10 +211,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
 					containerInfo.WorkloadID == workloadID {
 					// Create or update call stack search tree if not exists
-					if _, exists := apc.containerToCallStackIndex.Load(containerID); !exists {
-						// Index the call stacks for this container
-						apc.indexContainerCallStacks(containerID, containerInfo.Name, fullProfile)
-					}
+					apc.indexContainerCallStacks(containerID, containerInfo.Name, fullProfile)
 				}
 			}
 		}
