@@ -49,6 +49,7 @@ type Config struct {
 	WorkerPoolSize           int                       `mapstructure:"workerPoolSize"`
 	TestMode                 bool                      `mapstructure:"testMode"`
 	ExcludeJsonPaths         []string                  `mapstructure:"excludeJsonPaths"`
+	ProfilesCacheRefreshRate time.Duration             `mapstructure:"profilesCacheRefreshRate"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -75,6 +76,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("workerPoolSize", 10)
 	viper.SetDefault("testMode", false)
 	viper.SetDefault("enableEmbeddedSBOMs", false)
+	viper.SetDefault("profilesCacheRefreshRate", 1*time.Minute)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()
