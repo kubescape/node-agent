@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/goradd/maps"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -129,4 +130,16 @@ func (r *RuleObjectCacheMock) ModifyHandler(_ context.Context, _ runtime.Object)
 
 func (r *RuleObjectCacheMock) DeleteHandler(_ context.Context, _ runtime.Object) {
 	return
+}
+
+func (r *RuleObjectCacheMock) ContainerCallback(_ containercollection.PubSubEvent) {
+	return
+}
+
+func (r *RuleObjectCacheMock) GetApplicationProfileState(_ string) *objectcache.ProfileState {
+	return nil
+}
+
+func (r *RuleObjectCacheMock) GetNetworkNeighborhoodState(_ string) *objectcache.ProfileState {
+	return nil
 }

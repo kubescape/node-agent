@@ -246,11 +246,11 @@ func main() {
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 100)
 		ruleBindingCache.AddNotifier(&ruleBindingNotify)
 
-		apc := applicationprofilecache.NewApplicationProfileCache(cfg, storageClient.StorageClient)
-		dWatcher.AddAdaptor(apc)
+		apc := applicationprofilecache.NewApplicationProfileCache(cfg, storageClient.StorageClient, k8sObjectCache)
+		apc.Start(ctx)
 
-		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(cfg, storageClient.StorageClient)
-		dWatcher.AddAdaptor(nnc)
+		nnc := networkneighborhoodcache.NewNetworkNeighborhoodCache(cfg, storageClient.StorageClient, k8sObjectCache)
+		nnc.Start(ctx)
 
 		dc := dnscache.NewDnsCache(dnsResolver)
 

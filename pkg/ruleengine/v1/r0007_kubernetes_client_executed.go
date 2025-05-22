@@ -227,7 +227,7 @@ func (rule *R0007KubernetesClientExecuted) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0007KubernetesClientExecutedDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileDependency: apitypes.Optional,
+			ProfileDependency: apitypes.Required,
 			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}

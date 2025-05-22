@@ -56,7 +56,8 @@ jobs:
           Test_15_CompletedApCannotBecomeReadyAgain,
           Test_16_ApNotStuckOnRestart,
           Test_17_ApCompletedToPartialUpdateTest,
-          Test_18_ShortLivedJobTest
+          Test_18_ShortLivedJobTest,
+          Test_19_AlertOnPartialProfileTest
         ]
     steps:
       - name: Checkout code
@@ -79,7 +80,7 @@ jobs:
         run: |
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo update
-          helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --set grafana.enabled=false --namespace monitoring --create-namespace --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false,prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false --set prometheus.prometheusSpec.maximumStartupDurationSeconds=300 --wait --timeout 5m 
+          helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --set grafana.enabled=false --namespace monitoring --create-namespace --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false,prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false --set prometheus.prometheusSpec.maximumStartupDurationSeconds=300 --wait --timeout 5m
           # Check that the prometheus pod is running
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=prometheus -n monitoring --timeout=300s
       - name: Install Node Agent Chart

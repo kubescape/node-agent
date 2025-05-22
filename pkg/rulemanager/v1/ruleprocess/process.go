@@ -2,9 +2,9 @@ package ruleprocess
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -50,30 +50,32 @@ func setProfileMetadata(rule ruleengine.RuleEvaluator, ruleFailure ruleengine.Ru
 	switch profileReq.ProfileType {
 	case armotypes.ApplicationProfile:
 		// TODO: Use get profile metadata
-		ap := objectCache.ApplicationProfileCache().GetApplicationProfile(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
-		if ap != nil {
+		state := objectCache.ApplicationProfileCache().GetApplicationProfileState(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
+		if state != nil {
 			profileMetadata := &armotypes.ProfileMetadata{
-				Status:            ap.GetAnnotations()[helpersv1.StatusMetadataKey],
-				Completion:        ap.GetAnnotations()[helpersv1.CompletionMetadataKey],
-				Name:              ap.Name,
+				Status:            state.Status,
+				Completion:        state.Completion,
+				Name:              state.Name,
 				FailOnProfile:     failOnProfile,
 				Type:              armotypes.ApplicationProfile,
 				ProfileDependency: profileReq.ProfileDependency,
+				Error:             state.Error,
 			}
 			baseRuntimeAlert.ProfileMetadata = profileMetadata
 		}
 
 	case armotypes.NetworkProfile:
 		// TODO: Use get profile metadata
-		nn := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
-		if nn != nil {
+		state := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhoodState(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
+		if state != nil {
 			profileMetadata := &armotypes.ProfileMetadata{
-				Status:            nn.GetAnnotations()[helpersv1.StatusMetadataKey],
-				Completion:        nn.GetAnnotations()[helpersv1.CompletionMetadataKey],
-				Name:              nn.Name,
+				Status:            state.Status,
+				Completion:        state.Completion,
+				Name:              state.Name,
 				FailOnProfile:     failOnProfile,
 				Type:              armotypes.NetworkProfile,
 				ProfileDependency: profileReq.ProfileDependency,
+				Error:             state.Error,
 			}
 			baseRuntimeAlert.ProfileMetadata = profileMetadata
 		}
@@ -81,6 +83,7 @@ func setProfileMetadata(rule ruleengine.RuleEvaluator, ruleFailure ruleengine.Ru
 		profileMetadata := &armotypes.ProfileMetadata{
 			ProfileDependency: profileReq.ProfileDependency,
 			FailOnProfile:     failOnProfile,
+			Error:             fmt.Errorf("profile type %d not supported", profileReq.ProfileType),
 		}
 		baseRuntimeAlert.ProfileMetadata = profileMetadata
 	}

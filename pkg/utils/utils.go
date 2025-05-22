@@ -162,6 +162,17 @@ func AddJitter(duration time.Duration, maxJitterPercentage int) time.Duration {
 	return duration * time.Duration(jitter)
 }
 
+// Jitter returns a random duration
+func Jitter(duration *time.Duration, maxJitterPercentage float64) {
+	if *duration == 0 {
+		return
+	}
+
+	jitterFraction := maxJitterPercentage / 100.0
+	jitterDuration := time.Duration(float64(*duration) * jitterFraction * (rand.Float64()*2 - 1))
+	*duration += jitterDuration
+}
+
 // RandomDuration returns a duration between 1/2 max and max
 func RandomDuration(max int, duration time.Duration) time.Duration {
 	// we don't initialize the seed, so we will get the same sequence of random numbers every time
