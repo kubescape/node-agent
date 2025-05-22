@@ -38,6 +38,7 @@ var R1011LdPreloadHookRuleDescriptor = ruleengine.RuleDescriptor{
 	RuleCreationFunc: func() ruleengine.RuleEvaluator {
 		return CreateRuleR1011LdPreloadHook()
 	},
+	RulePolicySupport: true,
 }
 var _ ruleengine.RuleEvaluator = (*R1011LdPreloadHook)(nil)
 
@@ -58,42 +59,6 @@ func (rule *R1011LdPreloadHook) ID() string {
 }
 
 func (rule *R1011LdPreloadHook) DeleteRule() {
-}
-
-func (rule *R1011LdPreloadHook) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	if ok, _ := rule.EvaluateRule(eventType, event, objectCache.K8sObjectCache()); !ok {
-		return nil
-	}
-
-	if eventType == utils.ExecveEventType {
-		execEvent, ok := event.(*events.ExecEvent)
-		if !ok {
-			return nil
-		}
-
-		if allowed, err := IsAllowed(&execEvent.Event.Event, objectCache, execEvent.Comm, R1011ID); err != nil {
-			return nil
-		} else if allowed {
-			return nil
-		}
-
-		return rule.ruleFailureExecEvent(execEvent)
-	} else if eventType == utils.OpenEventType {
-		openEvent, ok := event.(*events.OpenEvent)
-		if !ok {
-			return nil
-		}
-
-		if allowed, err := IsAllowed(&openEvent.Event.Event, objectCache, openEvent.Comm, R1011ID); err != nil {
-			return nil
-		} else if allowed {
-			return nil
-		}
-
-		return rule.ruleFailureOpenEvent(&openEvent.Event, openEvent.GetExtra())
-	}
-
-	return nil
 }
 
 func (rule *R1011LdPreloadHook) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
@@ -117,9 +82,49 @@ func (rule *R1011LdPreloadHook) EvaluateRule(eventType utils.EventType, event ut
 	}
 }
 
-func (rule *R1011LdPreloadHook) Requirements() ruleengine.RuleSpec {
-	return &RuleRequirements{
-		EventTypes: R1011LdPreloadHookRuleDescriptor.Requirements.RequiredEventTypes(),
+func (rule *R1011LdPreloadHook) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	// First do basic evaluation
+	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
+	}
+
+	switch eventType {
+	case utils.ExecveEventType:
+		execEvent, _ := event.(*events.ExecEvent)
+		if allowed, err := IsAllowed(&execEvent.Event.Event, objCache, execEvent.Comm, R1011ID); err != nil {
+			return false, nil, err
+		} else if allowed {
+			return false, nil, nil
+		}
+		return true, nil, nil
+
+	case utils.OpenEventType:
+		openEvent, _ := event.(*events.OpenEvent)
+		if allowed, err := IsAllowed(&openEvent.Event.Event, objCache, openEvent.Comm, R1011ID); err != nil {
+			return false, nil, err
+		} else if allowed {
+			return false, nil, nil
+		}
+		return true, nil, nil
+
+	default:
+		return false, nil, nil
+	}
+}
+
+func (rule *R1011LdPreloadHook) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+	switch eventType {
+	case utils.ExecveEventType:
+		execEvent, _ := event.(*events.ExecEvent)
+		return rule.ruleFailureExecEvent(execEvent)
+
+	case utils.OpenEventType:
+		openEvent, _ := event.(*events.OpenEvent)
+		return rule.ruleFailureOpenEvent(&openEvent.Event, openEvent.GetExtra())
+
+	default:
+		return nil
 	}
 }
 
@@ -226,6 +231,10 @@ func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *events.ExecEvent, k8s
 
 	ldHookVar, shouldCheck := GetLdHookVar(envVars)
 	if shouldCheck {
+		if k8sObjCache == nil {
+			return false
+		}
+
 		podSpec := k8sObjCache.GetPodSpec(execEvent.GetNamespace(), execEvent.GetPod())
 		if podSpec != nil {
 			for _, container := range podSpec.Containers {
@@ -255,4 +264,14 @@ func GetLdHookVar(envVars map[string]string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func (rule *R1011LdPreloadHook) Requirements() ruleengine.RuleSpec {
+	return &RuleRequirements{
+		EventTypes: R1011LdPreloadHookRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.ApplicationProfile,
+		},
+	}
 }

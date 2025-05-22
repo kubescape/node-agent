@@ -47,6 +47,14 @@ func InitAlertManagerExporter(alertManagerURL string) *AlertManagerExporter {
 }
 
 func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+	profileMetadata := failedRule.GetBaseRuntimeAlert().ProfileMetadata
+	failOnProfile := false
+	completedStatus := ""
+	if profileMetadata != nil {
+		failOnProfile = profileMetadata.FailOnProfile
+		completedStatus = profileMetadata.Status
+	}
+
 	trace, err := traceToString(failedRule.GetBaseRuntimeAlert().Trace)
 	if err != nil {
 		logger.L().Debug("AlertManagerExporter.SendRuleAlert - converting trace to string", helpers.Error(err), helpers.Interface("trace", failedRule.GetBaseRuntimeAlert().Trace))
@@ -83,23 +91,25 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 		Alert: models.Alert{
 			GeneratorURL: strfmt.URI(sourceUrl),
 			Labels: map[string]string{
-				"alertname":      "KubescapeRuleViolated",
-				"rule_name":      failedRule.GetBaseRuntimeAlert().AlertName,
-				"rule_id":        failedRule.GetRuleId(),
-				"container_id":   failedRule.GetRuntimeAlertK8sDetails().ContainerID,
-				"container_name": failedRule.GetRuntimeAlertK8sDetails().ContainerName,
-				"namespace":      failedRule.GetRuntimeAlertK8sDetails().Namespace,
-				"pod_name":       failedRule.GetRuntimeAlertK8sDetails().PodName,
-				"severity":       PriorityToStatus(failedRule.GetBaseRuntimeAlert().Severity),
-				"host":           ame.Host,
-				"node_name":      ame.NodeName,
-				"pid":            fmt.Sprintf("%d", process.PID),
-				"ppid":           fmt.Sprintf("%d", process.PPID),
-				"pcomm":          process.Pcomm,
-				"comm":           process.Comm,
-				"uid":            fmt.Sprintf("%d", process.Uid),
-				"gid":            fmt.Sprintf("%d", process.Gid),
-				"trace":          trace,
+				"alertname":       "KubescapeRuleViolated",
+				"rule_name":       failedRule.GetBaseRuntimeAlert().AlertName,
+				"rule_id":         failedRule.GetRuleId(),
+				"container_id":    failedRule.GetRuntimeAlertK8sDetails().ContainerID,
+				"container_name":  failedRule.GetRuntimeAlertK8sDetails().ContainerName,
+				"namespace":       failedRule.GetRuntimeAlertK8sDetails().Namespace,
+				"pod_name":        failedRule.GetRuntimeAlertK8sDetails().PodName,
+				"severity":        PriorityToStatus(failedRule.GetBaseRuntimeAlert().Severity),
+				"host":            ame.Host,
+				"node_name":       ame.NodeName,
+				"pid":             fmt.Sprintf("%d", process.PID),
+				"ppid":            fmt.Sprintf("%d", process.PPID),
+				"pcomm":           process.Pcomm,
+				"comm":            process.Comm,
+				"uid":             fmt.Sprintf("%d", process.Uid),
+				"gid":             fmt.Sprintf("%d", process.Gid),
+				"trace":           trace,
+				"fail_on_profile": fmt.Sprintf("%t", failOnProfile),
+				"profile_status":  completedStatus,
 			},
 		},
 	}

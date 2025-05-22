@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
@@ -23,7 +24,7 @@ func TestR1006UnshareSyscall(t *testing.T) {
 		SyscallName: "test",
 	}
 
-	ruleResult := r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
+	ruleResult := ruleprocess.ProcessRule(r, utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since syscall is not unshare")
@@ -33,7 +34,7 @@ func TestR1006UnshareSyscall(t *testing.T) {
 	// Create a syscall event with unshare syscall
 	e.SyscallName = "unshare"
 
-	ruleResult = r.ProcessEvent(utils.SyscallEventType, e, &RuleObjectCacheMock{})
+	ruleResult = ruleprocess.ProcessRule(r, utils.SyscallEventType, e, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of unshare is used")

@@ -57,15 +57,27 @@ func (rule *R1015MaliciousPtraceUsage) ID() string {
 func (rule *R1015MaliciousPtraceUsage) DeleteRule() {
 }
 
-func (rule *R1015MaliciousPtraceUsage) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1015MaliciousPtraceUsage) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.PtraceEventType {
-		return nil
+		return false, nil
 	}
 
-	ptraceEvent, ok := event.(*tracerptracetype.Event)
+	_, ok := event.(*tracerptracetype.Event)
 	if !ok {
-		return nil
+		return false, nil
 	}
+
+	return true, nil
+}
+
+// Won't be used, because the rule is not profile dependent
+func (rule *R1015MaliciousPtraceUsage) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	ok, data := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	return ok, data, nil
+}
+
+func (rule *R1015MaliciousPtraceUsage) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+	ptraceEvent, _ := event.(*tracerptracetype.Event)
 
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
@@ -100,5 +112,8 @@ func (rule *R1015MaliciousPtraceUsage) ProcessEvent(eventType utils.EventType, e
 func (rule *R1015MaliciousPtraceUsage) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1015MaliciousPtraceUsageRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			ProfileDependency: apitypes.NotRequired,
+		},
 	}
 }

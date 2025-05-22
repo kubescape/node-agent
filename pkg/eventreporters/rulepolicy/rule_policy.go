@@ -19,7 +19,7 @@ func NewRulePolicyReporter(ruleManager rulemanager.RuleManagerClient, applicatio
 }
 
 func (rpm *RulePolicyReporter) ReportEvent(eventType utils.EventType, event utils.K8sEvent, k8sContainerID string, allowedProcess string) {
-	rulesIds := rpm.ruleManager.EvaluateRulesForEvent(eventType, event)
+	rulesIds := rpm.ruleManager.EvaluatePolicyRulesForEvent(eventType, event)
 	for _, rule := range rulesIds {
 		rpm.applicationProfileManager.ReportRulePolicy(k8sContainerID, rule, allowedProcess, false)
 	}

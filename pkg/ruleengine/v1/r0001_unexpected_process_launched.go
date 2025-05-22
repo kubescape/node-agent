@@ -5,12 +5,11 @@ import (
 	"slices"
 	"strings"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
@@ -57,26 +56,36 @@ func CreateRuleR0001UnexpectedProcessLaunched() *R0001UnexpectedProcessLaunched 
 	return &R0001UnexpectedProcessLaunched{enforceArgs: false}
 }
 
-func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0001UnexpectedProcessLaunched) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.ExecveEventType {
-		return nil
+		return false, nil
 	}
 
 	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
-		return nil
+		return false, nil
 	}
 
 	execPath := GetExecPathFromEvent(execEvent)
+	return true, execPath
+}
 
-	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
-	if ap == nil {
-		return nil
+func (rule *R0001UnexpectedProcessLaunched) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	// First do basic evaluation
+	ok, execPath := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
+	}
+
+	execEvent, _ := event.(*events.ExecEvent)
+	ap, err := GetApplicationProfile(execEvent.Runtime.ContainerID, objCache)
+	if err != nil {
+		return false, nil, err
 	}
 
 	appProfileExecList, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())
 	if err != nil {
-		return nil
+		return false, nil, err
 	}
 
 	for _, execCall := range appProfileExecList.Execs {
@@ -84,15 +93,22 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 			// if enforceArgs is set to true, we need to compare the arguments as well
 			// if not set, we only compare the path
 			if !rule.enforceArgs || slices.Compare(execCall.Args, execEvent.Args) == 0 {
-				return nil
+				return false, nil, nil
 			}
 		}
 	}
 
-	// If the parent process  is in the upper layer, the child process is also in the upper layer.
+	return true, nil, nil
+}
+
+func (rule *R0001UnexpectedProcessLaunched) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+	execEvent, _ := event.(*events.ExecEvent)
+	execPath := GetExecPathFromEvent(execEvent)
+
+	// If the parent process is in the upper layer, the child process is also in the upper layer.
 	upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
 
-	ruleFailure := GenericRuleFailure{
+	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
 			AlertName:   rule.Name(),
@@ -131,12 +147,14 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		RuleID: rule.ID(),
 		Extra:  execEvent.GetExtra(),
 	}
-
-	return &ruleFailure
 }
 
 func (rule *R0001UnexpectedProcessLaunched) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0001UnexpectedProcessLaunchedRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			ProfileDependency: apitypes.Required,
+			ProfileType:       apitypes.ApplicationProfile,
+		},
 	}
 }

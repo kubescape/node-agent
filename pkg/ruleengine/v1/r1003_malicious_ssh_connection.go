@@ -16,7 +16,6 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 
 	"github.com/kubescape/go-logger"
-
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 )
 
@@ -127,89 +126,106 @@ func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interfa
 func (rule *R1003MaliciousSSHConnection) DeleteRule() {
 }
 
-func (rule *R1003MaliciousSSHConnection) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R1003MaliciousSSHConnection) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.SSHEventType {
-		return nil
+		return false, nil
 	}
 
-	sshEvent := event.(*tracersshtype.Event)
+	sshEvent, ok := event.(*tracersshtype.Event)
+	if !ok {
+		return false, nil
+	}
 
 	// Check only outgoing packets (source port is ephemeral)
 	if sshEvent.SrcPort < rule.ephemeralPortRange[0] || sshEvent.SrcPort > rule.ephemeralPortRange[1] {
-		return nil
+		return false, nil
 	}
 
-	if objectCache != nil {
-		nn := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(sshEvent.Runtime.ContainerID)
-		if nn == nil {
-			return nil
+	if !slices.Contains(rule.allowedPorts, sshEvent.DstPort) {
+		// Check if the event is a response to a request we have already seen
+		if rule.requests.Has(sshEvent.DstIP) {
+			return false, nil
 		}
+		return true, sshEvent
+	}
 
-		nnContainer, err := GetContainerFromNetworkNeighborhood(nn, sshEvent.GetContainer())
-		if err != nil {
-			return nil
-		}
+	return false, nil
+}
 
-		for _, egress := range nnContainer.Egress {
-			if egress.IPAddress == sshEvent.DstIP {
-				for _, port := range egress.Ports {
-					if port.Port != nil {
-						if uint16(*port.Port) == sshEvent.DstPort {
-							return nil
-						}
+func (rule *R1003MaliciousSSHConnection) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	// First do basic evaluation
+	ok, sshEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
+	}
+
+	sshEventTyped, _ := sshEvent.(*tracersshtype.Event)
+	nn, err := GetNetworkNeighborhood(sshEventTyped.Runtime.ContainerID, objCache)
+	if err != nil {
+		return false, nil, err
+	}
+
+	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, sshEventTyped.GetContainer())
+	if err != nil {
+		return false, nil, err
+	}
+
+	for _, egress := range nnContainer.Egress {
+		if egress.IPAddress == sshEventTyped.DstIP {
+			for _, port := range egress.Ports {
+				if port.Port != nil {
+					if uint16(*port.Port) == sshEventTyped.DstPort {
+						return false, nil, nil
 					}
 				}
 			}
 		}
 	}
 
-	if !slices.Contains(rule.allowedPorts, sshEvent.DstPort) {
-		// Check if the event is a response to a request we have already seen.
-		if rule.requests.Has(sshEvent.DstIP) {
-			return nil
-		}
-		rule.requests.Set(sshEvent.SrcIP, sshEvent.DstIP)
-		ruleFailure := GenericRuleFailure{
-			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-				UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s%d", sshEvent.Comm, sshEvent.DstIP, sshEvent.DstPort)),
-				AlertName: rule.Name(),
-				Arguments: map[string]interface{}{
-					"srcIP":   sshEvent.SrcIP,
-					"dstIP":   sshEvent.DstIP,
-					"dstPort": sshEvent.DstPort,
-					"srcPort": sshEvent.SrcPort,
-				},
-				InfectedPID: sshEvent.Pid,
-				Severity:    R1003MaliciousSSHConnectionRuleDescriptor.Priority,
-			},
-			RuntimeProcessDetails: apitypes.ProcessTree{
-				ProcessTree: apitypes.Process{
-					Comm: sshEvent.Comm,
-					Gid:  &sshEvent.Gid,
-					PID:  sshEvent.Pid,
-					Uid:  &sshEvent.Uid,
-				},
-				ContainerID: sshEvent.Runtime.ContainerID,
-			},
-			TriggerEvent: sshEvent.Event,
-			RuleAlert: apitypes.RuleAlert{
-				RuleDescription: fmt.Sprintf("SSH connection to disallowed port %s:%d", sshEvent.DstIP, sshEvent.DstPort),
-			},
-			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-				PodName:   sshEvent.GetPod(),
-				PodLabels: sshEvent.K8s.PodLabels,
-			},
-			RuleID: rule.ID(),
-		}
+	return true, nil, nil
+}
 
-		return &ruleFailure
+func (rule *R1003MaliciousSSHConnection) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+	sshEvent, _ := event.(*tracersshtype.Event)
+
+	return &GenericRuleFailure{
+		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%d", sshEvent.Comm, sshEvent.DstIP, sshEvent.DstPort)),
+			AlertName:   rule.Name(),
+			InfectedPID: sshEvent.Pid,
+			Arguments: map[string]interface{}{
+				"dstIP":   sshEvent.DstIP,
+				"dstPort": sshEvent.DstPort,
+			},
+			Severity: R1003MaliciousSSHConnectionRuleDescriptor.Priority,
+		},
+		RuntimeProcessDetails: apitypes.ProcessTree{
+			ProcessTree: apitypes.Process{
+				Comm: sshEvent.Comm,
+				Gid:  &sshEvent.Gid,
+				PID:  sshEvent.Pid,
+				Uid:  &sshEvent.Uid,
+			},
+			ContainerID: sshEvent.Runtime.ContainerID,
+		},
+		TriggerEvent: sshEvent.Event,
+		RuleAlert: apitypes.RuleAlert{
+			RuleDescription: fmt.Sprintf("Malicious SSH connection attempt to %s:%d", sshEvent.DstIP, sshEvent.DstPort),
+		},
+		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+			PodName:   sshEvent.GetPod(),
+			PodLabels: sshEvent.K8s.PodLabels,
+		},
+		RuleID: rule.ID(),
 	}
-
-	return nil
 }
 
 func (rule *R1003MaliciousSSHConnection) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1003MaliciousSSHConnectionRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.NetworkProfile,
+		},
 	}
 }

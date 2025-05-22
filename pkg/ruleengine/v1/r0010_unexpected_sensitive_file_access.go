@@ -7,7 +7,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
-	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -108,53 +107,64 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ID() string {
 func (rule *R0010UnexpectedSensitiveFileAccess) DeleteRule() {
 }
 
-func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0010UnexpectedSensitiveFileAccess) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.OpenEventType {
-		return nil
+		return false, nil
 	}
 
 	fullEvent, ok := event.(*events.OpenEvent)
 	if !ok {
-		return nil
+		return false, nil
 	}
 
 	openEvent := fullEvent.Event
 
-	var appProfileOpenList v1beta1.ApplicationProfileContainer
-	var err error
-
-	if objCache != nil {
-		ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
-		if ap == nil {
-			return nil
-		}
-
-		appProfileOpenList, err = GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
-		if err != nil {
-			return nil
-		}
-	} else {
-		// Running without application profile, to avoid false positives check if the process name is legitimate
-		for _, processName := range legitimateProcessNames {
-			if processName == openEvent.Comm {
-				return nil
-			}
-		}
-	}
-
 	if !utils.IsSensitivePath(openEvent.FullPath, rule.additionalPaths) {
-		return nil
+		return false, nil
 	}
 
-	if objCache != nil {
-		for _, open := range appProfileOpenList.Opens {
-			if dynamicpathdetector.CompareDynamic(open.Path, openEvent.FullPath) {
-				return nil
-			}
+	// Running without application profile, to avoid false positives check if the process name is legitimate
+	for _, processName := range legitimateProcessNames {
+		if processName == openEvent.Comm {
+			return false, nil
 		}
 	}
 
-	ruleFailure := GenericRuleFailure{
+	return true, fullEvent
+}
+
+func (rule *R0010UnexpectedSensitiveFileAccess) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	// First do basic evaluation
+	ok, openEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
+	}
+
+	openEventTyped, _ := openEvent.(*events.OpenEvent)
+	ap, err := GetApplicationProfile(openEventTyped.Runtime.ContainerID, objCache)
+	if err != nil {
+		return false, nil, err
+	}
+
+	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEventTyped.GetContainer())
+	if err != nil {
+		return false, nil, err
+	}
+
+	for _, open := range appProfileOpenList.Opens {
+		if dynamicpathdetector.CompareDynamic(open.Path, openEventTyped.FullPath) {
+			return false, nil, nil
+		}
+	}
+
+	return true, nil, nil
+}
+
+func (rule *R0010UnexpectedSensitiveFileAccess) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+	fullEvent, _ := event.(*events.OpenEvent)
+	openEvent := fullEvent.Event
+
+	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", openEvent.Comm, openEvent.FullPath)),
 			AlertName: rule.Name(),
@@ -185,12 +195,14 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 		RuleID: rule.ID(),
 		Extra:  fullEvent.GetExtra(),
 	}
-
-	return &ruleFailure
 }
 
 func (rule *R0010UnexpectedSensitiveFileAccess) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0010UnexpectedSensitiveFileAccessRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			ProfileDependency: apitypes.Optional,
+			ProfileType:       apitypes.ApplicationProfile,
+		},
 	}
 }

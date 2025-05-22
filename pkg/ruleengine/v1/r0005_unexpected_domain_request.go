@@ -5,13 +5,12 @@ import (
 	"slices"
 	"strings"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
+	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 )
 
 const (
@@ -54,43 +53,61 @@ func (rule *R0005UnexpectedDomainRequest) ID() string {
 func (rule *R0005UnexpectedDomainRequest) DeleteRule() {
 }
 
-func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0005UnexpectedDomainRequest) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
 	if eventType != utils.DnsEventType {
-		return nil
+		return false, nil
 	}
 
 	domainEvent, ok := event.(*tracerdnstype.Event)
 	if !ok {
-		return nil
+		return false, nil
 	}
 
 	if rule.alertedDomains.Has(domainEvent.DNSName) {
-		return nil
+		return false, nil
 	}
 
 	// TODO: fix this, currently we are ignoring in-cluster communication
 	if strings.HasSuffix(domainEvent.DNSName, "svc.cluster.local.") {
-		return nil
+		return false, nil
 	}
 
-	nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(domainEvent.Runtime.ContainerID)
-	if nn == nil {
-		return nil
+	return true, domainEvent
+}
+
+func (rule *R0005UnexpectedDomainRequest) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+	// First do basic evaluation
+	ok, domainEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !ok {
+		return false, nil, nil
 	}
 
-	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, domainEvent.GetContainer())
+	domainEventTyped, _ := domainEvent.(*tracerdnstype.Event)
+	nn, err := GetNetworkNeighborhood(domainEventTyped.Runtime.ContainerID, objCache)
 	if err != nil {
-		return nil
+		return false, nil, err
+	}
+
+	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, domainEventTyped.GetContainer())
+	if err != nil {
+		return false, nil, err
 	}
 
 	// Check that the domain is in the network neighbors
 	for _, dns := range nnContainer.Egress {
-		if dns.DNS == domainEvent.DNSName || slices.Contains(dns.DNSNames, domainEvent.DNSName) {
-			return nil
+		if dns.DNS == domainEventTyped.DNSName || slices.Contains(dns.DNSNames, domainEventTyped.DNSName) {
+			return false, nil, nil
 		}
 	}
 
-	ruleFailure := GenericRuleFailure{
+	return true, nil, nil
+}
+
+func (rule *R0005UnexpectedDomainRequest) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+	domainEvent, _ := event.(*tracerdnstype.Event)
+	rule.alertedDomains.Set(domainEvent.DNSName, true)
+
+	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", domainEvent.Comm, domainEvent.DNSName)),
 			AlertName:   rule.Name(),
@@ -126,14 +143,14 @@ func (rule *R0005UnexpectedDomainRequest) ProcessEvent(eventType utils.EventType
 		},
 		RuleID: rule.ID(),
 	}
-
-	rule.alertedDomains.Set(domainEvent.DNSName, true)
-
-	return &ruleFailure
 }
 
 func (rule *R0005UnexpectedDomainRequest) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0005UnexpectedDomainRequestRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			ProfileDependency: apitypes.Required,
+			ProfileType:       apitypes.NetworkProfile,
+		},
 	}
 }

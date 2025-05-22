@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 
@@ -60,7 +61,7 @@ func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {
 		NewPath: "test",
 	}
 
-	ruleResult := r.ProcessEvent(utils.SymlinkEventType, e, &objCache)
+	ruleResult := ruleprocess.ProcessRule(r, utils.SymlinkEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since symlink path is not sensitive")
@@ -71,7 +72,7 @@ func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {
 	e.OldPath = "/etc/shadow"
 	e.NewPath = "/etc/abc"
 
-	ruleResult = r.ProcessEvent(utils.SymlinkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.SymlinkEventType, e, &objCache)
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of symlink is used over sensitive file")
@@ -79,7 +80,7 @@ func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {
 	}
 
 	e.OldPath = "/etc/abc"
-	ruleResult = r.ProcessEvent(utils.SymlinkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.SymlinkEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since symlink is not used over sensitive file")
@@ -91,7 +92,7 @@ func TestR1010SymlinkCreatedOverSensitiveFile(t *testing.T) {
 	e.OldPath = "/etc/shadow"
 	e.NewPath = "/etc/abc"
 
-	ruleResult = r.ProcessEvent(utils.SymlinkEventType, e, &objCache)
+	ruleResult = ruleprocess.ProcessRule(r, utils.SymlinkEventType, e, &objCache)
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since file is whitelisted and not sensitive")
