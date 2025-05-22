@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 )
 
 const (
@@ -94,18 +96,30 @@ func filterAlertsByLabel(alerts []Alert, labelKey, labelValue string) []Alert {
 }
 
 func AssertContains(t *testing.T, alerts []Alert, expectedRuleName string, expectedCommand string, expectedContainerName string, expectedFailOnProfile []bool) {
+	expectedProfileStatus := helpers.Completed
 	for _, alert := range alerts {
 		ruleName, ruleOk := alert.Labels["rule_name"]
 		command, cmdOk := alert.Labels["comm"]
 		containerName, containerOk := alert.Labels["container_name"]
 		failOnProfile, failOnProfileOk := alert.Labels["fail_on_profile"]
+		profileStatus, profileStatusOk := alert.Labels["profile_status"]
 		failOnProfileBool, err := strconv.ParseBool(failOnProfile)
 		if err != nil {
 			t.Errorf("error parsing fail_on_profile: %v", err)
 		}
+
 		if ruleOk && cmdOk && containerOk && ruleName == expectedRuleName && command == expectedCommand && containerName == expectedContainerName &&
-			failOnProfileOk && slices.Contains(expectedFailOnProfile, failOnProfileBool) {
-			return
+			failOnProfileOk && slices.Contains(expectedFailOnProfile, failOnProfileBool) && profileStatusOk {
+			// if fail on profile is true, we expect the profile to be completed
+			// else return if the profile is not completed
+			if failOnProfileBool {
+				if profileStatus == expectedProfileStatus {
+					return
+				}
+			} else {
+				return
+			}
+
 		}
 	}
 

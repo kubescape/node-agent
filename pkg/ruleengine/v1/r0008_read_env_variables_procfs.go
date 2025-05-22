@@ -148,7 +148,7 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) Requirements() ruleengine.RuleS
 	return &RuleRequirements{
 		EventTypes: R0008ReadEnvironmentVariablesProcFSRuleDescriptor.Requirements.RequiredEventTypes(),
 		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileDependency: apitypes.Optional,
+			ProfileDependency: apitypes.Required,
 			ProfileType:       apitypes.ApplicationProfile,
 		},
 	}

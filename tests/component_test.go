@@ -1353,5 +1353,5 @@ func Test_19_AlertOnPartialProfileTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
-	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx")
+	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
 }

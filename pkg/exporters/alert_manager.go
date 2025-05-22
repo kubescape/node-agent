@@ -49,8 +49,10 @@ func InitAlertManagerExporter(alertManagerURL string) *AlertManagerExporter {
 func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
 	profileMetadata := failedRule.GetBaseRuntimeAlert().ProfileMetadata
 	failOnProfile := false
+	completedStatus := ""
 	if profileMetadata != nil {
 		failOnProfile = profileMetadata.FailOnProfile
+		completedStatus = profileMetadata.Status
 	}
 
 	trace, err := traceToString(failedRule.GetBaseRuntimeAlert().Trace)
@@ -107,6 +109,7 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 				"gid":             fmt.Sprintf("%d", process.Gid),
 				"trace":           trace,
 				"fail_on_profile": fmt.Sprintf("%t", failOnProfile),
+				"profile_status":  completedStatus,
 			},
 		},
 	}
