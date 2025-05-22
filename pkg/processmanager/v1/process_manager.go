@@ -133,7 +133,7 @@ func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent
 		if process, err := p.getProcessFromProc(int(containerPID)); err == nil {
 			shimPID := apitypes.CommPID{Comm: process.Pcomm, PID: process.PPID}
 			p.containerIdToShimPid.Set(containerID, shimPID)
-			p.addProcess(process)
+			p.addProcessUnsafe(process)
 		} else {
 			logger.L().Warning("ProcessManager.ContainerCallback - failed to get container process info",
 				helpers.String("containerID", containerID),
@@ -142,7 +142,7 @@ func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent
 
 	case containercollection.EventTypeRemoveContainer:
 		if shimPID, exists := p.containerIdToShimPid.Load(containerID); exists {
-			p.removeProcessesUnderShim(shimPID)
+			p.removeProcessesUnderShimUnsafe(shimPID)
 			p.containerIdToShimPid.Delete(containerID)
 		}
 	}
@@ -152,6 +152,13 @@ func (p *ProcessManager) ContainerCallback(notif containercollection.PubSubEvent
 // shim process PID from the process tree. This is typically called when a container
 // is being removed.
 func (p *ProcessManager) removeProcessesUnderShim(shimPID apitypes.CommPID) {
+	p.processTreeMutex.Lock()
+	defer p.processTreeMutex.Unlock()
+	p.removeProcessesUnderShimUnsafe(shimPID)
+}
+
+// removeProcessesUnderShimUnsafe is the internal implementation that assumes the mutex is already held
+func (p *ProcessManager) removeProcessesUnderShimUnsafe(shimPID apitypes.CommPID) {
 	var pidsToRemove []apitypes.CommPID
 
 	// CAREFUL this is RLocking the map, do not call other methods that Lock the map
@@ -177,14 +184,15 @@ func (p *ProcessManager) removeProcessesUnderShim(shimPID apitypes.CommPID) {
 
 	// Remove in reverse order to handle parent-child relationships
 	for i := len(pidsToRemove) - 1; i >= 0; i-- {
-		p.removeProcess(pidsToRemove[i])
+		p.removeProcessUnsafe(pidsToRemove[i])
 	}
 }
 
-// addProcess adds or updates a process in the process tree and maintains the
+// addProcessUnsafe adds or updates a process in the process tree and maintains the
 // parent-child relationships between processes. If the process already exists
 // with a different parent, it updates the relationships accordingly.
-func (p *ProcessManager) addProcess(process *apitypes.Process) {
+// This method assumes the caller already holds the processTreeMutex.
+func (p *ProcessManager) addProcessUnsafe(process *apitypes.Process) {
 	// First, check if the process already exists and has a different parent
 	pid := apitypes.CommPID{Comm: process.Comm, PID: process.PID}
 	if existingProc, exists := p.processTree.Load(pid); exists && existingProc.PPID != process.PPID {
@@ -203,10 +211,18 @@ func (p *ProcessManager) addProcess(process *apitypes.Process) {
 	}
 }
 
-// removeProcess removes a process from the process tree and updates the parent-child
+// removeProcess removes a process from the process tree with proper locking
+func (p *ProcessManager) removeProcess(pid apitypes.CommPID) {
+	p.processTreeMutex.Lock()
+	defer p.processTreeMutex.Unlock()
+	p.removeProcessUnsafe(pid)
+}
+
+// removeProcessUnsafe removes a process from the process tree and updates the parent-child
 // relationships. Children of the removed process are reassigned to their grandparent
 // to maintain the process hierarchy.
-func (p *ProcessManager) removeProcess(pid apitypes.CommPID) {
+// This method assumes the caller already holds the processTreeMutex.
+func (p *ProcessManager) removeProcessUnsafe(pid apitypes.CommPID) {
 	if process, exists := p.processTree.Load(pid); exists {
 		if parent, exists := p.processTree.Load(apitypes.CommPID{Comm: process.Pcomm, PID: process.PPID}); exists {
 			delete(parent.ChildrenMap, pid)
@@ -216,7 +232,7 @@ func (p *ProcessManager) removeProcess(pid apitypes.CommPID) {
 			if childProcess, exists := p.processTree.Load(apitypes.CommPID{Comm: child.Comm, PID: child.PID}); exists {
 				childProcess.PPID = process.PPID
 				childProcess.Pcomm = process.Pcomm
-				p.addProcess(childProcess)
+				p.addProcessUnsafe(childProcess)
 			}
 		}
 
@@ -248,7 +264,7 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid apitypes.C
 		if strings.HasPrefix(process.Comm, runCCommPrefix) {
 			return apitypes.Process{}, fmt.Errorf("process %d is a runc process, not supported", pid.PID)
 		}
-		p.addProcess(process)
+		p.addProcessUnsafe(process)
 		result = process
 	}
 
@@ -263,7 +279,7 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid apitypes.C
 
 		if parent, exists := p.processTree.Load(currentPID); exists {
 			parentCopy := parent
-			parentCopy.ChildrenMap = map[apitypes.CommPID]*apitypes.Process{apitypes.CommPID{Comm: result.Comm, PID: result.PID}: result}
+			parentCopy.ChildrenMap = map[apitypes.CommPID]*apitypes.Process{{Comm: result.Comm, PID: result.PID}: result}
 			result = parentCopy
 			currentPID = apitypes.CommPID{Comm: parent.Pcomm, PID: parent.PPID}
 		} else {
@@ -274,7 +290,7 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid apitypes.C
 	// If the process is runc, try to fetch the real process info.
 	// Intentionally we are doing this only once the process is asked for to avoid unnecessary calls to /proc and give time for the process to be created.
 	if strings.HasPrefix(result.Comm, runCCommPrefix) {
-		if resolvedProcess, err := p.resolveRuncProcess(result); err == nil {
+		if resolvedProcess, err := p.resolveRuncProcessUnsafe(result); err == nil {
 			result = resolvedProcess
 		} else {
 			logger.L().Debug("ProcessManager - failed to resolve runc process",
@@ -287,7 +303,8 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid apitypes.C
 	return *result.DeepCopy(), nil
 }
 
-func (p *ProcessManager) resolveRuncProcess(process *apitypes.Process) (*apitypes.Process, error) {
+// resolveRuncProcessUnsafe resolves a runc process assuming the mutex is already held
+func (p *ProcessManager) resolveRuncProcessUnsafe(process *apitypes.Process) (*apitypes.Process, error) {
 	err := backoff.Retry(func() error {
 		resolvedProcess, err := p.getProcessFromProc(int(process.PID))
 		if err != nil {
@@ -352,7 +369,7 @@ func (p *ProcessManager) ReportEvent(eventType utils.EventType, event utils.K8sE
 		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
 	}
 
-	p.addProcess(&process)
+	p.addProcessUnsafe(&process)
 }
 
 // startCleanupRoutine starts a goroutine that periodically runs the cleanup
@@ -391,7 +408,7 @@ func (p *ProcessManager) cleanup() {
 
 	for pid := range deadPids {
 		logger.L().Debug("ProcessManager - removing dead process", helpers.Interface("pid", pid))
-		p.removeProcess(pid)
+		p.removeProcessUnsafe(pid)
 	}
 }
 
