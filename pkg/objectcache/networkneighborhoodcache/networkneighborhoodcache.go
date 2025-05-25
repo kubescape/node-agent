@@ -24,9 +24,10 @@ import (
 
 // ContainerInfo holds container metadata we need for network neighborhood mapping
 type ContainerInfo struct {
-	ContainerID string
-	WorkloadID  string
-	Namespace   string
+	ContainerID          string
+	WorkloadID           string
+	InstanceTemplateHash string
+	Namespace            string
 }
 
 // NetworkNeighborhoodCacheImpl implements the NetworkNeighborhoodCache interface
@@ -137,6 +138,20 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 				continue
 			}
 
+			// Check if this workload ID is used by any container in this namespace
+			workloadIDInUse := false
+			for containerID := range containerSet.Iter() {
+				if containerInfo, exists := nnc.containerIDToInfo.Load(containerID); exists &&
+					containerInfo.WorkloadID == workloadID && containerInfo.InstanceTemplateHash == nn.Annotations[helpersv1.TemplateHashKey] {
+					workloadIDInUse = true
+					break
+				}
+			}
+
+			if !workloadIDInUse {
+				continue
+			}
+
 			// Update profile state regardless of whether we'll update the full profile
 			profileState := &objectcache.ProfileState{
 				Completion: nn.Annotations[helpersv1.CompletionMetadataKey],
@@ -148,20 +163,6 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 
 			// Only consider completed network neighborhoods
 			if nn.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
-				continue
-			}
-
-			// Check if this workload ID is used by any container in this namespace
-			workloadIDInUse := false
-			for containerID := range containerSet.Iter() {
-				if containerInfo, exists := nnc.containerIDToInfo.Load(containerID); exists &&
-					containerInfo.WorkloadID == workloadID {
-					workloadIDInUse = true
-					break
-				}
-			}
-
-			if !workloadIDInUse {
 				continue
 			}
 
@@ -321,9 +322,10 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 
 	// Create container info
 	containerInfo := &ContainerInfo{
-		ContainerID: containerID,
-		WorkloadID:  workloadID,
-		Namespace:   namespace,
+		ContainerID:          containerID,
+		WorkloadID:           workloadID,
+		InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
+		Namespace:            namespace,
 	}
 
 	// Add to container info map

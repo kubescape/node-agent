@@ -25,10 +25,11 @@ import (
 
 // ContainerInfo holds container metadata we need for application profile mapping
 type ContainerInfo struct {
-	ContainerID string
-	WorkloadID  string
-	Namespace   string
-	Name        string
+	ContainerID          string
+	WorkloadID           string
+	InstanceTemplateHash string
+	Namespace            string
+	Name                 string
 }
 
 // ContainerCallStackIndex maintains call stack search trees for a container
@@ -144,6 +145,20 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 				continue
 			}
 
+			// Check if this workload ID is used by any container in this namespace
+			workloadIDInUse := false
+			for containerID := range containerSet.Iter() {
+				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
+					containerInfo.WorkloadID == workloadID && containerInfo.InstanceTemplateHash == profile.Annotations[helpersv1.TemplateHashKey] {
+					workloadIDInUse = true
+					break
+				}
+			}
+
+			if !workloadIDInUse {
+				continue
+			}
+
 			// Update profile state regardless of whether we'll update the full profile
 			profileState := &objectcache.ProfileState{
 				Completion: profile.Annotations[helpersv1.CompletionMetadataKey],
@@ -155,20 +170,6 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 
 			// Only consider completed profiles
 			if profile.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
-				continue
-			}
-
-			// Check if this workload ID is used by any container in this namespace
-			workloadIDInUse := false
-			for containerID := range containerSet.Iter() {
-				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
-					containerInfo.WorkloadID == workloadID {
-					workloadIDInUse = true
-					break
-				}
-			}
-
-			if !workloadIDInUse {
 				continue
 			}
 
@@ -208,7 +209,8 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			// Update call stack search trees for containers using this workload ID
 			for containerID := range containerSet.Iter() {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
-					containerInfo.WorkloadID == workloadID {
+					containerInfo.WorkloadID == workloadID &&
+					containerInfo.InstanceTemplateHash == profile.Annotations[helpersv1.TemplateHashKey] {
 					// Create or update call stack search tree if not exists
 					apc.indexContainerCallStacks(containerID, containerInfo.Name, fullProfile)
 				}
@@ -398,10 +400,11 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 
 	// Create container info
 	containerInfo := &ContainerInfo{
-		ContainerID: containerID,
-		WorkloadID:  workloadID,
-		Namespace:   namespace,
-		Name:        container.Runtime.ContainerName,
+		ContainerID:          containerID,
+		WorkloadID:           workloadID,
+		InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
+		Namespace:            namespace,
+		Name:                 container.Runtime.ContainerName,
 	}
 
 	// Add to container info map
