@@ -145,21 +145,11 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 				continue
 			}
 
-			// Get the instance template hash from profile
-			instanceTemplateHash := profile.Annotations[helpersv1.TemplateHashKey]
-			if instanceTemplateHash == "" {
-				logger.L().Debug("skipping profile without instance template hash",
-					helpers.String("workloadID", workloadID),
-					helpers.String("namespace", namespace),
-					helpers.String("profileName", profile.Name))
-				continue
-			}
-
 			// Check if this workload ID is used by any container in this namespace
 			workloadIDInUse := false
 			for containerID := range containerSet.Iter() {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
-					containerInfo.WorkloadID == workloadID && containerInfo.InstanceTemplateHash == instanceTemplateHash {
+					containerInfo.WorkloadID == workloadID && containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
 					workloadIDInUse = true
 					break
 				}

@@ -142,7 +142,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 			workloadIDInUse := false
 			for containerID := range containerSet.Iter() {
 				if containerInfo, exists := nnc.containerIDToInfo.Load(containerID); exists &&
-					containerInfo.WorkloadID == workloadID && containerInfo.InstanceTemplateHash == nn.Annotations[helpersv1.TemplateHashKey] {
+					containerInfo.WorkloadID == workloadID && containerInfo.InstanceTemplateHash == nn.Labels[helpersv1.TemplateHashKey] {
 					workloadIDInUse = true
 					break
 				}
