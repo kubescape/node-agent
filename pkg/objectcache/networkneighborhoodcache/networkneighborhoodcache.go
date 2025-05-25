@@ -13,7 +13,6 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -139,20 +138,12 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 				continue
 			}
 
-			instanceID, err := instanceidhandler.GenerateInstanceIDFromString(nn.Annotations[helpersv1.InstanceIDMetadataKey])
-			if err != nil {
-				logger.L().Error("failed to generate instance ID from network neighborhood annotation",
-					helpers.String("workloadID", workloadID),
-					helpers.String("namespace", namespace),
-					helpers.Error(err))
-				continue
-			}
-
 			// Check if this workload ID is used by any container in this namespace
 			workloadIDInUse := false
 			for containerID := range containerSet.Iter() {
 				if containerInfo, exists := nnc.containerIDToInfo.Load(containerID); exists &&
-					containerInfo.WorkloadID == workloadID && containerInfo.InstanceTemplateHash == instanceID.GetTemplateHash() {
+					containerInfo.WorkloadID == workloadID &&
+					containerInfo.InstanceTemplateHash == nn.Labels[helpersv1.TemplateHashKey] {
 					workloadIDInUse = true
 					break
 				}
