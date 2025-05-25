@@ -8,7 +8,7 @@ require (
 	github.com/DmitriyVTitov/size v1.5.0
 	github.com/anchore/syft v1.18.1
 	github.com/aquilax/truncate v1.0.0
-	github.com/armosec/armoapi-go v0.0.570
+	github.com/armosec/armoapi-go v0.0.592
 	github.com/armosec/utils-k8s-go v0.0.30
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cenkalti/backoff/v4 v4.3.0
@@ -364,5 +364,3 @@ replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5
 replace github.com/mholt/archiver/v3 v3.5.1 => github.com/anchore/archiver/v3 v3.5.2
 
 replace github.com/inspektor-gadget/inspektor-gadget => github.com/amirmalka/inspektor-gadget v0.39.1-0.20250511132413-c7a2a761237a
-
-replace github.com/armosec/armoapi-go => github.com/armosec/armoapi-go v0.0.577-0.20250522102642-ab8368a209fc

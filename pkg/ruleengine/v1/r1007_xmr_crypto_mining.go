@@ -54,31 +54,31 @@ func (rule *R1007XMRCryptoMining) ID() string {
 func (rule *R1007XMRCryptoMining) DeleteRule() {
 }
 
-func (rule *R1007XMRCryptoMining) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R1007XMRCryptoMining) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.RandomXEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	randomXEvent, ok := event.(*tracerrandomxtype.Event)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
-	return true, randomXEvent
+	return ruleengine.DetectionResult{IsFailure: true, Payload: randomXEvent}
 }
 
-func (rule *R1007XMRCryptoMining) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R1007XMRCryptoMining) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
 	// This rule doesn't need profile evaluation since it's based on direct detection
-	return true, nil, nil
+	return detectionResult, nil
 }
 
-func (rule *R1007XMRCryptoMining) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R1007XMRCryptoMining) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	randomXEvent, _ := event.(*tracerrandomxtype.Event)
 
 	return &GenericRuleFailure{

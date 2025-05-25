@@ -54,18 +54,18 @@ func (rule *R1005FilelessExecution) ID() string {
 func (rule *R1005FilelessExecution) DeleteRule() {
 }
 
-func (rule *R1005FilelessExecution) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R1005FilelessExecution) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.ExecveEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if !strings.Contains(execEvent.ExePath, "memfd") {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	execFullPath := GetExecFullPathFromEvent(execEvent)
@@ -87,25 +87,25 @@ func (rule *R1005FilelessExecution) EvaluateRule(eventType utils.EventType, even
 	}
 
 	if isProcFd(execPathDir) || isProcFd(execEvent.Cwd) || isProcFd(execEvent.ExePath) {
-		return true, execEvent
+		return ruleengine.DetectionResult{IsFailure: true, Payload: execEvent}
 	}
 
-	return false, nil
+	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 }
 
-func (rule *R1005FilelessExecution) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R1005FilelessExecution) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
 	// This rule doesn't need profile evaluation since it's based on direct detection
-	return true, nil, nil
+	return detectionResult, nil
 }
 
-func (rule *R1005FilelessExecution) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
-	execEvent, _ := event.(*events.ExecEvent)
+func (rule *R1005FilelessExecution) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
+	execEvent, _ := payload.Payload.(*events.ExecEvent)
 	execFullPath := GetExecFullPathFromEvent(execEvent)
 	execPathDir := filepath.Dir(execFullPath)
 	upperLayer := execEvent.UpperLayer || execEvent.PupperLayer

@@ -60,38 +60,38 @@ func (rule *R1030UnexpectedIouringOperation) ID() string {
 func (rule *R1030UnexpectedIouringOperation) DeleteRule() {
 }
 
-func (rule *R1030UnexpectedIouringOperation) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R1030UnexpectedIouringOperation) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.IoUringEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	iouringEvent, ok := event.(*traceriouringtype.Event)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	ok, _ = iouring.GetOpcodeName(uint8(iouringEvent.Opcode))
-	return ok, nil
+	return ruleengine.DetectionResult{IsFailure: ok, Payload: nil}
 }
 
-func (rule *R1030UnexpectedIouringOperation) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
-	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+func (rule *R1030UnexpectedIouringOperation) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
 	iouringEvent, _ := event.(*traceriouringtype.Event)
 	if allowed, err := IsAllowed(&iouringEvent.Event, objCache, iouringEvent.Comm, R1030ID); err != nil {
 		logger.L().Error("RuleManager - failed to check if iouring event is allowed", helpers.Error(err))
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	} else if allowed {
-		return false, nil, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 	}
 
-	return true, nil, nil
+	return detectionResult, nil
 }
 
-func (rule *R1030UnexpectedIouringOperation) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R1030UnexpectedIouringOperation) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	iouringEvent, _ := event.(*traceriouringtype.Event)
 	ok, name := iouring.GetOpcodeName(uint8(iouringEvent.Opcode))
 	if !ok {

@@ -59,43 +59,43 @@ func (rule *R1009CryptoMiningRelatedPort) ID() string {
 func (rule *R1009CryptoMiningRelatedPort) DeleteRule() {
 }
 
-func (rule *R1009CryptoMiningRelatedPort) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R1009CryptoMiningRelatedPort) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.NetworkEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	networkEvent, ok := event.(*tracernetworktype.Event)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if rule.alreadyNotified {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if networkEvent.Proto == "TCP" && networkEvent.PktType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
-		return true, networkEvent
+		return ruleengine.DetectionResult{IsFailure: true, Payload: networkEvent}
 	}
 
-	return false, nil
+	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 }
 
-func (rule *R1009CryptoMiningRelatedPort) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R1009CryptoMiningRelatedPort) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, networkEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
-	networkEventTyped, _ := networkEvent.(*tracernetworktype.Event)
+	networkEventTyped, _ := event.(*tracernetworktype.Event)
 	nn, err := GetNetworkNeighborhood(networkEventTyped.Runtime.ContainerID, objCache)
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEventTyped.GetContainer())
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	// Check if the port is in the egress list
@@ -105,15 +105,15 @@ func (rule *R1009CryptoMiningRelatedPort) EvaluateRuleWithProfile(eventType util
 				continue
 			}
 			if networkEventTyped.Port == uint16(*port.Port) {
-				return false, nil, nil
+				return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 			}
 		}
 	}
 
-	return true, nil, nil
+	return ruleengine.DetectionResult{IsFailure: true, Payload: nil}, nil
 }
 
-func (rule *R1009CryptoMiningRelatedPort) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R1009CryptoMiningRelatedPort) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	networkEvent, _ := event.(*tracernetworktype.Event)
 	rule.alreadyNotified = true
 

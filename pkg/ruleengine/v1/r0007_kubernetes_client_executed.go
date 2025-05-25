@@ -57,93 +57,93 @@ func (rule *R0007KubernetesClientExecuted) ID() string {
 func (rule *R0007KubernetesClientExecuted) DeleteRule() {
 }
 
-func (rule *R0007KubernetesClientExecuted) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R0007KubernetesClientExecuted) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.ExecveEventType && eventType != utils.NetworkEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if eventType == utils.ExecveEventType {
 		execEvent, ok := event.(*events.ExecEvent)
 		if !ok {
-			return false, nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 		}
 
 		execPath := GetExecPathFromEvent(execEvent)
 		if slices.Contains(kubernetesClients, filepath.Base(execPath)) || slices.Contains(kubernetesClients, execEvent.ExePath) {
-			return true, execEvent
+			return ruleengine.DetectionResult{IsFailure: true, Payload: execEvent}
 		}
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	networkEvent, ok := event.(*tracernetworktype.Event)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if networkEvent.PktType != "OUTGOING" {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if k8sObjCache == nil {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	apiServerIP := k8sObjCache.GetApiServerIpAddress()
 	if apiServerIP == "" || networkEvent.DstEndpoint.Addr != apiServerIP {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
-	return true, networkEvent
+	return ruleengine.DetectionResult{IsFailure: true, Payload: networkEvent}
 }
 
-func (rule *R0007KubernetesClientExecuted) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R0007KubernetesClientExecuted) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, eventData := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
 	if eventType == utils.ExecveEventType {
-		execEvent, _ := eventData.(*events.ExecEvent)
+		execEvent, _ := event.(*events.ExecEvent)
 		ap, err := GetApplicationProfile(execEvent.Runtime.ContainerID, objCache)
 		if err != nil {
-			return false, nil, err
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 		}
 
 		whitelistedExecs, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())
 		if err != nil {
-			return false, nil, err
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 		}
 
 		execPath := GetExecPathFromEvent(execEvent)
 		for _, whitelistedExec := range whitelistedExecs.Execs {
 			if whitelistedExec.Path == execPath {
-				return false, nil, nil
+				return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 			}
 		}
 	} else {
-		networkEvent, _ := eventData.(*tracernetworktype.Event)
+		networkEvent, _ := event.(*tracernetworktype.Event)
 		nn, err := GetNetworkNeighborhood(networkEvent.Runtime.ContainerID, objCache)
 		if err != nil {
-			return false, nil, err
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 		}
 
 		nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
 		if err != nil {
-			return false, nil, err
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 		}
 
 		for _, egress := range nnContainer.Egress {
 			if egress.IPAddress == networkEvent.DstEndpoint.Addr {
-				return false, nil, nil
+				return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 			}
 		}
 	}
 
-	return true, nil, nil
+	return ruleengine.DetectionResult{IsFailure: true, Payload: nil}, nil
 }
 
-func (rule *R0007KubernetesClientExecuted) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R0007KubernetesClientExecuted) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	if eventType == utils.ExecveEventType {
 		execEvent, _ := event.(*events.ExecEvent)
 		execPath := GetExecPathFromEvent(execEvent)

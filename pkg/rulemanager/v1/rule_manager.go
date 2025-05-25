@@ -480,7 +480,7 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 			continue
 		}
 
-		if ok, _ := rule.EvaluateRule(eventType, event, rm.objectCache.K8sObjectCache()); ok {
+		if detectionResult := rule.EvaluateRule(eventType, event, rm.objectCache.K8sObjectCache()); detectionResult.IsFailure {
 			results = append(results, rule.ID())
 		}
 	}

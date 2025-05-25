@@ -12,33 +12,37 @@ import (
 
 func ProcessRule(rule ruleengine.RuleEvaluator, eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	failOnProfile := false
-	var finalPayload interface{}
+	var finalPayload ruleengine.DetectionResult
 	if rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Required ||
 		(rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Optional) {
-		ok, payload, err := rule.EvaluateRuleWithProfile(eventType, event, objCache)
+		result, err := rule.EvaluateRuleWithProfile(eventType, event, objCache)
 		// if profile is required and there is no profile available, return nil
 		// or if profile is required and there is a profile available and no rule failure, continue
 		// or if profile is optional and there is no profile available, continue
 		// or if profile is optional and there is a profile available and no rule failure, continue
-		if !ok && (!errors.Is(err, NoProfileAvailable) ||
+		if !result.IsFailure && (!errors.Is(err, NoProfileAvailable) ||
 			rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Required) {
 			return nil
 		}
-		finalPayload = payload
-		failOnProfile = ok
+		finalPayload = result
+		failOnProfile = result.IsFailure
 	}
 
 	// If profile is not required and there is no rule failure, do basic evaluation
 	if !(rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Required) && !failOnProfile {
-		ok, payload := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-		if !ok {
+		result := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+		if !result.IsFailure {
 			return nil
 		}
-		finalPayload = payload
+		finalPayload = result
 	}
 
 	// Create and return the failure
 	ruleFailure := rule.CreateRuleFailure(eventType, event, objCache, finalPayload)
+	if ruleFailure == nil {
+		return nil
+	}
+
 	setProfileMetadata(rule, ruleFailure, objCache, failOnProfile)
 	return ruleFailure
 }
@@ -49,7 +53,6 @@ func setProfileMetadata(rule ruleengine.RuleEvaluator, ruleFailure ruleengine.Ru
 
 	switch profileReq.ProfileType {
 	case armotypes.ApplicationProfile:
-		// TODO: Use get profile metadata
 		state := objectCache.ApplicationProfileCache().GetApplicationProfileState(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
 		if state != nil {
 			profileMetadata := &armotypes.ProfileMetadata{
@@ -65,7 +68,6 @@ func setProfileMetadata(rule ruleengine.RuleEvaluator, ruleFailure ruleengine.Ru
 		}
 
 	case armotypes.NetworkProfile:
-		// TODO: Use get profile metadata
 		state := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhoodState(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
 		if state != nil {
 			profileMetadata := &armotypes.ProfileMetadata{

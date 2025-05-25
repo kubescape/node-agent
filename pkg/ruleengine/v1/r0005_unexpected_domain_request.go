@@ -53,57 +53,57 @@ func (rule *R0005UnexpectedDomainRequest) ID() string {
 func (rule *R0005UnexpectedDomainRequest) DeleteRule() {
 }
 
-func (rule *R0005UnexpectedDomainRequest) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R0005UnexpectedDomainRequest) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.DnsEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	domainEvent, ok := event.(*tracerdnstype.Event)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if rule.alertedDomains.Has(domainEvent.DNSName) {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	// TODO: fix this, currently we are ignoring in-cluster communication
 	if strings.HasSuffix(domainEvent.DNSName, "svc.cluster.local.") {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
-	return true, domainEvent
+	return ruleengine.DetectionResult{IsFailure: true, Payload: domainEvent}
 }
 
-func (rule *R0005UnexpectedDomainRequest) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R0005UnexpectedDomainRequest) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, domainEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
-	domainEventTyped, _ := domainEvent.(*tracerdnstype.Event)
+	domainEventTyped, _ := event.(*tracerdnstype.Event)
 	nn, err := GetNetworkNeighborhood(domainEventTyped.Runtime.ContainerID, objCache)
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, domainEventTyped.GetContainer())
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	// Check that the domain is in the network neighbors
 	for _, dns := range nnContainer.Egress {
 		if dns.DNS == domainEventTyped.DNSName || slices.Contains(dns.DNSNames, domainEventTyped.DNSName) {
-			return false, nil, nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 		}
 	}
 
-	return true, nil, nil
+	return detectionResult, nil
 }
 
-func (rule *R0005UnexpectedDomainRequest) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R0005UnexpectedDomainRequest) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	domainEvent, _ := event.(*tracerdnstype.Event)
 	rule.alertedDomains.Set(domainEvent.DNSName, true)
 

@@ -127,7 +127,8 @@ func TestR1030UnexpectedIouringOperation(t *testing.T) {
 	}
 
 	// Test evaluation with invalid event type
-	if ok, _ := r.EvaluateRule(utils.HardlinkEventType, wrongEvent, objCache.K8sObjectCache()); ok {
+	detectionResult := r.EvaluateRule(utils.HardlinkEventType, wrongEvent, objCache.K8sObjectCache())
+	if detectionResult.IsFailure {
 		t.Error("Expected EvaluateRule to return false for wrong event type")
 	}
 

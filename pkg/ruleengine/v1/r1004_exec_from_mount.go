@@ -50,50 +50,50 @@ func (rule *R1004ExecFromMount) ID() string {
 func (rule *R1004ExecFromMount) DeleteRule() {
 }
 
-func (rule *R1004ExecFromMount) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R1004ExecFromMount) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.ExecveEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	mounts, err := GetContainerMountPaths(execEvent.GetNamespace(), execEvent.GetPod(), execEvent.GetContainer(), k8sObjCache)
 	if err != nil {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	for _, mount := range mounts {
 		fullPath := GetExecFullPathFromEvent(execEvent)
 		if rule.isPathContained(fullPath, mount) || rule.isPathContained(execEvent.ExePath, mount) {
-			return true, execEvent
+			return ruleengine.DetectionResult{IsFailure: true, Payload: execEvent}
 		}
 	}
 
-	return false, nil
+	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 }
 
-func (rule *R1004ExecFromMount) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R1004ExecFromMount) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, execEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
-	execEventTyped, _ := execEvent.(*events.ExecEvent)
+	execEventTyped, _ := event.(*events.ExecEvent)
 	whiteListed, err := IsExecEventInProfile(execEventTyped, objCache, false)
 	if whiteListed {
-		return false, nil, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 	} else if err != nil && !errors.Is(err, ProfileNotFound) {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
-	return true, execEvent, nil
+	return detectionResult, nil
 }
 
-func (rule *R1004ExecFromMount) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R1004ExecFromMount) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	execEvent, _ := event.(*events.ExecEvent)
 	upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
 

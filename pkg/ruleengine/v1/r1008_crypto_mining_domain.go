@@ -166,39 +166,39 @@ func (rule *R1008CryptoMiningDomainCommunication) ID() string {
 func (rule *R1008CryptoMiningDomainCommunication) DeleteRule() {
 }
 
-func (rule *R1008CryptoMiningDomainCommunication) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R1008CryptoMiningDomainCommunication) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.DnsEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	dnsEvent, ok := event.(*tracerdnstype.Event)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if rule.alertedDomains.Has(dnsEvent.DNSName) {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if slices.Contains(commonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
-		return true, dnsEvent
+		return ruleengine.DetectionResult{IsFailure: true, Payload: dnsEvent}
 	}
 
-	return false, nil
+	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 }
 
-func (rule *R1008CryptoMiningDomainCommunication) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R1008CryptoMiningDomainCommunication) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
 	// This rule doesn't need profile evaluation since it's based on direct detection
-	return true, nil, nil
+	return detectionResult, nil
 }
 
-func (rule *R1008CryptoMiningDomainCommunication) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R1008CryptoMiningDomainCommunication) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	dnsEvent, _ := event.(*tracerdnstype.Event)
 	rule.alertedDomains.Set(dnsEvent.DNSName, true)
 

@@ -78,42 +78,42 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) ID() string {
 func (rule *R1012HardlinkCreatedOverSensitiveFile) DeleteRule() {
 }
 
-func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.HardlinkEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	hardlinkEvent, ok := event.(*tracerhardlinktype.Event)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	for _, path := range rule.additionalPaths {
 		if strings.HasPrefix(hardlinkEvent.OldPath, path) {
-			return true, nil
+			return ruleengine.DetectionResult{IsFailure: true, Payload: hardlinkEvent.OldPath}
 		}
 	}
-	return false, nil
+	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 }
 
-func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R1012HardlinkCreatedOverSensitiveFile) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
 	hardlinkEvent, _ := event.(*tracerhardlinktype.Event)
 	if allowed, err := IsAllowed(&hardlinkEvent.Event, objCache, hardlinkEvent.Comm, R1012ID); err != nil {
-		return false, nil, err // If we can't check profile, we still want to alert
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err // If we can't check profile, we still want to alert
 	} else if allowed {
-		return false, nil, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 	}
 
-	return true, nil, nil
+	return detectionResult, nil
 }
 
-func (rule *R1012HardlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R1012HardlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	hardlinkEvent, _ := event.(*tracerhardlinktype.Event)
 
 	return &GenericRuleFailure{

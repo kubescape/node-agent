@@ -93,42 +93,42 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ID() string {
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) DeleteRule() {}
 
-func (rule *R0006UnexpectedServiceAccountTokenAccess) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R0006UnexpectedServiceAccountTokenAccess) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.OpenEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	convertedEvent, ok := event.(*events.OpenEvent)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	openEvent := convertedEvent.Event
 
 	// Check if this is a token path - using optimized check
 	if getTokenBasePath(openEvent.FullPath) == "" {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
-	return true, convertedEvent
+	return ruleengine.DetectionResult{IsFailure: true, Payload: openEvent.FullPath}
 }
 
-func (rule *R0006UnexpectedServiceAccountTokenAccess) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R0006UnexpectedServiceAccountTokenAccess) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, openEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 	}
 
-	openEventTyped, _ := openEvent.(*events.OpenEvent)
+	openEventTyped, _ := event.(*events.OpenEvent)
 	ap, err := GetApplicationProfile(openEventTyped.Runtime.ContainerID, objCache)
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEventTyped.GetContainer())
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	// Normalize the accessed path once
@@ -138,14 +138,14 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) EvaluateRuleWithProfile(ev
 	for _, open := range appProfileOpenList.Opens {
 		normalizedWhitelistedPath := normalizeTimestampPath(open.Path)
 		if dynamicpathdetector.CompareDynamic(filepath.Dir(normalizedWhitelistedPath), filepath.Dir(normalizedAccessedPath)) {
-			return false, nil, nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 		}
 	}
 
-	return true, nil, nil
+	return detectionResult, nil
 }
 
-func (rule *R0006UnexpectedServiceAccountTokenAccess) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R0006UnexpectedServiceAccountTokenAccess) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	convertedEvent, _ := event.(*events.OpenEvent)
 	openEvent := convertedEvent.Event
 

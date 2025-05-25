@@ -50,51 +50,51 @@ func (rule *R0004UnexpectedCapabilityUsed) ID() string {
 func (rule *R0004UnexpectedCapabilityUsed) DeleteRule() {
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R0004UnexpectedCapabilityUsed) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.CapabilitiesEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	capEvent, ok := event.(*tracercapabilitiestype.Event)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if rule.alertedCapabilities.Has(capEvent.CapName) {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
-	return true, capEvent
+	return ruleengine.DetectionResult{IsFailure: true, Payload: capEvent.CapName}
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R0004UnexpectedCapabilityUsed) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, capEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
-	capEventTyped, _ := capEvent.(*tracercapabilitiestype.Event)
+	capEventTyped, _ := event.(*tracercapabilitiestype.Event)
 	ap, err := GetApplicationProfile(capEventTyped.Runtime.ContainerID, objCache)
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	appProfileCapabilitiesList, err := GetContainerFromApplicationProfile(ap, capEventTyped.GetContainer())
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	for _, capability := range appProfileCapabilitiesList.Capabilities {
 		if capEventTyped.CapName == capability {
-			return false, nil, nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 		}
 	}
 
-	return true, nil, nil
+	return detectionResult, nil
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R0004UnexpectedCapabilityUsed) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	capEvent, _ := event.(*tracercapabilitiestype.Event)
 	rule.alertedCapabilities.Set(capEvent.CapName, true)
 

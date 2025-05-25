@@ -17,6 +17,13 @@ const (
 	RulePrioritySystemIssue = 1000
 )
 
+type DetectionInfo interface{}
+
+type DetectionResult struct {
+	IsFailure bool
+	Payload   DetectionInfo
+}
+
 type RuleDescriptor struct {
 	// Rule ID
 	ID string
@@ -76,13 +83,13 @@ type RuleEvaluator interface {
 	Name() string
 
 	// EvaluateRule evaluates the rule without profile
-	EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{})
+	EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) DetectionResult
 
 	// EvaluateRuleWithProfile evaluates the rule with profile
-	EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error)
+	EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (DetectionResult, error)
 
 	// CreateRuleFailure creates a rule failure
-	CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) RuleFailure
+	CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload DetectionResult) RuleFailure
 
 	// Rule requirements
 	Requirements() RuleSpec
@@ -95,7 +102,7 @@ type RuleEvaluator interface {
 }
 
 type RuleCondition interface {
-	EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{})
+	EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) DetectionResult
 	ID() string
 }
 

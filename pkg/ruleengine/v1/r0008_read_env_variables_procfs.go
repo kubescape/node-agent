@@ -54,58 +54,58 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ID() string {
 func (rule *R0008ReadEnvironmentVariablesProcFS) DeleteRule() {
 }
 
-func (rule *R0008ReadEnvironmentVariablesProcFS) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R0008ReadEnvironmentVariablesProcFS) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.OpenEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	fullEvent, ok := event.(*events.OpenEvent)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	openEvent := fullEvent.Event
 
 	if !strings.HasPrefix(openEvent.FullPath, "/proc/") || !strings.HasSuffix(openEvent.FullPath, "/environ") {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if rule.alertedPaths[openEvent.FullPath] {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
-	return true, fullEvent
+	return ruleengine.DetectionResult{IsFailure: true, Payload: openEvent.FullPath}
 }
 
-func (rule *R0008ReadEnvironmentVariablesProcFS) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R0008ReadEnvironmentVariablesProcFS) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, openEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
-	openEventTyped, _ := openEvent.(*events.OpenEvent)
+	openEventTyped, _ := event.(*events.OpenEvent)
 	ap, err := GetApplicationProfile(openEventTyped.Runtime.ContainerID, objCache)
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEventTyped.GetContainer())
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	for _, open := range appProfileOpenList.Opens {
 		// Check if there is an open call to /proc/<pid>/environ
 		if strings.HasPrefix(open.Path, "/proc/") && strings.HasSuffix(open.Path, "/environ") {
-			return false, nil, nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: open.Path}, nil
 		}
 	}
 
-	return true, nil, nil
+	return detectionResult, nil
 }
 
-func (rule *R0008ReadEnvironmentVariablesProcFS) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R0008ReadEnvironmentVariablesProcFS) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	fullEvent, _ := event.(*events.OpenEvent)
 	openEvent := fullEvent.Event
 

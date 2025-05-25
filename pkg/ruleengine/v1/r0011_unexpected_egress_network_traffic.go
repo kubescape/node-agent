@@ -54,76 +54,76 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) ID() string {
 func (rule *R0011UnexpectedEgressNetworkTraffic) DeleteRule() {
 }
 
-func (rule *R0011UnexpectedEgressNetworkTraffic) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R0011UnexpectedEgressNetworkTraffic) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.NetworkEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	networkEvent, ok := event.(*tracernetworktype.Event)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	// Check if the container was pre-running.
 	if time.Unix(int64(networkEvent.Runtime.ContainerStartedAt), 0).Before(rule.startTime) {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	// Check if we already alerted on this endpoint.
 	endpoint := fmt.Sprintf("%s:%d:%s", networkEvent.DstEndpoint.Addr, networkEvent.Port, networkEvent.Proto)
 	if ok := rule.alertedAdresses.Has(endpoint); ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	// Check if the network event is outgoing and the destination is not a private IP.
 	if networkEvent.PktType == "OUTGOING" && !isPrivateIP(networkEvent.DstEndpoint.Addr) {
-		return true, networkEvent
+		return ruleengine.DetectionResult{IsFailure: true, Payload: networkEvent.DstEndpoint.Addr}
 	}
 
-	return false, nil
+	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 }
 
-func (rule *R0011UnexpectedEgressNetworkTraffic) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R0011UnexpectedEgressNetworkTraffic) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, networkEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
-	networkEventTyped, _ := networkEvent.(*tracernetworktype.Event)
+	networkEventTyped, _ := event.(*tracernetworktype.Event)
 	nn, err := GetNetworkNeighborhood(networkEventTyped.Runtime.ContainerID, objCache)
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	// Skip partially watched containers.
 	if annotations := nn.GetAnnotations(); annotations != nil {
 		if annotations["kubescape.io/completion"] == string(utils.WatchedContainerCompletionStatusPartial) {
-			return false, nil, nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 		}
 	}
 
 	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEventTyped.GetContainer())
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	domain := objCache.DnsCache().ResolveIpToDomain(networkEventTyped.DstEndpoint.Addr)
 	if domain != "" {
-		return false, nil, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 	}
 
 	// Check if the address is in the egress list and isn't in cluster.
 	for _, egress := range nnContainer.Egress {
 		if egress.IPAddress == networkEventTyped.DstEndpoint.Addr {
-			return false, nil, nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 		}
 	}
 
-	return true, nil, nil
+	return detectionResult, nil
 }
 
-func (rule *R0011UnexpectedEgressNetworkTraffic) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R0011UnexpectedEgressNetworkTraffic) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	networkEvent, _ := event.(*tracernetworktype.Event)
 	endpoint := fmt.Sprintf("%s:%d:%s", networkEvent.DstEndpoint.Addr, networkEvent.Port, networkEvent.Proto)
 	rule.alertedAdresses.Set(endpoint, true)

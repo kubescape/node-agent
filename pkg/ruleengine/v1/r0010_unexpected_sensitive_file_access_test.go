@@ -62,6 +62,13 @@ func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 		description     string
 	}{
 		{
+			name:        "Relative path with dots",
+			event:       createTestEvent("./etc/shadow", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/etc/shadow"}, []string{"O_RDONLY"}),
+			expectAlert: true,
+			description: "Should handle relative paths correctly",
+		},
+		{
 			name:        "No application profile",
 			event:       createTestEvent("/test", []string{"O_RDONLY"}),
 			profile:     nil,
@@ -233,13 +240,6 @@ func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 			profile:     createTestProfile("test", []string{"/etc/conf!g#file"}, []string{"O_RDONLY"}),
 			expectAlert: false,
 			description: "Should handle special characters in paths",
-		},
-		{
-			name:        "Relative path with dots",
-			event:       createTestEvent("./etc/shadow", []string{"O_RDONLY"}),
-			profile:     createTestProfile("test", []string{"/etc/shadow"}, []string{"O_RDONLY"}),
-			expectAlert: true,
-			description: "Should handle relative paths correctly",
 		},
 	}
 

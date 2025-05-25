@@ -62,14 +62,14 @@ var whitelistedProcessesForMaliciousSource = []string{
 	"supervisord",
 }
 
-func (rule *R1000ExecFromMaliciousSource) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R1000ExecFromMaliciousSource) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.ExecveEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	var maliciousExecPathPrefixes = []string{
@@ -80,7 +80,7 @@ func (rule *R1000ExecFromMaliciousSource) EvaluateRule(eventType utils.EventType
 	if k8sObjCache == nil {
 		for _, processName := range whitelistedProcessesForMaliciousSource {
 			if processName == execEvent.Comm {
-				return false, nil
+				return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 			}
 		}
 	}
@@ -91,23 +91,23 @@ func (rule *R1000ExecFromMaliciousSource) EvaluateRule(eventType utils.EventType
 		if strings.HasPrefix(execPathDir, maliciousExecPathPrefix) ||
 			strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) ||
 			strings.HasPrefix(execEvent.ExePath, maliciousExecPathPrefix) {
-			return true, execEvent
+			return ruleengine.DetectionResult{IsFailure: true, Payload: execEvent}
 		}
 	}
 
-	return false, nil
+	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 }
 
-func (rule *R1000ExecFromMaliciousSource) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
-	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+func (rule *R1000ExecFromMaliciousSource) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 	// This rule doesn't need profile evaluation since it's based on direct detection
-	return true, nil, nil
+	return ruleengine.DetectionResult{IsFailure: true, Payload: nil}, nil
 }
 
-func (rule *R1000ExecFromMaliciousSource) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R1000ExecFromMaliciousSource) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	execEvent, _ := event.(*events.ExecEvent)
 	execPath := GetExecFullPathFromEvent(execEvent)
 	execPathDir := filepath.Dir(execPath)

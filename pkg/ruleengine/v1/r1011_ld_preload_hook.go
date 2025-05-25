@@ -61,59 +61,59 @@ func (rule *R1011LdPreloadHook) ID() string {
 func (rule *R1011LdPreloadHook) DeleteRule() {
 }
 
-func (rule *R1011LdPreloadHook) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R1011LdPreloadHook) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	switch eventType {
 	case utils.ExecveEventType:
 		execEvent, ok := event.(*events.ExecEvent)
 		if !ok {
-			return false, nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 		}
-		return rule.shouldAlertExec(execEvent, k8sObjCache), nil
+		return rule.shouldAlertExec(execEvent, k8sObjCache)
 
 	case utils.OpenEventType:
 		openEvent, ok := event.(*events.OpenEvent)
 		if !ok {
-			return false, nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 		}
-		return rule.shouldAlertOpen(openEvent), nil
+		return rule.shouldAlertOpen(openEvent)
 
 	default:
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 }
 
-func (rule *R1011LdPreloadHook) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R1011LdPreloadHook) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, _ := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 	}
 
 	switch eventType {
 	case utils.ExecveEventType:
 		execEvent, _ := event.(*events.ExecEvent)
 		if allowed, err := IsAllowed(&execEvent.Event.Event, objCache, execEvent.Comm, R1011ID); err != nil {
-			return false, nil, err
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 		} else if allowed {
-			return false, nil, nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 		}
-		return true, nil, nil
+		return ruleengine.DetectionResult{IsFailure: true, Payload: nil}, nil
 
 	case utils.OpenEventType:
 		openEvent, _ := event.(*events.OpenEvent)
 		if allowed, err := IsAllowed(&openEvent.Event.Event, objCache, openEvent.Comm, R1011ID); err != nil {
-			return false, nil, err
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 		} else if allowed {
-			return false, nil, nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 		}
-		return true, nil, nil
+		return ruleengine.DetectionResult{IsFailure: true, Payload: nil}, nil
 
 	default:
-		return false, nil, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 	}
 }
 
-func (rule *R1011LdPreloadHook) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R1011LdPreloadHook) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	switch eventType {
 	case utils.ExecveEventType:
 		execEvent, _ := event.(*events.ExecEvent)
@@ -213,26 +213,26 @@ func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.E
 	return &ruleFailure
 }
 
-func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *events.ExecEvent, k8sObjCache objectcache.K8sObjectCache) bool {
+func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *events.ExecEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	// Java is a special case, we don't want to alert on it because it uses LD_LIBRARY_PATH.
 	if execEvent.Comm == JAVA_COMM {
-		return false
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	// Check if the process is a MATLAB process and ignore it.
 	if execEvent.GetContainer() == "matlab" {
-		return false
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	envVars, err := utils.GetProcessEnv(int(execEvent.Pid))
 	if err != nil {
-		return false
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	ldHookVar, shouldCheck := GetLdHookVar(envVars)
 	if shouldCheck {
 		if k8sObjCache == nil {
-			return false
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 		}
 
 		podSpec := k8sObjCache.GetPodSpec(execEvent.GetNamespace(), execEvent.GetPod())
@@ -241,20 +241,23 @@ func (rule *R1011LdPreloadHook) shouldAlertExec(execEvent *events.ExecEvent, k8s
 				if container.Name == execEvent.GetContainer() {
 					for _, envVar := range container.Env {
 						if envVar.Name == ldHookVar {
-							return false
+							return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 						}
 					}
 				}
 			}
 		}
-		return true
+		return ruleengine.DetectionResult{IsFailure: true, Payload: nil}
 	}
 
-	return false
+	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 }
 
-func (rule *R1011LdPreloadHook) shouldAlertOpen(openEvent *events.OpenEvent) bool {
-	return openEvent.FullPath == LD_PRELOAD_FILE && (openEvent.FlagsRaw&(int32(os.O_WRONLY)|int32(os.O_RDWR))) != 0
+func (rule *R1011LdPreloadHook) shouldAlertOpen(openEvent *events.OpenEvent) ruleengine.DetectionResult {
+	if openEvent.FullPath == LD_PRELOAD_FILE && (openEvent.FlagsRaw&(int32(os.O_WRONLY)|int32(os.O_RDWR))) != 0 {
+		return ruleengine.DetectionResult{IsFailure: true, Payload: nil}
+	}
+	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 }
 
 func GetLdHookVar(envVars map[string]string) (string, bool) {

@@ -52,41 +52,46 @@ func (rule *R1001ExecBinaryNotInBaseImage) ID() string {
 func (rule *R1001ExecBinaryNotInBaseImage) DeleteRule() {
 }
 
-func (rule *R1001ExecBinaryNotInBaseImage) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R1001ExecBinaryNotInBaseImage) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.ExecveEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if execEvent.UpperLayer || execEvent.PupperLayer {
-		return true, execEvent
+		return ruleengine.DetectionResult{IsFailure: true, Payload: execEvent}
 	}
 
-	return false, nil
+	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 }
 
-func (rule *R1001ExecBinaryNotInBaseImage) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
-	ok, execEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+func (rule *R1001ExecBinaryNotInBaseImage) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
+	}
+
+	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
-		return false, nil, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 	}
 
 	// Check if the event is expected, if so return nil
-	whiteListed, err := IsExecEventInProfile(execEvent.(*events.ExecEvent), objCache, false)
+	whiteListed, err := IsExecEventInProfile(execEvent, objCache, false)
 	if whiteListed {
-		return false, nil, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 	} else if err != nil && !errors.Is(err, ProfileNotFound) {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
-	return true, nil, nil
+	return ruleengine.DetectionResult{IsFailure: true, Payload: execEvent}, nil
 }
 
-func (rule *R1001ExecBinaryNotInBaseImage) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R1001ExecBinaryNotInBaseImage) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	execEvent, _ := event.(*events.ExecEvent)
 	upperLayer := true
 

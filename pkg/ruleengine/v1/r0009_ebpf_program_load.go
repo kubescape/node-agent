@@ -54,54 +54,54 @@ func (rule *R0009EbpfProgramLoad) ID() string {
 func (rule *R0009EbpfProgramLoad) DeleteRule() {
 }
 
-func (rule *R0009EbpfProgramLoad) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R0009EbpfProgramLoad) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if rule.alreadyNotified {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if eventType != utils.SyscallEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if syscallEvent.SyscallName == "bpf" {
-		return true, syscallEvent
+		return ruleengine.DetectionResult{IsFailure: true, Payload: syscallEvent}
 	}
 
-	return false, nil
+	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 }
 
-func (rule *R0009EbpfProgramLoad) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R0009EbpfProgramLoad) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, syscallEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
-	syscallEventTyped, _ := syscallEvent.(*ruleenginetypes.SyscallEvent)
+	syscallEventTyped, _ := event.(*ruleenginetypes.SyscallEvent)
 	ap, err := GetApplicationProfile(syscallEventTyped.Runtime.ContainerID, objCache)
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	appProfileSyscallList, err := GetContainerFromApplicationProfile(ap, syscallEventTyped.GetContainer())
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	// Check if the syscall is in the list of allowed syscalls
 	if slices.Contains(appProfileSyscallList.Syscalls, syscallEventTyped.SyscallName) {
-		return false, nil, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 	}
 
-	return true, nil, nil
+	return detectionResult, nil
 }
 
-func (rule *R0009EbpfProgramLoad) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R0009EbpfProgramLoad) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	syscallEvent, _ := event.(*ruleenginetypes.SyscallEvent)
 	rule.alreadyNotified = true
 

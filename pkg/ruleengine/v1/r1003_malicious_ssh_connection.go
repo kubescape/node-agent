@@ -126,48 +126,48 @@ func (rule *R1003MaliciousSSHConnection) SetParameters(params map[string]interfa
 func (rule *R1003MaliciousSSHConnection) DeleteRule() {
 }
 
-func (rule *R1003MaliciousSSHConnection) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{}) {
+func (rule *R1003MaliciousSSHConnection) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.SSHEventType {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	sshEvent, ok := event.(*tracersshtype.Event)
 	if !ok {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	// Check only outgoing packets (source port is ephemeral)
 	if sshEvent.SrcPort < rule.ephemeralPortRange[0] || sshEvent.SrcPort > rule.ephemeralPortRange[1] {
-		return false, nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	if !slices.Contains(rule.allowedPorts, sshEvent.DstPort) {
 		// Check if the event is a response to a request we have already seen
 		if rule.requests.Has(sshEvent.DstIP) {
-			return false, nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 		}
-		return true, sshEvent
+		return ruleengine.DetectionResult{IsFailure: true, Payload: sshEvent}
 	}
 
-	return false, nil
+	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 }
 
-func (rule *R1003MaliciousSSHConnection) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}, error) {
+func (rule *R1003MaliciousSSHConnection) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
 	// First do basic evaluation
-	ok, sshEvent := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !ok {
-		return false, nil, nil
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
 	}
 
-	sshEventTyped, _ := sshEvent.(*tracersshtype.Event)
+	sshEventTyped, _ := event.(*tracersshtype.Event)
 	nn, err := GetNetworkNeighborhood(sshEventTyped.Runtime.ContainerID, objCache)
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, sshEventTyped.GetContainer())
 	if err != nil {
-		return false, nil, err
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	for _, egress := range nnContainer.Egress {
@@ -175,17 +175,17 @@ func (rule *R1003MaliciousSSHConnection) EvaluateRuleWithProfile(eventType utils
 			for _, port := range egress.Ports {
 				if port.Port != nil {
 					if uint16(*port.Port) == sshEventTyped.DstPort {
-						return false, nil, nil
+						return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 					}
 				}
 			}
 		}
 	}
 
-	return true, nil, nil
+	return ruleengine.DetectionResult{IsFailure: true, Payload: nil}, nil
 }
 
-func (rule *R1003MaliciousSSHConnection) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
+func (rule *R1003MaliciousSSHConnection) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	sshEvent, _ := event.(*tracersshtype.Event)
 
 	return &GenericRuleFailure{
