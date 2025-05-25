@@ -342,18 +342,20 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 		Namespace:            namespace,
 	}
 
+	// Critical section to ensure thread safety
+	nnc.containerIDToInfo.Lock()
+	defer nnc.containerIDToInfo.Unlock()
+
 	// Add to container info map
 	nnc.containerIDToInfo.Set(containerID, containerInfo)
 
 	// Add to namespace -> containers mapping
-	nnc.mutex.Lock()
 	containerSet, exists := nnc.namespaceToContainers.Load(namespace)
 	if !exists || containerSet == nil {
 		containerSet = mapset.NewSet[string]()
 		nnc.namespaceToContainers.Set(namespace, containerSet)
 	}
 	containerSet.Add(containerID)
-	nnc.mutex.Unlock()
 
 	// Create workload ID to state mapping
 	if _, exists := nnc.workloadIDToProfileState.Load(workloadID); !exists {
@@ -377,15 +379,17 @@ func (nnc *NetworkNeighborhoodCacheImpl) deleteContainer(containerID string) {
 		return
 	}
 
-	// Clean up namespace -> containers mapping
+	// Enter critical section to ensure thread safety
 	nnc.mutex.Lock()
+	defer nnc.mutex.Unlock()
+
+	// Clean up namespace -> containers mapping
 	if containerSet, exists := nnc.namespaceToContainers.Load(containerInfo.Namespace); exists {
 		containerSet.Remove(containerID)
 		if containerSet.Cardinality() == 0 {
 			nnc.namespaceToContainers.Delete(containerInfo.Namespace)
 		}
 	}
-	nnc.mutex.Unlock()
 
 	// Clean up container info
 	nnc.containerIDToInfo.Delete(containerID)
