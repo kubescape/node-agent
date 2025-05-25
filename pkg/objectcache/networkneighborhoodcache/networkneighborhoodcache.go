@@ -303,11 +303,17 @@ func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn
 func (nnc *NetworkNeighborhoodCacheImpl) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
+		if nnc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+			return
+		}
 		// This method can be blocking but since this callback is called from a goroutine, we can afford to wait.
 		if err := nnc.addContainer(notif.Container); err != nil {
 			logger.L().Error("failed to add container to the cache", helpers.Error(err))
 		}
 	case containercollection.EventTypeRemoveContainer:
+		if nnc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+			return
+		}
 		nnc.deleteContainer(notif.Container.Runtime.ContainerID)
 	}
 }

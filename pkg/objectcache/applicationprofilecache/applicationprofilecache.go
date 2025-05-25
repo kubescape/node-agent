@@ -383,11 +383,17 @@ func (apc *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, co
 func (apc *ApplicationProfileCacheImpl) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
+		if apc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+			return
+		}
 		// This method can be blocking but since this callback is called from a goroutine, we can afford to wait.
 		if err := apc.addContainer(notif.Container); err != nil {
 			logger.L().Error("failed to add container to the cache", helpers.Error(err))
 		}
 	case containercollection.EventTypeRemoveContainer:
+		if apc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+			return
+		}
 		apc.deleteContainer(notif.Container.Runtime.ContainerID)
 	}
 }
