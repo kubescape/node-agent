@@ -13,6 +13,7 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -145,11 +146,20 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 				continue
 			}
 
+			instanceID, err := instanceidhandler.GenerateInstanceIDFromString(profile.Annotations[helpersv1.InstanceIDMetadataKey])
+			if err != nil {
+				logger.L().Error("failed to generate instance ID from profile",
+					helpers.String("workloadID", workloadID),
+					helpers.String("namespace", namespace),
+					helpers.Error(err))
+				continue
+			}
+
 			// Check if this workload ID is used by any container in this namespace
 			workloadIDInUse := false
 			for containerID := range containerSet.Iter() {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
-					containerInfo.WorkloadID == workloadID && containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
+					containerInfo.WorkloadID == workloadID && containerInfo.InstanceTemplateHash == instanceID.GetTemplateHash() {
 					workloadIDInUse = true
 					break
 				}
@@ -210,7 +220,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			for containerID := range containerSet.Iter() {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
 					containerInfo.WorkloadID == workloadID &&
-					containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
+					containerInfo.InstanceTemplateHash == instanceID.GetTemplateHash() {
 					// Create or update call stack search tree if not exists
 					apc.indexContainerCallStacks(containerID, containerInfo.Name, fullProfile)
 				}
