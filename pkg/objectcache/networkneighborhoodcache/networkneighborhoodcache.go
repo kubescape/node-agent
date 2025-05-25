@@ -22,7 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ContainerInfo holds essential container metadata for network neighborhood mapping
+// ContainerInfo holds container metadata we need for network neighborhood mapping
 type ContainerInfo struct {
 	ContainerID          string
 	WorkloadID           string
@@ -30,338 +30,302 @@ type ContainerInfo struct {
 	Namespace            string
 }
 
-// NetworkNeighborhoodKey represents a unique network neighborhood identifier
-type NetworkNeighborhoodKey string
-
-func (nnk NetworkNeighborhoodKey) String() string {
-	return string(nnk)
+// NetworkNeighborhoodCacheImpl implements the NetworkNeighborhoodCache interface
+type NetworkNeighborhoodCacheImpl struct {
+	cfg                                        config.Config
+	workloadIDToNetworkNeighborhood            maps.SafeMap[string, *v1beta1.NetworkNeighborhood]
+	workloadIDToProfileState                   maps.SafeMap[string, *objectcache.ProfileState] // Tracks profile state even if not in cache
+	containerIDToInfo                          maps.SafeMap[string, *ContainerInfo]
+	namespaceToContainers                      maps.SafeMap[string, mapset.Set[string]] // namespace -> set of containerIDs
+	networkNeighborhoodToUserManagedIdentifier maps.SafeMap[string, string]             // networkNeighborhoodName -> user-managed profile unique identifier
+	storageClient                              versioned.SpdxV1beta1Interface
+	k8sObjectCache                             objectcache.K8sObjectCache
+	updateInterval                             time.Duration
+	mutex                                      sync.Mutex // For operations that need additional synchronization
+	updateInProgress                           bool       // Flag to track if update is in progress
+	updateMutex                                sync.Mutex // Mutex to protect the flag
 }
 
-// NetworkNeighborhoodCache implements efficient network neighborhood caching with periodic updates
-type NetworkNeighborhoodCache struct {
-	// Configuration
-	cfg            config.Config
-	storageClient  versioned.SpdxV1beta1Interface
-	k8sObjectCache objectcache.K8sObjectCache
-	updateInterval time.Duration
+// NewNetworkNeighborhoodCache creates a new network neighborhood cache with periodic updates
+func NewNetworkNeighborhoodCache(cfg config.Config, storageClient versioned.SpdxV1beta1Interface, k8sObjectCache objectcache.K8sObjectCache) *NetworkNeighborhoodCacheImpl {
+	updateInterval := utils.AddJitter(cfg.ProfilesCacheRefreshRate, 10) // Add 10% jitter to avoid high load on the storage
 
-	// Core mappings
-	workloadNeighborhoods maps.SafeMap[string, *v1beta1.NetworkNeighborhood]
-	workloadStates        maps.SafeMap[string, *objectcache.ProfileState]
-	containerInfo         maps.SafeMap[string, *ContainerInfo]
-	namespaceContainers   maps.SafeMap[string, mapset.Set[string]]
-
-	// User-managed network neighborhood tracking
-	userNeighborhoodIdentifiers maps.SafeMap[NetworkNeighborhoodKey, string]
-
-	// Synchronization
-	mu               sync.RWMutex
-	updateInProgress bool
-	updateMu         sync.Mutex
-}
-
-// NewNetworkNeighborhoodCache creates a new cache instance with jittered update intervals
-func NewNetworkNeighborhoodCache(
-	cfg config.Config,
-	storageClient versioned.SpdxV1beta1Interface,
-	k8sObjectCache objectcache.K8sObjectCache,
-) *NetworkNeighborhoodCache {
-	return &NetworkNeighborhoodCache{
-		cfg:                         cfg,
-		storageClient:               storageClient,
-		k8sObjectCache:              k8sObjectCache,
-		updateInterval:              utils.AddJitter(cfg.ProfilesCacheRefreshRate, 10),
-		workloadNeighborhoods:       maps.SafeMap[string, *v1beta1.NetworkNeighborhood]{},
-		workloadStates:              maps.SafeMap[string, *objectcache.ProfileState]{},
-		containerInfo:               maps.SafeMap[string, *ContainerInfo]{},
-		namespaceContainers:         maps.SafeMap[string, mapset.Set[string]]{},
-		userNeighborhoodIdentifiers: maps.SafeMap[NetworkNeighborhoodKey, string]{},
+	nnc := &NetworkNeighborhoodCacheImpl{
+		cfg:                             cfg,
+		workloadIDToNetworkNeighborhood: maps.SafeMap[string, *v1beta1.NetworkNeighborhood]{},
+		workloadIDToProfileState:        maps.SafeMap[string, *objectcache.ProfileState]{},
+		containerIDToInfo:               maps.SafeMap[string, *ContainerInfo]{},
+		namespaceToContainers:           maps.SafeMap[string, mapset.Set[string]]{},
+		networkNeighborhoodToUserManagedIdentifier: maps.SafeMap[string, string]{},
+		storageClient:  storageClient,
+		k8sObjectCache: k8sObjectCache,
+		updateInterval: updateInterval,
 	}
+
+	return nnc
 }
 
-// Start initiates the periodic network neighborhood update process
-func (nnc *NetworkNeighborhoodCache) Start(ctx context.Context) {
-	go nnc.runPeriodicUpdates(ctx)
+// Start begins the periodic update process
+func (nnc *NetworkNeighborhoodCacheImpl) Start(ctx context.Context) {
+	go nnc.periodicUpdate(ctx)
 }
 
-// runPeriodicUpdates manages the periodic network neighborhood refresh cycle
-func (nnc *NetworkNeighborhoodCache) runPeriodicUpdates(ctx context.Context) {
+// periodicUpdate periodically fetches and updates network neighborhoods from storage
+func (nnc *NetworkNeighborhoodCacheImpl) periodicUpdate(ctx context.Context) {
 	ticker := time.NewTicker(nnc.updateInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			if nnc.shouldSkipUpdate() {
-				logger.L().Debug("skipping network neighborhood update: previous update still in progress")
+			// Check if an update is already in progress
+			nnc.updateMutex.Lock()
+			if nnc.updateInProgress {
+				// Skip this update cycle
+				logger.L().Debug("skipping profile update: previous update still in progress")
+				nnc.updateMutex.Unlock()
 				continue
 			}
 
-			nnc.setUpdateInProgress(true)
-			nnc.refreshAllNeighborhoods(ctx)
-			nnc.setUpdateInProgress(false)
+			// Set the flag and release the lock before the potentially long-running call
+			nnc.updateInProgress = true
+			nnc.updateMutex.Unlock()
+
+			// Run the update directly
+			nnc.updateAllNetworkNeighborhoods(ctx)
+
+			// Mark the update as complete
+			nnc.updateMutex.Lock()
+			nnc.updateInProgress = false
+			nnc.updateMutex.Unlock()
 
 		case <-ctx.Done():
-			logger.L().Info("NetworkNeighborhoodCache periodic update stopped")
+			logger.L().Info("NetworkNeighborhoodsCache periodic update stopped")
 			return
 		}
 	}
 }
 
-// shouldSkipUpdate checks if an update is already in progress
-func (nnc *NetworkNeighborhoodCache) shouldSkipUpdate() bool {
-	nnc.updateMu.Lock()
-	defer nnc.updateMu.Unlock()
-	return nnc.updateInProgress
-}
+// updateAllNetworkNeighborhoods fetches all network neighborhoods from storage and updates the cache
+func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx context.Context) {
+	// Process namespace by namespace to optimize LIST operations
+	namespaces := nnc.namespaceToContainers.Keys()
+	if len(namespaces) == 0 {
+		logger.L().Debug("no namespaces found in cache, skipping network neighborhood update")
+		return
+	}
+	// Iterate over each namespace
+	for _, namespace := range namespaces {
+		// Get the set of container IDs for this namespace
+		containerSet, exists := nnc.namespaceToContainers.Load(namespace)
+		if !exists || containerSet == nil {
+			logger.L().Debug("no containers found for namespace, skipping",
+				helpers.String("namespace", namespace))
+			continue // Skip to next namespace
+		}
 
-// setUpdateInProgress safely sets the update progress flag
-func (nnc *NetworkNeighborhoodCache) setUpdateInProgress(inProgress bool) {
-	nnc.updateMu.Lock()
-	defer nnc.updateMu.Unlock()
-	nnc.updateInProgress = inProgress
-}
-
-// refreshAllNeighborhoods fetches and updates all network neighborhoods from storage
-func (nnc *NetworkNeighborhoodCache) refreshAllNeighborhoods(ctx context.Context) {
-	namespaces := nnc.getActiveNamespaces()
-
-	for namespace, containerSet := range namespaces {
+		// Skip empty namespaces
 		if containerSet.Cardinality() == 0 {
 			continue
 		}
-		nnc.refreshNamespaceNeighborhoods(ctx, namespace, containerSet)
+
+		// Get network neighborhoods list for this namespace
+		nnList, err := nnc.storageClient.NetworkNeighborhoods(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			logger.L().Error("failed to list network neighborhoods",
+				helpers.String("namespace", namespace),
+				helpers.Error(err))
+			continue // Continue to next namespace
+		}
+
+		// Process each network neighborhood
+		for _, nn := range nnList.Items {
+			// Handle user-managed network neighborhoods
+			if isUserManagedNN(&nn) {
+				nnc.handleUserManagedNetworkNeighborhood(&nn)
+				continue
+			}
+
+			// Get the workload ID from network neighborhood
+			workloadID := nn.Annotations[helpersv1.WlidMetadataKey]
+			if workloadID == "" {
+				continue
+			}
+
+			// Update profile state regardless of whether we'll update the full profile
+			profileState := &objectcache.ProfileState{
+				Completion: nn.Annotations[helpersv1.CompletionMetadataKey],
+				Status:     nn.Annotations[helpersv1.StatusMetadataKey],
+				Name:       nn.Name,
+				Error:      nil,
+			}
+			nnc.workloadIDToProfileState.Set(workloadID, profileState)
+
+			// Only consider completed network neighborhoods
+			if nn.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
+				continue
+			}
+
+			// Check if this workload ID is used by any container in this namespace
+			workloadIDInUse := false
+			for _, containerID := range containerSet.ToSlice() {
+				if containerInfo, exists := nnc.containerIDToInfo.Load(containerID); exists &&
+					containerInfo.WorkloadID == workloadID &&
+					containerInfo.InstanceTemplateHash == nn.Labels[helpersv1.TemplateHashKey] {
+					workloadIDInUse = true
+					break
+				}
+			}
+
+			if !workloadIDInUse {
+				continue
+			}
+
+			// Update the network neighborhood in the cache
+			if existingNN, exists := nnc.workloadIDToNetworkNeighborhood.Load(workloadID); exists {
+				// If the network neighborhood already exists and it's complete/completed, continue to the next one
+				if existingNN.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Complete {
+					continue
+				}
+
+				// If the new network neighborhood is not complete and we already have a completed/partial one, skip it
+				if nn.Annotations[helpersv1.CompletionMetadataKey] != helpersv1.Complete {
+					continue
+				}
+			}
+
+			// Fetch the network neighborhood from storage
+			fullNN, err := nnc.storageClient.NetworkNeighborhoods(namespace).Get(ctx, nn.Name, metav1.GetOptions{})
+			if err != nil {
+				logger.L().Error("failed to get network neighborhood",
+					helpers.String("workloadID", workloadID),
+					helpers.String("namespace", namespace),
+					helpers.Error(err))
+				profileState.Error = err
+				nnc.workloadIDToProfileState.Set(workloadID, profileState)
+				continue
+			}
+
+			nnc.workloadIDToNetworkNeighborhood.Set(workloadID, fullNN)
+			logger.L().Debug("updated network neighborhood in cache",
+				helpers.String("workloadID", workloadID),
+				helpers.String("namespace", namespace),
+				helpers.String("status", nn.Annotations[helpersv1.StatusMetadataKey]),
+				helpers.String("completion", nn.Annotations[helpersv1.CompletionMetadataKey]))
+		}
 	}
 }
 
-// getActiveNamespaces returns a snapshot of namespace to container mappings
-func (nnc *NetworkNeighborhoodCache) getActiveNamespaces() map[string]mapset.Set[string] {
-	nnc.mu.RLock()
-	defer nnc.mu.RUnlock()
+// handleUserManagedNetworkNeighborhood handles user-managed network neighborhoods
+func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood) {
+	normalizedNNName := strings.TrimPrefix(nn.Name, helpersv1.UserNetworkNeighborhoodPrefix)
+	userManagedNNUniqueIdentifier := nn.ResourceVersion + string(nn.UID)
 
-	namespaces := make(map[string]mapset.Set[string])
-	nnc.namespaceContainers.Range(func(namespace string, containerSet mapset.Set[string]) bool {
-		namespaces[namespace] = containerSet
+	// Create a unique tracking key for this user network neighborhood
+	nnKey := nnc.networkNeighborhoodKey(nn.Namespace, normalizedNNName)
+
+	// Check if we've already processed this exact version of the user-managed network neighborhood
+	if storedIdentifier, exists := nnc.networkNeighborhoodToUserManagedIdentifier.Load(nnKey); exists &&
+		storedIdentifier == userManagedNNUniqueIdentifier {
+		return
+	}
+
+	// Find and collect the network neighborhood to merge
+	var toMerge struct {
+		wlid string
+		nn   *v1beta1.NetworkNeighborhood
+	}
+
+	nnc.workloadIDToNetworkNeighborhood.Range(func(wlid string, originalNN *v1beta1.NetworkNeighborhood) bool {
+		if originalNN.Name == normalizedNNName && originalNN.Namespace == nn.Namespace {
+			toMerge.wlid = wlid
+			toMerge.nn = originalNN
+			logger.L().Debug("found matching network neighborhood for user-managed network neighborhood",
+				helpers.String("workloadID", wlid),
+				helpers.String("namespace", originalNN.Namespace),
+				helpers.String("nnName", originalNN.Name))
+			// Stop iteration
+			return false
+		}
 		return true
 	})
-	return namespaces
-}
 
-// refreshNamespaceNeighborhoods updates network neighborhoods for a specific namespace
-func (nnc *NetworkNeighborhoodCache) refreshNamespaceNeighborhoods(ctx context.Context, namespace string, containerSet mapset.Set[string]) {
-	neighborhoodList, err := nnc.storageClient.NetworkNeighborhoods(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		logger.L().Error("failed to list network neighborhoods",
-			helpers.String("namespace", namespace),
-			helpers.Error(err))
+	// If we didn't find a matching network neighborhood, skip merging
+	if toMerge.nn == nil {
 		return
 	}
 
-	for _, neighborhood := range neighborhoodList.Items {
-		if nnc.isUserManagedNeighborhood(&neighborhood) {
-			nnc.handleUserManagedNeighborhood(&neighborhood)
-		} else {
-			nnc.handleStandardNeighborhood(ctx, &neighborhood, containerSet)
-		}
-	}
-}
-
-// handleStandardNeighborhood processes regular (non-user-managed) network neighborhoods
-func (nnc *NetworkNeighborhoodCache) handleStandardNeighborhood(ctx context.Context, neighborhood *v1beta1.NetworkNeighborhood, containerSet mapset.Set[string]) {
-	workloadID := neighborhood.Annotations[helpersv1.WlidMetadataKey]
-	if workloadID == "" {
-		return
-	}
-
-	// Always update profile state
-	profileState := &objectcache.ProfileState{
-		Completion: neighborhood.Annotations[helpersv1.CompletionMetadataKey],
-		Status:     neighborhood.Annotations[helpersv1.StatusMetadataKey],
-		Name:       neighborhood.Name,
-		Error:      nil,
-	}
-	nnc.workloadStates.Set(workloadID, profileState)
-
-	// Only process completed neighborhoods
-	if neighborhood.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
-		return
-	}
-
-	if !nnc.isWorkloadInUse(workloadID, neighborhood.Labels[helpersv1.TemplateHashKey], containerSet) {
-		return
-	}
-
-	if nnc.shouldSkipNeighborhoodUpdate(workloadID, neighborhood) {
-		return
-	}
-
-	fullNeighborhood, err := nnc.fetchFullNeighborhood(ctx, neighborhood)
-	if err != nil {
-		profileState.Error = err
-		nnc.workloadStates.Set(workloadID, profileState)
-		return
-	}
-
-	nnc.updateNeighborhood(workloadID, fullNeighborhood)
-}
-
-// isWorkloadInUse checks if a workload ID is currently used by any container
-func (nnc *NetworkNeighborhoodCache) isWorkloadInUse(workloadID, templateHash string, containerSet mapset.Set[string]) bool {
-	for containerID := range containerSet.Iter() {
-		nnc.mu.RLock()
-		containerInfo, exists := nnc.containerInfo.Load(containerID)
-		nnc.mu.RUnlock()
-
-		if exists && containerInfo.WorkloadID == workloadID && containerInfo.InstanceTemplateHash == templateHash {
-			return true
-		}
-	}
-	return false
-}
-
-// shouldSkipNeighborhoodUpdate determines if a neighborhood update should be skipped
-func (nnc *NetworkNeighborhoodCache) shouldSkipNeighborhoodUpdate(workloadID string, newNeighborhood *v1beta1.NetworkNeighborhood) bool {
-	existingNeighborhood, exists := nnc.workloadNeighborhoods.Load(workloadID)
-	if !exists {
-		return false
-	}
-
-	// Skip if existing neighborhood is complete
-	if existingNeighborhood.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Complete {
-		return true
-	}
-
-	// Skip if new neighborhood is not complete and we have a partial one
-	return newNeighborhood.Annotations[helpersv1.CompletionMetadataKey] != helpersv1.Complete
-}
-
-// fetchFullNeighborhood retrieves the complete neighborhood from storage
-func (nnc *NetworkNeighborhoodCache) fetchFullNeighborhood(ctx context.Context, neighborhood *v1beta1.NetworkNeighborhood) (*v1beta1.NetworkNeighborhood, error) {
-	return nnc.storageClient.NetworkNeighborhoods(neighborhood.Namespace).Get(ctx, neighborhood.Name, metav1.GetOptions{})
-}
-
-// updateNeighborhood updates the neighborhood cache
-func (nnc *NetworkNeighborhoodCache) updateNeighborhood(workloadID string, neighborhood *v1beta1.NetworkNeighborhood) {
-	nnc.workloadNeighborhoods.Set(workloadID, neighborhood)
-
-	logger.L().Debug("updated network neighborhood in cache",
-		helpers.String("workloadID", workloadID),
-		helpers.String("namespace", neighborhood.Namespace),
-		helpers.String("status", neighborhood.Annotations[helpersv1.StatusMetadataKey]),
-		helpers.String("completion", neighborhood.Annotations[helpersv1.CompletionMetadataKey]))
-}
-
-// handleUserManagedNeighborhood processes user-managed neighborhoods and merges them with base neighborhoods
-func (nnc *NetworkNeighborhoodCache) handleUserManagedNeighborhood(neighborhood *v1beta1.NetworkNeighborhood) {
-	normalizedName := strings.TrimPrefix(neighborhood.Name, helpersv1.UserNetworkNeighborhoodPrefix)
-	uniqueIdentifier := neighborhood.ResourceVersion + string(neighborhood.UID)
-	neighborhoodKey := nnc.createNeighborhoodKey(neighborhood.Namespace, normalizedName)
-
-	// Skip if already processed this version
-	if storedID, exists := nnc.userNeighborhoodIdentifiers.Load(neighborhoodKey); exists && storedID == uniqueIdentifier {
-		return
-	}
-
-	// Find matching base neighborhood
-	baseWorkloadID, baseNeighborhood := nnc.findMatchingBaseNeighborhood(normalizedName, neighborhood.Namespace)
-	if baseNeighborhood == nil {
-		return
-	}
-
-	// Fetch and merge neighborhoods
-	fullUserNeighborhood, err := nnc.fetchFullNeighborhood(context.Background(), neighborhood)
+	// Fetch the full user network neighborhood
+	fullUserNN, err := nnc.storageClient.NetworkNeighborhoods(nn.Namespace).Get(
+		context.Background(), nn.Name, metav1.GetOptions{})
 	if err != nil {
 		logger.L().Error("failed to get user-managed network neighborhood",
-			helpers.String("namespace", neighborhood.Namespace),
-			helpers.String("neighborhoodName", neighborhood.Name),
+			helpers.String("namespace", nn.Namespace),
+			helpers.String("nnName", nn.Name),
 			helpers.Error(err))
 		return
 	}
 
-	originalNeighborhood, err := nnc.fetchFullNeighborhood(context.Background(), baseNeighborhood)
+	// Merge the user-managed network neighborhood with the normal network neighborhood
+
+	// First, pull the original network neighborhood from the storage
+	originalNN, err := nnc.storageClient.NetworkNeighborhoods(toMerge.nn.Namespace).Get(
+		context.Background(), toMerge.nn.Name, metav1.GetOptions{})
 	if err != nil {
 		logger.L().Error("failed to get original network neighborhood",
-			helpers.String("namespace", baseNeighborhood.Namespace),
-			helpers.String("neighborhoodName", baseNeighborhood.Name),
+			helpers.String("namespace", toMerge.nn.Namespace),
+			helpers.String("nnName", toMerge.nn.Name),
 			helpers.Error(err))
 		return
 	}
-
-	mergedNeighborhood := nnc.mergeNeighborhoods(originalNeighborhood, fullUserNeighborhood)
-	nnc.updateMergedNeighborhood(baseWorkloadID, mergedNeighborhood)
-	nnc.userNeighborhoodIdentifiers.Set(neighborhoodKey, uniqueIdentifier)
-}
-
-// findMatchingBaseNeighborhood locates the base neighborhood for user-managed neighborhood merging
-func (nnc *NetworkNeighborhoodCache) findMatchingBaseNeighborhood(neighborhoodName, namespace string) (string, *v1beta1.NetworkNeighborhood) {
-	var workloadID string
-	var neighborhood *v1beta1.NetworkNeighborhood
-
-	nnc.workloadNeighborhoods.Range(func(wlid string, nn *v1beta1.NetworkNeighborhood) bool {
-		if nn.Name == neighborhoodName && nn.Namespace == namespace {
-			workloadID = wlid
-			neighborhood = nn
-			return false // Stop iteration
-		}
-		return true
-	})
-
-	return workloadID, neighborhood
-}
-
-// updateMergedNeighborhood updates cache with merged neighborhood and its state
-func (nnc *NetworkNeighborhoodCache) updateMergedNeighborhood(workloadID string, mergedNeighborhood *v1beta1.NetworkNeighborhood) {
-	nnc.workloadNeighborhoods.Set(workloadID, mergedNeighborhood)
-
+	// Merge the network neighborhoods
+	mergedNN := nnc.performMerge(originalNN, fullUserNN)
+	// Update the cache with the merged network neighborhood
+	nnc.workloadIDToNetworkNeighborhood.Set(toMerge.wlid, mergedNN)
+	// Update profile state for the merged profile
 	profileState := &objectcache.ProfileState{
-		Completion: mergedNeighborhood.Annotations[helpersv1.CompletionMetadataKey],
-		Status:     mergedNeighborhood.Annotations[helpersv1.StatusMetadataKey],
-		Name:       mergedNeighborhood.Name,
+		Completion: mergedNN.Annotations[helpersv1.CompletionMetadataKey],
+		Status:     mergedNN.Annotations[helpersv1.StatusMetadataKey],
+		Name:       mergedNN.Name,
 		Error:      nil,
 	}
-	nnc.workloadStates.Set(workloadID, profileState)
+	nnc.workloadIDToProfileState.Set(toMerge.wlid, profileState)
+	logger.L().Debug("merged user-managed network neighborhood with normal network neighborhood",
+		helpers.String("workloadID", toMerge.wlid),
+		helpers.String("namespace", nn.Namespace),
+		helpers.String("nnName", nn.Name))
 
-	logger.L().Debug("merged user-managed network neighborhood with base neighborhood",
-		helpers.String("workloadID", workloadID),
-		helpers.String("namespace", mergedNeighborhood.Namespace))
+	// Record that we've processed this version of the network neighborhood
+	nnc.networkNeighborhoodToUserManagedIdentifier.Set(nnKey, userManagedNNUniqueIdentifier)
 }
 
 // ContainerCallback handles container lifecycle events
-func (nnc *NetworkNeighborhoodCache) ContainerCallback(notif containercollection.PubSubEvent) {
+func (nnc *NetworkNeighborhoodCacheImpl) ContainerCallback(notif containercollection.PubSubEvent) {
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
-		if nnc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
-			return
-		}
-
 		go func() {
 			if err := nnc.addContainer(notif.Container); err != nil {
-				logger.L().Error("failed to add container to cache", helpers.Error(err))
+				logger.L().Error("failed to add container to the cache", helpers.Error(err))
 			}
 		}()
 	case containercollection.EventTypeRemoveContainer:
-		if nnc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
-			return
-		}
-
-		// Run removal in goroutine to prevent blocking the event system
-		// and maintain consistency with add operations
-		go func() {
-			containerID := notif.Container.Runtime.ContainerID
-			nnc.removeContainer(containerID)
-			logger.L().Debug("container removed from cache", helpers.String("containerID", containerID))
-		}()
+		nnc.deleteContainer(notif.Container.Runtime.ContainerID)
 	}
 }
 
-// addContainer registers a new container in the cache
-func (nnc *NetworkNeighborhoodCache) addContainer(container *containercollection.Container) error {
+// addContainer adds a container to the cache
+func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollection.Container) error {
+	// Get container ID and namespace directly from container
 	containerID := container.Runtime.ContainerID
 	namespace := container.K8s.Namespace
 
-	sharedData, err := nnc.waitForSharedData(containerID)
+	// Get workload ID from shared data
+	sharedData, err := nnc.waitForSharedContainerData(containerID)
 	if err != nil {
-		return fmt.Errorf("failed to get shared data for container %s: %w", containerID, err)
+		logger.L().Error("failed to get shared data for container",
+			helpers.String("containerID", containerID),
+			helpers.Error(err))
+		return err
 	}
 
 	workloadID := sharedData.Wlid
@@ -370,6 +334,7 @@ func (nnc *NetworkNeighborhoodCache) addContainer(container *containercollection
 		return nil
 	}
 
+	// Create container info
 	containerInfo := &ContainerInfo{
 		ContainerID:          containerID,
 		WorkloadID:           workloadID,
@@ -377,12 +342,23 @@ func (nnc *NetworkNeighborhoodCache) addContainer(container *containercollection
 		Namespace:            namespace,
 	}
 
-	nnc.mu.Lock()
-	defer nnc.mu.Unlock()
+	// Add to container info map
+	nnc.containerIDToInfo.Set(containerID, containerInfo)
 
-	nnc.containerInfo.Set(containerID, containerInfo)
-	nnc.addContainerToNamespace(namespace, containerID)
-	nnc.ensureWorkloadStateExists(workloadID)
+	// Add to namespace -> containers mapping
+	nnc.mutex.Lock()
+	containerSet, exists := nnc.namespaceToContainers.Load(namespace)
+	if !exists || containerSet == nil {
+		containerSet = mapset.NewSet[string]()
+		nnc.namespaceToContainers.Set(namespace, containerSet)
+	}
+	containerSet.Add(containerID)
+	nnc.mutex.Unlock()
+
+	// Create workload ID to state mapping
+	if _, exists := nnc.workloadIDToProfileState.Load(workloadID); !exists {
+		nnc.workloadIDToProfileState.Set(workloadID, nil)
+	}
 
 	logger.L().Debug("container added to cache",
 		helpers.String("containerID", containerID),
@@ -392,86 +368,53 @@ func (nnc *NetworkNeighborhoodCache) addContainer(container *containercollection
 	return nil
 }
 
-// addContainerToNamespace adds a container to the namespace mapping
-func (nnc *NetworkNeighborhoodCache) addContainerToNamespace(namespace, containerID string) {
-	containerSet, exists := nnc.namespaceContainers.Load(namespace)
-	if !exists || containerSet == nil {
-		containerSet = mapset.NewSet[string]()
-		nnc.namespaceContainers.Set(namespace, containerSet)
-	}
-	containerSet.Add(containerID)
-}
-
-// ensureWorkloadStateExists initializes workload state if it doesn't exist
-func (nnc *NetworkNeighborhoodCache) ensureWorkloadStateExists(workloadID string) {
-	if _, exists := nnc.workloadStates.Load(workloadID); !exists {
-		nnc.workloadStates.Set(workloadID, nil)
-	}
-}
-
-// removeContainer removes a container and cleans up associated resources
-func (nnc *NetworkNeighborhoodCache) removeContainer(containerID string) {
-	nnc.mu.Lock()
-	defer nnc.mu.Unlock()
-
-	containerInfo, exists := nnc.containerInfo.Load(containerID)
+// deleteContainer deletes a container from the cache
+func (nnc *NetworkNeighborhoodCacheImpl) deleteContainer(containerID string) {
+	// Get container info
+	containerInfo, exists := nnc.containerIDToInfo.Load(containerID)
 	if !exists {
 		logger.L().Debug("containerID not found in cache", helpers.String("containerID", containerID))
 		return
 	}
 
-	nnc.cleanupNamespaceMapping(containerInfo)
-	nnc.cleanupContainerResources(containerID)
-	nnc.cleanupUnusedWorkload(containerInfo.WorkloadID)
-}
-
-// cleanupNamespaceMapping removes container from namespace mapping
-func (nnc *NetworkNeighborhoodCache) cleanupNamespaceMapping(containerInfo *ContainerInfo) {
-	if containerSet, exists := nnc.namespaceContainers.Load(containerInfo.Namespace); exists {
-		containerSet.Remove(containerInfo.ContainerID)
+	// Clean up namespace -> containers mapping
+	nnc.mutex.Lock()
+	if containerSet, exists := nnc.namespaceToContainers.Load(containerInfo.Namespace); exists {
+		containerSet.Remove(containerID)
 		if containerSet.Cardinality() == 0 {
-			nnc.namespaceContainers.Delete(containerInfo.Namespace)
+			nnc.namespaceToContainers.Delete(containerInfo.Namespace)
 		}
 	}
-}
+	nnc.mutex.Unlock()
 
-// cleanupContainerResources removes container-specific resources
-func (nnc *NetworkNeighborhoodCache) cleanupContainerResources(containerID string) {
-	nnc.containerInfo.Delete(containerID)
-}
+	// Clean up container info
+	nnc.containerIDToInfo.Delete(containerID)
 
-// cleanupUnusedWorkload removes workload data if no containers are using it
-func (nnc *NetworkNeighborhoodCache) cleanupUnusedWorkload(workloadID string) {
-	if nnc.isWorkloadStillInUse(workloadID) {
-		return
-	}
-
-	if neighborhood, exists := nnc.workloadNeighborhoods.Load(workloadID); exists {
-		neighborhoodKey := nnc.createNeighborhoodKey(neighborhood.Namespace, neighborhood.Name)
-		nnc.userNeighborhoodIdentifiers.Delete(neighborhoodKey)
-	}
-
-	nnc.workloadStates.Delete(workloadID)
-	nnc.workloadNeighborhoods.Delete(workloadID)
-
-	logger.L().Debug("deleted workloadID from cache", helpers.String("workloadID", workloadID))
-}
-
-// isWorkloadStillInUse checks if any container is still using the workload
-func (nnc *NetworkNeighborhoodCache) isWorkloadStillInUse(workloadID string) bool {
-	workloadInUse := false
-	nnc.containerInfo.Range(func(_ string, info *ContainerInfo) bool {
-		if info.WorkloadID == workloadID {
-			workloadInUse = true
+	// Check if any other container is using the same workload ID
+	workloadStillInUse := false
+	nnc.containerIDToInfo.Range(func(_ string, info *ContainerInfo) bool {
+		if info.WorkloadID == containerInfo.WorkloadID {
+			workloadStillInUse = true
 			return false // Stop iteration
 		}
-		return true
+		return true // Continue iteration
 	})
-	return workloadInUse
+
+	// If no other container is using the same workload ID, delete it from the cache
+	if !workloadStillInUse {
+		if nn, exists := nnc.workloadIDToNetworkNeighborhood.Load(containerInfo.WorkloadID); exists {
+			// Remove any user managed identifiers related to this network neighborhood
+			nnKey := nnc.networkNeighborhoodKey(nn.Namespace, nn.Name)
+			nnc.networkNeighborhoodToUserManagedIdentifier.Delete(nnKey)
+		}
+		nnc.workloadIDToNetworkNeighborhood.Delete(containerInfo.WorkloadID)
+		nnc.workloadIDToProfileState.Delete(containerInfo.WorkloadID)
+		logger.L().Debug("deleted workloadID from cache", helpers.String("workloadID", containerInfo.WorkloadID))
+	}
 }
 
-// waitForSharedData waits for shared container data with exponential backoff
-func (nnc *NetworkNeighborhoodCache) waitForSharedData(containerID string) (*utils.WatchedContainerData, error) {
+// waitForSharedContainerData waits for shared container data to be available
+func (nnc *NetworkNeighborhoodCacheImpl) waitForSharedContainerData(containerID string) (*utils.WatchedContainerData, error) {
 	return backoff.Retry(context.Background(), func() (*utils.WatchedContainerData, error) {
 		if sharedData := nnc.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
 			return sharedData, nil
@@ -480,200 +423,237 @@ func (nnc *NetworkNeighborhoodCache) waitForSharedData(containerID string) (*uti
 	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
 }
 
-// Utility methods
-
-func (nnc *NetworkNeighborhoodCache) createNeighborhoodKey(namespace, name string) NetworkNeighborhoodKey {
-	return NetworkNeighborhoodKey(fmt.Sprintf("%s/%s", namespace, name))
+func (apc *NetworkNeighborhoodCacheImpl) networkNeighborhoodKey(namespace, name string) string {
+	return fmt.Sprintf("%s/%s", namespace, name)
 }
 
-func (nnc *NetworkNeighborhoodCache) isUserManagedNeighborhood(neighborhood *v1beta1.NetworkNeighborhood) bool {
-	return neighborhood.Annotations != nil &&
-		neighborhood.Annotations[helpersv1.ManagedByMetadataKey] == helpersv1.ManagedByUserValue &&
-		strings.HasPrefix(neighborhood.GetName(), helpersv1.UserNetworkNeighborhoodPrefix)
-}
+// GetNetworkNeighborhood gets the network neighborhood for a container
+func (nnc *NetworkNeighborhoodCacheImpl) GetNetworkNeighborhood(containerID string) *v1beta1.NetworkNeighborhood {
+	// Get container info
+	if containerInfo, exists := nnc.containerIDToInfo.Load(containerID); exists {
+		workloadID := containerInfo.WorkloadID
+		if workloadID == "" {
+			return nil
+		}
 
-// mergeNeighborhoods combines a base neighborhood with a user-managed neighborhood
-func (nnc *NetworkNeighborhoodCache) mergeNeighborhoods(base, userManaged *v1beta1.NetworkNeighborhood) *v1beta1.NetworkNeighborhood {
-	merged := base.DeepCopy()
-
-	// Merge container specifications
-	merged.Spec.Containers = nnc.mergeContainerSpecs(merged.Spec.Containers, userManaged.Spec.Containers)
-	merged.Spec.InitContainers = nnc.mergeContainerSpecs(merged.Spec.InitContainers, userManaged.Spec.InitContainers)
-	merged.Spec.EphemeralContainers = nnc.mergeContainerSpecs(merged.Spec.EphemeralContainers, userManaged.Spec.EphemeralContainers)
-
-	// Merge label selectors
-	nnc.mergeLabelSelector(&merged.Spec.LabelSelector, &userManaged.Spec.LabelSelector)
-
-	return merged
-}
-
-// mergeContainerSpecs merges container specifications
-func (nnc *NetworkNeighborhoodCache) mergeContainerSpecs(base, userManaged []v1beta1.NetworkNeighborhoodContainer) []v1beta1.NetworkNeighborhoodContainer {
-	if len(userManaged) != len(base) {
-		logger.L().Warning("failed to merge user-managed network neighborhood with base neighborhood",
-			helpers.Int("baseContainers", len(base)),
-			helpers.Int("userManagedContainers", len(userManaged)),
-			helpers.String("reason", "container count mismatch"))
-		return base
-	}
-
-	for i := range base {
-		for j := range userManaged {
-			if base[i].Name == userManaged[j].Name {
-				nnc.mergeContainerData(&base[i], &userManaged[j])
-				break
+		// Try to get network neighborhood from cache
+		if nn, exists := nnc.workloadIDToNetworkNeighborhood.Load(workloadID); exists {
+			if nn != nil {
+				return nn
 			}
 		}
 	}
-	return base
-}
 
-// mergeContainerData merges individual container network data
-func (nnc *NetworkNeighborhoodCache) mergeContainerData(base, userManaged *v1beta1.NetworkNeighborhoodContainer) {
-	base.Ingress = nnc.mergeNetworkNeighbors(base.Ingress, userManaged.Ingress)
-	base.Egress = nnc.mergeNetworkNeighbors(base.Egress, userManaged.Egress)
-}
-
-// mergeNetworkNeighbors merges network neighbor lists
-func (nnc *NetworkNeighborhoodCache) mergeNetworkNeighbors(base, userManaged []v1beta1.NetworkNeighbor) []v1beta1.NetworkNeighbor {
-	neighborMap := make(map[string]int)
-	for i, neighbor := range base {
-		neighborMap[neighbor.Identifier] = i
-	}
-
-	for _, userNeighbor := range userManaged {
-		if idx, exists := neighborMap[userNeighbor.Identifier]; exists {
-			base[idx] = nnc.mergeNetworkNeighbor(base[idx], userNeighbor)
-		} else {
-			base = append(base, userNeighbor)
-		}
-	}
-
-	return base
-}
-
-// mergeNetworkNeighbor merges individual network neighbors
-func (nnc *NetworkNeighborhoodCache) mergeNetworkNeighbor(base, userManaged v1beta1.NetworkNeighbor) v1beta1.NetworkNeighbor {
-	merged := base.DeepCopy()
-
-	// Merge DNS names (removing duplicates)
-	dnsSet := make(map[string]struct{})
-	for _, dns := range base.DNSNames {
-		dnsSet[dns] = struct{}{}
-	}
-	for _, dns := range userManaged.DNSNames {
-		dnsSet[dns] = struct{}{}
-	}
-
-	merged.DNSNames = make([]string, 0, len(dnsSet))
-	for dns := range dnsSet {
-		merged.DNSNames = append(merged.DNSNames, dns)
-	}
-
-	// Merge ports
-	merged.Ports = nnc.mergeNetworkPorts(merged.Ports, userManaged.Ports)
-
-	// Merge selectors
-	if userManaged.PodSelector != nil {
-		if merged.PodSelector == nil {
-			merged.PodSelector = &metav1.LabelSelector{}
-		}
-		nnc.mergeLabelSelector(merged.PodSelector, userManaged.PodSelector)
-	}
-
-	if userManaged.NamespaceSelector != nil {
-		if merged.NamespaceSelector == nil {
-			merged.NamespaceSelector = &metav1.LabelSelector{}
-		}
-		nnc.mergeLabelSelector(merged.NamespaceSelector, userManaged.NamespaceSelector)
-	}
-
-	// Override with user-managed values if provided
-	if userManaged.IPAddress != "" {
-		merged.IPAddress = userManaged.IPAddress
-	}
-	if userManaged.Type != "" {
-		merged.Type = userManaged.Type
-	}
-
-	return *merged
-}
-
-// mergeNetworkPorts merges network port lists
-func (nnc *NetworkNeighborhoodCache) mergeNetworkPorts(base, userManaged []v1beta1.NetworkPort) []v1beta1.NetworkPort {
-	portMap := make(map[string]int)
-	for i, port := range base {
-		portMap[port.Name] = i
-	}
-
-	for _, userPort := range userManaged {
-		if idx, exists := portMap[userPort.Name]; exists {
-			base[idx] = userPort
-		} else {
-			base = append(base, userPort)
-		}
-	}
-
-	return base
-}
-
-// mergeLabelSelector merges label selectors
-func (nnc *NetworkNeighborhoodCache) mergeLabelSelector(base, userManaged *metav1.LabelSelector) {
-	if userManaged.MatchLabels != nil {
-		if base.MatchLabels == nil {
-			base.MatchLabels = make(map[string]string)
-		}
-		for k, v := range userManaged.MatchLabels {
-			base.MatchLabels[k] = v
-		}
-	}
-
-	base.MatchExpressions = append(base.MatchExpressions, userManaged.MatchExpressions...)
-}
-
-// Public API methods
-
-// GetNetworkNeighborhood retrieves the network neighborhood for a container
-func (nnc *NetworkNeighborhoodCache) GetNetworkNeighborhood(containerID string) *v1beta1.NetworkNeighborhood {
-	containerInfo, exists := nnc.containerInfo.Load(containerID)
-	if !exists || containerInfo.WorkloadID == "" {
-		return nil
-	}
-
-	if neighborhood, exists := nnc.workloadNeighborhoods.Load(containerInfo.WorkloadID); exists {
-		return neighborhood
-	}
 	return nil
 }
 
-// GetNetworkNeighborhoodState retrieves the profile state for a container
-func (nnc *NetworkNeighborhoodCache) GetNetworkNeighborhoodState(containerID string) *objectcache.ProfileState {
-	containerInfo, exists := nnc.containerInfo.Load(containerID)
+// GetNetworkNeighborhoodState gets the profile state for a container
+func (nnc *NetworkNeighborhoodCacheImpl) GetNetworkNeighborhoodState(containerID string) *objectcache.ProfileState {
+	// Get container info
+	containerInfo, exists := nnc.containerIDToInfo.Load(containerID)
 	if !exists {
 		return &objectcache.ProfileState{
 			Error: fmt.Errorf("container %s not found in cache", containerID),
 		}
 	}
 
-	if containerInfo.WorkloadID == "" {
+	workloadID := containerInfo.WorkloadID
+	if workloadID == "" {
 		return &objectcache.ProfileState{
 			Error: fmt.Errorf("no workload ID for container %s", containerID),
 		}
 	}
 
-	if profileState, exists := nnc.workloadStates.Load(containerInfo.WorkloadID); exists {
+	// Try to get profile state from cache
+	if profileState, exists := nnc.workloadIDToProfileState.Load(workloadID); exists {
 		if profileState != nil {
 			return profileState
-		}
-		return &objectcache.ProfileState{
-			Error: fmt.Errorf("profile state not available"),
+		} else {
+			return &objectcache.ProfileState{
+				Error: fmt.Errorf("profile state not available - shouldn't happen"),
+			}
 		}
 	}
 
 	return &objectcache.ProfileState{
-		Error: fmt.Errorf("profile state not found for workload ID %s", containerInfo.WorkloadID),
+		Error: fmt.Errorf("profile state not found for workload ID %s", workloadID),
 	}
 }
 
-// Ensure NetworkNeighborhoodCache implements the required interface
-var _ objectcache.NetworkNeighborhoodCache = (*NetworkNeighborhoodCache)(nil)
+// performMerge merges a user-managed network neighborhood with a normal network neighborhood
+func (nnc *NetworkNeighborhoodCacheImpl) performMerge(normalNN, userManagedNN *v1beta1.NetworkNeighborhood) *v1beta1.NetworkNeighborhood {
+	mergedNN := normalNN.DeepCopy()
+
+	// Merge spec
+	mergedNN.Spec.Containers = nnc.mergeContainers(mergedNN.Spec.Containers, userManagedNN.Spec.Containers)
+	mergedNN.Spec.InitContainers = nnc.mergeContainers(mergedNN.Spec.InitContainers, userManagedNN.Spec.InitContainers)
+	mergedNN.Spec.EphemeralContainers = nnc.mergeContainers(mergedNN.Spec.EphemeralContainers, userManagedNN.Spec.EphemeralContainers)
+
+	// Merge LabelSelector
+	if userManagedNN.Spec.LabelSelector.MatchLabels != nil {
+		if mergedNN.Spec.LabelSelector.MatchLabels == nil {
+			mergedNN.Spec.LabelSelector.MatchLabels = make(map[string]string)
+		}
+		for k, v := range userManagedNN.Spec.LabelSelector.MatchLabels {
+			mergedNN.Spec.LabelSelector.MatchLabels[k] = v
+		}
+	}
+	mergedNN.Spec.LabelSelector.MatchExpressions = append(
+		mergedNN.Spec.LabelSelector.MatchExpressions,
+		userManagedNN.Spec.LabelSelector.MatchExpressions...,
+	)
+
+	return mergedNN
+}
+
+func (nnc *NetworkNeighborhoodCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.NetworkNeighborhoodContainer) []v1beta1.NetworkNeighborhoodContainer {
+	if len(userManagedContainers) != len(normalContainers) {
+		// If the number of containers don't match, we can't merge
+		logger.L().Warning("NetworkNeighborhoodCacheImpl - failed to merge user-managed profile with base profile",
+			helpers.Int("normalContainers len", len(normalContainers)),
+			helpers.Int("userManagedContainers len", len(userManagedContainers)),
+			helpers.String("reason", "number of containers don't match"))
+		return normalContainers
+	}
+
+	// Assuming the normalContainers are already in the correct Pod order
+	// We'll merge user containers at their corresponding positions
+	for i := range normalContainers {
+		for _, userContainer := range userManagedContainers {
+			if normalContainers[i].Name == userContainer.Name {
+				nnc.mergeContainer(&normalContainers[i], &userContainer)
+				break
+			}
+		}
+	}
+	return normalContainers
+}
+
+func (nnc *NetworkNeighborhoodCacheImpl) mergeContainer(normalContainer, userContainer *v1beta1.NetworkNeighborhoodContainer) {
+	// Merge ingress rules
+	normalContainer.Ingress = nnc.mergeNetworkNeighbors(normalContainer.Ingress, userContainer.Ingress)
+
+	// Merge egress rules
+	normalContainer.Egress = nnc.mergeNetworkNeighbors(normalContainer.Egress, userContainer.Egress)
+}
+
+func (nnc *NetworkNeighborhoodCacheImpl) mergeNetworkNeighbors(normalNeighbors, userNeighbors []v1beta1.NetworkNeighbor) []v1beta1.NetworkNeighbor {
+	// Use map to track existing neighbors by identifier
+	neighborMap := make(map[string]int)
+	for i, neighbor := range normalNeighbors {
+		neighborMap[neighbor.Identifier] = i
+	}
+
+	// Merge or append user neighbors
+	for _, userNeighbor := range userNeighbors {
+		if idx, exists := neighborMap[userNeighbor.Identifier]; exists {
+			// Merge existing neighbor
+			normalNeighbors[idx] = nnc.mergeNetworkNeighbor(normalNeighbors[idx], userNeighbor)
+		} else {
+			// Append new neighbor
+			normalNeighbors = append(normalNeighbors, userNeighbor)
+		}
+	}
+
+	return normalNeighbors
+}
+
+func (nnc *NetworkNeighborhoodCacheImpl) mergeNetworkNeighbor(normal, user v1beta1.NetworkNeighbor) v1beta1.NetworkNeighbor {
+	merged := normal.DeepCopy()
+
+	// Merge DNS names (removing duplicates)
+	dnsNamesSet := make(map[string]struct{})
+	for _, dns := range normal.DNSNames {
+		dnsNamesSet[dns] = struct{}{}
+	}
+	for _, dns := range user.DNSNames {
+		dnsNamesSet[dns] = struct{}{}
+	}
+	merged.DNSNames = make([]string, 0, len(dnsNamesSet))
+	for dns := range dnsNamesSet {
+		merged.DNSNames = append(merged.DNSNames, dns)
+	}
+
+	// Merge ports based on patchMergeKey (name)
+	merged.Ports = nnc.mergeNetworkPorts(merged.Ports, user.Ports)
+
+	// Merge pod selector if provided
+	if user.PodSelector != nil {
+		if merged.PodSelector == nil {
+			merged.PodSelector = &metav1.LabelSelector{}
+		}
+		if user.PodSelector.MatchLabels != nil {
+			if merged.PodSelector.MatchLabels == nil {
+				merged.PodSelector.MatchLabels = make(map[string]string)
+			}
+			for k, v := range user.PodSelector.MatchLabels {
+				merged.PodSelector.MatchLabels[k] = v
+			}
+		}
+		merged.PodSelector.MatchExpressions = append(
+			merged.PodSelector.MatchExpressions,
+			user.PodSelector.MatchExpressions...,
+		)
+	}
+
+	// Merge namespace selector if provided
+	if user.NamespaceSelector != nil {
+		if merged.NamespaceSelector == nil {
+			merged.NamespaceSelector = &metav1.LabelSelector{}
+		}
+		if user.NamespaceSelector.MatchLabels != nil {
+			if merged.NamespaceSelector.MatchLabels == nil {
+				merged.NamespaceSelector.MatchLabels = make(map[string]string)
+			}
+			for k, v := range user.NamespaceSelector.MatchLabels {
+				merged.NamespaceSelector.MatchLabels[k] = v
+			}
+		}
+		merged.NamespaceSelector.MatchExpressions = append(
+			merged.NamespaceSelector.MatchExpressions,
+			user.NamespaceSelector.MatchExpressions...,
+		)
+	}
+
+	// Take the user's IP address if provided
+	if user.IPAddress != "" {
+		merged.IPAddress = user.IPAddress
+	}
+
+	// Take the user's type if provided
+	if user.Type != "" {
+		merged.Type = user.Type
+	}
+
+	return *merged
+}
+
+func (nnc *NetworkNeighborhoodCacheImpl) mergeNetworkPorts(normalPorts, userPorts []v1beta1.NetworkPort) []v1beta1.NetworkPort {
+	// Use map to track existing ports by name (patchMergeKey)
+	portMap := make(map[string]int)
+	for i, port := range normalPorts {
+		portMap[port.Name] = i
+	}
+
+	// Merge or append user ports
+	for _, userPort := range userPorts {
+		if idx, exists := portMap[userPort.Name]; exists {
+			// Update existing port
+			normalPorts[idx] = userPort
+		} else {
+			// Append new port
+			normalPorts = append(normalPorts, userPort)
+		}
+	}
+
+	return normalPorts
+}
+
+func isUserManagedNN(nn *v1beta1.NetworkNeighborhood) bool {
+	return nn.Annotations != nil &&
+		nn.Annotations[helpersv1.ManagedByMetadataKey] == helpersv1.ManagedByUserValue &&
+		strings.HasPrefix(nn.GetName(), helpersv1.UserNetworkNeighborhoodPrefix)
+}
+
+// Ensure NetworkNeighborhoodCacheImpl implements the NetworkNeighborhoodCache interface
+var _ objectcache.NetworkNeighborhoodCache = (*NetworkNeighborhoodCacheImpl)(nil)
