@@ -343,8 +343,8 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 	}
 
 	// Critical section to ensure thread safety
-	nnc.containerIDToInfo.Lock()
-	defer nnc.containerIDToInfo.Unlock()
+	nnc.mutex.Lock()
+	defer nnc.mutex.Unlock()
 
 	// Add to container info map
 	nnc.containerIDToInfo.Set(containerID, containerInfo)
