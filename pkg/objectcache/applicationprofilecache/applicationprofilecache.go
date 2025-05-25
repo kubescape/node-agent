@@ -210,7 +210,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			for containerID := range containerSet.Iter() {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
 					containerInfo.WorkloadID == workloadID &&
-					containerInfo.InstanceTemplateHash == profile.Annotations[helpersv1.TemplateHashKey] {
+					containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
 					// Create or update call stack search tree if not exists
 					apc.indexContainerCallStacks(containerID, containerInfo.Name, fullProfile)
 				}
