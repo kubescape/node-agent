@@ -145,12 +145,25 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 				continue
 			}
 
+			logger.L().Debug("processing application profile",
+				helpers.String("workloadID", workloadID),
+				helpers.String("namespace", namespace),
+				helpers.String("profileName", profile.Name),
+				helpers.String("status", profile.Annotations[helpersv1.StatusMetadataKey]),
+				helpers.String("completion", profile.Annotations[helpersv1.CompletionMetadataKey]),
+				helpers.String("templateHash", profile.Labels[helpersv1.TemplateHashKey]))
+
 			// Check if this workload ID is used by any container in this namespace
 			workloadIDInUse := false
 			for containerID := range containerSet.Iter() {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
 					containerInfo.WorkloadID == workloadID &&
 					containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
+					logger.L().Debug("found container using workload ID",
+						helpers.String("containerID", containerID),
+						helpers.String("workloadID", workloadID),
+						helpers.String("namespace", namespace),
+						helpers.String("instanceTemplateHash", containerInfo.InstanceTemplateHash))
 					workloadIDInUse = true
 					break
 				}
