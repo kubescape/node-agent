@@ -423,18 +423,20 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 		Name:                 container.Runtime.ContainerName,
 	}
 
+	// Single critical section for container registration
+	apc.mutex.Lock()
+	defer apc.mutex.Unlock()
+
 	// Add to container info map
 	apc.containerIDToInfo.Set(containerID, containerInfo)
 
 	// Add to namespace -> containers mapping
-	apc.mutex.Lock()
 	containerSet, exists := apc.namespaceToContainers.Load(namespace)
 	if !exists || containerSet == nil {
 		containerSet = mapset.NewSet[string]()
 		apc.namespaceToContainers.Set(namespace, containerSet)
 	}
 	containerSet.Add(containerID)
-	apc.mutex.Unlock()
 
 	// Create workload ID to state mapping
 	if _, exists := apc.workloadIDToProfileState.Load(workloadID); !exists {
@@ -458,15 +460,17 @@ func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
 		return
 	}
 
-	// Clean up namespace -> containers mapping
+	// Enter critical section to safely modify shared data
 	apc.mutex.Lock()
+	defer apc.mutex.Unlock()
+
+	// Clean up namespace -> containers mapping
 	if containerSet, exists := apc.namespaceToContainers.Load(containerInfo.Namespace); exists {
 		containerSet.Remove(containerID)
 		if containerSet.Cardinality() == 0 {
 			apc.namespaceToContainers.Delete(containerInfo.Namespace)
 		}
 	}
-	apc.mutex.Unlock()
 
 	// Clean up container info and call stack index
 	apc.containerIDToInfo.Delete(containerID)
