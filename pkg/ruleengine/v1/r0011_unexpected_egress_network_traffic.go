@@ -8,10 +8,11 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
+
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 )
 
 const (
@@ -54,120 +55,103 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) ID() string {
 func (rule *R0011UnexpectedEgressNetworkTraffic) DeleteRule() {
 }
 
-func (rule *R0011UnexpectedEgressNetworkTraffic) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
-	if eventType != utils.NetworkEventType {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
-	}
-
-	networkEvent, ok := event.(*tracernetworktype.Event)
-	if !ok {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
-	}
-
+func (rule *R0011UnexpectedEgressNetworkTraffic) handleNetworkEvent(networkEvent *tracernetworktype.Event, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	// Check if the container was pre-running.
 	if time.Unix(int64(networkEvent.Runtime.ContainerStartedAt), 0).Before(rule.startTime) {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	// Check if we already alerted on this endpoint.
 	endpoint := fmt.Sprintf("%s:%d:%s", networkEvent.DstEndpoint.Addr, networkEvent.Port, networkEvent.Proto)
 	if ok := rule.alertedAdresses.Has(endpoint); ok {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	// Check if the network event is outgoing and the destination is not a private IP.
 	if networkEvent.PktType == "OUTGOING" && !isPrivateIP(networkEvent.DstEndpoint.Addr) {
-		return ruleengine.DetectionResult{IsFailure: true, Payload: networkEvent.DstEndpoint.Addr}
-	}
+		nn := objCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
+		if nn == nil {
+			return nil
+		}
 
-	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
-}
+		// Skip partially watched containers.
+		if annotations := nn.GetAnnotations(); annotations != nil {
+			if annotations["kubescape.io/completion"] == string(utils.WatchedContainerCompletionStatusPartial) {
+				return nil
+			}
+		}
 
-func (rule *R0011UnexpectedEgressNetworkTraffic) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
-	// First do basic evaluation
-	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !detectionResult.IsFailure {
-		return detectionResult, nil
-	}
+		nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
+		if err != nil {
+			return nil
+		}
 
-	networkEventTyped, _ := event.(*tracernetworktype.Event)
-	nn, err := GetNetworkNeighborhood(networkEventTyped.Runtime.ContainerID, objCache)
-	if err != nil {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
-	}
+		domain := objCache.DnsCache().ResolveIpToDomain(networkEvent.DstEndpoint.Addr)
+		if domain != "" {
+			return nil
+		}
 
-	// Skip partially watched containers.
-	if annotations := nn.GetAnnotations(); annotations != nil {
-		if annotations["kubescape.io/completion"] == string(utils.WatchedContainerCompletionStatusPartial) {
-			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
+		// Check if the address is in the egress list and isn't in cluster.
+		for _, egress := range nnContainer.Egress {
+			if egress.IPAddress == networkEvent.DstEndpoint.Addr {
+				return nil
+			}
+		}
+
+		// Alert on the address.
+		rule.alertedAdresses.Set(endpoint, true)
+		return &GenericRuleFailure{
+			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%d", networkEvent.Comm, networkEvent.DstEndpoint.Addr, networkEvent.Port)),
+				AlertName:   rule.Name(),
+				InfectedPID: networkEvent.Pid,
+				Arguments: map[string]interface{}{
+					"ip":    networkEvent.DstEndpoint.Addr,
+					"port":  networkEvent.Port,
+					"proto": networkEvent.Proto,
+				},
+				Severity: R0011UnexpectedEgressNetworkTrafficRuleDescriptor.Priority,
+			},
+			RuntimeProcessDetails: apitypes.ProcessTree{
+				ProcessTree: apitypes.Process{
+					Comm: networkEvent.Comm,
+					Gid:  &networkEvent.Gid,
+					PID:  networkEvent.Pid,
+					Uid:  &networkEvent.Uid,
+				},
+				ContainerID: networkEvent.Runtime.ContainerID,
+			},
+			TriggerEvent: networkEvent.Event,
+			RuleAlert: apitypes.RuleAlert{
+				RuleDescription: fmt.Sprintf("Unexpected egress network communication to: %s:%d using %s from: %s", networkEvent.DstEndpoint.Addr, networkEvent.Port, networkEvent.Proto, networkEvent.GetContainer()),
+			},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName:   networkEvent.GetPod(),
+				PodLabels: networkEvent.K8s.PodLabels,
+			},
+			RuleID: rule.ID(),
 		}
 	}
 
-	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEventTyped.GetContainer())
-	if err != nil {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
-	}
-
-	domain := objCache.DnsCache().ResolveIpToDomain(networkEventTyped.DstEndpoint.Addr)
-	if domain != "" {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
-	}
-
-	// Check if the address is in the egress list and isn't in cluster.
-	for _, egress := range nnContainer.Egress {
-		if egress.IPAddress == networkEventTyped.DstEndpoint.Addr {
-			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
-		}
-	}
-
-	return detectionResult, nil
+	return nil
 }
 
-func (rule *R0011UnexpectedEgressNetworkTraffic) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
-	networkEvent, _ := event.(*tracernetworktype.Event)
-	endpoint := fmt.Sprintf("%s:%d:%s", networkEvent.DstEndpoint.Addr, networkEvent.Port, networkEvent.Proto)
-	rule.alertedAdresses.Set(endpoint, true)
-
-	return &GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%d", networkEvent.Comm, networkEvent.DstEndpoint.Addr, networkEvent.Port)),
-			AlertName:   rule.Name(),
-			InfectedPID: networkEvent.Pid,
-			Arguments: map[string]interface{}{
-				"ip":    networkEvent.DstEndpoint.Addr,
-				"port":  networkEvent.Port,
-				"proto": networkEvent.Proto,
-			},
-			Severity: R0011UnexpectedEgressNetworkTrafficRuleDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
-			ProcessTree: apitypes.Process{
-				Comm: networkEvent.Comm,
-				Gid:  &networkEvent.Gid,
-				PID:  networkEvent.Pid,
-				Uid:  &networkEvent.Uid,
-			},
-			ContainerID: networkEvent.Runtime.ContainerID,
-		},
-		TriggerEvent: networkEvent.Event,
-		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Unexpected egress network communication to: %s:%d using %s from: %s", networkEvent.DstEndpoint.Addr, networkEvent.Port, networkEvent.Proto, networkEvent.GetContainer()),
-		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName:   networkEvent.GetPod(),
-			PodLabels: networkEvent.K8s.PodLabels,
-		},
-		RuleID: rule.ID(),
+func (rule *R0011UnexpectedEgressNetworkTraffic) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	if eventType != utils.NetworkEventType {
+		return nil
 	}
+
+	networkEvent, ok := event.(*tracernetworktype.Event)
+	if !ok {
+		return nil
+	}
+	return rule.handleNetworkEvent(networkEvent, objCache)
+
 }
 
 func (rule *R0011UnexpectedEgressNetworkTraffic) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0011UnexpectedEgressNetworkTrafficRuleDescriptor.Requirements.RequiredEventTypes(),
-		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileDependency: apitypes.Required,
-			ProfileType:       apitypes.NetworkProfile,
-		},
 	}
 }
 

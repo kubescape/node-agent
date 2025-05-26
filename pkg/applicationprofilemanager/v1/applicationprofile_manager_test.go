@@ -33,7 +33,6 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 	"github.com/stretchr/testify/assert"
-	istiocache "istio.io/pkg/cache"
 )
 
 func ensureInstanceID(container *containercollection.Container, watchedContainer *utils.WatchedContainerData, k8sclient *k8sclient.K8sClientMock, clusterName string) error {
@@ -297,43 +296,29 @@ func TestApplicationProfileManager(t *testing.T) {
 	// let it stop
 	time.Sleep(2 * time.Second)
 	// verify generated CRDs
-	assert.Equal(t, 2, len(storageClient.ApplicationProfiles))
+	assert.Equal(t, 2, len(storageClient.ContainerProfiles))
 	// check the first profile
-	sort.Strings(storageClient.ApplicationProfiles[0].Spec.Containers[0].Capabilities)
-	assert.Equal(t, []string{"dup", "listen"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Syscalls)
-	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Capabilities)
-
-	reportedExecs := storageClient.ApplicationProfiles[0].Spec.Containers[1].Execs
-	expectedExecs := []v1beta1.ExecCalls{
+	assert.Equal(t, []string{"NET_BIND_SERVICE"},
+		storageClient.ContainerProfiles[0].Spec.Capabilities)
+	assert.ElementsMatch(t, []v1beta1.ExecCalls{
 		{Path: "/bin/bash", Args: []string{"/bin/bash", "-c", "ls"}, Envs: []string(nil)},
 		{Path: "/bin/bash", Args: []string{"/bin/bash", "-c", "ls", "-l"}, Envs: []string(nil)},
 		{Path: "/bin/bash", Args: []string{"/bin/bash", "ls", "-c"}, Envs: []string(nil)},
 		{Path: "/bin/ls", Args: []string{"/bin/ls", "-l"}, Envs: []string(nil)},
-	}
-	assert.Len(t, reportedExecs, len(expectedExecs))
-	for _, expectedExec := range expectedExecs {
-		assert.Contains(t, reportedExecs, expectedExec)
-	}
-	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Opens)
-
-	expectedEndpoints := GetExcpectedEndpoints(t)
-	actualEndpoints := storageClient.ApplicationProfiles[1].Spec.Containers[1].Endpoints
-
-	sortHTTPEndpoints(expectedEndpoints)
-	sortHTTPEndpoints(actualEndpoints)
-
-	assert.Equal(t, expectedEndpoints, actualEndpoints)
-	// check the second profile - this is a patch for execs and opens
-	sort.Strings(storageClient.ApplicationProfiles[1].Spec.Containers[0].Capabilities)
-	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Capabilities)
-	assert.Equal(t, storageClient.ApplicationProfiles[0].Spec.Containers[1].Execs, storageClient.ApplicationProfiles[1].Spec.Containers[1].Execs)
-	assert.Equal(t, []v1beta1.OpenCalls{
-		{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}},
+	}, storageClient.ContainerProfiles[0].Spec.Execs)
+	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}},
+		storageClient.ContainerProfiles[0].Spec.Opens)
+	assert.ElementsMatch(t, GetExpectedEndpoints(t),
+		storageClient.ContainerProfiles[1].Spec.Endpoints)
+	// check the second profile
+	assert.ElementsMatch(t, []string{"dup", "listen"},
+		storageClient.ContainerProfiles[1].Spec.Syscalls)
+	assert.ElementsMatch(t, []v1beta1.OpenCalls{
 		{Path: "/etc/hosts", Flags: []string{"O_RDONLY"}},
-	}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Opens)
+	}, storageClient.ContainerProfiles[1].Spec.Opens)
 }
 
-func GetExcpectedEndpoints(t *testing.T) []v1beta1.HTTPEndpoint {
+func GetExpectedEndpoints(t *testing.T) []v1beta1.HTTPEndpoint {
 	headers := map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}
 	rawJSON, err := json.Marshal(headers)
 	assert.NoError(t, err)
@@ -543,13 +528,9 @@ func TestReportRulePolicy(t *testing.T) {
 			am, err := CreateApplicationProfileManager(ctx, cfg, "cluster", k8sClient, storageClient, k8sObjectCacheMock, seccompManagerMock, nil, ruleBindingCache)
 			assert.NoError(t, err)
 
-			am.savedRulePolicies.Set(tt.k8sContainerID, istiocache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
 			am.toSaveRulePolicies.Set(tt.k8sContainerID, new(maps.SafeMap[string, *v1beta1.RulePolicy]))
 			am.trackedContainers.Add(tt.k8sContainerID)
 
-			if tt.existingSaved != nil {
-				am.savedRulePolicies.Get(tt.k8sContainerID).Set(tt.ruleID, tt.existingSaved)
-			}
 			if tt.existingToSave != nil {
 				am.toSaveRulePolicies.Get(tt.k8sContainerID).Set(tt.ruleID, tt.existingToSave)
 			}
@@ -752,7 +733,6 @@ func TestReportIdentifiedCallStack(t *testing.T) {
 			}
 
 			// Initialize container tracking
-			am.savedCallStacks.Set(tt.k8sContainerID, istiocache.NewTTL(5*am.cfg.UpdateDataPeriod, am.cfg.UpdateDataPeriod))
 			am.toSaveCallStacks.Set(tt.k8sContainerID, new(maps.SafeMap[string, *v1beta1.IdentifiedCallStack]))
 			am.trackedContainers.Add(tt.k8sContainerID)
 
@@ -929,10 +909,6 @@ func TestApplicationProfileManagerWithCallStacks(t *testing.T) {
 	// Let monitoring run and trigger a save
 	time.Sleep(2 * time.Second)
 
-	// Check saved call stacks after first save
-	savedCallStacks := am.savedCallStacks.Get("ns/pod/cont")
-	t.Logf("After first save - Number of call stacks in saved: %v", savedCallStacks)
-
 	// Let it run for the remaining time
 	time.Sleep(2 * time.Second)
 
@@ -946,32 +922,24 @@ func TestApplicationProfileManagerWithCallStacks(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// Debug logging for profiles
-	for i, profile := range storageClient.ApplicationProfiles {
+	for i, profile := range storageClient.ContainerProfiles {
 		t.Logf("Profile %d:", i)
-		t.Logf("  Number of containers: %d", len(profile.Spec.Containers))
-		if len(profile.Spec.Containers) > 1 {
-			t.Logf("  Call stacks in container[1]: %d", len(profile.Spec.Containers[1].IdentifiedCallStacks))
-			for _, cs := range profile.Spec.Containers[1].IdentifiedCallStacks {
-				t.Logf("    Call stack ID: %s", cs.CallID)
-			}
+		t.Logf("  Call stacks in container[1]: %d", len(profile.Spec.IdentifiedCallStacks))
+		for _, cs := range profile.Spec.IdentifiedCallStacks {
+			t.Logf("    Call stack ID: %s", cs.CallID)
 		}
+
 	}
 
 	// Verify results
-	if len(storageClient.ApplicationProfiles) == 0 {
+	if len(storageClient.ContainerProfiles) == 0 {
 		t.Fatal("No application profiles were created")
 	}
 
 	// Get the latest profile
-	latestProfile := storageClient.ApplicationProfiles[len(storageClient.ApplicationProfiles)-1]
-	if latestProfile.Spec.Containers == nil {
-		t.Fatal("Containers slice is nil")
-	}
-	if len(latestProfile.Spec.Containers) <= 1 {
-		t.Fatal("Not enough containers in profile")
-	}
+	latestProfile := storageClient.ContainerProfiles[len(storageClient.ContainerProfiles)-1]
 
-	foundCallStacks := latestProfile.Spec.Containers[1].IdentifiedCallStacks
+	foundCallStacks := latestProfile.Spec.IdentifiedCallStacks
 
 	// Sort both expected and found call stacks
 	sortCallStacks := func(cs []v1beta1.IdentifiedCallStack) {
@@ -984,8 +952,7 @@ func TestApplicationProfileManagerWithCallStacks(t *testing.T) {
 	sortCallStacks(expectedCallStacks)
 	sortCallStacks(foundCallStacks)
 
-	t.Logf("Number of profiles: %d", len(storageClient.ApplicationProfiles))
-	t.Logf("Latest profile containers: %d", len(latestProfile.Spec.Containers))
+	t.Logf("Number of profiles: %d", len(storageClient.ContainerProfiles))
 	t.Logf("Found call stacks: %d", len(foundCallStacks))
 
 	if len(expectedCallStacks) != len(foundCallStacks) {

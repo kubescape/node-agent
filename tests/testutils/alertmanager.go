@@ -6,11 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"slices"
-	"strconv"
 	"testing"
-
-	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 )
 
 const (
@@ -95,31 +91,14 @@ func filterAlertsByLabel(alerts []Alert, labelKey, labelValue string) []Alert {
 	return filteredAlerts
 }
 
-func AssertContains(t *testing.T, alerts []Alert, expectedRuleName string, expectedCommand string, expectedContainerName string, expectedFailOnProfile []bool) {
-	expectedProfileStatus := helpers.Completed
+func AssertContains(t *testing.T, alerts []Alert, expectedRuleName string, expectedCommand string, expectedContainerName string) {
 	for _, alert := range alerts {
 		ruleName, ruleOk := alert.Labels["rule_name"]
 		command, cmdOk := alert.Labels["comm"]
 		containerName, containerOk := alert.Labels["container_name"]
-		failOnProfile, failOnProfileOk := alert.Labels["fail_on_profile"]
-		profileStatus, profileStatusOk := alert.Labels["profile_status"]
-		failOnProfileBool, err := strconv.ParseBool(failOnProfile)
-		if err != nil {
-			t.Errorf("error parsing fail_on_profile: %v", err)
-		}
 
-		if ruleOk && cmdOk && containerOk && ruleName == expectedRuleName && command == expectedCommand && containerName == expectedContainerName &&
-			failOnProfileOk && slices.Contains(expectedFailOnProfile, failOnProfileBool) {
-			// if fail on profile is true, we expect the profile to be completed
-			// else return if the profile is not completed
-			if failOnProfileBool {
-				if profileStatusOk && profileStatus == expectedProfileStatus {
-					return
-				}
-			} else {
-				return
-			}
-
+		if ruleOk && cmdOk && containerOk && ruleName == expectedRuleName && command == expectedCommand && containerName == expectedContainerName {
+			return
 		}
 	}
 
@@ -127,18 +106,13 @@ func AssertContains(t *testing.T, alerts []Alert, expectedRuleName string, expec
 	t.Logf("All alerts: %v", alerts)
 }
 
-func AssertNotContains(t *testing.T, alerts []Alert, notExpectedRuleName string, notExpectedCommand string, notExpectedContainerName string, notExpectedFailOnProfile []bool) {
+func AssertNotContains(t *testing.T, alerts []Alert, notExpectedRuleName string, notExpectedCommand string, notExpectedContainerName string) {
 	for _, alert := range alerts {
 		ruleName, ruleOk := alert.Labels["rule_name"]
 		command, cmdOk := alert.Labels["comm"]
 		containerName, containerOk := alert.Labels["container_name"]
-		failOnProfile, failOnProfileOk := alert.Labels["fail_on_profile"]
-		failOnProfileBool, err := strconv.ParseBool(failOnProfile)
-		if err != nil {
-			t.Errorf("error parsing fail_on_profile: %v", err)
-		}
-		if ruleOk && cmdOk && containerOk && ruleName == notExpectedRuleName && command == notExpectedCommand && containerName == notExpectedContainerName &&
-			failOnProfileOk && slices.Contains(notExpectedFailOnProfile, failOnProfileBool) {
+
+		if ruleOk && cmdOk && containerOk && ruleName == notExpectedRuleName && command == notExpectedCommand && containerName == notExpectedContainerName {
 			t.Error("did not expect an alert with rule name: ", notExpectedRuleName, " command: ", notExpectedCommand, " container name: ", notExpectedContainerName, " not found")
 			t.Logf("All alerts: %v", alerts)
 		}

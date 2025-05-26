@@ -12,13 +12,12 @@ const (
 )
 
 type StorageHttpClientMock struct {
-	ApplicationActivities []*spdxv1beta1.ApplicationActivity
-	ApplicationProfiles   []*spdxv1beta1.ApplicationProfile
-	SyftSBOMs             []*spdxv1beta1.SBOMSyft
-	NetworkNeighborhoods  []*v1beta1.NetworkNeighborhood
-	ImageCounters         map[string]int
-	mockSBOM              *v1beta1.SBOMSyft
-	failedOnce            bool
+	ContainerProfiles    []*spdxv1beta1.ContainerProfile
+	SyftSBOMs            []*spdxv1beta1.SBOMSyft
+	NetworkNeighborhoods []*v1beta1.NetworkNeighborhood
+	ImageCounters        map[string]int
+	mockSBOM             *v1beta1.SBOMSyft
+	failedOnce           bool
 }
 
 var _ StorageClient = (*StorageHttpClientMock)(nil)

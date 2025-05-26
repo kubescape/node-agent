@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/exporters"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/rulecooldown"
 	"github.com/spf13/viper"
 )
 
@@ -16,42 +15,41 @@ const PodNameEnvVar = "POD_NAME"
 const NamespaceEnvVar = "NAMESPACE_NAME"
 
 type Config struct {
-	Exporters                exporters.ExportersConfig       `mapstructure:"exporters"`
-	InitialDelay             time.Duration                   `mapstructure:"initialDelay"`
-	MaxSniffingTime          time.Duration                   `mapstructure:"maxSniffingTimePerContainer"`
-	UpdateDataPeriod         time.Duration                   `mapstructure:"updateDataPeriod"`
-	MaxDelaySeconds          int                             `mapstructure:"maxDelaySeconds"`
-	MaxJitterPercentage      int                             `mapstructure:"maxJitterPercentage"`
-	MaxImageSize             int64                           `mapstructure:"maxImageSize"`
-	MaxSBOMSize              int                             `mapstructure:"maxSBOMSize"`
-	EnableFullPathTracing    bool                            `mapstructure:"fullPathTracingEnabled"`
-	EnableApplicationProfile bool                            `mapstructure:"applicationProfileServiceEnabled"`
-	EnableMalwareDetection   bool                            `mapstructure:"malwareDetectionEnabled"`
-	EnablePrometheusExporter bool                            `mapstructure:"prometheusExporterEnabled"`
-	EnableRuntimeDetection   bool                            `mapstructure:"runtimeDetectionEnabled"`
-	EnableHttpDetection      bool                            `mapstructure:"httpDetectionEnabled"`
-	EnableNetworkTracing     bool                            `mapstructure:"networkServiceEnabled"`
-	EnableNetworkStreaming   bool                            `mapstructure:"networkStreamingEnabled"`
-	EnableNodeProfile        bool                            `mapstructure:"nodeProfileServiceEnabled"`
-	EnableHostMalwareSensor  bool                            `mapstructure:"hostMalwareSensorEnabled"`
-	EnableHostNetworkSensor  bool                            `mapstructure:"hostNetworkSensorEnabled"`
-	NodeProfileInterval      time.Duration                   `mapstructure:"nodeProfileInterval"`
-	EnableSeccomp            bool                            `mapstructure:"seccompServiceEnabled"`
-	ExcludeLabels            map[string]string               `mapstructure:"excludeLabels"`
-	ExcludeNamespaces        []string                        `mapstructure:"excludeNamespaces"`
-	IncludeNamespaces        []string                        `mapstructure:"includeNamespaces"`
-	EnableSbomGeneration     bool                            `mapstructure:"sbomGenerationEnabled"`
-	EnableEmbeddedSboms      bool                            `mapstructure:"enableEmbeddedSBOMs"`
-	NamespaceName            string                          `mapstructure:"namespaceName"`
-	NodeName                 string                          `mapstructure:"nodeName"`
-	PodName                  string                          `mapstructure:"podName"`
-	KubernetesMode           bool                            `mapstructure:"kubernetesMode"`
-	NetworkStreamingInterval time.Duration                   `mapstructure:"networkStreamingInterval"`
-	WorkerPoolSize           int                             `mapstructure:"workerPoolSize"`
-	TestMode                 bool                            `mapstructure:"testMode"`
-	ExcludeJsonPaths         []string                        `mapstructure:"excludeJsonPaths"`
-	ProfilesCacheRefreshRate time.Duration                   `mapstructure:"profilesCacheRefreshRate"`
-	RuleCoolDown             rulecooldown.RuleCooldownConfig `mapstructure:"ruleCooldown"`
+	Exporters                exporters.ExportersConfig `mapstructure:"exporters"`
+	InitialDelay             time.Duration             `mapstructure:"initialDelay"`
+	MaxSniffingTime          time.Duration             `mapstructure:"maxSniffingTimePerContainer"`
+	UpdateDataPeriod         time.Duration             `mapstructure:"updateDataPeriod"`
+	MaxDelaySeconds          int                       `mapstructure:"maxDelaySeconds"`
+	MaxJitterPercentage      int                       `mapstructure:"maxJitterPercentage"`
+	MaxImageSize             int64                     `mapstructure:"maxImageSize"`
+	MaxSBOMSize              int                       `mapstructure:"maxSBOMSize"`
+	EnableFullPathTracing    bool                      `mapstructure:"fullPathTracingEnabled"`
+	EnableApplicationProfile bool                      `mapstructure:"applicationProfileServiceEnabled"`
+	EnableMalwareDetection   bool                      `mapstructure:"malwareDetectionEnabled"`
+	EnablePrometheusExporter bool                      `mapstructure:"prometheusExporterEnabled"`
+	EnableRuntimeDetection   bool                      `mapstructure:"runtimeDetectionEnabled"`
+	EnableHttpDetection      bool                      `mapstructure:"httpDetectionEnabled"`
+	EnableNetworkTracing     bool                      `mapstructure:"networkServiceEnabled"`
+	EnableNetworkStreaming   bool                      `mapstructure:"networkStreamingEnabled"`
+	EnableNodeProfile        bool                      `mapstructure:"nodeProfileServiceEnabled"`
+	EnableHostMalwareSensor  bool                      `mapstructure:"hostMalwareSensorEnabled"`
+	EnableHostNetworkSensor  bool                      `mapstructure:"hostNetworkSensorEnabled"`
+	NodeProfileInterval      time.Duration             `mapstructure:"nodeProfileInterval"`
+	EnableSeccomp            bool                      `mapstructure:"seccompServiceEnabled"`
+	ExcludeLabels            map[string]string         `mapstructure:"excludeLabels"`
+	ExcludeNamespaces        []string                  `mapstructure:"excludeNamespaces"`
+	IncludeNamespaces        []string                  `mapstructure:"includeNamespaces"`
+	EnableSbomGeneration     bool                      `mapstructure:"sbomGenerationEnabled"`
+	EnableEmbeddedSboms      bool                      `mapstructure:"enableEmbeddedSBOMs"`
+	NamespaceName            string                    `mapstructure:"namespaceName"`
+	NodeName                 string                    `mapstructure:"nodeName"`
+	PodName                  string                    `mapstructure:"podName"`
+	KubernetesMode           bool                      `mapstructure:"kubernetesMode"`
+	NetworkStreamingInterval time.Duration             `mapstructure:"networkStreamingInterval"`
+	WorkerPoolSize           int                       `mapstructure:"workerPoolSize"`
+	TestMode                 bool                      `mapstructure:"testMode"`
+	ExcludeJsonPaths         []string                  `mapstructure:"excludeJsonPaths"`
+	ProfilesCacheRefreshRate time.Duration             `mapstructure:"profilesCacheRefreshRate"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -79,10 +77,6 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("testMode", false)
 	viper.SetDefault("enableEmbeddedSBOMs", false)
 	viper.SetDefault("profilesCacheRefreshRate", 1*time.Minute)
-	viper.SetDefault("ruleCooldown.ruleCooldownDuration", 1*time.Hour)
-	viper.SetDefault("ruleCooldown.ruleCooldownAfterCount", 1)
-	viper.SetDefault("ruleCooldown.ruleCooldownOnProfileFailure", true)
-	viper.SetDefault("ruleCooldown.ruleCooldownMaxSize", 10000)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()

@@ -54,24 +54,24 @@ func (rule *R1005FilelessExecution) ID() string {
 func (rule *R1005FilelessExecution) DeleteRule() {
 }
 
-func (rule *R1005FilelessExecution) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
-	if eventType != utils.ExecveEventType {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+func (rule *R1005FilelessExecution) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, _ objectcache.ObjectCache) ruleengine.RuleFailure {
+	if eventType == utils.ExecveEventType {
+		return rule.handleExecveEvent(event.(*events.ExecEvent))
 	}
 
-	execEvent, ok := event.(*events.ExecEvent)
-	if !ok {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
-	}
+	return nil
+}
 
+func (rule *R1005FilelessExecution) handleExecveEvent(execEvent *events.ExecEvent) ruleengine.RuleFailure {
 	if !strings.Contains(execEvent.ExePath, "memfd") {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	execFullPath := GetExecFullPathFromEvent(execEvent)
 	execPathDir := filepath.Dir(execFullPath)
 
 	// Check for any /proc/*/fd/* or /proc/self/fd/* patterns
+	// This covers both /proc/self/fd and /proc/<pid>/fd paths
 	isProcFd := func(path string) bool {
 		if strings.HasPrefix(path, "/proc/self/fd") {
 			return true
@@ -87,74 +87,53 @@ func (rule *R1005FilelessExecution) EvaluateRule(eventType utils.EventType, even
 	}
 
 	if isProcFd(execPathDir) || isProcFd(execEvent.Cwd) || isProcFd(execEvent.ExePath) {
-		return ruleengine.DetectionResult{IsFailure: true, Payload: execEvent}
-	}
-
-	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
-}
-
-func (rule *R1005FilelessExecution) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
-	// First do basic evaluation
-	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !detectionResult.IsFailure {
-		return detectionResult, nil
-	}
-
-	// This rule doesn't need profile evaluation since it's based on direct detection
-	return detectionResult, nil
-}
-
-func (rule *R1005FilelessExecution) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
-	execEvent, _ := payload.Payload.(*events.ExecEvent)
-	execFullPath := GetExecFullPathFromEvent(execEvent)
-	execPathDir := filepath.Dir(execFullPath)
-	upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
-
-	return &GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
-			AlertName:   rule.Name(),
-			InfectedPID: execEvent.Pid,
-			Arguments: map[string]interface{}{
-				"hardlink": execEvent.ExePath,
+		upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
+		ruleFailure := GenericRuleFailure{
+			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
+				AlertName:   rule.Name(),
+				InfectedPID: execEvent.Pid,
+				Arguments: map[string]interface{}{
+					"hardlink": execEvent.ExePath,
+				},
+				Severity: R1005FilelessExecutionRuleDescriptor.Priority,
 			},
-			Severity: R1005FilelessExecutionRuleDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
-			ProcessTree: apitypes.Process{
-				Comm:       execEvent.Comm,
-				Gid:        &execEvent.Gid,
-				PID:        execEvent.Pid,
-				Uid:        &execEvent.Uid,
-				UpperLayer: &upperLayer,
-				PPID:       execEvent.Ppid,
-				Pcomm:      execEvent.Pcomm,
-				Cwd:        execEvent.Cwd,
-				Hardlink:   execEvent.ExePath,
-				Path:       execFullPath,
-				Cmdline:    fmt.Sprintf("%s %s", GetExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+			RuntimeProcessDetails: apitypes.ProcessTree{
+				ProcessTree: apitypes.Process{
+					Comm:       execEvent.Comm,
+					Gid:        &execEvent.Gid,
+					PID:        execEvent.Pid,
+					Uid:        &execEvent.Uid,
+					UpperLayer: &upperLayer,
+					PPID:       execEvent.Ppid,
+					Pcomm:      execEvent.Pcomm,
+					Cwd:        execEvent.Cwd,
+					Hardlink:   execEvent.ExePath,
+					Path:       execFullPath,
+					Cmdline:    fmt.Sprintf("%s %s", GetExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+				},
+				ContainerID: execEvent.Runtime.ContainerID,
 			},
-			ContainerID: execEvent.Runtime.ContainerID,
-		},
-		TriggerEvent: execEvent.Event.Event,
-		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source %s", execPathDir, execEvent.ExePath),
-		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName:   execEvent.GetPod(),
-			PodLabels: execEvent.K8s.PodLabels,
-		},
-		RuleID: rule.ID(),
-		Extra:  execEvent.GetExtra(),
+			TriggerEvent: execEvent.Event.Event,
+			RuleAlert: apitypes.RuleAlert{
+				RuleDescription: fmt.Sprintf("Fileless execution detected: exec call \"%s\" is from a malicious source %s", execPathDir, execEvent.ExePath),
+			},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName:   execEvent.GetPod(),
+				PodLabels: execEvent.K8s.PodLabels,
+			},
+			RuleID: rule.ID(),
+			Extra:  execEvent.GetExtra(),
+		}
+
+		return &ruleFailure
 	}
+
+	return nil
 }
 
 func (rule *R1005FilelessExecution) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1005FilelessExecutionRuleDescriptor.Requirements.RequiredEventTypes(),
-		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileType:       apitypes.ApplicationProfile,
-			ProfileDependency: apitypes.NotRequired,
-		},
 	}
 }

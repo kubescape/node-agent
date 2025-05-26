@@ -128,7 +128,7 @@ func (sc Storage) patchNetworkNeighborhood(name, namespace string, operations []
 			loggerhelpers.String("name", name),
 			loggerhelpers.String("namespace", namespace),
 			loggerhelpers.String("watchedContainer", watchedContainer.ContainerID),
-			loggerhelpers.String("completion", helpers.Complete))
+			loggerhelpers.String("completion", helpers.Full))
 		return sc.patchNetworkNeighborhood(name, namespace, operations, watchedContainer)
 	}
 

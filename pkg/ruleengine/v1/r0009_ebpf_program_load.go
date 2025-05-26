@@ -8,8 +8,9 @@ import (
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
@@ -54,92 +55,75 @@ func (rule *R0009EbpfProgramLoad) ID() string {
 func (rule *R0009EbpfProgramLoad) DeleteRule() {
 }
 
-func (rule *R0009EbpfProgramLoad) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
+func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if rule.alreadyNotified {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	if eventType != utils.SyscallEventType {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
+	}
+
+	if objCache != nil {
+		ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEvent.Runtime.ContainerID)
+		if ap == nil {
+			return nil
+		}
+
+		appProfileSyscallList, err := GetContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
+		if err != nil {
+			return nil
+		}
+
+		// Check if the syscall is in the list of allowed syscalls
+		if slices.Contains(appProfileSyscallList.Syscalls, syscallEvent.SyscallName) {
+			return nil
+		}
 	}
 
 	if syscallEvent.SyscallName == "bpf" {
-		return ruleengine.DetectionResult{IsFailure: true, Payload: syscallEvent}
-	}
-
-	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
-}
-
-func (rule *R0009EbpfProgramLoad) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
-	// First do basic evaluation
-	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !detectionResult.IsFailure {
-		return detectionResult, nil
-	}
-
-	syscallEventTyped, _ := event.(*ruleenginetypes.SyscallEvent)
-	ap, err := GetApplicationProfile(syscallEventTyped.Runtime.ContainerID, objCache)
-	if err != nil {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
-	}
-
-	appProfileSyscallList, err := GetContainerFromApplicationProfile(ap, syscallEventTyped.GetContainer())
-	if err != nil {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
-	}
-
-	// Check if the syscall is in the list of allowed syscalls
-	if slices.Contains(appProfileSyscallList.Syscalls, syscallEventTyped.SyscallName) {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
-	}
-
-	return detectionResult, nil
-}
-
-func (rule *R0009EbpfProgramLoad) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
-	syscallEvent, _ := event.(*ruleenginetypes.SyscallEvent)
-	rule.alreadyNotified = true
-
-	return &GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", syscallEvent.Comm, syscallEvent.SyscallName)),
-			AlertName: rule.Name(),
-			Arguments: map[string]interface{}{
-				"syscall": syscallEvent.SyscallName,
+		rule.alreadyNotified = true
+		ruleFailure := GenericRuleFailure{
+			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", syscallEvent.Comm, syscallEvent.SyscallName)),
+				AlertName: rule.Name(),
+				Arguments: map[string]interface{}{
+					"syscall": syscallEvent.SyscallName,
+				},
+				InfectedPID: syscallEvent.Pid,
+				Severity:    R0009EbpfProgramLoadRuleDescriptor.Priority,
 			},
-			InfectedPID: syscallEvent.Pid,
-			Severity:    R0009EbpfProgramLoadRuleDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
-			ProcessTree: apitypes.Process{
-				Comm: syscallEvent.Comm,
-				PID:  syscallEvent.Pid,
+			RuntimeProcessDetails: apitypes.ProcessTree{
+				ProcessTree: apitypes.Process{
+					Comm: syscallEvent.Comm,
+					PID:  syscallEvent.Pid,
+				},
+				ContainerID: syscallEvent.Runtime.ContainerID,
 			},
-			ContainerID: syscallEvent.Runtime.ContainerID,
-		},
-		TriggerEvent: syscallEvent.Event,
-		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("bpf system call executed in %s", syscallEvent.GetContainer()),
-		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName:   syscallEvent.GetPod(),
-			PodLabels: syscallEvent.K8s.PodLabels,
-		},
-		RuleID: rule.ID(),
+			TriggerEvent: syscallEvent.Event,
+			RuleAlert: apitypes.RuleAlert{
+				RuleDescription: fmt.Sprintf("bpf system call executed in %s", syscallEvent.GetContainer()),
+			},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName:   syscallEvent.GetPod(),
+				PodLabels: syscallEvent.K8s.PodLabels,
+			},
+			RuleID: rule.ID(),
+		}
+
+		return &ruleFailure
 	}
+
+	return nil
 }
 
 func (rule *R0009EbpfProgramLoad) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0009EbpfProgramLoadRuleDescriptor.Requirements.RequiredEventTypes(),
-		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileDependency: apitypes.Optional,
-			ProfileType:       apitypes.ApplicationProfile,
-		},
 	}
 }

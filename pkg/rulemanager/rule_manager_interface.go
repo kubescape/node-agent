@@ -16,5 +16,5 @@ type RuleManagerClient interface {
 	HasFinalApplicationProfile(pod *v1.Pod) bool
 	IsContainerMonitored(k8sContainerID string) bool
 	IsPodMonitored(namespace, pod string) bool
-	EvaluatePolicyRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string
+	EvaluateRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string
 }

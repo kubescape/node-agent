@@ -17,13 +17,6 @@ const (
 	RulePrioritySystemIssue = 1000
 )
 
-type DetectionInfo interface{}
-
-type DetectionResult struct {
-	IsFailure bool
-	Payload   DetectionInfo
-}
-
 type RuleDescriptor struct {
 	// Rule ID
 	ID string
@@ -39,17 +32,6 @@ type RuleDescriptor struct {
 	Requirements RuleSpec
 	// Create a rule function
 	RuleCreationFunc func() RuleEvaluator
-	// RulePolicySupport indicates if the rule supports policy
-	RulePolicySupport bool
-}
-
-// ProfileRequirement indicates how a rule uses profiles
-type ProfileRequirement struct {
-	// ProfileDependency indicates if the rule requires a profile
-	ProfileDependency apitypes.ProfileDependency
-
-	// ProfileType indicates what type of profile is needed (Application, Network, etc)
-	ProfileType apitypes.ProfileType
 }
 
 func (r *RuleDescriptor) HasTags(tags []string) bool {
@@ -70,7 +52,6 @@ type RuleCreator interface {
 	CreateRuleByName(name string) RuleEvaluator
 	RegisterRule(rule RuleDescriptor)
 	CreateRulesByEventType(eventType utils.EventType) []RuleEvaluator
-	CreateRulePolicyRulesByEventType(eventType utils.EventType) []RuleEvaluator
 	CreateAllRules() []RuleEvaluator
 	GetAllRuleIDs() []string
 }
@@ -82,14 +63,8 @@ type RuleEvaluator interface {
 	// Rule Name
 	Name() string
 
-	// EvaluateRule evaluates the rule without profile
-	EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) DetectionResult
-
-	// EvaluateRuleWithProfile evaluates the rule with profile
-	EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (DetectionResult, error)
-
-	// CreateRuleFailure creates a rule failure
-	CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload DetectionResult) RuleFailure
+	// Rule processing
+	ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) RuleFailure
 
 	// Rule requirements
 	Requirements() RuleSpec
@@ -102,7 +77,7 @@ type RuleEvaluator interface {
 }
 
 type RuleCondition interface {
-	EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) DetectionResult
+	EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) (bool, interface{})
 	ID() string
 }
 
@@ -110,9 +85,6 @@ type RuleCondition interface {
 type RuleSpec interface {
 	// Event types required for the rule
 	RequiredEventTypes() []utils.EventType
-
-	// Profile requirements
-	GetProfileRequirements() ProfileRequirement
 }
 
 type RuleFailure interface {

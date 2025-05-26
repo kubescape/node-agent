@@ -1,7 +1,6 @@
 package ruleengine
 
 import (
-	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -22,18 +21,11 @@ var _ ruleengine.RuleSpec = (*RuleRequirements)(nil)
 type RuleRequirements struct {
 	// Needed events for the rule.
 	EventTypes []utils.EventType
-	// Profile requirements
-	ProfileRequirements ruleengine.ProfileRequirement
 }
 
 // Event types required for the rule
 func (r *RuleRequirements) RequiredEventTypes() []utils.EventType {
 	return r.EventTypes
-}
-
-// Profile requirements
-func (r *RuleRequirements) GetProfileRequirements() ruleengine.ProfileRequirement {
-	return r.ProfileRequirements
 }
 
 type BaseRule struct {
@@ -59,19 +51,4 @@ func (br *BaseRule) GetParameters() map[string]interface{} {
 		},
 	)
 	return parametersCopy
-}
-
-// Basic evaluation without profile
-func (br *BaseRule) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, _ objectcache.K8sObjectCache) (bool, interface{}) {
-	return false, nil
-}
-
-// Evaluation with profile if available
-func (br *BaseRule) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (bool, interface{}) {
-	return false, nil
-}
-
-// Create rule failure with available context
-func (br *BaseRule) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload interface{}) ruleengine.RuleFailure {
-	return nil
 }

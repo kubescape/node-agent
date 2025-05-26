@@ -52,76 +52,57 @@ func (rule *R1002LoadKernelModule) ID() string {
 func (rule *R1002LoadKernelModule) DeleteRule() {
 }
 
-func (rule *R1002LoadKernelModule) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
+func (rule *R1002LoadKernelModule) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if rule.alerted {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	if eventType != utils.SyscallEventType {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	if syscallEvent.SyscallName == "init_module" || syscallEvent.SyscallName == "finit_module" {
-		return ruleengine.DetectionResult{IsFailure: true, Payload: syscallEvent}
-	}
-
-	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
-}
-
-func (rule *R1002LoadKernelModule) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
-	// First do basic evaluation
-	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !detectionResult.IsFailure {
-		return detectionResult, nil
-	}
-
-	// This rule doesn't need profile evaluation since it's based on direct detection
-	return detectionResult, nil
-}
-
-func (rule *R1002LoadKernelModule) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
-	syscallEvent, _ := event.(*ruleenginetypes.SyscallEvent)
-	rule.alerted = true
-
-	return &GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:    HashStringToMD5(syscallEvent.SyscallName),
-			AlertName:   rule.Name(),
-			InfectedPID: syscallEvent.Pid,
-			Severity:    R1002LoadKernelModuleRuleDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
-			ProcessTree: apitypes.Process{
-				Comm: syscallEvent.Comm,
-				Gid:  &syscallEvent.Gid,
-				PID:  syscallEvent.Pid,
-				Uid:  &syscallEvent.Uid,
+		rule.alerted = true
+		ruleFailure := GenericRuleFailure{
+			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+				UniqueID:    HashStringToMD5(syscallEvent.SyscallName),
+				AlertName:   rule.Name(),
+				InfectedPID: syscallEvent.Pid,
+				Severity:    R1002LoadKernelModuleRuleDescriptor.Priority,
 			},
-			ContainerID: syscallEvent.Runtime.ContainerID,
-		},
-		TriggerEvent: syscallEvent.Event,
-		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Kernel module load syscall (%s) was called", syscallEvent.SyscallName),
-		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName:   syscallEvent.GetPod(),
-			PodLabels: syscallEvent.K8s.PodLabels,
-		},
-		RuleID: rule.ID(),
+			RuntimeProcessDetails: apitypes.ProcessTree{
+				ProcessTree: apitypes.Process{
+					Comm: syscallEvent.Comm,
+					Gid:  &syscallEvent.Gid,
+					PID:  syscallEvent.Pid,
+					Uid:  &syscallEvent.Uid,
+				},
+				ContainerID: syscallEvent.Runtime.ContainerID,
+			},
+			TriggerEvent: syscallEvent.Event,
+			RuleAlert: apitypes.RuleAlert{
+				RuleDescription: fmt.Sprintf("Kernel module load syscall (%s) was called", syscallEvent.SyscallName),
+			},
+			RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+				PodName:   syscallEvent.GetPod(),
+				PodLabels: syscallEvent.K8s.PodLabels,
+			},
+			RuleID: rule.ID(),
+		}
+
+		return &ruleFailure
 	}
+
+	return nil
 }
 
 func (rule *R1002LoadKernelModule) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1002LoadKernelModuleRuleDescriptor.Requirements.RequiredEventTypes(),
-		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileDependency: apitypes.NotRequired,
-			ProfileType:       apitypes.ApplicationProfile,
-		},
 	}
 }
