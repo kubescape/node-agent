@@ -41,9 +41,9 @@ type NetworkNeighborhoodCacheImpl struct {
 	storageClient                              versioned.SpdxV1beta1Interface
 	k8sObjectCache                             objectcache.K8sObjectCache
 	updateInterval                             time.Duration
-	mutex                                      sync.Mutex // For operations that need additional synchronization
-	updateInProgress                           bool       // Flag to track if update is in progress
-	updateMutex                                sync.Mutex // Mutex to protect the flag
+	updateInProgress                           bool
+	updateMutex                                sync.Mutex
+	containerLocks                             sync.Map // map[string]*sync.Mutex
 }
 
 // NewNetworkNeighborhoodCache creates a new network neighborhood cache with periodic updates
@@ -323,6 +323,9 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 	// Get container ID and namespace directly from container
 	containerID := container.Runtime.ContainerID
 	namespace := container.K8s.Namespace
+	containerLock := nnc.getContainerLock(containerID)
+	containerLock.Lock()
+	defer containerLock.Unlock()
 
 	// Get workload ID from shared data
 	sharedData, err := nnc.waitForSharedContainerData(containerID)
@@ -346,10 +349,6 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 		InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
 		Namespace:            namespace,
 	}
-
-	// Critical section to ensure thread safety
-	nnc.mutex.Lock()
-	defer nnc.mutex.Unlock()
 
 	// Add to container info map
 	nnc.containerIDToInfo.Set(containerID, containerInfo)
@@ -377,16 +376,16 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 
 // deleteContainer deletes a container from the cache
 func (nnc *NetworkNeighborhoodCacheImpl) deleteContainer(containerID string) {
+	containerLock := nnc.getContainerLock(containerID)
+	containerLock.Lock()
+	defer containerLock.Unlock()
+
 	// Get container info
 	containerInfo, exists := nnc.containerIDToInfo.Load(containerID)
 	if !exists {
 		logger.L().Debug("containerID not found in cache", helpers.String("containerID", containerID))
 		return
 	}
-
-	// Enter critical section to ensure thread safety
-	nnc.mutex.Lock()
-	defer nnc.mutex.Unlock()
 
 	// Clean up namespace -> containers mapping
 	if containerSet, exists := nnc.namespaceToContainers.Load(containerInfo.Namespace); exists {
@@ -656,6 +655,11 @@ func (nnc *NetworkNeighborhoodCacheImpl) mergeNetworkPorts(normalPorts, userPort
 	}
 
 	return normalPorts
+}
+
+func (nnc *NetworkNeighborhoodCacheImpl) getContainerLock(containerID string) *sync.Mutex {
+	lock, _ := nnc.containerLocks.LoadOrStore(containerID, &sync.Mutex{})
+	return lock.(*sync.Mutex)
 }
 
 func isUserManagedNN(nn *v1beta1.NetworkNeighborhood) bool {

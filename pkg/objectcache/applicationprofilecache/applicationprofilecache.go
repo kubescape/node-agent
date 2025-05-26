@@ -48,9 +48,9 @@ type ApplicationProfileCacheImpl struct {
 	storageClient                  versioned.SpdxV1beta1Interface
 	k8sObjectCache                 objectcache.K8sObjectCache
 	updateInterval                 time.Duration
-	mutex                          sync.Mutex // For operations that need additional synchronization
 	updateInProgress               bool       // Flag to track if update is in progress
 	updateMutex                    sync.Mutex // Mutex to protect the flag
+	containerLocks                 sync.Map   // map[string]*sync.Mutex
 }
 
 // NewApplicationProfileCache creates a new application profile cache with periodic updates
@@ -400,9 +400,17 @@ func (apc *ApplicationProfileCacheImpl) ContainerCallback(notif containercollect
 
 // addContainer adds a container to the cache
 func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollection.Container) error {
-	// Get container ID and namespace directly from container
 	containerID := container.Runtime.ContainerID
-	namespace := container.K8s.Namespace
+	containerLock := apc.getContainerLock(containerID)
+	containerLock.Lock()
+	defer containerLock.Unlock()
+
+	// Get container info
+	containerInfo, exists := apc.containerIDToInfo.Load(containerID)
+	if !exists {
+		logger.L().Debug("containerID not found in cache", helpers.String("containerID", containerID))
+		return nil
+	}
 
 	// Get workload ID from shared data
 	sharedData, err := apc.waitForSharedContainerData(containerID)
@@ -420,26 +428,22 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 	}
 
 	// Create container info
-	containerInfo := &ContainerInfo{
+	containerInfo = &ContainerInfo{
 		ContainerID:          containerID,
 		WorkloadID:           workloadID,
 		InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
-		Namespace:            namespace,
+		Namespace:            container.K8s.Namespace,
 		Name:                 container.Runtime.ContainerName,
 	}
-
-	// Single critical section for container registration
-	apc.mutex.Lock()
-	defer apc.mutex.Unlock()
 
 	// Add to container info map
 	apc.containerIDToInfo.Set(containerID, containerInfo)
 
 	// Add to namespace -> containers mapping
-	containerSet, exists := apc.namespaceToContainers.Load(namespace)
+	containerSet, exists := apc.namespaceToContainers.Load(container.K8s.Namespace)
 	if !exists || containerSet == nil {
 		containerSet = mapset.NewSet[string]()
-		apc.namespaceToContainers.Set(namespace, containerSet)
+		apc.namespaceToContainers.Set(container.K8s.Namespace, containerSet)
 	}
 	containerSet.Add(containerID)
 
@@ -451,23 +455,23 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 	logger.L().Debug("container added to cache",
 		helpers.String("containerID", containerID),
 		helpers.String("workloadID", workloadID),
-		helpers.String("namespace", namespace))
+		helpers.String("namespace", container.K8s.Namespace))
 
 	return nil
 }
 
 // deleteContainer deletes a container from the cache
 func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
+	containerLock := apc.getContainerLock(containerID)
+	containerLock.Lock()
+	defer containerLock.Unlock()
+
 	// Get container info
 	containerInfo, exists := apc.containerIDToInfo.Load(containerID)
 	if !exists {
 		logger.L().Debug("containerID not found in cache", helpers.String("containerID", containerID))
 		return
 	}
-
-	// Enter critical section to safely modify shared data
-	apc.mutex.Lock()
-	defer apc.mutex.Unlock()
 
 	// Clean up namespace -> containers mapping
 	if containerSet, exists := apc.namespaceToContainers.Load(containerInfo.Namespace); exists {
@@ -502,6 +506,9 @@ func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
 		apc.workloadIDToProfile.Delete(containerInfo.WorkloadID)
 		logger.L().Debug("deleted workloadID from cache", helpers.String("workloadID", containerInfo.WorkloadID))
 	}
+
+	// Clean up the lock when done
+	apc.containerLocks.Delete(containerID)
 }
 
 // waitForSharedContainerData waits for shared container data to be available
@@ -633,6 +640,12 @@ func (apc *ApplicationProfileCacheImpl) GetCallStackSearchTree(containerID strin
 	}
 
 	return nil
+}
+
+// Helper function to get or create a lock for a container
+func (apc *ApplicationProfileCacheImpl) getContainerLock(containerID string) *sync.Mutex {
+	lock, _ := apc.containerLocks.LoadOrStore(containerID, &sync.Mutex{})
+	return lock.(*sync.Mutex)
 }
 
 // Ensure ApplicationProfileCacheImpl implements the ApplicationProfileCache interface
