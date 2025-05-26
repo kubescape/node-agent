@@ -37,7 +37,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"istio.io/pkg/cache"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -221,8 +220,8 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		return
 	}
 
-	// leave container name empty this way the "slug" will represent a workload
-	slug, err := watchedContainer.InstanceID.GetSlug(true)
+	// keep the container name in the slug as we're sending per-container profiles
+	slug, err := watchedContainer.InstanceID.GetSlug(false)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("ApplicationProfileManager - failed to get slug", helpers.Error(err),
 			helpers.String("slug", slug),
@@ -238,9 +237,6 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	if am.droppedEventsContainers.ContainsOne(watchedContainer.K8sContainerID) {
 		watchedContainer.SetStatus(utils.WatchedContainerStatusMissingRuntime)
 	}
-
-	// application activity is deprecated
-	// syscalls now reside in the application profile
 
 	// get syscalls from IG
 	var observedSyscalls []string
@@ -327,223 +323,39 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 	})
 
 	// new activity
-	// the process tries to use JSON patching to avoid conflicts between updates on the same object from different containers
-	// 0. create both a patch and a new object
-	// 1. try to apply the patch
-	// 2a. the object doesn't exist - create the new object
-	// 2b. the patch was invalid - get existing object to fix the patch
-	// 3a. the object is missing its container slice - ADD one with the container profile at the right index
-	// 3b. the object is missing the container profile - ADD the container profile at the right index
-	// 3c. default - patch the container ourselves and REPLACE it at the right index
+	// we send a new profile for the container containing the new capabilities, endpoints, execs, opens, rule policies and call stacks
 	if len(capabilities) > 0 || len(endpoints) > 0 || len(execs) > 0 || len(opens) > 0 || len(toSaveSyscalls) > 0 || len(initalizeOperations) > 0 || len(callStacks) > 0 || watchedContainer.StatusUpdated() {
-		// 0. calculate patch
-		operations := utils.CreateCapabilitiesPatchOperations(capabilities, observedSyscalls, execs, opens, endpoints, rulePolicies, callStacks, watchedContainer.ContainerType.String(), watchedContainer.ContainerIndex)
-		if len(initalizeOperations) > 0 {
-			operations = append(operations, initalizeOperations...)
+		now := time.Now()
+		// create a new ApplicationProfile object
+		newObject := &v1beta1.ApplicationProfile{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: fmt.Sprintf("%s-%d", slug, now.Unix()), // use timestamp as a sequence number to avoid conflicts
+				Annotations: map[string]string{
+					helpersv1.CompletionMetadataKey:      string(watchedContainer.GetCompletionStatus()),
+					helpersv1.ContainerIdMetadataKey:     watchedContainer.ContainerID,
+					helpersv1.InstanceIDMetadataKey:      watchedContainer.InstanceID.GetStringFormatted(),
+					helpersv1.ReportTimestampMetadataKey: now.Format(time.RFC3339),
+					helpersv1.StatusMetadataKey:          string(watchedContainer.GetStatus()),
+					helpersv1.WlidMetadataKey:            watchedContainer.Wlid,
+				},
+				Labels: utils.GetLabels(watchedContainer, false),
+			},
+			Spec: v1beta1.ApplicationProfileSpec{
+				Architectures: []string{runtime.GOARCH},
+			},
 		}
-
-		operations = utils.AppendStatusAnnotationPatchOperations(operations, watchedContainer)
-		operations = append(operations, utils.PatchOperation{
-			Op:    "add",
-			Path:  "/spec/architectures/-",
-			Value: runtime.GOARCH,
-		})
-
-		// 1. try to patch object
-		var gotErr error
-		if err := am.storageClient.PatchApplicationProfile(slug, namespace, operations, watchedContainer); err != nil {
-			switch {
-			case apierrors.IsTimeout(err):
-				// backoff timeout, we have already retried for maxElapsedTime
-				gotErr = err
-				logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to patch application profile", helpers.Error(err),
-					helpers.String("slug", slug),
-					helpers.Int("container index", watchedContainer.ContainerIndex),
-					helpers.String("container ID", watchedContainer.ContainerID),
-					helpers.String("k8s workload", watchedContainer.K8sContainerID))
-			case apierrors.IsNotFound(err):
-				// 2a. new object
-				newObject := &v1beta1.ApplicationProfile{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: slug,
-						Annotations: map[string]string{
-							helpersv1.InstanceIDMetadataKey: watchedContainer.InstanceID.GetStringNoContainer(),
-							helpersv1.WlidMetadataKey:       watchedContainer.Wlid,
-							helpersv1.CompletionMetadataKey: string(watchedContainer.GetCompletionStatus()),
-							helpersv1.StatusMetadataKey:     string(watchedContainer.GetStatus()),
-						},
-						Labels: utils.GetLabels(watchedContainer, true),
-					},
-				}
-				addContainers := func(containers []v1beta1.ApplicationProfileContainer, containerInfos []utils.ContainerInfo) []v1beta1.ApplicationProfileContainer {
-					for _, info := range containerInfos {
-						seccompProfile, err := am.seccompManager.GetSeccompProfile(info.Name, watchedContainer.SeccompProfilePath)
-						if err != nil {
-							logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
-								helpers.String("slug", slug),
-								helpers.Int("container index", watchedContainer.ContainerIndex),
-								helpers.String("container ID", watchedContainer.ContainerID),
-								helpers.String("k8s workload", watchedContainer.K8sContainerID))
-						}
-						containers = append(containers, v1beta1.ApplicationProfileContainer{
-							Name:                 info.Name,
-							Endpoints:            make([]v1beta1.HTTPEndpoint, 0),
-							Execs:                make([]v1beta1.ExecCalls, 0),
-							Opens:                make([]v1beta1.OpenCalls, 0),
-							Capabilities:         make([]string, 0),
-							Syscalls:             make([]string, 0),
-							PolicyByRuleId:       make(map[string]v1beta1.RulePolicy),
-							IdentifiedCallStacks: make([]v1beta1.IdentifiedCallStack, 0),
-							SeccompProfile:       seccompProfile,
-							ImageTag:             info.ImageTag,
-							ImageID:              info.ImageID,
-						})
-					}
-					return containers
-				}
-				newObject.Spec.Architectures = []string{runtime.GOARCH}
-				newObject.Spec.Containers = addContainers(newObject.Spec.Containers, watchedContainer.ContainerInfos[utils.Container])
-				newObject.Spec.InitContainers = addContainers(newObject.Spec.InitContainers, watchedContainer.ContainerInfos[utils.InitContainer])
-				newObject.Spec.EphemeralContainers = addContainers(newObject.Spec.EphemeralContainers, watchedContainer.ContainerInfos[utils.EphemeralContainer])
-				// enrich container
-				newContainer := utils.GetApplicationProfileContainer(newObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
-				utils.EnrichApplicationProfileContainer(newContainer, capabilities, observedSyscalls, execs, opens, endpoints, rulePolicies, callStacks, watchedContainer.ImageID, watchedContainer.ImageTag)
-				// try to create object
-				if err := am.storageClient.CreateApplicationProfile(newObject, namespace); err != nil {
-					gotErr = err
-					logger.L().Ctx(ctx).Warning("ApplicationProfileManager - failed to create application profile", helpers.Error(err),
-						helpers.String("slug", slug),
-						helpers.Int("container index", watchedContainer.ContainerIndex),
-						helpers.String("container ID", watchedContainer.ContainerID),
-						helpers.String("k8s workload", watchedContainer.K8sContainerID))
-				}
-			default:
-				logger.L().Debug("ApplicationProfileManager - failed to patch application profile, will get existing one and adjust patch", helpers.Error(err),
-					helpers.String("slug", slug),
-					helpers.Int("container index", watchedContainer.ContainerIndex),
-					helpers.String("container ID", watchedContainer.ContainerID),
-					helpers.String("k8s workload", watchedContainer.K8sContainerID))
-				// 2b. get existing object
-				existingObject, err := am.storageClient.GetApplicationProfile(namespace, slug)
-				if err != nil {
-					gotErr = err
-					logger.L().Ctx(ctx).Warning("ApplicationProfileManager - failed to get existing application profile", helpers.Error(err),
-						helpers.String("slug", slug),
-						helpers.Int("container index", watchedContainer.ContainerIndex),
-						helpers.String("container ID", watchedContainer.ContainerID),
-						helpers.String("k8s workload", watchedContainer.K8sContainerID))
-				} else {
-					var replaceOperations []utils.PatchOperation
-					containerNames := watchedContainer.ContainerInfos[watchedContainer.ContainerType]
-					// check existing container
-					existingContainer := utils.GetApplicationProfileContainer(existingObject, watchedContainer.ContainerType, watchedContainer.ContainerIndex)
-					if existingContainer == nil {
-						info := containerNames[watchedContainer.ContainerIndex]
-						seccompProfile, err := am.seccompManager.GetSeccompProfile(info.Name, watchedContainer.SeccompProfilePath)
-						if err != nil {
-							logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
-								helpers.String("slug", slug),
-								helpers.Int("container index", watchedContainer.ContainerIndex),
-								helpers.String("container ID", watchedContainer.ContainerID),
-								helpers.String("k8s workload", watchedContainer.K8sContainerID))
-						}
-						existingContainer = &v1beta1.ApplicationProfileContainer{
-							Name:                 info.Name,
-							Endpoints:            make([]v1beta1.HTTPEndpoint, 0),
-							Execs:                make([]v1beta1.ExecCalls, 0),
-							Opens:                make([]v1beta1.OpenCalls, 0),
-							Capabilities:         make([]string, 0),
-							Syscalls:             make([]string, 0),
-							PolicyByRuleId:       make(map[string]v1beta1.RulePolicy),
-							IdentifiedCallStacks: make([]v1beta1.IdentifiedCallStack, 0),
-							SeccompProfile:       seccompProfile,
-							ImageTag:             info.ImageTag,
-							ImageID:              info.ImageID,
-						}
-					}
-					// update it
-					utils.EnrichApplicationProfileContainer(existingContainer, capabilities, observedSyscalls, execs, opens, endpoints, rulePolicies, callStacks, watchedContainer.ImageID, watchedContainer.ImageTag)
-					// get existing containers
-					var existingContainers []v1beta1.ApplicationProfileContainer
-					if watchedContainer.ContainerType == utils.Container {
-						existingContainers = existingObject.Spec.Containers
-					} else if watchedContainer.ContainerType == utils.InitContainer {
-						existingContainers = existingObject.Spec.InitContainers
-					} else {
-						existingContainers = existingObject.Spec.EphemeralContainers
-					}
-					// replace or add container using patch
-					// 3a. ensure we have a container slice
-					if existingContainers == nil {
-						replaceOperations = append(replaceOperations, utils.PatchOperation{
-							Op:    "add",
-							Path:  fmt.Sprintf("/spec/%s", watchedContainer.ContainerType),
-							Value: make([]v1beta1.ApplicationProfileContainer, 0),
-						})
-					}
-					// 3b. ensure the slice has all the containers
-					for i := len(existingContainers); i < len(containerNames); i++ {
-						info := containerNames[i]
-						seccompProfile, err := am.seccompManager.GetSeccompProfile(info.Name, watchedContainer.SeccompProfilePath)
-						if err != nil {
-							logger.L().Ctx(ctx).Debug("ApplicationProfileManager - failed to get seccomp profile", helpers.Error(err),
-								helpers.String("slug", slug),
-								helpers.Int("container index", watchedContainer.ContainerIndex),
-								helpers.String("container ID", watchedContainer.ContainerID),
-								helpers.String("k8s workload", watchedContainer.K8sContainerID))
-						}
-						replaceOperations = append(replaceOperations, utils.PatchOperation{
-							Op:   "add",
-							Path: fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, i),
-							Value: v1beta1.ApplicationProfileContainer{
-								Name:                 info.Name,
-								Endpoints:            make([]v1beta1.HTTPEndpoint, 0),
-								Execs:                make([]v1beta1.ExecCalls, 0),
-								Opens:                make([]v1beta1.OpenCalls, 0),
-								Capabilities:         make([]string, 0),
-								Syscalls:             make([]string, 0),
-								PolicyByRuleId:       make(map[string]v1beta1.RulePolicy),
-								IdentifiedCallStacks: make([]v1beta1.IdentifiedCallStack, 0),
-								SeccompProfile:       seccompProfile,
-								ImageTag:             info.ImageTag,
-								ImageID:              info.ImageID,
-							},
-						})
-					}
-					// 3c. replace the existing container at the right index
-					replaceOperations = append(replaceOperations, utils.PatchOperation{
-						Op:    "replace",
-						Path:  fmt.Sprintf("/spec/%s/%d", watchedContainer.ContainerType, watchedContainer.ContainerIndex),
-						Value: existingContainer,
-					})
-
-					replaceOperations = utils.AppendStatusAnnotationPatchOperations(replaceOperations, watchedContainer)
-					if len(existingObject.Spec.Architectures) == 0 {
-						replaceOperations = append(replaceOperations, utils.PatchOperation{
-							Op:    "add",
-							Path:  "/spec/architectures",
-							Value: []string{runtime.GOARCH},
-						})
-					} else {
-						replaceOperations = append(replaceOperations, utils.PatchOperation{
-							Op:    "add",
-							Path:  "/spec/architectures/-",
-							Value: runtime.GOARCH,
-						})
-					}
-
-					if err := am.storageClient.PatchApplicationProfile(slug, namespace, replaceOperations, watchedContainer); err != nil {
-						gotErr = err
-						logger.L().Ctx(ctx).Warning("ApplicationProfileManager - failed to patch application profile", helpers.Error(err),
-							helpers.String("slug", slug),
-							helpers.Int("container index", watchedContainer.ContainerIndex),
-							helpers.String("container ID", watchedContainer.ContainerID),
-							helpers.String("k8s workload", watchedContainer.K8sContainerID))
-					}
-				}
-			}
+		if watchedContainer.PreviousProfileTS != nil {
+			newObject.ObjectMeta.Annotations[helpersv1.PreviousReportTimestampMetadataKey] = watchedContainer.PreviousProfileTS.Format(time.RFC3339)
 		}
-		if gotErr != nil {
+		newContainer := utils.GetApplicationProfileContainer(newObject, watchedContainer.ContainerType)
+		utils.EnrichApplicationProfileContainer(newContainer, capabilities, observedSyscalls, execs, opens, endpoints, rulePolicies, callStacks, watchedContainer.ImageID, watchedContainer.ImageTag)
+		// try to create object
+		if err := am.storageClient.CreateApplicationProfile(newObject, namespace); err != nil {
+			logger.L().Ctx(ctx).Warning("ApplicationProfileManager - failed to create application profile", helpers.Error(err),
+				helpers.String("slug", slug),
+				helpers.Int("container index", watchedContainer.ContainerIndex),
+				helpers.String("container ID", watchedContainer.ContainerID),
+				helpers.String("k8s workload", watchedContainer.K8sContainerID))
 			// restore capabilities set
 			am.toSaveCapabilities.Get(watchedContainer.K8sContainerID).Append(capabilities...)
 			// restore endpoints map entries
@@ -572,7 +384,7 @@ func (am *ApplicationProfileManager) saveProfile(ctx context.Context, watchedCon
 		} else {
 			// for status updates to be tracked, we reset the update flag
 			watchedContainer.ResetStatusUpdatedFlag()
-
+			watchedContainer.PreviousProfileTS = &now
 			// record saved syscalls
 			am.savedSyscalls.Get(watchedContainer.K8sContainerID).Append(toSaveSyscalls...)
 			// record saved capabilities

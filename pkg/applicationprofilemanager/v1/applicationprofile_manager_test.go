@@ -299,41 +299,27 @@ func TestApplicationProfileManager(t *testing.T) {
 	// verify generated CRDs
 	assert.Equal(t, 2, len(storageClient.ApplicationProfiles))
 	// check the first profile
-	sort.Strings(storageClient.ApplicationProfiles[0].Spec.Containers[0].Capabilities)
-	assert.Equal(t, []string{"dup", "listen"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Syscalls)
-	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Capabilities)
-
-	reportedExecs := storageClient.ApplicationProfiles[0].Spec.Containers[1].Execs
-	expectedExecs := []v1beta1.ExecCalls{
+	assert.Equal(t, []string{"NET_BIND_SERVICE"},
+		storageClient.ApplicationProfiles[0].Spec.Containers[0].Capabilities)
+	assert.ElementsMatch(t, []v1beta1.ExecCalls{
 		{Path: "/bin/bash", Args: []string{"/bin/bash", "-c", "ls"}, Envs: []string(nil)},
 		{Path: "/bin/bash", Args: []string{"/bin/bash", "-c", "ls", "-l"}, Envs: []string(nil)},
 		{Path: "/bin/bash", Args: []string{"/bin/bash", "ls", "-c"}, Envs: []string(nil)},
 		{Path: "/bin/ls", Args: []string{"/bin/ls", "-l"}, Envs: []string(nil)},
-	}
-	assert.Len(t, reportedExecs, len(expectedExecs))
-	for _, expectedExec := range expectedExecs {
-		assert.Contains(t, reportedExecs, expectedExec)
-	}
-	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}}, storageClient.ApplicationProfiles[0].Spec.Containers[1].Opens)
-
-	expectedEndpoints := GetExcpectedEndpoints(t)
-	actualEndpoints := storageClient.ApplicationProfiles[1].Spec.Containers[1].Endpoints
-
-	sortHTTPEndpoints(expectedEndpoints)
-	sortHTTPEndpoints(actualEndpoints)
-
-	assert.Equal(t, expectedEndpoints, actualEndpoints)
-	// check the second profile - this is a patch for execs and opens
-	sort.Strings(storageClient.ApplicationProfiles[1].Spec.Containers[0].Capabilities)
-	assert.Equal(t, []string{"NET_BIND_SERVICE"}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Capabilities)
-	assert.Equal(t, storageClient.ApplicationProfiles[0].Spec.Containers[1].Execs, storageClient.ApplicationProfiles[1].Spec.Containers[1].Execs)
-	assert.Equal(t, []v1beta1.OpenCalls{
-		{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}},
+	}, storageClient.ApplicationProfiles[0].Spec.Containers[0].Execs)
+	assert.Equal(t, []v1beta1.OpenCalls{{Path: "/etc/passwd", Flags: []string{"O_RDONLY"}}},
+		storageClient.ApplicationProfiles[0].Spec.Containers[0].Opens)
+	assert.ElementsMatch(t, GetExpectedEndpoints(t),
+		storageClient.ApplicationProfiles[1].Spec.Containers[0].Endpoints)
+	// check the second profile
+	assert.ElementsMatch(t, []string{"dup", "listen"},
+		storageClient.ApplicationProfiles[1].Spec.Containers[0].Syscalls)
+	assert.ElementsMatch(t, []v1beta1.OpenCalls{
 		{Path: "/etc/hosts", Flags: []string{"O_RDONLY"}},
-	}, storageClient.ApplicationProfiles[1].Spec.Containers[1].Opens)
+	}, storageClient.ApplicationProfiles[1].Spec.Containers[0].Opens)
 }
 
-func GetExcpectedEndpoints(t *testing.T) []v1beta1.HTTPEndpoint {
+func GetExpectedEndpoints(t *testing.T) []v1beta1.HTTPEndpoint {
 	headers := map[string][]string{"Host": {"localhost"}, "Connection": {"keep-alive"}}
 	rawJSON, err := json.Marshal(headers)
 	assert.NoError(t, err)

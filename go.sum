@@ -703,8 +703,8 @@ github.com/kubescape/backend v0.0.25 h1:PLESA7KGJskebR5hiSqPeJ1cPQ8Ra+4yNYXKyIej
 github.com/kubescape/backend v0.0.25/go.mod h1:FpazfN+c3Ucuvv4jZYCnk99moSBRNMVIxl5aWCZAEBo=
 github.com/kubescape/go-logger v0.0.24 h1:JRNlblY16Ty7hD6MSYNPvWYDxNzVAufsDDX/sZJayL0=
 github.com/kubescape/go-logger v0.0.24/go.mod h1:sMPVCr3VpW/e+SeMaXig5kClGvmZbDXN8YktUeNU4nY=
-github.com/kubescape/k8s-interface v0.0.195 h1:pJ1PT3x3fd1WatLjyZbKAfE64PWtEbvxiFjOBKSBwuU=
-github.com/kubescape/k8s-interface v0.0.195/go.mod h1:j9snZbH+RxOaa1yG/bWgTClj90q7To0rGgQepxy4b+k=
+github.com/kubescape/k8s-interface v0.0.195-0.20250527060553-80251dee6213 h1:vCXFYNprGThMlxVPnotQ7DJk65N3X4d7H3ou3t4aSDA=
+github.com/kubescape/k8s-interface v0.0.195-0.20250527060553-80251dee6213/go.mod h1:j9snZbH+RxOaa1yG/bWgTClj90q7To0rGgQepxy4b+k=
 github.com/kubescape/storage v0.0.179 h1:IC2T6SPFu8zY1QTDfw5t6hsbru1779TFoefq/6gs4oY=
 github.com/kubescape/storage v0.0.179/go.mod h1:SBOGxgq1Hhhcu7yUd7LdENhPZU2ixvFhi10BIr8gSHk=
 github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf h1:hI0jVwrB6fT4GJWvuUjzObfci1CUknrZdRHfnRVtKM0=
