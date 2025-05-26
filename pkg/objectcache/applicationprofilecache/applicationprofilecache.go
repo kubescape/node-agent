@@ -380,15 +380,30 @@ func (apc *ApplicationProfileCacheImpl) ContainerCallback(notif containercollect
 		if apc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
-		// This method can be blocking but since this callback is called from a goroutine, we can afford to wait.
-		if err := apc.addContainer(notif.Container); err != nil {
-			logger.L().Error("failed to add container to the cache", helpers.Error(err))
-		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+
+			done := make(chan error, 1)
+			go func() {
+				done <- apc.addContainer(notif.Container)
+			}()
+
+			select {
+			case err := <-done:
+				if err != nil {
+					logger.L().Error("failed to add container to the cache", helpers.Error(err))
+				}
+			case <-ctx.Done():
+				logger.L().Error("timeout while adding container to the cache",
+					helpers.String("containerID", notif.Container.Runtime.ContainerID))
+			}
+		}()
 	case containercollection.EventTypeRemoveContainer:
 		if apc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
-		apc.deleteContainer(notif.Container.Runtime.ContainerID)
+		go apc.deleteContainer(notif.Container.Runtime.ContainerID)
 	}
 }
 

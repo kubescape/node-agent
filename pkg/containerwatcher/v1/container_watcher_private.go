@@ -126,6 +126,14 @@ func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *container
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workload: %w", err)
 	}
+	// make sure the pod is not pending (otherwise ImageID is empty in containerStatuses)
+	podStatus, err := wl.GetPodStatus()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod status: %w", err)
+	}
+	if podStatus.Phase == "Pending" {
+		return nil, fmt.Errorf("pod is still pending")
+	}
 	pod := wl.(*workloadinterface.Workload)
 	// fill container type, index and names
 	if watchedContainer.ContainerType == utils.Unknown {
