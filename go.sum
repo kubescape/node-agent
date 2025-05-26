@@ -707,8 +707,8 @@ github.com/kubescape/k8s-interface v0.0.195 h1:pJ1PT3x3fd1WatLjyZbKAfE64PWtEbvxi
 github.com/kubescape/k8s-interface v0.0.195/go.mod h1:j9snZbH+RxOaa1yG/bWgTClj90q7To0rGgQepxy4b+k=
 github.com/kubescape/storage v0.0.179 h1:IC2T6SPFu8zY1QTDfw5t6hsbru1779TFoefq/6gs4oY=
 github.com/kubescape/storage v0.0.179/go.mod h1:SBOGxgq1Hhhcu7yUd7LdENhPZU2ixvFhi10BIr8gSHk=
-github.com/kubescape/workerpool v0.0.0-20250508133046-be5bcbd29751 h1:F4OGgaV+v1xZ1kgbvD0Lfr8t5h5IjVEzljz2EXYUPLM=
-github.com/kubescape/workerpool v0.0.0-20250508133046-be5bcbd29751/go.mod h1:Il5baM40PV9cTt4OGdLMeTRRAai3TMfvImu31itIeCM=
+github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf h1:hI0jVwrB6fT4GJWvuUjzObfci1CUknrZdRHfnRVtKM0=
+github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf/go.mod h1:Il5baM40PV9cTt4OGdLMeTRRAai3TMfvImu31itIeCM=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80/go.mod h1:imJHygn/1yfhB7XSJJKlFZKl/J+dCPAknuiaGOshXAs=

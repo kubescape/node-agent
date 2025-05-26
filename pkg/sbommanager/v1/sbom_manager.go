@@ -160,7 +160,7 @@ func (s *SbomManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	// enqueue the container for processing
 	s.pool.Submit(func() {
 		s.processContainer(notif)
-	})
+	}, utils.FuncName(s.processContainer))
 }
 
 func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
