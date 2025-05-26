@@ -120,7 +120,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 
 	openEvent := fullEvent.Event
 
-	var appProfileOpenList v1beta1.ApplicationProfileContainer
+	var appProfileOpenList v1beta1.ApplicationProfileSpec
 	var err error
 
 	if objCache != nil {
@@ -129,7 +129,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) ProcessEvent(eventType utils.Eve
 			return nil
 		}
 
-		appProfileOpenList, err = GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
+		appProfileOpenList = ap.Spec
 		if err != nil {
 			return nil
 		}

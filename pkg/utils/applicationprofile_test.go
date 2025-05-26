@@ -21,57 +21,49 @@ func Test_EnrichApplicationProfileContainer(t *testing.T) {
 			Annotations:     map[string]string{},
 		},
 		Spec: v1beta1.ApplicationProfileSpec{
-			Containers: []v1beta1.ApplicationProfileContainer{
-				{
-					Name:         "server",
-					Capabilities: []string{"SETGID", "NET_ADMIN", "SYS_ADMIN", "SETPCAP", "SETUID"},
-					Execs: []v1beta1.ExecCalls{
-						{Path: "/checkoutservice", Args: []string{"/checkoutservice"}},
-						{Path: "/bin/grpc_health_probe", Args: []string{"/bin/grpc_health_probe", "-addr=:5050"}},
-					},
-					Opens:    nil,
-					Syscalls: []string{"nanosleep", "listen", "bind", "connect", "rt_sigaction"},
-				},
+			Capabilities: []string{"SETGID", "NET_ADMIN", "SYS_ADMIN", "SETPCAP", "SETUID"},
+			Execs: []v1beta1.ExecCalls{
+				{Path: "/checkoutservice", Args: []string{"/checkoutservice"}},
+				{Path: "/bin/grpc_health_probe", Args: []string{"/bin/grpc_health_probe", "-addr=:5050"}},
 			},
+			Opens:    nil,
+			Syscalls: []string{"nanosleep", "listen", "bind", "connect", "rt_sigaction"},
 		},
 		Status: struct{}{},
 	}
 
-	existingContainer := GetApplicationProfileContainer(applicationProfile, Container, 0)
-	assert.NotNil(t, existingContainer)
-
 	var test map[string]*v1beta1.HTTPEndpoint
 
 	// empty enrich
-	EnrichApplicationProfileContainer(existingContainer, []string{}, []string{}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{}, []v1beta1.IdentifiedCallStack{}, "", "")
-	assert.Equal(t, 5, len(existingContainer.Capabilities))
-	assert.Equal(t, 2, len(existingContainer.Execs))
-	assert.Equal(t, 5, len(existingContainer.Syscalls))
-	assert.Equal(t, 0, len(existingContainer.Opens))
+	EnrichApplicationProfileSpec(&applicationProfile.Spec, []string{}, []string{}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{}, []v1beta1.IdentifiedCallStack{}, "", "")
+	assert.Equal(t, 5, len(applicationProfile.Spec.Capabilities))
+	assert.Equal(t, 2, len(applicationProfile.Spec.Execs))
+	assert.Equal(t, 5, len(applicationProfile.Spec.Syscalls))
+	assert.Equal(t, 0, len(applicationProfile.Spec.Opens))
 
 	// enrich with existing capabilities, syscalls - no change
-	EnrichApplicationProfileContainer(existingContainer, []string{"SETGID"}, []string{"listen"}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{}, []v1beta1.IdentifiedCallStack{}, "", "")
-	assert.Equal(t, 5, len(existingContainer.Capabilities))
-	assert.Equal(t, 2, len(existingContainer.Execs))
-	assert.Equal(t, 5, len(existingContainer.Syscalls))
-	assert.Equal(t, 0, len(existingContainer.Opens))
+	EnrichApplicationProfileSpec(&applicationProfile.Spec, []string{"SETGID"}, []string{"listen"}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{}, []v1beta1.IdentifiedCallStack{}, "", "")
+	assert.Equal(t, 5, len(applicationProfile.Spec.Capabilities))
+	assert.Equal(t, 2, len(applicationProfile.Spec.Execs))
+	assert.Equal(t, 5, len(applicationProfile.Spec.Syscalls))
+	assert.Equal(t, 0, len(applicationProfile.Spec.Opens))
 
 	// enrich with new capabilities, syscalls - add
-	EnrichApplicationProfileContainer(existingContainer, []string{"NEW"}, []string{"xxx", "yyy"}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{}, []v1beta1.IdentifiedCallStack{}, "", "")
-	assert.Equal(t, 6, len(existingContainer.Capabilities))
-	assert.Equal(t, 2, len(existingContainer.Execs))
-	assert.Equal(t, 7, len(existingContainer.Syscalls))
-	assert.Equal(t, 0, len(existingContainer.Opens))
+	EnrichApplicationProfileSpec(&applicationProfile.Spec, []string{"NEW"}, []string{"xxx", "yyy"}, map[string][]string{}, map[string]mapset.Set[string]{}, test, map[string]v1beta1.RulePolicy{}, []v1beta1.IdentifiedCallStack{}, "", "")
+	assert.Equal(t, 6, len(applicationProfile.Spec.Capabilities))
+	assert.Equal(t, 2, len(applicationProfile.Spec.Execs))
+	assert.Equal(t, 7, len(applicationProfile.Spec.Syscalls))
+	assert.Equal(t, 0, len(applicationProfile.Spec.Opens))
 
 	// enrich with new opens
 	opens := map[string]mapset.Set[string]{
 		"/checkoutservice": mapset.NewSet("O_RDONLY", "O_WRONLY"),
 	}
-	EnrichApplicationProfileContainer(existingContainer, []string{"NEW"}, []string{"xxx", "yyy"}, map[string][]string{}, opens, test, map[string]v1beta1.RulePolicy{}, []v1beta1.IdentifiedCallStack{}, "", "")
-	assert.Equal(t, 6, len(existingContainer.Capabilities))
-	assert.Equal(t, 2, len(existingContainer.Execs))
-	assert.Equal(t, 7, len(existingContainer.Syscalls))
-	assert.Equal(t, 1, len(existingContainer.Opens))
+	EnrichApplicationProfileSpec(&applicationProfile.Spec, []string{"NEW"}, []string{"xxx", "yyy"}, map[string][]string{}, opens, test, map[string]v1beta1.RulePolicy{}, []v1beta1.IdentifiedCallStack{}, "", "")
+	assert.Equal(t, 6, len(applicationProfile.Spec.Capabilities))
+	assert.Equal(t, 2, len(applicationProfile.Spec.Execs))
+	assert.Equal(t, 7, len(applicationProfile.Spec.Syscalls))
+	assert.Equal(t, 1, len(applicationProfile.Spec.Opens))
 }
 
 func TestMergePolicies(t *testing.T) {

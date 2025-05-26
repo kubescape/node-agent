@@ -75,13 +75,8 @@ func (rule *R0009EbpfProgramLoad) ProcessEvent(eventType utils.EventType, event 
 			return nil
 		}
 
-		appProfileSyscallList, err := GetContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
-		if err != nil {
-			return nil
-		}
-
 		// Check if the syscall is in the list of allowed syscalls
-		if slices.Contains(appProfileSyscallList.Syscalls, syscallEvent.SyscallName) {
+		if slices.Contains(ap.Spec.Syscalls, syscallEvent.SyscallName) {
 			return nil
 		}
 	}

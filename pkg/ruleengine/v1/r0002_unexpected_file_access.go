@@ -138,12 +138,7 @@ func (rule *R0002UnexpectedFileAccess) ProcessEvent(eventType utils.EventType, e
 		return nil
 	}
 
-	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
-	if err != nil {
-		return nil
-	}
-
-	for _, open := range appProfileOpenList.Opens {
+	for _, open := range ap.Spec.Opens {
 		if dynamicpathdetector.CompareDynamic(open.Path, openEvent.FullPath) {
 			found := 0
 			for _, eventOpenFlag := range openEvent.Flags {

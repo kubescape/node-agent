@@ -73,13 +73,8 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 		return nil
 	}
 
-	container, err := GetContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
-	if err != nil {
-		return nil
-	}
-
 	// If the syscall is whitelisted, return nil
-	for _, syscall := range container.Syscalls {
+	for _, syscall := range ap.Spec.Syscalls {
 		if syscall == syscallEvent.SyscallName {
 			return nil
 		}

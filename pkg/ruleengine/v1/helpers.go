@@ -50,25 +50,6 @@ func GetExecFullPathFromEvent(event *events.ExecEvent) string {
 	return execPath
 }
 
-func GetContainerFromApplicationProfile(ap *v1beta1.ApplicationProfile, containerName string) (v1beta1.ApplicationProfileContainer, error) {
-	for _, s := range ap.Spec.Containers {
-		if s.Name == containerName {
-			return s, nil
-		}
-	}
-	for _, s := range ap.Spec.InitContainers {
-		if s.Name == containerName {
-			return s, nil
-		}
-	}
-	for _, s := range ap.Spec.EphemeralContainers {
-		if s.Name == containerName {
-			return s, nil
-		}
-	}
-	return v1beta1.ApplicationProfileContainer{}, ContainerNotFound
-}
-
 func GetContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, containerName string) (v1beta1.NetworkNeighborhoodContainer, error) {
 	for _, c := range nn.Spec.Containers {
 		if c.Name == containerName {
@@ -131,12 +112,7 @@ func IsExecEventInProfile(execEvent *events.ExecEvent, objectCache objectcache.O
 		return false, ProfileNotFound
 	}
 
-	appProfileExecList, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())
-	if err != nil {
-		return false, ContainerNotFound
-	}
-
-	for _, exec := range appProfileExecList.Execs {
+	for _, exec := range ap.Spec.Execs {
 		if exec.Path == execPath {
 			// Either compare args false or args match
 			if !compareArgs || slices.Compare(exec.Args, execEvent.Args) == 0 {
@@ -168,17 +144,12 @@ func IsAllowed(event *eventtypes.Event, objCache objectcache.ObjectCache, proces
 		return false, errors.New("application profile not found")
 	}
 
-	appProfile, err := GetContainerFromApplicationProfile(ap, event.GetContainer())
-	if err != nil {
-		return false, err
-	}
-
 	// rule policy does not exists, allowed by default
-	if _, ok := appProfile.PolicyByRuleId[ruleId]; !ok {
+	if _, ok := ap.Spec.PolicyByRuleId[ruleId]; !ok {
 		return true, nil
 	}
 
-	if policy, ok := appProfile.PolicyByRuleId[ruleId]; ok {
+	if policy, ok := ap.Spec.PolicyByRuleId[ruleId]; ok {
 		if policy.AllowedContainer || slices.Contains(policy.AllowedProcesses, process) {
 			logger.L().Debug("isAllowed - process is allowed by policy", helpers.String("ruleID", ruleId), helpers.String("process", process))
 			return true, nil

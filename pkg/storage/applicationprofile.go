@@ -15,10 +15,7 @@ func (sc *StorageHttpClientMock) GetApplicationProfile(_, _ string) (*v1beta1.Ap
 	if len(sc.ApplicationProfiles) == 0 {
 		return &v1beta1.ApplicationProfile{
 			Spec: v1beta1.ApplicationProfileSpec{
-				Containers: []v1beta1.ApplicationProfileContainer{
-					{Capabilities: []string{"SYS_ADMIN"}},
-					{Capabilities: []string{"NET_BROADCAST"}},
-				},
+				Capabilities: []string{"SYS_ADMIN", "NET_BROADCAST"},
 			},
 		}, nil
 	}

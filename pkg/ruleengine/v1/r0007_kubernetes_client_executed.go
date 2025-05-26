@@ -14,8 +14,6 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -115,14 +113,8 @@ func (rule *R0007KubernetesClientExecuted) handleNetworkEvent(event *tracernetwo
 }
 
 func (rule *R0007KubernetesClientExecuted) handleExecEvent(event *events.ExecEvent, ap *v1beta1.ApplicationProfile) *GenericRuleFailure {
-	whitelistedExecs, err := GetContainerFromApplicationProfile(ap, event.GetContainer())
-	if err != nil {
-		logger.L().Error("R0007KubernetesClientExecuted.handleExecEvent - failed to get container from application profile", helpers.String("ruleID", rule.ID()), helpers.String("error", err.Error()))
-		return nil
-	}
-
 	execPath := GetExecPathFromEvent(event)
-	for _, whitelistedExec := range whitelistedExecs.Execs {
+	for _, whitelistedExec := range ap.Spec.Execs {
 		if whitelistedExec.Path == execPath {
 			return nil
 		}

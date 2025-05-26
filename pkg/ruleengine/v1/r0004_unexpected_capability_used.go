@@ -66,16 +66,11 @@ func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventTyp
 		return nil
 	}
 
-	appProfileCapabilitiesList, err := GetContainerFromApplicationProfile(ap, capEvent.GetContainer())
-	if err != nil {
-		return nil
-	}
-
 	if rule.alertedCapabilities.Has(capEvent.CapName) {
 		return nil
 	}
 
-	for _, capability := range appProfileCapabilitiesList.Capabilities {
+	for _, capability := range ap.Spec.Capabilities {
 		if capEvent.CapName == capability {
 			return nil
 		}

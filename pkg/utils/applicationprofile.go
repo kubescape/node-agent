@@ -94,7 +94,7 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 	return profileOperations
 }
 
-func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, rulePolicies map[string]v1beta1.RulePolicy, callStacks []v1beta1.IdentifiedCallStack, imageID, imageTag string) {
+func EnrichApplicationProfileSpec(container *v1beta1.ApplicationProfileSpec, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, rulePolicies map[string]v1beta1.RulePolicy, callStacks []v1beta1.IdentifiedCallStack, imageID, imageTag string) {
 	// add image metadata
 	container.ImageID = imageID
 	container.ImageTag = imageTag
@@ -154,28 +154,6 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 	// add call stacks
 	container.IdentifiedCallStacks = append(container.IdentifiedCallStacks, callStacks...)
 
-}
-
-// TODO make generic?
-func GetApplicationProfileContainer(object *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) *v1beta1.ApplicationProfileContainer {
-	if object == nil {
-		return nil
-	}
-	switch containerType {
-	case Container:
-		if len(object.Spec.Containers) > containerIndex {
-			return &object.Spec.Containers[containerIndex]
-		}
-	case InitContainer:
-		if len(object.Spec.InitContainers) > containerIndex {
-			return &object.Spec.InitContainers[containerIndex]
-		}
-	case EphemeralContainer:
-		if len(object.Spec.EphemeralContainers) > containerIndex {
-			return &object.Spec.EphemeralContainers[containerIndex]
-		}
-	}
-	return nil
 }
 
 func MergePolicies(primary, secondary v1beta1.RulePolicy) v1beta1.RulePolicy {

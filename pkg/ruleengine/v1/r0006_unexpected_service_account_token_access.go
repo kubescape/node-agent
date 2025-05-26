@@ -118,16 +118,11 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 		return nil
 	}
 
-	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
-	if err != nil {
-		return nil
-	}
-
 	// Normalize the accessed path once
 	normalizedAccessedPath := normalizeTimestampPath(openEvent.FullPath)
 
 	// Check against whitelisted paths
-	for _, open := range appProfileOpenList.Opens {
+	for _, open := range ap.Spec.Opens {
 		normalizedWhitelistedPath := normalizeTimestampPath(open.Path)
 		if dynamicpathdetector.CompareDynamic(filepath.Dir(normalizedWhitelistedPath), filepath.Dir(normalizedAccessedPath)) {
 			return nil

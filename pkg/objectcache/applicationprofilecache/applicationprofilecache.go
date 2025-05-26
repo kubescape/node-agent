@@ -319,46 +319,12 @@ func (apc *ApplicationProfileCacheImpl) indexContainerCallStacks(containerID, co
 		searchTree: callStackSearchTree,
 	})
 
-	// Iterate over the containers in the application profile
-	// Find the container in the profile and index its call stacks
-	for _, c := range appProfile.Spec.Containers {
-		if c.Name == containerName {
-			// Index all call stacks
-			for _, stack := range c.IdentifiedCallStacks {
-				callStackSearchTree.AddCallStack(stack)
-			}
-
-			// Clear the call stacks to free memory
-			c.IdentifiedCallStacks = nil
-			break
-		}
+	for _, stack := range appProfile.Spec.IdentifiedCallStacks {
+		callStackSearchTree.AddCallStack(stack)
 	}
 
-	// Also check init containers
-	for _, c := range appProfile.Spec.InitContainers {
-		if c.Name == containerName {
-			for _, stack := range c.IdentifiedCallStacks {
-				callStackSearchTree.AddCallStack(stack)
-			}
-
-			// Clear the call stacks to free memory
-			c.IdentifiedCallStacks = nil
-			break
-		}
-	}
-
-	// And ephemeral containers
-	for _, c := range appProfile.Spec.EphemeralContainers {
-		if c.Name == containerName {
-			for _, stack := range c.IdentifiedCallStacks {
-				callStackSearchTree.AddCallStack(stack)
-			}
-
-			// Clear the call stacks to free memory
-			c.IdentifiedCallStacks = nil
-			break
-		}
-	}
+	// Clear the call stacks to free memory
+	appProfile.Spec.IdentifiedCallStacks = nil
 }
 
 // ContainerCallback handles container lifecycle events
@@ -494,49 +460,20 @@ func (apc *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedP
 	mergedProfile := normalProfile.DeepCopy()
 
 	// Merge spec
-	mergedProfile.Spec.Containers = apc.mergeContainers(mergedProfile.Spec.Containers, userManagedProfile.Spec.Containers)
-	mergedProfile.Spec.InitContainers = apc.mergeContainers(mergedProfile.Spec.InitContainers, userManagedProfile.Spec.InitContainers)
-	mergedProfile.Spec.EphemeralContainers = apc.mergeContainers(mergedProfile.Spec.EphemeralContainers, userManagedProfile.Spec.EphemeralContainers)
+	mergedProfile.Spec.Capabilities = append(mergedProfile.Spec.Capabilities, userManagedProfile.Spec.Capabilities...)
+	mergedProfile.Spec.Execs = append(mergedProfile.Spec.Execs, userManagedProfile.Spec.Execs...)
+	mergedProfile.Spec.Opens = append(mergedProfile.Spec.Opens, userManagedProfile.Spec.Opens...)
+	mergedProfile.Spec.Syscalls = append(mergedProfile.Spec.Syscalls, userManagedProfile.Spec.Syscalls...)
+	mergedProfile.Spec.Endpoints = append(mergedProfile.Spec.Endpoints, userManagedProfile.Spec.Endpoints...)
+	for k, v := range userManagedProfile.Spec.PolicyByRuleId {
+		if existingPolicy, exists := mergedProfile.Spec.PolicyByRuleId[k]; exists {
+			mergedProfile.Spec.PolicyByRuleId[k] = utils.MergePolicies(existingPolicy, v)
+		} else {
+			mergedProfile.Spec.PolicyByRuleId[k] = v
+		}
+	}
 
 	return mergedProfile
-}
-
-func (apc *ApplicationProfileCacheImpl) mergeContainers(normalContainers, userManagedContainers []v1beta1.ApplicationProfileContainer) []v1beta1.ApplicationProfileContainer {
-	if len(userManagedContainers) != len(normalContainers) {
-		// If the number of containers don't match, we can't merge
-		logger.L().Warning("ApplicationProfileCacheImpl - failed to merge user-managed profile with base profile",
-			helpers.Int("normalContainers len", len(normalContainers)),
-			helpers.Int("userManagedContainers len", len(userManagedContainers)),
-			helpers.String("reason", "number of containers don't match"))
-		return normalContainers
-	}
-
-	// Assuming the normalContainers are already in the correct Pod order
-	// We'll merge user containers at their corresponding positions
-	for i := range normalContainers {
-		for _, userContainer := range userManagedContainers {
-			if normalContainers[i].Name == userContainer.Name {
-				apc.mergeContainer(&normalContainers[i], &userContainer)
-				break
-			}
-		}
-	}
-	return normalContainers
-}
-
-func (apc *ApplicationProfileCacheImpl) mergeContainer(normalContainer, userContainer *v1beta1.ApplicationProfileContainer) {
-	normalContainer.Capabilities = append(normalContainer.Capabilities, userContainer.Capabilities...)
-	normalContainer.Execs = append(normalContainer.Execs, userContainer.Execs...)
-	normalContainer.Opens = append(normalContainer.Opens, userContainer.Opens...)
-	normalContainer.Syscalls = append(normalContainer.Syscalls, userContainer.Syscalls...)
-	normalContainer.Endpoints = append(normalContainer.Endpoints, userContainer.Endpoints...)
-	for k, v := range userContainer.PolicyByRuleId {
-		if existingPolicy, exists := normalContainer.PolicyByRuleId[k]; exists {
-			normalContainer.PolicyByRuleId[k] = utils.MergePolicies(existingPolicy, v)
-		} else {
-			normalContainer.PolicyByRuleId[k] = v
-		}
-	}
 }
 
 func isUserManagedProfile(appProfile *v1beta1.ApplicationProfile) bool {

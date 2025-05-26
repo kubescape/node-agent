@@ -74,12 +74,7 @@ func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventTy
 		return nil
 	}
 
-	appProfileExecList, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())
-	if err != nil {
-		return nil
-	}
-
-	for _, execCall := range appProfileExecList.Execs {
+	for _, execCall := range ap.Spec.Execs {
 		if execCall.Path == execPath {
 			// if enforceArgs is set to true, we need to compare the arguments as well
 			// if not set, we only compare the path
