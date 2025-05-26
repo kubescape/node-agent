@@ -42,8 +42,7 @@ type ApplicationProfileCacheImpl struct {
 	workloadIDToProfile            maps.SafeMap[string, *v1beta1.ApplicationProfile]
 	workloadIDToProfileState       maps.SafeMap[string, *objectcache.ProfileState] // Tracks profile state even if not in cache
 	containerIDToInfo              maps.SafeMap[string, *ContainerInfo]
-	namespaceToContainers          maps.SafeMap[string, mapset.Set[string]] // namespace -> set of containerIDs
-	profileToUserManagedIdentifier maps.SafeMap[string, string]             // profileName -> user-managed profile unique identifier (This is used to prevent merging the same user-managed profile multiple times)
+	profileToUserManagedIdentifier maps.SafeMap[string, string] // profileName -> user-managed profile unique identifier (This is used to prevent merging the same user-managed profile multiple times)
 	containerToCallStackIndex      maps.SafeMap[string, *ContainerCallStackIndex]
 	storageClient                  versioned.SpdxV1beta1Interface
 	k8sObjectCache                 objectcache.K8sObjectCache
@@ -58,15 +57,15 @@ func NewApplicationProfileCache(cfg config.Config, storageClient versioned.SpdxV
 	updateInterval := utils.AddJitter(cfg.ProfilesCacheRefreshRate, 10) // Add 10% jitter to avoid high load on the storage
 
 	apc := &ApplicationProfileCacheImpl{
-		cfg:                       cfg,
-		workloadIDToProfile:       maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
-		workloadIDToProfileState:  maps.SafeMap[string, *objectcache.ProfileState]{},
-		containerIDToInfo:         maps.SafeMap[string, *ContainerInfo]{},
-		namespaceToContainers:     maps.SafeMap[string, mapset.Set[string]]{},
-		containerToCallStackIndex: maps.SafeMap[string, *ContainerCallStackIndex]{},
-		storageClient:             storageClient,
-		k8sObjectCache:            k8sObjectCache,
-		updateInterval:            updateInterval,
+		cfg:                            cfg,
+		workloadIDToProfile:            maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
+		workloadIDToProfileState:       maps.SafeMap[string, *objectcache.ProfileState]{},
+		containerIDToInfo:              maps.SafeMap[string, *ContainerInfo]{},
+		profileToUserManagedIdentifier: maps.SafeMap[string, string]{},
+		containerToCallStackIndex:      maps.SafeMap[string, *ContainerCallStackIndex]{},
+		storageClient:                  storageClient,
+		k8sObjectCache:                 k8sObjectCache,
+		updateInterval:                 updateInterval,
 	}
 
 	return apc
@@ -115,8 +114,8 @@ func (apc *ApplicationProfileCacheImpl) periodicUpdate(ctx context.Context) {
 
 // updateAllProfiles fetches all application profiles from storage and updates the cache
 func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
-	// Process namespace by namespace to optimize LIST operations
-	namespaces := apc.namespaceToContainers.Keys()
+	// Get unique namespaces from container info
+	namespaces := apc.getNamespaces()
 	if len(namespaces) == 0 {
 		logger.L().Debug("no namespaces found in cache, skipping profile update")
 		return
@@ -124,16 +123,11 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 
 	// Iterate over each namespace
 	for _, namespace := range namespaces {
-		// Get the set of container IDs for this namespace
-		containerSet, exists := apc.namespaceToContainers.Load(namespace)
-		if !exists || containerSet == nil {
+		// Get container IDs for this namespace
+		containerIDs := apc.getContainerIDsForNamespace(namespace)
+		if len(containerIDs) == 0 {
 			logger.L().Debug("no containers found for namespace, skipping",
 				helpers.String("namespace", namespace))
-			continue // Skip to next namespace
-		}
-
-		// Skip empty namespaces
-		if containerSet.Cardinality() == 0 {
 			continue
 		}
 
@@ -143,7 +137,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			logger.L().Error("failed to list application profiles",
 				helpers.String("namespace", namespace),
 				helpers.Error(err))
-			continue // Continue to next namespace
+			continue
 		}
 
 		// Process each profile
@@ -176,7 +170,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 
 			// Check if this workload ID is used by any container in this namespace
 			workloadIDInUse := false
-			for _, containerID := range containerSet.ToSlice() {
+			for _, containerID := range containerIDs {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
 					containerInfo.WorkloadID == workloadID &&
 					containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
@@ -223,7 +217,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 				helpers.String("completion", profile.Annotations[helpersv1.CompletionMetadataKey]))
 
 			// Update call stack search trees for containers using this workload ID
-			for _, containerID := range containerSet.ToSlice() {
+			for _, containerID := range containerIDs {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
 					containerInfo.WorkloadID == workloadID &&
 					containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
@@ -405,13 +399,6 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 	containerLock.Lock()
 	defer containerLock.Unlock()
 
-	// Get container info
-	containerInfo, exists := apc.containerIDToInfo.Load(containerID)
-	if !exists {
-		logger.L().Debug("containerID not found in cache", helpers.String("containerID", containerID))
-		return nil
-	}
-
 	// Get workload ID from shared data
 	sharedData, err := apc.waitForSharedContainerData(containerID)
 	if err != nil {
@@ -428,7 +415,7 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 	}
 
 	// Create container info
-	containerInfo = &ContainerInfo{
+	containerInfo := &ContainerInfo{
 		ContainerID:          containerID,
 		WorkloadID:           workloadID,
 		InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
@@ -438,14 +425,6 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 
 	// Add to container info map
 	apc.containerIDToInfo.Set(containerID, containerInfo)
-
-	// Add to namespace -> containers mapping
-	containerSet, exists := apc.namespaceToContainers.Load(container.K8s.Namespace)
-	if !exists || containerSet == nil {
-		containerSet = mapset.NewSet[string]()
-		apc.namespaceToContainers.Set(container.K8s.Namespace, containerSet)
-	}
-	containerSet.Add(containerID)
 
 	// Create workload ID to state mapping
 	if _, exists := apc.workloadIDToProfileState.Load(workloadID); !exists {
@@ -471,14 +450,6 @@ func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
 	if !exists {
 		logger.L().Debug("containerID not found in cache", helpers.String("containerID", containerID))
 		return
-	}
-
-	// Clean up namespace -> containers mapping
-	if containerSet, exists := apc.namespaceToContainers.Load(containerInfo.Namespace); exists {
-		containerSet.Remove(containerID)
-		if containerSet.Cardinality() == 0 {
-			apc.namespaceToContainers.Delete(containerInfo.Namespace)
-		}
 	}
 
 	// Clean up container info and call stack index
@@ -646,6 +617,28 @@ func (apc *ApplicationProfileCacheImpl) GetCallStackSearchTree(containerID strin
 func (apc *ApplicationProfileCacheImpl) getContainerLock(containerID string) *sync.Mutex {
 	lock, _ := apc.containerLocks.LoadOrStore(containerID, &sync.Mutex{})
 	return lock.(*sync.Mutex)
+}
+
+// Add new function to get unique namespaces from container info
+func (apc *ApplicationProfileCacheImpl) getNamespaces() []string {
+	namespaceSet := mapset.NewSet[string]()
+	apc.containerIDToInfo.Range(func(_ string, info *ContainerInfo) bool {
+		namespaceSet.Add(info.Namespace)
+		return true
+	})
+	return namespaceSet.ToSlice()
+}
+
+// Add new function to get container IDs for a namespace
+func (apc *ApplicationProfileCacheImpl) getContainerIDsForNamespace(namespace string) []string {
+	containerIDs := []string{}
+	apc.containerIDToInfo.Range(func(containerID string, info *ContainerInfo) bool {
+		if info.Namespace == namespace {
+			containerIDs = append(containerIDs, containerID)
+		}
+		return true
+	})
+	return containerIDs
 }
 
 // Ensure ApplicationProfileCacheImpl implements the ApplicationProfileCache interface

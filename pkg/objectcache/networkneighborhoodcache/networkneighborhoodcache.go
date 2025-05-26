@@ -36,8 +36,7 @@ type NetworkNeighborhoodCacheImpl struct {
 	workloadIDToNetworkNeighborhood            maps.SafeMap[string, *v1beta1.NetworkNeighborhood]
 	workloadIDToProfileState                   maps.SafeMap[string, *objectcache.ProfileState] // Tracks profile state even if not in cache
 	containerIDToInfo                          maps.SafeMap[string, *ContainerInfo]
-	namespaceToContainers                      maps.SafeMap[string, mapset.Set[string]] // namespace -> set of containerIDs
-	networkNeighborhoodToUserManagedIdentifier maps.SafeMap[string, string]             // networkNeighborhoodName -> user-managed profile unique identifier
+	networkNeighborhoodToUserManagedIdentifier maps.SafeMap[string, string] // networkNeighborhoodName -> user-managed profile unique identifier
 	storageClient                              versioned.SpdxV1beta1Interface
 	k8sObjectCache                             objectcache.K8sObjectCache
 	updateInterval                             time.Duration
@@ -55,7 +54,6 @@ func NewNetworkNeighborhoodCache(cfg config.Config, storageClient versioned.Spdx
 		workloadIDToNetworkNeighborhood: maps.SafeMap[string, *v1beta1.NetworkNeighborhood]{},
 		workloadIDToProfileState:        maps.SafeMap[string, *objectcache.ProfileState]{},
 		containerIDToInfo:               maps.SafeMap[string, *ContainerInfo]{},
-		namespaceToContainers:           maps.SafeMap[string, mapset.Set[string]]{},
 		networkNeighborhoodToUserManagedIdentifier: maps.SafeMap[string, string]{},
 		storageClient:  storageClient,
 		k8sObjectCache: k8sObjectCache,
@@ -108,24 +106,20 @@ func (nnc *NetworkNeighborhoodCacheImpl) periodicUpdate(ctx context.Context) {
 
 // updateAllNetworkNeighborhoods fetches all network neighborhoods from storage and updates the cache
 func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx context.Context) {
-	// Process namespace by namespace to optimize LIST operations
-	namespaces := nnc.namespaceToContainers.Keys()
+	// Get unique namespaces from container info
+	namespaces := nnc.getNamespaces()
 	if len(namespaces) == 0 {
 		logger.L().Debug("no namespaces found in cache, skipping network neighborhood update")
 		return
 	}
+
 	// Iterate over each namespace
 	for _, namespace := range namespaces {
-		// Get the set of container IDs for this namespace
-		containerSet, exists := nnc.namespaceToContainers.Load(namespace)
-		if !exists || containerSet == nil {
+		// Get container IDs for this namespace
+		containerIDs := nnc.getContainerIDsForNamespace(namespace)
+		if len(containerIDs) == 0 {
 			logger.L().Debug("no containers found for namespace, skipping",
 				helpers.String("namespace", namespace))
-			continue // Skip to next namespace
-		}
-
-		// Skip empty namespaces
-		if containerSet.Cardinality() == 0 {
 			continue
 		}
 
@@ -135,7 +129,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 			logger.L().Error("failed to list network neighborhoods",
 				helpers.String("namespace", namespace),
 				helpers.Error(err))
-			continue // Continue to next namespace
+			continue
 		}
 
 		// Process each network neighborhood
@@ -168,7 +162,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 
 			// Check if this workload ID is used by any container in this namespace
 			workloadIDInUse := false
-			for _, containerID := range containerSet.ToSlice() {
+			for _, containerID := range containerIDs {
 				if containerInfo, exists := nnc.containerIDToInfo.Load(containerID); exists &&
 					containerInfo.WorkloadID == workloadID &&
 					containerInfo.InstanceTemplateHash == nn.Labels[helpersv1.TemplateHashKey] {
@@ -320,7 +314,6 @@ func (nnc *NetworkNeighborhoodCacheImpl) ContainerCallback(notif containercollec
 
 // addContainer adds a container to the cache
 func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollection.Container) error {
-	// Get container ID and namespace directly from container
 	containerID := container.Runtime.ContainerID
 	namespace := container.K8s.Namespace
 	containerLock := nnc.getContainerLock(containerID)
@@ -353,14 +346,6 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 	// Add to container info map
 	nnc.containerIDToInfo.Set(containerID, containerInfo)
 
-	// Add to namespace -> containers mapping
-	containerSet, exists := nnc.namespaceToContainers.Load(namespace)
-	if !exists || containerSet == nil {
-		containerSet = mapset.NewSet[string]()
-		nnc.namespaceToContainers.Set(namespace, containerSet)
-	}
-	containerSet.Add(containerID)
-
 	// Create workload ID to state mapping
 	if _, exists := nnc.workloadIDToProfileState.Load(workloadID); !exists {
 		nnc.workloadIDToProfileState.Set(workloadID, nil)
@@ -385,14 +370,6 @@ func (nnc *NetworkNeighborhoodCacheImpl) deleteContainer(containerID string) {
 	if !exists {
 		logger.L().Debug("containerID not found in cache", helpers.String("containerID", containerID))
 		return
-	}
-
-	// Clean up namespace -> containers mapping
-	if containerSet, exists := nnc.namespaceToContainers.Load(containerInfo.Namespace); exists {
-		containerSet.Remove(containerID)
-		if containerSet.Cardinality() == 0 {
-			nnc.namespaceToContainers.Delete(containerInfo.Namespace)
-		}
 	}
 
 	// Clean up container info
@@ -670,3 +647,25 @@ func isUserManagedNN(nn *v1beta1.NetworkNeighborhood) bool {
 
 // Ensure NetworkNeighborhoodCacheImpl implements the NetworkNeighborhoodCache interface
 var _ objectcache.NetworkNeighborhoodCache = (*NetworkNeighborhoodCacheImpl)(nil)
+
+// Add new function to get unique namespaces from container info
+func (nnc *NetworkNeighborhoodCacheImpl) getNamespaces() []string {
+	namespaceSet := mapset.NewSet[string]()
+	nnc.containerIDToInfo.Range(func(_ string, info *ContainerInfo) bool {
+		namespaceSet.Add(info.Namespace)
+		return true
+	})
+	return namespaceSet.ToSlice()
+}
+
+// Add new function to get container IDs for a namespace
+func (nnc *NetworkNeighborhoodCacheImpl) getContainerIDsForNamespace(namespace string) []string {
+	containerIDs := []string{}
+	nnc.containerIDToInfo.Range(func(containerID string, info *ContainerInfo) bool {
+		if info.Namespace == namespace {
+			containerIDs = append(containerIDs, containerID)
+		}
+		return true
+	})
+	return containerIDs
+}
