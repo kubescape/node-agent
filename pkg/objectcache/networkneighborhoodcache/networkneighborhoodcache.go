@@ -318,7 +318,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainerWithTimeout(container *cont
 
 	done := make(chan error, 1)
 	go func() {
-		done <- nnc.addContainer(container)
+		done <- nnc.addContainer(container, ctx)
 	}()
 
 	select {
@@ -336,12 +336,12 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainerWithTimeout(container *cont
 }
 
 // addContainer adds a container to the cache
-func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollection.Container) error {
+func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollection.Container, ctx context.Context) error {
 	containerID := container.Runtime.ContainerID
 
 	return nnc.containerLocks.WithLockAndError(containerID, func() error {
 		// Get workload ID from shared data
-		sharedData, err := nnc.waitForSharedContainerData(containerID)
+		sharedData, err := nnc.waitForSharedContainerData(containerID, ctx)
 		if err != nil {
 			logger.L().Error("failed to get shared data for container",
 				helpers.String("containerID", containerID),
@@ -421,8 +421,8 @@ func (nnc *NetworkNeighborhoodCacheImpl) deleteContainer(containerID string) {
 }
 
 // waitForSharedContainerData waits for shared container data to be available
-func (nnc *NetworkNeighborhoodCacheImpl) waitForSharedContainerData(containerID string) (*utils.WatchedContainerData, error) {
-	return backoff.Retry(context.Background(), func() (*utils.WatchedContainerData, error) {
+func (nnc *NetworkNeighborhoodCacheImpl) waitForSharedContainerData(containerID string, ctx context.Context) (*utils.WatchedContainerData, error) {
+	return backoff.Retry(ctx, func() (*utils.WatchedContainerData, error) {
 		if sharedData := nnc.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
 			return sharedData, nil
 		}
