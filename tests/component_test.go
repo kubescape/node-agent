@@ -1,5 +1,3 @@
-//go:build component
-
 package tests
 
 import (
@@ -1503,6 +1501,9 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error restarting deployment: %v", err)
 	}
+
+	// Sleep to allow the restart to complete
+	time.Sleep(45 * time.Second)
 
 	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, "multiple-containers-deployment")
 	if err != nil {
