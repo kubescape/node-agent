@@ -1190,6 +1190,11 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 
 	testutils.AssertContains(t, alerts, "Hardlink Created Over Sensitive File", "ln", "endpoint-traffic", []bool{true})
 	testutils.AssertNotContains(t, alerts, "Symlink Created Over Sensitive File", "ln", "endpoint-traffic", []bool{true})
+
+	// Also check for learning mode
+	testutils.AssertContains(t, alerts, "Symlink Created Over Sensitive File", "ln", "endpoint-traffic", []bool{false})
+	testutils.AssertNotContains(t, alerts, "Hardlink Created Over Sensitive File", "ln", "endpoint-traffic", []bool{false})
+
 }
 
 func Test_15_CompletedApCannotBecomeReadyAgain(t *testing.T) {
