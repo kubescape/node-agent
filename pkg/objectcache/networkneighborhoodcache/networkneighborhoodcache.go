@@ -328,7 +328,10 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainerWithTimeout(container *cont
 		}
 	case <-ctx.Done():
 		logger.L().Error("timeout while adding container to the cache",
-			helpers.String("containerID", container.Runtime.ContainerID))
+			helpers.String("containerID", container.Runtime.ContainerID),
+			helpers.String("containerName", container.Runtime.ContainerName),
+			helpers.String("podName", container.K8s.PodName),
+			helpers.String("namespace", container.K8s.Namespace))
 	}
 }
 
