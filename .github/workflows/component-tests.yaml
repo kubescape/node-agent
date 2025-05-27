@@ -60,6 +60,7 @@ jobs:
           Test_19_AlertOnPartialProfileTest,
           Test_20_AlertOnPartialThenLearnProcessTest,
           Test_21_AlertOnPartialThenLearnNetworkTest,
+          Test_22_AlertOnPartialNetworkProfileTest
         ]
     steps:
       - name: Checkout code

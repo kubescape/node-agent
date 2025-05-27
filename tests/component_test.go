@@ -1559,3 +1559,52 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	}
 	testutils.AssertNetworkNeighborhoodContains(t, nn, "endpoint-traffic", []string{"example.com."}, []string{})
 }
+
+func Test_22_AlertOnPartialNetworkProfileTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+
+	// Create a workload
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	// Wait for the workload to be ready
+	err = wl.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
+
+	// Restart the daemonset
+	err = testutils.RestartDaemonSet("kubescape", "node-agent")
+	if err != nil {
+		t.Errorf("Error restarting daemonset: %v", err)
+	}
+	assert.NoError(t, err)
+
+	// Wait for the network neighborhood to be completed
+	err = wl.WaitForNetworkNeighborhoodCompletion(160)
+	if err != nil {
+		t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
+	}
+
+	// Wait for cache to be updated
+	time.Sleep(15 * time.Second)
+
+	// Generate an alert by making an unexpected network request
+	_, _, err = wl.ExecIntoPod([]string{"curl", "google.com", "-m", "5"}, "nginx")
+	if err != nil {
+		t.Errorf("Error executing network command in pod: %v", err)
+	}
+
+	// Wait for the alert to be generated
+	time.Sleep(15 * time.Second)
+	alerts, err := testutils.GetAlerts(ns.Name)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx")
+}
