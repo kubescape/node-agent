@@ -611,3 +611,49 @@ func RestartDaemonSet(namespace, name string) error {
 
 	return err
 }
+
+func RestartDeployment(namespace, name string) error {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	ctx := context.TODO()
+
+	// Get the deployment
+	deployment, err := k8sClient.KubernetesClient.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get deployment %s/%s: %w", namespace, name, err)
+	}
+
+	// Add or update the restart annotation
+	if deployment.Spec.Template.ObjectMeta.Annotations == nil {
+		deployment.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+	}
+	deployment.Spec.Template.ObjectMeta.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
+
+	// Update the deployment
+	_, err = k8sClient.KubernetesClient.AppsV1().Deployments(namespace).Update(ctx, deployment, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update deployment %s/%s: %w", namespace, name, err)
+	}
+
+	// Wait for the deployment to be ready
+	err = backoff.RetryNotify(func() error {
+		updatedDeployment, err := k8sClient.KubernetesClient.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		if updatedDeployment.Status.AvailableReplicas < updatedDeployment.Status.Replicas {
+			return fmt.Errorf("deployment %s/%s not ready: %d/%d replicas available",
+				namespace, name, updatedDeployment.Status.AvailableReplicas, updatedDeployment.Status.Replicas)
+		}
+
+		return nil
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), 30), func(err error, d time.Duration) {
+		logger.L().Info("waiting for deployment to be ready",
+			helpers.String("deployment", name),
+			helpers.String("namespace", namespace),
+			helpers.Error(err),
+			helpers.String("retry in", d.String()))
+	})
+
+	return err
+}

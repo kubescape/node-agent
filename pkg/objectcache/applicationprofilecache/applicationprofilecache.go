@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
+	"github.com/kubescape/node-agent/pkg/resourcelocks"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	versioned "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
@@ -47,9 +48,9 @@ type ApplicationProfileCacheImpl struct {
 	storageClient                  versioned.SpdxV1beta1Interface
 	k8sObjectCache                 objectcache.K8sObjectCache
 	updateInterval                 time.Duration
-	updateInProgress               bool       // Flag to track if update is in progress
-	updateMutex                    sync.Mutex // Mutex to protect the flag
-	containerLocks                 sync.Map   // map[string]*sync.Mutex
+	updateInProgress               bool                         // Flag to track if update is in progress
+	updateMutex                    sync.Mutex                   // Mutex to protect the flag
+	containerLocks                 *resourcelocks.ResourceLocks // Locks for each container to prevent concurrent modifications
 }
 
 // NewApplicationProfileCache creates a new application profile cache with periodic updates
@@ -66,6 +67,7 @@ func NewApplicationProfileCache(cfg config.Config, storageClient versioned.SpdxV
 		storageClient:                  storageClient,
 		k8sObjectCache:                 k8sObjectCache,
 		updateInterval:                 updateInterval,
+		containerLocks:                 resourcelocks.New(),
 	}
 
 	return apc
@@ -380,25 +382,7 @@ func (apc *ApplicationProfileCacheImpl) ContainerCallback(notif containercollect
 		if apc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer cancel()
-
-			done := make(chan error, 1)
-			go func() {
-				done <- apc.addContainer(notif.Container)
-			}()
-
-			select {
-			case err := <-done:
-				if err != nil {
-					logger.L().Error("failed to add container to the cache", helpers.Error(err))
-				}
-			case <-ctx.Done():
-				logger.L().Error("timeout while adding container to the cache",
-					helpers.String("containerID", notif.Container.Runtime.ContainerID))
-			}
-		}()
+		go apc.addContainerWithTimeout(notif.Container)
 	case containercollection.EventTypeRemoveContainer:
 		if apc.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
@@ -407,94 +391,112 @@ func (apc *ApplicationProfileCacheImpl) ContainerCallback(notif containercollect
 	}
 }
 
+// addContainerWithTimeout handles adding a container with a timeout to prevent hanging
+func (apc *ApplicationProfileCacheImpl) addContainerWithTimeout(container *containercollection.Container) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- apc.addContainer(container)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			logger.L().Error("failed to add container to the cache", helpers.Error(err))
+		}
+	case <-ctx.Done():
+		logger.L().Error("timeout while adding container to the cache",
+			helpers.String("containerID", container.Runtime.ContainerID))
+	}
+}
+
 // addContainer adds a container to the cache
 func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollection.Container) error {
 	containerID := container.Runtime.ContainerID
-	containerLock := apc.getContainerLock(containerID)
-	containerLock.Lock()
-	defer containerLock.Unlock()
 
-	// Get workload ID from shared data
-	sharedData, err := apc.waitForSharedContainerData(containerID)
-	if err != nil {
-		logger.L().Error("failed to get shared data for container",
+	return apc.containerLocks.WithLockAndError(containerID, func() error {
+		// Get workload ID from shared data
+		sharedData, err := apc.waitForSharedContainerData(containerID)
+		if err != nil {
+			logger.L().Error("failed to get shared data for container",
+				helpers.String("containerID", containerID),
+				helpers.Error(err))
+			return err
+		}
+
+		workloadID := sharedData.Wlid
+		if workloadID == "" {
+			logger.L().Debug("empty workloadID for container", helpers.String("containerID", containerID))
+			return nil
+		}
+
+		// Create container info
+		containerInfo := &ContainerInfo{
+			ContainerID:          containerID,
+			WorkloadID:           workloadID,
+			InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
+			Namespace:            container.K8s.Namespace,
+			Name:                 container.Runtime.ContainerName,
+		}
+
+		// Add to container info map
+		apc.containerIDToInfo.Set(containerID, containerInfo)
+
+		// Create workload ID to state mapping
+		if _, exists := apc.workloadIDToProfileState.Load(workloadID); !exists {
+			apc.workloadIDToProfileState.Set(workloadID, nil)
+		}
+
+		logger.L().Debug("container added to cache",
 			helpers.String("containerID", containerID),
-			helpers.Error(err))
-		return err
-	}
+			helpers.String("workloadID", workloadID),
+			helpers.String("namespace", container.K8s.Namespace))
 
-	workloadID := sharedData.Wlid
-	if workloadID == "" {
-		logger.L().Debug("empty workloadID for container", helpers.String("containerID", containerID))
 		return nil
-	}
-
-	// Create container info
-	containerInfo := &ContainerInfo{
-		ContainerID:          containerID,
-		WorkloadID:           workloadID,
-		InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
-		Namespace:            container.K8s.Namespace,
-		Name:                 container.Runtime.ContainerName,
-	}
-
-	// Add to container info map
-	apc.containerIDToInfo.Set(containerID, containerInfo)
-
-	// Create workload ID to state mapping
-	if _, exists := apc.workloadIDToProfileState.Load(workloadID); !exists {
-		apc.workloadIDToProfileState.Set(workloadID, nil)
-	}
-
-	logger.L().Debug("container added to cache",
-		helpers.String("containerID", containerID),
-		helpers.String("workloadID", workloadID),
-		helpers.String("namespace", container.K8s.Namespace))
-
-	return nil
+	})
 }
 
 // deleteContainer deletes a container from the cache
 func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
-	containerLock := apc.getContainerLock(containerID)
-	containerLock.Lock()
-	defer containerLock.Unlock()
-
-	// Get container info
-	containerInfo, exists := apc.containerIDToInfo.Load(containerID)
-	if !exists {
-		logger.L().Debug("containerID not found in cache", helpers.String("containerID", containerID))
-		return
-	}
-
-	// Clean up container info and call stack index
-	apc.containerIDToInfo.Delete(containerID)
-	apc.containerToCallStackIndex.Delete(containerID)
-
-	// Check if any other container is using the same workload ID
-	workloadStillInUse := false
-	apc.containerIDToInfo.Range(func(_ string, info *ContainerInfo) bool {
-		if info.WorkloadID == containerInfo.WorkloadID {
-			workloadStillInUse = true
-			return false // Stop iteration
+	apc.containerLocks.WithLock(containerID, func() {
+		// Get container info
+		containerInfo, exists := apc.containerIDToInfo.Load(containerID)
+		if !exists {
+			logger.L().Debug("containerID not found in cache", helpers.String("containerID", containerID))
+			return
 		}
-		return true // Continue iteration
+
+		// Clean up container info and call stack index
+		apc.containerIDToInfo.Delete(containerID)
+		apc.containerToCallStackIndex.Delete(containerID)
+
+		// Check if any other container is using the same workload ID
+		workloadStillInUse := false
+		apc.containerIDToInfo.Range(func(_ string, info *ContainerInfo) bool {
+			if info.WorkloadID == containerInfo.WorkloadID {
+				workloadStillInUse = true
+				return false // Stop iteration
+			}
+			return true // Continue iteration
+		})
+
+		// If no other container is using the same workload ID, delete it from the cache
+		if !workloadStillInUse {
+			if profile, exists := apc.workloadIDToProfile.Load(containerInfo.WorkloadID); exists {
+				// Remove the profile from the cache
+				profileKey := apc.profileKey(profile.Namespace, profile.Name)
+				apc.profileToUserManagedIdentifier.Delete(profileKey)
+			}
+			apc.workloadIDToProfileState.Delete(containerInfo.WorkloadID)
+			apc.workloadIDToProfile.Delete(containerInfo.WorkloadID)
+			logger.L().Debug("deleted workloadID from cache", helpers.String("workloadID", containerInfo.WorkloadID))
+		}
 	})
 
-	// If no other container is using the same workload ID, delete it from the cache
-	if !workloadStillInUse {
-		if profile, exists := apc.workloadIDToProfile.Load(containerInfo.WorkloadID); exists {
-			// Remove the profile from the cache
-			profileKey := apc.profileKey(profile.Namespace, profile.Name)
-			apc.profileToUserManagedIdentifier.Delete(profileKey)
-		}
-		apc.workloadIDToProfileState.Delete(containerInfo.WorkloadID)
-		apc.workloadIDToProfile.Delete(containerInfo.WorkloadID)
-		logger.L().Debug("deleted workloadID from cache", helpers.String("workloadID", containerInfo.WorkloadID))
-	}
-
-	// Clean up the lock when done
-	apc.containerLocks.Delete(containerID)
+	// Clean up the lock when done - call this outside the WithLock closure
+	apc.containerLocks.ReleaseLock(containerID)
 }
 
 // waitForSharedContainerData waits for shared container data to be available
@@ -628,13 +630,7 @@ func (apc *ApplicationProfileCacheImpl) GetCallStackSearchTree(containerID strin
 	return nil
 }
 
-// Helper function to get or create a lock for a container
-func (apc *ApplicationProfileCacheImpl) getContainerLock(containerID string) *sync.Mutex {
-	lock, _ := apc.containerLocks.LoadOrStore(containerID, &sync.Mutex{})
-	return lock.(*sync.Mutex)
-}
-
-// Add new function to get unique namespaces from container info
+// getNamespaces retrieves all unique namespaces from the container info cache
 func (apc *ApplicationProfileCacheImpl) getNamespaces() []string {
 	namespaceSet := mapset.NewSet[string]()
 	apc.containerIDToInfo.Range(func(_ string, info *ContainerInfo) bool {
@@ -644,7 +640,7 @@ func (apc *ApplicationProfileCacheImpl) getNamespaces() []string {
 	return namespaceSet.ToSlice()
 }
 
-// Add new function to get container IDs for a namespace
+// getContainerIDsForNamespace retrieves all container IDs for a given namespace
 func (apc *ApplicationProfileCacheImpl) getContainerIDsForNamespace(namespace string) []string {
 	containerIDs := []string{}
 	apc.containerIDToInfo.Range(func(containerID string, info *ContainerInfo) bool {
