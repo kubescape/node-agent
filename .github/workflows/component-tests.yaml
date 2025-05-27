@@ -57,7 +57,8 @@ jobs:
           Test_16_ApNotStuckOnRestart,
           Test_17_ApCompletedToPartialUpdateTest,
           Test_18_ShortLivedJobTest,
-          Test_19_AlertOnPartialProfileTest
+          Test_19_AlertOnPartialProfileTest,
+          Test_20_RuleCooldownTest
         ]
     steps:
       - name: Checkout code

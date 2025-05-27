@@ -109,11 +109,11 @@ func AssertContains(t *testing.T, alerts []Alert, expectedRuleName string, expec
 		}
 
 		if ruleOk && cmdOk && containerOk && ruleName == expectedRuleName && command == expectedCommand && containerName == expectedContainerName &&
-			failOnProfileOk && slices.Contains(expectedFailOnProfile, failOnProfileBool) && profileStatusOk {
+			failOnProfileOk && slices.Contains(expectedFailOnProfile, failOnProfileBool) {
 			// if fail on profile is true, we expect the profile to be completed
 			// else return if the profile is not completed
 			if failOnProfileBool {
-				if profileStatus == expectedProfileStatus {
+				if profileStatusOk && profileStatus == expectedProfileStatus {
 					return
 				}
 			} else {

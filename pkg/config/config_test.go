@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/rulecooldown"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,6 +61,12 @@ func TestLoadConfig(t *testing.T) {
 					},
 				},
 				WorkerPoolSize: 10,
+				RuleCoolDown: rulecooldown.RuleCooldownConfig{
+					CooldownDuration:   1 * time.Hour,
+					CooldownAfterCount: 10,
+					OnProfileFailure:   true,
+					MaxSize:            10000,
+				},
 			},
 			wantErr: false,
 		},

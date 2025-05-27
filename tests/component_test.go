@@ -1134,6 +1134,7 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 
 	// Wait for application profile to be ready
 	assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
+	time.Sleep(30 * time.Second)
 
 	// Add to rule policy symlink
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "-s", "/etc/shadow", "/tmp/a"}, "")
@@ -1358,5 +1359,49 @@ func Test_19_AlertOnPartialProfileTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
+	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
+}
+
+func Test_20_RuleCooldownTest(t *testing.T) {
+	ns := testutils.NewRandomNamespace()
+
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	assert.NoError(t, wl.WaitForApplicationProfileCompletion(80))
+
+	// Wait for cache
+	time.Sleep(30 * time.Second)
+
+	// Run the same process 20 times
+	for i := 0; i < 20; i++ {
+		_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
+		assert.NoError(t, err)
+		time.Sleep(1 * time.Second)
+	}
+
+	// Wait for alerts to be processed
+	time.Sleep(30 * time.Second)
+
+	// Get all alerts
+	alerts, err := testutils.GetAlerts(wl.Namespace)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	// Count alerts for "Unexpected process launched" rule
+	alertCount := 0
+	for _, alert := range alerts {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+			alertCount++
+		}
+	}
+
+	// We should get exactly 10 alerts (cooldown threshold) even though we ran the process 20 times
+	assert.Equal(t, 9, alertCount, "Expected exactly 10 alerts due to cooldown threshold, got %d", alertCount)
+
+	// Verify the specific alert details
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
 }
