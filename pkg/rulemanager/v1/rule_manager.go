@@ -31,6 +31,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
@@ -59,11 +60,12 @@ type RuleManager struct {
 	enricher             ruleenginetypes.Enricher
 	processManager       processmanager.ProcessManagerClient
 	dnsManager           dnsmanager.DNSResolver
+	ruleCooldown         *rulecooldown.RuleCooldown
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		ctx:               ctx,
@@ -78,6 +80,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		enricher:          enricher,
 		processManager:    processManager,
 		dnsManager:        dnsManager,
+		ruleCooldown:      ruleCooldown,
 	}, nil
 }
 
@@ -291,6 +294,12 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 
 		res := ruleprocess.ProcessRule(rule, eventType, event, rm.objectCache)
 		if res != nil {
+			shouldCooldown, count := rm.ruleCooldown.ShouldCooldown(res)
+			if shouldCooldown {
+				logger.L().Debug("RuleManager - rule cooldown", helpers.String("rule", rule.Name()), helpers.Int("seen_count", count))
+				continue
+			}
+
 			res = rm.enrichRuleFailure(res)
 			if res != nil {
 				res.SetWorkloadDetails(details)
