@@ -1317,6 +1317,15 @@ func Test_19_AlertOnPartialProfileTest(t *testing.T) {
 		t.Errorf("Error waiting for application profile to be completed: %v", err)
 	}
 
+	profile, err := wl.GetApplicationProfile()
+	if err != nil {
+		t.Errorf("Error getting application profile: %v", err)
+	}
+
+	if profile.Annotations[helpersv1.CompletionMetadataKey] != helpersv1.Partial {
+		t.Errorf("Expected application profile status to be 'partial', got '%s'", profile.Annotations[helpersv1.CompletionMetadataKey])
+	}
+
 	// Wait for cache to be updated
 	time.Sleep(15 * time.Second)
 
