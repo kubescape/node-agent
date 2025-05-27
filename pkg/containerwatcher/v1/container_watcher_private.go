@@ -9,7 +9,6 @@ import (
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff"
-	"github.com/google/uuid"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
@@ -40,14 +39,9 @@ func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSub
 	}
 	// scale up the pool size if needed pkg/config/config.go:66
 	for _, callback := range ch.callbacks {
-		// generate a unique ID for the callback invocation
-		name := utils.FuncName(callback)
-		id := uuid.New().String()
 		ch.pool.Submit(func() {
-			logger.L().Debug("IGContainerWatcher - callback started", helpers.String("callback", name), helpers.String("id", id))
 			callback(notif)
-			logger.L().Debug("IGContainerWatcher - callback finished", helpers.String("callback", name), helpers.String("id", id))
-		})
+		}, utils.FuncName(callback))
 	}
 }
 
