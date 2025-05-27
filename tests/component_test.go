@@ -1479,10 +1479,8 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	time.Sleep(15 * time.Second)
 
 	// Generate an alert by making a network request (should trigger alert on partial profile)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com", "-T", "2"}, "endpoint-traffic")
-	if err != nil {
-		t.Errorf("Error executing network command in pod: %v", err)
-	}
+	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com"}, "")
+	assert.NoError(t, err)
 
 	// Wait for the alert to be generated
 	time.Sleep(15 * time.Second)
@@ -1515,10 +1513,8 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	}
 
 	// Execute the same network command during learning phase (should be learned in profile)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com", "-T", "2"}, "endpoint-traffic")
-	if err != nil {
-		t.Errorf("Error executing network command in pod during learning: %v", err)
-	}
+	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com"}, "")
+	assert.NoError(t, err)
 
 	// Wait for the network neighborhood to be completed (with curl command learned)
 	err = wl.WaitForNetworkNeighborhoodCompletionWithBlacklist(160, []string{nn.Name})
@@ -1530,10 +1526,8 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	time.Sleep(15 * time.Second)
 
 	// Execute the same network command again - should NOT trigger an alert now
-	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com", "-T", "2"}, "endpoint-traffic")
-	if err != nil {
-		t.Errorf("Error executing network command in pod after learning: %v", err)
-	}
+	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com"}, "")
+	assert.NoError(t, err)
 
 	// Wait to see if any alert is generated
 	time.Sleep(15 * time.Second)
