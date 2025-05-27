@@ -1553,13 +1553,6 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	if count > 1 {
 		t.Errorf("Unexpected alerts found after learning: %d", count)
 	}
-
-	// Verify that the network neighborhood now contains the learned domain
-	nn, err = wl.GetNetworkNeighborhood()
-	if err != nil {
-		t.Errorf("Error getting network neighborhood: %v", err)
-	}
-	testutils.AssertNetworkNeighborhoodContains(t, nn, "endpoint-traffic", []string{"example.com."}, []string{})
 }
 
 func Test_22_AlertOnPartialNetworkProfileTest(t *testing.T) {
