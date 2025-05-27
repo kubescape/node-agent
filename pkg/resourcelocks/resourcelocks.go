@@ -11,6 +11,7 @@ import (
 // ResourceLocks manages per-resource mutexes to prevent concurrent modifications
 type ResourceLocks struct {
 	locks maps.SafeMap[string, *sync.Mutex]
+	mu    sync.Mutex // Protects the creation of new locks
 }
 
 // New creates a new ResourceLocks instance
@@ -22,12 +23,23 @@ func New() *ResourceLocks {
 
 // GetLock returns a mutex for the given resource ID, creating one if it doesn't exist
 func (rl *ResourceLocks) GetLock(resourceID string) *sync.Mutex {
-	var lock *sync.Mutex
-	var exists bool
-	if lock, exists = rl.locks.Load(resourceID); !exists {
-		lock = &sync.Mutex{}
-		rl.locks.Set(resourceID, lock)
+	// First, try to get existing lock without acquiring the creation mutex
+	if lock, exists := rl.locks.Load(resourceID); exists {
+		return lock
 	}
+
+	// If not found, acquire the creation mutex to ensure atomic creation
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	// Double-check after acquiring the mutex (another goroutine might have created it)
+	if lock, exists := rl.locks.Load(resourceID); exists {
+		return lock
+	}
+
+	// Create and store the new lock
+	lock := &sync.Mutex{}
+	rl.locks.Set(resourceID, lock)
 	return lock
 }
 
