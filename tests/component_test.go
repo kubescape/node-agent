@@ -1450,8 +1450,8 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 
 	ns := testutils.NewRandomNamespace()
 
-	// Create a workload
-	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/endpoint-traffic.yaml"))
+	// Create a workload using deployment-multiple-containers.yaml (same as Test_22)
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
 	if err != nil {
 		t.Errorf("Error creating workload: %v", err)
 	}
@@ -1479,8 +1479,11 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	time.Sleep(15 * time.Second)
 
 	// Generate an alert by making a network request (should trigger alert on partial profile)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com"}, "")
-	assert.NoError(t, err)
+	// Using curl with timeout and targeting nginx container (same as Test_22)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "google.com", "-m", "5"}, "nginx")
+	if err != nil {
+		t.Errorf("Error executing network command in pod: %v", err)
+	}
 
 	// Wait for the alert to be generated
 	time.Sleep(15 * time.Second)
@@ -1488,7 +1491,7 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
-	testutils.AssertContains(t, alerts, "Unexpected domain request", "wget", "endpoint-traffic")
+	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx")
 
 	nn, err := wl.GetNetworkNeighborhood()
 	if err != nil {
@@ -1513,8 +1516,10 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	}
 
 	// Execute the same network command during learning phase (should be learned in profile)
-	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com"}, "")
-	assert.NoError(t, err)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "google.com", "-m", "5"}, "nginx")
+	if err != nil {
+		t.Errorf("Error executing network command in pod during learning: %v", err)
+	}
 
 	// Wait for the network neighborhood to be completed (with curl command learned)
 	err = wl.WaitForNetworkNeighborhoodCompletionWithBlacklist(160, []string{nn.Name})
@@ -1526,8 +1531,10 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	time.Sleep(15 * time.Second)
 
 	// Execute the same network command again - should NOT trigger an alert now
-	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com"}, "")
-	assert.NoError(t, err)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "google.com", "-m", "5"}, "nginx")
+	if err != nil {
+		t.Errorf("Error executing network command in pod after learning: %v", err)
+	}
 
 	// Wait to see if any alert is generated
 	time.Sleep(15 * time.Second)
@@ -1537,10 +1544,9 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	}
 
 	// Should not contain new alert for curl command after learning
-	// testutils.AssertNotContains(t, alertsAfter, "Unexpected domain request", "curl", "nginx")
 	count := 0
 	for _, alert := range alertsAfter {
-		if alert.Labels["rule_name"] == "Unexpected domain request" && alert.Labels["container_name"] == "endpoint-traffic" && alert.Labels["process_name"] == "wget" {
+		if alert.Labels["rule_name"] == "Unexpected domain request" && alert.Labels["container_name"] == "nginx" && alert.Labels["process_name"] == "curl" {
 			count++
 		}
 	}
