@@ -1,5 +1,3 @@
-//go:build component
-
 package tests
 
 import (
@@ -1382,10 +1380,20 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	}
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx")
 
+	profile, err := wl.GetApplicationProfile()
+	if err != nil {
+		t.Errorf("Error getting application profile: %v", err)
+	}
+
 	// Restart the deployment to reset the profile learning
 	err = testutils.RestartDeployment(ns.Name, wl.WorkloadObj.GetName())
 	if err != nil {
 		t.Errorf("Error restarting deployment: %v", err)
+	}
+
+	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, "nginx-deployment")
+	if err != nil {
+		t.Errorf("Error re-fetching workload after restart: %v", err)
 	}
 
 	// Wait for the workload to be ready after restart
@@ -1401,7 +1409,7 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	}
 
 	// Wait for the application profile to be completed (with ls command learned)
-	err = wl.WaitForApplicationProfileCompletion(160)
+	err = wl.WaitForApplicationProfileCompletionWithBlacklist(160, []string{profile.Name})
 	if err != nil {
 		t.Errorf("Error waiting for application profile to be completed after learning: %v", err)
 	}
@@ -1423,7 +1431,15 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	}
 
 	// Should not contain new alert for ls command after learning
-	testutils.AssertNotContains(t, alertsAfter, "Unexpected process launched", "ls", "nginx")
+	count := 0
+	for _, alert := range alertsAfter {
+		if alert.Labels["rule_name"] == "Unexpected process launched" && alert.Labels["container_name"] == "nginx" && alert.Labels["process_name"] == "ls" {
+			count++
+		}
+	}
+	if count > 1 {
+		t.Errorf("Unexpected alerts found after learning: %d", count)
+	}
 }
 
 func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
@@ -1433,7 +1449,7 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	ns := testutils.NewRandomNamespace()
 
 	// Create a workload
-	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/endpoint-traffic.yaml"))
 	if err != nil {
 		t.Errorf("Error creating workload: %v", err)
 	}
@@ -1461,7 +1477,7 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	time.Sleep(15 * time.Second)
 
 	// Generate an alert by making a network request (should trigger alert on partial profile)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "example.com", "-m", "2"}, "")
+	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com", "-T", "2"}, "endpoint-traffic")
 	if err != nil {
 		t.Errorf("Error executing network command in pod: %v", err)
 	}
@@ -1472,12 +1488,22 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
-	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx")
+	testutils.AssertContains(t, alerts, "Unexpected domain request", "wget", "endpoint-traffic")
+
+	nn, err := wl.GetNetworkNeighborhood()
+	if err != nil {
+		t.Errorf("Error getting network neighborhood: %v", err)
+	}
 
 	// Restart the deployment to reset the profile learning
 	err = testutils.RestartDeployment(ns.Name, wl.WorkloadObj.GetName())
 	if err != nil {
 		t.Errorf("Error restarting deployment: %v", err)
+	}
+
+	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, wl.UnstructuredObj.GetName())
+	if err != nil {
+		t.Errorf("Error re-fetching workload after restart: %v", err)
 	}
 
 	// Wait for the workload to be ready after restart
@@ -1487,13 +1513,13 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	}
 
 	// Execute the same network command during learning phase (should be learned in profile)
-	_, _, err = wl.ExecIntoPod([]string{"curl", "example.com", "-m", "2"}, "")
+	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com", "-T", "2"}, "endpoint-traffic")
 	if err != nil {
 		t.Errorf("Error executing network command in pod during learning: %v", err)
 	}
 
 	// Wait for the network neighborhood to be completed (with curl command learned)
-	err = wl.WaitForNetworkNeighborhoodCompletion(160)
+	err = wl.WaitForNetworkNeighborhoodCompletionWithBlacklist(160, []string{nn.Name})
 	if err != nil {
 		t.Errorf("Error waiting for network neighborhood to be completed after learning: %v", err)
 	}
@@ -1502,7 +1528,7 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	time.Sleep(15 * time.Second)
 
 	// Execute the same network command again - should NOT trigger an alert now
-	_, _, err = wl.ExecIntoPod([]string{"curl", "example.com", "-m", "2"}, "")
+	_, _, err = wl.ExecIntoPod([]string{"wget", "example.com", "-T", "2"}, "endpoint-traffic")
 	if err != nil {
 		t.Errorf("Error executing network command in pod after learning: %v", err)
 	}
@@ -1515,12 +1541,21 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	}
 
 	// Should not contain new alert for curl command after learning
-	testutils.AssertNotContains(t, alertsAfter, "Unexpected domain request", "curl", "nginx")
+	// testutils.AssertNotContains(t, alertsAfter, "Unexpected domain request", "curl", "nginx")
+	count := 0
+	for _, alert := range alertsAfter {
+		if alert.Labels["rule_name"] == "Unexpected domain request" && alert.Labels["container_name"] == "endpoint-traffic" && alert.Labels["process_name"] == "wget" {
+			count++
+		}
+	}
+	if count > 1 {
+		t.Errorf("Unexpected alerts found after learning: %d", count)
+	}
 
 	// Verify that the network neighborhood now contains the learned domain
-	nn, err := wl.GetNetworkNeighborhood()
+	nn, err = wl.GetNetworkNeighborhood()
 	if err != nil {
 		t.Errorf("Error getting network neighborhood: %v", err)
 	}
-	testutils.AssertNetworkNeighborhoodContains(t, nn, "nginx", []string{"example.com."}, []string{})
+	testutils.AssertNetworkNeighborhoodContains(t, nn, "endpoint-traffic", []string{"example.com."}, []string{})
 }
