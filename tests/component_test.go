@@ -1503,7 +1503,7 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 		t.Errorf("Error restarting deployment: %v", err)
 	}
 
-	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, wl.UnstructuredObj.GetName())
+	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, wl.WorkloadObj.GetName())
 	if err != nil {
 		t.Errorf("Error re-fetching workload after restart: %v", err)
 	}
