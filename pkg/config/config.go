@@ -80,7 +80,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("enableEmbeddedSBOMs", false)
 	viper.SetDefault("profilesCacheRefreshRate", 1*time.Minute)
 	viper.SetDefault("ruleCooldown.ruleCooldownDuration", 1*time.Hour)
-	viper.SetDefault("ruleCooldown.ruleCooldownAfterCount", 10)
+	viper.SetDefault("ruleCooldown.ruleCooldownAfterCount", 1)
 	viper.SetDefault("ruleCooldown.ruleCooldownOnProfileFailure", true)
 	viper.SetDefault("ruleCooldown.ruleCooldownMaxSize", 10000)
 	viper.AutomaticEnv()

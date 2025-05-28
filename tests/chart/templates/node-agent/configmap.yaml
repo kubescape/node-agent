@@ -26,6 +26,12 @@ data:
           "alertManagerExporterUrls": {{- .Values.nodeAgent.config.alertManagerExporterUrls | toJson }},
           "stdoutExporter": {{- .Values.nodeAgent.config.stdoutExporter }},
           "syslogExporterURL": "{{- .Values.nodeAgent.config.syslogExporterURL }}"
+        },
+        "ruleCooldown": {
+            "ruleCooldownDuration": "{{ .Values.nodeAgent.config.ruleCooldown.ruleCooldownDuration }}",
+            "ruleCooldownAfterCount": {{ .Values.nodeAgent.config.ruleCooldown.ruleCooldownAfterCount }},
+            "ruleCooldownOnProfileFailure": {{ .Values.nodeAgent.config.ruleCooldown.ruleCooldownOnProfileFailure }},
+            "ruleCooldownMaxSize": {{ .Values.nodeAgent.config.ruleCooldown.ruleCooldownMaxSize }}
         }
     }
 ---

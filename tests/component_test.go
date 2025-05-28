@@ -1371,50 +1371,6 @@ func Test_19_AlertOnPartialProfileTest(t *testing.T) {
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
 }
 
-func Test_20_RuleCooldownTest(t *testing.T) {
-	ns := testutils.NewRandomNamespace()
-
-	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
-	if err != nil {
-		t.Errorf("Error creating workload: %v", err)
-	}
-
-	assert.NoError(t, wl.WaitForApplicationProfileCompletion(80))
-
-	// Wait for cache
-	time.Sleep(30 * time.Second)
-
-	// Run the same process 20 times
-	for i := 0; i < 20; i++ {
-		_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
-		assert.NoError(t, err)
-		time.Sleep(1 * time.Second)
-	}
-
-	// Wait for alerts to be processed
-	time.Sleep(30 * time.Second)
-
-	// Get all alerts
-	alerts, err := testutils.GetAlerts(wl.Namespace)
-	if err != nil {
-		t.Errorf("Error getting alerts: %v", err)
-	}
-
-	// Count alerts for "Unexpected process launched" rule
-	alertCount := 0
-	for _, alert := range alerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
-			alertCount++
-		}
-	}
-
-	// We should get exactly 10 alerts (cooldown threshold) even though we ran the process 20 times
-	assert.Equal(t, 10, alertCount, "Expected exactly 10 alerts due to cooldown threshold, got %d", alertCount)
-
-	// Verify the specific alert details
-	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
-}
-
 func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	start := time.Now()
 	defer tearDownTest(t, start)
@@ -1461,7 +1417,7 @@ func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
-	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx")
+	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
 
 	profile, err := wl.GetApplicationProfile()
 	if err != nil {
@@ -1572,7 +1528,7 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
-	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx")
+	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx", []bool{true})
 
 	nn, err := wl.GetNetworkNeighborhood()
 	if err != nil {
@@ -1685,5 +1641,52 @@ func Test_22_AlertOnPartialNetworkProfileTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error getting alerts: %v", err)
 	}
-	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx")
+	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx", []bool{true})
+}
+
+func Test_23_RuleCooldownTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	assert.NoError(t, wl.WaitForApplicationProfileCompletion(80))
+
+	// Wait for cache
+	time.Sleep(30 * time.Second)
+
+	// Run the same process 20 times
+	for i := 0; i < 20; i++ {
+		_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
+		assert.NoError(t, err)
+		time.Sleep(1 * time.Second)
+	}
+
+	// Wait for alerts to be processed
+	time.Sleep(30 * time.Second)
+
+	// Get all alerts
+	alerts, err := testutils.GetAlerts(wl.Namespace)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	// Count alerts for "Unexpected process launched" rule
+	alertCount := 0
+	for _, alert := range alerts {
+		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+			alertCount++
+		}
+	}
+
+	// We should get exactly 10 alerts (cooldown threshold) even though we ran the process 20 times
+	assert.Equal(t, 10, alertCount, "Expected exactly 10 alerts due to cooldown threshold, got %d", alertCount)
+
+	// Verify the specific alert details
+	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
 }

@@ -482,7 +482,6 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	creator := rm.ruleBindingCache.GetRuleCreator()
 	rules := creator.CreateRulePolicyRulesByEventType(eventType)
 
-	// TODO: Rule policies should be applied here
 	for _, rule := range rules {
 		rule, ok := rule.(ruleengine.RuleCondition)
 		if !ok {

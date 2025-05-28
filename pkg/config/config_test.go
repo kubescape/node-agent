@@ -63,7 +63,7 @@ func TestLoadConfig(t *testing.T) {
 				WorkerPoolSize: 10,
 				RuleCoolDown: rulecooldown.RuleCooldownConfig{
 					CooldownDuration:   1 * time.Hour,
-					CooldownAfterCount: 10,
+					CooldownAfterCount: 1,
 					OnProfileFailure:   true,
 					MaxSize:            10000,
 				},
