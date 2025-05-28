@@ -35,7 +35,7 @@ func NewRuleCooldown(config RuleCooldownConfig) *RuleCooldown {
 
 func (rc *RuleCooldown) ShouldCooldown(ruleFailures ruleengine.RuleFailure) (bool, int) {
 	alert := ruleFailures.GetBaseRuntimeAlert()
-	key := alert.UniqueID + ruleFailures.GetRuntimeProcessDetails().ContainerID
+	key := alert.UniqueID + ruleFailures.GetRuntimeProcessDetails().ContainerID + ruleFailures.GetRuleId()
 
 	// If we're not on profile failure, and the profile failed, don't cooldown
 	if !rc.cooldownConfig.OnProfileFailure && alert.ProfileMetadata.FailOnProfile {
