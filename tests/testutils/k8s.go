@@ -92,6 +92,32 @@ func (w *TestWorkload) ExecIntoPod(command []string, container string) (string, 
 
 	return ExecIntoPod(pod.Name, w.Namespace, command, container)
 }
+func NewTestWorkloadFromK8sIdentifiers(namespace, kind, name string) (*TestWorkload, error) {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	gvr, err := k8sinterface.GetGroupVersionResource(kind)
+	if err != nil {
+		return nil, err
+	}
+	clientResource := k8sClient.DynamicClient.Resource(gvr)
+	obj, err := clientResource.Namespace(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workload %s/%s: %w", namespace, name, err)
+	}
+	objData, err := json.Marshal(obj.Object)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal object: %w", err)
+	}
+	wl, err := workloadinterface.NewWorkload(objData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create workload from object: %w", err)
+	}
+	return &TestWorkload{
+		Namespace:       namespace,
+		UnstructuredObj: obj,
+		WorkloadObj:     wl,
+		client:          clientResource.Namespace(namespace),
+	}, nil
+}
 
 func ExecIntoPod(podName, podNamespace string, command []string, container string) (string, string, error) {
 	k8sClient := k8sinterface.NewKubernetesApi()
@@ -220,16 +246,33 @@ func (w *TestWorkload) GetApplicationProfile() (*v1beta1.ApplicationProfile, err
 		return nil, err
 	}
 
+	var matchingProfiles []v1beta1.ApplicationProfile
+
+	// Find all matching profiles
 	for _, appProfile := range appProfiles {
 		wlKind := appProfile.Labels["kubescape.io/workload-kind"]
 		wlName := appProfile.Labels["kubescape.io/workload-name"]
 		wlNs := appProfile.Labels["kubescape.io/workload-namespace"]
 
 		if wlKind == w.WorkloadObj.GetKind() && wlName == w.WorkloadObj.GetName() && wlNs == w.Namespace {
-			return storageclient.ApplicationProfiles(w.Namespace).Get(context.TODO(), appProfile.Name, metav1.GetOptions{})
+			matchingProfiles = append(matchingProfiles, appProfile)
 		}
 	}
-	return nil, fmt.Errorf("application profile not found")
+
+	if len(matchingProfiles) == 0 {
+		return nil, fmt.Errorf("application profile not found")
+	}
+
+	// Find the newest profile
+	newestProfile := &matchingProfiles[0]
+	for i := 1; i < len(matchingProfiles); i++ {
+		if matchingProfiles[i].CreationTimestamp.After(newestProfile.CreationTimestamp.Time) {
+			newestProfile = &matchingProfiles[i]
+		}
+	}
+
+	// Get the full profile object
+	return storageclient.ApplicationProfiles(w.Namespace).Get(context.TODO(), newestProfile.Name, metav1.GetOptions{})
 }
 
 func (w *TestWorkload) GetNetworkNeighborhood() (*v1beta1.NetworkNeighborhood, error) {
@@ -241,21 +284,58 @@ func (w *TestWorkload) GetNetworkNeighborhood() (*v1beta1.NetworkNeighborhood, e
 		return nil, err
 	}
 
+	var matchingNeighborhoods []v1beta1.NetworkNeighborhood
+
+	// Find all matching network neighborhoods
 	for _, n := range nn {
 		wlKind := n.Labels["kubescape.io/workload-kind"]
 		wlName := n.Labels["kubescape.io/workload-name"]
 		wlNs := n.Labels["kubescape.io/workload-namespace"]
 
 		if wlKind == w.WorkloadObj.GetKind() && wlName == w.WorkloadObj.GetName() && wlNs == w.Namespace {
-			// get the network neighborhood
-			return storageclient.NetworkNeighborhoods(w.Namespace).Get(context.TODO(), n.Name, metav1.GetOptions{})
+			matchingNeighborhoods = append(matchingNeighborhoods, n)
 		}
 	}
-	return nil, fmt.Errorf("network neighborhood not found")
+
+	if len(matchingNeighborhoods) == 0 {
+		return nil, fmt.Errorf("network neighborhood not found")
+	}
+
+	// Find the newest neighborhood
+	newestNeighborhood := &matchingNeighborhoods[0]
+	for i := 1; i < len(matchingNeighborhoods); i++ {
+		if matchingNeighborhoods[i].CreationTimestamp.After(newestNeighborhood.CreationTimestamp.Time) {
+			newestNeighborhood = &matchingNeighborhoods[i]
+		}
+	}
+
+	// Get the full network neighborhood object
+	return storageclient.NetworkNeighborhoods(w.Namespace).Get(context.TODO(), newestNeighborhood.Name, metav1.GetOptions{})
 }
 
 func (w *TestWorkload) WaitForApplicationProfileCompletion(maxRetries uint64) error {
 	return w.WaitForApplicationProfile(maxRetries, "completed")
+}
+
+func (w *TestWorkload) WaitForApplicationProfileCompletionWithBlacklist(maxRetries uint64, blacklist []string) error {
+	return backoff.RetryNotify(func() error {
+		appProfile, err := w.GetApplicationProfile()
+		if err != nil {
+			return err
+		}
+
+		if appProfile.Annotations["kubescape.io/status"] == "completed" {
+			for _, item := range blacklist {
+				if appProfile.Name == item {
+					return fmt.Errorf("application profile %s is blacklisted", item)
+				}
+			}
+			return nil
+		}
+		return fmt.Errorf("application profile is not in status 'completed'")
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
+		logger.L().Info("waiting for app profile", helpers.Error(err), helpers.String("retry in", d.String()))
+	})
 }
 
 func (w *TestWorkload) WaitForApplicationProfile(maxRetries uint64, expectedStatus string) error {
@@ -276,6 +356,27 @@ func (w *TestWorkload) WaitForApplicationProfile(maxRetries uint64, expectedStat
 
 func (w *TestWorkload) WaitForNetworkNeighborhoodCompletion(maxRetries uint64) error {
 	return w.WaitForNetworkNeighborhood(maxRetries, "completed")
+}
+
+func (w *TestWorkload) WaitForNetworkNeighborhoodCompletionWithBlacklist(maxRetries uint64, blacklist []string) error {
+	return backoff.RetryNotify(func() error {
+		networkNeighborhood, err := w.GetNetworkNeighborhood()
+		if err != nil {
+			return err
+		}
+
+		if networkNeighborhood.Annotations["kubescape.io/status"] == "completed" {
+			for _, item := range blacklist {
+				if networkNeighborhood.Name == item {
+					return fmt.Errorf("network neighborhood %s is blacklisted", item)
+				}
+			}
+			return nil
+		}
+		return fmt.Errorf("network neighborhood is not in status 'completed'")
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
+		logger.L().Info("waiting for network neighborhood", helpers.Error(err), helpers.String("retry in", d.String()))
+	})
 }
 
 func (w *TestWorkload) WaitForNetworkNeighborhood(maxRetries uint64, expectedStatus string) error {
@@ -604,6 +705,52 @@ func RestartDaemonSet(namespace, name string) error {
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), 30), func(err error, d time.Duration) {
 		logger.L().Info("waiting for daemonset to be ready",
 			helpers.String("daemonset", name),
+			helpers.String("namespace", namespace),
+			helpers.Error(err),
+			helpers.String("retry in", d.String()))
+	})
+
+	return err
+}
+
+func RestartDeployment(namespace, name string) error {
+	k8sClient := k8sinterface.NewKubernetesApi()
+	ctx := context.TODO()
+
+	// Get the deployment
+	deployment, err := k8sClient.KubernetesClient.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get deployment %s/%s: %w", namespace, name, err)
+	}
+
+	// Add or update the restart annotation
+	if deployment.Spec.Template.ObjectMeta.Annotations == nil {
+		deployment.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+	}
+	deployment.Spec.Template.ObjectMeta.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
+
+	// Update the deployment
+	_, err = k8sClient.KubernetesClient.AppsV1().Deployments(namespace).Update(ctx, deployment, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update deployment %s/%s: %w", namespace, name, err)
+	}
+
+	// Wait for the deployment to be ready
+	err = backoff.RetryNotify(func() error {
+		updatedDeployment, err := k8sClient.KubernetesClient.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		if updatedDeployment.Status.AvailableReplicas < updatedDeployment.Status.Replicas {
+			return fmt.Errorf("deployment %s/%s not ready: %d/%d replicas available",
+				namespace, name, updatedDeployment.Status.AvailableReplicas, updatedDeployment.Status.Replicas)
+		}
+
+		return nil
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(5*time.Second), 30), func(err error, d time.Duration) {
+		logger.L().Info("waiting for deployment to be ready",
+			helpers.String("deployment", name),
 			helpers.String("namespace", namespace),
 			helpers.Error(err),
 			helpers.String("retry in", d.String()))

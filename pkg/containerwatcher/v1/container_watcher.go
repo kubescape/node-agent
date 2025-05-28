@@ -210,6 +210,10 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
+			return
+		}
+
 		metrics.ReportEvent(utils.CapabilitiesEventType)
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
 		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
@@ -236,6 +240,10 @@ func CreateIGContainerWatcher(cfg config.Config,
 
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
+			return
+		}
+
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
 			return
 		}
 
@@ -268,6 +276,11 @@ func CreateIGContainerWatcher(cfg config.Config,
 		if event.K8s.ContainerName == "" {
 			return
 		}
+
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
+			return
+		}
+
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
 
 		if isDroppedEvent(event.Type, event.Message) {
@@ -296,6 +309,10 @@ func CreateIGContainerWatcher(cfg config.Config,
 
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
+			return
+		}
+
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
 			return
 		}
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
@@ -333,6 +350,10 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
+			return
+		}
+
 		metrics.ReportEvent(utils.DnsEventType)
 		dnsManagerClient.ReportEvent(event)
 		ruleManager.ReportEvent(utils.DnsEventType, &event)
@@ -350,6 +371,11 @@ func CreateIGContainerWatcher(cfg config.Config,
 		if event.K8s.ContainerName == "" {
 			return
 		}
+
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
+			return
+		}
+
 		metrics.ReportEvent(utils.RandomXEventType)
 		ruleManager.ReportEvent(utils.RandomXEventType, &event)
 
@@ -363,6 +389,9 @@ func CreateIGContainerWatcher(cfg config.Config,
 	symlinkWorkerPool, err := ants.NewPoolWithFunc(symlinkWorkerPoolSize, func(i interface{}) {
 		event := i.(tracersymlinktype.Event)
 		if event.K8s.ContainerName == "" {
+			return
+		}
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
 			return
 		}
 		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
@@ -381,6 +410,9 @@ func CreateIGContainerWatcher(cfg config.Config,
 	hardlinkWorkerPool, err := ants.NewPoolWithFunc(hardlinkWorkerPoolSize, func(i interface{}) {
 		event := i.(tracerhardlinktype.Event)
 		if event.K8s.ContainerName == "" {
+			return
+		}
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
 			return
 		}
 
@@ -402,6 +434,9 @@ func CreateIGContainerWatcher(cfg config.Config,
 		if event.K8s.ContainerName == "" {
 			return
 		}
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
+			return
+		}
 
 		metrics.ReportEvent(utils.SSHEventType)
 		ruleManager.ReportEvent(utils.SSHEventType, &event)
@@ -418,6 +453,9 @@ func CreateIGContainerWatcher(cfg config.Config,
 		event := i.(tracerhttptype.Event)
 		// ignore events with empty container name
 		if event.K8s.ContainerName == "" {
+			return
+		}
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
 			return
 		}
 
@@ -445,6 +483,9 @@ func CreateIGContainerWatcher(cfg config.Config,
 		if event.K8s.ContainerName == "" {
 			return
 		}
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
+			return
+		}
 		ruleManager.ReportEvent(utils.PtraceEventType, &event)
 	})
 
@@ -465,6 +506,9 @@ func CreateIGContainerWatcher(cfg config.Config,
 	iouringWorkerPool, err := ants.NewPoolWithFunc(defaultWorkerPoolSize, func(i interface{}) {
 		event := i.(traceriouringtype.Event)
 		if event.K8s.ContainerName == "" {
+			return
+		}
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
 			return
 		}
 

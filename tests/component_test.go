@@ -1317,6 +1317,15 @@ func Test_19_AlertOnPartialProfileTest(t *testing.T) {
 		t.Errorf("Error waiting for application profile to be completed: %v", err)
 	}
 
+	profile, err := wl.GetApplicationProfile()
+	if err != nil {
+		t.Errorf("Error getting application profile: %v", err)
+	}
+
+	if profile.Annotations[helpersv1.CompletionMetadataKey] != helpersv1.Partial {
+		t.Errorf("Expected application profile status to be 'partial', got '%s'", profile.Annotations[helpersv1.CompletionMetadataKey])
+	}
+
 	// Wait for cache to be updated
 	time.Sleep(15 * time.Second)
 
@@ -1332,4 +1341,277 @@ func Test_19_AlertOnPartialProfileTest(t *testing.T) {
 		t.Errorf("Error getting alerts: %v", err)
 	}
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx")
+}
+
+func Test_20_AlertOnPartialThenLearnProcessTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+
+	// Create a workload
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/nginx-deployment.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	// Wait for the workload to be ready
+	err = wl.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
+
+	// Restart the daemonset
+	err = testutils.RestartDaemonSet("kubescape", "node-agent")
+	if err != nil {
+		t.Errorf("Error restarting daemonset: %v", err)
+	}
+	assert.NoError(t, err)
+
+	// Wait for the application profile to be completed (partial)
+	err = wl.WaitForApplicationProfileCompletion(160)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+
+	// Wait for cache to be updated
+	time.Sleep(15 * time.Second)
+
+	// Generate an alert by executing a command (should trigger alert on partial profile)
+	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
+	if err != nil {
+		t.Errorf("Error executing command in pod: %v", err)
+	}
+
+	// Wait for the alert to be generated
+	time.Sleep(15 * time.Second)
+	alerts, err := testutils.GetAlerts(ns.Name)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx")
+
+	profile, err := wl.GetApplicationProfile()
+	if err != nil {
+		t.Errorf("Error getting application profile: %v", err)
+	}
+
+	// Restart the deployment to reset the profile learning
+	err = testutils.RestartDeployment(ns.Name, wl.WorkloadObj.GetName())
+	if err != nil {
+		t.Errorf("Error restarting deployment: %v", err)
+	}
+
+	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, "nginx-deployment")
+	if err != nil {
+		t.Errorf("Error re-fetching workload after restart: %v", err)
+	}
+
+	// Wait for the workload to be ready after restart
+	err = wl.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready after restart: %v", err)
+	}
+
+	// Execute the same command during learning phase (should be learned in profile)
+	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
+	if err != nil {
+		t.Errorf("Error executing command in pod during learning: %v", err)
+	}
+
+	// Wait for the application profile to be completed (with ls command learned)
+	err = wl.WaitForApplicationProfileCompletionWithBlacklist(160, []string{profile.Name})
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed after learning: %v", err)
+	}
+
+	// Wait for cache to be updated
+	time.Sleep(15 * time.Second)
+
+	// Execute the same command again - should NOT trigger an alert now
+	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "")
+	if err != nil {
+		t.Errorf("Error executing command in pod after learning: %v", err)
+	}
+
+	// Wait to see if any alert is generated
+	time.Sleep(15 * time.Second)
+	alertsAfter, err := testutils.GetAlerts(ns.Name)
+	if err != nil {
+		t.Errorf("Error getting alerts after learning: %v", err)
+	}
+
+	// Should not contain new alert for ls command after learning
+	count := 0
+	for _, alert := range alertsAfter {
+		if alert.Labels["rule_name"] == "Unexpected process launched" && alert.Labels["container_name"] == "nginx" && alert.Labels["process_name"] == "ls" {
+			count++
+		}
+	}
+	if count > 1 {
+		t.Errorf("Unexpected alerts found after learning: %d", count)
+	}
+}
+
+func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+
+	// Create a workload using deployment-multiple-containers.yaml (same as Test_22)
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	// Wait for the workload to be ready
+	err = wl.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
+
+	// Restart the daemonset
+	err = testutils.RestartDaemonSet("kubescape", "node-agent")
+	if err != nil {
+		t.Errorf("Error restarting daemonset: %v", err)
+	}
+	assert.NoError(t, err)
+
+	// Wait for the network neighborhood to be completed (partial)
+	err = wl.WaitForNetworkNeighborhoodCompletion(160)
+	if err != nil {
+		t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
+	}
+
+	// Wait for cache to be updated
+	time.Sleep(15 * time.Second)
+
+	// Generate an alert by making a network request (should trigger alert on partial profile)
+	// Using curl with timeout and targeting nginx container (same as Test_22)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "google.com", "-m", "5"}, "nginx")
+	if err != nil {
+		t.Errorf("Error executing network command in pod: %v", err)
+	}
+
+	// Wait for the alert to be generated
+	time.Sleep(15 * time.Second)
+	alerts, err := testutils.GetAlerts(ns.Name)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx")
+
+	nn, err := wl.GetNetworkNeighborhood()
+	if err != nil {
+		t.Errorf("Error getting network neighborhood: %v", err)
+	}
+
+	// Restart the deployment to reset the profile learning
+	err = testutils.RestartDeployment(ns.Name, wl.WorkloadObj.GetName())
+	if err != nil {
+		t.Errorf("Error restarting deployment: %v", err)
+	}
+
+	// Sleep to allow the restart to complete
+	time.Sleep(45 * time.Second)
+
+	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, "multiple-containers-deployment")
+	if err != nil {
+		t.Errorf("Error re-fetching workload after restart: %v", err)
+	}
+
+	// Wait for the workload to be ready after restart
+	err = wl.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready after restart: %v", err)
+	}
+
+	// Execute the same network command during learning phase (should be learned in profile)
+	_, _, err = wl.ExecIntoPod([]string{"curl", "google.com", "-m", "5"}, "nginx")
+	if err != nil {
+		t.Errorf("Error executing network command in pod during learning: %v", err)
+	}
+
+	// Wait for the network neighborhood to be completed (with curl command learned)
+	err = wl.WaitForNetworkNeighborhoodCompletionWithBlacklist(160, []string{nn.Name})
+	if err != nil {
+		t.Errorf("Error waiting for network neighborhood to be completed after learning: %v", err)
+	}
+
+	// Wait for cache to be updated
+	time.Sleep(15 * time.Second)
+
+	// Execute the same network command again - should NOT trigger an alert now
+	_, _, err = wl.ExecIntoPod([]string{"curl", "google.com", "-m", "5"}, "nginx")
+	if err != nil {
+		t.Errorf("Error executing network command in pod after learning: %v", err)
+	}
+
+	// Wait to see if any alert is generated
+	time.Sleep(15 * time.Second)
+	alertsAfter, err := testutils.GetAlerts(ns.Name)
+	if err != nil {
+		t.Errorf("Error getting alerts after learning: %v", err)
+	}
+
+	// Should not contain new alert for curl command after learning
+	count := 0
+	for _, alert := range alertsAfter {
+		if alert.Labels["rule_name"] == "Unexpected domain request" && alert.Labels["container_name"] == "nginx" && alert.Labels["process_name"] == "curl" {
+			count++
+		}
+	}
+	if count > 1 {
+		t.Errorf("Unexpected alerts found after learning: %d", count)
+	}
+}
+
+func Test_22_AlertOnPartialNetworkProfileTest(t *testing.T) {
+	start := time.Now()
+	defer tearDownTest(t, start)
+
+	ns := testutils.NewRandomNamespace()
+
+	// Create a workload
+	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	// Wait for the workload to be ready
+	err = wl.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
+
+	// Restart the daemonset
+	err = testutils.RestartDaemonSet("kubescape", "node-agent")
+	if err != nil {
+		t.Errorf("Error restarting daemonset: %v", err)
+	}
+	assert.NoError(t, err)
+
+	// Wait for the network neighborhood to be completed
+	err = wl.WaitForNetworkNeighborhoodCompletion(160)
+	if err != nil {
+		t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
+	}
+
+	// Wait for cache to be updated
+	time.Sleep(15 * time.Second)
+
+	// Generate an alert by making an unexpected network request
+	_, _, err = wl.ExecIntoPod([]string{"curl", "google.com", "-m", "5"}, "nginx")
+	if err != nil {
+		t.Errorf("Error executing network command in pod: %v", err)
+	}
+
+	// Wait for the alert to be generated
+	time.Sleep(15 * time.Second)
+	alerts, err := testutils.GetAlerts(ns.Name)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+	testutils.AssertContains(t, alerts, "Unexpected domain request", "curl", "nginx")
 }
