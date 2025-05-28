@@ -157,23 +157,20 @@ func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileCont
 }
 
 // TODO make generic?
-func GetApplicationProfileContainer(object *v1beta1.ApplicationProfile, containerType ContainerType, containerIndex int) *v1beta1.ApplicationProfileContainer {
+func GetApplicationProfileContainer(object *v1beta1.ApplicationProfile, containerType ContainerType) *v1beta1.ApplicationProfileContainer {
 	if object == nil {
 		return nil
 	}
 	switch containerType {
 	case Container:
-		if len(object.Spec.Containers) > containerIndex {
-			return &object.Spec.Containers[containerIndex]
-		}
+		object.Spec.Containers = append(object.Spec.Containers, v1beta1.ApplicationProfileContainer{})
+		return &object.Spec.Containers[0]
 	case InitContainer:
-		if len(object.Spec.InitContainers) > containerIndex {
-			return &object.Spec.InitContainers[containerIndex]
-		}
+		object.Spec.InitContainers = append(object.Spec.InitContainers, v1beta1.ApplicationProfileContainer{})
+		return &object.Spec.InitContainers[0]
 	case EphemeralContainer:
-		if len(object.Spec.EphemeralContainers) > containerIndex {
-			return &object.Spec.EphemeralContainers[containerIndex]
-		}
+		object.Spec.EphemeralContainers = append(object.Spec.EphemeralContainers, v1beta1.ApplicationProfileContainer{})
+		return &object.Spec.EphemeralContainers[0]
 	}
 	return nil
 }

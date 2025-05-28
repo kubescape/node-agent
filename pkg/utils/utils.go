@@ -100,6 +100,7 @@ type WatchedContainerData struct {
 	ParentWorkloadSelector                     *metav1.LabelSelector
 	SeccompProfilePath                         *string
 	PreRunningContainer                        bool
+	PreviousProfileTS                          *time.Time
 }
 
 type ContainerInfo struct {

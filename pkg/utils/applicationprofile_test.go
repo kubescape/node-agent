@@ -37,7 +37,7 @@ func Test_EnrichApplicationProfileContainer(t *testing.T) {
 		Status: struct{}{},
 	}
 
-	existingContainer := GetApplicationProfileContainer(applicationProfile, Container, 0)
+	existingContainer := &applicationProfile.Spec.Containers[0]
 	assert.NotNil(t, existingContainer)
 
 	var test map[string]*v1beta1.HTTPEndpoint
