@@ -58,39 +58,58 @@ func (rule *R0003UnexpectedSystemCall) ID() string {
 func (rule *R0003UnexpectedSystemCall) DeleteRule() {
 }
 
-func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0003UnexpectedSystemCall) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.SyscallEventType {
-		return nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
-		return nil
-	}
-
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(syscallEvent.Runtime.ContainerID)
-	if ap == nil {
-		return nil
-	}
-
-	container, err := GetContainerFromApplicationProfile(ap, syscallEvent.GetContainer())
-	if err != nil {
-		return nil
-	}
-
-	// If the syscall is whitelisted, return nil
-	for _, syscall := range container.Syscalls {
-		if syscall == syscallEvent.SyscallName {
-			return nil
-		}
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	// We have already alerted for this syscall
 	if rule.listOfAlertedSyscalls.ContainsOne(syscallEvent.SyscallName) {
-		return nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
-	ruleFailure := GenericRuleFailure{
+	return ruleengine.DetectionResult{IsFailure: true, Payload: syscallEvent}
+}
+
+func (rule *R0003UnexpectedSystemCall) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
+	// First do basic evaluation
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
+	}
+
+	syscallEventTyped, _ := event.(*ruleenginetypes.SyscallEvent)
+	ap, err := GetApplicationProfile(syscallEventTyped.Runtime.ContainerID, objCache)
+	if err != nil {
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
+	}
+
+	container, err := GetContainerFromApplicationProfile(ap, syscallEventTyped.GetContainer())
+	if err != nil {
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
+	}
+
+	// If the syscall is whitelisted, return nil
+	for _, syscall := range container.Syscalls {
+		if syscall == syscallEventTyped.SyscallName {
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
+		}
+	}
+
+	return ruleengine.DetectionResult{IsFailure: true, Payload: nil}, nil
+}
+
+func (rule *R0003UnexpectedSystemCall) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
+	syscallEvent, _ := event.(*ruleenginetypes.SyscallEvent)
+
+	rule.listOfAlertedSyscalls.Add(syscallEvent.SyscallName)
+
+	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:  HashStringToMD5(syscallEvent.SyscallName),
 			AlertName: rule.Name(),
@@ -115,14 +134,14 @@ func (rule *R0003UnexpectedSystemCall) ProcessEvent(eventType utils.EventType, e
 		},
 		RuleID: rule.ID(),
 	}
-
-	rule.listOfAlertedSyscalls.Add(syscallEvent.SyscallName)
-
-	return &ruleFailure
 }
 
 func (rule *R0003UnexpectedSystemCall) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0003UnexpectedSystemCallRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			ProfileDependency: apitypes.Required,
+			ProfileType:       apitypes.ApplicationProfile,
+		},
 	}
 }

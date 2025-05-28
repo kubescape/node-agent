@@ -5,13 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
@@ -94,47 +93,62 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ID() string {
 
 func (rule *R0006UnexpectedServiceAccountTokenAccess) DeleteRule() {}
 
-func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	// Quick type checks first
+func (rule *R0006UnexpectedServiceAccountTokenAccess) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.OpenEventType {
-		return nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	convertedEvent, ok := event.(*events.OpenEvent)
 	if !ok {
-		return nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	openEvent := convertedEvent.Event
 
 	// Check if this is a token path - using optimized check
 	if getTokenBasePath(openEvent.FullPath) == "" {
-		return nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
-	// Get the application profile
-	ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
-	if ap == nil {
-		return nil
+	return ruleengine.DetectionResult{IsFailure: true, Payload: openEvent.FullPath}
+}
+
+func (rule *R0006UnexpectedServiceAccountTokenAccess) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
+	// First do basic evaluation
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 	}
 
-	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
+	openEventTyped, _ := event.(*events.OpenEvent)
+	ap, err := GetApplicationProfile(openEventTyped.Runtime.ContainerID, objCache)
 	if err != nil {
-		return nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
+	}
+
+	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEventTyped.GetContainer())
+	if err != nil {
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	}
 
 	// Normalize the accessed path once
-	normalizedAccessedPath := normalizeTimestampPath(openEvent.FullPath)
+	normalizedAccessedPath := normalizeTimestampPath(openEventTyped.FullPath)
 
 	// Check against whitelisted paths
 	for _, open := range appProfileOpenList.Opens {
 		normalizedWhitelistedPath := normalizeTimestampPath(open.Path)
 		if dynamicpathdetector.CompareDynamic(filepath.Dir(normalizedWhitelistedPath), filepath.Dir(normalizedAccessedPath)) {
-			return nil
+			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 		}
 	}
 
-	// If we get here, the access was not whitelisted - create an alert
+	return detectionResult, nil
+}
+
+func (rule *R0006UnexpectedServiceAccountTokenAccess) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
+	convertedEvent, _ := event.(*events.OpenEvent)
+	openEvent := convertedEvent.Event
+
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", openEvent.Comm, openEvent.FullPath)),
@@ -175,5 +189,9 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) ProcessEvent(eventType uti
 func (rule *R0006UnexpectedServiceAccountTokenAccess) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			ProfileDependency: apitypes.Required,
+			ProfileType:       apitypes.ApplicationProfile,
+		},
 	}
 }

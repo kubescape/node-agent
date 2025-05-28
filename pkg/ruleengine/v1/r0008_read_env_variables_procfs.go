@@ -4,12 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
-
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
@@ -36,10 +35,13 @@ var _ ruleengine.RuleEvaluator = (*R0008ReadEnvironmentVariablesProcFS)(nil)
 
 type R0008ReadEnvironmentVariablesProcFS struct {
 	BaseRule
+	alertedPaths map[string]bool
 }
 
 func CreateRuleR0008ReadEnvironmentVariablesProcFS() *R0008ReadEnvironmentVariablesProcFS {
-	return &R0008ReadEnvironmentVariablesProcFS{}
+	return &R0008ReadEnvironmentVariablesProcFS{
+		alertedPaths: make(map[string]bool),
+	}
 }
 func (rule *R0008ReadEnvironmentVariablesProcFS) Name() string {
 	return R0008Name
@@ -52,42 +54,64 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ID() string {
 func (rule *R0008ReadEnvironmentVariablesProcFS) DeleteRule() {
 }
 
-func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+func (rule *R0008ReadEnvironmentVariablesProcFS) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
 	if eventType != utils.OpenEventType {
-		return nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	fullEvent, ok := event.(*events.OpenEvent)
 	if !ok {
-		return nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
 	openEvent := fullEvent.Event
 
 	if !strings.HasPrefix(openEvent.FullPath, "/proc/") || !strings.HasSuffix(openEvent.FullPath, "/environ") {
-		return nil
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
-	if objCache != nil {
-		ap := objCache.ApplicationProfileCache().GetApplicationProfile(openEvent.Runtime.ContainerID)
-		if ap == nil {
-			return nil
-		}
+	if rule.alertedPaths[openEvent.FullPath] {
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+	}
 
-		appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEvent.GetContainer())
-		if err != nil {
-			return nil
-		}
+	return ruleengine.DetectionResult{IsFailure: true, Payload: openEvent.FullPath}
+}
 
-		for _, open := range appProfileOpenList.Opens {
-			// Check if there is an open call to /proc/<pid>/environ
-			if strings.HasPrefix(open.Path, "/proc/") && strings.HasSuffix(open.Path, "/environ") {
-				return nil
-			}
+func (rule *R0008ReadEnvironmentVariablesProcFS) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
+	// First do basic evaluation
+	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !detectionResult.IsFailure {
+		return detectionResult, nil
+	}
+
+	openEventTyped, _ := event.(*events.OpenEvent)
+	ap, err := GetApplicationProfile(openEventTyped.Runtime.ContainerID, objCache)
+	if err != nil {
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
+	}
+
+	appProfileOpenList, err := GetContainerFromApplicationProfile(ap, openEventTyped.GetContainer())
+	if err != nil {
+		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
+	}
+
+	for _, open := range appProfileOpenList.Opens {
+		// Check if there is an open call to /proc/<pid>/environ
+		if strings.HasPrefix(open.Path, "/proc/") && strings.HasSuffix(open.Path, "/environ") {
+			return ruleengine.DetectionResult{IsFailure: false, Payload: open.Path}, nil
 		}
 	}
 
-	ruleFailure := GenericRuleFailure{
+	return detectionResult, nil
+}
+
+func (rule *R0008ReadEnvironmentVariablesProcFS) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
+	fullEvent, _ := event.(*events.OpenEvent)
+	openEvent := fullEvent.Event
+
+	rule.alertedPaths[openEvent.FullPath] = true
+
+	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", openEvent.Comm, openEvent.FullPath)),
 			AlertName: rule.Name(),
@@ -118,12 +142,14 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) ProcessEvent(eventType utils.Ev
 		RuleID: rule.ID(),
 		Extra:  fullEvent.GetExtra(),
 	}
-
-	return &ruleFailure
 }
 
 func (rule *R0008ReadEnvironmentVariablesProcFS) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0008ReadEnvironmentVariablesProcFSRuleDescriptor.Requirements.RequiredEventTypes(),
+		ProfileRequirements: ruleengine.ProfileRequirement{
+			ProfileDependency: apitypes.Required,
+			ProfileType:       apitypes.ApplicationProfile,
+		},
 	}
 }

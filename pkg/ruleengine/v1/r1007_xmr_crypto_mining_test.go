@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
@@ -22,7 +23,7 @@ func TestR1007XMRCryptoMining(t *testing.T) {
 		Comm: "test",
 	}
 
-	ruleResult := r.ProcessEvent(utils.RandomXEventType, e3, &RuleObjectCacheMock{})
+	ruleResult := ruleprocess.ProcessRule(r, utils.RandomXEventType, e3, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of RandomX event")
