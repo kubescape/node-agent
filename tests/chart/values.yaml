@@ -66,6 +66,12 @@ nodeAgent:
     ]
     stdoutExporter: true
     syslogExporterURL: ""
+    ruleCooldown:
+      ruleCooldownDuration: 1h
+      ruleCooldownAfterCount: 10 # for tests
+      ruleCooldownOnProfileFailure: true
+      ruleCooldownMaxSize: 20000
+
 
   serviceMonitor:
     enabled: true

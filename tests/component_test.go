@@ -1400,7 +1400,7 @@ func Test_20_RuleCooldownTest(t *testing.T) {
 	}
 
 	// We should get exactly 10 alerts (cooldown threshold) even though we ran the process 20 times
-	assert.Equal(t, 9, alertCount, "Expected exactly 10 alerts due to cooldown threshold, got %d", alertCount)
+	assert.Equal(t, 10, alertCount, "Expected exactly 10 alerts due to cooldown threshold, got %d", alertCount)
 
 	// Verify the specific alert details
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})

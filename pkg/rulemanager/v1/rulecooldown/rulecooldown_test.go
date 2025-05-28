@@ -58,7 +58,7 @@ func TestShouldCooldown(t *testing.T) {
 					ContainerID: "test-container-2",
 				},
 			},
-			expectedCooldown: true,
+			expectedCooldown: false,
 			expectedCount:    3,
 			iterations:       3,
 			profileFailure:   false,
@@ -109,6 +109,30 @@ func TestShouldCooldown(t *testing.T) {
 			profileFailure:   false,
 			waitBetweenCalls: 200 * time.Millisecond,
 		},
+		{
+			name: "cooldown on profile failure when enabled",
+			config: RuleCooldownConfig{
+				CooldownDuration:   1 * time.Hour,
+				CooldownAfterCount: 3,
+				OnProfileFailure:   true,
+				MaxSize:            1000,
+			},
+			ruleFailure: &ruleengine.GenericRuleFailure{
+				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+					UniqueID: "test-alert-3",
+					ProfileMetadata: &apitypes.ProfileMetadata{
+						FailOnProfile: true,
+					},
+				},
+				RuntimeProcessDetails: apitypes.ProcessTree{
+					ContainerID: "test-container-3",
+				},
+			},
+			expectedCooldown: false,
+			expectedCount:    3,
+			iterations:       3,
+			profileFailure:   true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -154,7 +178,7 @@ func TestShouldCooldownImmediate(t *testing.T) {
 
 	// First call should trigger cooldown immediately
 	cooldown, count := rc.ShouldCooldown(ruleFailure)
-	assert.True(t, cooldown)
+	assert.False(t, cooldown)
 	assert.Equal(t, 1, count)
 
 	// Second call should still be in cooldown
@@ -166,7 +190,7 @@ func TestShouldCooldownImmediate(t *testing.T) {
 func TestShouldCooldownOnProfileFailure(t *testing.T) {
 	rc := NewRuleCooldown(RuleCooldownConfig{
 		CooldownDuration:   1 * time.Hour,
-		CooldownAfterCount: 3,
+		CooldownAfterCount: 2,
 		OnProfileFailure:   true,
 		MaxSize:            1000,
 	})
@@ -239,12 +263,12 @@ func TestShouldCooldownDifferentKeys(t *testing.T) {
 
 	// First failure - second call
 	cooldown, count = rc.ShouldCooldown(ruleFailure1)
-	assert.True(t, cooldown)
+	assert.False(t, cooldown)
 	assert.Equal(t, 2, count)
 
 	// Second failure - second call
 	cooldown, count = rc.ShouldCooldown(ruleFailure2)
-	assert.True(t, cooldown)
+	assert.False(t, cooldown)
 	assert.Equal(t, 2, count)
 }
 

@@ -49,5 +49,5 @@ func (rc *RuleCooldown) ShouldCooldown(ruleFailures ruleengine.RuleFailure) (boo
 
 	count++
 	rc.cooldownMap.Add(key, count)
-	return count >= rc.cooldownConfig.CooldownAfterCount, count
+	return count > rc.cooldownConfig.CooldownAfterCount, count
 }
