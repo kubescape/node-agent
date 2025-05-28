@@ -151,7 +151,7 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			}
 
 			// Get the workload ID from profile
-			workloadID := profile.Annotations[helpersv1.WlidMetadataKey]
+			workloadID := apc.wlidKey(profile.Annotations[helpersv1.WlidMetadataKey], profile.Labels[helpersv1.TemplateHashKey])
 			if workloadID == "" {
 				continue
 			}
@@ -429,7 +429,7 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 			return err
 		}
 
-		workloadID := sharedData.Wlid
+		workloadID := apc.wlidKey(sharedData.Wlid, sharedData.InstanceID.GetTemplateHash())
 		if workloadID == "" {
 			logger.L().Debug("empty workloadID for container", helpers.String("containerID", containerID))
 			return nil
@@ -514,6 +514,10 @@ func (apc *ApplicationProfileCacheImpl) waitForSharedContainerData(containerID s
 
 func (apc *ApplicationProfileCacheImpl) profileKey(namespace, name string) string {
 	return fmt.Sprintf("%s/%s", namespace, name)
+}
+
+func (apc *ApplicationProfileCacheImpl) wlidKey(wlid, templateHash string) string {
+	return fmt.Sprintf("%s/%s", wlid, templateHash)
 }
 
 func (apc *ApplicationProfileCacheImpl) performMerge(normalProfile, userManagedProfile *v1beta1.ApplicationProfile) *v1beta1.ApplicationProfile {
