@@ -26,7 +26,7 @@ import (
 // ContainerInfo holds container metadata we need for network neighborhood mapping
 type ContainerInfo struct {
 	ContainerID          string
-	WorkloadID           string
+	InstanceID           string
 	InstanceTemplateHash string
 	Namespace            string
 }
@@ -34,8 +34,8 @@ type ContainerInfo struct {
 // NetworkNeighborhoodCacheImpl implements the NetworkNeighborhoodCache interface
 type NetworkNeighborhoodCacheImpl struct {
 	cfg                                        config.Config
-	workloadIDToNetworkNeighborhood            maps.SafeMap[string, *v1beta1.NetworkNeighborhood]
-	workloadIDToProfileState                   maps.SafeMap[string, *objectcache.ProfileState] // Tracks profile state even if not in cache
+	instanceIDToNetworkNeighborhood            maps.SafeMap[string, *v1beta1.NetworkNeighborhood]
+	instanceIDToProfileState                   maps.SafeMap[string, *objectcache.ProfileState] // Tracks profile state even if not in cache
 	containerIDToInfo                          maps.SafeMap[string, *ContainerInfo]
 	networkNeighborhoodToUserManagedIdentifier maps.SafeMap[string, string] // networkNeighborhoodName -> user-managed profile unique identifier
 	storageClient                              versioned.SpdxV1beta1Interface
@@ -52,8 +52,8 @@ func NewNetworkNeighborhoodCache(cfg config.Config, storageClient versioned.Spdx
 
 	nnc := &NetworkNeighborhoodCacheImpl{
 		cfg:                             cfg,
-		workloadIDToNetworkNeighborhood: maps.SafeMap[string, *v1beta1.NetworkNeighborhood]{},
-		workloadIDToProfileState:        maps.SafeMap[string, *objectcache.ProfileState]{},
+		instanceIDToNetworkNeighborhood: maps.SafeMap[string, *v1beta1.NetworkNeighborhood]{},
+		instanceIDToProfileState:        maps.SafeMap[string, *objectcache.ProfileState]{},
 		containerIDToInfo:               maps.SafeMap[string, *ContainerInfo]{},
 		networkNeighborhoodToUserManagedIdentifier: maps.SafeMap[string, string]{},
 		storageClient:  storageClient,
@@ -142,9 +142,9 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 				continue
 			}
 
-			// Get the workload ID from network neighborhood
-			workloadID := nn.Annotations[helpersv1.WlidMetadataKey]
-			if workloadID == "" {
+			// Get the instance ID from network neighborhood
+			instanceID := nn.Annotations[helpersv1.InstanceIDMetadataKey]
+			if instanceID == "" {
 				continue
 			}
 
@@ -155,30 +155,30 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 				Name:       nn.Name,
 				Error:      nil,
 			}
-			nnc.workloadIDToProfileState.Set(workloadID, profileState)
+			nnc.instanceIDToProfileState.Set(instanceID, profileState)
 
 			// Only consider completed network neighborhoods
 			if nn.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
 				continue
 			}
 
-			// Check if this workload ID is used by any container in this namespace
-			workloadIDInUse := false
+			// Check if this instance ID is used by any container in this namespace
+			instanceIDInUse := false
 			for _, containerID := range containerIDs {
 				if containerInfo, exists := nnc.containerIDToInfo.Load(containerID); exists &&
-					containerInfo.WorkloadID == workloadID &&
+					containerInfo.InstanceID == instanceID &&
 					containerInfo.InstanceTemplateHash == nn.Labels[helpersv1.TemplateHashKey] {
-					workloadIDInUse = true
+					instanceIDInUse = true
 					break
 				}
 			}
 
-			if !workloadIDInUse {
+			if !instanceIDInUse {
 				continue
 			}
 
 			// Update the network neighborhood in the cache
-			if existingNN, exists := nnc.workloadIDToNetworkNeighborhood.Load(workloadID); exists {
+			if existingNN, exists := nnc.instanceIDToNetworkNeighborhood.Load(instanceID); exists {
 				// If the network neighborhood already exists and it's complete/completed, continue to the next one
 				if existingNN.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Complete {
 					continue
@@ -194,17 +194,17 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 			fullNN, err := nnc.storageClient.NetworkNeighborhoods(namespace).Get(ctx, nn.Name, metav1.GetOptions{})
 			if err != nil {
 				logger.L().Error("failed to get network neighborhood",
-					helpers.String("workloadID", workloadID),
+					helpers.String("instanceID", instanceID),
 					helpers.String("namespace", namespace),
 					helpers.Error(err))
 				profileState.Error = err
-				nnc.workloadIDToProfileState.Set(workloadID, profileState)
+				nnc.instanceIDToProfileState.Set(instanceID, profileState)
 				continue
 			}
 
-			nnc.workloadIDToNetworkNeighborhood.Set(workloadID, fullNN)
+			nnc.instanceIDToNetworkNeighborhood.Set(instanceID, fullNN)
 			logger.L().Debug("updated network neighborhood in cache",
-				helpers.String("workloadID", workloadID),
+				helpers.String("instanceID", instanceID),
 				helpers.String("namespace", namespace),
 				helpers.String("status", nn.Annotations[helpersv1.StatusMetadataKey]),
 				helpers.String("completion", nn.Annotations[helpersv1.CompletionMetadataKey]))
@@ -228,16 +228,16 @@ func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn
 
 	// Find and collect the network neighborhood to merge
 	var toMerge struct {
-		wlid string
-		nn   *v1beta1.NetworkNeighborhood
+		instanceID string
+		nn         *v1beta1.NetworkNeighborhood
 	}
 
-	nnc.workloadIDToNetworkNeighborhood.Range(func(wlid string, originalNN *v1beta1.NetworkNeighborhood) bool {
+	nnc.instanceIDToNetworkNeighborhood.Range(func(instanceID string, originalNN *v1beta1.NetworkNeighborhood) bool {
 		if originalNN.Name == normalizedNNName && originalNN.Namespace == nn.Namespace {
-			toMerge.wlid = wlid
+			toMerge.instanceID = instanceID
 			toMerge.nn = originalNN
 			logger.L().Debug("found matching network neighborhood for user-managed network neighborhood",
-				helpers.String("workloadID", wlid),
+				helpers.String("instanceID", instanceID),
 				helpers.String("namespace", originalNN.Namespace),
 				helpers.String("nnName", originalNN.Name))
 			// Stop iteration
@@ -277,7 +277,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn
 	// Merge the network neighborhoods
 	mergedNN := nnc.performMerge(originalNN, fullUserNN)
 	// Update the cache with the merged network neighborhood
-	nnc.workloadIDToNetworkNeighborhood.Set(toMerge.wlid, mergedNN)
+	nnc.instanceIDToNetworkNeighborhood.Set(toMerge.instanceID, mergedNN)
 	// Update profile state for the merged profile
 	profileState := &objectcache.ProfileState{
 		Completion: mergedNN.Annotations[helpersv1.CompletionMetadataKey],
@@ -285,9 +285,9 @@ func (nnc *NetworkNeighborhoodCacheImpl) handleUserManagedNetworkNeighborhood(nn
 		Name:       mergedNN.Name,
 		Error:      nil,
 	}
-	nnc.workloadIDToProfileState.Set(toMerge.wlid, profileState)
+	nnc.instanceIDToProfileState.Set(toMerge.instanceID, profileState)
 	logger.L().Debug("merged user-managed network neighborhood with normal network neighborhood",
-		helpers.String("workloadID", toMerge.wlid),
+		helpers.String("instanceID", toMerge.instanceID),
 		helpers.String("namespace", nn.Namespace),
 		helpers.String("nnName", nn.Name))
 
@@ -349,16 +349,16 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 			return err
 		}
 
-		workloadID := sharedData.Wlid
-		if workloadID == "" {
-			logger.L().Debug("empty workloadID for container", helpers.String("containerID", containerID))
+		instanceID := sharedData.Wlid
+		if instanceID == "" {
+			logger.L().Debug("empty instanceID for container", helpers.String("containerID", containerID))
 			return nil
 		}
 
 		// Create container info
 		containerInfo := &ContainerInfo{
 			ContainerID:          containerID,
-			WorkloadID:           workloadID,
+			InstanceID:           instanceID,
 			InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
 			Namespace:            container.K8s.Namespace,
 		}
@@ -366,14 +366,14 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 		// Add to container info map
 		nnc.containerIDToInfo.Set(containerID, containerInfo)
 
-		// Create workload ID to state mapping
-		if _, exists := nnc.workloadIDToProfileState.Load(workloadID); !exists {
-			nnc.workloadIDToProfileState.Set(workloadID, nil)
+		// Create instance ID to state mapping
+		if _, exists := nnc.instanceIDToProfileState.Load(instanceID); !exists {
+			nnc.instanceIDToProfileState.Set(instanceID, nil)
 		}
 
 		logger.L().Debug("container added to cache",
 			helpers.String("containerID", containerID),
-			helpers.String("workloadID", workloadID),
+			helpers.String("instanceID", instanceID),
 			helpers.String("namespace", container.K8s.Namespace))
 
 		return nil
@@ -393,26 +393,26 @@ func (nnc *NetworkNeighborhoodCacheImpl) deleteContainer(containerID string) {
 		// Clean up container info
 		nnc.containerIDToInfo.Delete(containerID)
 
-		// Check if any other container is using the same workload ID
-		workloadStillInUse := false
+		// Check if any other container is using the same instance ID
+		instanceIDStillInUse := false
 		nnc.containerIDToInfo.Range(func(_ string, info *ContainerInfo) bool {
-			if info.WorkloadID == containerInfo.WorkloadID {
-				workloadStillInUse = true
+			if info.InstanceID == containerInfo.InstanceID {
+				instanceIDStillInUse = true
 				return false // Stop iteration
 			}
 			return true // Continue iteration
 		})
 
-		// If no other container is using the same workload ID, delete it from the cache
-		if !workloadStillInUse {
-			if nn, exists := nnc.workloadIDToNetworkNeighborhood.Load(containerInfo.WorkloadID); exists {
+		// If no other container is using the same instance ID, delete it from the cache
+		if !instanceIDStillInUse {
+			if nn, exists := nnc.instanceIDToNetworkNeighborhood.Load(containerInfo.InstanceID); exists {
 				// Remove any user managed identifiers related to this network neighborhood
 				nnKey := nnc.networkNeighborhoodKey(nn.Namespace, nn.Name)
 				nnc.networkNeighborhoodToUserManagedIdentifier.Delete(nnKey)
 			}
-			nnc.workloadIDToNetworkNeighborhood.Delete(containerInfo.WorkloadID)
-			nnc.workloadIDToProfileState.Delete(containerInfo.WorkloadID)
-			logger.L().Debug("deleted workloadID from cache", helpers.String("workloadID", containerInfo.WorkloadID))
+			nnc.instanceIDToNetworkNeighborhood.Delete(containerInfo.InstanceID)
+			nnc.instanceIDToProfileState.Delete(containerInfo.InstanceID)
+			logger.L().Debug("deleted instanceID from cache", helpers.String("instanceID", containerInfo.InstanceID))
 		}
 	})
 
@@ -438,13 +438,13 @@ func (nnc *NetworkNeighborhoodCacheImpl) networkNeighborhoodKey(namespace, name 
 func (nnc *NetworkNeighborhoodCacheImpl) GetNetworkNeighborhood(containerID string) *v1beta1.NetworkNeighborhood {
 	// Get container info
 	if containerInfo, exists := nnc.containerIDToInfo.Load(containerID); exists {
-		workloadID := containerInfo.WorkloadID
-		if workloadID == "" {
+		instanceID := containerInfo.InstanceID
+		if instanceID == "" {
 			return nil
 		}
 
 		// Try to get network neighborhood from cache
-		if nn, exists := nnc.workloadIDToNetworkNeighborhood.Load(workloadID); exists {
+		if nn, exists := nnc.instanceIDToNetworkNeighborhood.Load(instanceID); exists {
 			if nn != nil {
 				return nn
 			}
@@ -464,15 +464,15 @@ func (nnc *NetworkNeighborhoodCacheImpl) GetNetworkNeighborhoodState(containerID
 		}
 	}
 
-	workloadID := containerInfo.WorkloadID
-	if workloadID == "" {
+	instanceID := containerInfo.InstanceID
+	if instanceID == "" {
 		return &objectcache.ProfileState{
-			Error: fmt.Errorf("no workload ID for container %s", containerID),
+			Error: fmt.Errorf("no instance ID for container %s", containerID),
 		}
 	}
 
 	// Try to get profile state from cache
-	if profileState, exists := nnc.workloadIDToProfileState.Load(workloadID); exists {
+	if profileState, exists := nnc.instanceIDToProfileState.Load(instanceID); exists {
 		if profileState != nil {
 			return profileState
 		} else {
@@ -483,7 +483,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) GetNetworkNeighborhoodState(containerID
 	}
 
 	return &objectcache.ProfileState{
-		Error: fmt.Errorf("profile state not found for workload ID %s", workloadID),
+		Error: fmt.Errorf("profile state not found for instance ID %s", instanceID),
 	}
 }
 
