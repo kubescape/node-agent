@@ -6,6 +6,7 @@ import (
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -60,6 +61,13 @@ func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 		expectAlert     bool
 		description     string
 	}{
+		{
+			name:        "Relative path with dots",
+			event:       createTestEvent("./etc/shadow", []string{"O_RDONLY"}),
+			profile:     createTestProfile("test", []string{"/etc/shadow"}, []string{"O_RDONLY"}),
+			expectAlert: true,
+			description: "Should handle relative paths correctly",
+		},
 		{
 			name:        "No application profile",
 			event:       createTestEvent("/test", []string{"O_RDONLY"}),
@@ -233,13 +241,6 @@ func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 			expectAlert: false,
 			description: "Should handle special characters in paths",
 		},
-		{
-			name:        "Relative path with dots",
-			event:       createTestEvent("./etc/shadow", []string{"O_RDONLY"}),
-			profile:     createTestProfile("test", []string{"/etc/shadow"}, []string{"O_RDONLY"}),
-			expectAlert: true,
-			description: "Should handle relative paths correctly",
-		},
 	}
 
 	for _, tt := range tests {
@@ -260,7 +261,7 @@ func TestR0010UnexpectedSensitiveFileAccess(t *testing.T) {
 				})
 			}
 
-			result := rule.ProcessEvent(utils.OpenEventType, tt.event, objCache)
+			result := ruleprocess.ProcessRule(rule, utils.OpenEventType, tt.event, objCache)
 
 			if tt.expectAlert && result == nil {
 				t.Errorf("%s: expected alert but got none", tt.description)

@@ -50,6 +50,7 @@ import (
 	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	rulemanagerv1 "github.com/kubescape/node-agent/pkg/rulemanager/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
@@ -257,8 +258,10 @@ func main() {
 		// create object cache
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
 
+		ruleCooldown := rulecooldown.NewRuleCooldown(cfg.RuleCoolDown)
+
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processManager, dnsResolver, nil)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processManager, dnsResolver, nil, ruleCooldown)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}

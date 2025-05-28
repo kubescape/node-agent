@@ -31,6 +31,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -58,11 +60,12 @@ type RuleManager struct {
 	enricher             ruleenginetypes.Enricher
 	processManager       processmanager.ProcessManagerClient
 	dnsManager           dnsmanager.DNSResolver
+	ruleCooldown         *rulecooldown.RuleCooldown
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		ctx:               ctx,
@@ -77,6 +80,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		enricher:          enricher,
 		processManager:    processManager,
 		dnsManager:        dnsManager,
+		ruleCooldown:      ruleCooldown,
 	}, nil
 }
 
@@ -288,14 +292,19 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 			continue
 		}
 
-		res := rule.ProcessEvent(eventType, event, rm.objectCache)
+		res := ruleprocess.ProcessRule(rule, eventType, event, rm.objectCache)
 		if res != nil {
+			shouldCooldown, count := rm.ruleCooldown.ShouldCooldown(res)
+			if shouldCooldown {
+				logger.L().Debug("RuleManager - rule cooldown", helpers.String("rule", rule.Name()), helpers.Int("seen_count", count))
+				continue
+			}
+
 			res = rm.enrichRuleFailure(res)
 			if res != nil {
 				res.SetWorkloadDetails(details)
 				rm.exporter.SendRuleAlert(res)
 			}
-
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())
@@ -346,7 +355,6 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	}
 
 	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
-
 	runtimeProcessDetails := ruleFailure.GetRuntimeProcessDetails()
 
 	err = backoff.Retry(func() error {
@@ -424,7 +432,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 
 	if rm.enricher != nil && !reflect.ValueOf(rm.enricher).IsNil() {
 		if err := rm.enricher.EnrichRuleFailure(ruleFailure); err != nil {
-			if errors.Is(err, ErrRuleShouldNotBeAlerted) {
+			if errors.Is(err, ruleprocess.ErrRuleShouldNotBeAlerted) {
 				return nil
 			}
 		}
@@ -468,11 +476,11 @@ func (rm *RuleManager) IsPodMonitored(namespace, pod string) bool {
 	return rm.podToWlid.Has(utils.CreateK8sPodID(namespace, pod))
 }
 
-func (rm *RuleManager) EvaluateRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string {
+func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, event utils.K8sEvent) []string {
 	results := []string{}
 
 	creator := rm.ruleBindingCache.GetRuleCreator()
-	rules := creator.CreateRulesByEventType(eventType)
+	rules := creator.CreateRulePolicyRulesByEventType(eventType)
 
 	for _, rule := range rules {
 		rule, ok := rule.(ruleengine.RuleCondition)
@@ -480,7 +488,7 @@ func (rm *RuleManager) EvaluateRulesForEvent(eventType utils.EventType, event ut
 			continue
 		}
 
-		if ok, _ := rule.EvaluateRule(eventType, event, rm.objectCache.K8sObjectCache()); ok {
+		if detectionResult := rule.EvaluateRule(eventType, event, rm.objectCache.K8sObjectCache()); detectionResult.IsFailure {
 			results = append(results, rule.ID())
 		}
 	}

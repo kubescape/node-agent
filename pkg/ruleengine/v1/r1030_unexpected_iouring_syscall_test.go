@@ -5,6 +5,7 @@ import (
 
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -107,7 +108,7 @@ func TestR1030UnexpectedIouringOperation(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ruleResult := r.ProcessEvent(utils.IoUringEventType, tc.event, &objCache)
+			ruleResult := ruleprocess.ProcessRule(r, utils.IoUringEventType, tc.event, &objCache)
 
 			if tc.expectedAlert && ruleResult == nil {
 				t.Errorf("Expected alert for io_uring operation but got nil")
@@ -120,13 +121,14 @@ func TestR1030UnexpectedIouringOperation(t *testing.T) {
 
 	// Test wrong event type
 	wrongEvent := &traceriouringtype.Event{}
-	ruleResult := r.ProcessEvent(utils.HardlinkEventType, wrongEvent, &objCache)
+	ruleResult := ruleprocess.ProcessRule(r, utils.HardlinkEventType, wrongEvent, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected no alert for wrong event type but got: %v", ruleResult)
 	}
 
 	// Test evaluation with invalid event type
-	if ok, _ := r.EvaluateRule(utils.HardlinkEventType, wrongEvent, objCache.K8sObjectCache()); ok {
+	detectionResult := r.EvaluateRule(utils.HardlinkEventType, wrongEvent, objCache.K8sObjectCache())
+	if detectionResult.IsFailure {
 		t.Error("Expected EvaluateRule to return false for wrong event type")
 	}
 
