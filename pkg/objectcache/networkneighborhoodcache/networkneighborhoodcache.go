@@ -143,7 +143,10 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 			}
 
 			// Get the workload ID from network neighborhood
-			workloadID := nn.Annotations[helpersv1.WlidMetadataKey]
+			workloadID := nnc.wlidKey(
+				nn.Annotations[helpersv1.WlidMetadataKey],
+				nn.Labels[helpersv1.TemplateHashKey],
+			)
 			if workloadID == "" {
 				continue
 			}
@@ -349,7 +352,7 @@ func (nnc *NetworkNeighborhoodCacheImpl) addContainer(container *containercollec
 			return err
 		}
 
-		workloadID := sharedData.Wlid
+		workloadID := nnc.wlidKey(sharedData.Wlid, sharedData.InstanceID.GetTemplateHash())
 		if workloadID == "" {
 			logger.L().Debug("empty workloadID for container", helpers.String("containerID", containerID))
 			return nil
@@ -432,6 +435,10 @@ func (nnc *NetworkNeighborhoodCacheImpl) waitForSharedContainerData(containerID 
 
 func (nnc *NetworkNeighborhoodCacheImpl) networkNeighborhoodKey(namespace, name string) string {
 	return fmt.Sprintf("%s/%s", namespace, name)
+}
+
+func (nnc *NetworkNeighborhoodCacheImpl) wlidKey(wlid, templateHash string) string {
+	return fmt.Sprintf("%s/%s", wlid, templateHash)
 }
 
 // GetNetworkNeighborhood gets the network neighborhood for a container
