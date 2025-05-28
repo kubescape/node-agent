@@ -27,7 +27,7 @@ import (
 // ContainerInfo holds container metadata we need for application profile mapping
 type ContainerInfo struct {
 	ContainerID          string
-	WorkloadID           string
+	InstanceID           string
 	InstanceTemplateHash string
 	Namespace            string
 	Name                 string
@@ -40,8 +40,8 @@ type ContainerCallStackIndex struct {
 
 type ApplicationProfileCacheImpl struct {
 	cfg                            config.Config
-	workloadIDToProfile            maps.SafeMap[string, *v1beta1.ApplicationProfile]
-	workloadIDToProfileState       maps.SafeMap[string, *objectcache.ProfileState] // Tracks profile state even if not in cache
+	instanceIDToProfile            maps.SafeMap[string, *v1beta1.ApplicationProfile]
+	instanceIDToProfileState       maps.SafeMap[string, *objectcache.ProfileState] // Tracks profile state even if not in cache
 	containerIDToInfo              maps.SafeMap[string, *ContainerInfo]
 	profileToUserManagedIdentifier maps.SafeMap[string, string] // profileName -> user-managed profile unique identifier (This is used to prevent merging the same user-managed profile multiple times)
 	containerToCallStackIndex      maps.SafeMap[string, *ContainerCallStackIndex]
@@ -59,8 +59,8 @@ func NewApplicationProfileCache(cfg config.Config, storageClient versioned.SpdxV
 
 	apc := &ApplicationProfileCacheImpl{
 		cfg:                            cfg,
-		workloadIDToProfile:            maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
-		workloadIDToProfileState:       maps.SafeMap[string, *objectcache.ProfileState]{},
+		instanceIDToProfile:            maps.SafeMap[string, *v1beta1.ApplicationProfile]{},
+		instanceIDToProfileState:       maps.SafeMap[string, *objectcache.ProfileState]{},
 		containerIDToInfo:              maps.SafeMap[string, *ContainerInfo]{},
 		profileToUserManagedIdentifier: maps.SafeMap[string, string]{},
 		containerToCallStackIndex:      maps.SafeMap[string, *ContainerCallStackIndex]{},
@@ -150,9 +150,9 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 				continue
 			}
 
-			// Get the workload ID from profile
-			workloadID := profile.Annotations[helpersv1.WlidMetadataKey]
-			if workloadID == "" {
+			// Get the instanceID ID from profile
+			instanceID := profile.Annotations[helpersv1.InstanceIDMetadataKey]
+			if instanceID == "" {
 				continue
 			}
 
@@ -163,30 +163,30 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 				Name:       profile.Name,
 				Error:      nil,
 			}
-			apc.workloadIDToProfileState.Set(workloadID, profileState)
+			apc.instanceIDToProfileState.Set(instanceID, profileState)
 
 			// Only consider completed profiles
 			if profile.Annotations[helpersv1.StatusMetadataKey] != helpersv1.Completed {
 				continue
 			}
 
-			// Check if this workload ID is used by any container in this namespace
-			workloadIDInUse := false
+			// Check if this instanceID ID is used by any container in this namespace
+			instanceIDInUse := false
 			for _, containerID := range containerIDs {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
-					containerInfo.WorkloadID == workloadID &&
+					containerInfo.InstanceID == instanceID &&
 					containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
-					workloadIDInUse = true
+					instanceIDInUse = true
 					break
 				}
 			}
 
-			if !workloadIDInUse {
+			if !instanceIDInUse {
 				continue
 			}
 
 			// Update the profile in the cache
-			if existingProfile, exists := apc.workloadIDToProfile.Load(workloadID); exists {
+			if existingProfile, exists := apc.instanceIDToProfile.Load(instanceID); exists {
 				// If the profile already exists and it's complete/completed, continue to the next one
 				if existingProfile.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Complete {
 					continue
@@ -202,26 +202,26 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			fullProfile, err := apc.storageClient.ApplicationProfiles(namespace).Get(ctx, profile.Name, metav1.GetOptions{})
 			if err != nil {
 				logger.L().Error("failed to get application profile",
-					helpers.String("workloadID", workloadID),
+					helpers.String("instanceID", instanceID),
 					helpers.String("namespace", namespace),
 					helpers.Error(err))
 				// Update the profile state to indicate an error
 				profileState.Error = err
-				apc.workloadIDToProfileState.Set(workloadID, profileState)
+				apc.instanceIDToProfileState.Set(instanceID, profileState)
 				continue
 			}
 
-			apc.workloadIDToProfile.Set(workloadID, fullProfile)
+			apc.instanceIDToProfile.Set(instanceID, fullProfile)
 			logger.L().Debug("updated profile in cache",
-				helpers.String("workloadID", workloadID),
+				helpers.String("instanceID", instanceID),
 				helpers.String("namespace", namespace),
 				helpers.String("status", profile.Annotations[helpersv1.StatusMetadataKey]),
 				helpers.String("completion", profile.Annotations[helpersv1.CompletionMetadataKey]))
 
-			// Update call stack search trees for containers using this workload ID
+			// Update call stack search trees for containers using this instanceID ID
 			for _, containerID := range containerIDs {
 				if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists &&
-					containerInfo.WorkloadID == workloadID &&
+					containerInfo.InstanceID == instanceID &&
 					containerInfo.InstanceTemplateHash == profile.Labels[helpersv1.TemplateHashKey] {
 					// Create or update call stack search tree if not exists
 					apc.indexContainerCallStacks(containerID, containerInfo.Name, fullProfile)
@@ -248,16 +248,16 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 
 	// Find and collect the profile to merge
 	var toMerge struct {
-		wlid    string
-		profile *v1beta1.ApplicationProfile
+		instanceID string
+		profile    *v1beta1.ApplicationProfile
 	}
 
-	apc.workloadIDToProfile.Range(func(wlid string, originalProfile *v1beta1.ApplicationProfile) bool {
+	apc.instanceIDToProfile.Range(func(instanceID string, originalProfile *v1beta1.ApplicationProfile) bool {
 		if originalProfile.Name == normalizedProfileName && originalProfile.Namespace == profile.Namespace {
-			toMerge.wlid = wlid
+			toMerge.instanceID = instanceID
 			toMerge.profile = originalProfile
 			logger.L().Debug("found matching profile for user-managed profile",
-				helpers.String("workloadID", wlid),
+				helpers.String("instanceID", instanceID),
 				helpers.String("namespace", originalProfile.Namespace),
 				helpers.String("profileName", originalProfile.Name))
 			// Stop iteration
@@ -297,7 +297,7 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 	// Merge the profiles
 	mergedProfile := apc.performMerge(originalProfile, fullUserProfile)
 	// Update the cache with the merged profile
-	apc.workloadIDToProfile.Set(toMerge.wlid, mergedProfile)
+	apc.instanceIDToProfile.Set(toMerge.instanceID, mergedProfile)
 	// Update profile state for the merged profile
 	profileState := &objectcache.ProfileState{
 		Completion: mergedProfile.Annotations[helpersv1.CompletionMetadataKey],
@@ -305,10 +305,10 @@ func (apc *ApplicationProfileCacheImpl) handleUserManagedProfile(profile *v1beta
 		Name:       mergedProfile.Name,
 		Error:      nil,
 	}
-	apc.workloadIDToProfileState.Set(toMerge.wlid, profileState)
+	apc.instanceIDToProfileState.Set(toMerge.instanceID, profileState)
 
 	logger.L().Debug("merged user-managed profile with normal profile",
-		helpers.String("workloadID", toMerge.wlid),
+		helpers.String("instanceID", toMerge.instanceID),
 		helpers.String("namespace", profile.Namespace),
 		helpers.String("profileName", profile.Name))
 
@@ -420,7 +420,7 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 	containerID := container.Runtime.ContainerID
 
 	return apc.containerLocks.WithLockAndError(containerID, func() error {
-		// Get workload ID from shared data
+		// Get instanceID ID from shared data
 		sharedData, err := apc.waitForSharedContainerData(containerID, ctx)
 		if err != nil {
 			logger.L().Error("failed to get shared data for container",
@@ -429,16 +429,12 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 			return err
 		}
 
-		workloadID := sharedData.Wlid
-		if workloadID == "" {
-			logger.L().Debug("empty workloadID for container", helpers.String("containerID", containerID))
-			return nil
-		}
+		instanceID := sharedData.InstanceID.GetStringFormatted()
 
 		// Create container info
 		containerInfo := &ContainerInfo{
 			ContainerID:          containerID,
-			WorkloadID:           workloadID,
+			InstanceID:           instanceID,
 			InstanceTemplateHash: sharedData.InstanceID.GetTemplateHash(),
 			Namespace:            container.K8s.Namespace,
 			Name:                 container.Runtime.ContainerName,
@@ -447,14 +443,14 @@ func (apc *ApplicationProfileCacheImpl) addContainer(container *containercollect
 		// Add to container info map
 		apc.containerIDToInfo.Set(containerID, containerInfo)
 
-		// Create workload ID to state mapping
-		if _, exists := apc.workloadIDToProfileState.Load(workloadID); !exists {
-			apc.workloadIDToProfileState.Set(workloadID, nil)
+		// Create instanceID ID to state mapping
+		if _, exists := apc.instanceIDToProfileState.Load(instanceID); !exists {
+			apc.instanceIDToProfileState.Set(instanceID, nil)
 		}
 
 		logger.L().Debug("container added to cache",
 			helpers.String("containerID", containerID),
-			helpers.String("workloadID", workloadID),
+			helpers.String("instanceID", instanceID),
 			helpers.String("namespace", container.K8s.Namespace))
 
 		return nil
@@ -475,26 +471,26 @@ func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
 		apc.containerIDToInfo.Delete(containerID)
 		apc.containerToCallStackIndex.Delete(containerID)
 
-		// Check if any other container is using the same workload ID
-		workloadStillInUse := false
+		// Check if any other container is using the same instanceID ID
+		instanceIDStillInUse := false
 		apc.containerIDToInfo.Range(func(_ string, info *ContainerInfo) bool {
-			if info.WorkloadID == containerInfo.WorkloadID {
-				workloadStillInUse = true
+			if info.InstanceID == containerInfo.InstanceID {
+				instanceIDStillInUse = true
 				return false // Stop iteration
 			}
 			return true // Continue iteration
 		})
 
-		// If no other container is using the same workload ID, delete it from the cache
-		if !workloadStillInUse {
-			if profile, exists := apc.workloadIDToProfile.Load(containerInfo.WorkloadID); exists {
+		// If no other container is using the same instanceID ID, delete it from the cache
+		if !instanceIDStillInUse {
+			if profile, exists := apc.instanceIDToProfile.Load(containerInfo.InstanceID); exists {
 				// Remove the profile from the cache
 				profileKey := apc.profileKey(profile.Namespace, profile.Name)
 				apc.profileToUserManagedIdentifier.Delete(profileKey)
 			}
-			apc.workloadIDToProfileState.Delete(containerInfo.WorkloadID)
-			apc.workloadIDToProfile.Delete(containerInfo.WorkloadID)
-			logger.L().Debug("deleted workloadID from cache", helpers.String("workloadID", containerInfo.WorkloadID))
+			apc.instanceIDToProfileState.Delete(containerInfo.InstanceID)
+			apc.instanceIDToProfile.Delete(containerInfo.InstanceID)
+			logger.L().Debug("deleted instanceID from cache", helpers.String("instanceID", containerInfo.InstanceID))
 		}
 	})
 
@@ -575,13 +571,13 @@ func isUserManagedProfile(appProfile *v1beta1.ApplicationProfile) bool {
 func (apc *ApplicationProfileCacheImpl) GetApplicationProfile(containerID string) *v1beta1.ApplicationProfile {
 	// Get container info
 	if containerInfo, exists := apc.containerIDToInfo.Load(containerID); exists {
-		workloadID := containerInfo.WorkloadID
-		if workloadID == "" {
+		instanceID := containerInfo.InstanceID
+		if instanceID == "" {
 			return nil
 		}
 
 		// Try to get profile from cache
-		if profile, exists := apc.workloadIDToProfile.Load(workloadID); exists {
+		if profile, exists := apc.instanceIDToProfile.Load(instanceID); exists {
 			if profile != nil {
 				return profile
 			}
@@ -601,15 +597,15 @@ func (apc *ApplicationProfileCacheImpl) GetApplicationProfileState(containerID s
 		}
 	}
 
-	workloadID := containerInfo.WorkloadID
-	if workloadID == "" {
+	instanceID := containerInfo.InstanceID
+	if instanceID == "" {
 		return &objectcache.ProfileState{
-			Error: fmt.Errorf("no workload ID for container %s", containerID),
+			Error: fmt.Errorf("no instanceID ID for container %s", containerID),
 		}
 	}
 
 	// Try to get profile state from cache
-	if profileState, exists := apc.workloadIDToProfileState.Load(workloadID); exists {
+	if profileState, exists := apc.instanceIDToProfileState.Load(instanceID); exists {
 		if profileState != nil {
 			return profileState
 		} else {
@@ -620,7 +616,7 @@ func (apc *ApplicationProfileCacheImpl) GetApplicationProfileState(containerID s
 	}
 
 	return &objectcache.ProfileState{
-		Error: fmt.Errorf("profile state not found for workload ID %s", workloadID),
+		Error: fmt.Errorf("profile state not found for instance ID %s", instanceID),
 	}
 }
 
