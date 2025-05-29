@@ -11,34 +11,55 @@ import (
 )
 
 func ProcessRule(rule ruleengine.RuleEvaluator, eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
-	failOnProfile := false
-	var finalPayload ruleengine.DetectionResult
-	if rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Required ||
-		(rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Optional) {
-		result, err := rule.EvaluateRuleWithProfile(eventType, event, objCache)
-		// if profile is required and there is no profile available, return nil
-		// or if profile is required and there is a profile available and no rule failure, continue
-		// or if profile is optional and there is no profile available, continue
-		// or if profile is optional and there is a profile available and no rule failure, continue
-		if !result.IsFailure && (!errors.Is(err, NoProfileAvailable) ||
-			rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Required) {
-			return nil
-		}
-		finalPayload = result
-		failOnProfile = result.IsFailure
+	profileDependency := rule.Requirements().GetProfileRequirements().ProfileDependency
+
+	// Handle profile-based evaluation
+	if profileDependency == armotypes.Required || profileDependency == armotypes.Optional {
+		return processWithProfile(rule, eventType, event, objCache, profileDependency)
 	}
 
-	// If profile is not required and there is no rule failure, do basic evaluation
-	if !(rule.Requirements().GetProfileRequirements().ProfileDependency == armotypes.Required) && !failOnProfile {
-		result := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-		if !result.IsFailure {
-			return nil
+	// Handle basic evaluation (no profile dependency)
+	return processBasicRule(rule, eventType, event, objCache)
+}
+
+func processWithProfile(rule ruleengine.RuleEvaluator, eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, profileDependency armotypes.ProfileDependency) ruleengine.RuleFailure {
+	result, err := rule.EvaluateRuleWithProfile(eventType, event, objCache)
+
+	// Handle profile evaluation results
+	switch {
+	case errors.Is(err, NoProfileAvailable):
+		if profileDependency == armotypes.Required {
+			return nil // Required profile not available - no failure
 		}
-		finalPayload = result
+		// Optional profile not available - fall back to basic evaluation
+		ruleFailure := processBasicRule(rule, eventType, event, objCache)
+		if ruleFailure != nil {
+			setProfileMetadata(rule, ruleFailure, objCache, false)
+			return ruleFailure
+		}
+		return nil // No failure from basic evaluation
+	case result.IsFailure:
+		// Profile evaluation failed - create failure with profile metadata
+		return createRuleFailureWithProfile(rule, eventType, event, objCache, result, true)
+
+	default:
+		// Profile evaluation passed - no failure
+		return nil
+	}
+}
+
+func processBasicRule(rule ruleengine.RuleEvaluator, eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
+	result := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
+	if !result.IsFailure {
+		return nil
 	}
 
-	// Create and return the failure
-	ruleFailure := rule.CreateRuleFailure(eventType, event, objCache, finalPayload)
+	ruleFailure := rule.CreateRuleFailure(eventType, event, objCache, result)
+	return ruleFailure
+}
+
+func createRuleFailureWithProfile(rule ruleengine.RuleEvaluator, eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult, failOnProfile bool) ruleengine.RuleFailure {
+	ruleFailure := rule.CreateRuleFailure(eventType, event, objCache, payload)
 	if ruleFailure == nil {
 		return nil
 	}
