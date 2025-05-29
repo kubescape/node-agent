@@ -151,7 +151,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) CreateRuleFailure(eventTyp
 
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", openEvent.Comm, openEvent.FullPath)),
+			UniqueID:  HashStringToMD5(openEvent.Comm), // We don't want to use the full path as it can be dynamic (https://kubernetes.io/docs/concepts/security/service-accounts/#assign-to-pod)
 			AlertName: rule.Name(),
 			Arguments: map[string]interface{}{
 				"path":  openEvent.FullPath,
