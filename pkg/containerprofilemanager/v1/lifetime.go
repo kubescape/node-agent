@@ -77,8 +77,11 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace))
 		cpm.containerLocks.WithLock(containerID, func() {
-			cpm.containerIDToInfo.Get(containerID).SyncChannel <- utils.ObjectCompleted
-			// We might want to call save profile here to ensure the last state is saved (TODO)
+			if watchedContainer, ok := cpm.containerIDToInfo.Load(containerID); ok {
+				watchedContainer.SyncChannel <- utils.ContainerReachedMaxTime
+			}
+			// We might want to call save profile here to ensure the last state is saved (TODO) does go clean the watchedContainer after the delete of the container or it keeps my ptr?
+			// I can lock here or lock in saveProfile.
 		})
 		cpm.deleteContainer(containerID)
 		// Notify all registered channels about the end of life (in cases where runtime detection is not used we can stop sniffing).
@@ -106,11 +109,25 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			return err
 		}
 
+		if !cpm.cfg.EnableRuntimeDetection && sharedData.PreRunningContainer {
+			logger.L().Debug("ignoring pre-running container without runtime detection",
+				helpers.String("containerID", containerID),
+				helpers.String("containerName", container.Runtime.ContainerName),
+				helpers.String("podName", container.K8s.PodName),
+				helpers.String("namespace", container.K8s.Namespace),
+				helpers.String("container ID", container.Runtime.ContainerID),
+			)
+			return nil
+		}
+
 		// Set container data
 		cpm.setContainerData(container, sharedData)
 
 		// Add to container info map
 		cpm.containerIDToInfo.Set(containerID, sharedData)
+
+		// Start monitoring the container (separate goroutine because we don't want to block the callback)
+		go cpm.startContainerMonitoring(container, sharedData)
 
 		logger.L().Debug("container added to container profile manager",
 			helpers.String("containerID", containerID),
@@ -121,6 +138,17 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 
 		return nil
 	})
+}
+
+// startContainerMonitoring starts monitoring a container
+func (cpm *ContainerProfileManager) startContainerMonitoring(container *containercollection.Container, sharedData *utils.WatchedContainerData) {
+	if err := cpm.monitorContainer(container, sharedData); err != nil {
+		logger.L().Info("stopped recording container profile", helpers.String("reason", err.Error()),
+			helpers.String("containerID", container.Runtime.ContainerID),
+			helpers.String("containerName", container.Runtime.ContainerName),
+			helpers.String("podName", container.K8s.PodName),
+			helpers.String("namespace", container.K8s.Namespace))
+	}
 }
 
 // setContainerData sets the container data for the container profile manager
@@ -163,6 +191,19 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 
 // deleteContainer deletes a container from the container profile manager
 func (cpm *ContainerProfileManager) deleteContainer(containerID string) {
+	var watchedContainer *utils.WatchedContainerData
+	var ok bool
+	// Check if the container is being monitored
+	if watchedContainer, ok = cpm.containerIDToInfo.Load(containerID); !ok {
+		logger.L().Debug("container not found in container profile manager, skipping delete",
+			helpers.String("containerID", containerID))
+		return
+	}
+	// Send container termination signal to the sync channel
+	watchedContainer.SyncChannel <- utils.ContainerHasTerminatedError
+
+	// TODO: Do we have a race here of who catches the lock first? we need saveProfile to be called before the deleteContainer
+
 	cpm.containerLocks.WithLock(containerID, func() { // Clean up container info
 		cpm.containerIDToInfo.Delete(containerID)
 		logger.L().Debug("container deleted from container profile manager",
