@@ -1,0 +1,61 @@
+package containerprofilemanager
+
+import (
+	"context"
+
+	"github.com/goradd/maps"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
+	"github.com/kubescape/node-agent/pkg/k8sclient"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/resourcelocks"
+	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	"github.com/kubescape/node-agent/pkg/seccompmanager"
+	"github.com/kubescape/node-agent/pkg/storage"
+	"github.com/kubescape/node-agent/pkg/utils"
+)
+
+type ContainerProfileManager struct {
+	ctx                          context.Context
+	cfg                          config.Config
+	k8sClient                    k8sclient.K8sClientInterface
+	k8sObjectCache               objectcache.K8sObjectCache
+	storageClient                storage.StorageClient
+	syscallPeekFunc              func(nsMountId uint64) ([]string, error)
+	seccompManager               seccompmanager.SeccompManagerClient
+	enricher                     containerprofilemanager.Enricher
+	ruleCache                    rulebindingmanager.RuleBindingCache
+	containerIDToInfo            maps.SafeMap[string, *utils.WatchedContainerData]
+	maxSniffTimeNotificationChan []chan *containercollection.Container
+	containerLocks               *resourcelocks.ResourceLocks
+}
+
+func NewContainerProfileManager(
+	ctx context.Context,
+	cfg config.Config,
+	k8sClient k8sclient.K8sClientInterface,
+	k8sObjectCache objectcache.K8sObjectCache,
+	storageClient storage.StorageClient,
+	syscallPeekFunc func(nsMountId uint64) ([]string, error),
+	seccompManager seccompmanager.SeccompManagerClient,
+	enricher containerprofilemanager.Enricher,
+	ruleCache rulebindingmanager.RuleBindingCache,
+) *ContainerProfileManager {
+	return &ContainerProfileManager{
+		ctx:                          ctx,
+		cfg:                          cfg,
+		k8sClient:                    k8sClient,
+		k8sObjectCache:               k8sObjectCache,
+		storageClient:                storageClient,
+		syscallPeekFunc:              syscallPeekFunc,
+		seccompManager:               seccompManager,
+		enricher:                     enricher,
+		ruleCache:                    ruleCache,
+		containerLocks:               resourcelocks.New(),
+		containerIDToInfo:            maps.SafeMap[string, *utils.WatchedContainerData]{},
+		maxSniffTimeNotificationChan: make([]chan *containercollection.Container, 0),
+	}
+}
+
+var _ containerprofilemanager.ContainerProfileManagerClient = (*ContainerProfileManager)(nil)
