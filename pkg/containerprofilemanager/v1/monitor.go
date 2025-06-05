@@ -82,6 +82,17 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 
 	// TODO: add container type.
 
+	containerInfo := watchedContainer.ContainerInfos[watchedContainer.ContainerType][watchedContainer.ContainerIndex]
+	seccompProfile, err := cpm.seccompManager.GetSeccompProfile(containerInfo.Name, watchedContainer.SeccompProfilePath)
+	if err != nil {
+		logger.L().Debug("failed to get seccomp profile for container",
+			helpers.Error(err),
+			helpers.String("slug", slug),
+			helpers.Int("container index", watchedContainer.ContainerIndex),
+			helpers.String("container ID", watchedContainer.ContainerID),
+			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+	}
+
 	containerProfile := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: slug,
@@ -97,7 +108,11 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 			Labels: utils.GetLabels(watchedContainer, false),
 		},
 		Spec: v1beta1.ContainerProfileSpec{
-			Architectures: []string{runtime.GOARCH},
+			Architectures:  []string{runtime.GOARCH},
+			ImageID:        containerInfo.ImageID,
+			ImageTag:       containerInfo.ImageTag,
+			SeccompProfile: seccompProfile,
+			// Add events.
 		},
 	}
 
