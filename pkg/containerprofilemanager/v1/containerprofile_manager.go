@@ -13,7 +13,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
-	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type ContainerProfileManager struct {
@@ -25,8 +24,8 @@ type ContainerProfileManager struct {
 	syscallPeekFunc              func(nsMountId uint64) ([]string, error)
 	seccompManager               seccompmanager.SeccompManagerClient
 	enricher                     containerprofilemanager.Enricher
-	ruleCache                    rulebindingmanager.RuleBindingCache
-	containerIDToInfo            maps.SafeMap[string, *utils.WatchedContainerData]
+	ruleBindingCache             rulebindingmanager.RuleBindingCache
+	containerIDToInfo            maps.SafeMap[string, *containerData]
 	maxSniffTimeNotificationChan []chan *containercollection.Container
 	containerLocks               *resourcelocks.ResourceLocks
 }
@@ -40,7 +39,7 @@ func NewContainerProfileManager(
 	syscallPeekFunc func(nsMountId uint64) ([]string, error),
 	seccompManager seccompmanager.SeccompManagerClient,
 	enricher containerprofilemanager.Enricher,
-	ruleCache rulebindingmanager.RuleBindingCache,
+	ruleBindingCache rulebindingmanager.RuleBindingCache,
 ) *ContainerProfileManager {
 	return &ContainerProfileManager{
 		ctx:                          ctx,
@@ -51,9 +50,9 @@ func NewContainerProfileManager(
 		syscallPeekFunc:              syscallPeekFunc,
 		seccompManager:               seccompManager,
 		enricher:                     enricher,
-		ruleCache:                    ruleCache,
+		ruleBindingCache:             ruleBindingCache,
 		containerLocks:               resourcelocks.New(),
-		containerIDToInfo:            maps.SafeMap[string, *utils.WatchedContainerData]{},
+		containerIDToInfo:            maps.SafeMap[string, *containerData]{},
 		maxSniffTimeNotificationChan: make([]chan *containercollection.Container, 0),
 	}
 }

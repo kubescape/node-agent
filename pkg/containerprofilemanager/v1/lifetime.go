@@ -2,6 +2,7 @@ package containerprofilemanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -70,17 +71,23 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		}
 	}
 
-	time.AfterFunc(sniffingTime, func() {
+	time.AfterFunc(sniffingTime, func() { // TODO: use the timer returned to cancel the timer if the container is deleted before it expires
 		logger.L().Debug("reached max sniffing time for container",
 			helpers.String("containerID", containerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace))
-		cpm.containerLocks.WithLock(containerID, func() {
-			if watchedContainer, ok := cpm.containerIDToInfo.Load(containerID); ok {
-				watchedContainer.SyncChannel <- utils.ContainerReachedMaxTime
+		err := cpm.containerLocks.WithLockAndError(containerID, func() error {
+			if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
+				containerData.WatchedContainerData.SyncChannel <- utils.ContainerReachedMaxTime
+				return nil
 			}
+			return ErrContainerNotFound
 		})
+		if err != nil && errors.Is(err, ErrContainerNotFound) {
+			cpm.containerLocks.ReleaseLock(containerID) // Release the lock if we failed to send the signal
+			return
+		}
 		time.Sleep(100 * time.Millisecond) // Give some time for the monitoring goroutine to process the signal (TODO: find a better way to handle this).
 		cpm.deleteContainer(containerID)
 		// Notify all registered channels about the end of life (in cases where runtime detection is not used we can stop sniffing).
@@ -123,7 +130,9 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		cpm.setContainerData(container, sharedData)
 
 		// Add to container info map
-		cpm.containerIDToInfo.Set(containerID, sharedData)
+		cpm.containerIDToInfo.Set(containerID, &containerData{
+			WatchedContainerData: sharedData,
+		})
 
 		// Start monitoring the container (separate goroutine because we don't want to block the callback)
 		go cpm.startContainerMonitoring(container, sharedData)
@@ -190,16 +199,16 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 
 // deleteContainer deletes a container from the container profile manager
 func (cpm *ContainerProfileManager) deleteContainer(containerID string) {
-	var watchedContainer *utils.WatchedContainerData
+	var containerData *containerData
 	var ok bool
 	// Check if the container is being monitored
-	if watchedContainer, ok = cpm.containerIDToInfo.Load(containerID); !ok {
+	if containerData, ok = cpm.containerIDToInfo.Load(containerID); !ok {
 		logger.L().Debug("container not found in container profile manager, skipping delete",
 			helpers.String("containerID", containerID))
 		return
 	}
 	// Send container termination signal to the sync channel
-	watchedContainer.SyncChannel <- utils.ContainerHasTerminatedError
+	containerData.WatchedContainerData.SyncChannel <- utils.ContainerHasTerminatedError
 
 	// Wait a bit to allow the monitoring goroutine to finish (it will take a lock on the container ID)
 	// This is a workaround to ensure that the monitoring goroutine has enough time to process the signal

@@ -14,19 +14,19 @@ import (
 type ContainerProfileManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
 	RegisterPeekFunc(peek func(mntns uint64) ([]string, error))
-	ReportCapability(k8sContainerID, capability string)
-	ReportFileExec(k8sContainerID string, event events.ExecEvent)
-	ReportFileOpen(k8sContainerID string, event events.OpenEvent)
-	ReportHTTPEvent(k8sContainerID string, event *tracerhttptype.Event)
-	ReportRulePolicy(k8sContainerID, ruleId, allowedProcess string, allowedContainer bool)
-	ReportIdentifiedCallStack(k8sContainerID string, callStack *v1beta1.IdentifiedCallStack)
-	ReportSymlinkEvent(k8sContainerID string, event *tracersymlinktype.Event)
-	ReportHardlinkEvent(k8sContainerID string, event *tracerhardlinktype.Event)
-	ReportNetworkEvent(k8sContainerID string, event *tracernetworktype.Event)
-	ReportDroppedEvent(k8sContainerID string)
+	ReportCapability(containerID, capability string)
+	ReportFileExec(containerID string, event events.ExecEvent)
+	ReportFileOpen(containerID string, event events.OpenEvent)
+	ReportHTTPEvent(containerID string, event *tracerhttptype.Event)
+	ReportRulePolicy(containerID, ruleId, allowedProcess string, allowedContainer bool)
+	ReportIdentifiedCallStack(containerID string, callStack *v1beta1.IdentifiedCallStack)
+	ReportSymlinkEvent(containerID string, event *tracersymlinktype.Event)
+	ReportHardlinkEvent(containerID string, event *tracerhardlinktype.Event)
+	ReportNetworkEvent(containerID string, event *tracernetworktype.Event)
+	ReportDroppedEvent(containerID string)
 	RegisterForContainerEndOfLife(notificationChannel chan *containercollection.Container)
 }
 
 type Enricher interface {
-	EnrichEvent(k8sContainerID string, event utils.EnrichEvent, callID string)
+	EnrichEvent(containerID string, event utils.EnrichEvent, callID string)
 }

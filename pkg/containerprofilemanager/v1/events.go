@@ -1,16 +1,24 @@
 package containerprofilemanager
 
 import (
+	"errors"
 	"regexp"
 	"slices"
 	"strings"
 
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goradd/maps"
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
 
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
@@ -19,183 +27,328 @@ func (cpm *ContainerProfileManager) RegisterPeekFunc(peek func(mntns uint64) ([]
 	cpm.syscallPeekFunc = peek
 }
 
-func (cpm *ContainerProfileManager) ReportCapability(k8sContainerID, capability string) {
-	if err := cpm.waitForContainer(k8sContainerID); err != nil {
-		return
-	}
-	// check if we already have this capability
-	if _, ok := cpm.savedCapabilities.Get(k8sContainerID).Get(capability); ok {
-		return
-	}
-	// add to capability map
-	cpm.toSaveCapabilities.Get(k8sContainerID).Add(capability)
-}
-
-func (cpm *ContainerProfileManager) ReportFileExec(k8sContainerID string, event events.ExecEvent) {
-	if err := cpm.waitForContainer(k8sContainerID); err != nil {
-		return
-	}
-
-	path := event.Comm
-	if len(event.Args) > 0 {
-		path = event.Args[0]
-	}
-
-	// check if we already have this exec
-	// we use a SHA256 hash of the exec to identify it uniquely (path + args, in the order they were provided)
-	execIdentifier := utils.CalculateSHA256FileExecHash(path, event.Args)
-	if cpm.enricher != nil {
-		go cpm.enricher.EnrichEvent(k8sContainerID, &event, execIdentifier)
-	}
-
-	if _, ok := cpm.savedExecs.Get(k8sContainerID).Get(execIdentifier); ok {
-		return
-	}
-	// add to exec map, first element is the path, the rest are the args
-	cpm.toSaveExecs.Get(k8sContainerID).Set(execIdentifier, append([]string{path}, event.Args...))
-}
-
-func (cpm *ContainerProfileManager) ReportFileOpen(k8sContainerID string, event events.OpenEvent) {
-	if err := cpm.waitForContainer(k8sContainerID); err != nil {
-		return
-	}
-	// deduplicate /proc/1234/* into /proc/.../* (quite a common case)
-	// we perform it here instead of waiting for compression
-	path := event.Path
-	if strings.HasPrefix(path, "/proc/") {
-		path = procRegex.ReplaceAllString(path, "/proc/"+dyncpmicpathdetector.DyncpmicIdentifier)
-	}
-
-	isSensitive := utils.IsSensitivePath(path, ruleengine.SensitiveFiles)
-
-	if cpm.enricher != nil && isSensitive {
-		openIdentifier := utils.CalculateSHA256FileOpenHash(path)
-		go cpm.enricher.EnrichEvent(k8sContainerID, &event, openIdentifier)
-	}
-
-	// check if we already have this open
-	if opens, ok := cpm.savedOpens.Get(k8sContainerID).Get(path); ok && opens.(mapset.Set[string]).Contains(event.Flags...) {
-		return
-	}
-	// add to open map
-	openMap := cpm.toSaveOpens.Get(k8sContainerID)
-	if openMap.Has(path) {
-		openMap.Get(path).Append(event.Flags...)
-	} else {
-		openMap.Set(path, mapset.NewSet[string](event.Flags...))
-	}
-}
-
-func (cpm *ContainerProfileManager) ReportSymlinkEvent(k8sContainerID string, event *tracersymlinktype.Event) {
-	if err := cpm.waitForContainer(k8sContainerID); err != nil {
-		return
-	}
-
-	if cpm.enricher != nil {
-		symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
-		go cpm.enricher.EnrichEvent(k8sContainerID, event, symlinkIdentifier)
-	}
-}
-
-func (cpm *ContainerProfileManager) ReportHardlinkEvent(k8sContainerID string, event *tracerhardlinktype.Event) {
-	if err := cpm.waitForContainer(k8sContainerID); err != nil {
-		return
-	}
-
-	if cpm.enricher != nil {
-		hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
-		go cpm.enricher.EnrichEvent(k8sContainerID, event, hardlinkIdentifier)
-	}
-}
-
-func (cpm *ContainerProfileManager) ReportDroppedEvent(k8sContainerID string) {
-	cpm.droppedEventsContainers.Add(k8sContainerID)
-}
-
-func (cpm *ContainerProfileManager) ReportHTTPEvent(k8sContainerID string, event *tracerhttptype.Event) {
-	if err := cpm.waitForContainer(k8sContainerID); err != nil {
-		return
-	}
-
-	if event.Response == nil {
-		logger.L().Debug("ContainerProfileManager - HTTP event without response", helpers.String("container ID", k8sContainerID))
-		return
-	}
-
-	endpointIdentifier, err := GetEndpointIdentifier(event)
-	if err != nil {
-		logger.L().Ctx(cpm.ctx).Warning("ContainerProfileManager - failed to get endpoint identifier", helpers.Error(err))
-		return
-	}
-	endpoint, err := GetNewEndpoint(event, endpointIdentifier)
-	if err != nil {
-		logger.L().Ctx(cpm.ctx).Warning("ContainerProfileManager - failed to get new endpoint", helpers.Error(err))
-		return
-	}
-	// check if we already have this endpoint
-	endpointHash := CalculateHTTPEndpointHash(endpoint)
-	if _, ok := cpm.savedEndpoints.Get(k8sContainerID).Get(endpointHash); ok {
-		return
-	}
-	// add to endpoint map
-	cpm.toSaveEndpoints.Get(k8sContainerID).Set(endpointHash, endpoint)
-}
-
-func (cpm *ContainerProfileManager) ReportRulePolicy(k8sContainerID, ruleId, allowedProcess string, allowedContainer bool) {
-	if err := cpm.waitForContainer(k8sContainerID); err != nil {
-		return
-	}
-
-	newPolicy := &v1beta1.RulePolicy{
-		AllowedContainer: allowedContainer,
-		AllowedProcesses: []string{allowedProcess},
-	}
-
-	savedPolicies := cpm.savedRulePolicies.Get(k8sContainerID)
-	savedPolicy, ok := savedPolicies.Get(ruleId)
-	if ok {
-		savedPolicy := savedPolicy.(*v1beta1.RulePolicy)
-		if IsPolicyIncluded(savedPolicy, newPolicy) {
-			return
+func (cpm *ContainerProfileManager) ReportCapability(containerID, capability string) {
+	err := cpm.containerLocks.WithLockAndError(containerID, func() error {
+		if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
+			if containerData.capabilites == nil {
+				containerData.capabilites = mapset.NewSet[string]()
+			}
+			if !containerData.capabilites.Contains(capability) {
+				containerData.capabilites.Add(capability)
+			}
+			return nil
 		}
+
+		return ErrContainerNotFound
+	},
+	)
+
+	if err != nil && errors.Is(err, ErrContainerNotFound) {
+		logger.L().Error("ContainerProfileManager - failed to report capability", helpers.String("container ID", containerID), helpers.Error(err))
+		cpm.containerLocks.ReleaseLock(containerID)
 	}
-
-	toBeSavedPolicies := cpm.toSaveRulePolicies.Get(k8sContainerID)
-	toBeSavedPolicy := toBeSavedPolicies.Get(ruleId)
-
-	if IsPolicyIncluded(toBeSavedPolicy, newPolicy) {
-		return
-	}
-
-	var finalPolicy *v1beta1.RulePolicy
-	if toBeSavedPolicy != nil {
-		finalPolicy = toBeSavedPolicy
-		if allowedContainer {
-			finalPolicy.AllowedContainer = true
-		}
-		if allowedProcess != "" && !slices.Contains(finalPolicy.AllowedProcesses, allowedProcess) {
-			finalPolicy.AllowedProcesses = append(finalPolicy.AllowedProcesses, allowedProcess)
-		}
-	} else {
-		finalPolicy = newPolicy
-	}
-
-	toBeSavedPolicies.Set(ruleId, finalPolicy)
 }
 
-func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(k8sContainerID string, callStack *v1beta1.IdentifiedCallStack) {
-	if err := cpm.waitForContainer(k8sContainerID); err != nil {
-		return
+func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event events.ExecEvent) {
+	err := cpm.containerLocks.WithLockAndError(containerID, func() error {
+		if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
+			if containerData.execs == nil {
+				containerData.execs = &maps.SafeMap[string, []string]{}
+			}
+
+			path := event.Comm
+			if len(event.Args) > 0 {
+				path = event.Args[0]
+			}
+
+			// we use a SHA256 hash of the exec to identify it uniquely (path + args, in the order they were provided)
+			execIdentifier := utils.CalculateSHA256FileExecHash(path, event.Args)
+			if cpm.enricher != nil {
+				go cpm.enricher.EnrichEvent(containerID, &event, execIdentifier)
+			}
+
+			containerData.execs.Set(execIdentifier, append([]string{path}, event.Args...))
+
+			return nil
+		}
+		return ErrContainerNotFound
+	},
+	)
+
+	if err != nil && errors.Is(err, ErrContainerNotFound) {
+		logger.L().Error("ContainerProfileManager - failed to report file exec", helpers.String("container ID", containerID), helpers.Error(err))
+		cpm.containerLocks.ReleaseLock(containerID)
+	}
+}
+
+func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event events.OpenEvent) {
+	err := cpm.containerLocks.WithLockAndError(containerID, func() error {
+		if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
+			if containerData.opens == nil {
+				containerData.opens = &maps.SafeMap[string, mapset.Set[string]]{}
+			}
+
+			// deduplicate /proc/1234/* into /proc/.../* (quite a common case)
+			// we perform it here instead of waiting for compression
+			path := event.Path
+			if strings.HasPrefix(path, "/proc/") {
+				path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
+			}
+
+			isSensitive := utils.IsSensitivePath(path, ruleengine.SensitiveFiles)
+
+			if cpm.enricher != nil && isSensitive {
+				openIdentifier := utils.CalculateSHA256FileOpenHash(path)
+				go cpm.enricher.EnrichEvent(containerID, &event, openIdentifier)
+			}
+
+			// Check if we already have this open
+			if opens, ok := containerData.opens.Load(path); ok && opens.Contains(event.Flags...) { // TODO: we might want to remove it.
+				return nil
+			}
+			// Add to open map
+			if opens, ok := containerData.opens.Load(path); ok {
+				opens.Append(event.Flags...)
+			} else {
+				containerData.opens.Set(path, mapset.NewSet[string](event.Flags...))
+			}
+
+			return nil
+		}
+		return ErrContainerNotFound
+	})
+
+	if err != nil && errors.Is(err, ErrContainerNotFound) {
+		logger.L().Error("ContainerProfileManager - failed to report file open", helpers.String("container ID", containerID), helpers.Error(err))
+		cpm.containerLocks.ReleaseLock(containerID)
+	}
+}
+
+func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event *tracersymlinktype.Event) {
+	err := cpm.containerLocks.WithLockAndError(containerID, func() error {
+		if _, ok := cpm.containerIDToInfo.Load(containerID); ok {
+			if cpm.enricher != nil {
+				symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
+				go cpm.enricher.EnrichEvent(containerID, event, symlinkIdentifier)
+			}
+			return nil
+		}
+		return ErrContainerNotFound
+	})
+
+	if err != nil && errors.Is(err, ErrContainerNotFound) {
+		logger.L().Error("ContainerProfileManager - failed to report symlink event", helpers.String("container ID", containerID), helpers.Error(err))
+		cpm.containerLocks.ReleaseLock(containerID)
+	}
+}
+
+func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, event *tracerhardlinktype.Event) {
+	err := cpm.containerLocks.WithLockAndError(containerID, func() error {
+		if _, ok := cpm.containerIDToInfo.Load(containerID); ok {
+			if cpm.enricher != nil {
+				hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
+				go cpm.enricher.EnrichEvent(containerID, event, hardlinkIdentifier)
+			}
+			return nil
+		}
+		return ErrContainerNotFound
+	})
+
+	if err != nil && errors.Is(err, ErrContainerNotFound) {
+		logger.L().Error("ContainerProfileManager - failed to report hardlink event", helpers.String("container ID", containerID), helpers.Error(err))
+		cpm.containerLocks.ReleaseLock(containerID)
+	}
+}
+
+func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
+	// TODO: what to do with this?
+	// err := cpm.containerLocks.WithLockAndError(containerID, func() error {
+	// 	if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
+	// 		if containerData.droppedEvents == nil {
+	// 			containerData.droppedEvents = mapset.NewSet[string]()
+	// 		}
+	// 		containerData.droppedEvents.Add(containerID)
+	// 		return nil
+	// 	}
+	// 	return ErrContainerNotFound
+	// })
+
+	// if err != nil && errors.Is(err, ErrContainerNotFound) {
+	// 	logger.L().Error("ContainerProfileManager - failed to report dropped event", helpers.String("container ID", containerID), helpers.Error(err))
+	// 	cpm.containerLocks.ReleaseLock(containerID)
+	// }
+}
+
+func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event *tracerhttptype.Event) {
+	err := cpm.containerLocks.WithLockAndError(containerID, func() error {
+		if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
+			if event.Response == nil {
+				logger.L().Debug("ContainerProfileManager - HTTP event without response", helpers.String("container ID", containerID))
+				return nil
+			}
+
+			if containerData.endpoints == nil {
+				containerData.endpoints = &maps.SafeMap[string, *v1beta1.HTTPEndpoint]{}
+			}
+
+			endpointIdentifier, err := GetEndpointIdentifier(event)
+			if err != nil {
+				logger.L().Ctx(cpm.ctx).Warning("ContainerProfileManager - failed to get endpoint identifier", helpers.Error(err))
+				return nil
+			}
+			endpoint, err := GetNewEndpoint(event, endpointIdentifier)
+			if err != nil {
+				logger.L().Ctx(cpm.ctx).Warning("ContainerProfileManager - failed to get new endpoint", helpers.Error(err))
+				return nil
+			}
+			// check if we already have this endpoint
+			endpointHash := CalculateHTTPEndpointHash(endpoint)
+			if containerData.endpoints.Has(endpointHash) {
+				return nil
+			}
+			// add to endpoint map
+			containerData.endpoints.Set(endpointHash, endpoint)
+			return nil
+		}
+		return ErrContainerNotFound
+	})
+
+	if err != nil && errors.Is(err, ErrContainerNotFound) {
+		logger.L().Error("ContainerProfileManager - failed to report HTTP event", helpers.String("container ID", containerID), helpers.Error(err))
+		cpm.containerLocks.ReleaseLock(containerID)
+	}
+}
+
+func (cpm *ContainerProfileManager) ReportRulePolicy(containerID, ruleId, allowedProcess string, allowedContainer bool) {
+	err := cpm.containerLocks.WithLockAndError(containerID, func() error {
+		if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
+			if containerData.rulePolicies == nil {
+				containerData.rulePolicies = &maps.SafeMap[string, *v1beta1.RulePolicy]{}
+			}
+
+			newPolicy := &v1beta1.RulePolicy{
+				AllowedContainer: allowedContainer,
+				AllowedProcesses: []string{allowedProcess},
+			}
+
+			existingPolicy, hasExisting := containerData.rulePolicies.Load(ruleId)
+			if hasExisting {
+				if IsPolicyIncluded(existingPolicy, newPolicy) {
+					return nil
+				}
+			}
+
+			var finalPolicy *v1beta1.RulePolicy
+			if hasExisting {
+				finalPolicy = existingPolicy
+				if allowedContainer {
+					finalPolicy.AllowedContainer = true
+				}
+				if allowedProcess != "" && !slices.Contains(finalPolicy.AllowedProcesses, allowedProcess) {
+					finalPolicy.AllowedProcesses = append(finalPolicy.AllowedProcesses, allowedProcess)
+				}
+			} else {
+				finalPolicy = newPolicy
+			}
+
+			containerData.rulePolicies.Set(ruleId, finalPolicy)
+			return nil
+		}
+		return ErrContainerNotFound
+	})
+
+	if err != nil && errors.Is(err, ErrContainerNotFound) {
+		logger.L().Error("ContainerProfileManager - failed to report rule policy", helpers.String("container ID", containerID), helpers.Error(err))
+		cpm.containerLocks.ReleaseLock(containerID)
+	}
+}
+
+func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string, callStack *v1beta1.IdentifiedCallStack) {
+	err := cpm.containerLocks.WithLockAndError(containerID, func() error {
+		if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
+			if containerData.callStacks == nil {
+				containerData.callStacks = &maps.SafeMap[string, *v1beta1.IdentifiedCallStack]{}
+			}
+
+			// Generate unique identifier for the call stack
+			callStackIdentifier := CalculateSHA256CallStackHash(*callStack)
+
+			// Check if we already have this call stack
+			if containerData.callStacks.Has(callStackIdentifier) {
+				return nil
+			}
+
+			// Add to call stacks map
+			containerData.callStacks.Set(callStackIdentifier, callStack)
+			return nil
+		}
+		return ErrContainerNotFound
+	})
+
+	if err != nil && errors.Is(err, ErrContainerNotFound) {
+		logger.L().Error("ContainerProfileManager - failed to report identified call stack", helpers.String("container ID", containerID), helpers.Error(err))
+		cpm.containerLocks.ReleaseLock(containerID)
+	}
+}
+
+func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event *tracernetworktype.Event) {
+	err := cpm.containerLocks.WithLockAndError(containerID, func() error {
+		if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
+			if !cpm.isValidNetworkEvent(event) {
+				return nil
+			}
+
+			if containerData.networks == nil {
+				containerData.networks = mapset.NewSet[NetworkEvent]()
+			}
+
+			networkEvent := NetworkEvent{
+				Port:     event.Port,
+				Protocol: event.Proto,
+				PktType:  event.PktType,
+				Destination: Destination{
+					Namespace: event.DstEndpoint.Namespace,
+					Name:      event.DstEndpoint.Name,
+					Kind:      EndpointKind(event.DstEndpoint.Kind),
+					IPAddress: event.DstEndpoint.Addr,
+				},
+			}
+			networkEvent.SetPodLabels(event.PodLabels)
+			networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
+
+			// skip if we already saved this event
+			if containerData.networks.Contains(networkEvent) {
+				return nil
+			}
+			containerData.networks.Add(networkEvent)
+			return nil
+		}
+		return ErrContainerNotFound
+	})
+
+	if err != nil && errors.Is(err, ErrContainerNotFound) {
+		logger.L().Error("ContainerProfileManager - failed to report network event", helpers.String("container ID", containerID), helpers.Error(err))
+		cpm.containerLocks.ReleaseLock(containerID)
+	}
+}
+
+// isValidNetworkEvent checks if the network event is valid for processing.
+func (cpm *ContainerProfileManager) isValidNetworkEvent(event *tracernetworktype.Event) bool {
+	// unknown type, shouldn't happen
+	if event.PktType != HostPktType && event.PktType != OutgoingPktType {
+		logger.L().Debug("NetworkManager - pktType is not HOST or OUTGOING", helpers.Interface("event", event))
+		return false
 	}
 
-	// Generate unique identifier for the call stack
-	callStackIdentifier := CalculateSHA256CallStackHash(*callStack)
-
-	// Check if we already have this call stack
-	if _, ok := cpm.savedCallStacks.Get(k8sContainerID).Get(callStackIdentifier); ok {
-		return
+	// ignore localhost
+	if event.PktType == HostPktType && event.PodHostIP == event.DstEndpoint.Addr {
+		return false
 	}
 
-	// Add to call stacks map
-	cpm.toSaveCallStacks.Get(k8sContainerID).Set(callStackIdentifier, callStack)
+	// ignore host netns
+	if event.K8s.HostNetwork {
+		return false
+	}
+
+	return true
 }

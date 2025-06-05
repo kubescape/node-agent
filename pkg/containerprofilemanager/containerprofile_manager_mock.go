@@ -63,10 +63,10 @@ func (a ContainerProfileManagerMock) ReportHardlinkEvent(_ string, _ *tracerhard
 	// noop
 }
 
-func (am ContainerProfileManagerMock) RegisterForContainerEndOfLife(_ chan *containercollection.Container) {
+func (a ContainerProfileManagerMock) RegisterForContainerEndOfLife(_ chan *containercollection.Container) {
 	// noop
 }
 
-func (am ContainerProfileManagerMock) ReportNetworkEvent(_ string, _ *tracernetworktype.Event) {
+func (a ContainerProfileManagerMock) ReportNetworkEvent(_ string, _ *tracernetworktype.Event) {
 	// noop
 }
