@@ -74,7 +74,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 		return errors.New("watched container data is nil")
 	}
 
-	slug, err := watchedContainer.InstanceID.GetSlug(false) // TODO: use the unique slug function.
+	slug, err := watchedContainer.InstanceID.GetOneTimeSlug(false)
 	if err != nil {
 		logger.L().Error("failed to get slug for container profile", helpers.Error(err))
 		return err
@@ -101,6 +101,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 				helpersv1.WlidMetadataKey:                    watchedContainer.Wlid,
 				helpersv1.CompletionMetadataKey:              string(watchedContainer.GetCompletionStatus()),
 				helpersv1.StatusMetadataKey:                  string(watchedContainer.GetStatus()),
+				helpersv1.ContainerTypeMetadataKey:           string(watchedContainer.ContainerType),
 				helpersv1.ReportSeriesIdMetadataKey:          watchedContainer.SeriesID,
 				helpersv1.PreviousReportTimestampMetadataKey: watchedContainer.PreviousReportTimestamp.String(),
 				helpersv1.ReportTimestampMetadataKey:         watchedContainer.CurrentReportTimestamp.String(),
