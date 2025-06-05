@@ -3,7 +3,6 @@ package ruleengine
 import (
 	"testing"
 
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
@@ -34,7 +33,7 @@ func TestR1001ExecBinaryNotInBaseImage(t *testing.T) {
 	}
 
 	// Test with non-existing binary
-	ruleResult := ruleprocess.ProcessRule(r, utils.ExecveEventType, e, &RuleObjectCacheMock{})
+	ruleResult := r.ProcessEvent(utils.ExecveEventType, e, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since exec is not in the upper layer")
 	}

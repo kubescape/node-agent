@@ -62,25 +62,25 @@ var whitelistedProcessesForMaliciousSource = []string{
 	"supervisord",
 }
 
-func (rule *R1000ExecFromMaliciousSource) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
+func (rule *R1000ExecFromMaliciousSource) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	var maliciousExecPathPrefixes = []string{
 		"/dev/shm",
 	}
 
-	// Running without object cache, to avoid false positives check if the process name is legitimate
-	if k8sObjCache == nil {
+	if objCache == nil {
+		// Running without object cache, to avoid false positives check if the process name is legitimate
 		for _, processName := range whitelistedProcessesForMaliciousSource {
 			if processName == execEvent.Comm {
-				return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+				return nil
 			}
 		}
 	}
@@ -88,76 +88,57 @@ func (rule *R1000ExecFromMaliciousSource) EvaluateRule(eventType utils.EventType
 	execPath := GetExecFullPathFromEvent(execEvent)
 	execPathDir := filepath.Dir(execPath)
 	for _, maliciousExecPathPrefix := range maliciousExecPathPrefixes {
-		if strings.HasPrefix(execPathDir, maliciousExecPathPrefix) ||
-			strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) ||
-			strings.HasPrefix(execEvent.ExePath, maliciousExecPathPrefix) {
-			return ruleengine.DetectionResult{IsFailure: true, Payload: execEvent}
+		// if the exec path or the current dir is from a malicious source
+		if strings.HasPrefix(execPathDir, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.Cwd, maliciousExecPathPrefix) || strings.HasPrefix(execEvent.ExePath, maliciousExecPathPrefix) {
+			upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
+
+			ruleFailure := GenericRuleFailure{
+				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+					UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execPath, execEvent.Pcomm)),
+					AlertName:   rule.Name(),
+					InfectedPID: execEvent.Pid,
+					Arguments: map[string]interface{}{
+						"hardlink": execEvent.ExePath,
+					},
+					Severity: R1000ExecFromMaliciousSourceDescriptor.Priority,
+				},
+				RuntimeProcessDetails: apitypes.ProcessTree{
+					ProcessTree: apitypes.Process{
+						Comm:       execEvent.Comm,
+						Gid:        &execEvent.Gid,
+						PID:        execEvent.Pid,
+						Uid:        &execEvent.Uid,
+						UpperLayer: &upperLayer,
+						PPID:       execEvent.Ppid,
+						Pcomm:      execEvent.Pcomm,
+						Cwd:        execEvent.Cwd,
+						Hardlink:   execEvent.ExePath,
+						Path:       execPath,
+						Cmdline:    fmt.Sprintf("%s %s", GetExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+					},
+					ContainerID: execEvent.Runtime.ContainerID,
+				},
+				TriggerEvent: execEvent.Event.Event,
+				RuleAlert: apitypes.RuleAlert{
+					RuleDescription: fmt.Sprintf("Execution from malicious source: %s", execPathDir),
+				},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+					PodName:   execEvent.GetPod(),
+					PodLabels: execEvent.K8s.PodLabels,
+				},
+				RuleID: rule.ID(),
+				Extra:  execEvent.GetExtra(),
+			}
+
+			return &ruleFailure
 		}
 	}
 
-	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
-}
-
-func (rule *R1000ExecFromMaliciousSource) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
-	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !detectionResult.IsFailure {
-		return detectionResult, nil
-	}
-	// This rule doesn't need profile evaluation since it's based on direct detection
-	return ruleengine.DetectionResult{IsFailure: true, Payload: nil}, nil
-}
-
-func (rule *R1000ExecFromMaliciousSource) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
-	execEvent, _ := event.(*events.ExecEvent)
-	execPath := GetExecFullPathFromEvent(execEvent)
-	execPathDir := filepath.Dir(execPath)
-	upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
-
-	return &GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execPath, execEvent.Pcomm)),
-			AlertName:   rule.Name(),
-			InfectedPID: execEvent.Pid,
-			Arguments: map[string]interface{}{
-				"hardlink": execEvent.ExePath,
-			},
-			Severity: R1000ExecFromMaliciousSourceDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
-			ProcessTree: apitypes.Process{
-				Comm:       execEvent.Comm,
-				Gid:        &execEvent.Gid,
-				PID:        execEvent.Pid,
-				Uid:        &execEvent.Uid,
-				UpperLayer: &upperLayer,
-				PPID:       execEvent.Ppid,
-				Pcomm:      execEvent.Pcomm,
-				Cwd:        execEvent.Cwd,
-				Hardlink:   execEvent.ExePath,
-				Path:       execPath,
-				Cmdline:    fmt.Sprintf("%s %s", GetExecPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
-			},
-			ContainerID: execEvent.Runtime.ContainerID,
-		},
-		TriggerEvent: execEvent.Event.Event,
-		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Execution from malicious source: %s", execPathDir),
-		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName:   execEvent.GetPod(),
-			PodLabels: execEvent.K8s.PodLabels,
-		},
-		RuleID: rule.ID(),
-		Extra:  execEvent.GetExtra(),
-	}
+	return nil
 }
 
 func (rule *R1000ExecFromMaliciousSource) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1000ExecFromMaliciousSourceDescriptor.Requirements.RequiredEventTypes(),
-		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileDependency: apitypes.NotRequired,
-			ProfileType:       apitypes.ApplicationProfile,
-		},
 	}
 }

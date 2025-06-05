@@ -7,7 +7,6 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -42,7 +41,7 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 		},
 	}
 	// Test with nil appProfileAccess
-	ruleResult := ruleprocess.ProcessRule(r, utils.OpenEventType, e, &objectcache.ObjectCacheMock{})
+	ruleResult := r.ProcessEvent(utils.OpenEventType, e, &objectcache.ObjectCacheMock{})
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to not be nil since no appProfile")
 	}
@@ -68,7 +67,7 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 		}
 		objCache.SetApplicationProfile(profile)
 	}
-	ruleResult = ruleprocess.ProcessRule(r, utils.OpenEventType, e, &objCache)
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since file is whitelisted")
 	}
@@ -91,14 +90,14 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 	}
 	objCache.SetApplicationProfile(profile)
 	r.SetParameters(map[string]interface{}{"ignoreMounts": false, "ignorePrefixes": []interface{}{}})
-	ruleResult = ruleprocess.ProcessRule(r, utils.OpenEventType, e, &objCache)
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since file matches dynamic path in profile")
 	}
 
 	// Test with dynamic path but different flags
 	e.Flags = []string{"O_WRONLY"}
-	ruleResult = ruleprocess.ProcessRule(r, utils.OpenEventType, e, &objCache)
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since flag is not whitelisted for dynamic path")
 	}
@@ -106,7 +105,7 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 	// Test with dynamic path but non-matching file
 	e.FullPath = "/var/log/different_directory/app123.log"
 	e.Flags = []string{"O_RDONLY"}
-	ruleResult = ruleprocess.ProcessRule(r, utils.OpenEventType, e, &objCache)
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since file does not match dynamic path structure")
 	}
@@ -120,14 +119,14 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 		},
 	}
 	objCache.SetApplicationProfile(profile)
-	ruleResult = ruleprocess.ProcessRule(r, utils.OpenEventType, e, &objCache)
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since file matches multiple dynamic segments in profile")
 	}
 
 	// Test with whitelisted file, but different flags
 	e.Flags = []string{"O_WRONLY"}
-	ruleResult = ruleprocess.ProcessRule(r, utils.OpenEventType, e, &objCache)
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since flag is not whitelisted")
 	}
@@ -159,7 +158,7 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 		},
 	})
 	r.SetParameters(map[string]interface{}{"ignoreMounts": true})
-	ruleResult = ruleprocess.ProcessRule(r, utils.OpenEventType, e, &objCache)
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
 
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since file is mounted")
@@ -169,7 +168,7 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 	e.FullPath = "/var/test1"
 	ignorePrefixes := []interface{}{"/var"}
 	r.SetParameters(map[string]interface{}{"ignoreMounts": false, "ignorePrefixes": ignorePrefixes})
-	ruleResult = ruleprocess.ProcessRule(r, utils.OpenEventType, e, &objCache)
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since file is ignored")
 	}
@@ -178,14 +177,14 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 	e.FullPath = "/var/test1"
 	includePrefixes := []interface{}{"/etc"}
 	r.SetParameters(map[string]interface{}{"ignoreMounts": false, "ignorePrefixes": ignorePrefixes, "includePrefixes": includePrefixes})
-	ruleResult = ruleprocess.ProcessRule(r, utils.OpenEventType, e, &objCache)
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since file is not included")
 	}
 
 	// Test the case where the path is included
 	e.FullPath = "/etc/passwd"
-	ruleResult = ruleprocess.ProcessRule(r, utils.OpenEventType, e, &objCache)
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
 	if ruleResult == nil {
 		t.Errorf("Expected ruleResult to not be nil since file is included")
 	}
@@ -194,7 +193,7 @@ func TestR0002UnexpectedFileAccess(t *testing.T) {
 	e.FullPath = "/etc/some/random/path/passwd"
 	ignorePrefixes = []interface{}{"/etc/some"}
 	r.SetParameters(map[string]interface{}{"ignoreMounts": false, "ignorePrefixes": ignorePrefixes, "includePrefixes": includePrefixes})
-	ruleResult = ruleprocess.ProcessRule(r, utils.OpenEventType, e, &objCache)
+	ruleResult = r.ProcessEvent(utils.OpenEventType, e, &objCache)
 	if ruleResult != nil {
 		t.Errorf("Expected ruleResult to be nil since file is ignored")
 	}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
@@ -23,7 +22,7 @@ func TestR1008CryptoMiningDomainCommunication(t *testing.T) {
 		DNSName: "xmr.gntl.uk.",
 	}
 
-	ruleResult := ruleprocess.ProcessRule(r, utils.DnsEventType, e2, &RuleObjectCacheMock{})
+	ruleResult := r.ProcessEvent(utils.DnsEventType, e2, &RuleObjectCacheMock{})
 	if ruleResult == nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be Failure because of dns name is in the commonly used crypto miners domains")
@@ -32,7 +31,7 @@ func TestR1008CryptoMiningDomainCommunication(t *testing.T) {
 
 	e2.DNSName = "amit.com"
 
-	ruleResult = ruleprocess.ProcessRule(r, utils.DnsEventType, e2, &RuleObjectCacheMock{})
+	ruleResult = r.ProcessEvent(utils.DnsEventType, e2, &RuleObjectCacheMock{})
 	if ruleResult != nil {
 		fmt.Printf("ruleResult: %v\n", ruleResult)
 		t.Errorf("Expected ruleResult to be nil since dns name is not in the commonly used crypto miners domains")

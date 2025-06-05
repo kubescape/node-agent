@@ -28,6 +28,7 @@ func (ch *IGContainerWatcher) httpEventCallback(event *tracerhttptype.Event) {
 
 	if event.Response != nil {
 		if event.Response.StatusCode < StatusOK || event.Response.StatusCode >= StatusBadRequest {
+			logger.L().Debug("http tracer got bad status code", helpers.Interface("event", event))
 			return
 		}
 	}

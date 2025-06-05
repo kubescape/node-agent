@@ -89,23 +89,6 @@ func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []ru
 	}
 	return rules
 }
-
-func (r *RuleCreatorImpl) CreateRulePolicyRulesByEventType(eventType utils.EventType) []ruleengine.RuleEvaluator {
-	ruleCreator := NewRuleCreator()
-	rules := ruleCreator.CreateRulesByEventType(eventType)
-	for _, rule := range rules {
-		for _, descriptor := range r.RuleDescriptions {
-			if descriptor.ID == rule.ID() {
-				if descriptor.RulePolicySupport {
-					rules = append(rules, rule)
-				}
-			}
-		}
-	}
-
-	return rules
-}
-
 func (r *RuleCreatorImpl) GetAllRuleIDs() []string {
 	var ruleIDs []string
 	for _, rule := range r.RuleDescriptions {

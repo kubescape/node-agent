@@ -166,79 +166,59 @@ func (rule *R1008CryptoMiningDomainCommunication) ID() string {
 func (rule *R1008CryptoMiningDomainCommunication) DeleteRule() {
 }
 
-func (rule *R1008CryptoMiningDomainCommunication) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
+func (rule *R1008CryptoMiningDomainCommunication) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, _ objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.DnsEventType {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
-	dnsEvent, ok := event.(*tracerdnstype.Event)
-	if !ok {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+	if dnsEvent, ok := event.(*tracerdnstype.Event); ok {
+		if rule.alertedDomains.Has(dnsEvent.DNSName) {
+			return nil
+		}
+
+		if slices.Contains(commonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
+			ruleFailure := GenericRuleFailure{
+				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+					UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", dnsEvent.DNSName, dnsEvent.Comm)),
+					AlertName:   rule.Name(),
+					InfectedPID: dnsEvent.Pid,
+					Severity:    R1008CryptoMiningDomainCommunicationRuleDescriptor.Priority,
+				},
+				RuntimeProcessDetails: apitypes.ProcessTree{
+					ProcessTree: apitypes.Process{
+						Comm:  dnsEvent.Comm,
+						Gid:   &dnsEvent.Gid,
+						PID:   dnsEvent.Pid,
+						Uid:   &dnsEvent.Uid,
+						Pcomm: dnsEvent.Pcomm,
+						Path:  dnsEvent.Exepath,
+						Cwd:   dnsEvent.Cwd,
+						PPID:  dnsEvent.Ppid,
+					},
+					ContainerID: dnsEvent.Runtime.ContainerID,
+				},
+				TriggerEvent: dnsEvent.Event,
+				RuleAlert: apitypes.RuleAlert{
+					RuleDescription: fmt.Sprintf("Communication with a known crypto mining domain: %s", dnsEvent.DNSName),
+				},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+					PodName:   dnsEvent.GetPod(),
+					PodLabels: dnsEvent.K8s.PodLabels,
+				},
+				RuleID: rule.ID(),
+			}
+
+			rule.alertedDomains.Set(dnsEvent.DNSName, true)
+
+			return &ruleFailure
+		}
 	}
 
-	if rule.alertedDomains.Has(dnsEvent.DNSName) {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
-	}
-
-	if slices.Contains(commonlyUsedCryptoMinersDomains, dnsEvent.DNSName) {
-		return ruleengine.DetectionResult{IsFailure: true, Payload: dnsEvent}
-	}
-
-	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
-}
-
-func (rule *R1008CryptoMiningDomainCommunication) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
-	// First do basic evaluation
-	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !detectionResult.IsFailure {
-		return detectionResult, nil
-	}
-
-	// This rule doesn't need profile evaluation since it's based on direct detection
-	return detectionResult, nil
-}
-
-func (rule *R1008CryptoMiningDomainCommunication) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
-	dnsEvent, _ := event.(*tracerdnstype.Event)
-	rule.alertedDomains.Set(dnsEvent.DNSName, true)
-
-	return &GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", dnsEvent.DNSName, dnsEvent.Comm)),
-			AlertName:   rule.Name(),
-			InfectedPID: dnsEvent.Pid,
-			Severity:    R1008CryptoMiningDomainCommunicationRuleDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
-			ProcessTree: apitypes.Process{
-				Comm:  dnsEvent.Comm,
-				Gid:   &dnsEvent.Gid,
-				PID:   dnsEvent.Pid,
-				Uid:   &dnsEvent.Uid,
-				Pcomm: dnsEvent.Pcomm,
-				Path:  dnsEvent.Exepath,
-				Cwd:   dnsEvent.Cwd,
-				PPID:  dnsEvent.Ppid,
-			},
-			ContainerID: dnsEvent.Runtime.ContainerID,
-		},
-		TriggerEvent: dnsEvent.Event,
-		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Communication with a known crypto mining domain: %s", dnsEvent.DNSName),
-		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName:   dnsEvent.GetPod(),
-			PodLabels: dnsEvent.K8s.PodLabels,
-		},
-		RuleID: rule.ID(),
-	}
+	return nil
 }
 
 func (rule *R1008CryptoMiningDomainCommunication) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1008CryptoMiningDomainCommunicationRuleDescriptor.Requirements.RequiredEventTypes(),
-		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileDependency: apitypes.NotRequired,
-		},
 	}
 }

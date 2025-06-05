@@ -18,21 +18,21 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-func (sc Storage) GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error) {
-	ap, err := sc.StorageClient.ApplicationProfiles(namespace).Get(context.Background(), sc.modifyName(name), v1.GetOptions{})
+func (sc Storage) GetContainerProfile(namespace, name string) (*v1beta1.ContainerProfile, error) {
+	ap, err := sc.StorageClient.ContainerProfiles(namespace).Get(context.Background(), sc.modifyName(name), v1.GetOptions{})
 	if ap != nil {
 		sc.revertNameP(&ap.Name)
 	}
 	return ap, err
 }
 
-func (sc Storage) CreateApplicationProfile(profile *v1beta1.ApplicationProfile, namespace string) error {
+func (sc Storage) CreateContainerProfile(profile *v1beta1.ContainerProfile, namespace string) error {
 	sc.modifyNameP(&profile.Name)
 	defer sc.revertNameP(&profile.Name)
 
 	// unset resourceVersion
 	profile.ResourceVersion = ""
-	_, err := sc.StorageClient.ApplicationProfiles(namespace).Create(context.Background(), profile, v1.CreateOptions{})
+	_, err := sc.StorageClient.ContainerProfiles(namespace).Create(context.Background(), profile, v1.CreateOptions{})
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func (sc Storage) patchApplicationProfile(name, namespace string, operations []u
 			loggerhelpers.String("name", name),
 			loggerhelpers.String("namespace", namespace),
 			loggerhelpers.String("watchedContainer", watchedContainer.ContainerID),
-			loggerhelpers.String("completion", helpers.Complete))
+			loggerhelpers.String("completion", helpers.Full))
 		return sc.patchApplicationProfile(name, namespace, operations, watchedContainer)
 	}
 

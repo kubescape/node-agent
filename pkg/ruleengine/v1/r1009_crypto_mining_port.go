@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"slices"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 )
 
 const (
@@ -41,7 +42,6 @@ var _ ruleengine.RuleEvaluator = (*R1009CryptoMiningRelatedPort)(nil)
 
 type R1009CryptoMiningRelatedPort struct {
 	BaseRule
-	alreadyNotified bool
 }
 
 func CreateRuleR1009CryptoMiningRelatedPort() *R1009CryptoMiningRelatedPort {
@@ -59,103 +59,82 @@ func (rule *R1009CryptoMiningRelatedPort) ID() string {
 func (rule *R1009CryptoMiningRelatedPort) DeleteRule() {
 }
 
-func (rule *R1009CryptoMiningRelatedPort) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
+func (rule *R1009CryptoMiningRelatedPort) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectcache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.NetworkEventType {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	networkEvent, ok := event.(*tracernetworktype.Event)
 	if !ok {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
-	if rule.alreadyNotified {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+	nn := objectcache.NetworkNeighborhoodCache().GetNetworkNeighborhood(networkEvent.Runtime.ContainerID)
+	if nn == nil {
+		return nil
 	}
 
-	if networkEvent.Proto == "TCP" && networkEvent.PktType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
-		return ruleengine.DetectionResult{IsFailure: true, Payload: networkEvent}
-	}
-
-	return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
-}
-
-func (rule *R1009CryptoMiningRelatedPort) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
-	// First do basic evaluation
-	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !detectionResult.IsFailure {
-		return detectionResult, nil
-	}
-
-	networkEventTyped, _ := event.(*tracernetworktype.Event)
-	nn, err := GetNetworkNeighborhood(networkEventTyped.Runtime.ContainerID, objCache)
+	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEvent.GetContainer())
 	if err != nil {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
+		return nil
 	}
 
-	nnContainer, err := GetContainerFromNetworkNeighborhood(nn, networkEventTyped.GetContainer())
-	if err != nil {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
-	}
-
-	// Check if the port is in the egress list
+	// Check if the port is in the egress list.
 	for _, nn := range nnContainer.Egress {
 		for _, port := range nn.Ports {
 			if port.Port == nil {
 				continue
 			}
-			if networkEventTyped.Port == uint16(*port.Port) {
-				return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
+
+			if networkEvent.Port == uint16(*port.Port) {
+				return nil
 			}
 		}
 	}
 
-	return ruleengine.DetectionResult{IsFailure: true, Payload: nil}, nil
-}
+	if networkEvent, ok := event.(*tracernetworktype.Event); ok {
+		if networkEvent.Proto == "TCP" && networkEvent.PktType == "OUTGOING" && slices.Contains(CommonlyUsedCryptoMinersPorts, networkEvent.Port) {
+			ruleFailure := GenericRuleFailure{
+				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
+					UniqueID:  HashStringToMD5(fmt.Sprintf("%s%d", networkEvent.Comm, networkEvent.Port)),
+					AlertName: rule.Name(),
+					Arguments: map[string]interface{}{
+						"port":  networkEvent.Port,
+						"proto": networkEvent.Proto,
+						"ip":    networkEvent.DstEndpoint.Addr,
+					},
+					InfectedPID: networkEvent.Pid,
+					Severity:    R1009CryptoMiningRelatedPortRuleDescriptor.Priority,
+				},
+				RuntimeProcessDetails: apitypes.ProcessTree{
+					ProcessTree: apitypes.Process{
+						Comm: networkEvent.Comm,
+						Gid:  &networkEvent.Gid,
+						PID:  networkEvent.Pid,
+						Uid:  &networkEvent.Uid,
+					},
+					ContainerID: networkEvent.Runtime.ContainerID,
+				},
+				TriggerEvent: networkEvent.Event,
+				RuleAlert: apitypes.RuleAlert{
+					RuleDescription: fmt.Sprintf("Communication on a commonly used crypto mining port: %d", networkEvent.Port),
+				},
+				RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
+					PodName:   networkEvent.GetPod(),
+					PodLabels: networkEvent.K8s.PodLabels,
+				},
+				RuleID: rule.ID(),
+			}
 
-func (rule *R1009CryptoMiningRelatedPort) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
-	networkEvent, _ := event.(*tracernetworktype.Event)
-	rule.alreadyNotified = true
-
-	return &GenericRuleFailure{
-		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%d", networkEvent.Comm, networkEvent.Port)),
-			AlertName: rule.Name(),
-			Arguments: map[string]interface{}{
-				"port":  networkEvent.Port,
-				"proto": networkEvent.Proto,
-				"ip":    networkEvent.DstEndpoint.Addr,
-			},
-			InfectedPID: networkEvent.Pid,
-			Severity:    R1009CryptoMiningRelatedPortRuleDescriptor.Priority,
-		},
-		RuntimeProcessDetails: apitypes.ProcessTree{
-			ProcessTree: apitypes.Process{
-				Comm: networkEvent.Comm,
-				Gid:  &networkEvent.Gid,
-				PID:  networkEvent.Pid,
-				Uid:  &networkEvent.Uid,
-			},
-			ContainerID: networkEvent.Runtime.ContainerID,
-		},
-		TriggerEvent: networkEvent.Event,
-		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Communication on a commonly used crypto mining port: %d", networkEvent.Port),
-		},
-		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
-			PodName:   networkEvent.GetPod(),
-			PodLabels: networkEvent.K8s.PodLabels,
-		},
-		RuleID: rule.ID(),
+			return &ruleFailure
+		}
 	}
+
+	return nil
 }
 
 func (rule *R1009CryptoMiningRelatedPort) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R1009CryptoMiningRelatedPortRuleDescriptor.Requirements.RequiredEventTypes(),
-		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileDependency: apitypes.Optional,
-			ProfileType:       apitypes.NetworkProfile,
-		},
 	}
 }

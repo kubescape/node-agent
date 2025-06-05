@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"k8s.io/utils/ptr"
@@ -63,21 +62,21 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 		objCache.SetNetworkNeighborhood(nn)
 	}
 
-	failure := ruleprocess.ProcessRule(rule, utils.SSHEventType, sshEvent, &objCache)
+	failure := rule.ProcessEvent(utils.SSHEventType, sshEvent, &objCache)
 	if failure != nil {
 		t.Errorf("Expected nil since the SSH connection is to an allowed port, got %v", failure)
 	}
 
 	// Test disallowed port
 	sshEvent.DstPort = 1234
-	failure = ruleprocess.ProcessRule(rule, utils.SSHEventType, sshEvent, &objCache)
+	failure = rule.ProcessEvent(utils.SSHEventType, sshEvent, &objCache)
 	if failure == nil {
 		t.Errorf("Expected failure since the SSH connection is to a disallowed port, got nil")
 	}
 
 	// Test disallowed port that is in the egress list
 	sshEvent.DstPort = 2023
-	failure = ruleprocess.ProcessRule(rule, utils.SSHEventType, sshEvent, &objCache)
+	failure = rule.ProcessEvent(utils.SSHEventType, sshEvent, &objCache)
 	if failure == nil {
 		t.Errorf("Expected failure since the SSH connection is to a disallowed port, got nil")
 	}
@@ -85,7 +84,7 @@ func TestR1003DisallowedSSHConnectionPort_ProcessEvent(t *testing.T) {
 	// Test allowed port
 	sshEvent.DstPort = 2022
 	sshEvent.DstIP = "3.3.3.3"
-	failure = ruleprocess.ProcessRule(rule, utils.SSHEventType, sshEvent, &objCache)
+	failure = rule.ProcessEvent(utils.SSHEventType, sshEvent, &objCache)
 	if failure != nil {
 		t.Errorf("Expected nil since the SSH connection is to an allowed port, got %v", failure)
 	}

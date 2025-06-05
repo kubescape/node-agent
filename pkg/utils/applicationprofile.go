@@ -94,7 +94,7 @@ func CreateCapabilitiesPatchOperations(capabilities, syscalls []string, execs ma
 	return profileOperations
 }
 
-func EnrichApplicationProfileContainer(container *v1beta1.ApplicationProfileContainer, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, rulePolicies map[string]v1beta1.RulePolicy, callStacks []v1beta1.IdentifiedCallStack, imageID, imageTag string) {
+func EnrichContainerProfileSpec(container *v1beta1.ContainerProfileSpec, observedCapabilities, observedSyscalls []string, execs map[string][]string, opens map[string]mapset.Set[string], endpoints map[string]*v1beta1.HTTPEndpoint, rulePolicies map[string]v1beta1.RulePolicy, callStacks []v1beta1.IdentifiedCallStack, imageID, imageTag string) {
 	// add image metadata
 	container.ImageID = imageID
 	container.ImageTag = imageTag

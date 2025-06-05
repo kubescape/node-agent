@@ -9,6 +9,7 @@ import (
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/cenkalti/backoff"
+	"github.com/google/uuid"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
@@ -120,6 +121,7 @@ func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *container
 	watchedContainer := utils.WatchedContainerData{
 		ContainerID: container.Runtime.ContainerID,
 		// we get ImageID and ImageTag from the pod spec for consistency with operator
+		Uuid: uuid.New().String(),
 	}
 
 	wl, err := ch.k8sClient.GetWorkload(container.K8s.Namespace, "Pod", container.K8s.PodName)

@@ -3,12 +3,13 @@ package ruleengine
 import (
 	"fmt"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
-	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 )
 
 const (
@@ -50,55 +51,37 @@ func (rule *R0004UnexpectedCapabilityUsed) ID() string {
 func (rule *R0004UnexpectedCapabilityUsed) DeleteRule() {
 }
 
-func (rule *R0004UnexpectedCapabilityUsed) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
+func (rule *R0004UnexpectedCapabilityUsed) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.CapabilitiesEventType {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	capEvent, ok := event.(*tracercapabilitiestype.Event)
 	if !ok {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
+	}
+
+	ap := objCache.ApplicationProfileCache().GetApplicationProfile(capEvent.Runtime.ContainerID)
+	if ap == nil {
+		return nil
+	}
+
+	appProfileCapabilitiesList, err := GetContainerFromApplicationProfile(ap, capEvent.GetContainer())
+	if err != nil {
+		return nil
 	}
 
 	if rule.alertedCapabilities.Has(capEvent.CapName) {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
-	}
-
-	return ruleengine.DetectionResult{IsFailure: true, Payload: capEvent.CapName}
-}
-
-func (rule *R0004UnexpectedCapabilityUsed) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
-	// First do basic evaluation
-	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !detectionResult.IsFailure {
-		return detectionResult, nil
-	}
-
-	capEventTyped, _ := event.(*tracercapabilitiestype.Event)
-	ap, err := GetApplicationProfile(capEventTyped.Runtime.ContainerID, objCache)
-	if err != nil {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
-	}
-
-	appProfileCapabilitiesList, err := GetContainerFromApplicationProfile(ap, capEventTyped.GetContainer())
-	if err != nil {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
+		return nil
 	}
 
 	for _, capability := range appProfileCapabilitiesList.Capabilities {
-		if capEventTyped.CapName == capability {
-			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
+		if capEvent.CapName == capability {
+			return nil
 		}
 	}
 
-	return detectionResult, nil
-}
-
-func (rule *R0004UnexpectedCapabilityUsed) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
-	capEvent, _ := event.(*tracercapabilitiestype.Event)
-	rule.alertedCapabilities.Set(capEvent.CapName, true)
-
-	return &GenericRuleFailure{
+	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:  HashStringToMD5(fmt.Sprintf("%s%s", capEvent.Comm, capEvent.CapName)),
 			AlertName: rule.Name(),
@@ -127,14 +110,14 @@ func (rule *R0004UnexpectedCapabilityUsed) CreateRuleFailure(eventType utils.Eve
 		},
 		RuleID: rule.ID(),
 	}
+
+	rule.alertedCapabilities.Set(capEvent.CapName, true)
+
+	return &ruleFailure
 }
 
 func (rule *R0004UnexpectedCapabilityUsed) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0004UnexpectedCapabilityUsedRuleDescriptor.Requirements.RequiredEventTypes(),
-		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileDependency: apitypes.Required,
-			ProfileType:       apitypes.ApplicationProfile,
-		},
 	}
 }

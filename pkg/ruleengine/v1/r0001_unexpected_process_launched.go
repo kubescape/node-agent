@@ -5,11 +5,12 @@ import (
 	"slices"
 	"strings"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
 
 const (
@@ -56,59 +57,42 @@ func CreateRuleR0001UnexpectedProcessLaunched() *R0001UnexpectedProcessLaunched 
 	return &R0001UnexpectedProcessLaunched{enforceArgs: false}
 }
 
-func (rule *R0001UnexpectedProcessLaunched) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) ruleengine.DetectionResult {
+func (rule *R0001UnexpectedProcessLaunched) ProcessEvent(eventType utils.EventType, event utils.K8sEvent, objectCache objectcache.ObjectCache) ruleengine.RuleFailure {
 	if eventType != utils.ExecveEventType {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
+		return nil
 	}
 
 	execPath := GetExecPathFromEvent(execEvent)
-	return ruleengine.DetectionResult{IsFailure: true, Payload: execPath}
-}
 
-func (rule *R0001UnexpectedProcessLaunched) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (ruleengine.DetectionResult, error) {
-	// First do basic evaluation
-	detectionResult := rule.EvaluateRule(eventType, event, objCache.K8sObjectCache())
-	if !detectionResult.IsFailure {
-		return detectionResult, nil
-	}
-
-	execEvent, _ := event.(*events.ExecEvent)
-	ap, err := GetApplicationProfile(execEvent.Runtime.ContainerID, objCache)
-	if err != nil {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
+	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(execEvent.Runtime.ContainerID)
+	if ap == nil {
+		return nil
 	}
 
 	appProfileExecList, err := GetContainerFromApplicationProfile(ap, execEvent.GetContainer())
 	if err != nil {
-		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
+		return nil
 	}
 
 	for _, execCall := range appProfileExecList.Execs {
-		if execCall.Path == detectionResult.Payload {
+		if execCall.Path == execPath {
 			// if enforceArgs is set to true, we need to compare the arguments as well
 			// if not set, we only compare the path
 			if !rule.enforceArgs || slices.Compare(execCall.Args, execEvent.Args) == 0 {
-				return ruleengine.DetectionResult{IsFailure: false, Payload: execCall.Path}, nil
+				return nil
 			}
 		}
 	}
 
-	return ruleengine.DetectionResult{IsFailure: true, Payload: nil}, nil
-}
-
-func (rule *R0001UnexpectedProcessLaunched) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
-	execEvent, _ := event.(*events.ExecEvent)
-	execPath := GetExecPathFromEvent(execEvent)
-
-	// If the parent process is in the upper layer, the child process is also in the upper layer.
+	// If the parent process  is in the upper layer, the child process is also in the upper layer.
 	upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
 
-	return &GenericRuleFailure{
+	ruleFailure := GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
 			AlertName:   rule.Name(),
@@ -147,14 +131,12 @@ func (rule *R0001UnexpectedProcessLaunched) CreateRuleFailure(eventType utils.Ev
 		RuleID: rule.ID(),
 		Extra:  execEvent.GetExtra(),
 	}
+
+	return &ruleFailure
 }
 
 func (rule *R0001UnexpectedProcessLaunched) Requirements() ruleengine.RuleSpec {
 	return &RuleRequirements{
 		EventTypes: R0001UnexpectedProcessLaunchedRuleDescriptor.Requirements.RequiredEventTypes(),
-		ProfileRequirements: ruleengine.ProfileRequirement{
-			ProfileDependency: apitypes.Required,
-			ProfileType:       apitypes.ApplicationProfile,
-		},
 	}
 }

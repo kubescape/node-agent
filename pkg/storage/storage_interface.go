@@ -6,9 +6,9 @@ import (
 )
 
 type StorageClient interface {
-	CreateApplicationProfile(profile *v1beta1.ApplicationProfile, namespace string) error
+	CreateContainerProfile(profile *v1beta1.ContainerProfile, namespace string) error
 	PatchApplicationProfile(name, namespace string, operations []utils.PatchOperation, watchedContainer *utils.WatchedContainerData) error
-	GetApplicationProfile(namespace, name string) (*v1beta1.ApplicationProfile, error)
+	GetContainerProfile(namespace, name string) (*v1beta1.ContainerProfile, error)
 	CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error)
 	GetSBOM(name string) (*v1beta1.SBOMSyft, error)
 	GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error)

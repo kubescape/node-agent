@@ -32,10 +32,6 @@ func (r *RuleCreatorMock) CreateRulesByEventType(eventType utils.EventType) []Ru
 	return []RuleEvaluator{}
 }
 
-func (r *RuleCreatorMock) CreateRulePolicyRulesByEventType(eventType utils.EventType) []RuleEvaluator {
-	return []RuleEvaluator{}
-}
-
 func (r *RuleCreatorMock) CreateAllRules() []RuleEvaluator {
 	return []RuleEvaluator{}
 }
@@ -64,15 +60,7 @@ func (rule *RuleMock) ID() string {
 func (rule *RuleMock) DeleteRule() {
 }
 
-func (rule *RuleMock) EvaluateRule(eventType utils.EventType, event utils.K8sEvent, k8sObjCache objectcache.K8sObjectCache) DetectionResult {
-	return DetectionResult{IsFailure: false, Payload: nil}
-}
-
-func (rule *RuleMock) EvaluateRuleWithProfile(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache) (DetectionResult, error) {
-	return DetectionResult{IsFailure: false, Payload: nil}, nil
-}
-
-func (rule *RuleMock) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload DetectionResult) RuleFailure {
+func (rule *RuleMock) ProcessEvent(_ utils.EventType, _ utils.K8sEvent, _ objectcache.ObjectCache) RuleFailure {
 	return nil
 }
 
@@ -93,8 +81,4 @@ type RuleSpecMock struct {
 
 func (ruleSpec *RuleSpecMock) RequiredEventTypes() []utils.EventType {
 	return []utils.EventType{}
-}
-
-func (ruleSpec *RuleSpecMock) GetProfileRequirements() ProfileRequirement {
-	return ProfileRequirement{}
 }
