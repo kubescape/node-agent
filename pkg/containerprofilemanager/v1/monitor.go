@@ -2,12 +2,16 @@ package containerprofilemanager
 
 import (
 	"errors"
+	"runtime"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func (cpm *ContainerProfileManager) monitorContainer(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
@@ -21,13 +25,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 			}
 
 			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
-			cpm.saveProfile(watchedContainer, container.K8s.Namespace)
-
-			// // save profile after initialaztion
-			// if initOps != nil {
-			// 	cpm.saveProfile(watchedContainer, container.K8s.Namespace, initOps)
-			// 	initOps = nil
-			// }
+			cpm.saveProfile(watchedContainer, container)
 
 		case err := <-watchedContainer.SyncChannel:
 			switch {
@@ -36,11 +34,11 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName, container.Runtime.ContainerID) == 0 {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				}
-				cpm.saveProfile(watchedContainer, container.K8s.Namespace)
+				cpm.saveProfile(watchedContainer, container)
 				return err
 			case errors.Is(err, utils.ContainerReachedMaxTime):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
-				cpm.saveProfile(watchedContainer, container.K8s.Namespace)
+				cpm.saveProfile(watchedContainer, container)
 				return err
 			case errors.Is(err, utils.ObjectCompleted): // Todo figure out if we need this
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
@@ -60,17 +58,63 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 	}
 }
 
-func (cpm *ContainerProfileManager) saveProfile(watchedContainer *utils.WatchedContainerData, namespace string) error {
+func (cpm *ContainerProfileManager) saveProfile(watchedContainer *utils.WatchedContainerData, container *containercollection.Container) error {
 	// Lock the container profile manager to prevent deleting the container profile while saving it
 	return cpm.containerLocks.WithLockAndError(
 		watchedContainer.ContainerID,
 		func() error {
-			return cpm.saveContainerProfile(watchedContainer, namespace)
+			return cpm.saveContainerProfile(watchedContainer, container)
 		},
 	)
 }
 
-// saveContainerProfile saves the container profile to the object cache
-func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils.WatchedContainerData, namespace string) error {
-	// TODO: implement saving logic
+// saveContainerProfile saves the container profile to the storage
+func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils.WatchedContainerData, container *containercollection.Container) error {
+	if watchedContainer == nil {
+		return errors.New("watched container data is nil")
+	}
+
+	slug, err := watchedContainer.InstanceID.GetSlug(false) // TODO: use the unique slug function.
+	if err != nil {
+		logger.L().Error("failed to get slug for container profile", helpers.Error(err))
+		return err
+	}
+
+	// TODO: add container type.
+
+	containerProfile := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: slug,
+			Annotations: map[string]string{
+				helpersv1.InstanceIDMetadataKey:              watchedContainer.InstanceID.GetStringFormatted(),
+				helpersv1.WlidMetadataKey:                    watchedContainer.Wlid,
+				helpersv1.CompletionMetadataKey:              string(watchedContainer.GetCompletionStatus()),
+				helpersv1.StatusMetadataKey:                  string(watchedContainer.GetStatus()),
+				helpersv1.ReportSeriesIdMetadataKey:          watchedContainer.SeriesID,
+				helpersv1.PreviousReportTimestampMetadataKey: watchedContainer.PreviousReportTimestamp.String(),
+				helpersv1.ReportTimestampMetadataKey:         watchedContainer.CurrentReportTimestamp.String(),
+			},
+			Labels: utils.GetLabels(watchedContainer, false),
+		},
+		Spec: v1beta1.ContainerProfileSpec{
+			Architectures: []string{runtime.GOARCH},
+		},
+	}
+
+	if err := cpm.storageClient.CreateContainerProfile(containerProfile, container.K8s.Namespace); err != nil {
+		logger.L().Error("failed to create container profile", helpers.Error(err),
+			helpers.String("containerID", watchedContainer.ContainerID),
+			helpers.String("containerName", container.Runtime.ContainerName),
+			helpers.String("podName", container.K8s.PodName),
+			helpers.String("namespace", container.K8s.Namespace),
+			helpers.String("container ID", container.Runtime.ContainerID),
+			helpers.String("slug", slug),
+			helpers.String("workloadID", watchedContainer.Wlid),
+			helpers.String("status", string(watchedContainer.GetStatus())),
+			helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())),
+		)
+		return err
+	}
+
+	return nil
 }

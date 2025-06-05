@@ -128,7 +128,7 @@ func (sc Storage) patchApplicationProfile(name, namespace string, operations []u
 			loggerhelpers.String("name", name),
 			loggerhelpers.String("namespace", namespace),
 			loggerhelpers.String("watchedContainer", watchedContainer.ContainerID),
-			loggerhelpers.String("completion", helpers.Complete))
+			loggerhelpers.String("completion", helpers.Full))
 		return sc.patchApplicationProfile(name, namespace, operations, watchedContainer)
 	}
 

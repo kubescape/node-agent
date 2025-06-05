@@ -80,9 +80,8 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			if watchedContainer, ok := cpm.containerIDToInfo.Load(containerID); ok {
 				watchedContainer.SyncChannel <- utils.ContainerReachedMaxTime
 			}
-			// We might want to call save profile here to ensure the last state is saved (TODO) does go clean the watchedContainer after the delete of the container or it keeps my ptr?
-			// I can lock here or lock in saveProfile.
 		})
+		time.Sleep(100 * time.Millisecond) // Give some time for the monitoring goroutine to process the signal (TODO: find a better way to handle this).
 		cpm.deleteContainer(containerID)
 		// Notify all registered channels about the end of life (in cases where runtime detection is not used we can stop sniffing).
 		// TODO: Register to this from the container watcher.
@@ -202,7 +201,9 @@ func (cpm *ContainerProfileManager) deleteContainer(containerID string) {
 	// Send container termination signal to the sync channel
 	watchedContainer.SyncChannel <- utils.ContainerHasTerminatedError
 
-	// TODO: Do we have a race here of who catches the lock first? we need saveProfile to be called before the deleteContainer
+	// Wait a bit to allow the monitoring goroutine to finish (it will take a lock on the container ID)
+	// This is a workaround to ensure that the monitoring goroutine has enough time to process the signal
+	time.Sleep(100 * time.Millisecond)
 
 	cpm.containerLocks.WithLock(containerID, func() { // Clean up container info
 		cpm.containerIDToInfo.Delete(containerID)
