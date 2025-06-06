@@ -20,10 +20,10 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
-	applicationprofilemanagerv1 "github.com/kubescape/node-agent/pkg/applicationprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/cloudmetadata"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
+	containerprofilemanagerv1 "github.com/kubescape/node-agent/pkg/containerprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/containerwatcher/v1"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
@@ -32,8 +32,6 @@ import (
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	metricprometheus "github.com/kubescape/node-agent/pkg/metricsmanager/prometheus"
-	"github.com/kubescape/node-agent/pkg/networkmanager"
-	networkmanagerv2 "github.com/kubescape/node-agent/pkg/networkmanager/v2"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	networkstreamv1 "github.com/kubescape/node-agent/pkg/networkstream/v1"
 	"github.com/kubescape/node-agent/pkg/nodeprofilemanager"
@@ -193,19 +191,7 @@ func main() {
 		ruleBindingCache = rulebindingcachev1.NewCache(cfg.NodeName, k8sClient)
 	}
 
-	// Create the application profile manager
-	var applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
-	if cfg.EnableApplicationProfile {
-		applicationProfileManager, err = applicationprofilemanagerv1.CreateApplicationProfileManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, k8sObjectCache, seccompManager, nil, ruleBindingCache)
-		if err != nil {
-			logger.L().Ctx(ctx).Fatal("error creating the application profile manager", helpers.Error(err))
-		}
-	} else {
-		applicationProfileManager = applicationprofilemanager.CreateApplicationProfileManagerMock()
-	}
-
-	// Create the network and DNS managers
-	var networkManagerClient networkmanager.NetworkManagerClient
+	// Create and DNS managers
 	var dnsManagerClient dnsmanager.DNSManagerClient
 	var dnsResolver dnsmanager.DNSResolver
 	if cfg.EnableNetworkTracing || cfg.EnableRuntimeDetection {
@@ -213,14 +199,22 @@ func main() {
 		dnsManagerClient = dnsManager
 		// NOTE: dnsResolver is set for threat detection.
 		dnsResolver = dnsManager
-		networkManagerClient = networkmanagerv2.CreateNetworkManager(ctx, cfg, clusterData.ClusterName, k8sClient, storageClient, dnsManager, k8sObjectCache)
 	} else {
 		if cfg.EnableRuntimeDetection {
 			logger.L().Ctx(ctx).Fatal("Network tracing is disabled, but runtime detection is enabled. Network tracing is required for runtime detection.")
 		}
 		dnsManagerClient = dnsmanager.CreateDNSManagerMock()
 		dnsResolver = dnsmanager.CreateDNSManagerMock()
-		networkManagerClient = networkmanager.CreateNetworkManagerMock()
+	}
+
+	var containerProfileManager containerprofilemanager.ContainerProfileManagerClient
+	if cfg.EnableApplicationProfile {
+		containerProfileManager, err = containerprofilemanagerv1.NewContainerProfileManager(ctx, cfg, k8sClient, k8sObjectCache, storageClient, dnsResolver, seccompManager, nil, ruleBindingCache)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating the container profile manager", helpers.Error(err))
+		}
+	} else {
+		containerProfileManager = containerprofilemanager.CreateContainerProfileManagerMock()
 	}
 
 	var ruleManager rulemanager.RuleManagerClient
@@ -333,8 +327,8 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
-		igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager,
+	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, containerProfileManager, k8sClient,
+		igK8sClient, dnsManagerClient, prometheusExporter, ruleManager,
 		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
 		processManager, clusterData.ClusterName, objCache, networkStreamClient)
 	if err != nil {

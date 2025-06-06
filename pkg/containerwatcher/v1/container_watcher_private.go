@@ -58,8 +58,6 @@ func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.P
 
 		// Set shared watched container data
 		go ch.setSharedWatchedContainerData(notif.Container)
-
-		// TODO: use the channel to receive notification when a container is removed and call unregisterContainer (not here, in a separate goroutine or something)
 	case containercollection.EventTypeRemoveContainer:
 		logger.L().Debug("IGContainerWatcher.containerCallback - remove container event received",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
@@ -184,8 +182,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 	ch.callbacks = []containercollection.FuncNotify{
 		ch.containerCallbackAsync,
-		ch.applicationProfileManager.ContainerCallback,
-		ch.networkManager.ContainerCallback,
+		ch.containerProfileManager.ContainerCallback,
 		ch.objectCache.ApplicationProfileCache().ContainerCallback,
 		ch.objectCache.NetworkNeighborhoodCache().ContainerCallback,
 		ch.malwareManager.ContainerCallback,

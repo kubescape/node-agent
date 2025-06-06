@@ -39,11 +39,10 @@ func NewContainerProfileManager(
 	k8sObjectCache objectcache.K8sObjectCache,
 	storageClient storage.StorageClient,
 	dnsResolverClient dnsmanager.DNSResolver,
-	syscallPeekFunc func(nsMountId uint64) ([]string, error),
 	seccompManager seccompmanager.SeccompManagerClient,
 	enricher containerprofilemanager.Enricher,
 	ruleBindingCache rulebindingmanager.RuleBindingCache,
-) *ContainerProfileManager {
+) (*ContainerProfileManager, error) {
 	return &ContainerProfileManager{
 		ctx:                          ctx,
 		cfg:                          cfg,
@@ -51,14 +50,13 @@ func NewContainerProfileManager(
 		k8sObjectCache:               k8sObjectCache,
 		storageClient:                storageClient,
 		dnsResolverClient:            dnsResolverClient,
-		syscallPeekFunc:              syscallPeekFunc,
 		seccompManager:               seccompManager,
 		enricher:                     enricher,
 		ruleBindingCache:             ruleBindingCache,
 		containerLocks:               resourcelocks.New(),
 		containerIDToInfo:            maps.SafeMap[string, *containerData]{},
 		maxSniffTimeNotificationChan: make([]chan *containercollection.Container, 0),
-	}
+	}, nil
 }
 
 var _ containerprofilemanager.ContainerProfileManagerClient = (*ContainerProfileManager)(nil)

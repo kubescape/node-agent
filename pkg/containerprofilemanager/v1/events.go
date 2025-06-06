@@ -193,12 +193,12 @@ func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event *t
 
 			endpointIdentifier, err := GetEndpointIdentifier(event)
 			if err != nil {
-				logger.L().Ctx(cpm.ctx).Warning("ContainerProfileManager - failed to get endpoint identifier", helpers.Error(err))
+				logger.L().Warning("ContainerProfileManager - failed to get endpoint identifier", helpers.Error(err))
 				return nil
 			}
 			endpoint, err := GetNewEndpoint(event, endpointIdentifier)
 			if err != nil {
-				logger.L().Ctx(cpm.ctx).Warning("ContainerProfileManager - failed to get new endpoint", helpers.Error(err))
+				logger.L().Warning("ContainerProfileManager - failed to get new endpoint", helpers.Error(err))
 				return nil
 			}
 			// check if we already have this endpoint
@@ -219,7 +219,7 @@ func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event *t
 	}
 }
 
-func (cpm *ContainerProfileManager) ReportRulePolicy(containerID, ruleId, allowedProcess string, allowedContainer bool) {
+func (cpm *ContainerProfileManager) ReportRulePolicy(containerID, ruleId, allowedProcess string, allowedContainer bool) { // TODO: do we need to do the initial operation as in the old manager?
 	err := cpm.containerLocks.WithLockAndError(containerID, func() error {
 		if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
 			if containerData.rulePolicies == nil {

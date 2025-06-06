@@ -34,7 +34,7 @@ type containerData struct {
 	callStacks   *maps.SafeMap[string, *v1beta1.IdentifiedCallStack] // Map of callstacks reported for this container, key is the SHA256 hash of the callstack
 	networks     mapset.Set[NetworkEvent]
 
-	// TODO: cache events we reported already, so we don't report them again
+	// TODO: cache events we reported already, so we don't report them again, currently the cache is only done between updates but we might want to keep the events for a longer period of time.
 }
 
 func (cd *containerData) isEmpty() bool {
@@ -206,7 +206,7 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 
 	} else if networkEvent.Destination.Kind == EndpointKindService {
 		// for service, we need to retrieve it and use its selector
-		svc, err := k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name)
+		svc, err := k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name) // TODO: replace this with ig k8sInventory.
 		if err != nil {
 			logger.L().Warning("NetworkManager - failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
 			return nil
