@@ -118,7 +118,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 				helpersv1.WlidMetadataKey:                    watchedContainer.Wlid,
 				helpersv1.CompletionMetadataKey:              string(watchedContainer.GetCompletionStatus()),
 				helpersv1.StatusMetadataKey:                  string(watchedContainer.GetStatus()),
-				helpersv1.ContainerTypeMetadataKey:           string(watchedContainer.ContainerType),
+				helpersv1.ContainerTypeMetadataKey:           watchedContainer.ContainerType.String(),
 				helpersv1.ReportSeriesIdMetadataKey:          watchedContainer.SeriesID,
 				helpersv1.PreviousReportTimestampMetadataKey: watchedContainer.PreviousReportTimestamp.String(),
 				helpersv1.ReportTimestampMetadataKey:         watchedContainer.CurrentReportTimestamp.String(),
