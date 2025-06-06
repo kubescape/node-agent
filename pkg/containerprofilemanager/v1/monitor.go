@@ -3,6 +3,7 @@ package containerprofilemanager
 import (
 	"errors"
 	"runtime"
+	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
@@ -107,6 +108,8 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 		)
 	}
 
+	watchedContainer.CurrentReportTimestamp = time.Now()
+
 	containerProfile := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: slug,
@@ -158,6 +161,9 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 		helpers.String("containerName", container.Runtime.ContainerName),
 		helpers.String("podName", container.K8s.PodName),
 	)
+
+	// Update the timestamp of the last report
+	watchedContainer.PreviousReportTimestamp = watchedContainer.CurrentReportTimestamp // TODO: this should be done before sending to storage? we care if we fail?
 
 	// Empty the container data to prevent reporting the same data again
 	containerData.emptyEvents()
