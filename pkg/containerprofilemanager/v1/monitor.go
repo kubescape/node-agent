@@ -34,22 +34,21 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName, container.Runtime.ContainerID) == 0 {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				}
-				cpm.saveProfile(watchedContainer, container)
+				cpm.saveProfile(watchedContainer, container) // TODO: Handle errors here.
 				return err
 			case errors.Is(err, utils.ContainerReachedMaxTime):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
-				cpm.saveProfile(watchedContainer, container)
+				cpm.saveProfile(watchedContainer, container) // TODO: Handle errors here.
 				return err
-			case errors.Is(err, utils.ObjectCompleted): // Todo figure out if we need this
+			case errors.Is(err, utils.ObjectCompleted): // TODO: figure out if we need this.
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				return err
-			case errors.Is(err, utils.TooLargeObjectError):
+			case errors.Is(err, utils.TooLargeObjectError): // TODO: We currently don't use this error as it was originated from the patch operation.
 				logger.L().Debug("container profile manager: container is too large, stopping monitoring",
 					helpers.String("containerID", container.Runtime.ContainerID),
 					helpers.String("containerName", container.Runtime.ContainerName),
 					helpers.String("podName", container.K8s.PodName),
 					helpers.String("namespace", container.K8s.Namespace),
-					helpers.String("container ID", container.Runtime.ContainerID),
 				)
 				watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
 				return err
@@ -128,7 +127,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 			ImageID:              containerInfo.ImageID,
 			ImageTag:             containerInfo.ImageTag,
 			SeccompProfile:       seccompProfile,
-			Capabilities:         containerData.capabilites.ToSlice(),
+			Capabilities:         containerData.getCapabilities(),
 			Execs:                containerData.getExecs(),
 			Opens:                containerData.getOpens(),
 			Syscalls:             syscalls,
@@ -146,7 +145,6 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace),
-			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("slug", slug),
 			helpers.String("workloadID", watchedContainer.Wlid),
 			helpers.String("status", string(watchedContainer.GetStatus())),

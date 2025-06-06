@@ -161,22 +161,7 @@ func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, even
 }
 
 func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
-	// TODO: what to do with this?
-	// err := cpm.containerLocks.WithLockAndError(containerID, func() error {
-	// 	if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
-	// 		if containerData.droppedEvents == nil {
-	// 			containerData.droppedEvents = mapset.NewSet[string]()
-	// 		}
-	// 		containerData.droppedEvents.Add(containerID)
-	// 		return nil
-	// 	}
-	// 	return ErrContainerNotFound
-	// })
-
-	// if err != nil && errors.Is(err, ErrContainerNotFound) {
-	// 	logger.L().Error("ContainerProfileManager - failed to report dropped event", helpers.String("container ID", containerID), helpers.Error(err))
-	// 	cpm.containerLocks.ReleaseLock(containerID)
-	// }
+	// TODO: what to do with this? just log it?
 }
 
 func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event *tracerhttptype.Event) {

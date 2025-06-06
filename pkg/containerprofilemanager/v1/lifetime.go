@@ -91,7 +91,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		time.Sleep(100 * time.Millisecond) // Give some time for the monitoring goroutine to process the signal (TODO: find a better way to handle this).
 		cpm.deleteContainer(containerID)
 		// Notify all registered channels about the end of life (in cases where runtime detection is not used we can stop sniffing).
-		// TODO: Register to this from the container watcher.
+		// TODO: Check this notification logic, put debug logs to see if it works as expected.
 		for _, notifChan := range cpm.maxSniffTimeNotificationChan {
 			select {
 			case notifChan <- container:

@@ -26,7 +26,7 @@ type ContainerProfileManager struct {
 	syscallPeekFunc              func(nsMountId uint64) ([]string, error)
 	seccompManager               seccompmanager.SeccompManagerClient
 	enricher                     containerprofilemanager.Enricher
-	ruleBindingCache             rulebindingmanager.RuleBindingCache
+	ruleBindingCache             rulebindingmanager.RuleBindingCache // Currently not used, check the todo in the events.go file
 	containerIDToInfo            maps.SafeMap[string, *containerData]
 	maxSniffTimeNotificationChan []chan *containercollection.Container
 	containerLocks               *resourcelocks.ResourceLocks
