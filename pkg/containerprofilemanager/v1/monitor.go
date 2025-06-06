@@ -80,8 +80,6 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 		return err
 	}
 
-	// TODO: add container type.
-
 	containerInfo := watchedContainer.ContainerInfos[watchedContainer.ContainerType][watchedContainer.ContainerIndex]
 	seccompProfile, err := cpm.seccompManager.GetSeccompProfile(containerInfo.Name, watchedContainer.SeccompProfilePath)
 	if err != nil {
@@ -91,6 +89,23 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+	}
+
+	var containerData *containerData
+	var ok bool
+	if containerData, ok = cpm.containerIDToInfo.Load(watchedContainer.ContainerID); !ok {
+		return errors.New("container data not found for container ID: " + watchedContainer.ContainerID)
+	}
+	if containerData == nil {
+		return errors.New("container data is nil for container ID: " + watchedContainer.ContainerID)
+	}
+
+	syscalls, err := cpm.syscallPeekFunc(watchedContainer.NsMntId)
+	if err != nil {
+		logger.L().Error("failed to peek syscalls for container", helpers.Error(err),
+			helpers.String("containerID", watchedContainer.ContainerID),
+			helpers.String("containerName", container.Runtime.ContainerName),
+		)
 	}
 
 	containerProfile := &v1beta1.ContainerProfile{
@@ -109,11 +124,19 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 			Labels: utils.GetLabels(watchedContainer, false),
 		},
 		Spec: v1beta1.ContainerProfileSpec{
-			Architectures:  []string{runtime.GOARCH},
-			ImageID:        containerInfo.ImageID,
-			ImageTag:       containerInfo.ImageTag,
-			SeccompProfile: seccompProfile,
-			// Add events.
+			Architectures:        []string{runtime.GOARCH},
+			ImageID:              containerInfo.ImageID,
+			ImageTag:             containerInfo.ImageTag,
+			SeccompProfile:       seccompProfile,
+			Capabilities:         containerData.capabilites.ToSlice(),
+			Execs:                containerData.getExecs(),
+			Opens:                containerData.getOpens(),
+			Syscalls:             syscalls,
+			Endpoints:            containerData.getEndpoints(),
+			PolicyByRuleId:       containerData.getRulePolicies(),
+			IdentifiedCallStacks: containerData.getCallStacks(),
+			Egress:               containerData.getEgressNetworkNeighbors(container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient),
+			Ingress:              containerData.getIngressNetworkNeighbors(container.K8s.Namespace, cpm.k8sClient, cpm.dnsResolverClient),
 		},
 	}
 
@@ -131,6 +154,15 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 		)
 		return err
 	}
+
+	logger.L().Debug("container profile saved successfully",
+		helpers.String("containerID", watchedContainer.ContainerID),
+		helpers.String("containerName", container.Runtime.ContainerName),
+		helpers.String("podName", container.K8s.PodName),
+	)
+
+	// Empty the container data to prevent reporting the same data again
+	containerData.emptyEvents()
 
 	return nil
 }

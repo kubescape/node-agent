@@ -352,3 +352,45 @@ func (cpm *ContainerProfileManager) isValidNetworkEvent(event *tracernetworktype
 
 	return true
 }
+
+// PeekSyscalls returns the syscalls for the given mount namespace ID.
+func (cpm *ContainerProfileManager) PeekSyscalls(containerID string, nsMountId uint64) ([]string, error) {
+	syscalls := []string{}
+	var err error
+
+	err = cpm.containerLocks.WithLockAndError(containerID, func() error {
+		if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
+			if cpm.syscallPeekFunc == nil {
+				return errors.New("syscall peek function is not set")
+			}
+
+			if syscalls, err = cpm.syscallPeekFunc(nsMountId); err != nil {
+				logger.L().Error("ContainerProfileManager - failed to peek syscalls", helpers.String("container ID", containerID), helpers.Error(err))
+				return err
+			}
+
+			if containerData.syscalls == nil {
+				containerData.syscalls = mapset.NewSet[string]()
+			} else {
+				syscallsSet := mapset.NewSet[string](syscalls...)
+				syscalls = syscallsSet.Difference(containerData.syscalls).ToSlice()
+			}
+
+			// Store the syscalls in the container data
+			containerData.syscalls.Append(syscalls...)
+			return nil
+		}
+		return ErrContainerNotFound
+	},
+	)
+	if err != nil && errors.Is(err, ErrContainerNotFound) {
+		logger.L().Error("ContainerProfileManager - failed to peek syscalls", helpers.String("container ID", containerID), helpers.Error(err))
+		cpm.containerLocks.ReleaseLock(containerID)
+		return nil, err
+	} else if err != nil {
+		logger.L().Error("ContainerProfileManager - failed to peek syscalls", helpers.String("container ID", containerID), helpers.Error(err))
+		return nil, err // Return the error if it's not a container not found error, as it might be a real issue with the syscall peeking.
+	}
+
+	return syscalls, nil
+}

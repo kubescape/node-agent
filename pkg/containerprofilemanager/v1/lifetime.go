@@ -79,7 +79,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			helpers.String("namespace", container.K8s.Namespace))
 		err := cpm.containerLocks.WithLockAndError(containerID, func() error {
 			if containerData, ok := cpm.containerIDToInfo.Load(containerID); ok {
-				containerData.WatchedContainerData.SyncChannel <- utils.ContainerReachedMaxTime
+				containerData.watchedContainerData.SyncChannel <- utils.ContainerReachedMaxTime
 				return nil
 			}
 			return ErrContainerNotFound
@@ -131,7 +131,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 
 		// Add to container info map
 		cpm.containerIDToInfo.Set(containerID, &containerData{
-			WatchedContainerData: sharedData,
+			watchedContainerData: sharedData,
 		})
 
 		// Start monitoring the container (separate goroutine because we don't want to block the callback)
@@ -208,7 +208,7 @@ func (cpm *ContainerProfileManager) deleteContainer(containerID string) {
 		return
 	}
 	// Send container termination signal to the sync channel
-	containerData.WatchedContainerData.SyncChannel <- utils.ContainerHasTerminatedError
+	containerData.watchedContainerData.SyncChannel <- utils.ContainerHasTerminatedError
 
 	// Wait a bit to allow the monitoring goroutine to finish (it will take a lock on the container ID)
 	// This is a workaround to ensure that the monitoring goroutine has enough time to process the signal

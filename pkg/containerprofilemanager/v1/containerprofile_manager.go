@@ -7,6 +7,7 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
+	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/resourcelocks"
@@ -21,6 +22,7 @@ type ContainerProfileManager struct {
 	k8sClient                    k8sclient.K8sClientInterface
 	k8sObjectCache               objectcache.K8sObjectCache
 	storageClient                storage.StorageClient
+	dnsResolverClient            dnsmanager.DNSResolver
 	syscallPeekFunc              func(nsMountId uint64) ([]string, error)
 	seccompManager               seccompmanager.SeccompManagerClient
 	enricher                     containerprofilemanager.Enricher
@@ -36,6 +38,7 @@ func NewContainerProfileManager(
 	k8sClient k8sclient.K8sClientInterface,
 	k8sObjectCache objectcache.K8sObjectCache,
 	storageClient storage.StorageClient,
+	dnsResolverClient dnsmanager.DNSResolver,
 	syscallPeekFunc func(nsMountId uint64) ([]string, error),
 	seccompManager seccompmanager.SeccompManagerClient,
 	enricher containerprofilemanager.Enricher,
@@ -47,6 +50,7 @@ func NewContainerProfileManager(
 		k8sClient:                    k8sClient,
 		k8sObjectCache:               k8sObjectCache,
 		storageClient:                storageClient,
+		dnsResolverClient:            dnsResolverClient,
 		syscallPeekFunc:              syscallPeekFunc,
 		seccompManager:               seccompManager,
 		enricher:                     enricher,
