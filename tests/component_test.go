@@ -1213,7 +1213,7 @@ func Test_15_CompletedApCannotBecomeReadyAgain(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Complete,
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
 				helpersv1.StatusMetadataKey:     helpersv1.Completed,
 			},
 		},
@@ -1226,7 +1226,7 @@ func Test_15_CompletedApCannotBecomeReadyAgain(t *testing.T) {
 		{
 			Op:    "replace",
 			Path:  "/metadata/annotations/" + utils.EscapeJSONPointerElement(helpersv1.StatusMetadataKey),
-			Value: helpersv1.Ready,
+			Value: helpersv1.Learning,
 		},
 	}
 	patch, err := json.Marshal(patchOperations)

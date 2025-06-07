@@ -55,29 +55,9 @@ func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.P
 			helpers.String("k8s workload", k8sContainerID),
 			helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
-		// Check if Pod has a label of max sniffing time
-		sniffingTime := utils.AddJitter(ch.cfg.MaxSniffingTime, ch.cfg.MaxJitterPercentage)
-		if podLabelMaxSniffingTime, ok := notif.Container.K8s.PodLabels[MaxSniffingTimeLabel]; ok {
-			if duration, err := time.ParseDuration(podLabelMaxSniffingTime); err == nil {
-				sniffingTime = duration
-			} else {
-				logger.L().Debug("IGContainerWatcher.containerCallback - parsing sniffing time in label", helpers.Error(err), helpers.String("podLabelMaxSniffingTime", podLabelMaxSniffingTime))
-			}
-		}
 
 		// Set shared watched container data
 		go ch.setSharedWatchedContainerData(notif.Container)
-
-		time.AfterFunc(sniffingTime, func() {
-			logger.L().Debug("IGContainerWatcher.containerCallback - monitoring time ended",
-				helpers.String("container ID", notif.Container.Runtime.ContainerID),
-				helpers.String("k8s workload", k8sContainerID),
-				helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
-				helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
-			ch.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
-			ch.networkManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
-			ch.unregisterContainer(notif.Container)
-		})
 	case containercollection.EventTypeRemoveContainer:
 		logger.L().Debug("IGContainerWatcher.containerCallback - remove container event received",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
@@ -202,8 +182,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 	ch.callbacks = []containercollection.FuncNotify{
 		ch.containerCallbackAsync,
-		ch.applicationProfileManager.ContainerCallback,
-		ch.networkManager.ContainerCallback,
+		ch.containerProfileManager.ContainerCallback,
 		ch.objectCache.ApplicationProfileCache().ContainerCallback,
 		ch.objectCache.NetworkNeighborhoodCache().ContainerCallback,
 		ch.malwareManager.ContainerCallback,

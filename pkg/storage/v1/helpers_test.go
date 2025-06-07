@@ -19,7 +19,7 @@ func TestIsComplete(t *testing.T) {
 			name: "complete when status=Completed and completion=Complete",
 			annotations: map[string]string{
 				helpers.StatusMetadataKey:     helpers.Completed,
-				helpers.CompletionMetadataKey: helpers.Complete,
+				helpers.CompletionMetadataKey: helpers.Full,
 			},
 			completionStatus:   utils.WatchedContainerCompletionStatusFull,
 			expectedIsComplete: true,
@@ -45,8 +45,8 @@ func TestIsComplete(t *testing.T) {
 		{
 			name: "not complete when status=Ready",
 			annotations: map[string]string{
-				helpers.StatusMetadataKey:     helpers.Ready,
-				helpers.CompletionMetadataKey: helpers.Complete,
+				helpers.StatusMetadataKey:     helpers.Learning,
+				helpers.CompletionMetadataKey: helpers.Full,
 			},
 			completionStatus:   utils.WatchedContainerCompletionStatusFull,
 			expectedIsComplete: false,
@@ -54,7 +54,7 @@ func TestIsComplete(t *testing.T) {
 		{
 			name: "not complete when status is missing",
 			annotations: map[string]string{
-				helpers.CompletionMetadataKey: helpers.Complete,
+				helpers.CompletionMetadataKey: helpers.Full,
 			},
 			completionStatus:   utils.WatchedContainerCompletionStatusFull,
 			expectedIsComplete: false,
@@ -102,7 +102,7 @@ func TestIsSeenFromStart(t *testing.T) {
 		{
 			name: "seen from start when completion=Complete and container status=Partial",
 			annotations: map[string]string{
-				helpers.CompletionMetadataKey: helpers.Complete,
+				helpers.CompletionMetadataKey: helpers.Full,
 			},
 			watchedContainer:        &utils.WatchedContainerData{},
 			expectedIsSeenFromStart: true,

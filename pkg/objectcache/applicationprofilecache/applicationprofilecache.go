@@ -188,12 +188,12 @@ func (apc *ApplicationProfileCacheImpl) updateAllProfiles(ctx context.Context) {
 			// Update the profile in the cache
 			if existingProfile, exists := apc.workloadIDToProfile.Load(workloadID); exists {
 				// If the profile already exists and it's complete/completed, continue to the next one
-				if existingProfile.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Complete {
+				if existingProfile.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Full {
 					continue
 				}
 
 				// If the new profile is not complete and we already have a completed/partial one, skip it
-				if profile.Annotations[helpersv1.CompletionMetadataKey] != helpersv1.Complete {
+				if profile.Annotations[helpersv1.CompletionMetadataKey] != helpersv1.Full {
 					continue
 				}
 			}

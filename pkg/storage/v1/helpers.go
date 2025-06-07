@@ -13,5 +13,5 @@ func IsComplete(annotations map[string]string, newCompletionStatus utils.Watched
 }
 
 func IsSeenFromStart(annotations map[string]string, watchedContainer *utils.WatchedContainerData) bool {
-	return annotations[helpers.CompletionMetadataKey] == helpers.Complete && watchedContainer.GetCompletionStatus() == helpers.Partial
+	return annotations[helpers.CompletionMetadataKey] == helpers.Full && watchedContainer.GetCompletionStatus() == helpers.Partial
 }

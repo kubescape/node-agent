@@ -58,7 +58,7 @@ type WatchedContainerStatus string
 
 const (
 	WatchedContainerStatusInitializing WatchedContainerStatus = helpersv1.Initializing
-	WatchedContainerStatusReady        WatchedContainerStatus = helpersv1.Ready
+	WatchedContainerStatusReady        WatchedContainerStatus = helpersv1.Learning
 	WatchedContainerStatusCompleted    WatchedContainerStatus = helpersv1.Completed
 
 	WatchedContainerStatusMissingRuntime WatchedContainerStatus = helpersv1.MissingRuntime
@@ -69,7 +69,7 @@ type WatchedContainerCompletionStatus string
 
 const (
 	WatchedContainerCompletionStatusPartial WatchedContainerCompletionStatus = helpersv1.Partial
-	WatchedContainerCompletionStatusFull    WatchedContainerCompletionStatus = helpersv1.Complete
+	WatchedContainerCompletionStatusFull    WatchedContainerCompletionStatus = helpersv1.Full
 )
 
 func (c ContainerType) String() string {
@@ -100,6 +100,9 @@ type WatchedContainerData struct {
 	ParentWorkloadSelector                     *metav1.LabelSelector
 	SeccompProfilePath                         *string
 	PreRunningContainer                        bool
+	SeriesID                                   string
+	PreviousReportTimestamp                    time.Time
+	CurrentReportTimestamp                     time.Time
 }
 
 type ContainerInfo struct {
