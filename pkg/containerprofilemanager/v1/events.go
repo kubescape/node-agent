@@ -43,9 +43,12 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 	},
 	)
 
-	if err != nil && errors.Is(err, ErrContainerNotFound) {
-		logger.L().Error("ContainerProfileManager - failed to report capability", helpers.String("container ID", containerID), helpers.Error(err))
-		cpm.containerLocks.ReleaseLock(containerID)
+	if err != nil {
+		if !errors.Is(err, ErrContainerNotFound) {
+			logger.L().Error("ContainerProfileManager - failed to report capability event", helpers.String("container ID", containerID), helpers.Error(err))
+		} else {
+			cpm.containerLocks.ReleaseLock(containerID)
+		}
 	}
 }
 
@@ -75,9 +78,12 @@ func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event eve
 	},
 	)
 
-	if err != nil && errors.Is(err, ErrContainerNotFound) {
-		logger.L().Error("ContainerProfileManager - failed to report file exec", helpers.String("container ID", containerID), helpers.Error(err))
-		cpm.containerLocks.ReleaseLock(containerID)
+	if err != nil {
+		if !errors.Is(err, ErrContainerNotFound) {
+			logger.L().Error("ContainerProfileManager - failed to report file exec event", helpers.String("container ID", containerID), helpers.Error(err))
+		} else {
+			cpm.containerLocks.ReleaseLock(containerID)
+		}
 	}
 }
 
@@ -118,9 +124,12 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event eve
 		return ErrContainerNotFound
 	})
 
-	if err != nil && errors.Is(err, ErrContainerNotFound) {
-		logger.L().Error("ContainerProfileManager - failed to report file open", helpers.String("container ID", containerID), helpers.Error(err))
-		cpm.containerLocks.ReleaseLock(containerID)
+	if err != nil {
+		if !errors.Is(err, ErrContainerNotFound) {
+			logger.L().Error("ContainerProfileManager - failed to report file open event", helpers.String("container ID", containerID), helpers.Error(err))
+		} else {
+			cpm.containerLocks.ReleaseLock(containerID)
+		}
 	}
 }
 
@@ -136,9 +145,12 @@ func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event
 		return ErrContainerNotFound
 	})
 
-	if err != nil && errors.Is(err, ErrContainerNotFound) {
-		logger.L().Error("ContainerProfileManager - failed to report symlink event", helpers.String("container ID", containerID), helpers.Error(err))
-		cpm.containerLocks.ReleaseLock(containerID)
+	if err != nil {
+		if !errors.Is(err, ErrContainerNotFound) {
+			logger.L().Error("ContainerProfileManager - failed to report symlink event", helpers.String("container ID", containerID), helpers.Error(err))
+		} else {
+			cpm.containerLocks.ReleaseLock(containerID)
+		}
 	}
 }
 
@@ -154,9 +166,12 @@ func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, even
 		return ErrContainerNotFound
 	})
 
-	if err != nil && errors.Is(err, ErrContainerNotFound) {
-		logger.L().Error("ContainerProfileManager - failed to report hardlink event", helpers.String("container ID", containerID), helpers.Error(err))
-		cpm.containerLocks.ReleaseLock(containerID)
+	if err != nil {
+		if !errors.Is(err, ErrContainerNotFound) {
+			logger.L().Error("ContainerProfileManager - failed to report hardlink event", helpers.String("container ID", containerID), helpers.Error(err))
+		} else {
+			cpm.containerLocks.ReleaseLock(containerID)
+		}
 	}
 }
 
@@ -198,9 +213,12 @@ func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event *t
 		return ErrContainerNotFound
 	})
 
-	if err != nil && errors.Is(err, ErrContainerNotFound) {
-		logger.L().Error("ContainerProfileManager - failed to report HTTP event", helpers.String("container ID", containerID), helpers.Error(err))
-		cpm.containerLocks.ReleaseLock(containerID)
+	if err != nil {
+		if !errors.Is(err, ErrContainerNotFound) {
+			logger.L().Error("ContainerProfileManager - failed to report http event", helpers.String("container ID", containerID), helpers.Error(err))
+		} else {
+			cpm.containerLocks.ReleaseLock(containerID)
+		}
 	}
 }
 
@@ -242,9 +260,12 @@ func (cpm *ContainerProfileManager) ReportRulePolicy(containerID, ruleId, allowe
 		return ErrContainerNotFound
 	})
 
-	if err != nil && errors.Is(err, ErrContainerNotFound) {
-		logger.L().Error("ContainerProfileManager - failed to report rule policy", helpers.String("container ID", containerID), helpers.Error(err))
-		cpm.containerLocks.ReleaseLock(containerID)
+	if err != nil {
+		if !errors.Is(err, ErrContainerNotFound) {
+			logger.L().Error("ContainerProfileManager - failed to report rule policy", helpers.String("container ID", containerID), helpers.Error(err))
+		} else {
+			cpm.containerLocks.ReleaseLock(containerID)
+		}
 	}
 }
 
@@ -270,9 +291,12 @@ func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string
 		return ErrContainerNotFound
 	})
 
-	if err != nil && errors.Is(err, ErrContainerNotFound) {
-		logger.L().Error("ContainerProfileManager - failed to report identified call stack", helpers.String("container ID", containerID), helpers.Error(err))
-		cpm.containerLocks.ReleaseLock(containerID)
+	if err != nil {
+		if !errors.Is(err, ErrContainerNotFound) {
+			logger.L().Error("ContainerProfileManager - failed to report callstack", helpers.String("container ID", containerID), helpers.Error(err))
+		} else {
+			cpm.containerLocks.ReleaseLock(containerID)
+		}
 	}
 }
 
@@ -311,9 +335,12 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 		return ErrContainerNotFound
 	})
 
-	if err != nil && errors.Is(err, ErrContainerNotFound) {
-		logger.L().Error("ContainerProfileManager - failed to report network event", helpers.String("container ID", containerID), helpers.Error(err))
-		cpm.containerLocks.ReleaseLock(containerID)
+	if err != nil {
+		if !errors.Is(err, ErrContainerNotFound) {
+			logger.L().Error("ContainerProfileManager - failed to report network event", helpers.String("container ID", containerID), helpers.Error(err))
+		} else {
+			cpm.containerLocks.ReleaseLock(containerID)
+		}
 	}
 }
 
@@ -368,13 +395,12 @@ func (cpm *ContainerProfileManager) PeekSyscalls(containerID string, nsMountId u
 		return ErrContainerNotFound
 	},
 	)
-	if err != nil && errors.Is(err, ErrContainerNotFound) {
-		logger.L().Error("ContainerProfileManager - failed to peek syscalls", helpers.String("container ID", containerID), helpers.Error(err))
-		cpm.containerLocks.ReleaseLock(containerID)
-		return nil, err
-	} else if err != nil {
-		logger.L().Error("ContainerProfileManager - failed to peek syscalls", helpers.String("container ID", containerID), helpers.Error(err))
-		return nil, err // Return the error if it's not a container not found error, as it might be a real issue with the syscall peeking.
+	if err != nil {
+		if !errors.Is(err, ErrContainerNotFound) {
+			logger.L().Error("ContainerProfileManager - failed to report capability", helpers.String("container ID", containerID), helpers.Error(err))
+		} else {
+			cpm.containerLocks.ReleaseLock(containerID)
+		}
 	}
 
 	return syscalls, nil
