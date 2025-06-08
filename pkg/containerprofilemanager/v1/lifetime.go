@@ -10,6 +10,7 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -25,7 +26,7 @@ func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.
 		if cpm.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
 			return
 		}
-		go cpm.deleteContainer(notif.Container.Runtime.ContainerID)
+		go cpm.deleteContainer(notif.Container)
 	}
 }
 
@@ -89,7 +90,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			return
 		}
 		time.Sleep(100 * time.Millisecond) // Give some time for the monitoring goroutine to process the signal (TODO: find a better way to handle this).
-		cpm.deleteContainer(containerID)
+		cpm.deleteContainer(container)     // Delete the container from the container profile manager
 		// Notify all registered channels about the end of life (in cases where runtime detection is not used we can stop sniffing).
 		// TODO: Check this notification logic, put debug logs to see if it works as expected.
 		for _, notifChan := range cpm.maxSniffTimeNotificationChan {
@@ -135,7 +136,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		})
 
 		// Start monitoring the container (separate goroutine because we don't want to block the callback)
-		go cpm.startContainerMonitoring(container, sharedData)
+		go cpm.startContainerMonitoring(container, sharedData) // TODO: verify that because it's ptr the values are updated in the map
 
 		logger.L().Debug("container added to container profile manager",
 			helpers.String("containerID", containerID),
@@ -198,15 +199,20 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 }
 
 // deleteContainer deletes a container from the container profile manager
-func (cpm *ContainerProfileManager) deleteContainer(containerID string) {
+func (cpm *ContainerProfileManager) deleteContainer(container *containercollection.Container) {
 	var containerData *containerData
 	var ok bool
 	// Check if the container is being monitored
-	if containerData, ok = cpm.containerIDToInfo.Load(containerID); !ok {
+	if containerData, ok = cpm.containerIDToInfo.Load(container.Runtime.ContainerID); !ok {
 		logger.L().Debug("container not found in container profile manager, skipping delete",
-			helpers.String("containerID", containerID))
+			helpers.String("containerID", container.Runtime.ContainerID))
 		return
 	}
+	// If exit code is 0 we set the status to completed
+	if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName, container.Runtime.ContainerID) == 0 {
+		containerData.watchedContainerData.SetStatus(utils.WatchedContainerStatusCompleted)
+	}
+
 	// Send container termination signal to the sync channel
 	containerData.watchedContainerData.SyncChannel <- utils.ContainerHasTerminatedError
 
@@ -214,14 +220,14 @@ func (cpm *ContainerProfileManager) deleteContainer(containerID string) {
 	// This is a workaround to ensure that the monitoring goroutine has enough time to process the signal
 	time.Sleep(100 * time.Millisecond)
 
-	cpm.containerLocks.WithLock(containerID, func() { // Clean up container info
-		cpm.containerIDToInfo.Delete(containerID)
+	cpm.containerLocks.WithLock(container.Runtime.ContainerID, func() { // Clean up container info
+		cpm.containerIDToInfo.Delete(container.Runtime.ContainerID)
 		logger.L().Debug("container deleted from container profile manager",
-			helpers.String("containerID", containerID))
+			helpers.String("containerID", container.Runtime.ContainerID))
 	})
 
 	// Clean up the lock when done - call this outside the WithLock closure
-	cpm.containerLocks.ReleaseLock(containerID)
+	cpm.containerLocks.ReleaseLock(container.Runtime.ContainerID)
 }
 
 // waitForSharedContainerData waits for shared container data to be available

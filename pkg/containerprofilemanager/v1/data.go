@@ -33,17 +33,6 @@ type containerData struct {
 	// TODO: cache events we reported already, so we don't report them again, currently the cache is only done between updates but we might want to keep the events for a longer period of time.
 }
 
-func (cd *containerData) isEmpty() bool {
-	return cd.capabilites == nil &&
-		// cd.syscalls == nil && // This is intentionally not set to nil, as we want to keep the syscalls reported for the container because of the peek function.
-		cd.execs == nil &&
-		cd.opens == nil &&
-		cd.endpoints == nil &&
-		cd.rulePolicies == nil &&
-		cd.callStacks == nil &&
-		cd.networks == nil
-}
-
 func (cd *containerData) emptyEvents() {
 	cd.capabilites = nil
 	// cd.syscalls = nil // This is intentionally not set to nil, as we want to keep the syscalls reported for the container because of the peek function.
@@ -96,7 +85,6 @@ func (cd *containerData) getOpens() []v1beta1.OpenCalls {
 
 	cd.opens.Range(func(path string, flags mapset.Set[string]) bool {
 		flagsSlice := flags.ToSlice()
-		sort.Strings(flagsSlice)
 		opens = append(opens, v1beta1.OpenCalls{
 			Path:  path,
 			Flags: flagsSlice,
@@ -159,7 +147,6 @@ func (cd *containerData) getIngressNetworkNeighbors(namespace string, k8sClient 
 		if event.PktType == HostPktType {
 			neighbor := cd.createNetworkNeighbor(event, namespace, k8sClient, dnsResolverClient)
 			if neighbor == nil {
-				logger.L().Debug("NetworkManager - skipping network neighbor creation for event", helpers.String("event", event.String()))
 				continue
 			}
 			ingress = append(ingress, *neighbor)
@@ -179,7 +166,6 @@ func (cd *containerData) getEgressNetworkNeighbors(namespace string, k8sClient k
 		if event.PktType != HostPktType {
 			neighbor := cd.createNetworkNeighbor(event, namespace, k8sClient, dnsResolverClient)
 			if neighbor == nil {
-				logger.L().Debug("NetworkManager - skipping network neighbor creation for event", helpers.String("event", event.String()))
 				continue
 			}
 			egress = append(egress, *neighbor)
@@ -215,7 +201,7 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 		// for service, we need to retrieve it and use its selector
 		svc, err := k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name) // TODO: replace this with ig k8sInventory.
 		if err != nil {
-			logger.L().Warning("NetworkManager - failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
+			logger.L().Warning("ContainerProfileManager - failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
 			return nil
 		}
 

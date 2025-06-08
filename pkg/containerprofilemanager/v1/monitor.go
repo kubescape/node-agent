@@ -9,7 +9,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,33 +25,61 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 			}
 
 			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
-			cpm.saveProfile(watchedContainer, container)
+			if err := cpm.saveProfile(watchedContainer, container); err != nil {
+				logger.L().Error("failed to save container profile", helpers.Error(err),
+					helpers.String("containerID", watchedContainer.ContainerID),
+					helpers.String("containerName", container.Runtime.ContainerName),
+					helpers.String("workloadID", watchedContainer.Wlid),
+					helpers.String("status", string(watchedContainer.GetStatus())),
+					helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())),
+				)
+
+				if errors.Is(err, utils.TooLargeObjectError) {
+					watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
+					cpm.containerLocks.WithLock(container.Runtime.ContainerID, func() { // TODO: verify what is the effect of deleting the container here.
+						cpm.containerIDToInfo.Delete(container.Runtime.ContainerID)
+					})
+					return utils.TooLargeObjectError
+				} else if errors.Is(err, utils.ObjectCompleted) {
+					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+					cpm.containerLocks.WithLock(container.Runtime.ContainerID, func() { // TODO: verify what is the effect of deleting the container here.
+						cpm.containerIDToInfo.Delete(container.Runtime.ContainerID)
+					})
+					return utils.ObjectCompleted
+				} else {
+					// Because we failed to save the profile, we change the completion status to partial
+					watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial) // TODO: yes?
+				}
+
+				// If we failed to save the profile, we will continue monitoring the container
+				// return err
+			}
 
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
-				// If exit code is 0 we set the status to completed
-				if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName, container.Runtime.ContainerID) == 0 {
-					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+				if err := cpm.saveProfile(watchedContainer, container); err != nil {
+					logger.L().Error("failed to save container profile", helpers.Error(err),
+						helpers.String("containerID", watchedContainer.ContainerID),
+						helpers.String("containerName", container.Runtime.ContainerName),
+						helpers.String("workloadID", watchedContainer.Wlid),
+						helpers.String("status", string(watchedContainer.GetStatus())),
+						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())),
+					)
 				}
-				cpm.saveProfile(watchedContainer, container) // TODO: Handle errors here.
-				return err
+				return utils.ContainerHasTerminatedError
 			case errors.Is(err, utils.ContainerReachedMaxTime):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
-				cpm.saveProfile(watchedContainer, container) // TODO: Handle errors here.
-				return err
-			case errors.Is(err, utils.ObjectCompleted): // TODO: figure out if we need this.
-				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
-				return err
-			case errors.Is(err, utils.TooLargeObjectError): // TODO: We currently don't use this error as it was originated from the patch operation.
-				logger.L().Debug("container profile manager: container is too large, stopping monitoring",
-					helpers.String("containerID", container.Runtime.ContainerID),
-					helpers.String("containerName", container.Runtime.ContainerName),
-					helpers.String("podName", container.K8s.PodName),
-					helpers.String("namespace", container.K8s.Namespace),
-				)
-				watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
-				return err
+				if err := cpm.saveProfile(watchedContainer, container); err != nil {
+					logger.L().Error("failed to save container profile", helpers.Error(err),
+						helpers.String("containerID", watchedContainer.ContainerID),
+						helpers.String("containerName", container.Runtime.ContainerName),
+						helpers.String("workloadID", watchedContainer.Wlid),
+						helpers.String("status", string(watchedContainer.GetStatus())),
+						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())),
+					)
+				}
+				return utils.ContainerReachedMaxTime
 			}
 		}
 	}
@@ -60,12 +87,22 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 
 func (cpm *ContainerProfileManager) saveProfile(watchedContainer *utils.WatchedContainerData, container *containercollection.Container) error {
 	// Lock the container profile manager to prevent deleting the container profile while saving it
-	return cpm.containerLocks.WithLockAndError(
+	if err := cpm.containerLocks.WithLockAndError(
 		watchedContainer.ContainerID,
 		func() error {
 			return cpm.saveContainerProfile(watchedContainer, container)
 		},
-	)
+	); err != nil {
+		if errors.Is(err, ErrContainerNotFound) {
+			// Release the lock if the container is not found, as it might have been deleted
+			cpm.containerLocks.ReleaseLock(watchedContainer.ContainerID)
+		}
+
+		return err
+	}
+
+	return nil
+
 }
 
 // saveContainerProfile saves the container profile to the storage
@@ -94,10 +131,10 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 	var containerData *containerData
 	var ok bool
 	if containerData, ok = cpm.containerIDToInfo.Load(watchedContainer.ContainerID); !ok {
-		return errors.New("container data not found for container ID: " + watchedContainer.ContainerID)
+		return ErrContainerNotFound
 	}
 	if containerData == nil {
-		return errors.New("container data is nil for container ID: " + watchedContainer.ContainerID)
+		return ErrContainerNotFound
 	}
 
 	syscalls, err := cpm.syscallPeekFunc(watchedContainer.NsMntId)
@@ -108,6 +145,8 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 		)
 	}
 
+	// Update the timestamp of the last report (We do this before saving the profile to ensure the timestamp is always up-to-date)
+	watchedContainer.PreviousReportTimestamp = watchedContainer.CurrentReportTimestamp
 	watchedContainer.CurrentReportTimestamp = time.Now()
 
 	containerProfile := &v1beta1.ContainerProfile{
@@ -142,17 +181,9 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 		},
 	}
 
-	if err := cpm.storageClient.CreateContainerProfile(containerProfile, container.K8s.Namespace); err != nil {
-		logger.L().Error("failed to create container profile", helpers.Error(err),
-			helpers.String("containerID", watchedContainer.ContainerID),
-			helpers.String("containerName", container.Runtime.ContainerName),
-			helpers.String("podName", container.K8s.PodName),
-			helpers.String("namespace", container.K8s.Namespace),
-			helpers.String("slug", slug),
-			helpers.String("workloadID", watchedContainer.Wlid),
-			helpers.String("status", string(watchedContainer.GetStatus())),
-			helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())),
-		)
+	if err := cpm.storageClient.CreateContainerProfile(containerProfile, container.K8s.Namespace); err != nil { // TODO: can this take time and block the goroutine? cuz we are under a lock here.
+		// Empty the container data to prevent reporting the same data again
+		containerData.emptyEvents()
 		return err
 	}
 
@@ -161,9 +192,6 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 		helpers.String("containerName", container.Runtime.ContainerName),
 		helpers.String("podName", container.K8s.PodName),
 	)
-
-	// Update the timestamp of the last report
-	watchedContainer.PreviousReportTimestamp = watchedContainer.CurrentReportTimestamp // TODO: this should be done before sending to storage? we care if we fail?
 
 	// Empty the container data to prevent reporting the same data again
 	containerData.emptyEvents()
