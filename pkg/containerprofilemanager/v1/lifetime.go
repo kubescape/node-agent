@@ -91,19 +91,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		}
 		time.Sleep(100 * time.Millisecond) // Give some time for the monitoring goroutine to process the signal (TODO: find a better way to handle this).
 		cpm.deleteContainer(container)     // Delete the container from the container profile manager
-		// Notify all registered channels about the end of life (in cases where runtime detection is not used we can stop sniffing).
-		// TODO: Check this notification logic, put debug logs to see if it works as expected.
-		for _, notifChan := range cpm.maxSniffTimeNotificationChan {
-			select {
-			case notifChan <- container:
-			default:
-				logger.L().Warning("notification channel for container end of life is full, skipping notification",
-					helpers.String("containerID", containerID),
-					helpers.String("containerName", container.Runtime.ContainerName),
-					helpers.String("podName", container.K8s.PodName),
-					helpers.String("namespace", container.K8s.Namespace))
-			}
-		}
+		cpm.notifyContainerEndOfLife(container)
 	})
 
 	return cpm.containerLocks.WithLockAndError(containerID, func() error {
@@ -136,7 +124,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		})
 
 		// Start monitoring the container (separate goroutine because we don't want to block the callback)
-		go cpm.startContainerMonitoring(container, sharedData) // TODO: verify that because it's ptr the values are updated in the map
+		go cpm.startContainerMonitoring(container, sharedData)
 
 		logger.L().Debug("container added to container profile manager",
 			helpers.String("containerID", containerID),
@@ -202,25 +190,31 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 func (cpm *ContainerProfileManager) deleteContainer(container *containercollection.Container) {
 	var containerData *containerData
 	var ok bool
-	// Check if the container is being monitored
-	if containerData, ok = cpm.containerIDToInfo.Load(container.Runtime.ContainerID); !ok {
-		logger.L().Debug("container not found in container profile manager, skipping delete",
-			helpers.String("containerID", container.Runtime.ContainerID))
-		return
-	}
-	// If exit code is 0 we set the status to completed
-	if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName, container.Runtime.ContainerID) == 0 {
-		containerData.watchedContainerData.SetStatus(utils.WatchedContainerStatusCompleted)
-	}
 
-	// Send container termination signal to the sync channel
-	containerData.watchedContainerData.SyncChannel <- utils.ContainerHasTerminatedError
+	cpm.containerLocks.WithLock(container.Runtime.ContainerID, func() {
+		// Check if the container is being monitored
+		if containerData, ok = cpm.containerIDToInfo.Load(container.Runtime.ContainerID); !ok {
+			logger.L().Debug("container not found in container profile manager, skipping delete",
+				helpers.String("containerID", container.Runtime.ContainerID))
+			return
+		}
+
+		if containerData.watchedContainerData.GetStatus() != utils.WatchedContainerStatusCompleted {
+			// If exit code is 0 we set the status to completed
+			if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace, container.K8s.PodName, container.K8s.ContainerName, container.Runtime.ContainerID) == 0 {
+				containerData.watchedContainerData.SetStatus(utils.WatchedContainerStatusCompleted)
+			}
+
+			// Send container termination signal to the sync channel
+			containerData.watchedContainerData.SyncChannel <- utils.ContainerHasTerminatedError
+		}
+	})
 
 	// Wait a bit to allow the monitoring goroutine to finish (it will take a lock on the container ID)
 	// This is a workaround to ensure that the monitoring goroutine has enough time to process the signal
 	time.Sleep(100 * time.Millisecond)
 
-	cpm.containerLocks.WithLock(container.Runtime.ContainerID, func() { // Clean up container info
+	cpm.containerLocks.WithLock(container.Runtime.ContainerID, func() {
 		cpm.containerIDToInfo.Delete(container.Runtime.ContainerID)
 		logger.L().Debug("container deleted from container profile manager",
 			helpers.String("containerID", container.Runtime.ContainerID))
@@ -249,4 +243,19 @@ func (cpm *ContainerProfileManager) RegisterForContainerEndOfLife(notificationCh
 	cpm.maxSniffTimeNotificationChan = append(cpm.maxSniffTimeNotificationChan, notificationChannel)
 	logger.L().Debug("registered for container end of life notifications",
 		helpers.Int("currentChannelCount", len(cpm.maxSniffTimeNotificationChan)))
+}
+
+// Notify all registered channels about the end of life (in cases where runtime detection is not used we can stop sniffing).
+func (cpm *ContainerProfileManager) notifyContainerEndOfLife(container *containercollection.Container) {
+	for _, notifChan := range cpm.maxSniffTimeNotificationChan {
+		select {
+		case notifChan <- container:
+		default:
+			logger.L().Warning("notification channel for container end of life is full, skipping notification",
+				helpers.String("containerID", container.Runtime.ContainerID),
+				helpers.String("containerName", container.Runtime.ContainerName),
+				helpers.String("podName", container.K8s.PodName),
+				helpers.String("namespace", container.K8s.Namespace))
+		}
+	}
 }

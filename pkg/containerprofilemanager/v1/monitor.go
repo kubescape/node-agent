@@ -39,12 +39,16 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 					cpm.containerLocks.WithLock(container.Runtime.ContainerID, func() { // TODO: verify what is the effect of deleting the container here.
 						cpm.containerIDToInfo.Delete(container.Runtime.ContainerID)
 					})
+					cpm.containerLocks.ReleaseLock(watchedContainer.ContainerID)
+					cpm.notifyContainerEndOfLife(container)
 					return utils.TooLargeObjectError
 				} else if errors.Is(err, utils.ObjectCompleted) {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 					cpm.containerLocks.WithLock(container.Runtime.ContainerID, func() { // TODO: verify what is the effect of deleting the container here.
 						cpm.containerIDToInfo.Delete(container.Runtime.ContainerID)
 					})
+					cpm.containerLocks.ReleaseLock(watchedContainer.ContainerID)
+					cpm.notifyContainerEndOfLife(container)
 					return utils.ObjectCompleted
 				} else {
 					// Because we failed to save the profile, we change the completion status to partial

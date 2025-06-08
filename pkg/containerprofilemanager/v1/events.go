@@ -109,7 +109,7 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event eve
 			}
 
 			// Check if we already have this open
-			if opens, ok := containerData.opens.Load(path); ok && opens.Contains(event.Flags...) { // TODO: we might want to remove it.
+			if opens, ok := containerData.opens.Load(path); ok && opens.Contains(event.Flags...) {
 				return nil
 			}
 			// Add to open map

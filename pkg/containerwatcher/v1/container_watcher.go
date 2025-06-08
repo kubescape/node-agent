@@ -637,6 +637,8 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			}
 		}()
 
+		ch.containerProfileManager.RegisterForContainerEndOfLife(ch.containerEolNotificationChannel)
+
 		logger.L().TimedWrapper(utils.FuncName(ch.startContainerCollection), 5*time.Second, func() {
 			err = ch.startContainerCollection(ctx)
 		})
