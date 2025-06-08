@@ -55,8 +55,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 					watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial) // TODO: yes?
 				}
 
-				// If we failed to save the profile, we will continue monitoring the container
-				// return err
+				// return err // This is intentionally commented out to continue monitoring the container even if saving the profile fails
 			}
 
 		case err := <-watchedContainer.SyncChannel:

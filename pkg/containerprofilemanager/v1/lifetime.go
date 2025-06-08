@@ -94,7 +94,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		cpm.notifyContainerEndOfLife(container)
 	})
 
-	return cpm.containerLocks.WithLockAndError(containerID, func() error {
+	err := cpm.containerLocks.WithLockAndError(containerID, func() error {
 		// Get shared container data
 		sharedData, err := cpm.waitForSharedContainerData(containerID, ctx)
 		if err != nil {
@@ -135,6 +135,12 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 
 		return nil
 	})
+
+	if err != nil {
+		cpm.containerLocks.ReleaseLock(containerID) // Release the lock if we failed to add the container
+	}
+
+	return err
 }
 
 // startContainerMonitoring starts monitoring a container
