@@ -72,7 +72,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		}
 	}
 
-	time.AfterFunc(sniffingTime, func() { // TODO: use the timer returned to cancel the timer if the container is deleted before it expires
+	timer := time.AfterFunc(sniffingTime, func() { // TODO: use the timer returned to cancel the timer if the container is deleted before it expires
 		logger.L().Debug("reached max sniffing time for container",
 			helpers.String("containerID", containerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
@@ -137,6 +137,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 	})
 
 	if err != nil {
+		timer.Stop()                                // Stop the timer if we failed to add the container
 		cpm.containerLocks.ReleaseLock(containerID) // Release the lock if we failed to add the container
 	}
 
