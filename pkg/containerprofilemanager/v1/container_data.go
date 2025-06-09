@@ -8,7 +8,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
-	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -182,7 +181,7 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 			MatchLabels: filterLabels(networkEvent.GetDestinationPodLabels()),
 		}
 
-		if namespaceLabels := utils.GetNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
+		if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
 			neighborEntry.NamespaceSelector = &metav1.LabelSelector{
 				MatchLabels: namespaceLabels,
 			}
@@ -214,7 +213,7 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 			neighborEntry.PodSelector = &metav1.LabelSelector{
 				MatchLabels: selector,
 			}
-			if namespaceLabels := utils.GetNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
+			if namespaceLabels := getNamespaceMatchLabels(networkEvent.Destination.Namespace, namespace); namespaceLabels != nil {
 				neighborEntry.NamespaceSelector = &metav1.LabelSelector{
 					MatchLabels: namespaceLabels,
 				}
@@ -242,7 +241,7 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 		neighborEntry.Type = ExternalTrafficType
 	}
 
-	identifier, err := utils.GenerateNeighborsIdentifier(neighborEntry)
+	identifier, err := generateNeighborsIdentifier(neighborEntry)
 	if err != nil {
 		identifier = createUUID()
 	}

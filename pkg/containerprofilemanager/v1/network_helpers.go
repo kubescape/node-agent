@@ -1,9 +1,12 @@
 package containerprofilemanager
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 type EndpointKind string
@@ -96,10 +99,10 @@ func generatePodLabels(podLabels map[string]string) string {
 }
 
 func generatePortIdentifierFromEvent(networkEvent NetworkEvent) string {
-	return GeneratePortIdentifier(networkEvent.Protocol, int32(networkEvent.Port))
+	return generatePortIdentifier(networkEvent.Protocol, int32(networkEvent.Port))
 }
 
-func GeneratePortIdentifier(protocol string, port int32) string {
+func generatePortIdentifier(protocol string, port int32) string {
 	return fmt.Sprintf("%s-%d", protocol, port)
 }
 
@@ -115,4 +118,25 @@ func filterLabels(labels map[string]string) map[string]string {
 	}
 
 	return filteredLabels
+}
+
+func generateNeighborsIdentifier(neighborEntry v1beta1.NetworkNeighbor) (string, error) {
+	// identifier is hash of everything in egress except ports
+	identifier := fmt.Sprintf("%s-%s-%s-%s-%s", neighborEntry.Type, neighborEntry.IPAddress, neighborEntry.DNS, neighborEntry.NamespaceSelector, neighborEntry.PodSelector)
+	hash := sha256.New()
+	_, err := hash.Write([]byte(identifier))
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+func getNamespaceMatchLabels(destinationNamespace, sourceNamespace string) map[string]string {
+	if destinationNamespace != sourceNamespace {
+		// from version 1.22, all namespace have the kubernetes.io/metadata.name label
+		return map[string]string{
+			"kubernetes.io/metadata.name": destinationNamespace,
+		}
+	}
+	return nil
 }

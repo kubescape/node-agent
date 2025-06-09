@@ -56,7 +56,7 @@ type ContainerProfileManager struct {
 	syscallPeekFunc   func(nsMountId uint64) ([]string, error)
 	seccompManager    seccompmanager.SeccompManagerClient
 	enricher          containerprofilemanager.Enricher
-	ruleBindingCache  rulebindingmanager.RuleBindingCache // Currently  we are not using this, need to check if we need it.
+	ruleBindingCache  rulebindingmanager.RuleBindingCache // Currently we are not using this, need to check if we need it.
 
 	// Container storage with embedded locking
 	containers   map[string]*ContainerEntry

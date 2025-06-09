@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -104,7 +103,7 @@ func TestGenerateNeighborsIdentifier(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("Input: %s", tc.name), func(t *testing.T) {
-			result, err := utils.GenerateNeighborsIdentifier(tc.input)
+			result, err := generateNeighborsIdentifier(tc.input)
 			assert.NoError(t, err)
 			assert.Equal(t, tc.expected, result)
 		})
@@ -134,7 +133,7 @@ func TestGetNamespaceMatchLabels(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("Input: %s", tc.name), func(t *testing.T) {
-			result := utils.GetNamespaceMatchLabels(tc.destinationNamespace, tc.sourceNamespace)
+			result := getNamespaceMatchLabels(tc.destinationNamespace, tc.sourceNamespace)
 			assert.Equal(t, tc.expected, result)
 		})
 	}

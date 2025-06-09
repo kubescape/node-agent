@@ -132,7 +132,7 @@ func TestGeneratePortIdentifier(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := GeneratePortIdentifier(tt.protocol, tt.port)
+			result := generatePortIdentifier(tt.protocol, tt.port)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

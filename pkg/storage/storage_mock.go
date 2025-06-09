@@ -6,19 +6,16 @@ import (
 )
 
 const (
-	NginxKey         = "nginx-c9b3ae"
+	NginxKey         = "nginx-c9b3ae" // TODO: remove this constant as it is unused @matthias?
 	NginxImageID     = "nginx@sha256:6a59f1cbb8d28ac484176d52c473494859a512ddba3ea62a547258cf16c9b3ae"
 	FluentBitImageID = "fluentbit@sha256:236f7d961b0ba8b91796955f155819d64801e0d00fa666147502ab9b5b80f623"
 )
 
 type StorageHttpClientMock struct {
-	ApplicationProfiles  []*spdxv1beta1.ApplicationProfile
-	SyftSBOMs            []*spdxv1beta1.SBOMSyft
-	NetworkNeighborhoods []*v1beta1.NetworkNeighborhood
-	ContainerProfiles    []*v1beta1.ContainerProfile
-	ImageCounters        map[string]int
-	mockSBOM             *v1beta1.SBOMSyft
-	failedOnce           bool
+	SyftSBOMs         []*spdxv1beta1.SBOMSyft
+	ContainerProfiles []*v1beta1.ContainerProfile
+	ImageCounters     map[string]int
+	mockSBOM          *v1beta1.SBOMSyft
 }
 
 var _ StorageClient = (*StorageHttpClientMock)(nil)

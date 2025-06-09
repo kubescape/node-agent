@@ -6,162 +6,11 @@ import (
 	"testing"
 
 	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/storage"
-	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
-
-func TestStorage_PatchApplicationProfile(t *testing.T) {
-	type args struct {
-		name       string
-		operations []utils.PatchOperation
-	}
-	tests := []struct {
-		name    string
-		args    args
-		wantErr bool
-		want    *v1beta1.ApplicationProfile
-	}{
-		{
-			name: "test",
-			args: args{
-				name: storage.NginxKey,
-				operations: []utils.PatchOperation{
-					{Op: "add", Path: "/spec/containers/0/capabilities/-", Value: "SYS_ADMIN"},
-					{Op: "add", Path: "/spec/containers/0/execs/-", Value: v1beta1.ExecCalls{Path: "/usr/bin/test2"}},
-					{Op: "add", Path: "/spec/containers/0/execs/-", Value: v1beta1.ExecCalls{Path: "/usr/bin/test3"}},
-					{Op: "add", Path: "/spec/containers/0/opens/-", Value: v1beta1.OpenCalls{Path: "/usr/bin/test2"}},
-					{Op: "add", Path: "/spec/containers/0/opens/-", Value: v1beta1.OpenCalls{Path: "/usr/bin/test3"}},
-					{Op: "add", Path: "/spec/containers/0/syscalls/-", Value: "open"},
-				},
-			},
-			want: &v1beta1.ApplicationProfile{
-				ObjectMeta: v1.ObjectMeta{
-					Name:      storage.NginxKey,
-					Namespace: "default",
-				},
-				Spec: v1beta1.ApplicationProfileSpec{
-					Containers: []v1beta1.ApplicationProfileContainer{{
-						Name:         "test",
-						Capabilities: []string{"NET_ADMIN", "SYS_ADMIN"},
-						Execs: []v1beta1.ExecCalls{
-							{Path: "/usr/bin/test"},
-							{Path: "/usr/bin/test1"},
-							{Path: "/usr/bin/test2"},
-							{Path: "/usr/bin/test3"},
-						},
-						Opens: []v1beta1.OpenCalls{
-							{Path: "/usr/bin/test"},
-							{Path: "/usr/bin/test1"},
-							{Path: "/usr/bin/test2"},
-							{Path: "/usr/bin/test3"},
-						},
-						Syscalls: []string{"execve", "open"},
-					}},
-				},
-			},
-		},
-		{
-			name: "test",
-			args: args{
-				name: storage.NginxKey,
-				operations: []utils.PatchOperation{
-					{Op: "add", Path: "/spec/initContainers", Value: []v1beta1.ApplicationProfileContainer{{}, {}, {Name: "toto"}}},
-				},
-			},
-			want: &v1beta1.ApplicationProfile{
-				ObjectMeta: v1.ObjectMeta{
-					Name:      storage.NginxKey,
-					Namespace: "default",
-				},
-				Spec: v1beta1.ApplicationProfileSpec{
-					Containers: []v1beta1.ApplicationProfileContainer{{
-						Name:         "test",
-						Capabilities: []string{"NET_ADMIN"},
-						Execs: []v1beta1.ExecCalls{
-							{Path: "/usr/bin/test"},
-							{Path: "/usr/bin/test1"},
-						},
-						Opens: []v1beta1.OpenCalls{
-							{Path: "/usr/bin/test"},
-							{Path: "/usr/bin/test1"},
-						},
-						Syscalls: []string{"execve"},
-					}},
-					InitContainers: []v1beta1.ApplicationProfileContainer{{}, {}, {Name: "toto"}},
-				},
-			},
-		},
-		{
-			name: "test",
-			args: args{
-				name: storage.NginxKey,
-				operations: []utils.PatchOperation{
-					{Op: "add", Path: "/spec/ephemeralContainers", Value: []v1beta1.ApplicationProfileContainer{{}, {}, {Name: "abc"}}},
-				},
-			},
-			want: &v1beta1.ApplicationProfile{
-				ObjectMeta: v1.ObjectMeta{
-					Name:      storage.NginxKey,
-					Namespace: "default",
-				},
-				Spec: v1beta1.ApplicationProfileSpec{
-					Containers: []v1beta1.ApplicationProfileContainer{{
-						Name:         "test",
-						Capabilities: []string{"NET_ADMIN"},
-						Execs: []v1beta1.ExecCalls{
-							{Path: "/usr/bin/test"},
-							{Path: "/usr/bin/test1"},
-						},
-						Opens: []v1beta1.OpenCalls{
-							{Path: "/usr/bin/test"},
-							{Path: "/usr/bin/test1"},
-						},
-						Syscalls: []string{"execve"},
-					}},
-					EphemeralContainers: []v1beta1.ApplicationProfileContainer{{}, {}, {Name: "abc"}},
-				},
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sc, _ := CreateFakeStorage("kubescape")
-			existingProfile := &v1beta1.ApplicationProfile{
-				ObjectMeta: v1.ObjectMeta{
-					Name: tt.args.name,
-				},
-				Spec: v1beta1.ApplicationProfileSpec{
-					Containers: []v1beta1.ApplicationProfileContainer{
-						{
-							Name:         "test",
-							Capabilities: []string{"NET_ADMIN"},
-							Execs: []v1beta1.ExecCalls{
-								{Path: "/usr/bin/test"},
-								{Path: "/usr/bin/test1"},
-							},
-							Opens: []v1beta1.OpenCalls{
-								{Path: "/usr/bin/test"},
-								{Path: "/usr/bin/test1"},
-							},
-							Syscalls: []string{"execve"},
-						},
-					},
-				},
-			}
-			_, _ = sc.StorageClient.ApplicationProfiles("default").Create(context.Background(), existingProfile, v1.CreateOptions{})
-			if err := sc.PatchApplicationProfile(tt.args.name, "default", tt.args.operations, &utils.WatchedContainerData{}); (err != nil) != tt.wantErr {
-				t.Errorf("PatchApplicationProfile() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			got, err := sc.StorageClient.ApplicationProfiles("default").Get(context.Background(), tt.args.name, v1.GetOptions{})
-			assert.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
 
 func TestGetMultiplier(t *testing.T) {
 	tests := []struct {
@@ -340,6 +189,119 @@ func TestStorage_modifyName(t *testing.T) {
 			}
 			m := sc.modifyName(tt.args.n)
 			assert.Equal(t, tt.want, m)
+		})
+	}
+}
+
+func TestStorage_CreateContainerProfile(t *testing.T) {
+	tests := []struct {
+		name      string
+		profile   *v1beta1.ContainerProfile
+		namespace string
+		wantErr   bool
+	}{
+		{
+			name: "create basic container profile",
+			profile: &v1beta1.ContainerProfile{
+				ObjectMeta: v1.ObjectMeta{
+					Name: "test-container-profile",
+					Annotations: map[string]string{
+						"kubescape.io/instance-id": "test-instance-123",
+						"kubescape.io/wlid":        "wlid://cluster-test/namespace-default/deployment-nginx",
+						"kubescape.io/completion":  "complete",
+						"kubescape.io/status":      "ready",
+					},
+					Labels: map[string]string{
+						"app": "nginx",
+					},
+				},
+				Spec: v1beta1.ContainerProfileSpec{
+					Architectures: []string{"amd64"},
+					ImageID:       "sha256:abc123",
+					ImageTag:      "nginx:1.21",
+					Capabilities:  []string{"NET_ADMIN", "SYS_ADMIN"},
+					Execs: []v1beta1.ExecCalls{
+						{Path: "/usr/bin/nginx"},
+						{Path: "/bin/sh"},
+					},
+					Opens: []v1beta1.OpenCalls{
+						{Path: "/etc/nginx/nginx.conf", Flags: []string{"O_RDONLY"}},
+						{Path: "/var/log/nginx/access.log", Flags: []string{"O_WRONLY", "O_CREAT"}},
+					},
+					Syscalls: []string{"open", "read", "write", "execve"},
+					Endpoints: []v1beta1.HTTPEndpoint{
+						{Endpoint: "/health", Methods: []string{"GET"}},
+						{Endpoint: "/api/v1", Methods: []string{"GET", "POST"}},
+					},
+				},
+			},
+			namespace: "default",
+			wantErr:   false,
+		},
+		{
+			name: "create container profile with network data",
+			profile: &v1beta1.ContainerProfile{
+				ObjectMeta: v1.ObjectMeta{
+					Name: "test-container-with-network",
+					Annotations: map[string]string{
+						"kubescape.io/instance-id": "test-instance-456",
+						"kubescape.io/wlid":        "wlid://cluster-test/namespace-default/deployment-web",
+					},
+				},
+				Spec: v1beta1.ContainerProfileSpec{
+					Architectures: []string{"amd64"},
+					ImageID:       "sha256:def456",
+					ImageTag:      "web:latest",
+					Egress: []v1beta1.NetworkNeighbor{
+						{
+							Type: "external",
+							DNS:  "api.example.com",
+							Ports: []v1beta1.NetworkPort{
+								{Port: func() *int32 { p := int32(443); return &p }(), Protocol: "TCP"},
+							},
+						},
+					},
+					Ingress: []v1beta1.NetworkNeighbor{
+						{
+							Type: "internal",
+							Ports: []v1beta1.NetworkPort{
+								{Port: func() *int32 { p := int32(8080); return &p }(), Protocol: "TCP"},
+							},
+						},
+					},
+				},
+			},
+			namespace: "default",
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc, _ := CreateFakeStorage("kubescape")
+
+			err := sc.CreateContainerProfile(tt.profile, tt.namespace)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CreateContainerProfile() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				// Verify the container profile was created successfully
+				got, err := sc.StorageClient.ContainerProfiles(tt.namespace).Get(context.Background(), tt.profile.Name, v1.GetOptions{})
+				assert.NoError(t, err)
+				assert.Equal(t, tt.profile.Name, got.Name)
+				assert.Equal(t, tt.namespace, got.Namespace)
+				assert.Equal(t, tt.profile.Spec.ImageID, got.Spec.ImageID)
+				assert.Equal(t, tt.profile.Spec.ImageTag, got.Spec.ImageTag)
+				assert.Equal(t, tt.profile.Spec.Capabilities, got.Spec.Capabilities)
+				assert.Equal(t, tt.profile.Spec.Execs, got.Spec.Execs)
+				assert.Equal(t, tt.profile.Spec.Opens, got.Spec.Opens)
+				assert.Equal(t, tt.profile.Spec.Syscalls, got.Spec.Syscalls)
+				assert.Equal(t, tt.profile.Spec.Endpoints, got.Spec.Endpoints)
+				assert.Equal(t, tt.profile.Spec.Egress, got.Spec.Egress)
+				assert.Equal(t, tt.profile.Spec.Ingress, got.Spec.Ingress)
+			}
 		})
 	}
 }
