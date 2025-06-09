@@ -424,8 +424,8 @@ func (nnc *NetworkNeighborhoodCacheImpl) deleteContainer(containerID string) {
 }
 
 // waitForSharedContainerData waits for shared container data to be available
-func (nnc *NetworkNeighborhoodCacheImpl) waitForSharedContainerData(containerID string, ctx context.Context) (*utils.WatchedContainerData, error) {
-	return backoff.Retry(ctx, func() (*utils.WatchedContainerData, error) {
+func (nnc *NetworkNeighborhoodCacheImpl) waitForSharedContainerData(containerID string, ctx context.Context) (*objectcache.WatchedContainerData, error) {
+	return backoff.Retry(ctx, func() (*objectcache.WatchedContainerData, error) {
 		if sharedData := nnc.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
 			return sharedData, nil
 		}

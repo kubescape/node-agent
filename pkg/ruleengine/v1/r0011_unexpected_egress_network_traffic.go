@@ -98,7 +98,7 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) EvaluateRuleWithProfile(eventTy
 
 	// Skip partially watched containers.
 	if annotations := nn.GetAnnotations(); annotations != nil {
-		if annotations["kubescape.io/completion"] == string(utils.WatchedContainerCompletionStatusPartial) {
+		if annotations["kubescape.io/completion"] == string(objectcache.WatchedContainerCompletionStatusPartial) {
 			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 		}
 	}

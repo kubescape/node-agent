@@ -503,8 +503,8 @@ func (apc *ApplicationProfileCacheImpl) deleteContainer(containerID string) {
 }
 
 // waitForSharedContainerData waits for shared container data to be available
-func (apc *ApplicationProfileCacheImpl) waitForSharedContainerData(containerID string, ctx context.Context) (*utils.WatchedContainerData, error) {
-	return backoff.Retry(ctx, func() (*utils.WatchedContainerData, error) {
+func (apc *ApplicationProfileCacheImpl) waitForSharedContainerData(containerID string, ctx context.Context) (*objectcache.WatchedContainerData, error) {
+	return backoff.Retry(ctx, func() (*objectcache.WatchedContainerData, error) {
 		if sharedData := apc.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
 			return sharedData, nil
 		}

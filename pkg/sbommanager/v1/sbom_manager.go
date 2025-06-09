@@ -382,8 +382,8 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 		helpers.String("sbomName", sbomName))
 }
 
-func (s *SbomManager) waitForSharedContainerData(containerID string) (*utils.WatchedContainerData, error) {
-	return backoff.Retry(context.Background(), func() (*utils.WatchedContainerData, error) {
+func (s *SbomManager) waitForSharedContainerData(containerID string) (*objectcache.WatchedContainerData, error) {
+	return backoff.Retry(context.Background(), func() (*objectcache.WatchedContainerData, error) {
 		if sharedData := s.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
 			return sharedData, nil
 		}

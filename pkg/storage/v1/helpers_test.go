@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
-	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -12,7 +12,7 @@ func TestIsComplete(t *testing.T) {
 	tests := []struct {
 		name               string
 		annotations        map[string]string
-		completionStatus   utils.WatchedContainerCompletionStatus
+		completionStatus   objectcache.WatchedContainerCompletionStatus
 		expectedIsComplete bool
 	}{
 		{
@@ -21,7 +21,7 @@ func TestIsComplete(t *testing.T) {
 				helpers.StatusMetadataKey:     helpers.Completed,
 				helpers.CompletionMetadataKey: helpers.Full,
 			},
-			completionStatus:   utils.WatchedContainerCompletionStatusFull,
+			completionStatus:   objectcache.WatchedContainerCompletionStatusFull,
 			expectedIsComplete: true,
 		},
 		{
@@ -30,7 +30,7 @@ func TestIsComplete(t *testing.T) {
 				helpers.StatusMetadataKey:     helpers.Completed,
 				helpers.CompletionMetadataKey: helpers.Partial,
 			},
-			completionStatus:   utils.WatchedContainerCompletionStatusPartial,
+			completionStatus:   objectcache.WatchedContainerCompletionStatusPartial,
 			expectedIsComplete: true,
 		},
 		{
@@ -39,7 +39,7 @@ func TestIsComplete(t *testing.T) {
 				helpers.StatusMetadataKey:     helpers.Completed,
 				helpers.CompletionMetadataKey: helpers.Partial,
 			},
-			completionStatus:   utils.WatchedContainerCompletionStatusFull,
+			completionStatus:   objectcache.WatchedContainerCompletionStatusFull,
 			expectedIsComplete: false,
 		},
 		{
@@ -48,7 +48,7 @@ func TestIsComplete(t *testing.T) {
 				helpers.StatusMetadataKey:     helpers.Learning,
 				helpers.CompletionMetadataKey: helpers.Full,
 			},
-			completionStatus:   utils.WatchedContainerCompletionStatusFull,
+			completionStatus:   objectcache.WatchedContainerCompletionStatusFull,
 			expectedIsComplete: false,
 		},
 		{
@@ -56,7 +56,7 @@ func TestIsComplete(t *testing.T) {
 			annotations: map[string]string{
 				helpers.CompletionMetadataKey: helpers.Full,
 			},
-			completionStatus:   utils.WatchedContainerCompletionStatusFull,
+			completionStatus:   objectcache.WatchedContainerCompletionStatusFull,
 			expectedIsComplete: false,
 		},
 		{
@@ -64,13 +64,13 @@ func TestIsComplete(t *testing.T) {
 			annotations: map[string]string{
 				helpers.StatusMetadataKey: helpers.Completed,
 			},
-			completionStatus:   utils.WatchedContainerCompletionStatusFull,
+			completionStatus:   objectcache.WatchedContainerCompletionStatusFull,
 			expectedIsComplete: false,
 		},
 		{
 			name:               "not complete when annotations are empty",
 			annotations:        map[string]string{},
-			completionStatus:   utils.WatchedContainerCompletionStatusFull,
+			completionStatus:   objectcache.WatchedContainerCompletionStatusFull,
 			expectedIsComplete: false,
 		},
 		{
@@ -79,7 +79,7 @@ func TestIsComplete(t *testing.T) {
 				helpers.StatusMetadataKey:     "InvalidStatus",
 				helpers.CompletionMetadataKey: "InvalidCompletion",
 			},
-			completionStatus:   utils.WatchedContainerCompletionStatusFull,
+			completionStatus:   objectcache.WatchedContainerCompletionStatusFull,
 			expectedIsComplete: false,
 		},
 	}
@@ -96,7 +96,7 @@ func TestIsSeenFromStart(t *testing.T) {
 	tests := []struct {
 		name                    string
 		annotations             map[string]string
-		watchedContainer        *utils.WatchedContainerData
+		watchedContainer        *objectcache.WatchedContainerData
 		expectedIsSeenFromStart bool
 	}{
 		{
@@ -104,7 +104,7 @@ func TestIsSeenFromStart(t *testing.T) {
 			annotations: map[string]string{
 				helpers.CompletionMetadataKey: helpers.Full,
 			},
-			watchedContainer:        &utils.WatchedContainerData{},
+			watchedContainer:        &objectcache.WatchedContainerData{},
 			expectedIsSeenFromStart: true,
 		},
 		{
@@ -112,7 +112,7 @@ func TestIsSeenFromStart(t *testing.T) {
 			annotations: map[string]string{
 				helpers.CompletionMetadataKey: helpers.Partial,
 			},
-			watchedContainer:        &utils.WatchedContainerData{},
+			watchedContainer:        &objectcache.WatchedContainerData{},
 			expectedIsSeenFromStart: false,
 		},
 		{
@@ -120,13 +120,13 @@ func TestIsSeenFromStart(t *testing.T) {
 			annotations: map[string]string{
 				helpers.StatusMetadataKey: helpers.Completed,
 			},
-			watchedContainer:        &utils.WatchedContainerData{},
+			watchedContainer:        &objectcache.WatchedContainerData{},
 			expectedIsSeenFromStart: false,
 		},
 		{
 			name:                    "not seen from start when annotations are empty",
 			annotations:             map[string]string{},
-			watchedContainer:        &utils.WatchedContainerData{},
+			watchedContainer:        &objectcache.WatchedContainerData{},
 			expectedIsSeenFromStart: false,
 		},
 		{
@@ -134,7 +134,7 @@ func TestIsSeenFromStart(t *testing.T) {
 			annotations: map[string]string{
 				helpers.CompletionMetadataKey: "InvalidCompletion",
 			},
-			watchedContainer:        &utils.WatchedContainerData{},
+			watchedContainer:        &objectcache.WatchedContainerData{},
 			expectedIsSeenFromStart: false,
 		},
 	}
@@ -142,7 +142,7 @@ func TestIsSeenFromStart(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Set container's completion status to Partial
-			tc.watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
+			tc.watchedContainer.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusPartial)
 
 			isSeenFromStart := IsSeenFromStart(tc.annotations, tc.watchedContainer)
 			assert.Equal(t, tc.expectedIsSeenFromStart, isSeenFromStart, "IsSeenFromStart should return the expected result")

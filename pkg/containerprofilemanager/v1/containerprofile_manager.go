@@ -16,7 +16,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
 	"github.com/kubescape/node-agent/pkg/storage"
-	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -29,7 +28,7 @@ type ContainerEntry struct {
 // containerData contains all the monitored data for a single container
 type containerData struct {
 	// Core container information
-	watchedContainerData *utils.WatchedContainerData
+	watchedContainerData *objectcache.WatchedContainerData
 
 	// Cleanup resources
 	timer *time.Timer // For max sniffing time

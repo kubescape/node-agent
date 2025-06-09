@@ -9,13 +9,14 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // monitorContainer monitors a container and saves its profile periodically
-func (cpm *ContainerProfileManager) monitorContainer(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
+func (cpm *ContainerProfileManager) monitorContainer(container *containercollection.Container, watchedContainer *objectcache.WatchedContainerData) error {
 	for {
 		select {
 		case <-watchedContainer.UpdateDataTicker.C:
@@ -25,7 +26,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				watchedContainer.UpdateDataTicker.Reset(utils.AddJitter(cpm.cfg.UpdateDataPeriod, cpm.cfg.MaxJitterPercentage))
 			}
 
-			watchedContainer.SetStatus(utils.WatchedContainerStatusReady)
+			watchedContainer.SetStatus(objectcache.WatchedContainerStatusReady)
 			if err := cpm.saveProfile(watchedContainer, container); err != nil {
 				logger.L().Error("failed to save container profile", helpers.Error(err),
 					helpers.String("containerID", watchedContainer.ContainerID),
@@ -35,18 +36,18 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 					helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 
 				if errors.Is(err, TooLargeObjectError) {
-					watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
+					watchedContainer.SetStatus(objectcache.WatchedContainerStatusTooLarge)
 					cpm.deleteContainer(container)
 					cpm.notifyContainerEndOfLife(container)
 					return TooLargeObjectError
 				} else if errors.Is(err, ObjectCompleted) {
-					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+					watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
 					cpm.deleteContainer(container)
 					cpm.notifyContainerEndOfLife(container)
 					return ObjectCompleted
 				} else {
 					// Because we failed to save the profile, we change the completion status to partial
-					watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial) // TODO: check if need this.
+					watchedContainer.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusPartial) // TODO: check if need this.
 				}
 			}
 
@@ -64,7 +65,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				return ContainerHasTerminatedError
 
 			case errors.Is(err, ContainerReachedMaxTime):
-				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
+				watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
 				if err := cpm.saveProfile(watchedContainer, container); err != nil {
 					logger.L().Error("failed to save container profile on max time", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
@@ -80,14 +81,14 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 }
 
 // saveProfile saves the container profile using the with pattern for safe access
-func (cpm *ContainerProfileManager) saveProfile(watchedContainer *utils.WatchedContainerData, container *containercollection.Container) error {
+func (cpm *ContainerProfileManager) saveProfile(watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container) error {
 	return cpm.withContainer(watchedContainer.ContainerID, func(data *containerData) error {
 		return cpm.saveContainerProfile(watchedContainer, container, data)
 	})
 }
 
 // saveContainerProfile saves the container profile to storage
-func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils.WatchedContainerData, container *containercollection.Container, containerData *containerData) error {
+func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container, containerData *containerData) error {
 	if watchedContainer == nil {
 		return errors.New("watched container data is nil")
 	}
@@ -135,7 +136,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 				helpersv1.PreviousReportTimestampMetadataKey: watchedContainer.PreviousReportTimestamp.String(),
 				helpersv1.ReportTimestampMetadataKey:         watchedContainer.CurrentReportTimestamp.String(),
 			},
-			Labels: utils.GetLabels(watchedContainer, false),
+			Labels: objectcache.GetLabels(watchedContainer, false),
 		},
 		Spec: v1beta1.ContainerProfileSpec{
 			Architectures:        []string{runtime.GOARCH},

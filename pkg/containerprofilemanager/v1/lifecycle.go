@@ -186,13 +186,13 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 
 		// Signal termination if monitoring is active
 		if entry.data.watchedContainerData != nil &&
-			entry.data.watchedContainerData.GetStatus() != utils.WatchedContainerStatusCompleted &&
-			entry.data.watchedContainerData.GetStatus() != utils.WatchedContainerStatusTooLarge {
+			entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusCompleted &&
+			entry.data.watchedContainerData.GetStatus() != objectcache.WatchedContainerStatusTooLarge {
 
 			// Set exit code based status if applicable
 			if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace,
 				container.K8s.PodName, container.K8s.ContainerName, containerID) == 0 {
-				entry.data.watchedContainerData.SetStatus(utils.WatchedContainerStatusCompleted)
+				entry.data.watchedContainerData.SetStatus(objectcache.WatchedContainerStatusCompleted)
 			}
 
 			// Send container termination signal
@@ -224,7 +224,7 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 }
 
 // startContainerMonitoring starts monitoring a container
-func (cpm *ContainerProfileManager) startContainerMonitoring(container *containercollection.Container, sharedData *utils.WatchedContainerData) {
+func (cpm *ContainerProfileManager) startContainerMonitoring(container *containercollection.Container, sharedData *objectcache.WatchedContainerData) {
 	if err := cpm.monitorContainer(container, sharedData); err != nil {
 		logger.L().Info("stopped recording container profile",
 			helpers.String("reason", err.Error()),
@@ -236,14 +236,14 @@ func (cpm *ContainerProfileManager) startContainerMonitoring(container *containe
 }
 
 // setContainerData sets the container data for the container profile manager
-func (cpm *ContainerProfileManager) setContainerData(container *containercollection.Container, sharedData *utils.WatchedContainerData) {
+func (cpm *ContainerProfileManager) setContainerData(container *containercollection.Container, sharedData *objectcache.WatchedContainerData) {
 	// Set completion status & status as soon as we start monitoring the container
 	if sharedData.PreRunningContainer {
-		sharedData.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial)
+		sharedData.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusPartial)
 	} else {
-		sharedData.SetCompletionStatus(utils.WatchedContainerCompletionStatusFull)
+		sharedData.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusFull)
 	}
-	sharedData.SetStatus(utils.WatchedContainerStatusInitializing)
+	sharedData.SetStatus(objectcache.WatchedContainerStatusInitializing)
 
 	// Set series ID for the container
 	if sharedData.SeriesID == "" {
@@ -275,8 +275,8 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 }
 
 // waitForSharedContainerData waits for shared container data to be available
-func (cpm *ContainerProfileManager) waitForSharedContainerData(containerID string, ctx context.Context) (*utils.WatchedContainerData, error) {
-	return backoff.Retry(ctx, func() (*utils.WatchedContainerData, error) {
+func (cpm *ContainerProfileManager) waitForSharedContainerData(containerID string, ctx context.Context) (*objectcache.WatchedContainerData, error) {
+	return backoff.Retry(ctx, func() (*objectcache.WatchedContainerData, error) {
 		if sharedData := cpm.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
 			return sharedData, nil
 		}

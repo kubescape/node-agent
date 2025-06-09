@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -70,7 +71,7 @@ func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.P
 
 func (ch *IGContainerWatcher) setSharedWatchedContainerData(container *containercollection.Container) {
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
-	var sharedWatchedContainerData *utils.WatchedContainerData
+	var sharedWatchedContainerData *objectcache.WatchedContainerData
 	err := backoff.Retry(func() error {
 		data, err := ch.getSharedWatchedContainerData(container)
 		if err != nil {
@@ -96,8 +97,8 @@ func (ch *IGContainerWatcher) setSharedWatchedContainerData(container *container
 	ch.objectCache.K8sObjectCache().SetSharedContainerData(container.Runtime.ContainerID, sharedWatchedContainerData)
 }
 
-func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*utils.WatchedContainerData, error) {
-	watchedContainer := utils.WatchedContainerData{
+func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*objectcache.WatchedContainerData, error) {
+	watchedContainer := objectcache.WatchedContainerData{
 		ContainerID: container.Runtime.ContainerID,
 		// we get ImageID and ImageTag from the pod spec for consistency with operator
 	}
@@ -116,7 +117,7 @@ func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *container
 	}
 	pod := wl.(*workloadinterface.Workload)
 	// fill container type, index and names
-	if watchedContainer.ContainerType == utils.Unknown {
+	if watchedContainer.ContainerType == objectcache.Unknown {
 		if err := watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName); err != nil {
 			return nil, fmt.Errorf("failed to set container info: %w", err)
 		}

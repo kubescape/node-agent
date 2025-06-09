@@ -2,6 +2,8 @@ package utils
 
 import (
 	"math/rand"
+	"reflect"
+	"runtime"
 	"time"
 )
 
@@ -30,4 +32,8 @@ func RandomDuration(max int, duration time.Duration) time.Duration {
 	// we don't initialize the seed, so we will get the same sequence of random numbers every time
 	mini := max / 2
 	return time.Duration(rand.Intn(1+max-mini)+mini) * duration
+}
+
+func FuncName(i interface{}) string {
+	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 }

@@ -1,11 +1,8 @@
-package utils
+package objectcache
 
 import (
 	"fmt"
 	"iter"
-	"reflect"
-	"runtime"
-	"slices"
 	"strings"
 	"time"
 
@@ -16,6 +13,7 @@ import (
 	"github.com/kubescape/k8s-interface/instanceidhandler"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/node-agent/pkg/utils"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -24,6 +22,7 @@ import (
 type ContainerType int
 
 const (
+	// ContainerType represents the type of container in a pod
 	Unknown = iota
 	Container
 	InitContainer
@@ -33,6 +32,7 @@ const (
 type WatchedContainerStatus string
 
 const (
+	// WatchedContainerStatus represents the status of a watched container
 	WatchedContainerStatusInitializing WatchedContainerStatus = helpersv1.Initializing
 	WatchedContainerStatusReady        WatchedContainerStatus = helpersv1.Learning
 	WatchedContainerStatusCompleted    WatchedContainerStatus = helpersv1.Completed
@@ -44,6 +44,7 @@ const (
 type WatchedContainerCompletionStatus string
 
 const (
+	// WatchedContainerCompletionStatus represents the completion status of a watched container
 	WatchedContainerCompletionStatusPartial WatchedContainerCompletionStatus = helpersv1.Partial
 	WatchedContainerCompletionStatusFull    WatchedContainerCompletionStatus = helpersv1.Full
 )
@@ -164,10 +165,10 @@ func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterf
 		watchedContainer.ContainerInfos = make(map[ContainerType][]ContainerInfo)
 	}
 	checkContainers := func(containers iter.Seq2[int, v1.Container], containerStatuses []v1.ContainerStatus, containerType ContainerType) error {
-		statusesMap := MapContainerStatuses(containerStatuses)
+		statusesMap := utils.MapContainerStatuses(containerStatuses)
 		var containersInfo []ContainerInfo
 		for i, c := range containers {
-			normalizedImageName := NormalizeImageName(c.Image)
+			normalizedImageName := normalizeImageName(c.Image)
 			containersInfo = append(containersInfo, ContainerInfo{
 				Name:     c.Name,
 				ImageTag: normalizedImageName,
@@ -221,7 +222,7 @@ func ephemeralContainersIterator(c []v1.EphemeralContainer) iter.Seq2[int, v1.Co
 	}
 }
 
-func NormalizeImageName(image string) string {
+func normalizeImageName(image string) string {
 	ref, err := name.ParseReference(image)
 	if err != nil {
 		logger.L().Debug("failed to parse image reference", helpers.Error(err), helpers.String("image", image))
@@ -229,30 +230,4 @@ func NormalizeImageName(image string) string {
 	}
 	// docker.io is parsed as index.docker.io
 	return strings.Replace(ref.Name(), "index.docker.io", "docker.io", 1)
-}
-
-// TrimRuntimePrefix removes the runtime prefix from a container ID.
-func TrimRuntimePrefix(id string) string {
-	parts := strings.SplitN(id, "//", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-
-	return parts[1]
-}
-
-func GetContainerStatuses(podStatus v1.PodStatus) []v1.ContainerStatus {
-	return slices.Concat(podStatus.ContainerStatuses, podStatus.InitContainerStatuses, podStatus.EphemeralContainerStatuses)
-}
-
-func MapContainerStatuses(statuses []v1.ContainerStatus) map[string]v1.ContainerStatus {
-	statusesMap := make(map[string]v1.ContainerStatus)
-	for _, s := range statuses {
-		statusesMap[s.Name] = s
-	}
-	return statusesMap
-}
-
-func FuncName(i interface{}) string {
-	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 }
