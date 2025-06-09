@@ -112,7 +112,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 	// Get syscalls using peek function
 	syscalls, err := cpm.syscallPeekFunc(watchedContainer.NsMntId)
 	if err != nil {
-		logger.L().Error("failed to peek syscalls for container", helpers.Error(err),
+		logger.L().Debug("failed to peek syscalls for container", helpers.Error(err),
 			helpers.String("containerID", watchedContainer.ContainerID),
 			helpers.String("containerName", container.Runtime.ContainerName))
 	}
