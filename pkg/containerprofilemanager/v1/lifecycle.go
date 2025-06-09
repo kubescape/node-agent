@@ -164,11 +164,14 @@ func (cpm *ContainerProfileManager) handleContainerMaxTime(container *containerc
 func (cpm *ContainerProfileManager) deleteContainer(container *containercollection.Container) {
 	containerID := container.Runtime.ContainerID
 
-	// Remove from map first to prevent new operations
-	entry, exists := cpm.removeContainerEntry(containerID)
+	// Get the container entry
+	entry, exists := cpm.getContainerEntry(containerID)
 	if !exists {
 		logger.L().Debug("container not found in container profile manager, skipping delete",
-			helpers.String("containerID", containerID))
+			helpers.String("containerID", containerID),
+			helpers.String("containerName", container.Runtime.ContainerName),
+			helpers.String("podName", container.K8s.PodName),
+			helpers.String("namespace", container.K8s.Namespace))
 		return
 	}
 
@@ -201,9 +204,18 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 					helpers.String("containerID", containerID))
 			}
 		}
+	}
+	entry.mu.Unlock()
 
-		// Mark as deleted
-		entry.data = nil
+	// Give monitoring goroutine time to process the signal
+	time.Sleep(100 * time.Millisecond)
+
+	// Remove the container entry from the map
+	cpm.removeContainerEntry(containerID)
+
+	entry.mu.Lock()
+	if entry.data != nil {
+		entry.data = nil // Clear data to free resources
 	}
 	entry.mu.Unlock()
 

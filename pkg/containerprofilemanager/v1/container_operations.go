@@ -24,6 +24,15 @@ func (cpm *ContainerProfileManager) withContainer(containerID string, fn func(*c
 	return fn(entry.data)
 }
 
+// getContainerEntry retrieves a container entry by its ID
+func (cpm *ContainerProfileManager) getContainerEntry(containerID string) (*ContainerEntry, bool) {
+	cpm.containersMu.RLock()
+	defer cpm.containersMu.RUnlock()
+
+	entry, exists := cpm.containers[containerID]
+	return entry, exists
+}
+
 // addContainerEntry safely adds a new container entry to the map
 func (cpm *ContainerProfileManager) addContainerEntry(containerID string, entry *ContainerEntry) {
 	cpm.containersMu.Lock()
