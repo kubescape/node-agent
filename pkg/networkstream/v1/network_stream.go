@@ -351,11 +351,11 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 
 			if len(slimPod.OwnerReferences) > 0 {
 				workloadKind = slimPod.OwnerReferences[0].Kind
-				if utils.WorkloadKind(workloadKind) == utils.ReplicaSet {
-					workloadKind = string(utils.Deployment)
+				if WorkloadKind(workloadKind) == ReplicaSet {
+					workloadKind = string(Deployment)
 				}
 				// TODO: handle similar cases for CronJob -> Job -> Pod.
-				workloadName = utils.ExtractWorkloadName(slimPod.Name, utils.WorkloadKind(workloadKind))
+				workloadName = extractWorkloadName(slimPod.Name, WorkloadKind(workloadKind))
 			}
 
 			networkEvent.WorkloadName = workloadName
