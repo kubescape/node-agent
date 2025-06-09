@@ -34,16 +34,16 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 					helpers.String("status", string(watchedContainer.GetStatus())),
 					helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 
-				if errors.Is(err, utils.TooLargeObjectError) {
+				if errors.Is(err, TooLargeObjectError) {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
 					cpm.deleteContainer(container)
 					cpm.notifyContainerEndOfLife(container)
-					return utils.TooLargeObjectError
-				} else if errors.Is(err, utils.ObjectCompleted) {
+					return TooLargeObjectError
+				} else if errors.Is(err, ObjectCompleted) {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 					cpm.deleteContainer(container)
 					cpm.notifyContainerEndOfLife(container)
-					return utils.ObjectCompleted
+					return ObjectCompleted
 				} else {
 					// Because we failed to save the profile, we change the completion status to partial
 					watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial) // TODO: check if need this.
@@ -52,7 +52,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 
 		case err := <-watchedContainer.SyncChannel:
 			switch {
-			case errors.Is(err, utils.ContainerHasTerminatedError):
+			case errors.Is(err, ContainerHasTerminatedError):
 				if err := cpm.saveProfile(watchedContainer, container); err != nil {
 					logger.L().Error("failed to save container profile on termination", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
@@ -61,9 +61,9 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 						helpers.String("status", string(watchedContainer.GetStatus())),
 						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 				}
-				return utils.ContainerHasTerminatedError
+				return ContainerHasTerminatedError
 
-			case errors.Is(err, utils.ContainerReachedMaxTime):
+			case errors.Is(err, ContainerReachedMaxTime):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				if err := cpm.saveProfile(watchedContainer, container); err != nil {
 					logger.L().Error("failed to save container profile on max time", helpers.Error(err),
@@ -73,7 +73,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 						helpers.String("status", string(watchedContainer.GetStatus())),
 						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 				}
-				return utils.ContainerReachedMaxTime
+				return ContainerReachedMaxTime
 			}
 		}
 	}

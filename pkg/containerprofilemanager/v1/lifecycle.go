@@ -142,7 +142,7 @@ func (cpm *ContainerProfileManager) handleContainerMaxTime(container *containerc
 	err := cpm.withContainer(containerID, func(data *containerData) error {
 		if data.watchedContainerData != nil {
 			select {
-			case data.watchedContainerData.SyncChannel <- utils.ContainerReachedMaxTime:
+			case data.watchedContainerData.SyncChannel <- ContainerReachedMaxTime:
 			default:
 				// Channel might be full or closed, continue with cleanup
 				logger.L().Debug("could not send max time signal, channel may be full",
@@ -197,7 +197,7 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 
 			// Send container termination signal
 			select {
-			case entry.data.watchedContainerData.SyncChannel <- utils.ContainerHasTerminatedError:
+			case entry.data.watchedContainerData.SyncChannel <- ContainerHasTerminatedError:
 			default:
 				// Channel might be full or closed, continue with cleanup
 				logger.L().Debug("could not send termination signal, channel may be full",

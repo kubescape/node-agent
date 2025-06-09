@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"errors"
 	"fmt"
 	"iter"
 	"reflect"
@@ -20,13 +19,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
-)
-
-var (
-	ContainerHasTerminatedError = errors.New("container has terminated")
-	ContainerReachedMaxTime     = errors.New("container reached max time")
-	ObjectCompleted             = errors.New("object is completed")
-	TooLargeObjectError         = errors.New("object is too large")
 )
 
 type ContainerType int

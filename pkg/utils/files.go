@@ -3,6 +3,7 @@ package utils
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -60,4 +61,10 @@ func GetFileSize(path string) (int64, error) {
 	}
 
 	return fileInfo.Size(), nil
+}
+
+func CurrentDir() string {
+	_, filename, _, _ := runtime.Caller(1)
+
+	return filepath.Dir(filename)
 }
