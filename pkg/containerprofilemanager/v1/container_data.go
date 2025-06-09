@@ -4,8 +4,6 @@ import (
 	"sort"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/google/uuid"
-	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
@@ -16,26 +14,10 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-type containerData struct {
-	// watchedContainerData contains the data for a watched container
-	watchedContainerData *utils.WatchedContainerData // TODO: move watched container data to here
-
-	// Events reported for this container that needs to be saved to the profile
-	capabilites  mapset.Set[string]
-	syscalls     mapset.Set[string]
-	endpoints    *maps.SafeMap[string, *v1beta1.HTTPEndpoint]
-	execs        *maps.SafeMap[string, []string]                     // Map of execs reported for this container, key is the SHA256 hash of the exec
-	opens        *maps.SafeMap[string, mapset.Set[string]]           // Map of opens reported for this container, key is the file path
-	rulePolicies *maps.SafeMap[string, *v1beta1.RulePolicy]          // Map of rule policies reported for this container, key is the rule ID
-	callStacks   *maps.SafeMap[string, *v1beta1.IdentifiedCallStack] // Map of callstacks reported for this container, key is the SHA256 hash of the callstack
-	networks     mapset.Set[NetworkEvent]
-
-	// TODO: cache events we reported already, so we don't report them again, currently the cache is only done between updates but we might want to keep the events for a longer period of time.
-}
-
+// emptyEvents clears all event data except syscalls (which are kept for peek function)
 func (cd *containerData) emptyEvents() {
 	cd.capabilites = nil
-	// cd.syscalls = nil // This is intentionally not set to nil, as we want to keep the syscalls reported for the container because of the peek function.
+	// cd.syscalls is intentionally not set to nil, as we want to keep the syscalls for the peek function
 	cd.endpoints = nil
 	cd.execs = nil
 	cd.opens = nil
@@ -44,6 +26,7 @@ func (cd *containerData) emptyEvents() {
 	cd.networks = nil
 }
 
+// getCapabilities returns a sorted slice of capabilities
 func (cd *containerData) getCapabilities() []string {
 	var capabilities []string
 	if cd.capabilites == nil {
@@ -55,6 +38,7 @@ func (cd *containerData) getCapabilities() []string {
 	return capabilities
 }
 
+// getExecs returns all execution calls recorded for this container
 func (cd *containerData) getExecs() []v1beta1.ExecCalls {
 	var execs []v1beta1.ExecCalls
 	if cd.execs == nil {
@@ -77,6 +61,7 @@ func (cd *containerData) getExecs() []v1beta1.ExecCalls {
 	return execs
 }
 
+// getOpens returns all file open calls recorded for this container
 func (cd *containerData) getOpens() []v1beta1.OpenCalls {
 	var opens []v1beta1.OpenCalls
 	if cd.opens == nil {
@@ -95,6 +80,7 @@ func (cd *containerData) getOpens() []v1beta1.OpenCalls {
 	return opens
 }
 
+// getEndpoints returns all HTTP endpoints recorded for this container
 func (cd *containerData) getEndpoints() []v1beta1.HTTPEndpoint {
 	var endpoints []v1beta1.HTTPEndpoint
 	if cd.endpoints == nil {
@@ -109,7 +95,8 @@ func (cd *containerData) getEndpoints() []v1beta1.HTTPEndpoint {
 	return endpoints
 }
 
-func (cd *containerData) getRulePolicies() map[string]v1beta1.RulePolicy { // TODO: check here if we need to check if the policy is not empty or something like that.
+// getRulePolicies returns all rule policies recorded for this container
+func (cd *containerData) getRulePolicies() map[string]v1beta1.RulePolicy {
 	rulePolicies := make(map[string]v1beta1.RulePolicy)
 	if cd.rulePolicies == nil {
 		return rulePolicies
@@ -123,6 +110,7 @@ func (cd *containerData) getRulePolicies() map[string]v1beta1.RulePolicy { // TO
 	return rulePolicies
 }
 
+// getCallStacks returns all call stacks recorded for this container
 func (cd *containerData) getCallStacks() []v1beta1.IdentifiedCallStack {
 	var callStacks []v1beta1.IdentifiedCallStack
 	if cd.callStacks == nil {
@@ -137,6 +125,7 @@ func (cd *containerData) getCallStacks() []v1beta1.IdentifiedCallStack {
 	return callStacks
 }
 
+// getIngressNetworkNeighbors returns ingress network neighbors for this container
 func (cd *containerData) getIngressNetworkNeighbors(namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) []v1beta1.NetworkNeighbor {
 	var ingress []v1beta1.NetworkNeighbor
 	if cd.networks == nil {
@@ -156,6 +145,7 @@ func (cd *containerData) getIngressNetworkNeighbors(namespace string, k8sClient 
 	return ingress
 }
 
+// getEgressNetworkNeighbors returns egress network neighbors for this container
 func (cd *containerData) getEgressNetworkNeighbors(namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) []v1beta1.NetworkNeighbor {
 	var egress []v1beta1.NetworkNeighbor
 	if cd.networks == nil {
@@ -175,6 +165,7 @@ func (cd *containerData) getEgressNetworkNeighbors(namespace string, k8sClient k
 	return egress
 }
 
+// createNetworkNeighbor creates a network neighbor from a network event
 func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namespace string, k8sClient k8sclient.K8sClientInterface, dnsResolverClient dnsmanager.DNSResolver) *v1beta1.NetworkNeighbor {
 	var neighborEntry v1beta1.NetworkNeighbor
 
@@ -186,7 +177,7 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 	}}
 
 	if networkEvent.Destination.Kind == EndpointKindPod {
-		// for Pods, we need to remove the default labels
+		// For Pods, we need to remove the default labels
 		neighborEntry.PodSelector = &metav1.LabelSelector{
 			MatchLabels: filterLabels(networkEvent.GetDestinationPodLabels()),
 		}
@@ -198,23 +189,26 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 		}
 
 	} else if networkEvent.Destination.Kind == EndpointKindService {
-		// for service, we need to retrieve it and use its selector
-		svc, err := k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name) // TODO: replace this with ig k8sInventory.
+		// For service, we need to retrieve it and use its selector
+		svc, err := k8sClient.GetWorkload(networkEvent.Destination.Namespace, "Service", networkEvent.Destination.Name) // TODO: use IG inventory as this can generate a lot of API calls.
 		if err != nil {
-			logger.L().Warning("ContainerProfileManager - failed to get service", helpers.String("reason", err.Error()), helpers.String("service name", networkEvent.Destination.Name))
+			logger.L().Warning("failed to get service",
+				helpers.String("reason", err.Error()),
+				helpers.String("service name", networkEvent.Destination.Name))
 			return nil
 		}
 
 		var selector map[string]string
 		if svc.GetName() == "kubernetes" && svc.GetNamespace() == "default" {
-			// the default service has no selectors, in addition, we want to save the default service address
+			// The default service has no selectors, in addition, we want to save the default service address
 			selector = svc.GetLabels()
 			neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 		} else {
 			selector = svc.GetServiceSelector()
 		}
+
 		if len(selector) == 0 {
-			// FIXME check if we need to handle services with no selectors
+			// TODO: check if we need to handle services with no selectors
 			return nil
 		} else {
 			neighborEntry.PodSelector = &metav1.LabelSelector{
@@ -250,7 +244,7 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 
 	identifier, err := utils.GenerateNeighborsIdentifier(neighborEntry)
 	if err != nil {
-		identifier = uuid.New().String()
+		identifier = createUUID()
 	}
 	neighborEntry.Identifier = identifier
 

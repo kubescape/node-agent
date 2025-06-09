@@ -518,7 +518,6 @@ func TestContainerProfileManagerCreation(t *testing.T) {
 	assert.Equal(t, storageClient, cpm.storageClient)
 	assert.Equal(t, dnsResolverMock, cpm.dnsResolverClient)
 	assert.Equal(t, seccompManagerMock, cpm.seccompManager)
-	assert.NotNil(t, cpm.containerLocks)
 	assert.NotNil(t, cpm.maxSniffTimeNotificationChan)
 }
 

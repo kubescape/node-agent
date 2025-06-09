@@ -14,11 +14,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// monitorContainer monitors a container and saves its profile periodically
 func (cpm *ContainerProfileManager) monitorContainer(container *containercollection.Container, watchedContainer *utils.WatchedContainerData) error {
 	for {
 		select {
 		case <-watchedContainer.UpdateDataTicker.C:
-			// Adjust ticker after first tick, at the first run we want to update data faster to show the profile is created.
+			// Adjust ticker after first tick for faster initial updates
 			if !watchedContainer.InitialDelayExpired {
 				watchedContainer.InitialDelayExpired = true
 				watchedContainer.UpdateDataTicker.Reset(utils.AddJitter(cpm.cfg.UpdateDataPeriod, cpm.cfg.MaxJitterPercentage))
@@ -31,56 +32,46 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 					helpers.String("containerName", container.Runtime.ContainerName),
 					helpers.String("workloadID", watchedContainer.Wlid),
 					helpers.String("status", string(watchedContainer.GetStatus())),
-					helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())),
-				)
+					helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 
 				if errors.Is(err, utils.TooLargeObjectError) {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusTooLarge)
-					cpm.containerLocks.WithLock(container.Runtime.ContainerID, func() { // TODO: verify what is the effect of deleting the container here.
-						cpm.containerIDToInfo.Delete(container.Runtime.ContainerID)
-					})
-					cpm.containerLocks.ReleaseLock(watchedContainer.ContainerID)
+					cpm.deleteContainer(container)
 					cpm.notifyContainerEndOfLife(container)
 					return utils.TooLargeObjectError
 				} else if errors.Is(err, utils.ObjectCompleted) {
 					watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
-					cpm.containerLocks.WithLock(container.Runtime.ContainerID, func() { // TODO: verify what is the effect of deleting the container here.
-						cpm.containerIDToInfo.Delete(container.Runtime.ContainerID)
-					})
-					cpm.containerLocks.ReleaseLock(watchedContainer.ContainerID)
+					cpm.deleteContainer(container)
 					cpm.notifyContainerEndOfLife(container)
 					return utils.ObjectCompleted
 				} else {
 					// Because we failed to save the profile, we change the completion status to partial
-					watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial) // TODO: yes?
+					watchedContainer.SetCompletionStatus(utils.WatchedContainerCompletionStatusPartial) // TODO: check if need this.
 				}
-
-				// return err // This is intentionally commented out to continue monitoring the container even if saving the profile fails
 			}
 
 		case err := <-watchedContainer.SyncChannel:
 			switch {
 			case errors.Is(err, utils.ContainerHasTerminatedError):
 				if err := cpm.saveProfile(watchedContainer, container); err != nil {
-					logger.L().Error("failed to save container profile", helpers.Error(err),
+					logger.L().Error("failed to save container profile on termination", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
 						helpers.String("containerName", container.Runtime.ContainerName),
 						helpers.String("workloadID", watchedContainer.Wlid),
 						helpers.String("status", string(watchedContainer.GetStatus())),
-						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())),
-					)
+						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 				}
 				return utils.ContainerHasTerminatedError
+
 			case errors.Is(err, utils.ContainerReachedMaxTime):
 				watchedContainer.SetStatus(utils.WatchedContainerStatusCompleted)
 				if err := cpm.saveProfile(watchedContainer, container); err != nil {
-					logger.L().Error("failed to save container profile", helpers.Error(err),
+					logger.L().Error("failed to save container profile on max time", helpers.Error(err),
 						helpers.String("containerID", watchedContainer.ContainerID),
 						helpers.String("containerName", container.Runtime.ContainerName),
 						helpers.String("workloadID", watchedContainer.Wlid),
 						helpers.String("status", string(watchedContainer.GetStatus())),
-						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())),
-					)
+						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 				}
 				return utils.ContainerReachedMaxTime
 			}
@@ -88,28 +79,15 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 	}
 }
 
+// saveProfile saves the container profile using the with pattern for safe access
 func (cpm *ContainerProfileManager) saveProfile(watchedContainer *utils.WatchedContainerData, container *containercollection.Container) error {
-	// Lock the container profile manager to prevent deleting the container profile while saving it
-	if err := cpm.containerLocks.WithLockAndError(
-		watchedContainer.ContainerID,
-		func() error {
-			return cpm.saveContainerProfile(watchedContainer, container)
-		},
-	); err != nil {
-		if errors.Is(err, ErrContainerNotFound) {
-			// Release the lock if the container is not found, as it might have been deleted
-			cpm.containerLocks.ReleaseLock(watchedContainer.ContainerID)
-		}
-
-		return err
-	}
-
-	return nil
-
+	return cpm.withContainer(watchedContainer.ContainerID, func(data *containerData) error {
+		return cpm.saveContainerProfile(watchedContainer, container, data)
+	})
 }
 
-// saveContainerProfile saves the container profile to the storage
-func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils.WatchedContainerData, container *containercollection.Container) error {
+// saveContainerProfile saves the container profile to storage
+func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils.WatchedContainerData, container *containercollection.Container, containerData *containerData) error {
 	if watchedContainer == nil {
 		return errors.New("watched container data is nil")
 	}
@@ -131,30 +109,22 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 			helpers.String("k8s workload", watchedContainer.K8sContainerID))
 	}
 
-	var containerData *containerData
-	var ok bool
-	if containerData, ok = cpm.containerIDToInfo.Load(watchedContainer.ContainerID); !ok {
-		return ErrContainerNotFound
-	}
-	if containerData == nil {
-		return ErrContainerNotFound
-	}
-
+	// Get syscalls using peek function
 	syscalls, err := cpm.syscallPeekFunc(watchedContainer.NsMntId)
 	if err != nil {
 		logger.L().Error("failed to peek syscalls for container", helpers.Error(err),
 			helpers.String("containerID", watchedContainer.ContainerID),
-			helpers.String("containerName", container.Runtime.ContainerName),
-		)
+			helpers.String("containerName", container.Runtime.ContainerName))
 	}
 
-	// Update the timestamp of the last report (We do this before saving the profile to ensure the timestamp is always up-to-date)
+	// Update timestamps before saving
 	watchedContainer.PreviousReportTimestamp = watchedContainer.CurrentReportTimestamp
 	watchedContainer.CurrentReportTimestamp = time.Now()
 
 	containerProfile := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: slug,
+			Name:      slug,
+			Namespace: container.K8s.Namespace, // TODO: do we set it or the storage?
 			Annotations: map[string]string{
 				helpersv1.InstanceIDMetadataKey:              watchedContainer.InstanceID.GetStringFormatted(),
 				helpersv1.WlidMetadataKey:                    watchedContainer.Wlid,
@@ -184,7 +154,8 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 		},
 	}
 
-	if err := cpm.storageClient.CreateContainerProfile(containerProfile, container.K8s.Namespace); err != nil { // TODO: can this take time and block the goroutine? cuz we are under a lock here.
+	if err := cpm.storageClient.CreateContainerProfile(containerProfile, container.K8s.Namespace); err != nil {
+		cpm.logContainerProfile(containerProfile)
 		// Empty the container data to prevent reporting the same data again
 		containerData.emptyEvents()
 		return err
@@ -193,11 +164,29 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *utils
 	logger.L().Debug("container profile saved successfully",
 		helpers.String("containerID", watchedContainer.ContainerID),
 		helpers.String("containerName", container.Runtime.ContainerName),
-		helpers.String("podName", container.K8s.PodName),
-	)
+		helpers.String("podName", container.K8s.PodName))
 
 	// Empty the container data to prevent reporting the same data again
 	containerData.emptyEvents()
 
 	return nil
+}
+
+// For debugging purposes, we can log the container profile
+func (cpm *ContainerProfileManager) logContainerProfile(containerProfile *v1beta1.ContainerProfile) {
+	logger.L().Debug("Container Profile",
+		helpers.String("name", containerProfile.Name),
+		helpers.String("namespace", containerProfile.Namespace),
+		helpers.String("currentReportTimestamp", containerProfile.Annotations[helpersv1.ReportTimestampMetadataKey]),
+		helpers.String("previousReportTimestamp", containerProfile.Annotations[helpersv1.PreviousReportTimestampMetadataKey]),
+		helpers.String("slug", containerProfile.Name),
+		helpers.String("imageID", containerProfile.Spec.ImageID),
+		helpers.String("imageTag", containerProfile.Spec.ImageTag),
+		helpers.Interface("seccompProfile", containerProfile.Spec.SeccompProfile),
+		helpers.Interface("capabilities", containerProfile.Spec.Capabilities),
+		helpers.Interface("execs", containerProfile.Spec.Execs),
+		helpers.Interface("opens", containerProfile.Spec.Opens),
+		helpers.Interface("syscalls", containerProfile.Spec.Syscalls),
+		helpers.Interface("endpoints", containerProfile.Spec.Endpoints),
+	)
 }
