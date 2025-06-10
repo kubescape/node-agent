@@ -45,9 +45,6 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 					cpm.deleteContainer(container)
 					cpm.notifyContainerEndOfLife(container)
 					return ObjectCompleted
-				} else {
-					// Because we failed to save the profile, we change the completion status to partial
-					watchedContainer.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusPartial) // TODO: check if need this.
 				}
 			}
 
@@ -111,7 +108,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	}
 
 	// Get syscalls using peek function
-	syscalls, err := cpm.syscallPeekFunc(watchedContainer.NsMntId)
+	syscalls, err := cpm.PeekSyscalls(watchedContainer.ContainerID, watchedContainer.NsMntId)
 	if err != nil {
 		logger.L().Debug("failed to peek syscalls for container", helpers.Error(err),
 			helpers.String("containerID", watchedContainer.ContainerID),
@@ -125,7 +122,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	containerProfile := &v1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      slug,
-			Namespace: container.K8s.Namespace, // TODO: do we set it or the storage?
+			Namespace: container.K8s.Namespace,
 			Annotations: map[string]string{
 				helpersv1.InstanceIDMetadataKey:              watchedContainer.InstanceID.GetStringFormatted(),
 				helpersv1.WlidMetadataKey:                    watchedContainer.Wlid,

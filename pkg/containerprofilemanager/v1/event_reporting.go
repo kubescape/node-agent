@@ -262,6 +262,7 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 
 // ReportDroppedEvent reports a dropped event (currently just logs)
 func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
+	// TODO: change profile to partial.
 	logger.L().Debug("dropped event reported", helpers.String("containerID", containerID))
 }
 
