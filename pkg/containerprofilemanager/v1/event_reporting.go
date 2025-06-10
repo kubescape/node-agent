@@ -276,38 +276,30 @@ func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
 }
 
 // PeekSyscalls returns the syscalls for the given mount namespace ID
-func (cpm *ContainerProfileManager) PeekSyscalls(containerID string, nsMountId uint64) ([]string, error) {
+// Note: This function should be called with a lock held on the container data
+func (cpm *ContainerProfileManager) PeekSyscalls(data *containerData) ([]string, error) {
 	var syscalls []string
 
-	err := cpm.withContainer(containerID, func(data *containerData) error {
-		if cpm.syscallPeekFunc == nil {
-			return errors.New("syscall peek function is not set")
-		}
-
-		peekedSyscalls, err := cpm.syscallPeekFunc(nsMountId)
-		if err != nil {
-			return err
-		}
-
-		if data.syscalls == nil {
-			data.syscalls = mapset.NewSet[string]()
-		}
-
-		// Get only new syscalls
-		syscallsSet := mapset.NewSet[string](peekedSyscalls...)
-		newSyscalls := syscallsSet.Difference(data.syscalls)
-		syscalls = newSyscalls.ToSlice()
-
-		// Store all syscalls in container data
-		data.syscalls.Append(syscalls...)
-		return nil
-	})
-
-	if err != nil && !errors.Is(err, ErrContainerNotFound) {
-		logger.L().Error("failed to peek syscalls",
-			helpers.String("containerID", containerID),
-			helpers.Error(err))
+	if cpm.syscallPeekFunc == nil {
+		return nil, errors.New("syscall peek function is not set")
 	}
+
+	peekedSyscalls, err := cpm.syscallPeekFunc(data.watchedContainerData.NsMntId)
+	if err != nil {
+		return nil, err
+	}
+
+	if data.syscalls == nil {
+		data.syscalls = mapset.NewSet[string]()
+	}
+
+	// Get only new syscalls
+	syscallsSet := mapset.NewSet[string](peekedSyscalls...)
+	newSyscalls := syscallsSet.Difference(data.syscalls)
+	syscalls = newSyscalls.ToSlice()
+
+	// Store all syscalls in container data
+	data.syscalls.Append(syscalls...)
 
 	return syscalls, err
 }
