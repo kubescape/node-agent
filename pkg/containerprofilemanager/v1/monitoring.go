@@ -115,6 +115,11 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 			helpers.String("containerName", container.Runtime.ContainerName))
 	}
 
+	// Check if there are any dropped events
+	if containerData.droppedEvents {
+		watchedContainer.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusPartial)
+	}
+
 	// Update timestamps before saving
 	watchedContainer.PreviousReportTimestamp = watchedContainer.CurrentReportTimestamp
 	watchedContainer.CurrentReportTimestamp = time.Now()
