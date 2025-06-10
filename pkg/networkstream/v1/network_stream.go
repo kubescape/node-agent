@@ -28,6 +28,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
+const (
+	timeoutDefaultSeconds = 5 // Default timeout for HTTP requests if not set in the config
+)
+
 type NetworkStream struct {
 	networkEventsStorage      apitypes.NetworkStream
 	eventsStorageMutex        sync.RWMutex // Mutex to protect access to networkEventsStorage.Containers
@@ -55,6 +59,13 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 		k8sInventory.Start() // We do not stop it here, as we need it to be running for the whole lifetime of the NetworkStream.
 	}
 
+	var timeoutSeconds int
+	if cfg.Exporters.HTTPExporterConfig != nil && cfg.Exporters.HTTPExporterConfig.TimeoutSeconds > 0 {
+		timeoutSeconds = cfg.Exporters.HTTPExporterConfig.TimeoutSeconds
+	} else {
+		timeoutSeconds = timeoutDefaultSeconds
+	}
+
 	ns := NetworkStream{
 		networkEventsStorage: apitypes.NetworkStream{
 			Entities: make(map[string]apitypes.NetworkStreamEntity),
@@ -65,7 +76,7 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 		dnsResolver:    dnsResolver,
 		k8sInventory:   k8sInventory,
 		httpClient: &http.Client{
-			Timeout: time.Duration(cfg.Exporters.HTTPExporterConfig.TimeoutSeconds) * time.Second,
+			Timeout: time.Duration(timeoutSeconds) * time.Second,
 		},
 		nodeName:                  nodeName,
 		eventsNotificationChannel: eventsNotificationChannel,
