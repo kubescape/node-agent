@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -35,16 +36,16 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 					helpers.String("status", string(watchedContainer.GetStatus())),
 					helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 
-				if errors.Is(err, TooLargeObjectError) {
+				if errors.Is(err, file.TooLargeObjectError) {
 					watchedContainer.SetStatus(objectcache.WatchedContainerStatusTooLarge)
 					cpm.deleteContainer(container)
 					cpm.notifyContainerEndOfLife(container)
-					return TooLargeObjectError
-				} else if errors.Is(err, ObjectCompleted) {
+					return file.TooLargeObjectError
+				} else if errors.Is(err, file.ObjectCompleted) {
 					watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
 					cpm.deleteContainer(container)
 					cpm.notifyContainerEndOfLife(container)
-					return ObjectCompleted
+					return file.ObjectCompleted
 				}
 			}
 
