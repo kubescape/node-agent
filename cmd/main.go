@@ -151,7 +151,7 @@ func main() {
 	// Create clients
 	logger.L().Info("Kubernetes mode is true")
 	k8sClient := k8sinterface.NewKubernetesApi()
-	storageClient, err := storage.CreateStorage(clusterData.Namespace, cfg.UpdateDataPeriod)
+	storageClient, err := storage.CreateStorage(ctx, clusterData.Namespace, cfg.UpdateDataPeriod)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the storage client", helpers.Error(err))
 	}
