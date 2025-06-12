@@ -141,6 +141,22 @@ func TestQueueLRUEviction(t *testing.T) {
 	if queueData.GetQueueSize() != 3 {
 		t.Errorf("Expected queue size 3 due to LRU eviction, got %d", queueData.GetQueueSize())
 	}
+
+	// Check the names of the profiles in the queue
+	for i := 0; i < 3; i++ {
+		profile, err := queueData.queue.Dequeue()
+		if err != nil {
+			t.Fatalf("Failed to dequeue profile %d: %v", i, err)
+		}
+		if profile == nil {
+			t.Fatalf("Expected profile %d, got nil", i)
+		}
+		newProfile := profile.(*QueuedContainerProfile).Profile
+		expectedName := fmt.Sprintf("test-profile-%d", i+2) // Should keep last 3 profiles
+		if newProfile.Name != expectedName {
+			t.Errorf("Expected profile name '%s', got '%s'", expectedName, newProfile.Name)
+		}
+	}
 }
 
 func TestQueueRetryMechanism(t *testing.T) {
