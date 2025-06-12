@@ -159,7 +159,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	}
 
 	if err := cpm.storageClient.CreateContainerProfile(containerProfile, container.K8s.Namespace); err != nil {
-		cpm.logContainerProfile(containerProfile)
+		cpm.logContainerProfile(containerProfile) // TODO: Remove this line in production code, it's for debugging purposes.
 		// Empty the container data to prevent reporting the same data again
 		containerData.emptyEvents()
 		return err
