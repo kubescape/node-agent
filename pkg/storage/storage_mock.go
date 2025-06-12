@@ -6,19 +6,16 @@ import (
 )
 
 const (
-	NginxKey         = "nginx-c9b3ae"
+	NginxKey         = "nginx-c9b3ae" // TODO: remove this constant as it is unused @matthias?
 	NginxImageID     = "nginx@sha256:6a59f1cbb8d28ac484176d52c473494859a512ddba3ea62a547258cf16c9b3ae"
 	FluentBitImageID = "fluentbit@sha256:236f7d961b0ba8b91796955f155819d64801e0d00fa666147502ab9b5b80f623"
 )
 
 type StorageHttpClientMock struct {
-	ApplicationActivities []*spdxv1beta1.ApplicationActivity
-	ApplicationProfiles   []*spdxv1beta1.ApplicationProfile
-	SyftSBOMs             []*spdxv1beta1.SBOMSyft
-	NetworkNeighborhoods  []*v1beta1.NetworkNeighborhood
-	ImageCounters         map[string]int
-	mockSBOM              *v1beta1.SBOMSyft
-	failedOnce            bool
+	SyftSBOMs         []*spdxv1beta1.SBOMSyft
+	ContainerProfiles []*v1beta1.ContainerProfile
+	ImageCounters     map[string]int
+	mockSBOM          *v1beta1.SBOMSyft
 }
 
 var _ StorageClient = (*StorageHttpClientMock)(nil)
@@ -53,4 +50,9 @@ func (sc *StorageHttpClientMock) DecrementImageUse(imageID string) {
 		sc.ImageCounters[imageID] = 0
 	}
 	sc.ImageCounters[imageID]--
+}
+
+func (sc *StorageHttpClientMock) CreateContainerProfile(profile *v1beta1.ContainerProfile, namespace string) error {
+	sc.ContainerProfiles = append(sc.ContainerProfiles, profile)
+	return nil
 }

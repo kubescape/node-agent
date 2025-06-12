@@ -28,16 +28,15 @@ const (
 )
 
 type Storage struct {
-	StorageClient          spdxv1beta1.SpdxV1beta1Interface
-	maxElapsedTime         time.Duration
-	maxJsonPatchOperations int
-	namespace              string
-	multiplier             *int // used for testing to multiply the resources by this
+	StorageClient spdxv1beta1.SpdxV1beta1Interface
+	namespace     string
+	multiplier    *int // used for testing to multiply the resources by this
+	queueData     *QueueData
 }
 
 var _ storage.StorageClient = (*Storage)(nil)
 
-func CreateStorage(namespace string, maxElapsedTime time.Duration) (*Storage, error) {
+func CreateStorage(ctx context.Context, namespace string, maxElapsedTime time.Duration) (*Storage, error) {
 	var cfg *rest.Config
 	kubeconfig := os.Getenv(KubeConfig)
 	// use the current context in kubeconfig
@@ -67,60 +66,119 @@ func CreateStorage(namespace string, maxElapsedTime time.Duration) (*Storage, er
 		return nil, fmt.Errorf("too many retries waiting for storage: %w", err)
 	}
 
-	return &Storage{
-		StorageClient:          clientset.SpdxV1beta1(),
-		maxElapsedTime:         maxElapsedTime,
-		maxJsonPatchOperations: 9999,
-		namespace:              namespace,
-		multiplier:             getMultiplier(),
-	}, nil
+	storage := &Storage{
+		StorageClient: clientset.SpdxV1beta1(),
+		namespace:     namespace,
+		multiplier:    getMultiplier(),
+	}
+
+	// Initialize queue
+	queueDir := os.Getenv("QUEUE_DIR")
+	if queueDir == "" {
+		queueDir = DefaultQueueDir
+		logger.L().Info("QUEUE_DIR is not set, using default directory", helpers.String("default", DefaultQueueDir))
+	}
+
+	// Get max queue size from environment or use default
+	maxQueueSize := DefaultMaxQueueSize
+	if maxSizeStr := os.Getenv("MAX_QUEUE_SIZE"); maxSizeStr != "" {
+		if size, err := strconv.Atoi(maxSizeStr); err == nil && size > 0 {
+			maxQueueSize = size
+		}
+	}
+
+	// Initialize queue with storage as the ProfileCreator
+	queueData, err := NewQueueData(ctx, storage, QueueConfig{
+		QueueName:       DefaultQueueName,
+		QueueDir:        queueDir,
+		MaxQueueSize:    maxQueueSize,
+		RetryInterval:   DefaultRetryInterval,
+		ItemsPerSegment: ItemsPerSegment,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize queue: %w", err)
+	}
+
+	storage.queueData = queueData
+
+	// Start queue processing
+	storage.queueData.Start()
+
+	logger.L().Info("storage initialized with persistent queue",
+		helpers.String("queueDir", queueDir),
+		helpers.Int("maxQueueSize", maxQueueSize),
+		helpers.Int("currentQueueSize", queueData.GetQueueSize()))
+
+	return storage, nil
+
 }
 
 func CreateFakeStorage(namespace string) (*Storage, error) {
-	return &Storage{
+	storage := &Storage{
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
 		namespace:     namespace,
-	}, nil
+		multiplier:    getMultiplier(),
+	}
+
+	// Initialize a simple queue for fake storage (useful for testing)
+	queueDir := "/tmp/fake-storage-queue"
+	os.MkdirAll(queueDir, 0755)
+
+	queueData, err := NewQueueData(context.Background(), storage, QueueConfig{
+		QueueName:       DefaultQueueName + "-fake",
+		QueueDir:        queueDir,
+		MaxQueueSize:    DefaultMaxQueueSize,
+		RetryInterval:   DefaultRetryInterval,
+		ItemsPerSegment: ItemsPerSegment,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create fake queue: %w", err)
+	}
+
+	storage.queueData = queueData
+	storage.queueData.Start()
+
+	return storage, nil
 }
 
-func (sc Storage) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
+func (sc *Storage) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
 }
 
-func (sc Storage) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
+func (sc *Storage) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
 }
 
-func (sc Storage) GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error) {
+func (sc *Storage) GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{ResourceVersion: softwarecomposition.ResourceVersionMetadata})
 }
 
-func (sc Storage) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
+func (sc *Storage) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Update(context.Background(), SBOM, metav1.UpdateOptions{})
 }
 
-func (sc Storage) IncrementImageUse(_ string) {
+func (sc *Storage) IncrementImageUse(_ string) {
 	// noop
 }
 
-func (sc Storage) DecrementImageUse(_ string) {
+func (sc *Storage) DecrementImageUse(_ string) {
 	// noop
 }
 
-func (sc Storage) modifyName(n string) string {
+func (sc *Storage) modifyName(n string) string {
 	if sc.multiplier != nil {
 		return fmt.Sprintf("%s-%d", n, *sc.multiplier)
 	}
 	return n
 }
 
-func (sc Storage) modifyNameP(n *string) {
+func (sc *Storage) modifyNameP(n *string) {
 	if sc.multiplier != nil {
 		*n = fmt.Sprintf("%s-%d", *n, *sc.multiplier)
 	}
 }
 
-func (sc Storage) revertNameP(n *string) {
+func (sc *Storage) revertNameP(n *string) {
 	if sc.multiplier != nil {
 		*n = strings.TrimSuffix(*n, fmt.Sprintf("-%d", *sc.multiplier))
 	}
