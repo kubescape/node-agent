@@ -36,16 +36,16 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 					helpers.String("status", string(watchedContainer.GetStatus())),
 					helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 
-				if errors.Is(err, file.TooLargeObjectError) {
+				if errors.Is(err, file.ObjectTooLargeError) {
 					watchedContainer.SetStatus(objectcache.WatchedContainerStatusTooLarge)
 					cpm.deleteContainer(container)
 					cpm.notifyContainerEndOfLife(container)
-					return file.TooLargeObjectError
-				} else if errors.Is(err, file.ObjectCompleted) {
+					return file.ObjectTooLargeError
+				} else if errors.Is(err, file.ObjectCompletedError) {
 					watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
 					cpm.deleteContainer(container)
 					cpm.notifyContainerEndOfLife(container)
-					return file.ObjectCompleted
+					return file.ObjectCompletedError
 				}
 			}
 
