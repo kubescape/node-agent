@@ -63,6 +63,16 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		return fmt.Errorf("failed to get shared data for container %s: %w", containerID, err)
 	}
 
+	// Ignore ephemeral containers
+	if sharedData.ContainerType == objectcache.EphemeralContainer {
+		logger.L().Debug("ignoring ephemeral container",
+			helpers.String("containerID", containerID),
+			helpers.String("containerName", container.Runtime.ContainerName),
+			helpers.String("podName", container.K8s.PodName),
+			helpers.String("namespace", container.K8s.Namespace))
+		return nil
+	}
+
 	if !cpm.cfg.EnableRuntimeDetection && sharedData.PreRunningContainer {
 		logger.L().Debug("ignoring pre-running container without runtime detection",
 			helpers.String("containerID", containerID),
