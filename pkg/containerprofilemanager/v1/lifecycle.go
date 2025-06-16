@@ -257,7 +257,7 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 
 	// Set the update data ticker
 	if sharedData.UpdateDataTicker == nil {
-		sharedData.UpdateDataTicker = time.NewTicker(utils.AddJitter(cpm.cfg.UpdateDataPeriod, cpm.cfg.MaxJitterPercentage))
+		sharedData.UpdateDataTicker = time.NewTicker(utils.AddJitter(cpm.cfg.InitialDelay, cpm.cfg.MaxJitterPercentage))
 	}
 
 	// Set the initial delay expired to false
