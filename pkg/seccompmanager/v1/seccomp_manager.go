@@ -114,6 +114,9 @@ func getProfilesDir() (string, error) {
 	kubeletRoot, exists := os.LookupEnv("KUBELET_ROOT")
 	if !exists {
 		kubeletRoot = "/var/lib/kubelet"
+	} else {
+		// if KUBELET_ROOT is set, we don't need to use HOST_ROOT, this enables using two different mounts in the container (one is RO, one is RW)
+		hostRoot = ""
 	}
 	// use securejoin to join the two, add seccomp and store in seccompProfilesDir
 	seccompProfilesDir, err := securejoin.SecureJoin(hostRoot, filepath.Join(kubeletRoot, "seccomp"))
