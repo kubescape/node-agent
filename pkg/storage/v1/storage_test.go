@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"os"
 	"reflect"
 	"testing"
 
@@ -278,9 +279,23 @@ func TestStorage_CreateContainerProfile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sc, _ := CreateFakeStorage("kubescape")
+			// Create a unique temporary directory for this test
+			tempDir, err := os.MkdirTemp("", "fake-storage-queue-*")
+			if err != nil {
+				t.Fatalf("Failed to create temp directory: %v", err)
+			}
+			defer os.RemoveAll(tempDir) // Clean up after test
 
-			err := sc.CreateContainerProfile(tt.profile, tt.namespace)
+			// Override the queue directory for this test
+			t.Setenv("QUEUE_DIR", tempDir)
+
+			sc, err := CreateFakeStorage("kubescape")
+			if err != nil {
+				t.Fatalf("Failed to create fake storage: %v", err)
+			}
+			defer sc.queueData.Close() // Ensure queue is closed after test
+
+			err = sc.CreateContainerProfile(tt.profile, tt.namespace)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateContainerProfile() error = %v, wantErr %v", err, tt.wantErr)
 				return
