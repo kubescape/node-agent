@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"errors"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -29,7 +28,7 @@ func (sc *Storage) CreateContainerProfile(profile *v1beta1.ContainerProfile, nam
 	if err := sc.CreateContainerProfileDirect(profile); err == nil {
 		logger.L().Debug("container profile created directly", helpers.String("name", profile.Name), helpers.String("namespace", profile.Namespace))
 		return nil
-	} else if errors.Is(err, file.ObjectTooLargeError) || errors.Is(err, file.ObjectCompletedError) {
+	} else if err != nil && (err.Error() == file.ObjectTooLargeError.Error() || err.Error() == file.ObjectCompletedError.Error()) {
 		return err // Don't queue if the profile is too large or already completed
 	} else {
 		logger.L().Debug("failed to create container profile directly, queuing for later", helpers.String("name", profile.Name), helpers.String("namespace", profile.Namespace), helpers.Error(err))
