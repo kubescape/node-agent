@@ -373,7 +373,7 @@ replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5
 
 replace github.com/mholt/archiver/v3 v3.5.1 => github.com/anchore/archiver/v3 v3.5.2
 
-replace github.com/kubescape/storage => github.com/kubescape/storage v0.0.186-0.20250616091142-85394e0e6cab
+replace github.com/kubescape/storage => github.com/kubescape/storage v0.0.186-0.20250617125531-c8c841418020
 
 replace github.com/kubescape/k8s-interface => github.com/kubescape/k8s-interface v0.0.196-0.20250605131454-ebc0f2a0390c
 
