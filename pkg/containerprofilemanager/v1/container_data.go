@@ -23,6 +23,21 @@ func (cd *containerData) emptyEvents() {
 	cd.rulePolicies = nil
 	cd.callStacks = nil
 	cd.networks = nil
+	cd.lastReportedCompletion = string(cd.watchedContainerData.GetCompletionStatus())
+	cd.lastReportedStatus = string(cd.watchedContainerData.GetStatus())
+}
+
+// isEmpty returns true if the container data is empty
+func (cd *containerData) isEmpty() bool {
+	return cd.capabilites == nil &&
+		cd.endpoints == nil &&
+		cd.execs == nil &&
+		cd.opens == nil &&
+		cd.rulePolicies == nil &&
+		cd.callStacks == nil &&
+		cd.networks == nil &&
+		cd.lastReportedCompletion == string(cd.watchedContainerData.GetCompletionStatus()) &&
+		cd.lastReportedStatus == string(cd.watchedContainerData.GetStatus())
 }
 
 // getCapabilities returns a sorted slice of capabilities

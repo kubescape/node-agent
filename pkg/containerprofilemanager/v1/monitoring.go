@@ -121,6 +121,10 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		watchedContainer.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusPartial)
 	}
 
+	if containerData.isEmpty() && len(syscalls) == 0 { // TODO: Also check if the seccomp profile is new (currently not implemented)
+		return nil
+	}
+
 	// Update timestamps before saving
 	watchedContainer.PreviousReportTimestamp = watchedContainer.CurrentReportTimestamp
 	watchedContainer.CurrentReportTimestamp = time.Now()

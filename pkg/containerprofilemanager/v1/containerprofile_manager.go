@@ -43,6 +43,10 @@ type containerData struct {
 	callStacks    *maps.SafeMap[string, *v1beta1.IdentifiedCallStack] // Map of callstacks, key is SHA256 hash
 	networks      mapset.Set[NetworkEvent]
 	droppedEvents bool // Indicates if any events were dropped during monitoring
+
+	// Last reported completion/statuses
+	lastReportedCompletion string
+	lastReportedStatus     string
 }
 
 // ContainerProfileManager manages container profiles and their lifecycle
