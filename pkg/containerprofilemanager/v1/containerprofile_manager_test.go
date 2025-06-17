@@ -558,14 +558,19 @@ func TestContainerDataMethods(t *testing.T) {
 }
 
 func TestContainerDataEmptyEvents(t *testing.T) {
+	watchedContainerData := &objectcache.WatchedContainerData{}
+	watchedContainerData.SetCompletionStatus(objectcache.WatchedContainerCompletionStatus(objectcache.WatchedContainerStatusCompleted))
+	watchedContainerData.SetStatus(objectcache.WatchedContainerStatus(objectcache.WatchedContainerCompletionStatusFull))
+
 	cd := &containerData{
-		capabilites:  mapset.NewSet[string]("cap1"),
-		endpoints:    &maps.SafeMap[string, *v1beta1.HTTPEndpoint]{},
-		execs:        &maps.SafeMap[string, []string]{},
-		opens:        &maps.SafeMap[string, mapset.Set[string]]{},
-		rulePolicies: &maps.SafeMap[string, *v1beta1.RulePolicy]{},
-		callStacks:   &maps.SafeMap[string, *v1beta1.IdentifiedCallStack]{},
-		networks:     mapset.NewSet[NetworkEvent](),
+		watchedContainerData: watchedContainerData,
+		capabilites:          mapset.NewSet[string]("cap1"),
+		endpoints:            &maps.SafeMap[string, *v1beta1.HTTPEndpoint]{},
+		execs:                &maps.SafeMap[string, []string]{},
+		opens:                &maps.SafeMap[string, mapset.Set[string]]{},
+		rulePolicies:         &maps.SafeMap[string, *v1beta1.RulePolicy]{},
+		callStacks:           &maps.SafeMap[string, *v1beta1.IdentifiedCallStack]{},
+		networks:             mapset.NewSet[NetworkEvent](),
 	}
 
 	cd.emptyEvents()
