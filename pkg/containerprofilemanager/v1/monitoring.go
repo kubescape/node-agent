@@ -163,7 +163,6 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	}
 
 	if err := cpm.storageClient.CreateContainerProfile(containerProfile, container.K8s.Namespace); err != nil {
-		cpm.logContainerProfile(containerProfile) // TODO: Remove this line in production code, it's for debugging purposes.
 		// Empty the container data to prevent reporting the same data again
 		containerData.emptyEvents()
 		return err
@@ -178,23 +177,4 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	containerData.emptyEvents()
 
 	return nil
-}
-
-// For debugging purposes, we can log the container profile
-func (cpm *ContainerProfileManager) logContainerProfile(containerProfile *v1beta1.ContainerProfile) {
-	logger.L().Debug("Container Profile",
-		helpers.String("name", containerProfile.Name),
-		helpers.String("namespace", containerProfile.Namespace),
-		helpers.String("currentReportTimestamp", containerProfile.Annotations[helpersv1.ReportTimestampMetadataKey]),
-		helpers.String("previousReportTimestamp", containerProfile.Annotations[helpersv1.PreviousReportTimestampMetadataKey]),
-		helpers.String("slug", containerProfile.Name),
-		helpers.String("imageID", containerProfile.Spec.ImageID),
-		helpers.String("imageTag", containerProfile.Spec.ImageTag),
-		helpers.Interface("seccompProfile", containerProfile.Spec.SeccompProfile),
-		helpers.Interface("capabilities", containerProfile.Spec.Capabilities),
-		helpers.Interface("execs", containerProfile.Spec.Execs),
-		helpers.Interface("opens", containerProfile.Spec.Opens),
-		helpers.Interface("syscalls", containerProfile.Spec.Syscalls),
-		helpers.Interface("endpoints", containerProfile.Spec.Endpoints),
-	)
 }
