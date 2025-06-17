@@ -29,13 +29,6 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 
 			watchedContainer.SetStatus(objectcache.WatchedContainerStatusReady)
 			if err := cpm.saveProfile(watchedContainer, container); err != nil {
-				logger.L().Error("failed to save container profile", helpers.Error(err),
-					helpers.String("containerID", watchedContainer.ContainerID),
-					helpers.String("containerName", container.Runtime.ContainerName),
-					helpers.String("workloadID", watchedContainer.Wlid),
-					helpers.String("status", string(watchedContainer.GetStatus())),
-					helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
-
 				if err.Error() == file.ObjectTooLargeError.Error() {
 					watchedContainer.SetStatus(objectcache.WatchedContainerStatusTooLarge)
 					cpm.deleteContainer(container)
@@ -46,6 +39,13 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 					cpm.deleteContainer(container)
 					cpm.notifyContainerEndOfLife(container)
 					return file.ObjectCompletedError
+				} else {
+					logger.L().Error("failed to save container profile", helpers.Error(err),
+						helpers.String("containerID", watchedContainer.ContainerID),
+						helpers.String("containerName", container.Runtime.ContainerName),
+						helpers.String("workloadID", watchedContainer.Wlid),
+						helpers.String("status", string(watchedContainer.GetStatus())),
+						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 				}
 			}
 
