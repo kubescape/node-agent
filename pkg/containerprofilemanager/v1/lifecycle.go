@@ -294,7 +294,7 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 
 	// Set the sync channel
 	if sharedData.SyncChannel == nil {
-		sharedData.SyncChannel = make(chan error, 10)
+		sharedData.SyncChannel = make(chan error)
 	}
 
 	// Set the update data ticker
