@@ -170,6 +170,12 @@ func (cpm *ContainerProfileManager) ReportRulePolicy(containerID, ruleId, allowe
 	err := cpm.withContainer(containerID, func(data *containerData) error {
 		if data.rulePolicies == nil {
 			data.rulePolicies = &maps.SafeMap[string, *v1beta1.RulePolicy]{}
+
+			policies := cpm.getRulePolicies()
+
+			for id, policy := range policies {
+				data.rulePolicies.Set(id, &policy)
+			}
 		}
 
 		newPolicy := &v1beta1.RulePolicy{
@@ -326,40 +332,23 @@ func (cpm *ContainerProfileManager) isValidNetworkEvent(event *tracernetworktype
 	return true
 }
 
-func (cpm *ContainerProfileManager) reportInitialPolicies(containerID string) {
-	policies := cpm.getRulePolicies()
-
-	err := cpm.withContainer(containerID, func(data *containerData) error {
-		if data.rulePolicies == nil {
-			data.rulePolicies = &maps.SafeMap[string, *v1beta1.RulePolicy]{}
-		}
-
-		for id, policy := range policies {
-			data.rulePolicies.Set(id, &policy)
-		}
-		return nil
-	})
-
-	cpm.logEventError(err, "initial policies", containerID)
-}
-
 // getRulePolicies returns a map of rule policies based on the rule cache
 func (cpm *ContainerProfileManager) getRulePolicies() map[string]v1beta1.RulePolicy {
-	operations := make(map[string]v1beta1.RulePolicy)
+	policies := make(map[string]v1beta1.RulePolicy)
 
 	if reflect.ValueOf(cpm.ruleBindingCache).IsNil() {
-		return operations
+		return policies
 	}
 
 	ids := cpm.ruleBindingCache.GetRuleCreator().GetAllRuleIDs()
 	for _, id := range ids {
-		operations[id] = v1beta1.RulePolicy{
+		policies[id] = v1beta1.RulePolicy{
 			AllowedContainer: false,
 			AllowedProcesses: []string{},
 		}
 	}
 
-	return operations
+	return policies
 }
 
 // logEventError provides consistent error logging for event reporting

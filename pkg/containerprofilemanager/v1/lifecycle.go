@@ -109,9 +109,6 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 	// Start monitoring in separate goroutine
 	go cpm.startContainerMonitoring(container, sharedData)
 
-	// Report initial policies
-	cpm.reportInitialPolicies(containerID)
-
 	logger.L().Debug("container added to container profile manager",
 		helpers.String("containerID", containerID),
 		helpers.String("workloadID", sharedData.Wlid),
