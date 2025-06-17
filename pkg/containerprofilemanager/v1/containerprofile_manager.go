@@ -23,6 +23,8 @@ import (
 type ContainerEntry struct {
 	data *containerData
 	mu   sync.RWMutex
+	// ready channel is used to signal when the container entry is fully initialized
+	ready chan struct{}
 }
 
 // containerData contains all the monitored data for a single container

@@ -35,7 +35,8 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 
 	// Create container entry early with nil watchedContainerData
 	entry := &ContainerEntry{
-		data: &containerData{},
+		data:  &containerData{},
+		ready: make(chan struct{}),
 	}
 	cpm.addContainerEntry(containerID, entry)
 
@@ -121,6 +122,9 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 	// Start monitoring in separate goroutine
 	go cpm.startContainerMonitoring(container, sharedData)
 
+	// Signal that the container entry is ready
+	close(entry.ready)
+
 	logger.L().Debug("container added to container profile manager",
 		helpers.String("containerID", containerID),
 		helpers.String("workloadID", sharedData.Wlid),
@@ -195,6 +199,22 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace))
 		return
+	}
+
+	// Wait for shared data to be available, this is needed to avoid race condition in case the container is deleted before the shared data is available
+	ctx, cancel := context.WithTimeout(context.Background(), MaxWaitForSharedContainerData)
+	defer cancel()
+
+	// Wait for either the container to be ready or timeout
+	select {
+	case <-entry.ready:
+		// Container is ready, proceed with deletion
+	case <-ctx.Done():
+		logger.L().Debug("timeout waiting for container to be ready, proceeding with deletion",
+			helpers.String("containerID", containerID),
+			helpers.String("containerName", container.Runtime.ContainerName),
+			helpers.String("podName", container.K8s.PodName),
+			helpers.String("namespace", container.K8s.Namespace))
 	}
 
 	// Clean up container resources
