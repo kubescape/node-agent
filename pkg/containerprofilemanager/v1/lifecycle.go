@@ -31,6 +31,14 @@ func (cpm *ContainerProfileManager) ContainerCallback(notif containercollection.
 
 // addContainerWithTimeout handles adding a container with a timeout to prevent hanging
 func (cpm *ContainerProfileManager) addContainerWithTimeout(container *containercollection.Container) {
+	containerID := container.Runtime.ContainerID
+
+	// Create container entry early with nil watchedContainerData
+	entry := &ContainerEntry{
+		data: &containerData{},
+	}
+	cpm.addContainerEntry(containerID, entry)
+
 	ctx, cancel := context.WithTimeout(context.Background(), MaxWaitForSharedContainerData)
 	defer cancel()
 
@@ -57,9 +65,11 @@ func (cpm *ContainerProfileManager) addContainerWithTimeout(container *container
 func (cpm *ContainerProfileManager) addContainer(container *containercollection.Container, ctx context.Context) error {
 	containerID := container.Runtime.ContainerID
 
-	// Get shared container data with timeout
+	// Wait for shared container data with timeout
 	sharedData, err := cpm.waitForSharedContainerData(containerID, ctx)
 	if err != nil {
+		// Remove the container entry and all stacked events if we fail
+		cpm.removeContainerEntry(containerID)
 		return fmt.Errorf("failed to get shared data for container %s: %w", containerID, err)
 	}
 
@@ -70,6 +80,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace))
+		cpm.removeContainerEntry(containerID)
 		return nil
 	}
 
@@ -79,21 +90,22 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 			helpers.String("containerName", container.Runtime.ContainerName),
 			helpers.String("podName", container.K8s.PodName),
 			helpers.String("namespace", container.K8s.Namespace))
+		cpm.removeContainerEntry(containerID)
 		return nil
 	}
 
-	// Create container entry
-	entry := &ContainerEntry{
-		data: &containerData{
-			watchedContainerData: sharedData,
-		},
+	// Update the existing container entry with watchedContainerData
+	entry, exists := cpm.getContainerEntry(containerID)
+	if !exists || entry.data == nil {
+		// Should not happen, but guard just in case
+		return fmt.Errorf("container entry missing for %s after shared data ready", containerID)
 	}
+	entry.mu.Lock()
+	entry.data.watchedContainerData = sharedData
+	entry.mu.Unlock()
 
-	// Set container data
+	// Set container data fields
 	cpm.setContainerData(container, sharedData)
-
-	// Add to containers map
-	cpm.addContainerEntry(containerID, entry)
 
 	// Setup monitoring timer
 	sniffingTime := cpm.calculateSniffingTime(container)
