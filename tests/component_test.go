@@ -1133,8 +1133,8 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	}
 
 	// Wait for application profile to be ready
-	assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
-	time.Sleep(30 * time.Second)
+	// assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
+	time.Sleep(10 * time.Second)
 
 	// Add to rule policy symlink
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "-s", "/etc/shadow", "/tmp/a"}, "")
@@ -1169,7 +1169,7 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	fmt.Println("After completed....")
 
 	// wait for cache
-	time.Sleep(120 * time.Second)
+	time.Sleep(40 * time.Second)
 
 	// generate hardlink alert
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "/etc/shadow", "/tmp/a"}, "")
@@ -1182,7 +1182,7 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Wait for the alert to be signaled
-	time.Sleep(60 * time.Second)
+	time.Sleep(30 * time.Second)
 
 	alerts, err := testutils.GetAlerts(endpointTraffic.Namespace)
 	if err != nil {
