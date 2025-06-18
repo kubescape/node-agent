@@ -299,14 +299,14 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 		sharedData.SeriesID = createUUID()
 	}
 
-	// Set the sync channel (buffered)
+	// Set the sync channel
 	if sharedData.SyncChannel == nil {
-		sharedData.SyncChannel = make(chan error, 1)
+		sharedData.SyncChannel = make(chan error)
 	}
 
-	// Set the ack channel (buffered)
+	// Set the ack channel
 	if sharedData.AckChan == nil {
-		sharedData.AckChan = make(chan struct{}, 1)
+		sharedData.AckChan = make(chan struct{})
 	}
 
 	// Set the update data ticker
