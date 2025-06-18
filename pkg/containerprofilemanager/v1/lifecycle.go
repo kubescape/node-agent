@@ -169,9 +169,15 @@ func (cpm *ContainerProfileManager) handleContainerMaxTime(container *containerc
 		if data.watchedContainerData != nil {
 			select {
 			case data.watchedContainerData.SyncChannel <- ContainerReachedMaxTime:
-				// Wait for ack from monitoring goroutine
+				// Wait for ack from monitoring goroutine with timeout
 				if data.watchedContainerData.AckChan != nil {
-					<-data.watchedContainerData.AckChan
+					select {
+					case <-data.watchedContainerData.AckChan:
+						// Ack received
+					case <-time.After(1 * time.Second):
+						logger.L().Warning("timeout waiting for ack from monitoring goroutine after max time",
+							helpers.String("containerID", containerID))
+					}
 				}
 			default:
 				// Channel might be full or closed, continue with cleanup
@@ -242,9 +248,15 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 			// Send container termination signal
 			select {
 			case entry.data.watchedContainerData.SyncChannel <- ContainerHasTerminatedError:
-				// Wait for ack from monitoring goroutine
+				// Wait for ack from monitoring goroutine with timeout
 				if entry.data.watchedContainerData.AckChan != nil {
-					<-entry.data.watchedContainerData.AckChan
+					select {
+					case <-entry.data.watchedContainerData.AckChan:
+						// Ack received
+					case <-time.After(1 * time.Second):
+						logger.L().Warning("timeout waiting for ack from monitoring goroutine after termination",
+							helpers.String("containerID", containerID))
+					}
 				}
 			default:
 				// Channel might be full or closed, continue with cleanup
@@ -300,9 +312,9 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 		sharedData.SyncChannel = make(chan error)
 	}
 
-	// Set the ack channel
+	// Set the ack channel (buffered)
 	if sharedData.AckChan == nil {
-		sharedData.AckChan = make(chan struct{})
+		sharedData.AckChan = make(chan struct{}, 1)
 	}
 
 	// Set the update data ticker
