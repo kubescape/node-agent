@@ -167,14 +167,9 @@ func (cpm *ContainerProfileManager) handleContainerMaxTime(container *containerc
 	var ackChan chan struct{}
 	err := cpm.withContainer(containerID, func(data *containerData) error {
 		if data.watchedContainerData != nil {
-			select {
-			case data.watchedContainerData.SyncChannel <- ContainerReachedMaxTime:
-				ackChan = data.watchedContainerData.AckChan
-			default:
-				// Channel might be full or closed, continue with cleanup
-				logger.L().Debug("could not send max time signal, channel may be full",
-					helpers.String("containerID", containerID))
-			}
+			// Send container max time signal (blocking send, safe because monitoring goroutine is always running)
+			data.watchedContainerData.SyncChannel <- ContainerReachedMaxTime
+			ackChan = data.watchedContainerData.AckChan
 		}
 		return nil
 	})
@@ -247,15 +242,9 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 				entry.data.watchedContainerData.SetStatus(objectcache.WatchedContainerStatusCompleted)
 			}
 
-			// Send container termination signal
-			select {
-			case entry.data.watchedContainerData.SyncChannel <- ContainerHasTerminatedError:
-				ackChan = entry.data.watchedContainerData.AckChan
-			default:
-				// Channel might be full or closed, continue with cleanup
-				logger.L().Debug("could not send termination signal, channel may be full",
-					helpers.String("containerID", containerID))
-			}
+			// Send container termination signal (blocking send, safe because monitoring goroutine is always running)
+			entry.data.watchedContainerData.SyncChannel <- ContainerHasTerminatedError
+			ackChan = entry.data.watchedContainerData.AckChan
 		}
 	}
 	entry.mu.Unlock()
@@ -310,7 +299,7 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 		sharedData.SeriesID = createUUID()
 	}
 
-	// Set the sync channel
+	// Set the sync channel (buffered)
 	if sharedData.SyncChannel == nil {
 		sharedData.SyncChannel = make(chan error, 1)
 	}
