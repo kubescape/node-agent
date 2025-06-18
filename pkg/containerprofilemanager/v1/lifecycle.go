@@ -312,7 +312,7 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 
 	// Set the sync channel
 	if sharedData.SyncChannel == nil {
-		sharedData.SyncChannel = make(chan error)
+		sharedData.SyncChannel = make(chan error, 1)
 	}
 
 	// Set the ack channel (buffered)
