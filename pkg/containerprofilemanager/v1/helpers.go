@@ -23,6 +23,7 @@ import (
 const (
 	MaxSniffingTimeLabel          = "kubescape.io/max-sniffing-time"
 	MaxWaitForSharedContainerData = 10 * time.Minute
+	MaxWaitForAck                 = 30 * time.Second
 )
 
 // createUUID generates a new UUID string

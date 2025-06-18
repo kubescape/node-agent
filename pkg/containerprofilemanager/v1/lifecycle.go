@@ -164,21 +164,12 @@ func (cpm *ContainerProfileManager) handleContainerMaxTime(container *containerc
 		helpers.String("podName", container.K8s.PodName),
 		helpers.String("namespace", container.K8s.Namespace))
 
-	// Signal the monitoring goroutine that max time was reached
+	var ackChan chan struct{}
 	err := cpm.withContainer(containerID, func(data *containerData) error {
 		if data.watchedContainerData != nil {
 			select {
 			case data.watchedContainerData.SyncChannel <- ContainerReachedMaxTime:
-				// Wait for ack from monitoring goroutine with timeout
-				if data.watchedContainerData.AckChan != nil {
-					select {
-					case <-data.watchedContainerData.AckChan:
-						// Ack received
-					case <-time.After(1 * time.Second):
-						logger.L().Warning("timeout waiting for ack from monitoring goroutine after max time",
-							helpers.String("containerID", containerID))
-					}
-				}
+				ackChan = data.watchedContainerData.AckChan
 			default:
 				// Channel might be full or closed, continue with cleanup
 				logger.L().Debug("could not send max time signal, channel may be full",
@@ -187,6 +178,16 @@ func (cpm *ContainerProfileManager) handleContainerMaxTime(container *containerc
 		}
 		return nil
 	})
+
+	if ackChan != nil {
+		select {
+		case <-ackChan:
+			// Ack received
+		case <-time.After(MaxWaitForAck):
+			logger.L().Warning("timeout waiting for ack from monitoring goroutine after max time",
+				helpers.String("containerID", containerID))
+		}
+	}
 
 	if err == nil {
 		cpm.deleteContainer(container)
@@ -225,6 +226,7 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 			helpers.String("namespace", container.K8s.Namespace))
 	}
 
+	var ackChan chan struct{}
 	// Clean up container resources
 	entry.mu.Lock()
 	if entry.data != nil {
@@ -248,16 +250,7 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 			// Send container termination signal
 			select {
 			case entry.data.watchedContainerData.SyncChannel <- ContainerHasTerminatedError:
-				// Wait for ack from monitoring goroutine with timeout
-				if entry.data.watchedContainerData.AckChan != nil {
-					select {
-					case <-entry.data.watchedContainerData.AckChan:
-						// Ack received
-					case <-time.After(1 * time.Second):
-						logger.L().Warning("timeout waiting for ack from monitoring goroutine after termination",
-							helpers.String("containerID", containerID))
-					}
-				}
+				ackChan = entry.data.watchedContainerData.AckChan
 			default:
 				// Channel might be full or closed, continue with cleanup
 				logger.L().Debug("could not send termination signal, channel may be full",
@@ -266,6 +259,16 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 		}
 	}
 	entry.mu.Unlock()
+
+	if ackChan != nil {
+		select {
+		case <-ackChan:
+			// Ack received
+		case <-time.After(MaxWaitForAck):
+			logger.L().Warning("timeout waiting for ack from monitoring goroutine after termination",
+				helpers.String("containerID", containerID))
+		}
+	}
 
 	// Remove the container entry from the map
 	cpm.removeContainerEntry(containerID)

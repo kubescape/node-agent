@@ -62,7 +62,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				}
 				// Signal ack to lifecycle goroutine
 				if watchedContainer.AckChan != nil {
-					close(watchedContainer.AckChan)
+					watchedContainer.AckChan <- struct{}{}
 				}
 				return ContainerHasTerminatedError
 
@@ -78,7 +78,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 				}
 				// Signal ack to lifecycle goroutine
 				if watchedContainer.AckChan != nil {
-					close(watchedContainer.AckChan)
+					watchedContainer.AckChan <- struct{}{}
 				}
 				return ContainerReachedMaxTime
 			}
