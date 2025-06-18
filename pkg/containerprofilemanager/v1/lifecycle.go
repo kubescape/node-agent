@@ -169,6 +169,10 @@ func (cpm *ContainerProfileManager) handleContainerMaxTime(container *containerc
 		if data.watchedContainerData != nil {
 			select {
 			case data.watchedContainerData.SyncChannel <- ContainerReachedMaxTime:
+				// Wait for ack from monitoring goroutine
+				if data.watchedContainerData.AckChan != nil {
+					<-data.watchedContainerData.AckChan
+				}
 			default:
 				// Channel might be full or closed, continue with cleanup
 				logger.L().Debug("could not send max time signal, channel may be full",
@@ -179,8 +183,6 @@ func (cpm *ContainerProfileManager) handleContainerMaxTime(container *containerc
 	})
 
 	if err == nil {
-		// Give monitoring goroutine time to process the signal
-		time.Sleep(100 * time.Millisecond)
 		cpm.deleteContainer(container)
 		cpm.notifyContainerEndOfLife(container)
 	}
@@ -240,6 +242,10 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 			// Send container termination signal
 			select {
 			case entry.data.watchedContainerData.SyncChannel <- ContainerHasTerminatedError:
+				// Wait for ack from monitoring goroutine
+				if entry.data.watchedContainerData.AckChan != nil {
+					<-entry.data.watchedContainerData.AckChan
+				}
 			default:
 				// Channel might be full or closed, continue with cleanup
 				logger.L().Debug("could not send termination signal, channel may be full",
@@ -248,9 +254,6 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 		}
 	}
 	entry.mu.Unlock()
-
-	// Give monitoring goroutine time to process the signal
-	time.Sleep(100 * time.Millisecond)
 
 	// Remove the container entry from the map
 	cpm.removeContainerEntry(containerID)
@@ -295,6 +298,11 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 	// Set the sync channel
 	if sharedData.SyncChannel == nil {
 		sharedData.SyncChannel = make(chan error)
+	}
+
+	// Set the ack channel
+	if sharedData.AckChan == nil {
+		sharedData.AckChan = make(chan struct{})
 	}
 
 	// Set the update data ticker

@@ -57,6 +57,7 @@ type WatchedContainerData struct {
 	InstanceID                                 instanceidhandler.IInstanceID
 	UpdateDataTicker                           *time.Ticker
 	SyncChannel                                chan error
+	AckChan                                    chan struct{}
 	RelevantRealtimeFilesByIdentifier          map[string]bool
 	RelevantRelationshipsArtifactsByIdentifier map[string]bool
 	RelevantArtifactsFilesByIdentifier         map[string]bool

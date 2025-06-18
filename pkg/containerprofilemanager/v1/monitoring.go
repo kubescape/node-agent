@@ -60,6 +60,10 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 						helpers.String("status", string(watchedContainer.GetStatus())),
 						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 				}
+				// Signal ack to lifecycle goroutine
+				if watchedContainer.AckChan != nil {
+					close(watchedContainer.AckChan)
+				}
 				return ContainerHasTerminatedError
 
 			case errors.Is(err, ContainerReachedMaxTime):
@@ -71,6 +75,10 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 						helpers.String("workloadID", watchedContainer.Wlid),
 						helpers.String("status", string(watchedContainer.GetStatus())),
 						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
+				}
+				// Signal ack to lifecycle goroutine
+				if watchedContainer.AckChan != nil {
+					close(watchedContainer.AckChan)
 				}
 				return ContainerReachedMaxTime
 			}
