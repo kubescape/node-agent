@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file"
 )
 
 const (
@@ -222,6 +223,12 @@ func (qd *QueueData) processAllItems() {
 		// Attempt to create the profile
 		err = qd.creator.CreateContainerProfileDirect(queuedProfile.Profile)
 		if err != nil {
+			if err.Error() == file.ObjectTooLargeError.Error() || err.Error() == file.ObjectCompletedError.Error() {
+				logger.L().Debug("failed to create container profile, skipping",
+					helpers.String("name", queuedProfile.Profile.Name),
+					helpers.Error(err))
+				continue
+			}
 			logger.L().Debug("failed to create container profile, requeuing",
 				helpers.String("name", queuedProfile.Profile.Name),
 				helpers.Error(err))
