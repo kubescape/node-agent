@@ -21,10 +21,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-const (
-	MaxSniffingTimeLabel = "kubescape.io/max-sniffing-time"
-)
-
 func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
 	logger.L().Debug("IGContainerWatcher.containerCallback - received container event", helpers.String("event", fmt.Sprintf("%+v", notif)), helpers.String("container", fmt.Sprintf("%+v", notif.Container)))
 	if notif.Container == nil || notif.Container.Runtime.ContainerID == "" {
