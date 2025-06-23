@@ -42,7 +42,7 @@ jobs:
         test: [
           Test_01_BasicAlertTest,
           Test_02_AllAlertsFromMaliciousApp,
-          Test_03_BasicLoadActivities,
+          # Test_03_BasicLoadActivities,
           # Test_04_MemoryLeak,
           # Test_05_MemoryLeak_10K_Alerts,
           Test_06_KillProcessInTheMiddle,

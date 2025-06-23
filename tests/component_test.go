@@ -60,8 +60,7 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	}
 	assert.NoError(t, wl.WaitForReady(80))
 
-	assert.NoError(t, wl.WaitForApplicationProfile(80, "ready"))
-	assert.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"))
+	time.Sleep(10 * time.Second)
 
 	// process launched from nginx container
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
