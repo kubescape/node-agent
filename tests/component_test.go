@@ -134,11 +134,6 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
 	}
 
-	// Malicious activity will be detected in 3 minutes + 300 seconds to wait for the alerts to be generated
-	maliciousAppWaitBeforeStart := time.Minute * 3
-	waitBeforeLookingForAlerts := time.Minute * 5
-	timer := time.NewTimer(maliciousAppWaitBeforeStart + waitBeforeLookingForAlerts)
-
 	// Wait for the application profile to be created and completed
 	err = wl.WaitForApplicationProfileCompletion(80)
 	if err != nil {
@@ -146,7 +141,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	}
 
 	// Wait for the alerts to be generated
-	<-timer.C
+	time.Sleep(1 * time.Minute)
 
 	// Get all the alerts for the namespace
 	alerts, err := testutils.GetAlerts(wl.Namespace)
