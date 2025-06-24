@@ -1539,9 +1539,9 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	}
 
 	// Sleep to allow the restart to complete
-	time.Sleep(15 * time.Second)
+	time.Sleep(30 * time.Second)
 
-	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, "multiple-containers-deployment")
+	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, wl.WorkloadObj.GetName())
 	if err != nil {
 		t.Errorf("Error re-fetching workload after restart: %v", err)
 	}
