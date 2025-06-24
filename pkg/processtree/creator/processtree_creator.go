@@ -24,27 +24,13 @@ func (pt *processTreeCreatorImpl) FeedEvent(event feeder.ProcessEvent) {
 
 	switch event.Type {
 	case feeder.ForkEvent:
-		pt.handleForkOrProcfsEvent(event, false)
+		pt.handleForkEvent(event)
 	case feeder.ProcfsEvent:
-		pt.handleForkOrProcfsEvent(event, true)
+		pt.handleProcfsEvent(event)
 	case feeder.ExecEvent:
-		// Update process info on exec
-		proc := pt.getOrCreateProcess(event.PID)
-		proc.PID = event.PID
-		proc.PPID = event.PPID
-		proc.Comm = event.Comm
-		proc.Pcomm = event.Pcomm
-		proc.Cmdline = event.Cmdline
-		proc.Uid = event.Uid
-		proc.Gid = event.Gid
-		proc.Cwd = event.Cwd
-		proc.Path = event.Path
-		if proc.ChildrenMap == nil {
-			proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
-		}
+		pt.handleExecEvent(event)
 	case feeder.ExitEvent:
-		// Remove process from tree
-		delete(pt.processMap, event.PID)
+		pt.handleExitEvent(event)
 	}
 }
 
@@ -71,54 +57,44 @@ func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, er
 	return pt.deepCopyProcess(proc), nil
 }
 
-// handleForkOrProcfsEvent handles both Fork and Procfs events, with enrichment for Procfs.
-func (pt *processTreeCreatorImpl) handleForkOrProcfsEvent(event feeder.ProcessEvent, enrichExisting bool) {
+// handleForkEvent handles fork events - only fills properties if they are empty or don't exist
+func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 	proc, exists := pt.processMap[event.PID]
 	if !exists {
 		proc = &apitypes.Process{PID: event.PID, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
 		pt.processMap[event.PID] = proc
 	}
-	if enrichExisting && exists {
-		// Only update fields if the new value is non-empty and the existing value is empty or default
-		if event.PPID != 0 && proc.PPID == 0 {
-			proc.PPID = event.PPID
-		}
-		if event.Comm != "" && proc.Comm == "" {
-			proc.Comm = event.Comm
-		}
-		if event.Pcomm != "" && proc.Pcomm == "" {
-			proc.Pcomm = event.Pcomm
-		}
-		if event.Cmdline != "" && proc.Cmdline == "" {
-			proc.Cmdline = event.Cmdline
-		}
-		if event.Uid != nil && proc.Uid == nil {
-			proc.Uid = event.Uid
-		}
-		if event.Gid != nil && proc.Gid == nil {
-			proc.Gid = event.Gid
-		}
-		if event.Cwd != "" && proc.Cwd == "" {
-			proc.Cwd = event.Cwd
-		}
-		if event.Path != "" && proc.Path == "" {
-			proc.Path = event.Path
-		}
-	} else {
-		// Overwrite or set all fields
-		proc.PID = event.PID
+
+	// Only set fields if they are empty or don't exist
+	if proc.PPID == 0 {
 		proc.PPID = event.PPID
+	}
+	if proc.Comm == "" {
 		proc.Comm = event.Comm
+	}
+	if proc.Pcomm == "" {
 		proc.Pcomm = event.Pcomm
+	}
+	if proc.Cmdline == "" {
 		proc.Cmdline = event.Cmdline
+	}
+	if proc.Uid == nil {
 		proc.Uid = event.Uid
+	}
+	if proc.Gid == nil {
 		proc.Gid = event.Gid
+	}
+	if proc.Cwd == "" {
 		proc.Cwd = event.Cwd
+	}
+	if proc.Path == "" {
 		proc.Path = event.Path
 	}
+
 	if proc.ChildrenMap == nil {
 		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
 	}
+
 	// Link to parent
 	if event.PPID != 0 {
 		parent := pt.getOrCreateProcess(event.PPID)
@@ -127,6 +103,122 @@ func (pt *processTreeCreatorImpl) handleForkOrProcfsEvent(event feeder.ProcessEv
 		}
 		parent.ChildrenMap[apitypes.CommPID{Comm: event.Comm, PID: event.PID}] = proc
 	}
+}
+
+// handleProcfsEvent handles procfs events - overrides when existing values are empty or don't exist
+func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
+	proc, exists := pt.processMap[event.PID]
+	if !exists {
+		proc = &apitypes.Process{PID: event.PID, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
+		pt.processMap[event.PID] = proc
+	}
+
+	// Override fields if the new value is non-empty and the existing value is empty or default
+	if event.PPID != 0 && proc.PPID == 0 {
+		proc.PPID = event.PPID
+	}
+	if event.Comm != "" && proc.Comm == "" {
+		proc.Comm = event.Comm
+	}
+	if event.Pcomm != "" && proc.Pcomm == "" {
+		proc.Pcomm = event.Pcomm
+	}
+	if event.Cmdline != "" && proc.Cmdline == "" {
+		proc.Cmdline = event.Cmdline
+	}
+	if event.Uid != nil && proc.Uid == nil {
+		proc.Uid = event.Uid
+	}
+	if event.Gid != nil && proc.Gid == nil {
+		proc.Gid = event.Gid
+	}
+	if event.Cwd != "" && proc.Cwd == "" {
+		proc.Cwd = event.Cwd
+	}
+	if event.Path != "" && proc.Path == "" {
+		proc.Path = event.Path
+	}
+
+	if proc.ChildrenMap == nil {
+		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+	}
+
+	// Link to parent
+	if event.PPID != 0 {
+		parent := pt.getOrCreateProcess(event.PPID)
+		if parent.ChildrenMap == nil {
+			parent.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+		}
+		parent.ChildrenMap[apitypes.CommPID{Comm: event.Comm, PID: event.PID}] = proc
+	}
+}
+
+// handleExecEvent handles exec events - always overrides when it has values
+func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
+	proc := pt.getOrCreateProcess(event.PID)
+
+	// Always override with new values if they are provided
+	if event.PPID != 0 {
+		proc.PPID = event.PPID
+	}
+	if event.Comm != "" {
+		proc.Comm = event.Comm
+	}
+	if event.Pcomm != "" {
+		proc.Pcomm = event.Pcomm
+	}
+	if event.Cmdline != "" {
+		proc.Cmdline = event.Cmdline
+	}
+	if event.Uid != nil {
+		proc.Uid = event.Uid
+	}
+	if event.Gid != nil {
+		proc.Gid = event.Gid
+	}
+	if event.Cwd != "" {
+		proc.Cwd = event.Cwd
+	}
+	if event.Path != "" {
+		proc.Path = event.Path
+	}
+
+	if proc.ChildrenMap == nil {
+		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+	}
+}
+
+// handleExitEvent handles exit events - removes process and updates orphaned children
+func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
+	proc, exists := pt.processMap[event.PID]
+	if !exists {
+		return // Process doesn't exist, nothing to clean up
+	}
+
+	// Remove from parent's children list first
+	if proc.PPID != 0 {
+		if parent, parentExists := pt.processMap[proc.PPID]; parentExists {
+			delete(parent.ChildrenMap, apitypes.CommPID{Comm: proc.Comm, PID: event.PID})
+		}
+	}
+
+	// Update children's PPID to 1 (init process) since they become orphaned
+	for childCommPID, child := range proc.ChildrenMap {
+		if child != nil {
+			child.PPID = 1 // Adopted by init process
+
+			// Add child to init process (PID 1) if it exists
+			if initProc, initExists := pt.processMap[1]; initExists {
+				if initProc.ChildrenMap == nil {
+					initProc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+				}
+				initProc.ChildrenMap[childCommPID] = child
+			}
+		}
+	}
+
+	// Only remove the exiting process, not its descendants
+	delete(pt.processMap, event.PID)
 }
 
 func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Process {
