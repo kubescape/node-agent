@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
@@ -1538,10 +1540,13 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 		t.Errorf("Error restarting deployment: %v", err)
 	}
 
+	// Print we restarted the deployment
+	logger.L().Info("restarted deployment", helpers.String("name", wl.WorkloadObj.GetName()), helpers.String("namespace", wl.WorkloadObj.GetNamespace()))
+
 	// Sleep to allow the restart to complete
 	time.Sleep(30 * time.Second)
 
-	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, wl.WorkloadObj.GetName())
+	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, "multiple-containers-deployment")
 	if err != nil {
 		t.Errorf("Error re-fetching workload after restart: %v", err)
 	}
@@ -1557,6 +1562,11 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error executing network command in pod during learning: %v", err)
 	}
+
+	// Print the workload details we are using
+	logger.L().Info("workload details", helpers.String("name", wl.WorkloadObj.GetName()), helpers.String("namespace", wl.WorkloadObj.GetNamespace()))
+	// Print the metadata of the workload
+	logger.L().Info("workload metadata", helpers.Interface("metadata", wl.WorkloadObj.GetAnnotations()), helpers.Interface("labels", wl.WorkloadObj.GetLabels()))
 
 	// Wait for the network neighborhood to be completed (with curl command learned)
 	err = wl.WaitForNetworkNeighborhoodCompletionWithBlacklist(160, []string{nn.Name})

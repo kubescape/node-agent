@@ -374,6 +374,8 @@ func (w *TestWorkload) WaitForNetworkNeighborhoodCompletionWithBlacklist(maxRetr
 			}
 			return nil
 		}
+		// Print the network neighborhood details
+		logger.L().Info("network neighborhood details", helpers.Interface("annotations", networkNeighborhood.Annotations), helpers.Interface("labels", networkNeighborhood.Labels))
 		return fmt.Errorf("network neighborhood is not in status 'completed'")
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
 		logger.L().Info("waiting for network neighborhood", helpers.Error(err), helpers.String("retry in", d.String()))
