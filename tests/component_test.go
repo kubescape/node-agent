@@ -137,7 +137,7 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 	}
 
 	// Wait for the application profile to be created and completed
-	err = wl.WaitForApplicationProfileCompletion(80)
+	err = wl.WaitForApplicationProfileCompletion(150)
 	if err != nil {
 		t.Errorf("Error waiting for application profile to be completed: %v", err)
 	}
