@@ -1,11 +1,14 @@
 package processtreecreator
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/kubescape/node-agent/pkg/processtree/utils"
 )
@@ -130,6 +133,9 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 
 	// If process doesn't exist, check if it was previously exited
 	if !exists {
+		logger.L().Info("ProcFS: Creating new process",
+			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)))
+
 		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
 		if pt.isProcessExited(processHash) {
 			return // Don't create a new process that has already exited
@@ -185,6 +191,9 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 
 	// If process doesn't exist, check if it was previously exited
 	if !exists {
+		logger.L().Info("Exec: Creating new process",
+			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)))
+
 		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
 		if pt.isProcessExited(processHash) {
 			return // Don't create a new process that has already exited

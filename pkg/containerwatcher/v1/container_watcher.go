@@ -55,6 +55,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
+	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
@@ -194,7 +195,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher, processManager processmanager.ProcessManagerClient,
 	clusterName string, objectCache objectcache.ObjectCache, networkStreamClient networkstream.NetworkStreamClient,
-	containerProcessTree containerprocesstree.ContainerProcessTree) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
+	containerProcessTree containerprocesstree.ContainerProcessTree, processTreeFeeder *feeder.EventFeeder) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
 
 	containerCollection := &containercollection.ContainerCollection{}
 
@@ -260,6 +261,8 @@ func CreateIGContainerWatcher(cfg config.Config,
 
 		// ProcessManager must be notified before the event is reported to the other managers.
 		processManager.ReportEvent(utils.ExecveEventType, &event)
+
+		processTreeFeeder.ReportEvent(utils.ExecveEventType, &event)
 
 		ruleManager.ReportEvent(utils.ExecveEventType, &event)
 		malwareManager.ReportEvent(utils.ExecveEventType, &event)
