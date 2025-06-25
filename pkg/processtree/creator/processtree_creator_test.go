@@ -881,3 +881,162 @@ func calculateProcessDepth(pid uint32, tree map[uint32]*ExpectedProcess) int {
 	}
 	return 1 + calculateProcessDepth(proc.PPID, tree)
 }
+
+// TestProcfsAfterExit tests the race condition scenario where procfs tries to add
+// a process that has already exited
+func TestProcfsAfterExit(t *testing.T) {
+	pt := NewProcessTreeCreator()
+
+	// Create a process
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "test-process",
+		Cmdline:     "/bin/test",
+		StartTimeNs: 1000,
+	})
+
+	// Verify process exists
+	proc, err := pt.GetProcessNode(1)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, "test-process", proc.Comm)
+
+	// Process exits
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ExitEvent,
+		PID:         1,
+		StartTimeNs: 1000, // Same start time as the original process
+	})
+
+	// Verify process is removed
+	proc, err = pt.GetProcessNode(1)
+	assert.NoError(t, err)
+	assert.Nil(t, proc)
+
+	// Simulate procfs trying to add the exited process
+	// This should not create a phantom process
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ProcfsEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "phantom-process",
+		Cmdline:     "/bin/phantom",
+		StartTimeNs: 1000, // Same start time as the exited process
+	})
+
+	// Verify process still doesn't exist (no phantom process created)
+	proc, err = pt.GetProcessNode(1)
+	assert.NoError(t, err)
+	assert.Nil(t, proc, "Procfs event after exit should not create phantom process")
+}
+
+// TestPIDReuseWithDifferentStartTime tests that PID reuse works correctly
+// when the start time is different (different process instance)
+func TestPIDReuseWithDifferentStartTime(t *testing.T) {
+	pt := NewProcessTreeCreator()
+
+	// Create first process with PID 1 and start time 1000
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "first-process",
+		StartTimeNs: 1000,
+	})
+
+	// Verify first process exists
+	proc, err := pt.GetProcessNode(1)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, "first-process", proc.Comm)
+
+	// First process exits
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ExitEvent,
+		PID:         1,
+		StartTimeNs: 1000,
+	})
+
+	// Verify first process is removed
+	proc, err = pt.GetProcessNode(1)
+	assert.NoError(t, err)
+	assert.Nil(t, proc)
+
+	// Create second process with same PID 1 but different start time 2000
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "second-process",
+		StartTimeNs: 2000, // Different start time
+	})
+
+	// Verify second process exists (PID reuse should work)
+	proc, err = pt.GetProcessNode(1)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, "second-process", proc.Comm)
+
+	// Try to add the first process again via procfs (should be blocked)
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ProcfsEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "phantom-first-process",
+		StartTimeNs: 1000, // Same start time as the first (exited) process
+	})
+
+	// Verify the second process is still there and not replaced
+	proc, err = pt.GetProcessNode(1)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, "second-process", proc.Comm, "Second process should not be replaced by phantom process")
+}
+
+// TestEnrichmentStillWorks tests that enrichment still works for existing processes
+// even when there are exited processes with the same PID but different start times
+func TestEnrichmentStillWorks(t *testing.T) {
+	pt := NewProcessTreeCreator()
+
+	// Create a process with PID 1 and start time 1000
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "test-process",
+		StartTimeNs: 1000,
+	})
+
+	// Verify process exists
+	proc, err := pt.GetProcessNode(1)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, "test-process", proc.Comm)
+	assert.Equal(t, "", proc.Cmdline) // Initially empty
+
+	// Exit a different process instance with same PID but different start time
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ExitEvent,
+		PID:         1,
+		StartTimeNs: 2000, // Different start time
+	})
+
+	// Enrich the existing process with additional information
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ProcfsEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "test-process",
+		Cmdline:     "/bin/test --enriched",
+		StartTimeNs: 1000, // Same start time as the existing process
+	})
+
+	// Verify the existing process was enriched
+	proc, err = pt.GetProcessNode(1)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, "test-process", proc.Comm)
+	assert.Equal(t, "/bin/test --enriched", proc.Cmdline, "Process should be enriched with cmdline")
+}

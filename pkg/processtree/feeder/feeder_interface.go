@@ -25,15 +25,16 @@ type ProcessEvent struct {
 	Timestamp time.Time
 
 	// Process identity
-	PID     uint32
-	PPID    uint32
-	Comm    string
-	Pcomm   string
-	Cmdline string
-	Uid     *uint32
-	Gid     *uint32
-	Cwd     string
-	Path    string
+	PID         uint32
+	PPID        uint32
+	Comm        string
+	Pcomm       string
+	Cmdline     string
+	Uid         *uint32
+	Gid         *uint32
+	Cwd         string
+	Path        string
+	StartTimeNs uint64 // Process start time in nanoseconds for unique identification
 
 	// Container context
 	ContainerID string

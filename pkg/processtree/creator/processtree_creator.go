@@ -2,19 +2,31 @@ package processtree
 
 import (
 	"sync"
+	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
+	"github.com/kubescape/node-agent/pkg/processtree/utils"
 )
 
 type processTreeCreatorImpl struct {
-	mutex      sync.RWMutex
-	processMap map[uint32]*apitypes.Process // PID -> Process
+	mutex       sync.RWMutex
+	processMap  map[uint32]*apitypes.Process  // PID -> Process
+	exitedCache *lru.Cache[uint32, time.Time] // LRU cache for exited process hashes with TTL
 }
 
 func NewProcessTreeCreator() ProcessTreeCreator {
+	// Create LRU cache for exited processes with size 1000
+	exitedCache, err := lru.New[uint32, time.Time](1000)
+	if err != nil {
+		// Fallback to nil cache if creation fails
+		exitedCache = nil
+	}
+
 	return &processTreeCreatorImpl{
-		processMap: make(map[uint32]*apitypes.Process),
+		processMap:  make(map[uint32]*apitypes.Process),
+		exitedCache: exitedCache,
 	}
 }
 
@@ -60,12 +72,19 @@ func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, er
 // handleForkEvent handles fork events - only fills properties if they are empty or don't exist
 func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 	proc, exists := pt.processMap[event.PID]
+
+	// If process doesn't exist, check if it was previously exited
 	if !exists {
+		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
+		if pt.isProcessExited(processHash) {
+			return // Don't create a new process that has already exited
+		}
+		// Create new process if it wasn't exited
 		proc = &apitypes.Process{PID: event.PID, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
 		pt.processMap[event.PID] = proc
 	}
 
-	// Only set fields if they are empty or don't exist
+	// Only set fields if they are empty or don't exist (enrichment)
 	if proc.PPID == 0 {
 		proc.PPID = event.PPID
 	}
@@ -108,12 +127,19 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 // handleProcfsEvent handles procfs events - overrides when existing values are empty or don't exist
 func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 	proc, exists := pt.processMap[event.PID]
+
+	// If process doesn't exist, check if it was previously exited
 	if !exists {
+		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
+		if pt.isProcessExited(processHash) {
+			return // Don't create a new process that has already exited
+		}
+		// Create new process if it wasn't exited
 		proc = &apitypes.Process{PID: event.PID, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
 		pt.processMap[event.PID] = proc
 	}
 
-	// Override fields if the new value is non-empty and the existing value is empty or default
+	// Override fields if the new value is non-empty and the existing value is empty or default (enrichment)
 	if event.PPID != 0 && proc.PPID == 0 {
 		proc.PPID = event.PPID
 	}
@@ -155,9 +181,19 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 
 // handleExecEvent handles exec events - always overrides when it has values
 func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
-	proc := pt.getOrCreateProcess(event.PID)
+	proc, exists := pt.processMap[event.PID]
 
-	// Always override with new values if they are provided
+	// If process doesn't exist, check if it was previously exited
+	if !exists {
+		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
+		if pt.isProcessExited(processHash) {
+			return // Don't create a new process that has already exited
+		}
+		// Create new process if it wasn't exited
+		proc = pt.getOrCreateProcess(event.PID)
+	}
+
+	// Always override with new values if they are provided (enrichment)
 	if event.PPID != 0 {
 		proc.PPID = event.PPID
 	}
@@ -193,6 +229,12 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 	proc, exists := pt.processMap[event.PID]
 	if !exists {
 		return // Process doesn't exist, nothing to clean up
+	}
+
+	// Create unique hash for this process instance and mark it as exited
+	processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
+	if pt.exitedCache != nil {
+		pt.exitedCache.Add(processHash, time.Now())
 	}
 
 	// Remove from parent's children list first
@@ -240,4 +282,22 @@ func (pt *processTreeCreatorImpl) deepCopyProcess(proc *apitypes.Process) *apity
 		copy.ChildrenMap[k] = pt.deepCopyProcess(v)
 	}
 	return &copy
+}
+
+// isProcessExited checks if a process hash has been marked as exited
+// and cleans up expired entries (older than 1 hour)
+func (pt *processTreeCreatorImpl) isProcessExited(processHash uint32) bool {
+	if pt.exitedCache == nil {
+		return false
+	}
+
+	if exitTime, exists := pt.exitedCache.Get(processHash); exists {
+		// Check if the entry has expired (1 hour TTL)
+		if time.Since(exitTime) > time.Hour {
+			pt.exitedCache.Remove(processHash)
+			return false
+		}
+		return true
+	}
+	return false
 }
