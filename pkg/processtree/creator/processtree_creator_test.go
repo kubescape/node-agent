@@ -138,17 +138,33 @@ func TestProcessTreeCreator_ProcfsDoesNotOverwriteNonEmpty(t *testing.T) {
 func TestProcessTreeCreator_PIDReuse(t *testing.T) {
 	pt := NewProcessTreeCreator()
 	// First process with PID 2
-	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ForkEvent, PID: 2, PPID: 1, Comm: "child1"})
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         2,
+		PPID:        1,
+		Comm:        "child1",
+		StartTimeNs: 1000,
+	})
 	proc, err := pt.GetProcessNode(2)
 	assert.NoError(t, err)
 	assert.Equal(t, "child1", proc.Comm)
 	// Simulate exit of the first process
-	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ExitEvent, PID: 2})
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ExitEvent,
+		PID:         2,
+		StartTimeNs: 1000,
+	})
 	proc, err = pt.GetProcessNode(2)
 	assert.NoError(t, err)
 	assert.Nil(t, proc) // Should be removed after exit
-	// Reuse PID 2 for a new process
-	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ForkEvent, PID: 2, PPID: 1, Comm: "child2"})
+	// Reuse PID 2 for a new process with different start time
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         2,
+		PPID:        1,
+		Comm:        "child2",
+		StartTimeNs: 2000, // Different start time for PID reuse
+	})
 	proc, err = pt.GetProcessNode(2)
 	assert.NoError(t, err)
 	assert.NotNil(t, proc)
@@ -157,15 +173,41 @@ func TestProcessTreeCreator_PIDReuse(t *testing.T) {
 
 func TestProcessTreeCreator_EventOrderings(t *testing.T) {
 	pt := NewProcessTreeCreator()
-	// Exec before Fork
-	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ExecEvent, PID: 5, PPID: 1, Comm: "execfirst", Cmdline: "/bin/execfirst"})
-	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ForkEvent, PID: 5, PPID: 1, Comm: "execfirst"})
+	// Exec before Fork - same process instance
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ExecEvent,
+		PID:         5,
+		PPID:        1,
+		Comm:        "execfirst",
+		Cmdline:     "/bin/execfirst",
+		StartTimeNs: 1000,
+	})
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         5,
+		PPID:        1,
+		Comm:        "execfirst",
+		StartTimeNs: 1000, // Same start time as exec event
+	})
 	proc, err := pt.GetProcessNode(5)
 	assert.NoError(t, err)
 	assert.Equal(t, "/bin/execfirst", proc.Cmdline)
-	// Fork before Exec
-	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ForkEvent, PID: 6, PPID: 1, Comm: "forkfirst"})
-	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ExecEvent, PID: 6, PPID: 1, Comm: "forkfirst", Cmdline: "/bin/forkfirst"})
+	// Fork before Exec - same process instance
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         6,
+		PPID:        1,
+		Comm:        "forkfirst",
+		StartTimeNs: 2000,
+	})
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ExecEvent,
+		PID:         6,
+		PPID:        1,
+		Comm:        "forkfirst",
+		Cmdline:     "/bin/forkfirst",
+		StartTimeNs: 2000, // Same start time as fork event
+	})
 	proc, err = pt.GetProcessNode(6)
 	assert.NoError(t, err)
 	assert.Equal(t, "/bin/forkfirst", proc.Cmdline)
@@ -191,24 +233,26 @@ func TestProcessTreeCreator_ForkFieldFilling(t *testing.T) {
 
 	// Test that fork only fills empty fields
 	pt.FeedEvent(feeder.ProcessEvent{
-		Type:    feeder.ForkEvent,
-		PID:     1,
-		PPID:    0,
-		Comm:    "init",
-		Cmdline: "/sbin/init",
-		Uid:     &[]uint32{0}[0],
-		Gid:     &[]uint32{0}[0],
+		Type:        feeder.ForkEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "init",
+		Cmdline:     "/sbin/init",
+		Uid:         &[]uint32{0}[0],
+		Gid:         &[]uint32{0}[0],
+		StartTimeNs: 1000,
 	})
 
-	// Try to update with different values - should not overwrite
+	// Try to update with different values - should not overwrite (same process instance)
 	pt.FeedEvent(feeder.ProcessEvent{
-		Type:    feeder.ForkEvent,
-		PID:     1,
-		PPID:    0,
-		Comm:    "different-init",   // Should not overwrite
-		Cmdline: "/different/init",  // Should not overwrite
-		Uid:     &[]uint32{1000}[0], // Should not overwrite
-		Gid:     &[]uint32{1000}[0], // Should not overwrite
+		Type:        feeder.ForkEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "different-init",   // Should not overwrite
+		Cmdline:     "/different/init",  // Should not overwrite
+		Uid:         &[]uint32{1000}[0], // Should not overwrite
+		Gid:         &[]uint32{1000}[0], // Should not overwrite
+		StartTimeNs: 1000,               // Same start time as first event
 	})
 
 	proc, err := pt.GetProcessNode(1)
@@ -225,24 +269,26 @@ func TestProcessTreeCreator_ExecFieldOverriding(t *testing.T) {
 
 	// Create process with fork
 	pt.FeedEvent(feeder.ProcessEvent{
-		Type:    feeder.ForkEvent,
-		PID:     1,
-		PPID:    0,
-		Comm:    "init",
-		Cmdline: "/sbin/init",
-		Uid:     &[]uint32{0}[0],
-		Gid:     &[]uint32{0}[0],
+		Type:        feeder.ForkEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "init",
+		Cmdline:     "/sbin/init",
+		Uid:         &[]uint32{0}[0],
+		Gid:         &[]uint32{0}[0],
+		StartTimeNs: 1000,
 	})
 
-	// Exec should always override when values are provided
+	// Exec should always override when values are provided (same process instance)
 	pt.FeedEvent(feeder.ProcessEvent{
-		Type:    feeder.ExecEvent,
-		PID:     1,
-		PPID:    0,
-		Comm:    "new-init",
-		Cmdline: "/bin/new-init",
-		Uid:     &[]uint32{1000}[0],
-		Gid:     &[]uint32{1000}[0],
+		Type:        feeder.ExecEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "new-init",
+		Cmdline:     "/bin/new-init",
+		Uid:         &[]uint32{1000}[0],
+		Gid:         &[]uint32{1000}[0],
+		StartTimeNs: 1000, // Same start time as fork event
 	})
 
 	proc, err := pt.GetProcessNode(1)
@@ -259,22 +305,24 @@ func TestProcessTreeCreator_ProcfsFieldEnrichment(t *testing.T) {
 
 	// Create process with some fields
 	pt.FeedEvent(feeder.ProcessEvent{
-		Type:    feeder.ForkEvent,
-		PID:     1,
-		PPID:    0,
-		Comm:    "init",
-		Cmdline: "/sbin/init",
+		Type:        feeder.ForkEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "init",
+		Cmdline:     "/sbin/init",
+		StartTimeNs: 1000,
 	})
 
-	// Procfs should only fill empty fields
+	// Procfs should only fill empty fields (same process instance)
 	pt.FeedEvent(feeder.ProcessEvent{
-		Type:    feeder.ProcfsEvent,
-		PID:     1,
-		PPID:    0,
-		Comm:    "different-init", // Should not overwrite existing
-		Cmdline: "",               // Empty, should not overwrite
-		Cwd:     "/root",          // New field, should be added
-		Path:    "/sbin/init",     // New field, should be added
+		Type:        feeder.ProcfsEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "different-init", // Should not overwrite existing
+		Cmdline:     "",               // Empty, should not overwrite
+		Cwd:         "/root",          // New field, should be added
+		Path:        "/sbin/init",     // New field, should be added
+		StartTimeNs: 1000,             // Same start time as fork event
 	})
 
 	proc, err := pt.GetProcessNode(1)
@@ -321,23 +369,29 @@ func TestProcessTreeCreator_ProcessReplacement(t *testing.T) {
 
 	// Create initial process
 	pt.FeedEvent(feeder.ProcessEvent{
-		Type:    feeder.ForkEvent,
-		PID:     1,
-		PPID:    0,
-		Comm:    "init",
-		Cmdline: "/sbin/init",
+		Type:        feeder.ForkEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "init",
+		Cmdline:     "/sbin/init",
+		StartTimeNs: 1000,
 	})
 
 	// Process exits
-	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ExitEvent, PID: 1})
-
-	// New process with same PID (PID reuse)
 	pt.FeedEvent(feeder.ProcessEvent{
-		Type:    feeder.ForkEvent,
-		PID:     1,
-		PPID:    0,
-		Comm:    "new-process",
-		Cmdline: "/bin/new-process",
+		Type:        feeder.ExitEvent,
+		PID:         1,
+		StartTimeNs: 1000,
+	})
+
+	// New process with same PID (PID reuse) but different start time
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         1,
+		PPID:        0,
+		Comm:        "new-process",
+		Cmdline:     "/bin/new-process",
+		StartTimeNs: 2000, // Different start time for PID reuse
 	})
 
 	proc, err := pt.GetProcessNode(1)
