@@ -1,4 +1,4 @@
-package processtree
+package containerprocesstree
 
 import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"

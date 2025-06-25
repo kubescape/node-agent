@@ -212,6 +212,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 		ch.processManager.ContainerCallback,
 		ch.dnsManager.ContainerCallback,
 		ch.networkStreamClient.ContainerCallback,
+		ch.containerProcessTree.ContainerCallback,
 	}
 
 	for receiver := range ch.thirdPartyContainerReceivers.Iter() {

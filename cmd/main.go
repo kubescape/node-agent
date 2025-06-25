@@ -46,6 +46,7 @@ import (
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	processmanagerv1 "github.com/kubescape/node-agent/pkg/processmanager/v1"
+	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
@@ -332,11 +333,14 @@ func main() {
 		sbomManager = sbommanager.CreateSbomManagerMock()
 	}
 
+	// Create the container process tree
+	containerProcessTree := containerprocesstree.NewContainerProcessTree()
+
 	// Create the container handler
 	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
 		igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager,
 		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
-		processManager, clusterData.ClusterName, objCache, networkStreamClient)
+		processManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

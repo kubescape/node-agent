@@ -1,4 +1,4 @@
-package processtree
+package processtreecreator
 
 import (
 	"sync"

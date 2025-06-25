@@ -11,6 +11,5 @@ type ProcessTreeManager interface {
 	Stop() error
 	GetHostProcessTree() ([]apitypes.Process, error)
 	GetContainerProcessTree(containerID string) ([]apitypes.Process, error)
-	RegisterContainer(containerID string, shimPID int)
-	UnregisterContainer(containerID string)
+	GetProcessNode(pid int) (*apitypes.Process, error)
 }
