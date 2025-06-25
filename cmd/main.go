@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
@@ -46,7 +47,10 @@ import (
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/kubescape/node-agent/pkg/processmanager"
 	processmanagerv1 "github.com/kubescape/node-agent/pkg/processmanager/v1"
+	processtree "github.com/kubescape/node-agent/pkg/processtree"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
+	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
+	feeder "github.com/kubescape/node-agent/pkg/processtree/feeder"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
@@ -335,6 +339,33 @@ func main() {
 
 	// Create the container process tree
 	containerProcessTree := containerprocesstree.NewContainerProcessTree()
+
+	// Create the process tree creator
+	processTreeCreator := processtreecreator.NewProcessTreeCreator()
+
+	// Create feeders
+	var feeders []feeder.ProcessEventFeeder
+
+	// Create event feeder for exec/fork/exit events
+	eventFeeder := feeder.NewEventFeeder()
+	feeders = append(feeders, eventFeeder)
+
+	// Create procfs feeder for periodic scanning
+	procfsFeeder := feeder.NewProcfsFeeder(30 * time.Second) // Scan every 30 seconds
+	feeders = append(feeders, procfsFeeder)
+
+	// Create the process tree manager
+	processTreeManager := processtree.NewProcessTreeManager(
+		processTreeCreator,
+		containerProcessTree,
+		feeders,
+	)
+
+	// Start the process tree manager
+	if err := processTreeManager.Start(ctx); err != nil {
+		logger.L().Ctx(ctx).Fatal("error starting process tree manager", helpers.Error(err))
+	}
+	defer processTreeManager.Stop()
 
 	// Create the container handler
 	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
