@@ -24,7 +24,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/processmanager"
+	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -40,10 +40,10 @@ type NetworkStream struct {
 	httpClient                *http.Client
 	eventsNotificationChannel chan apitypes.NetworkStream
 	dnsSupport                bool
-	processTreeManager        processmanager.ProcessManagerClient
+	processTreeManager        processtree.ProcessTreeManager
 }
 
-func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, nodeName string, eventsNotificationChannel chan apitypes.NetworkStream, dnsSupport bool, processTreeManager processmanager.ProcessManagerClient) (*NetworkStream, error) {
+func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, nodeName string, eventsNotificationChannel chan apitypes.NetworkStream, dnsSupport bool, processTreeManager processtree.ProcessTreeManager) (*NetworkStream, error) {
 	var k8sInventory common.K8sInventoryCache
 
 	if cfg.KubernetesMode {
@@ -389,7 +389,7 @@ func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid uint32, com
 		}
 	}
 
-	processTree, err := ns.processTreeManager.GetProcessTreeForPID(containerID, apitypes.CommPID{Comm: comm, PID: pid})
+	processTree, err := ns.processTreeManager.GetContainerProcessTree(containerID, pid)
 	if err != nil {
 		logger.L().Debug("NetworkStream - failed to get process tree", helpers.Error(err), helpers.Int("pid", int(pid)))
 		return apitypes.ProcessTree{

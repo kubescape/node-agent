@@ -114,20 +114,57 @@ func (ptm *ProcessTreeManagerImpl) GetHostProcessTree() ([]apitypes.Process, err
 	return ptm.creator.GetNodeTree()
 }
 
-func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string) ([]apitypes.Process, error) {
+func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32) (apitypes.Process, error) {
 	ptm.mutex.RLock()
 	defer ptm.mutex.RUnlock()
 
 	if !ptm.started {
-		return nil, fmt.Errorf("process tree manager not started")
+		return apitypes.Process{}, fmt.Errorf("process tree manager not started")
 	}
 
 	fullTree, err := ptm.creator.GetNodeTree()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get host process tree: %v", err)
+		return apitypes.Process{}, fmt.Errorf("failed to get host process tree: %v", err)
 	}
 
-	return ptm.containerTree.GetContainerTree(containerID, fullTree)
+	// Get all processes in the container
+	containerProcesses, err := ptm.containerTree.GetContainerTree(containerID, fullTree)
+	if err != nil {
+		return apitypes.Process{}, fmt.Errorf("failed to get container tree: %v", err)
+	}
+
+	// If no container processes found, return empty process
+	if len(containerProcesses) == 0 {
+		return apitypes.Process{}, fmt.Errorf("no processes found for container %s", containerID)
+	}
+
+	// Find the specific process with the given PID
+	for _, process := range containerProcesses {
+		if process.PID == pid {
+			return process, nil
+		}
+		// Also search in children recursively
+		if found := ptm.findProcessByPID(&process, pid); found != nil {
+			return *found, nil
+		}
+	}
+
+	return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s", pid, containerID)
+}
+
+// findProcessByPID recursively searches for a process with the given PID in the process tree
+func (ptm *ProcessTreeManagerImpl) findProcessByPID(process *apitypes.Process, targetPID uint32) *apitypes.Process {
+	if process.PID == targetPID {
+		return process
+	}
+
+	for _, child := range process.ChildrenMap {
+		if found := ptm.findProcessByPID(child, targetPID); found != nil {
+			return found
+		}
+	}
+
+	return nil
 }
 
 func (ptm *ProcessTreeManagerImpl) GetProcessNode(pid int) (*apitypes.Process, error) {

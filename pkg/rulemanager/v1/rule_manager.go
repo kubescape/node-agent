@@ -26,7 +26,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/processmanager"
+	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
@@ -58,14 +58,14 @@ type RuleManager struct {
 	containerIdToShimPid maps.SafeMap[string, uint32]
 	containerIdToPid     maps.SafeMap[string, uint32]
 	enricher             ruleenginetypes.Enricher
-	processManager       processmanager.ProcessManagerClient
+	processManager       processtree.ProcessTreeManager
 	dnsManager           dnsmanager.DNSResolver
 	ruleCooldown         *rulecooldown.RuleCooldown
 }
 
 var _ rulemanager.RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processmanager.ProcessManagerClient, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processtree.ProcessTreeManager, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
 	return &RuleManager{
 		cfg:               cfg,
 		ctx:               ctx,
@@ -358,12 +358,9 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	runtimeProcessDetails := ruleFailure.GetRuntimeProcessDetails()
 
 	err = backoff.Retry(func() error {
-		tree, err := rm.processManager.GetProcessTreeForPID(
+		tree, err := rm.processManager.GetContainerProcessTree(
 			ruleFailure.GetRuntimeProcessDetails().ContainerID,
-			armotypes.CommPID{
-				Comm: ruleFailure.GetRuntimeProcessDetails().ProcessTree.Comm,
-				PID:  ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID,
-			},
+			ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID,
 		)
 		if err != nil {
 			return err

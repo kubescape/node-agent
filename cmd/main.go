@@ -45,8 +45,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	"github.com/kubescape/node-agent/pkg/objectcache/networkneighborhoodcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
-	"github.com/kubescape/node-agent/pkg/processmanager"
-	processmanagerv1 "github.com/kubescape/node-agent/pkg/processmanager/v1"
 	processtree "github.com/kubescape/node-agent/pkg/processtree"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
@@ -229,10 +227,43 @@ func main() {
 	}
 
 	var ruleManager rulemanager.RuleManagerClient
-	var processManager processmanager.ProcessManagerClient
+	var processTreeManager processtree.ProcessTreeManager
 	var objCache objectcache.ObjectCache
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
 	var cloudMetadata *apitypes.CloudMetadata
+
+	// Create the container process tree
+	containerProcessTree := containerprocesstree.NewContainerProcessTree()
+
+	// Create the process tree creator
+	processTreeCreator := processtreecreator.NewProcessTreeCreator()
+
+	// Create feeders
+	feeders := []feeder.ProcessEventFeeder{
+		feeder.NewEventFeeder(),
+		feeder.NewProcfsFeeder(100 * time.Millisecond),
+	}
+
+	// Create event feeder for exec/fork/exit events
+	eventFeeder := feeder.NewEventFeeder()
+	feeders = append(feeders, eventFeeder)
+
+	// Create procfs feeder for periodic scanning
+	procfsFeeder := feeder.NewProcfsFeeder(100 * time.Millisecond) // Scan every 100 milliseconds
+	feeders = append(feeders, procfsFeeder)
+
+	// Create the process tree manager
+	processTreeManager = processtree.NewProcessTreeManager(
+		processTreeCreator,
+		containerProcessTree,
+		feeders,
+	)
+
+	// Start the process tree manager
+	if err := processTreeManager.Start(ctx); err != nil {
+		logger.L().Ctx(ctx).Fatal("error starting process tree manager", helpers.Error(err))
+	}
+	defer processTreeManager.Stop()
 
 	if cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
 		cloudMetadata, err = cloudmetadata.GetCloudMetadata(ctx, k8sClient, cfg.NodeName)
@@ -242,9 +273,6 @@ func main() {
 	}
 
 	if cfg.EnableRuntimeDetection {
-		// create the process manager
-		processManager = processmanagerv1.CreateProcessManager(ctx)
-
 		// create exporter
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
 		dWatcher.AddAdaptor(ruleBindingCache)
@@ -266,7 +294,7 @@ func main() {
 		ruleCooldown := rulecooldown.NewRuleCooldown(cfg.RuleCoolDown)
 
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processManager, dnsResolver, nil, ruleCooldown)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processTreeManager, dnsResolver, nil, ruleCooldown)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
@@ -278,7 +306,6 @@ func main() {
 		dc := &objectcache.DnsCacheMock{}
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
-		processManager = processmanager.CreateProcessManagerMock()
 	}
 
 	// Create the node profile manager
@@ -293,7 +320,7 @@ func main() {
 	// Create the network streaming manager
 	var networkStreamClient networkstream.NetworkStreamClient
 	if cfg.EnableNetworkStreaming {
-		networkStreamClient, err = networkstreamv1.NewNetworkStream(ctx, cfg, k8sObjectCache, dnsResolver, cfg.NodeName, nil, false, processManager)
+		networkStreamClient, err = networkstreamv1.NewNetworkStream(ctx, cfg, k8sObjectCache, dnsResolver, cfg.NodeName, nil, false, processTreeManager)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating NetworkManager", helpers.Error(err))
 		}
@@ -337,41 +364,11 @@ func main() {
 		sbomManager = sbommanager.CreateSbomManagerMock()
 	}
 
-	// Create the container process tree
-	containerProcessTree := containerprocesstree.NewContainerProcessTree()
-
-	// Create the process tree creator
-	processTreeCreator := processtreecreator.NewProcessTreeCreator()
-
-	// Create feeders
-	var feeders []feeder.ProcessEventFeeder
-
-	// Create event feeder for exec/fork/exit events
-	eventFeeder := feeder.NewEventFeeder()
-	feeders = append(feeders, eventFeeder)
-
-	// Create procfs feeder for periodic scanning
-	procfsFeeder := feeder.NewProcfsFeeder(30 * time.Second) // Scan every 30 seconds
-	feeders = append(feeders, procfsFeeder)
-
-	// Create the process tree manager
-	processTreeManager := processtree.NewProcessTreeManager(
-		processTreeCreator,
-		containerProcessTree,
-		feeders,
-	)
-
-	// Start the process tree manager
-	if err := processTreeManager.Start(ctx); err != nil {
-		logger.L().Ctx(ctx).Fatal("error starting process tree manager", helpers.Error(err))
-	}
-	defer processTreeManager.Stop()
-
 	// Create the container handler
 	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
 		igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager,
 		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
-		processManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree, eventFeeder)
+		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree, eventFeeder)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

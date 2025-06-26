@@ -53,7 +53,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/networkmanager"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/processmanager"
+	"github.com/kubescape/node-agent/pkg/processtree"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
@@ -181,7 +181,7 @@ type IGContainerWatcher struct {
 	// container runtime
 	runtime *containerutilsTypes.RuntimeConfig
 	// process manager
-	processManager processmanager.ProcessManagerClient
+	processManager processtree.ProcessTreeManager
 }
 
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
@@ -193,7 +193,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 	malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient,
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig,
 	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
-	thirdPartyEnricher containerwatcher.TaskBasedEnricher, processManager processmanager.ProcessManagerClient,
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher, processManager processtree.ProcessTreeManager,
 	clusterName string, objectCache objectcache.ObjectCache, networkStreamClient networkstream.NetworkStreamClient,
 	containerProcessTree containerprocesstree.ContainerProcessTree, processTreeFeeder *feeder.EventFeeder) (*IGContainerWatcher, error) { // Use container collection to get notified for new containers
 
@@ -258,9 +258,6 @@ func CreateIGContainerWatcher(cfg config.Config,
 			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
 			return
 		}
-
-		// ProcessManager must be notified before the event is reported to the other managers.
-		processManager.ReportEvent(utils.ExecveEventType, &event)
 
 		processTreeFeeder.ReportEvent(utils.ExecveEventType, &event)
 
@@ -651,10 +648,6 @@ func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 			return fmt.Errorf("setting up container collection: %w", err)
 		}
 
-		// We want to populate the initial processes before starting the tracers but after retrieving the shims.
-		logger.L().TimedWrapper(utils.FuncName(ch.processManager.PopulateInitialProcesses), 5*time.Second, func() {
-			err = ch.processManager.PopulateInitialProcesses()
-		})
 		if err != nil {
 			ch.stopContainerCollection()
 			return fmt.Errorf("populating initial processes: %w", err)

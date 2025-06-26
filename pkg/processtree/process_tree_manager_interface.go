@@ -10,6 +10,6 @@ type ProcessTreeManager interface {
 	Start(ctx context.Context) error
 	Stop() error
 	GetHostProcessTree() ([]apitypes.Process, error)
-	GetContainerProcessTree(containerID string) ([]apitypes.Process, error)
+	GetContainerProcessTree(containerID string, pid uint32) (apitypes.Process, error)
 	GetProcessNode(pid int) (*apitypes.Process, error)
 }
