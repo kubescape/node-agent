@@ -647,7 +647,7 @@ func (am *ApplicationProfileManager) startApplicationProfiling(ctx context.Conte
 		return
 	}
 
-	if !am.cfg.EnableRuntimeDetection && sharedData.PreRunningContainer {
+	if sharedData.PreRunningContainer && !(am.cfg.EnableRuntimeDetection || am.cfg.EnablePartialProfileGeneration) {
 		logger.L().Debug("ApplicationProfileManager - skip container", helpers.String("reason", "preRunning container"),
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s workload", k8sContainerID))
