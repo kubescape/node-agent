@@ -36,9 +36,9 @@ func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.P
 }
 
 func (c *containerProcessTreeImpl) GetContainerTree(containerID string, fullTree []apitypes.Process) ([]apitypes.Process, error) {
-	c.mutex.Lock()
+	c.mutex.RLock()
 	shimPID, ok := c.containerIdToShimPid[containerID]
-	c.mutex.Unlock()
+	c.mutex.RUnlock()
 	logger.L().Debug("GetContainerTree", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 	if !ok {
 		logger.L().Debug("GetContainerTree Not found Shim PID", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))

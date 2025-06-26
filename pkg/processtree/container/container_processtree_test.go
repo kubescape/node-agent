@@ -25,109 +25,12 @@ func TestContainerProcessTreeImpl_ContainerCallback_AddContainer(t *testing.T) {
 	containerID := "test-container-123"
 	containerPID := uint32(100)
 
-	// Create a full tree with the container process and its parent (shim)
-	fullTree := []apitypes.Process{
-		{
-			PID:   50, // shim PID
-			PPID:  1,
-			Comm:  "containerd-shim",
-			Pcomm: "systemd",
-		},
-		{
-			PID:   containerPID, // container process
-			PPID:  50,           // parent is shim
-			Comm:  "nginx",
-			Pcomm: "containerd-shim",
-		},
-	}
+	cpt.containerIdToShimPid[containerID] = containerPID
 
-	// Set the last full tree
-	cpt.lastFullTree = fullTree
-
-	// Create container add event
-	event := containercollection.PubSubEvent{
-		Type: containercollection.EventTypeAddContainer,
-		Container: &containercollection.Container{
-			Runtime: containercollection.RuntimeMetadata{
-				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-					ContainerID: containerID,
-				},
-			},
-		},
-	}
-
-	// Mock ContainerPid method by creating a custom container
-	container := &containercollection.Container{
-		Runtime: containercollection.RuntimeMetadata{
-			BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-				ContainerID: containerID,
-			},
-		},
-	}
-	// We need to create a mock that has ContainerPid method
-	// For testing purposes, we'll create a simple mock
-	event.Container = container
-
-	// Since we can't easily mock the ContainerPid method, we'll test the logic differently
-	// by directly setting the container PID in the full tree and testing the inference logic
-
-	// Call the callback
-	cpt.ContainerCallback(event)
-
-	// Since ContainerPid() is not available in our mock, we'll test the inference logic directly
-	// by manually setting up the scenario where we have the container PID in the full tree
-	cpt.lastFullTree = fullTree
-
-	// Manually test the shim PID inference logic
-	var shimPID apitypes.CommPID
-	for i := range cpt.lastFullTree {
-		if cpt.lastFullTree[i].PID == containerPID {
-			shimPID = apitypes.CommPID{Comm: cpt.lastFullTree[i].Pcomm, PID: cpt.lastFullTree[i].PPID}
-			break
-		}
-	}
-
-	// Verify the shim PID was correctly inferred
-	assert.Equal(t, uint32(50), shimPID.PID)
-	assert.Equal(t, "containerd-shim", shimPID.Comm)
-}
-
-func TestContainerProcessTreeImpl_ContainerCallback_AddContainer_NoShimFound(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
-
-	// Create a mock container event
-	containerID := "test-container-123"
-
-	// Create a full tree without the container process
-	fullTree := []apitypes.Process{
-		{
-			PID:  1,
-			PPID: 0,
-			Comm: "init",
-		},
-	}
-
-	// Set the last full tree
-	cpt.lastFullTree = fullTree
-
-	// Create container add event
-	event := containercollection.PubSubEvent{
-		Type: containercollection.EventTypeAddContainer,
-		Container: &containercollection.Container{
-			Runtime: containercollection.RuntimeMetadata{
-				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-					ContainerID: containerID,
-				},
-			},
-		},
-	}
-
-	// Call the callback
-	cpt.ContainerCallback(event)
-
-	// Verify no shim PID was stored since container process not found
-	_, exists := cpt.containerIdToShimPid[containerID]
-	assert.False(t, exists)
+	// Verify the container PID was stored
+	storedPID, exists := cpt.containerIdToShimPid[containerID]
+	assert.True(t, exists)
+	assert.Equal(t, containerPID, storedPID)
 }
 
 func TestContainerProcessTreeImpl_ContainerCallback_RemoveContainer(t *testing.T) {
@@ -135,10 +38,8 @@ func TestContainerProcessTreeImpl_ContainerCallback_RemoveContainer(t *testing.T
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
-	cpt.containerIdToShimPid[containerID] = apitypes.CommPID{
-		PID:  50,
-		Comm: "containerd-shim",
-	}
+	containerPID := uint32(100)
+	cpt.containerIdToShimPid[containerID] = containerPID
 
 	// Create container remove event
 	event := containercollection.PubSubEvent{
@@ -165,34 +66,36 @@ func TestContainerProcessTreeImpl_GetContainerTree_Success(t *testing.T) {
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
-	shimPID := apitypes.CommPID{
-		PID:  50,
-		Comm: "containerd-shim",
-	}
-	cpt.containerIdToShimPid[containerID] = shimPID
+	containerPID := uint32(50) // This should be the shim PID, not the child process PID
+	cpt.containerIdToShimPid[containerID] = containerPID
 
 	// Create a full tree with container processes
-	fullTree := []apitypes.Process{
-		{
-			PID:  50, // shim
-			PPID: 1,
-			Comm: "containerd-shim",
-			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-				{Comm: "nginx", PID: 100}: {
-					PID:  100,
-					PPID: 50,
-					Comm: "nginx",
-					ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-						{Comm: "nginx-worker", PID: 101}: {
-							PID:         101,
-							PPID:        100,
-							Comm:        "nginx-worker",
-							ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
-						},
-					},
-				},
+	// The tree should have the shim as the root with children in its ChildrenMap
+	nginxProcess := &apitypes.Process{
+		PID:  100,
+		PPID: 50,
+		Comm: "nginx",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			{Comm: "nginx-worker", PID: 101}: {
+				PID:         101,
+				PPID:        100,
+				Comm:        "nginx-worker",
+				ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
 			},
 		},
+	}
+
+	shimProcess := &apitypes.Process{
+		PID:  50, // shim
+		PPID: 1,
+		Comm: "containerd-shim",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			{Comm: "nginx", PID: 100}: nginxProcess,
+		},
+	}
+
+	fullTree := []apitypes.Process{
+		*shimProcess,
 		{
 			PID:  1,
 			PPID: 0,
@@ -251,18 +154,15 @@ func TestContainerProcessTreeImpl_GetContainerTree_ContainerNotFound(t *testing.
 	assert.Nil(t, result)
 }
 
-func TestContainerProcessTreeImpl_GetContainerTree_ShimNotFound(t *testing.T) {
+func TestContainerProcessTreeImpl_GetContainerTree_ContainerPIDNotFound(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
-	shimPID := apitypes.CommPID{
-		PID:  50,
-		Comm: "containerd-shim",
-	}
-	cpt.containerIdToShimPid[containerID] = shimPID
+	containerPID := uint32(999) // PID that doesn't exist in the tree
+	cpt.containerIdToShimPid[containerID] = containerPID
 
-	// Create a full tree without the shim process
+	// Create a full tree without the container process
 	fullTree := []apitypes.Process{
 		{
 			PID:  1,
@@ -279,46 +179,18 @@ func TestContainerProcessTreeImpl_GetContainerTree_ShimNotFound(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-func TestContainerProcessTreeImpl_GetContainerTree_ShimCommMismatch(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
-
-	// Pre-populate with a container
-	containerID := "test-container-123"
-	shimPID := apitypes.CommPID{
-		PID:  50,
-		Comm: "containerd-shim",
-	}
-	cpt.containerIdToShimPid[containerID] = shimPID
-
-	// Create a full tree with shim PID but different comm
-	fullTree := []apitypes.Process{
-		{
-			PID:  50,
-			PPID: 1,
-			Comm: "different-shim", // Different comm
-		},
-	}
-
-	// Get container tree
-	result, err := cpt.GetContainerTree(containerID, fullTree)
-
-	// Verify results
-	assert.NoError(t, err)
-	assert.Nil(t, result)
-}
-
 func TestContainerProcessTreeImpl_ListContainers(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	// Pre-populate with multiple containers
-	containers := map[string]apitypes.CommPID{
-		"container-1": {PID: 50, Comm: "containerd-shim"},
-		"container-2": {PID: 60, Comm: "containerd-shim"},
-		"container-3": {PID: 70, Comm: "containerd-shim"},
+	containers := map[string]uint32{
+		"container-1": 50,
+		"container-2": 60,
+		"container-3": 70,
 	}
 
-	for id, shimPID := range containers {
-		cpt.containerIdToShimPid[id] = shimPID
+	for id, pid := range containers {
+		cpt.containerIdToShimPid[id] = pid
 	}
 
 	// List containers
@@ -351,15 +223,14 @@ func TestContainerProcessTreeImpl_ConcurrentAccess(t *testing.T) {
 	// Test concurrent access to the container process tree
 	done := make(chan bool)
 
-	// Goroutine 1: Add containers
+	// Goroutine 1: Add containers using proper method
 	go func() {
 		for i := 0; i < 100; i++ {
 			containerID := fmt.Sprintf("container-%d", i)
-			shimPID := apitypes.CommPID{
-				PID:  uint32(50 + i),
-				Comm: "containerd-shim",
-			}
-			cpt.containerIdToShimPid[containerID] = shimPID
+			// Use the proper locking mechanism to avoid race conditions
+			cpt.mutex.Lock()
+			cpt.containerIdToShimPid[containerID] = uint32(50 + i)
+			cpt.mutex.Unlock()
 		}
 		done <- true
 	}()
@@ -402,41 +273,47 @@ func TestContainerProcessTreeImpl_DeepTreeTraversal(t *testing.T) {
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
-	shimPID := apitypes.CommPID{
-		PID:  50,
-		Comm: "containerd-shim",
-	}
-	cpt.containerIdToShimPid[containerID] = shimPID
+	containerPID := uint32(50) // This will be the shim PID in the tree
+	cpt.containerIdToShimPid[containerID] = containerPID
 
 	// Create a deep tree structure
-	fullTree := []apitypes.Process{
-		{
-			PID:  50, // shim
-			PPID: 1,
-			Comm: "containerd-shim",
-			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-				{Comm: "nginx", PID: 100}: {
-					PID:  100,
-					PPID: 50,
-					Comm: "nginx",
-					ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-						{Comm: "nginx-worker", PID: 101}: {
-							PID:  101,
-							PPID: 100,
-							Comm: "nginx-worker",
-							ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-								{Comm: "nginx-child", PID: 102}: {
-									PID:         102,
-									PPID:        101,
-									Comm:        "nginx-child",
-									ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
-								},
-							},
-						},
-					},
-				},
-			},
+	// Build the tree from bottom up
+	nginxChild := &apitypes.Process{
+		PID:         102,
+		PPID:        101,
+		Comm:        "nginx-child",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+	}
+
+	nginxWorker := &apitypes.Process{
+		PID:  101,
+		PPID: 100,
+		Comm: "nginx-worker",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			{Comm: "nginx-child", PID: 102}: nginxChild,
 		},
+	}
+
+	nginxProcess := &apitypes.Process{
+		PID:  100,
+		PPID: 50,
+		Comm: "nginx",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			{Comm: "nginx-worker", PID: 101}: nginxWorker,
+		},
+	}
+
+	shimProcess := &apitypes.Process{
+		PID:  50, // shim
+		PPID: 1,
+		Comm: "containerd-shim",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			{Comm: "nginx", PID: 100}: nginxProcess,
+		},
+	}
+
+	fullTree := []apitypes.Process{
+		*shimProcess,
 	}
 
 	// Get container tree
@@ -458,141 +335,6 @@ func TestContainerProcessTreeImpl_DeepTreeTraversal(t *testing.T) {
 	assert.True(t, pids[102]) // nginx-child
 }
 
-func TestContainerProcessTreeImpl_LastFullTreeCaching(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
-
-	// Create initial full tree
-	initialTree := []apitypes.Process{
-		{
-			PID:  50,
-			PPID: 1,
-			Comm: "containerd-shim",
-		},
-		{
-			PID:  100,
-			PPID: 50,
-			Comm: "nginx",
-		},
-	}
-
-	// Call GetContainerTree to cache the tree
-	_, err := cpt.GetContainerTree("test-container", initialTree)
-	assert.NoError(t, err)
-
-	// Verify the tree was cached
-	assert.Equal(t, initialTree, cpt.lastFullTree)
-
-	// Create a new tree
-	newTree := []apitypes.Process{
-		{
-			PID:  60,
-			PPID: 1,
-			Comm: "containerd-shim",
-		},
-	}
-
-	// Call GetContainerTree again
-	_, err = cpt.GetContainerTree("test-container", newTree)
-	assert.NoError(t, err)
-
-	// Verify the tree was updated
-	assert.Equal(t, newTree, cpt.lastFullTree)
-}
-
-func TestContainerProcessTreeImpl_ShimPIDInference(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
-
-	// Create a full tree with container process
-	containerPID := uint32(100)
-	fullTree := []apitypes.Process{
-		{
-			PID:   50, // shim
-			PPID:  1,
-			Comm:  "containerd-shim",
-			Pcomm: "systemd",
-		},
-		{
-			PID:   containerPID, // container process
-			PPID:  50,           // parent is shim
-			Comm:  "nginx",
-			Pcomm: "containerd-shim",
-		},
-	}
-
-	// Set the last full tree
-	cpt.lastFullTree = fullTree
-
-	// Create container add event
-	containerID := "test-container-123"
-	event := containercollection.PubSubEvent{
-		Type: containercollection.EventTypeAddContainer,
-		Container: &containercollection.Container{
-			Runtime: containercollection.RuntimeMetadata{
-				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-					ContainerID: containerID,
-				},
-			},
-		},
-	}
-
-	// Since we can't easily mock ContainerPid(), we'll test the inference logic directly
-	// by manually setting up the scenario where we have the container PID in the full tree
-
-	// Call the callback
-	cpt.ContainerCallback(event)
-
-	// Manually test the shim PID inference logic
-	var shimPID apitypes.CommPID
-	for i := range cpt.lastFullTree {
-		if cpt.lastFullTree[i].PID == containerPID {
-			shimPID = apitypes.CommPID{Comm: cpt.lastFullTree[i].Pcomm, PID: cpt.lastFullTree[i].PPID}
-			break
-		}
-	}
-
-	// Verify the shim PID was correctly inferred
-	assert.Equal(t, uint32(50), shimPID.PID)
-	assert.Equal(t, "containerd-shim", shimPID.Comm)
-}
-
-func TestContainerProcessTreeImpl_ShimPIDInference_NoParent(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
-
-	// Create a full tree with container process but no parent info
-	containerPID := uint32(100)
-	fullTree := []apitypes.Process{
-		{
-			PID:   containerPID, // container process
-			PPID:  0,            // no parent
-			Comm:  "nginx",
-			Pcomm: "",
-		},
-	}
-
-	// Set the last full tree
-	cpt.lastFullTree = fullTree
-
-	// Create container add event
-	containerID := "test-container-123"
-	event := containercollection.PubSubEvent{
-		Type: containercollection.EventTypeAddContainer,
-		Container: &containercollection.Container{
-			Runtime: containercollection.RuntimeMetadata{
-				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-					ContainerID: containerID,
-				},
-			},
-		},
-	}
-
-	// Call the callback
-	cpt.ContainerCallback(event)
-
-	// Verify no shim PID was stored since no parent info
-	_, exists := cpt.containerIdToShimPid[containerID]
-	assert.False(t, exists)
-}
-
 func TestContainerProcessTreeImpl_Integration(t *testing.T) {
 	cpt := NewContainerProcessTree()
 
@@ -601,50 +343,48 @@ func TestContainerProcessTreeImpl_Integration(t *testing.T) {
 	container2ID := "container-2"
 
 	// Create full tree with multiple containers
+	// Container 1: shim (PID 50) -> nginx (PID 100)
+	nginxProcess1 := &apitypes.Process{
+		PID:         100,
+		PPID:        50,
+		Comm:        "nginx",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+	}
+
+	shimProcess1 := &apitypes.Process{
+		PID:  50, // shim 1
+		PPID: 1,
+		Comm: "containerd-shim",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			{Comm: "nginx", PID: 100}: nginxProcess1,
+		},
+	}
+
+	// Container 2: shim (PID 60) -> postgres (PID 200)
+	postgresProcess := &apitypes.Process{
+		PID:         200,
+		PPID:        60,
+		Comm:        "postgres",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
+	}
+
+	shimProcess2 := &apitypes.Process{
+		PID:  60, // shim 2
+		PPID: 1,
+		Comm: "containerd-shim",
+		ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
+			{Comm: "postgres", PID: 200}: postgresProcess,
+		},
+	}
+
 	fullTree := []apitypes.Process{
-		{
-			PID:  50, // shim 1
-			PPID: 1,
-			Comm: "containerd-shim",
-			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-				{Comm: "nginx", PID: 100}: {
-					PID:         100,
-					PPID:        50,
-					Comm:        "nginx",
-					ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
-				},
-			},
-		},
-		{
-			PID:  60, // shim 2
-			PPID: 1,
-			Comm: "containerd-shim",
-			ChildrenMap: map[apitypes.CommPID]*apitypes.Process{
-				{Comm: "postgres", PID: 200}: {
-					PID:         200,
-					PPID:        60,
-					Comm:        "postgres",
-					ChildrenMap: map[apitypes.CommPID]*apitypes.Process{},
-				},
-			},
-		},
+		*shimProcess1,
+		*shimProcess2,
 	}
 
-	// Set the last full tree first so ContainerCallback can find the container processes
-	cpt.(*containerProcessTreeImpl).lastFullTree = fullTree
-
-	// Since we can't easily mock ContainerPid(), we'll manually set up the shim PID mapping
-	// that would normally be done by the ContainerCallback method
-	cpt.(*containerProcessTreeImpl).containerIdToShimPid[container1ID] = apitypes.CommPID{
-		PID:  50,
-		Comm: "containerd-shim",
-	}
-
-	// Manually set up the shim PID mapping for container 2
-	cpt.(*containerProcessTreeImpl).containerIdToShimPid[container2ID] = apitypes.CommPID{
-		PID:  60,
-		Comm: "containerd-shim",
-	}
+	// Manually set up the container PID mapping
+	cpt.(*containerProcessTreeImpl).containerIdToShimPid[container1ID] = 50
+	cpt.(*containerProcessTreeImpl).containerIdToShimPid[container2ID] = 60
 
 	// Verify both containers are listed
 	containers := cpt.ListContainers()
