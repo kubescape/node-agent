@@ -292,6 +292,8 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 			continue
 		}
 
+		logger.L().Debug("RuleManager - processing event", helpers.String("rule", rule.Name()), helpers.Interface("eventType", eventType), helpers.Interface("event", event))
+
 		res := ruleprocess.ProcessRule(rule, eventType, event, rm.objectCache)
 		if res != nil {
 			shouldCooldown, count := rm.ruleCooldown.ShouldCooldown(res)

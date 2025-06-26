@@ -5,17 +5,18 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 type containerProcessTreeImpl struct {
-	containerIdToShimPid map[string]apitypes.CommPID
+	containerIdToShimPid map[string]uint32
 	mutex                sync.RWMutex
-	lastFullTree         []apitypes.Process // cache the last full tree for shim PID inference
 }
 
 func NewContainerProcessTree() ContainerProcessTree {
 	return &containerProcessTreeImpl{
-		containerIdToShimPid: make(map[string]apitypes.CommPID),
+		containerIdToShimPid: make(map[string]uint32),
 	}
 }
 
@@ -28,17 +29,7 @@ func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.P
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
 		containerPID := notif.Container.ContainerPid()
-		// Try to infer shim PID as the parent of the container process from the last full tree
-		var shimPID apitypes.CommPID
-		for i := range c.lastFullTree {
-			if c.lastFullTree[i].PID == containerPID {
-				shimPID = apitypes.CommPID{Comm: c.lastFullTree[i].Pcomm, PID: c.lastFullTree[i].PPID}
-				break
-			}
-		}
-		if shimPID.PID != 0 {
-			c.containerIdToShimPid[containerID] = shimPID
-		}
+		c.containerIdToShimPid[containerID] = containerPID
 	case containercollection.EventTypeRemoveContainer:
 		delete(c.containerIdToShimPid, containerID)
 	}
@@ -46,21 +37,24 @@ func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.P
 
 func (c *containerProcessTreeImpl) GetContainerTree(containerID string, fullTree []apitypes.Process) ([]apitypes.Process, error) {
 	c.mutex.Lock()
-	c.lastFullTree = fullTree
 	shimPID, ok := c.containerIdToShimPid[containerID]
 	c.mutex.Unlock()
+	logger.L().Debug("GetContainerTree", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 	if !ok {
+		logger.L().Debug("GetContainerTree Not found Shim PID", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 		return nil, nil
 	}
 
 	// Find the process node for the shim PID
 	var shimNode *apitypes.Process
 	for i := range fullTree {
-		if fullTree[i].PID == shimPID.PID && fullTree[i].Comm == shimPID.Comm {
+		if fullTree[i].PID == shimPID {
 			shimNode = &fullTree[i]
+			logger.L().Debug("GetContainerTree", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID), helpers.Interface("shimNode", shimNode))
 			break
 		}
 	}
+
 	if shimNode == nil {
 		return nil, nil
 	}

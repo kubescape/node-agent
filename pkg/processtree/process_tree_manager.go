@@ -135,7 +135,11 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 
 	// If no container processes found, return empty process
 	if len(containerProcesses) == 0 {
-		return apitypes.Process{}, fmt.Errorf("no processes found for container %s", containerID)
+		pids := []uint32{}
+		for i := range fullTree {
+			pids = append(pids, fullTree[i].PID)
+		}
+		return apitypes.Process{}, fmt.Errorf("no processes found for container %s, pids: %v", containerID, pids)
 	}
 
 	// Find the specific process with the given PID
