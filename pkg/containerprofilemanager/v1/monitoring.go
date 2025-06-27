@@ -81,6 +81,28 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 					watchedContainer.AckChan <- struct{}{}
 				}
 				return ContainerReachedMaxTime
+
+			case errors.Is(err, ProfileRequiresSplit):
+				if err := cpm.saveProfile(watchedContainer, container); err != nil {
+					if err.Error() == file.ObjectTooLargeError.Error() {
+						watchedContainer.SetStatus(objectcache.WatchedContainerStatusTooLarge)
+						cpm.deleteContainer(container)
+						cpm.notifyContainerEndOfLife(container)
+						return file.ObjectTooLargeError
+					} else if err.Error() == file.ObjectCompletedError.Error() {
+						watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
+						cpm.deleteContainer(container)
+						cpm.notifyContainerEndOfLife(container)
+						return file.ObjectCompletedError
+					} else {
+						logger.L().Error("failed to save container profile", helpers.Error(err),
+							helpers.String("containerID", watchedContainer.ContainerID),
+							helpers.String("containerName", container.Runtime.ContainerName),
+							helpers.String("workloadID", watchedContainer.Wlid),
+							helpers.String("status", string(watchedContainer.GetStatus())),
+							helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
+					}
+				}
 			}
 		}
 	}
@@ -88,8 +110,8 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 
 // saveProfile saves the container profile using the with pattern for safe access
 func (cpm *ContainerProfileManager) saveProfile(watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container) error {
-	return cpm.withContainer(watchedContainer.ContainerID, func(data *containerData) error {
-		return cpm.saveContainerProfile(watchedContainer, container, data)
+	return cpm.withContainer(watchedContainer.ContainerID, func(data *containerData) (int, error) {
+		return 0, cpm.saveContainerProfile(watchedContainer, container, data)
 	})
 }
 

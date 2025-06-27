@@ -165,13 +165,13 @@ func (cpm *ContainerProfileManager) handleContainerMaxTime(container *containerc
 		helpers.String("namespace", container.K8s.Namespace))
 
 	var ackChan chan struct{}
-	err := cpm.withContainer(containerID, func(data *containerData) error {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.watchedContainerData != nil {
 			// Send container max time signal (blocking send, safe because monitoring goroutine is always running)
 			data.watchedContainerData.SyncChannel <- ContainerReachedMaxTime
 			ackChan = data.watchedContainerData.AckChan
 		}
-		return nil
+		return 0, nil
 	})
 
 	if ackChan != nil {

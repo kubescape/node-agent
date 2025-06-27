@@ -3,6 +3,7 @@ package containerprofilemanager
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -31,6 +32,9 @@ type ContainerEntry struct {
 type containerData struct {
 	// Core container information
 	watchedContainerData *objectcache.WatchedContainerData
+
+	// Apparent size
+	size atomic.Int64
 
 	// Cleanup resources
 	timer *time.Timer // For max sniffing time

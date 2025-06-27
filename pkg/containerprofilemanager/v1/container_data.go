@@ -15,6 +15,7 @@ import (
 
 // emptyEvents clears all event data except syscalls (which are kept for peek function)
 func (cd *containerData) emptyEvents() {
+	cd.size.Store(0)
 	cd.capabilites = nil
 	// cd.syscalls is intentionally not set to nil, as we want to keep the syscalls for the peek function
 	cd.endpoints = nil
