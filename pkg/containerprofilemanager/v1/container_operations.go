@@ -48,6 +48,30 @@ func (cpm *ContainerProfileManager) withContainer(containerID string, fn func(*c
 	return nil
 }
 
+// withContainerNoSizeUpdate executes a function with access to container data but does not update the size counter
+// Use this when you want to modify or read container data but do not want to increment the size
+func (cpm *ContainerProfileManager) withContainerNoSizeUpdate(containerID string, fn func(*containerData) error) error {
+	// Get container entry (read lock on map)
+	cpm.containersMu.RLock()
+	entry, exists := cpm.containers[containerID]
+	cpm.containersMu.RUnlock()
+
+	if !exists {
+		return ErrContainerNotFound
+	}
+
+	// Lock container data for exclusive access
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
+	// Double-check that container wasn't deleted
+	if entry.data == nil {
+		return ErrContainerNotFound
+	}
+
+	return fn(entry.data)
+}
+
 // getContainerEntry retrieves a container entry by its ID
 func (cpm *ContainerProfileManager) getContainerEntry(containerID string) (*ContainerEntry, bool) {
 	cpm.containersMu.RLock()

@@ -43,7 +43,7 @@ func TestLoadConfig(t *testing.T) {
 				MaxJitterPercentage:      5,
 				MaxImageSize:             5368709120,
 				MaxSBOMSize:              20971520,
-				MaxTsProfileSize:         2097152,
+				MaxTsProfileSize:         2 * 1024 * 1024,
 				ProfilesCacheRefreshRate: 1 * time.Minute,
 				EnablePrometheusExporter: true,
 				EnableRuntimeDetection:   true,

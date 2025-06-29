@@ -94,7 +94,7 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event eve
 		if opens, ok := data.opens.Load(path); ok {
 			opens.Append(event.Flags...)
 		} else {
-			data.opens.Set(path, mapset.NewSet[string](event.Flags...))
+			data.opens.Set(path, mapset.NewSet(event.Flags...))
 		}
 
 		return size.Of(path) + size.Of(event.Flags), nil
@@ -272,9 +272,9 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 
 // ReportDroppedEvent reports a dropped event (currently just logs)
 func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
-	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
 		data.droppedEvents = true
-		return 0, nil
+		return nil
 	})
 	if err != nil && !errors.Is(err, ErrContainerNotFound) {
 		logger.L().Error("failed to report dropped event",
@@ -304,7 +304,7 @@ func (cpm *ContainerProfileManager) PeekSyscalls(data *containerData) ([]string,
 	}
 
 	// Get only new syscalls
-	syscallsSet := mapset.NewSet[string](peekedSyscalls...)
+	syscallsSet := mapset.NewSet(peekedSyscalls...)
 	newSyscalls := syscallsSet.Difference(data.syscalls)
 	syscalls = newSyscalls.ToSlice()
 

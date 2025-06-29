@@ -29,23 +29,8 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 
 			watchedContainer.SetStatus(objectcache.WatchedContainerStatusReady)
 			if err := cpm.saveProfile(watchedContainer, container); err != nil {
-				if err.Error() == file.ObjectTooLargeError.Error() {
-					watchedContainer.SetStatus(objectcache.WatchedContainerStatusTooLarge)
-					cpm.deleteContainer(container)
-					cpm.notifyContainerEndOfLife(container)
-					return file.ObjectTooLargeError
-				} else if err.Error() == file.ObjectCompletedError.Error() {
-					watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
-					cpm.deleteContainer(container)
-					cpm.notifyContainerEndOfLife(container)
-					return file.ObjectCompletedError
-				} else {
-					logger.L().Error("failed to save container profile", helpers.Error(err),
-						helpers.String("containerID", watchedContainer.ContainerID),
-						helpers.String("containerName", container.Runtime.ContainerName),
-						helpers.String("workloadID", watchedContainer.Wlid),
-						helpers.String("status", string(watchedContainer.GetStatus())),
-						helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
+				if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container); handledErr != err {
+					return handledErr
 				}
 			}
 
@@ -84,23 +69,8 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 
 			case errors.Is(err, ProfileRequiresSplit):
 				if err := cpm.saveProfile(watchedContainer, container); err != nil {
-					if err.Error() == file.ObjectTooLargeError.Error() {
-						watchedContainer.SetStatus(objectcache.WatchedContainerStatusTooLarge)
-						cpm.deleteContainer(container)
-						cpm.notifyContainerEndOfLife(container)
-						return file.ObjectTooLargeError
-					} else if err.Error() == file.ObjectCompletedError.Error() {
-						watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
-						cpm.deleteContainer(container)
-						cpm.notifyContainerEndOfLife(container)
-						return file.ObjectCompletedError
-					} else {
-						logger.L().Error("failed to save container profile", helpers.Error(err),
-							helpers.String("containerID", watchedContainer.ContainerID),
-							helpers.String("containerName", container.Runtime.ContainerName),
-							helpers.String("workloadID", watchedContainer.Wlid),
-							helpers.String("status", string(watchedContainer.GetStatus())),
-							helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
+					if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container); handledErr != err {
+						return handledErr
 					}
 				}
 			}
@@ -108,10 +78,33 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 	}
 }
 
+// handleSaveProfileError handles common error cases for saveProfile operations
+func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container) error {
+	if err.Error() == file.ObjectTooLargeError.Error() {
+		watchedContainer.SetStatus(objectcache.WatchedContainerStatusTooLarge)
+		cpm.deleteContainer(container)
+		cpm.notifyContainerEndOfLife(container)
+		return file.ObjectTooLargeError
+	} else if err.Error() == file.ObjectCompletedError.Error() {
+		watchedContainer.SetStatus(objectcache.WatchedContainerStatusCompleted)
+		cpm.deleteContainer(container)
+		cpm.notifyContainerEndOfLife(container)
+		return file.ObjectCompletedError
+	} else {
+		logger.L().Error("failed to save container profile", helpers.Error(err),
+			helpers.String("containerID", watchedContainer.ContainerID),
+			helpers.String("containerName", container.Runtime.ContainerName),
+			helpers.String("workloadID", watchedContainer.Wlid),
+			helpers.String("status", string(watchedContainer.GetStatus())),
+			helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
+	}
+	return err
+}
+
 // saveProfile saves the container profile using the with pattern for safe access
 func (cpm *ContainerProfileManager) saveProfile(watchedContainer *objectcache.WatchedContainerData, container *containercollection.Container) error {
-	return cpm.withContainer(watchedContainer.ContainerID, func(data *containerData) (int, error) {
-		return 0, cpm.saveContainerProfile(watchedContainer, container, data)
+	return cpm.withContainerNoSizeUpdate(watchedContainer.ContainerID, func(data *containerData) error {
+		return cpm.saveContainerProfile(watchedContainer, container, data)
 	})
 }
 
