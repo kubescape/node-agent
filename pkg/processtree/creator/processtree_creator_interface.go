@@ -9,7 +9,9 @@ type ProcessTreeCreator interface {
 	// Feed a new event into the process tree
 	FeedEvent(event feeder.ProcessEvent)
 	// Get the full process tree (returns the root or all processes)
-	GetNodeTree() ([]apitypes.Process, error)
+	GetRootTree() ([]apitypes.Process, error)
+	// Get the process map
+	GetProcessMap() map[uint32]*apitypes.Process
 	// Optionally: Query for a process node by PID
 	GetProcessNode(pid int) (*apitypes.Process, error)
 }

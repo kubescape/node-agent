@@ -94,13 +94,13 @@ func TestContainerProcessTreeImpl_GetContainerTree_Success(t *testing.T) {
 		},
 	}
 
-	fullTree := []apitypes.Process{
-		*shimProcess,
-		{
+	fullTree := map[uint32]*apitypes.Process{
+		1: {
 			PID:  1,
 			PPID: 0,
 			Comm: "init",
 		},
+		50: shimProcess,
 	}
 
 	// Get container tree
@@ -138,8 +138,8 @@ func TestContainerProcessTreeImpl_GetContainerTree_ContainerNotFound(t *testing.
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	// Don't populate any containers
-	fullTree := []apitypes.Process{
-		{
+	fullTree := map[uint32]*apitypes.Process{
+		1: {
 			PID:  1,
 			PPID: 0,
 			Comm: "init",
@@ -163,8 +163,8 @@ func TestContainerProcessTreeImpl_GetContainerTree_ContainerPIDNotFound(t *testi
 	cpt.containerIdToShimPid[containerID] = containerPID
 
 	// Create a full tree without the container process
-	fullTree := []apitypes.Process{
-		{
+	fullTree := map[uint32]*apitypes.Process{
+		1: {
 			PID:  1,
 			PPID: 0,
 			Comm: "init",
@@ -245,8 +245,8 @@ func TestContainerProcessTreeImpl_ConcurrentAccess(t *testing.T) {
 
 	// Goroutine 3: Get container trees
 	go func() {
-		fullTree := []apitypes.Process{
-			{
+		fullTree := map[uint32]*apitypes.Process{
+			50: {
 				PID:  50,
 				PPID: 1,
 				Comm: "containerd-shim",
@@ -312,8 +312,13 @@ func TestContainerProcessTreeImpl_DeepTreeTraversal(t *testing.T) {
 		},
 	}
 
-	fullTree := []apitypes.Process{
-		*shimProcess,
+	fullTree := map[uint32]*apitypes.Process{
+		1: {
+			PID:  1,
+			PPID: 0,
+			Comm: "init",
+		},
+		50: shimProcess,
 	}
 
 	// Get container tree
@@ -377,9 +382,14 @@ func TestContainerProcessTreeImpl_Integration(t *testing.T) {
 		},
 	}
 
-	fullTree := []apitypes.Process{
-		*shimProcess1,
-		*shimProcess2,
+	fullTree := map[uint32]*apitypes.Process{
+		1: {
+			PID:  1,
+			PPID: 0,
+			Comm: "init",
+		},
+		50: shimProcess1,
+		60: shimProcess2,
 	}
 
 	// Manually set up the container PID mapping

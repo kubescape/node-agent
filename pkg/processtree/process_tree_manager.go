@@ -111,7 +111,7 @@ func (ptm *ProcessTreeManagerImpl) GetHostProcessTree() ([]apitypes.Process, err
 		return nil, fmt.Errorf("process tree manager not started")
 	}
 
-	return ptm.creator.GetNodeTree()
+	return ptm.creator.GetRootTree()
 }
 
 func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32) (apitypes.Process, error) {
@@ -122,11 +122,7 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 		return apitypes.Process{}, fmt.Errorf("process tree manager not started")
 	}
 
-	fullTree, err := ptm.creator.GetNodeTree()
-	if err != nil {
-		return apitypes.Process{}, fmt.Errorf("failed to get host process tree: %v", err)
-	}
-
+	fullTree := ptm.creator.GetProcessMap()
 	// Get all processes in the container
 	containerProcesses, err := ptm.containerTree.GetContainerTree(containerID, fullTree)
 	if err != nil {

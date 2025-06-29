@@ -2,7 +2,7 @@ DOCKERFILE_PATH=./build/Dockerfile
 BINARY_NAME=node-agent
 
 IMAGE?=quay.io/armosec/image-registry-test
-TAG?=testb133
+TAG?=testb1331
 # TAG?=v0.0.1
 
 binary:

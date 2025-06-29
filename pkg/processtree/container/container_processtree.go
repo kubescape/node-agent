@@ -35,7 +35,7 @@ func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.P
 	}
 }
 
-func (c *containerProcessTreeImpl) GetContainerTree(containerID string, fullTree []apitypes.Process) ([]apitypes.Process, error) {
+func (c *containerProcessTreeImpl) GetContainerTree(containerID string, fullTree map[uint32]*apitypes.Process) ([]apitypes.Process, error) {
 	c.mutex.RLock()
 	shimPID, ok := c.containerIdToShimPid[containerID]
 	c.mutex.RUnlock()
@@ -46,16 +46,9 @@ func (c *containerProcessTreeImpl) GetContainerTree(containerID string, fullTree
 	}
 
 	// Find the process node for the shim PID
-	var shimNode *apitypes.Process
-	for i := range fullTree {
-		if fullTree[i].PID == shimPID {
-			shimNode = &fullTree[i]
-			logger.L().Debug("GetContainerTree", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID), helpers.Interface("shimNode", shimNode))
-			break
-		}
-	}
-
+	shimNode := fullTree[shimPID]
 	if shimNode == nil {
+		logger.L().Debug("GetContainerTree Not found Shim PID", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 		return nil, nil
 	}
 

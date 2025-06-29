@@ -31,7 +31,7 @@ func TestProcessTreeCreator_FeedEventAndGetNodeTree(t *testing.T) {
 		Comm: "parent",
 	})
 
-	tree, err := pt.GetNodeTree()
+	tree, err := pt.GetRootTree()
 	assert.NoError(t, err)
 	assert.Len(t, tree, 1)
 	assert.Equal(t, uint32(1), tree[0].PID)
@@ -222,7 +222,7 @@ func TestProcessTreeCreator_Efficiency(t *testing.T) {
 	}
 	dur := time.Since(start)
 	assert.Less(t, dur.Seconds(), 2.0, "Should handle 10k events in under 2 seconds")
-	roots, err := pt.GetNodeTree()
+	roots, err := pt.GetRootTree()
 	assert.NoError(t, err)
 	assert.NotEmpty(t, roots)
 }
@@ -345,7 +345,7 @@ func TestProcessTreeCreator_ComplexTreeScenarios(t *testing.T) {
 	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ForkEvent, PID: 5, PPID: 4, Comm: "vim"})
 
 	// Verify tree structure
-	roots, err := pt.GetNodeTree()
+	roots, err := pt.GetRootTree()
 	assert.NoError(t, err)
 	assert.Len(t, roots, 1)
 	assert.Equal(t, uint32(1), roots[0].PID)
@@ -468,7 +468,7 @@ func TestProcessTreeCreator_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 
 	// Verify all processes were added
-	roots, err := pt.GetNodeTree()
+	roots, err := pt.GetRootTree()
 	assert.NoError(t, err)
 	assert.NotEmpty(t, roots)
 
@@ -499,7 +499,7 @@ func TestProcessTreeCreator_MemoryEfficiency(t *testing.T) {
 	}
 
 	// Verify tree integrity
-	roots, err := pt.GetNodeTree()
+	roots, err := pt.GetRootTree()
 	assert.NoError(t, err)
 	assert.Len(t, roots, 1)
 
@@ -597,7 +597,7 @@ func TestProcessTreeCreator_DeepCopy(t *testing.T) {
 	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ForkEvent, PID: 3, PPID: 1, Comm: "child2"})
 
 	// Get deep copy
-	roots, err := pt.GetNodeTree()
+	roots, err := pt.GetRootTree()
 	assert.NoError(t, err)
 	assert.Len(t, roots, 1)
 
@@ -771,7 +771,7 @@ func TestProcessTreeCreator_ExpectedTreeStructure(t *testing.T) {
 	}
 
 	// Get the actual tree
-	actualRoots, err := pt.GetNodeTree()
+	actualRoots, err := pt.GetRootTree()
 	assert.NoError(t, err)
 	assert.Len(t, actualRoots, 1, "Should have exactly one root process")
 

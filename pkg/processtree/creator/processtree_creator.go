@@ -49,7 +49,7 @@ func (pt *processTreeCreatorImpl) FeedEvent(event feeder.ProcessEvent) {
 	}
 }
 
-func (pt *processTreeCreatorImpl) GetNodeTree() ([]apitypes.Process, error) {
+func (pt *processTreeCreatorImpl) GetRootTree() ([]apitypes.Process, error) {
 	pt.mutex.RLock()
 	defer pt.mutex.RUnlock()
 	// Find root processes (those whose parent is not in the map or PPID==0)
@@ -60,6 +60,16 @@ func (pt *processTreeCreatorImpl) GetNodeTree() ([]apitypes.Process, error) {
 		}
 	}
 	return roots, nil
+}
+
+func (pt *processTreeCreatorImpl) GetProcessMap() map[uint32]*apitypes.Process {
+	pt.mutex.RLock()
+	defer pt.mutex.RUnlock()
+	processMap := make(map[uint32]*apitypes.Process)
+	for pid, proc := range pt.processMap {
+		processMap[pid] = pt.deepCopyProcess(proc)
+	}
+	return processMap
 }
 
 func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, error) {
@@ -138,6 +148,8 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 
 		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
 		if pt.isProcessExited(processHash) {
+			logger.L().Info("ProcFS: Process has already exited",
+				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)))
 			return // Don't create a new process that has already exited
 		}
 		// Create new process if it wasn't exited
@@ -269,6 +281,8 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 	}
 
 	// Only remove the exiting process, not its descendants
+	logger.L().Info("Exit: Removing process",
+		helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)))
 	delete(pt.processMap, event.PID)
 }
 

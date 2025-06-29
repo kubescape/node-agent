@@ -7,6 +7,6 @@ import (
 
 type ContainerProcessTree interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
-	GetContainerTree(containerID string, fullTree []apitypes.Process) ([]apitypes.Process, error)
+	GetContainerTree(containerID string, fullTree map[uint32]*apitypes.Process) ([]apitypes.Process, error)
 	ListContainers() []string
 }
