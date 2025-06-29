@@ -1,8 +1,13 @@
 package containerprofilemanager
 
+import (
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+)
+
 // withContainer executes a function with write access to container data
 // This is the core method that handles all locking and error management
-func (cpm *ContainerProfileManager) withContainer(containerID string, fn func(*containerData) error) error {
+func (cpm *ContainerProfileManager) withContainer(containerID string, fn func(*containerData) (int, error)) error {
 	// Get container entry (read lock on map)
 	cpm.containersMu.RLock()
 	entry, exists := cpm.containers[containerID]
@@ -21,7 +26,26 @@ func (cpm *ContainerProfileManager) withContainer(containerID string, fn func(*c
 		return ErrContainerNotFound
 	}
 
-	return fn(entry.data)
+	increment, err := fn(entry.data)
+	if err != nil {
+		return err
+	}
+
+	if increment > 0 {
+		entry.data.size.Add(int64(increment))
+		if size := entry.data.size.Load(); size > cpm.cfg.MaxTsProfileSize {
+			if entry.data.watchedContainerData != nil {
+				logger.L().Debug("container profile too large, splitting",
+					helpers.Int("size", int(size)),
+					helpers.Int("maxSize", int(cpm.cfg.MaxTsProfileSize)),
+					helpers.String("containerID", containerID),
+					helpers.String("wlid", entry.data.watchedContainerData.Wlid))
+				entry.data.watchedContainerData.SyncChannel <- ProfileRequiresSplit
+			}
+		}
+	}
+
+	return nil
 }
 
 // getContainerEntry retrieves a container entry by its ID

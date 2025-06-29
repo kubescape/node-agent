@@ -24,6 +24,7 @@ type Config struct {
 	MaxJitterPercentage      int                             `mapstructure:"maxJitterPercentage"`
 	MaxImageSize             int64                           `mapstructure:"maxImageSize"`
 	MaxSBOMSize              int                             `mapstructure:"maxSBOMSize"`
+	MaxTsProfileSize         int64                           `mapstructure:"maxTsProfileSize"`
 	EnableFullPathTracing    bool                            `mapstructure:"fullPathTracingEnabled"`
 	EnableApplicationProfile bool                            `mapstructure:"applicationProfileServiceEnabled"`
 	EnableMalwareDetection   bool                            `mapstructure:"malwareDetectionEnabled"`
@@ -67,6 +68,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("maxJitterPercentage", 5)
 	viper.SetDefault("maxImageSize", 5*1024*1024*1024)
 	viper.SetDefault("maxSBOMSize", 20*1024*1024)
+	viper.SetDefault("maxTsProfileSize", 2*1024*1024)
 	viper.SetDefault("namespaceName", os.Getenv(NamespaceEnvVar))
 	viper.SetDefault("nodeName", os.Getenv(NodeNameEnvVar))
 	viper.SetDefault("podName", os.Getenv(PodNameEnvVar))

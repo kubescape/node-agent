@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
@@ -26,14 +27,14 @@ var procRegex = regexp.MustCompile(`^/proc/\d+`)
 
 // ReportCapability reports a capability event for a container
 func (cpm *ContainerProfileManager) ReportCapability(containerID, capability string) {
-	err := cpm.withContainer(containerID, func(data *containerData) error {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.capabilites == nil {
 			data.capabilites = mapset.NewSet[string]()
 		}
 		if !data.capabilites.Contains(capability) {
 			data.capabilites.Add(capability)
 		}
-		return nil
+		return size.Of(capability), nil
 	})
 
 	cpm.logEventError(err, "capability", containerID)
@@ -41,7 +42,7 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 
 // ReportFileExec reports a file execution event for a container
 func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event events.ExecEvent) {
-	err := cpm.withContainer(containerID, func(data *containerData) error {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.execs == nil {
 			data.execs = &maps.SafeMap[string, []string]{}
 		}
@@ -57,8 +58,9 @@ func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event eve
 			go cpm.enricher.EnrichEvent(containerID, &event, execIdentifier)
 		}
 
-		data.execs.Set(execIdentifier, append([]string{path}, event.Args...))
-		return nil
+		exec := append([]string{path}, event.Args...)
+		data.execs.Set(execIdentifier, exec)
+		return size.Of(exec), nil
 	})
 
 	cpm.logEventError(err, "file exec", containerID)
@@ -66,7 +68,7 @@ func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event eve
 
 // ReportFileOpen reports a file open event for a container
 func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event events.OpenEvent) {
-	err := cpm.withContainer(containerID, func(data *containerData) error {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.opens == nil {
 			data.opens = &maps.SafeMap[string, mapset.Set[string]]{}
 		}
@@ -85,7 +87,7 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event eve
 
 		// Check if we already have this open with these flags
 		if opens, ok := data.opens.Load(path); ok && opens.Contains(event.Flags...) {
-			return nil
+			return 0, nil
 		}
 
 		// Add to open map
@@ -95,7 +97,7 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event eve
 			data.opens.Set(path, mapset.NewSet[string](event.Flags...))
 		}
 
-		return nil
+		return size.Of(path) + size.Of(event.Flags), nil
 	})
 
 	cpm.logEventError(err, "file open", containerID)
@@ -103,12 +105,12 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event eve
 
 // ReportSymlinkEvent reports a symlink creation event for a container
 func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event *tracersymlinktype.Event) {
-	err := cpm.withContainer(containerID, func(data *containerData) error {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if cpm.enricher != nil {
 			symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
 			go cpm.enricher.EnrichEvent(containerID, event, symlinkIdentifier)
 		}
-		return nil
+		return size.Of(event.OldPath + event.NewPath), nil // FIXME this is not correct
 	})
 
 	cpm.logEventError(err, "symlink", containerID)
@@ -116,12 +118,12 @@ func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event
 
 // ReportHardlinkEvent reports a hardlink creation event for a container
 func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, event *tracerhardlinktype.Event) {
-	err := cpm.withContainer(containerID, func(data *containerData) error {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if cpm.enricher != nil {
 			hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
 			go cpm.enricher.EnrichEvent(containerID, event, hardlinkIdentifier)
 		}
-		return nil
+		return size.Of(event.OldPath + event.NewPath), nil // FIXME this is not correct
 	})
 
 	cpm.logEventError(err, "hardlink", containerID)
@@ -129,10 +131,10 @@ func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, even
 
 // ReportHTTPEvent reports an HTTP event for a container
 func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event *tracerhttptype.Event) {
-	err := cpm.withContainer(containerID, func(data *containerData) error {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if event.Response == nil {
 			logger.L().Debug("HTTP event without response", helpers.String("containerID", containerID))
-			return nil
+			return 0, nil
 		}
 
 		if data.endpoints == nil {
@@ -142,24 +144,24 @@ func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event *t
 		endpointIdentifier, err := GetEndpointIdentifier(event)
 		if err != nil {
 			logger.L().Warning("failed to get endpoint identifier", helpers.Error(err))
-			return nil
+			return 0, nil
 		}
 
 		endpoint, err := GetNewEndpoint(event, endpointIdentifier)
 		if err != nil {
 			logger.L().Warning("failed to get new endpoint", helpers.Error(err))
-			return nil
+			return 0, nil
 		}
 
 		// Check if we already have this endpoint
 		endpointHash := CalculateHTTPEndpointHash(endpoint)
 		if data.endpoints.Has(endpointHash) {
-			return nil
+			return 0, nil
 		}
 
 		// Add to endpoint map
 		data.endpoints.Set(endpointHash, endpoint)
-		return nil
+		return size.Of(endpoint), nil
 	})
 
 	cpm.logEventError(err, "http", containerID)
@@ -167,7 +169,7 @@ func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event *t
 
 // ReportRulePolicy reports a rule policy for a container
 func (cpm *ContainerProfileManager) ReportRulePolicy(containerID, ruleId, allowedProcess string, allowedContainer bool) {
-	err := cpm.withContainer(containerID, func(data *containerData) error {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.rulePolicies == nil {
 			data.rulePolicies = &maps.SafeMap[string, *v1beta1.RulePolicy]{}
 
@@ -185,7 +187,7 @@ func (cpm *ContainerProfileManager) ReportRulePolicy(containerID, ruleId, allowe
 
 		existingPolicy, hasExisting := data.rulePolicies.Load(ruleId)
 		if hasExisting && IsPolicyIncluded(existingPolicy, newPolicy) {
-			return nil
+			return 0, nil
 		}
 
 		var finalPolicy *v1beta1.RulePolicy
@@ -202,7 +204,7 @@ func (cpm *ContainerProfileManager) ReportRulePolicy(containerID, ruleId, allowe
 		}
 
 		data.rulePolicies.Set(ruleId, finalPolicy)
-		return nil
+		return size.Of(finalPolicy), nil
 	})
 
 	cpm.logEventError(err, "rule policy", containerID)
@@ -210,7 +212,7 @@ func (cpm *ContainerProfileManager) ReportRulePolicy(containerID, ruleId, allowe
 
 // ReportIdentifiedCallStack reports a call stack for a container
 func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string, callStack *v1beta1.IdentifiedCallStack) {
-	err := cpm.withContainer(containerID, func(data *containerData) error {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.callStacks == nil {
 			data.callStacks = &maps.SafeMap[string, *v1beta1.IdentifiedCallStack]{}
 		}
@@ -220,12 +222,12 @@ func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string
 
 		// Check if we already have this call stack
 		if data.callStacks.Has(callStackIdentifier) {
-			return nil
+			return 0, nil
 		}
 
 		// Add to call stacks map
 		data.callStacks.Set(callStackIdentifier, callStack)
-		return nil
+		return size.Of(callStack), nil
 	})
 
 	cpm.logEventError(err, "callstack", containerID)
@@ -237,7 +239,7 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 		return
 	}
 
-	err := cpm.withContainer(containerID, func(data *containerData) error {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.networks == nil {
 			data.networks = mapset.NewSet[NetworkEvent]()
 		}
@@ -257,11 +259,12 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 		networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
 
 		// Skip if we already saved this event
-		if !data.networks.Contains(networkEvent) {
-			data.networks.Add(networkEvent)
+		if data.networks.Contains(networkEvent) {
+			return 0, nil
 		}
 
-		return nil
+		data.networks.Add(networkEvent)
+		return size.Of(networkEvent), nil
 	})
 
 	cpm.logEventError(err, "network", containerID)
@@ -269,9 +272,9 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 
 // ReportDroppedEvent reports a dropped event (currently just logs)
 func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
-	err := cpm.withContainer(containerID, func(data *containerData) error {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		data.droppedEvents = true
-		return nil
+		return 0, nil
 	})
 	if err != nil && !errors.Is(err, ErrContainerNotFound) {
 		logger.L().Error("failed to report dropped event",
