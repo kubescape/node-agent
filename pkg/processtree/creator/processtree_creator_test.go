@@ -1094,3 +1094,265 @@ func TestEnrichmentStillWorks(t *testing.T) {
 	assert.Equal(t, "test-process", proc.Comm)
 	assert.Equal(t, "/bin/test --enriched", proc.Cmdline, "Process should be enriched with cmdline")
 }
+
+func TestProcessTreeCreator_ParentChildRelationshipBuilding(t *testing.T) {
+	// Test 1: Fork event should create parent-child relationship
+	t.Run("ForkEvent_ParentChildRelationship", func(t *testing.T) {
+		pt := NewProcessTreeCreator()
+
+		// Create parent process
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ForkEvent,
+			PID:  100,
+			PPID: 1,
+			Comm: "parent",
+		})
+
+		// Create child process
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ForkEvent,
+			PID:  200,
+			PPID: 100,
+			Comm: "child",
+		})
+
+		// Verify parent has child in its ChildrenMap
+		parent, err := pt.GetProcessNode(100)
+		assert.NoError(t, err)
+		assert.NotNil(t, parent)
+		assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{Comm: "child", PID: 200})
+
+		// Verify child has correct PPID
+		child, err := pt.GetProcessNode(200)
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+		assert.Equal(t, uint32(100), child.PPID)
+	})
+
+	// Test 2: Exec event should create parent-child relationship (this was the bug)
+	t.Run("ExecEvent_ParentChildRelationship", func(t *testing.T) {
+		pt := NewProcessTreeCreator()
+
+		// Create parent process first
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ForkEvent,
+			PID:  300,
+			PPID: 1,
+			Comm: "parent",
+		})
+
+		// Create child process via exec event
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ExecEvent,
+			PID:  400,
+			PPID: 300,
+			Comm: "exec-child",
+		})
+
+		// Verify parent has child in its ChildrenMap
+		parent, err := pt.GetProcessNode(300)
+		assert.NoError(t, err)
+		assert.NotNil(t, parent)
+		assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{Comm: "exec-child", PID: 400})
+
+		// Verify child has correct PPID
+		child, err := pt.GetProcessNode(400)
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+		assert.Equal(t, uint32(300), child.PPID)
+	})
+
+	// Test 3: Procfs event should create parent-child relationship
+	t.Run("ProcfsEvent_ParentChildRelationship", func(t *testing.T) {
+		pt := NewProcessTreeCreator()
+
+		// Create parent process first
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ForkEvent,
+			PID:  500,
+			PPID: 1,
+			Comm: "parent",
+		})
+
+		// Create child process via procfs event
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ProcfsEvent,
+			PID:  600,
+			PPID: 500,
+			Comm: "procfs-child",
+		})
+
+		// Verify parent has child in its ChildrenMap
+		parent, err := pt.GetProcessNode(500)
+		assert.NoError(t, err)
+		assert.NotNil(t, parent)
+		assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{Comm: "procfs-child", PID: 600})
+
+		// Verify child has correct PPID
+		child, err := pt.GetProcessNode(600)
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+		assert.Equal(t, uint32(500), child.PPID)
+	})
+
+	// Test 4: Complex tree building with all event types
+	t.Run("ComplexTreeBuilding_AllEventTypes", func(t *testing.T) {
+		pt := NewProcessTreeCreator()
+
+		// Build a complex tree:
+		// init (PID 1)
+		// ├── shell (PID 100) [fork]
+		// │   ├── nginx (PID 200) [exec]
+		// │   │   └── nginx-worker (PID 201) [procfs]
+		// │   └── bash (PID 300) [fork]
+		// └── systemd (PID 50) [procfs]
+
+		// Create init process
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ForkEvent,
+			PID:  1,
+			PPID: 0,
+			Comm: "init",
+		})
+
+		// Create shell via fork
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ForkEvent,
+			PID:  100,
+			PPID: 1,
+			Comm: "shell",
+		})
+
+		// Create nginx via exec
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ExecEvent,
+			PID:  200,
+			PPID: 100,
+			Comm: "nginx",
+		})
+
+		// Create nginx-worker via procfs
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ProcfsEvent,
+			PID:  201,
+			PPID: 200,
+			Comm: "nginx-worker",
+		})
+
+		// Create bash via fork
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ForkEvent,
+			PID:  300,
+			PPID: 100,
+			Comm: "bash",
+		})
+
+		// Create systemd via procfs
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ProcfsEvent,
+			PID:  50,
+			PPID: 1,
+			Comm: "systemd",
+		})
+
+		// Verify the complete tree structure
+		initProc, err := pt.GetProcessNode(1)
+		assert.NoError(t, err)
+		assert.NotNil(t, initProc)
+		assert.Len(t, initProc.ChildrenMap, 2) // shell and systemd
+		assert.Contains(t, initProc.ChildrenMap, apitypes.CommPID{Comm: "shell", PID: 100})
+		assert.Contains(t, initProc.ChildrenMap, apitypes.CommPID{Comm: "systemd", PID: 50})
+
+		shellProc, err := pt.GetProcessNode(100)
+		assert.NoError(t, err)
+		assert.NotNil(t, shellProc)
+		assert.Len(t, shellProc.ChildrenMap, 2) // nginx and bash
+		assert.Contains(t, shellProc.ChildrenMap, apitypes.CommPID{Comm: "nginx", PID: 200})
+		assert.Contains(t, shellProc.ChildrenMap, apitypes.CommPID{Comm: "bash", PID: 300})
+
+		nginxProc, err := pt.GetProcessNode(200)
+		assert.NoError(t, err)
+		assert.NotNil(t, nginxProc)
+		assert.Len(t, nginxProc.ChildrenMap, 1) // nginx-worker
+		assert.Contains(t, nginxProc.ChildrenMap, apitypes.CommPID{Comm: "nginx-worker", PID: 201})
+
+		// Verify all PPIDs are correct
+		assert.Equal(t, uint32(0), initProc.PPID)
+		assert.Equal(t, uint32(1), shellProc.PPID)
+
+		systemdProc, err := pt.GetProcessNode(50)
+		assert.NoError(t, err)
+		assert.Equal(t, uint32(1), systemdProc.PPID)
+
+		assert.Equal(t, uint32(100), nginxProc.PPID)
+
+		bashProc, err := pt.GetProcessNode(300)
+		assert.NoError(t, err)
+		assert.Equal(t, uint32(100), bashProc.PPID)
+
+		workerProc, err := pt.GetProcessNode(201)
+		assert.NoError(t, err)
+		assert.Equal(t, uint32(200), workerProc.PPID)
+	})
+
+	// Test 5: Verify that parent creation works when child comes first
+	t.Run("ChildBeforeParent_CreatesParent", func(t *testing.T) {
+		pt := NewProcessTreeCreator()
+
+		// Create child first (parent doesn't exist yet)
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ExecEvent,
+			PID:  700,
+			PPID: 800,
+			Comm: "child-first",
+		})
+
+		// Create parent later
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ForkEvent,
+			PID:  800,
+			PPID: 1,
+			Comm: "parent-later",
+		})
+
+		// Verify parent was created and has child
+		parent, err := pt.GetProcessNode(800)
+		assert.NoError(t, err)
+		assert.NotNil(t, parent)
+		assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{Comm: "child-first", PID: 700})
+
+		// Verify child has correct PPID
+		child, err := pt.GetProcessNode(700)
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+		assert.Equal(t, uint32(800), child.PPID)
+	})
+
+	// Test 6: Verify that ChildrenMap is properly initialized
+	t.Run("ChildrenMapInitialization", func(t *testing.T) {
+		pt := NewProcessTreeCreator()
+
+		// Create a process without children first
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ForkEvent,
+			PID:  900,
+			PPID: 1,
+			Comm: "lonely-process",
+		})
+
+		// Add a child later
+		pt.FeedEvent(feeder.ProcessEvent{
+			Type: feeder.ExecEvent,
+			PID:  901,
+			PPID: 900,
+			Comm: "child-added-later",
+		})
+
+		// Verify parent's ChildrenMap was properly initialized
+		parent, err := pt.GetProcessNode(900)
+		assert.NoError(t, err)
+		assert.NotNil(t, parent)
+		assert.NotNil(t, parent.ChildrenMap)
+		assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{Comm: "child-added-later", PID: 901})
+	})
+}

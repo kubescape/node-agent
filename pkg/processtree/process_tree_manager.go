@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
@@ -139,7 +141,9 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 	}
 
 	// Find the specific process with the given PID
+	processesPids := []uint32{}
 	for _, process := range containerProcesses {
+		processesPids = append(processesPids, process.PID)
 		if process.PID == pid {
 			return process, nil
 		}
@@ -147,9 +151,24 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 		if found := ptm.findProcessByPID(&process, pid); found != nil {
 			return *found, nil
 		}
+
 	}
 
-	return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s", pid, containerID)
+	processNode, err := ptm.creator.GetProcessNode(int(pid))
+	if err != nil {
+		return apitypes.Process{}, fmt.Errorf("failed to get process node: %v", err)
+	}
+
+	logger.L().Debug("Not tContainerProcessTree processNode", helpers.Int("pid", int(pid)), helpers.String("containerID", containerID), helpers.Interface("processNode", processNode))
+	if processNode != nil && processNode.ChildrenMap != nil {
+		for _, process := range processNode.ChildrenMap {
+			logger.L().Debug("Not GetContainerProcessTree processNode children", helpers.Int("pid", int(process.PID)), helpers.String("containerID", containerID), helpers.Interface("processNode", process))
+		}
+	} else {
+		logger.L().Debug("Not GetContainerProcessTree processNode children", helpers.Int("pid", int(pid)), helpers.String("containerID", containerID), helpers.Interface("processNode", processNode))
+	}
+
+	return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s, pids: %v", pid, containerID, processesPids)
 }
 
 // findProcessByPID recursively searches for a process with the given PID in the process tree
