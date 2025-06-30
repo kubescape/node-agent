@@ -1267,3 +1267,188 @@ func TestProcessTreeCreator_ComplexOutOfOrderScenario(t *testing.T) {
 	assert.Equal(t, uint32(3000), child4000.PPID)
 	assert.Equal(t, "process4000", child4000.Comm)
 }
+
+func TestProcessTreeCreator_ForkExecNoDuplication(t *testing.T) {
+	pt := NewProcessTreeCreator()
+
+	// Simulate a fork event creating a new process
+	forkEvent := feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         1830946, // Same PID as in the user's example
+		PPID:        1792028,
+		Comm:        "bash", // Initial comm from fork
+		StartTimeNs: 1000,
+	}
+	pt.FeedEvent(forkEvent)
+
+	// Verify the fork created a process node
+	proc, err := pt.GetProcessNode(1830946)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, uint32(1830946), proc.PID)
+	assert.Equal(t, uint32(1792028), proc.PPID)
+	assert.Equal(t, "bash", proc.Comm)
+	assert.Equal(t, "", proc.Cmdline) // No cmdline from fork
+	assert.Equal(t, "", proc.Path)    // No path from fork
+
+	// Simulate an exec event for the same PID
+	execEvent := feeder.ProcessEvent{
+		Type:        feeder.ExecEvent,
+		PID:         1830946, // Same PID as fork
+		PPID:        1792028,
+		Comm:        "ls", // New comm from exec
+		Cmdline:     "/bin/ls",
+		Path:        "/bin/ls",
+		StartTimeNs: 1000, // Same start time
+	}
+	pt.FeedEvent(execEvent)
+
+	// Verify the exec enriched the existing process, didn't create a duplicate
+	proc, err = pt.GetProcessNode(1830946)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, uint32(1830946), proc.PID)
+	assert.Equal(t, uint32(1792028), proc.PPID)
+	assert.Equal(t, "ls", proc.Comm)         // Updated by exec
+	assert.Equal(t, "/bin/ls", proc.Cmdline) // Added by exec
+	assert.Equal(t, "/bin/ls", proc.Path)    // Added by exec
+
+	// Verify there's only one process in the map for this PID
+	processMap := pt.GetProcessMap()
+	count := 0
+	for pid := range processMap {
+		if pid == 1830946 {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "Should have exactly one process node for PID 1830946")
+
+	// Verify the process is properly linked to its parent
+	parent, err := pt.GetProcessNode(1792028)
+	if err == nil && parent != nil {
+		childKey := apitypes.CommPID{Comm: "ls", PID: 1830946}
+		assert.Contains(t, parent.ChildrenMap, childKey, "Child should be in parent's children map")
+	}
+}
+
+func TestProcessTreeCreator_ExecBeforeFork(t *testing.T) {
+	pt := NewProcessTreeCreator()
+
+	// Simulate exec event arriving before fork (rare but possible)
+	execEvent := feeder.ProcessEvent{
+		Type:        feeder.ExecEvent,
+		PID:         9999,
+		PPID:        1,
+		Comm:        "early_exec",
+		Cmdline:     "/bin/early_exec",
+		Path:        "/bin/early_exec",
+		StartTimeNs: 1000,
+	}
+	pt.FeedEvent(execEvent)
+
+	// Verify exec created a process node
+	proc, err := pt.GetProcessNode(9999)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, uint32(9999), proc.PID)
+	assert.Equal(t, "early_exec", proc.Comm)
+	assert.Equal(t, "/bin/early_exec", proc.Cmdline)
+
+	// Now simulate fork event for the same PID
+	forkEvent := feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         9999,
+		PPID:        1,
+		Comm:        "early_exec", // Same comm
+		StartTimeNs: 1000,         // Same start time
+	}
+	pt.FeedEvent(forkEvent)
+
+	// Verify the fork enriched the existing process, didn't create a duplicate
+	proc, err = pt.GetProcessNode(9999)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, uint32(9999), proc.PID)
+	assert.Equal(t, "early_exec", proc.Comm)
+	assert.Equal(t, "/bin/early_exec", proc.Cmdline) // Preserved from exec
+
+	// Verify there's only one process in the map for this PID
+	processMap := pt.GetProcessMap()
+	count := 0
+	for pid := range processMap {
+		if pid == 9999 {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "Should have exactly one process node for PID 9999")
+}
+
+func TestProcessTreeCreator_ConcurrentForkExec(t *testing.T) {
+	pt := NewProcessTreeCreator()
+	var wg sync.WaitGroup
+
+	// Simulate concurrent fork and exec events for the same PID
+	for i := 0; i < 10; i++ {
+		wg.Add(2)
+
+		// Fork event
+		go func(pid uint32) {
+			defer wg.Done()
+			forkEvent := feeder.ProcessEvent{
+				Type:        feeder.ForkEvent,
+				PID:         pid,
+				PPID:        1,
+				Comm:        fmt.Sprintf("process_%d", pid),
+				StartTimeNs: uint64(pid),
+			}
+			pt.FeedEvent(forkEvent)
+		}(uint32(1000 + i))
+
+		// Exec event for the same PID
+		go func(pid uint32) {
+			defer wg.Done()
+			execEvent := feeder.ProcessEvent{
+				Type:        feeder.ExecEvent,
+				PID:         pid,
+				PPID:        1,
+				Comm:        fmt.Sprintf("exec_%d", pid),
+				Cmdline:     fmt.Sprintf("/bin/exec_%d", pid),
+				Path:        fmt.Sprintf("/bin/exec_%d", pid),
+				StartTimeNs: uint64(pid),
+			}
+			pt.FeedEvent(execEvent)
+		}(uint32(1000 + i))
+	}
+
+	wg.Wait()
+
+	// Verify each PID has exactly one process (no duplicates)
+	processMap := pt.GetProcessMap()
+
+	// Count unique PIDs
+	uniquePIDs := make(map[uint32]bool)
+	for pid := range processMap {
+		uniquePIDs[pid] = true
+	}
+
+	// Should have exactly 11 unique PIDs: 10 children (1000-1009) + 1 parent (PID=1)
+	assert.Equal(t, 11, len(uniquePIDs), "Should have exactly 11 unique PIDs: 10 children + 1 parent, no duplicates")
+
+	// Verify each expected child PID has exactly one process
+	for i := 0; i < 10; i++ {
+		pid := uint32(1000 + i)
+		proc, err := pt.GetProcessNode(int(pid))
+		assert.NoError(t, err)
+		assert.NotNil(t, proc)
+		assert.Equal(t, pid, proc.PID)
+
+		// Verify the process has either fork data, exec data, or both
+		assert.True(t, proc.Comm != "", "Process should have a comm name")
+	}
+
+	// Verify parent process (PID=1) exists
+	parent, err := pt.GetProcessNode(1)
+	assert.NoError(t, err)
+	assert.NotNil(t, parent)
+	assert.Equal(t, uint32(1), parent.PID)
+}

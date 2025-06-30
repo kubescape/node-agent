@@ -183,26 +183,57 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 	pt.linkProcessToParent(proc)
 }
 
-// handleExecEvent handles exec events - always overrides when it has values
+// handleExecEvent handles exec events - always enriches the existing process node if present, never creates a duplicate
 func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
+	// Always lock for write, as we may update the process node
 	proc, exists := pt.processMap[event.PID]
 
-	// If process doesn't exist, check if it was previously exited
-	if !exists {
-		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
-		if pt.isProcessExited(processHash) {
-			logger.L().Info("Exec: Process has already exited",
-				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
-			return // Don't create a new process that has already exited
+	if exists {
+		// Enrich the existing process node with exec data
+		if event.PPID != 0 {
+			proc.PPID = event.PPID
 		}
-		// Create new process if it wasn't exited
-		proc = pt.getOrCreateProcess(event.PID)
-
-		logger.L().Info("Exec: Creating new process",
-			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
+		if event.Comm != "" {
+			proc.Comm = event.Comm
+		}
+		if event.Pcomm != "" {
+			proc.Pcomm = event.Pcomm
+		}
+		if event.Cmdline != "" {
+			proc.Cmdline = event.Cmdline
+		}
+		if event.Uid != nil {
+			proc.Uid = event.Uid
+		}
+		if event.Gid != nil {
+			proc.Gid = event.Gid
+		}
+		if event.Cwd != "" {
+			proc.Cwd = event.Cwd
+		}
+		if event.Path != "" {
+			proc.Path = event.Path
+		}
+		if proc.ChildrenMap == nil {
+			proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+		}
+		pt.linkProcessToParent(proc)
+		return
 	}
 
-	// Always override with new values if they are provided (enrichment)
+	// If process doesn't exist, check if it was previously exited
+	processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
+	if pt.isProcessExited(processHash) {
+		logger.L().Info("Exec: Process has already exited",
+			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
+		return // Don't create a new process that has already exited
+	}
+	// Create new process if it wasn't exited (should be rare)
+	proc = pt.getOrCreateProcess(event.PID)
+	logger.L().Info("Exec: Creating new process (no prior fork event)",
+		helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
+
+	// Fill all fields from exec event
 	if event.PPID != 0 {
 		proc.PPID = event.PPID
 	}
@@ -227,11 +258,9 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	if event.Path != "" {
 		proc.Path = event.Path
 	}
-
 	if proc.ChildrenMap == nil {
 		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
 	}
-
 	pt.linkProcessToParent(proc)
 }
 

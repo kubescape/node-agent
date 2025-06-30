@@ -11,6 +11,7 @@ import (
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
+	"github.com/kubescape/node-agent/pkg/processtree/utils"
 )
 
 // ProcessTreeManagerImpl implements the ProcessTreeManager interface
@@ -126,10 +127,26 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 
 	processNode, err := ptm.creator.GetProcessNode(int(pid))
 	if err != nil {
+		logger.L().Error("Failed to get process node", helpers.Error(err))
+		nodes, err := ptm.containerTree.GetContainerTreeNodes(containerID, ptm.creator.GetProcessMap())
+		if err != nil {
+			logger.L().Error("Failed to get container tree nodes", helpers.Error(err))
+		}
+		if len(nodes) > 0 {
+			utils.PrintTreeOneLine(&nodes[0])
+		}
 		return apitypes.Process{}, fmt.Errorf("failed to get process node: %v", err)
 	}
 
 	if processNode == nil {
+		logger.L().Error("Failed to get process node", helpers.Error(err))
+		nodes, err := ptm.containerTree.GetContainerTreeNodes(containerID, ptm.creator.GetProcessMap())
+		if err != nil {
+			logger.L().Error("Failed to get container tree nodes", helpers.Error(err))
+		}
+		if len(nodes) > 0 {
+			utils.PrintTreeOneLine(&nodes[0])
+		}
 		return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s", pid, containerID)
 	}
 
@@ -137,6 +154,13 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 	containerSubtree, err := ptm.containerTree.GetContainerSubtree(containerID, pid, ptm.creator.GetProcessMap())
 	if err != nil {
 		logger.L().Error("Failed to get container subtree", helpers.Error(err))
+		nodes, err := ptm.containerTree.GetContainerTreeNodes(containerID, ptm.creator.GetProcessMap())
+		if err != nil {
+			logger.L().Error("Failed to get container tree nodes", helpers.Error(err))
+		}
+		if len(nodes) > 0 {
+			utils.PrintTreeOneLine(&nodes[0])
+		}
 		return apitypes.Process{}, fmt.Errorf("failed to get container subtree: %v", err)
 	}
 

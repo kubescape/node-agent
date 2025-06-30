@@ -82,9 +82,12 @@ func (t *Tracer) install() error {
 		return fmt.Errorf("loading ebpf spec: %w", err)
 	}
 
-	t.forkLink, err = link.Tracepoint("sched", "sched_process_fork", t.objs.TracepointSchedFork, nil)
+	t.forkLink, err = link.AttachRawTracepoint(link.RawTracepointOptions{
+		Name:    "sched_process_fork",
+		Program: t.objs.TracepointSchedFork,
+	})
 	if err != nil {
-		return fmt.Errorf("attaching tracepoint: %w", err)
+		return fmt.Errorf("attaching raw tracepoint: %w", err)
 	}
 
 	t.reader, err = perf.NewReader(t.objs.forkMaps.Events, gadgets.PerfBufferPages*os.Getpagesize())
