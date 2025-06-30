@@ -85,7 +85,7 @@ func (cpm *ContainerProfileManager) addContainer(container *containercollection.
 		return nil
 	}
 
-	if !cpm.cfg.EnableRuntimeDetection && sharedData.PreRunningContainer {
+	if !sharedData.PreRunningContainer || !(cpm.cfg.EnableRuntimeDetection || cpm.cfg.EnablePartialProfileGeneration) {
 		logger.L().Debug("ignoring pre-running container without runtime detection",
 			helpers.String("containerID", containerID),
 			helpers.String("containerName", container.Runtime.ContainerName),
