@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
@@ -131,18 +133,14 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 		return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s", pid, containerID)
 	}
 
-	containerTreeNodes, err := ptm.containerTree.GetContainerTreeNodes(containerID, ptm.creator.GetProcessMap())
+	// Get the container subtree starting from the node just before shim PID
+	containerSubtree, err := ptm.containerTree.GetContainerSubtree(containerID, pid, ptm.creator.GetProcessMap())
 	if err != nil {
-		return apitypes.Process{}, fmt.Errorf("failed to get container tree nodes: %v", err)
+		logger.L().Error("Failed to get container subtree", helpers.Error(err))
+		return apitypes.Process{}, fmt.Errorf("failed to get container subtree: %v", err)
 	}
 
-	for _, node := range containerTreeNodes {
-		if node.PID == pid {
-			return node, nil
-		}
-	}
-
-	return *processNode, nil
+	return containerSubtree, nil
 }
 
 func (ptm *ProcessTreeManagerImpl) GetProcessNode(pid int) (*apitypes.Process, error) {

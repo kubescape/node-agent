@@ -136,7 +136,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 	// If process doesn't exist, check if it was previously exited
 	if !exists {
 		logger.L().Info("ProcFS: Creating new process",
-			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)))
+			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
 
 		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
 		if pt.isProcessExited(processHash) {
@@ -190,14 +190,14 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
 		if pt.isProcessExited(processHash) {
 			logger.L().Info("Exec: Process has already exited",
-				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)))
+				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
 			return // Don't create a new process that has already exited
 		}
 		// Create new process if it wasn't exited
 		proc = pt.getOrCreateProcess(event.PID)
 
 		logger.L().Info("Exec: Creating new process",
-			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)))
+			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
 	}
 
 	// Always override with new values if they are provided (enrichment)

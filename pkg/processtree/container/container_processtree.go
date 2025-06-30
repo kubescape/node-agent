@@ -1,12 +1,14 @@
 package containerprocesstree
 
 import (
+	"fmt"
 	"sync"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/prometheus/procfs"
 )
 
 type containerProcessTreeImpl struct {
@@ -28,8 +30,20 @@ func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.P
 
 	switch notif.Type {
 	case containercollection.EventTypeAddContainer:
+		// Check if container already exists before adding
+		if _, exists := c.containerIdToShimPid[containerID]; exists {
+			logger.L().Debug("Container already exists in process tree", helpers.String("containerID", containerID))
+			return
+		}
 		containerPID := notif.Container.ContainerPid()
-		c.containerIdToShimPid[containerID] = containerPID
+		if process, err := c.getProcessFromProc(int(containerPID)); err == nil {
+			shimPID := process.PPID
+			c.containerIdToShimPid[containerID] = shimPID
+		} else {
+			logger.L().Warning("ContainerProcessTree.ContainerCallback - failed to get container process info",
+				helpers.String("containerID", containerID),
+				helpers.Error(err))
+		}
 	case containercollection.EventTypeRemoveContainer:
 		delete(c.containerIdToShimPid, containerID)
 	}
@@ -39,7 +53,6 @@ func (c *containerProcessTreeImpl) GetContainerTreeNodes(containerID string, ful
 	c.mutex.RLock()
 	shimPID, ok := c.containerIdToShimPid[containerID]
 	c.mutex.RUnlock()
-	logger.L().Debug("GetContainerTree", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 	if !ok {
 		logger.L().Debug("GetContainerTree Not found Shim PID", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 		return nil, nil
@@ -65,6 +78,96 @@ func (c *containerProcessTreeImpl) GetContainerTreeNodes(containerID string, ful
 	return result, nil
 }
 
+func (c *containerProcessTreeImpl) GetContainerSubtree(containerID string, targetPID uint32, fullTree map[uint32]*apitypes.Process) (apitypes.Process, error) {
+	c.mutex.RLock()
+	shimPID, ok := c.containerIdToShimPid[containerID]
+	c.mutex.RUnlock()
+	if !ok {
+		logger.L().Debug("GetContainerSubtree Not found Shim PID", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
+		return apitypes.Process{}, fmt.Errorf("container %s not found", containerID)
+	}
+
+	// Find the process node for the shim PID
+	shimNode := fullTree[shimPID]
+	if shimNode == nil {
+		logger.L().Debug("GetContainerSubtree Not found Shim PID", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
+		return apitypes.Process{}, fmt.Errorf("shim process %d not found in process tree", shimPID)
+	}
+
+	// Find the target process node
+	targetNode := fullTree[targetPID]
+	if targetNode == nil {
+		logger.L().Debug("GetContainerSubtree Target PID not found", helpers.String("containerID", containerID), helpers.Interface("targetPID", targetPID))
+		return apitypes.Process{}, fmt.Errorf("target process %d not found in process tree", targetPID)
+	}
+
+	// Check if the target PID is within the shim's subtree
+	if !c.isProcessInSubtree(targetNode, shimNode, fullTree) {
+		return apitypes.Process{}, fmt.Errorf("target process %d is not within container %s subtree", targetPID, containerID)
+	}
+
+	// Walk up the parent chain from target PID until we reach the node just before shim PID
+	rootNode := c.findRootNodeBeforeShim(targetNode, shimPID, fullTree)
+	if rootNode == nil {
+		return apitypes.Process{}, fmt.Errorf("failed to find root node before shim for target %d", targetPID)
+	}
+
+	return *rootNode, nil
+}
+
+// isProcessInSubtree checks if a process is within the subtree of a given root node
+func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apitypes.Process, fullTree map[uint32]*apitypes.Process) bool {
+	if targetNode == nil || rootNode == nil {
+		return false
+	}
+
+	// If target is the root, it's in the subtree
+	if targetNode.PID == rootNode.PID {
+		return true
+	}
+
+	// Check if target is a descendant of root by walking up the parent chain
+	current := targetNode
+	for current.PPID != 0 {
+		if current.PPID == rootNode.PID {
+			return true
+		}
+		parent := fullTree[current.PPID]
+		if parent == nil {
+			break
+		}
+		current = parent
+	}
+
+	return false
+}
+
+// findRootNodeBeforeShim walks up the parent chain from targetNode until reaching the node just before shimPID
+func (c *containerProcessTreeImpl) findRootNodeBeforeShim(targetNode *apitypes.Process, shimPID uint32, fullTree map[uint32]*apitypes.Process) *apitypes.Process {
+	if targetNode == nil {
+		return nil
+	}
+
+	// Walk up the parent chain
+	current := targetNode
+	for current.PPID != 0 {
+		parent := fullTree[current.PPID]
+		if parent == nil {
+			break
+		}
+
+		// If the parent is the shim PID, we've found our root (the current node)
+		if parent.PID == shimPID {
+			return current
+		}
+
+		current = parent
+	}
+
+	// If we reach here, the target node itself is the root (no parent found that leads to shim)
+	return current
+}
+
 func (c *containerProcessTreeImpl) ListContainers() []string {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
@@ -73,4 +176,25 @@ func (c *containerProcessTreeImpl) ListContainers() []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// getProcessFromProc retrieves process information from the /proc filesystem
+// for a given PID. This is a simplified version of the process manager's implementation.
+func (c *containerProcessTreeImpl) getProcessFromProc(pid int) (*apitypes.Process, error) {
+	proc, err := procfs.NewProc(pid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get process info: %v", err)
+	}
+
+	stat, err := proc.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get process stat: %v", err)
+	}
+
+	return &apitypes.Process{
+		PID:   uint32(pid),
+		PPID:  uint32(stat.PPID),
+		Comm:  stat.Comm,
+		Pcomm: stat.Comm, // For simplicity, using the same as Comm
+	}, nil
 }
