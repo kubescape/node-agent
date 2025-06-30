@@ -33,6 +33,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	tracerfork "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/tracer"
+	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
 	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
@@ -78,6 +80,7 @@ const (
 	sshTraceName               = "trace_ssh"
 	httpTraceName              = "trace_http"
 	iouringTraceName           = "trace_iouring"
+	forkTraceName              = "trace_fork"
 	topTraceName               = "trace_top"
 	capabilitiesWorkerPoolSize = 1
 	execWorkerPoolSize         = 2
@@ -90,6 +93,7 @@ const (
 	hardlinkWorkerPoolSize     = 1
 	sshWorkerPoolSize          = 1
 	httpWorkerPoolSize         = 4
+	forkWorkerPoolSize         = 1
 )
 
 type IGContainerWatcher struct {
@@ -132,6 +136,7 @@ type IGContainerWatcher struct {
 	sshTracer          *tracerssh.Tracer
 	httpTracer         *tracerhttp.Tracer
 	iouringTracer      *traceriouring.Tracer
+	forkTracer         *tracerfork.Tracer
 
 	kubeIPInstance   operators.OperatorInstance
 	kubeNameInstance operators.OperatorInstance
@@ -156,6 +161,7 @@ type IGContainerWatcher struct {
 	sshdWorkerPool         *ants.PoolWithFunc
 	httpWorkerPool         *ants.PoolWithFunc
 	iouringWorkerPool      *ants.PoolWithFunc
+	forkWorkerPool         *ants.PoolWithFunc
 
 	capabilitiesWorkerChan chan *tracercapabilitiestype.Event
 	execWorkerChan         chan *events.ExecEvent
@@ -170,6 +176,7 @@ type IGContainerWatcher struct {
 	sshWorkerChan          chan *tracersshtype.Event
 	httpWorkerChan         chan *tracerhttptype.Event
 	iouringWorkerChan      chan *traceriouringtype.Event
+	forkWorkerChan         chan *tracerforktype.Event
 
 	callbacks       []containercollection.FuncNotify
 	pool            *workerpool.WorkerPool
@@ -530,6 +537,28 @@ func CreateIGContainerWatcher(cfg config.Config,
 		return nil, fmt.Errorf("creating iouring worker pool: %w", err)
 	}
 
+	// Create a fork worker pool
+	forkWorkerPool, err := ants.NewPoolWithFunc(forkWorkerPoolSize, func(i interface{}) {
+		event := i.(tracerforktype.Event)
+		if event.K8s.ContainerName == "" {
+			return
+		}
+		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
+			return
+		}
+
+		processTreeFeeder.ReportEvent(utils.ForkEventType, &event)
+		metrics.ReportEvent(utils.ForkEventType)
+		ruleManager.ReportEvent(utils.ForkEventType, &event)
+
+		// Report fork events to event receivers
+		reportEventToThirdPartyTracers(utils.ForkEventType, &event, thirdPartyEventReceivers)
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("creating fork worker pool: %w", err)
+	}
+
 	return &IGContainerWatcher{
 		// Configuration
 		cfg:               cfg,
@@ -566,6 +595,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		ptraceWorkerPool:       ptraceWorkerPool,
 		topWorkerPool:          ebpftopWorkerPool,
 		iouringWorkerPool:      iouringWorkerPool,
+		forkWorkerPool:         forkWorkerPool,
 		metrics:                metrics,
 
 		// Channels
@@ -582,6 +612,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		sshWorkerChan:          make(chan *tracersshtype.Event, 1000),
 		httpWorkerChan:         make(chan *tracerhttptype.Event, 500000),
 		iouringWorkerChan:      make(chan *traceriouringtype.Event, 5000),
+		forkWorkerChan:         make(chan *tracerforktype.Event, 1000),
 
 		// cache
 		ruleBindingPodNotify:         ruleBindingPodNotify,

@@ -30,5 +30,6 @@ const (
 	HTTPEventType         EventType = "http"
 	PtraceEventType       EventType = "ptrace"
 	IoUringEventType      EventType = "iouring"
+	ForkEventType         EventType = "fork"
 	AllEventType          EventType = "all"
 )

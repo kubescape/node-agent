@@ -6,6 +6,7 @@ import (
 	"time"
 
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -72,6 +73,8 @@ func (ef *EventFeeder) ReportEvent(eventType utils.EventType, event utils.K8sEve
 	switch eventType {
 	case utils.ExecveEventType:
 		processEvent = ef.convertExecEvent(event.(*events.ExecEvent))
+	case utils.ForkEventType:
+		processEvent = ef.convertForkEvent(event.(*tracerforktype.Event))
 	default:
 		// Unknown event type, ignore
 		return
@@ -118,6 +121,36 @@ func (ef *EventFeeder) convertExecEvent(execEvent *events.ExecEvent) ProcessEven
 	// Set container context if available
 	if execEvent.Runtime.ContainerID != "" {
 		event.ContainerID = execEvent.Runtime.ContainerID
+	}
+
+	return event
+}
+
+// convertForkEvent converts a ForkEvent to ProcessEvent
+func (ef *EventFeeder) convertForkEvent(forkEvent *tracerforktype.Event) ProcessEvent {
+	event := ProcessEvent{
+		Type:        ForkEvent,
+		Timestamp:   time.Now(),
+		PID:         forkEvent.Pid,
+		PPID:        forkEvent.PPid,
+		Comm:        forkEvent.Comm,
+		Path:        forkEvent.ExePath,
+		StartTimeNs: uint64(time.Now().UnixNano()), // Use current time as start time for now
+	}
+
+	// Set UID and GID if available
+	if forkEvent.Uid != 0 {
+		uid := forkEvent.Uid
+		event.Uid = &uid
+	}
+	if forkEvent.Gid != 0 {
+		gid := forkEvent.Gid
+		event.Gid = &gid
+	}
+
+	// Set container context if available
+	if forkEvent.Runtime.ContainerID != "" {
+		event.ContainerID = forkEvent.Runtime.ContainerID
 	}
 
 	return event

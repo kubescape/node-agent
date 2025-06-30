@@ -94,6 +94,8 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 		}
 		// Create new process if it wasn't exited
 		proc = pt.getOrCreateProcess(event.PID)
+		logger.L().Info("Fork: Creating new process",
+			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
 	}
 
 	// Only set fields if they are empty or don't exist (enrichment)

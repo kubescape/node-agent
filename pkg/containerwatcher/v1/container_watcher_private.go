@@ -363,6 +363,12 @@ func (ch *IGContainerWatcher) startTracers() error {
 		}
 		logger.L().Info("started symlink tracing")
 
+		if err := ch.startForkTracing(); err != nil {
+			logger.L().Error("IGContainerWatcher - error starting fork tracing", helpers.Error(err))
+			return err
+		}
+		logger.L().Info("started fork tracing")
+
 		if err := ch.startHardlinkTracing(); err != nil {
 			logger.L().Error("IGContainerWatcher - error starting hardlink tracing", helpers.Error(err))
 			return err
@@ -469,6 +475,12 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		// Stop symlink tracer
 		if err := ch.stopSymlinkTracing(); err != nil {
 			logger.L().Error("IGContainerWatcher - error stopping symlink tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+
+		// Stop fork tracer
+		if err := ch.stopForkTracing(); err != nil {
+			logger.L().Error("IGContainerWatcher - error stopping fork tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 
