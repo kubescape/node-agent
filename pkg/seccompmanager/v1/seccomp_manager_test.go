@@ -121,14 +121,14 @@ func Test_getProfilesDir(t *testing.T) {
 		{
 			name:        "set KUBELET_ROOT",
 			kubeletRoot: "/var/lib/kubelet2",
-			want:        "/host/var/lib/kubelet2/seccomp",
+			want:        "/var/lib/kubelet2/seccomp",
 			wantErr:     assert.NoError,
 		},
 		{
 			name:        "set HOST_ROOT and KUBELET_ROOT",
 			hostRoot:    "/host2",
 			kubeletRoot: "/var/lib/kubelet2",
-			want:        "/host2/var/lib/kubelet2/seccomp",
+			want:        "/var/lib/kubelet2/seccomp",
 			wantErr:     assert.NoError,
 		},
 	}
