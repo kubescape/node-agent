@@ -391,8 +391,8 @@ func Test_06_KillProcessInTheMiddle(t *testing.T) {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
 	}
 
-	// Give time for the nginx pod to be ready
-	time.Sleep(10 * time.Second)
+	// Give time for the nginx application profile to be ready
+	assert.NoError(t, nginx.WaitForApplicationProfile(80, "ready"))
 
 	// Exec into the nginx pod and kill the process
 	_, _, err = nginx.ExecIntoPod([]string{"bash", "-c", "kill -9 1"}, "")
