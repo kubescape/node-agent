@@ -260,7 +260,6 @@ func CreateIGContainerWatcher(cfg config.Config,
 		}
 
 		processTreeFeeder.ReportEvent(utils.ExecveEventType, &event)
-
 		ruleManager.ReportEvent(utils.ExecveEventType, &event)
 		malwareManager.ReportEvent(utils.ExecveEventType, &event)
 		metrics.ReportEvent(utils.ExecveEventType)

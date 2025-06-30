@@ -79,7 +79,7 @@ func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, er
 	if !ok {
 		return nil, nil
 	}
-	return pt.deepCopyProcess(proc), nil
+	return pt.shallowCopyProcess(proc), nil
 }
 
 // handleForkEvent handles fork events - only fills properties if they are empty or don't exist
@@ -93,8 +93,7 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 			return // Don't create a new process that has already exited
 		}
 		// Create new process if it wasn't exited
-		proc = &apitypes.Process{PID: event.PID, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
-		pt.processMap[event.PID] = proc
+		proc = pt.getOrCreateProcess(event.PID)
 	}
 
 	// Only set fields if they are empty or don't exist (enrichment)
@@ -127,14 +126,7 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
 	}
 
-	// Link to parent
-	if event.PPID != 0 {
-		parent := pt.getOrCreateProcess(event.PPID)
-		if parent.ChildrenMap == nil {
-			parent.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
-		}
-		parent.ChildrenMap[apitypes.CommPID{Comm: event.Comm, PID: event.PID}] = proc
-	}
+	pt.linkProcessToParent(proc)
 }
 
 // handleProcfsEvent handles procfs events - overrides when existing values are empty or don't exist
@@ -153,8 +145,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 			return // Don't create a new process that has already exited
 		}
 		// Create new process if it wasn't exited
-		proc = &apitypes.Process{PID: event.PID, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
-		pt.processMap[event.PID] = proc
+		proc = pt.getOrCreateProcess(event.PID)
 	}
 
 	// Override fields if the new value is non-empty and the existing value is empty or default (enrichment)
@@ -187,14 +178,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
 	}
 
-	// Link to parent
-	if event.PPID != 0 {
-		parent := pt.getOrCreateProcess(event.PPID)
-		if parent.ChildrenMap == nil {
-			parent.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
-		}
-		parent.ChildrenMap[apitypes.CommPID{Comm: event.Comm, PID: event.PID}] = proc
-	}
+	pt.linkProcessToParent(proc)
 }
 
 // handleExecEvent handles exec events - always overrides when it has values
@@ -246,14 +230,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
 	}
 
-	// Link to parent
-	if event.PPID != 0 {
-		parent := pt.getOrCreateProcess(event.PPID)
-		if parent.ChildrenMap == nil {
-			parent.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
-		}
-		parent.ChildrenMap[apitypes.CommPID{Comm: event.Comm, PID: event.PID}] = proc
-	}
+	pt.linkProcessToParent(proc)
 }
 
 // handleExitEvent handles exit events - removes process and updates orphaned children
@@ -306,6 +283,8 @@ func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Proce
 	return proc
 }
 
+// deepCopyProcess creates a deep copy of a process with all its children
+// This is used when we need a complete independent copy
 func (pt *processTreeCreatorImpl) deepCopyProcess(proc *apitypes.Process) *apitypes.Process {
 	if proc == nil {
 		return nil
@@ -315,6 +294,18 @@ func (pt *processTreeCreatorImpl) deepCopyProcess(proc *apitypes.Process) *apity
 	for k, v := range proc.ChildrenMap {
 		copy.ChildrenMap[k] = pt.deepCopyProcess(v)
 	}
+	return &copy
+}
+
+// shallowCopyProcess creates a shallow copy of a process
+// This is much faster and suitable for read-only access
+func (pt *processTreeCreatorImpl) shallowCopyProcess(proc *apitypes.Process) *apitypes.Process {
+	if proc == nil {
+		return nil
+	}
+	copy := *proc
+	// ChildrenMap points to the same map (shared reference)
+	// This is safe for read-only access and much faster
 	return &copy
 }
 
@@ -334,4 +325,17 @@ func (pt *processTreeCreatorImpl) isProcessExited(processHash uint32) bool {
 		return true
 	}
 	return false
+}
+
+// linkProcessToParent ensures proc is added as a child to its parent (if PPID != 0)
+func (pt *processTreeCreatorImpl) linkProcessToParent(proc *apitypes.Process) {
+	if proc == nil || proc.PPID == 0 {
+		return
+	}
+	parent := pt.getOrCreateProcess(proc.PPID)
+	if parent.ChildrenMap == nil {
+		parent.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+	}
+	key := apitypes.CommPID{Comm: proc.Comm, PID: proc.PID}
+	parent.ChildrenMap[key] = proc
 }

@@ -104,7 +104,7 @@ func TestContainerProcessTreeImpl_GetContainerTree_Success(t *testing.T) {
 	}
 
 	// Get container tree
-	result, err := cpt.GetContainerTree(containerID, fullTree)
+	result, err := cpt.GetContainerTreeNodes(containerID, fullTree)
 
 	// Verify results
 	assert.NoError(t, err)
@@ -147,7 +147,7 @@ func TestContainerProcessTreeImpl_GetContainerTree_ContainerNotFound(t *testing.
 	}
 
 	// Get container tree for non-existent container
-	result, err := cpt.GetContainerTree("non-existent", fullTree)
+	result, err := cpt.GetContainerTreeNodes("non-existent", fullTree)
 
 	// Verify results
 	assert.NoError(t, err)
@@ -172,7 +172,7 @@ func TestContainerProcessTreeImpl_GetContainerTree_ContainerPIDNotFound(t *testi
 	}
 
 	// Get container tree
-	result, err := cpt.GetContainerTree(containerID, fullTree)
+	result, err := cpt.GetContainerTreeNodes(containerID, fullTree)
 
 	// Verify results
 	assert.NoError(t, err)
@@ -253,7 +253,7 @@ func TestContainerProcessTreeImpl_ConcurrentAccess(t *testing.T) {
 			},
 		}
 		for i := 0; i < 100; i++ {
-			cpt.GetContainerTree("container-0", fullTree)
+			cpt.GetContainerTreeNodes("container-0", fullTree)
 		}
 		done <- true
 	}()
@@ -322,7 +322,7 @@ func TestContainerProcessTreeImpl_DeepTreeTraversal(t *testing.T) {
 	}
 
 	// Get container tree
-	result, err := cpt.GetContainerTree(containerID, fullTree)
+	result, err := cpt.GetContainerTreeNodes(containerID, fullTree)
 
 	// Verify results
 	assert.NoError(t, err)
@@ -403,11 +403,11 @@ func TestContainerProcessTreeImpl_Integration(t *testing.T) {
 	assert.Contains(t, containers, container2ID)
 
 	// Get container trees
-	tree1, err := cpt.GetContainerTree(container1ID, fullTree)
+	tree1, err := cpt.GetContainerTreeNodes(container1ID, fullTree)
 	assert.NoError(t, err)
 	assert.Len(t, tree1, 2) // shim + nginx
 
-	tree2, err := cpt.GetContainerTree(container2ID, fullTree)
+	tree2, err := cpt.GetContainerTreeNodes(container2ID, fullTree)
 	assert.NoError(t, err)
 	assert.Len(t, tree2, 2) // shim + postgres
 
@@ -430,7 +430,7 @@ func TestContainerProcessTreeImpl_Integration(t *testing.T) {
 	assert.Contains(t, containers, container2ID)
 
 	// Verify container 1 tree is no longer available
-	tree1, err = cpt.GetContainerTree(container1ID, fullTree)
+	tree1, err = cpt.GetContainerTreeNodes(container1ID, fullTree)
 	assert.NoError(t, err)
 	assert.Nil(t, tree1)
 }

@@ -6,8 +6,6 @@ import (
 	"sync"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
@@ -124,66 +122,27 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 		return apitypes.Process{}, fmt.Errorf("process tree manager not started")
 	}
 
-	fullTree := ptm.creator.GetProcessMap()
-	// Get all processes in the container
-	containerProcesses, err := ptm.containerTree.GetContainerTree(containerID, fullTree)
-	if err != nil {
-		return apitypes.Process{}, fmt.Errorf("failed to get container tree: %v", err)
-	}
-
-	// If no container processes found, return empty process
-	if len(containerProcesses) == 0 {
-		pids := []uint32{}
-		for i := range fullTree {
-			pids = append(pids, fullTree[i].PID)
-		}
-		return apitypes.Process{}, fmt.Errorf("no processes found for container %s, pids: %v", containerID, pids)
-	}
-
-	// Find the specific process with the given PID
-	processesPids := []uint32{}
-	for _, process := range containerProcesses {
-		processesPids = append(processesPids, process.PID)
-		if process.PID == pid {
-			return process, nil
-		}
-		// Also search in children recursively
-		if found := ptm.findProcessByPID(&process, pid); found != nil {
-			return *found, nil
-		}
-
-	}
-
 	processNode, err := ptm.creator.GetProcessNode(int(pid))
 	if err != nil {
 		return apitypes.Process{}, fmt.Errorf("failed to get process node: %v", err)
 	}
 
-	logger.L().Debug("Not tContainerProcessTree processNode", helpers.Int("pid", int(pid)), helpers.String("containerID", containerID), helpers.Interface("processNode", processNode))
-	if processNode != nil && processNode.ChildrenMap != nil {
-		for _, process := range processNode.ChildrenMap {
-			logger.L().Debug("Not GetContainerProcessTree processNode children", helpers.Int("pid", int(process.PID)), helpers.String("containerID", containerID), helpers.Interface("processNode", process))
-		}
-	} else {
-		logger.L().Debug("Not GetContainerProcessTree processNode children", helpers.Int("pid", int(pid)), helpers.String("containerID", containerID), helpers.Interface("processNode", processNode))
+	if processNode == nil {
+		return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s", pid, containerID)
 	}
 
-	return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s, pids: %v", pid, containerID, processesPids)
-}
-
-// findProcessByPID recursively searches for a process with the given PID in the process tree
-func (ptm *ProcessTreeManagerImpl) findProcessByPID(process *apitypes.Process, targetPID uint32) *apitypes.Process {
-	if process.PID == targetPID {
-		return process
+	containerTreeNodes, err := ptm.containerTree.GetContainerTreeNodes(containerID, ptm.creator.GetProcessMap())
+	if err != nil {
+		return apitypes.Process{}, fmt.Errorf("failed to get container tree nodes: %v", err)
 	}
 
-	for _, child := range process.ChildrenMap {
-		if found := ptm.findProcessByPID(child, targetPID); found != nil {
-			return found
+	for _, node := range containerTreeNodes {
+		if node.PID == pid {
+			return node, nil
 		}
 	}
 
-	return nil
+	return *processNode, nil
 }
 
 func (ptm *ProcessTreeManagerImpl) GetProcessNode(pid int) (*apitypes.Process, error) {

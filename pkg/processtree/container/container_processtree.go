@@ -35,7 +35,7 @@ func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.P
 	}
 }
 
-func (c *containerProcessTreeImpl) GetContainerTree(containerID string, fullTree map[uint32]*apitypes.Process) ([]apitypes.Process, error) {
+func (c *containerProcessTreeImpl) GetContainerTreeNodes(containerID string, fullTree map[uint32]*apitypes.Process) ([]apitypes.Process, error) {
 	c.mutex.RLock()
 	shimPID, ok := c.containerIdToShimPid[containerID]
 	c.mutex.RUnlock()
