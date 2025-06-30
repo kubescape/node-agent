@@ -82,7 +82,7 @@ func (t *Tracer) install() error {
 		return fmt.Errorf("loading ebpf spec: %w", err)
 	}
 
-	t.forkLink, err = link.Tracepoint("sched", "sched_fork", t.objs.TracepointSchedFork, nil)
+	t.forkLink, err = link.Tracepoint("sched", "sched_process_fork", t.objs.TracepointSchedFork, nil)
 	if err != nil {
 		return fmt.Errorf("attaching tracepoint: %w", err)
 	}

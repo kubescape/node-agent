@@ -61,9 +61,71 @@ static __always_inline bool has_upper_layer()
     return upperdentry != NULL;
 }
 
-// This gadget is used to trace the sched_fork tracepoint.
-SEC("tracepoint/sched/sched_fork")
-int tracepoint__sched_fork(void *ctx)
+// Helper functions to get task information
+static __always_inline u64 get_task_start_time(struct task_struct *task)
+{
+    if (!task) {
+        return 0;
+    }
+    return BPF_CORE_READ(task, start_time);
+}
+
+static __always_inline int get_task_host_tgid(struct task_struct *task)
+{
+    if (!task) {
+        return 0;
+    }
+    return BPF_CORE_READ(task, tgid);
+}
+
+static __always_inline int get_task_host_pid(struct task_struct *task)
+{
+    if (!task) {
+        return 0;
+    }
+    return BPF_CORE_READ(task, pid);
+}
+
+static __always_inline int get_task_ns_tgid(struct task_struct *task)
+{
+    if (!task) {
+        return 0;
+    }
+    return BPF_CORE_READ(task, nsproxy, pid_ns_for_children, level);
+}
+
+static __always_inline int get_task_ns_pid(struct task_struct *task)
+{
+    if (!task) {
+        return 0;
+    }
+    return BPF_CORE_READ(task, nsproxy, pid_ns_for_children, level);
+}
+
+static __always_inline struct task_struct *get_parent_task(struct task_struct *task)
+{
+    if (!task) {
+        return NULL;
+    }
+    return BPF_CORE_READ(task, real_parent);
+}
+
+static __always_inline struct task_struct *get_leader_task(struct task_struct *task)
+{
+    if (!task) {
+        return NULL;
+    }
+    return BPF_CORE_READ(task, group_leader);
+}
+
+static __always_inline u64 get_current_time_in_ns()
+{
+    return bpf_ktime_get_boot_ns();
+}
+
+// This gadget is used to trace the sched_process_fork tracepoint.
+SEC("raw_tracepoint/sched_process_fork")
+int tracepoint__sched_fork(struct bpf_raw_tracepoint_args *ctx)
 {
     struct event *event;
     u32 zero = 0;
@@ -72,12 +134,18 @@ int tracepoint__sched_fork(void *ctx)
         return 0;
     }
 
-    struct task_struct *current_task = (struct task_struct*)bpf_get_current_task();
-    if (!current_task) {
+    struct task_struct *parent = (struct task_struct *) ctx->args[0];
+    struct task_struct *child = (struct task_struct *) ctx->args[1];
+    
+    if (!parent || !child) {
         return 0;
     }
 
-    u64 mntns_id = BPF_CORE_READ(current_task, nsproxy, mnt_ns, ns.inum);
+    struct task_struct *leader = get_leader_task(child);
+    struct task_struct *parent_process = get_leader_task(get_parent_task(leader));
+
+    // Check mount namespace filtering
+    u64 mntns_id = BPF_CORE_READ(child, nsproxy, mnt_ns, ns.inum);
     if (gadget_should_discard_mntns_id(mntns_id)) {
         return 0;
     }
@@ -89,28 +157,35 @@ int tracepoint__sched_fork(void *ctx)
         return 0;
     }
 
-    // For sched_fork, we can get the child PID from the current task's children
-    // or use a different approach. For now, let's set child_pid to 0
-    // and handle it in userspace if needed
-    u32 child_pid = 0;
-    u32 child_tid = 0;
+    // The event timestamp, so process tree info can be changelog'ed.
+    u64 timestamp = get_current_time_in_ns();
 
-    event->timestamp = bpf_ktime_get_boot_ns();
+    // Get parent and child information
+    int parent_pid = get_task_host_tgid(parent);
+    int child_pid = get_task_host_tgid(child);
+    int child_tid = get_task_host_pid(child);
+
+    // Populate the event structure
+    event->timestamp = timestamp;
     event->mntns_id = mntns_id;
-    event->pid = bpf_get_current_pid_tgid() >> 32;
-    event->tid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
-    event->ppid = BPF_CORE_READ(current_task, real_parent, pid);
+    event->pid = child_pid;
+    event->tid = child_tid;
+    event->ppid = parent_pid;
     event->uid = uid;
     event->gid = (u32)(uid_gid >> 32);
     event->upper_layer = has_upper_layer();
     event->child_pid = child_pid;
     event->child_tid = child_tid;
+    
+    // Get command name
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
 
-    struct file *exe_file = BPF_CORE_READ(current_task, mm, exe_file);
-    char *exepath;
-    exepath = get_path_str(&exe_file->f_path);
-    bpf_probe_read_kernel_str(event->exepath, MAX_STRING_SIZE, exepath);
+    // Get executable path
+    struct file *exe_file = BPF_CORE_READ(child, mm, exe_file);
+    if (exe_file) {
+        char *exepath = get_path_str(&exe_file->f_path);
+        bpf_probe_read_kernel_str(event->exepath, MAX_STRING_SIZE, exepath);
+    }
 
     /* emit event */
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(struct event));
