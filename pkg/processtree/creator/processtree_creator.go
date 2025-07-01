@@ -9,14 +9,16 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/kubescape/node-agent/pkg/processtree/utils"
 )
 
 type processTreeCreatorImpl struct {
-	mutex       sync.RWMutex
-	processMap  map[uint32]*apitypes.Process  // PID -> Process
-	exitedCache *lru.Cache[uint32, time.Time] // LRU cache for exited process hashes with TTL
+	mutex         sync.RWMutex
+	processMap    map[uint32]*apitypes.Process  // PID -> Process
+	exitedCache   *lru.Cache[uint32, time.Time] // LRU cache for exited process hashes with TTL
+	containerTree containerprocesstree.ContainerProcessTree
 }
 
 func NewProcessTreeCreator() ProcessTreeCreator {
@@ -31,6 +33,12 @@ func NewProcessTreeCreator() ProcessTreeCreator {
 		processMap:  make(map[uint32]*apitypes.Process),
 		exitedCache: exitedCache,
 	}
+}
+
+func (pt *processTreeCreatorImpl) SetContainerTree(containerTree containerprocesstree.ContainerProcessTree) {
+	pt.mutex.Lock()
+	defer pt.mutex.Unlock()
+	pt.containerTree = containerTree
 }
 
 func (pt *processTreeCreatorImpl) FeedEvent(event feeder.ProcessEvent) {
@@ -98,10 +106,15 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
 	}
 
-	// Only set fields if they are empty or don't exist (enrichment)
-	if proc.PPID == 0 {
-		proc.PPID = event.PPID
+	// Check if process is already under any containerd-shim subtree
+	if !(pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)) {
+		// Only set PPID if it is empty or process is not under container subtree
+		if proc.PPID == 0 {
+			proc.PPID = event.PPID
+		}
 	}
+
+	// Only set fields if they are empty or don't exist (enrichment)
 	if proc.Comm == "" {
 		proc.Comm = event.Comm
 	}
@@ -150,10 +163,25 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
-	// Override fields if the new value is non-empty and the existing value is empty or default (enrichment)
-	if event.PPID != 0 && proc.PPID == 0 {
-		proc.PPID = event.PPID
+	// Check if process is already under any containerd-shim subtree
+	if !(pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)) {
+		// Process is not under container subtree, check if new PPID is under container subtree
+		if pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.processMap) {
+			// New PPID is under container subtree, update PPID and log the change
+			logger.L().Info("ProcFS: Updating PPID to container subtree",
+				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
+			proc.PPID = event.PPID
+		} else {
+			// Standard PPID update logic for non-container processes
+			if event.PPID != 0 && proc.PPID == 0 {
+				logger.L().Info("ProcFS: Setting PPID",
+					helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
+				proc.PPID = event.PPID
+			}
+		}
 	}
+
+	// Override fields if the new value is non-empty and the existing value is empty or default (enrichment)
 	if event.Comm != "" && proc.Comm == "" {
 		proc.Comm = event.Comm
 	}
@@ -189,10 +217,28 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	proc, exists := pt.processMap[event.PID]
 
 	if exists {
-		// Enrich the existing process node with exec data
-		if event.PPID != 0 {
-			proc.PPID = event.PPID
+		// Check if process is already under any containerd-shim subtree
+		if !(pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)) {
+			// Process is not under container subtree, check if new PPID is under container subtree
+			if pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.processMap) {
+				// New PPID is under container subtree, update PPID and log the change
+				logger.L().Info("Exec: Updating PPID to container subtree",
+					helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)),
+					helpers.String("Pcomm", event.Pcomm), helpers.String("comm", event.Comm), helpers.String("cmdline", event.Cmdline))
+				proc.PPID = event.PPID
+			} else {
+				// Standard PPID update logic for non-container processes
+				if event.PPID != 0 {
+					logger.L().Info("Exec: Setting PPID",
+						helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)),
+						helpers.String("ppid", fmt.Sprintf("%d", event.PPID)), helpers.String("Pcomm", event.Pcomm),
+						helpers.String("comm", event.Comm), helpers.String("cmdline", event.Cmdline))
+					proc.PPID = event.PPID
+				}
+			}
 		}
+
+		// Enrich the existing process node with exec data (but not PPID if under container)
 		if event.Comm != "" {
 			proc.Comm = event.Comm
 		}

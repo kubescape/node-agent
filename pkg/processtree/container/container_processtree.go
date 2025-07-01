@@ -178,6 +178,85 @@ func (c *containerProcessTreeImpl) ListContainers() []string {
 	return ids
 }
 
+// SetShimPIDForTesting manually sets the shim PID for a container (for testing purposes only)
+func (c *containerProcessTreeImpl) SetShimPIDForTesting(containerID string, shimPID uint32) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.containerIdToShimPid[containerID] = shimPID
+}
+
+// IsProcessUnderAnyContainerSubtree checks if a process is under any containerd-shim subtree
+func (c *containerProcessTreeImpl) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree map[uint32]*apitypes.Process) bool {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	// Check each container's shim subtree
+	for _, shimPID := range c.containerIdToShimPid {
+		shimNode := fullTree[shimPID]
+		if shimNode == nil {
+			continue
+		}
+
+		targetNode := fullTree[pid]
+		if targetNode == nil {
+			continue
+		}
+
+		if c.isProcessInSubtree(targetNode, shimNode, fullTree) {
+			return true
+		}
+	}
+	return false
+}
+
+// GetShimPIDForProcess returns the shim PID for a given process if it's under a container subtree
+func (c *containerProcessTreeImpl) GetShimPIDForProcess(pid uint32, fullTree map[uint32]*apitypes.Process) (uint32, bool) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	// Check each container's shim subtree
+	for _, shimPID := range c.containerIdToShimPid {
+		shimNode := fullTree[shimPID]
+		if shimNode == nil {
+			continue
+		}
+
+		targetNode := fullTree[pid]
+		if targetNode == nil {
+			continue
+		}
+
+		if c.isProcessInSubtree(targetNode, shimNode, fullTree) {
+			return shimPID, true
+		}
+	}
+	return 0, false
+}
+
+// IsPPIDUnderAnyContainerSubtree checks if a PPID is under any container subtree
+func (c *containerProcessTreeImpl) IsPPIDUnderAnyContainerSubtree(ppid uint32, fullTree map[uint32]*apitypes.Process) bool {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	// Check each container's shim subtree
+	for _, shimPID := range c.containerIdToShimPid {
+		shimNode := fullTree[shimPID]
+		if shimNode == nil {
+			continue
+		}
+
+		ppidNode := fullTree[ppid]
+		if ppidNode == nil {
+			continue
+		}
+
+		if c.isProcessInSubtree(ppidNode, shimNode, fullTree) {
+			return true
+		}
+	}
+	return false
+}
+
 // getProcessFromProc retrieves process information from the /proc filesystem
 // for a given PID. This is a simplified version of the process manager's implementation.
 func (c *containerProcessTreeImpl) getProcessFromProc(pid int) (*apitypes.Process, error) {

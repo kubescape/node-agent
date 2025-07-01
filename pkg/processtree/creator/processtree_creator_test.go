@@ -7,9 +7,9 @@ import (
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
+	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/stretchr/testify/assert"
-
-	feeder "github.com/kubescape/node-agent/pkg/processtree/feeder"
 )
 
 func TestProcessTreeCreator_FeedEventAndGetNodeTree(t *testing.T) {
@@ -1451,4 +1451,199 @@ func TestProcessTreeCreator_ConcurrentForkExec(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, parent)
 	assert.Equal(t, uint32(1), parent.PID)
+}
+
+// Test container-aware PPID management
+func TestProcessTreeCreator_ContainerAwarePPIDManagement(t *testing.T) {
+	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt.SetContainerTree(containerTree)
+
+	// Set up a container with shim PID 100
+	containerID := "test-container-123"
+	containerTree.SetShimPIDForTesting(containerID, 100)
+
+	// Create the shim process first
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         100,
+		PPID:        1,
+		Comm:        "containerd-shim",
+		Pcomm:       "systemd",
+		StartTimeNs: 1000,
+	})
+
+	// Test 1: Fork event for a process that will be under container subtree
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         101,
+		PPID:        100, // Direct child of shim
+		Comm:        "nginx",
+		Pcomm:       "containerd-shim",
+		StartTimeNs: 2000,
+	})
+
+	// Verify the process was created with correct PPID
+	proc, err := pt.GetProcessNode(101)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, uint32(100), proc.PPID) // Should be under shim
+
+	// Test 2: Exec event that tries to change PPID when process is already under container
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ExecEvent,
+		PID:         101,
+		PPID:        999, // Try to change to different PPID
+		Comm:        "nginx",
+		Pcomm:       "containerd-shim",
+		StartTimeNs: 3000,
+	})
+
+	// Verify PPID was preserved (not changed)
+	proc, err = pt.GetProcessNode(101)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, uint32(100), proc.PPID) // Should still be under shim, not changed to 999
+
+	// Test 3: ProcFS event that tries to change PPID when process is already under container
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ProcfsEvent,
+		PID:         101,
+		PPID:        888, // Try to change to different PPID
+		Comm:        "nginx",
+		Pcomm:       "containerd-shim",
+		StartTimeNs: 4000,
+	})
+
+	// Verify PPID was preserved (not changed)
+	proc, err = pt.GetProcessNode(101)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, uint32(100), proc.PPID) // Should still be under shim, not changed to 888
+}
+
+func TestProcessTreeCreator_ContainerAwarePPIDManagement_ProcFS(t *testing.T) {
+	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt.SetContainerTree(containerTree)
+
+	// Set up a container with shim PID 100
+	containerID := "test-container-123"
+	containerTree.SetShimPIDForTesting(containerID, 100)
+
+	// Create the shim process first
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         100,
+		PPID:        1,
+		Comm:        "containerd-shim",
+		Pcomm:       "systemd",
+		StartTimeNs: 1000,
+	})
+
+	// Test: ProcFS event for a process not under container, but new PPID is under container
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ProcfsEvent,
+		PID:         201,
+		PPID:        100, // PPID is under container subtree
+		Comm:        "new-app",
+		Pcomm:       "containerd-shim",
+		StartTimeNs: 7000,
+	})
+
+	// Verify the process was created and PPID was set to container subtree
+	proc, err := pt.GetProcessNode(201)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+	assert.Equal(t, uint32(100), proc.PPID) // Should be under shim
+}
+
+func TestProcessTreeCreator_ContainerAwarePPIDManagement_MultipleContainers(t *testing.T) {
+	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt.SetContainerTree(containerTree)
+
+	// Set up two containers with different shim PIDs
+	container1ID := "container-1"
+	container2ID := "container-2"
+
+	containerTree.SetShimPIDForTesting(container1ID, 100)
+	containerTree.SetShimPIDForTesting(container2ID, 200)
+
+	// Create both shim processes
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         100,
+		PPID:        1,
+		Comm:        "containerd-shim",
+		Pcomm:       "systemd",
+		StartTimeNs: 1000,
+	})
+
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         200,
+		PPID:        1,
+		Comm:        "containerd-shim",
+		Pcomm:       "systemd",
+		StartTimeNs: 2000,
+	})
+
+	// Create processes under each container
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         101,
+		PPID:        100, // Under container 1
+		Comm:        "nginx",
+		Pcomm:       "containerd-shim",
+		StartTimeNs: 3000,
+	})
+
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ForkEvent,
+		PID:         201,
+		PPID:        200, // Under container 2
+		Comm:        "postgres",
+		Pcomm:       "containerd-shim",
+		StartTimeNs: 4000,
+	})
+
+	// Verify both processes are under their respective containers
+	proc1, err := pt.GetProcessNode(101)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc1)
+	assert.Equal(t, uint32(100), proc1.PPID) // Under container 1
+
+	proc2, err := pt.GetProcessNode(201)
+	assert.NoError(t, err)
+	assert.NotNil(t, proc2)
+	assert.Equal(t, uint32(200), proc2.PPID) // Under container 2
+
+	// Try to change PPIDs - they should be preserved
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ExecEvent,
+		PID:         101,
+		PPID:        999, // Try to change container 1 process
+		Comm:        "nginx",
+		Pcomm:       "containerd-shim",
+		StartTimeNs: 5000,
+	})
+
+	pt.FeedEvent(feeder.ProcessEvent{
+		Type:        feeder.ExecEvent,
+		PID:         201,
+		PPID:        888, // Try to change container 2 process
+		Comm:        "postgres",
+		Pcomm:       "containerd-shim",
+		StartTimeNs: 6000,
+	})
+
+	// Verify PPIDs were preserved
+	proc1, err = pt.GetProcessNode(101)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(100), proc1.PPID) // Still under container 1
+
+	proc2, err = pt.GetProcessNode(201)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(200), proc2.PPID) // Still under container 2
 }

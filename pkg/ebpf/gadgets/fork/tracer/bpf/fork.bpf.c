@@ -161,9 +161,9 @@ int tracepoint__sched_fork(struct bpf_raw_tracepoint_args *ctx)
     u64 timestamp = get_current_time_in_ns();
 
     // Get parent and child information
-    int parent_pid = get_task_host_tgid(parent);
-    int child_pid = get_task_host_tgid(child);
-    int child_tid = get_task_host_pid(child);
+    int parent_pid = BPF_CORE_READ(parent, tgid);
+    int child_pid = BPF_CORE_READ(child, tgid);
+    int child_tid = BPF_CORE_READ(child, pid);
 
     // Populate the event structure
     event->timestamp = timestamp;

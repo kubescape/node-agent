@@ -38,6 +38,9 @@ func NewProcessTreeManager(
 	containerTree containerprocesstree.ContainerProcessTree,
 	feeders []feeder.ProcessEventFeeder,
 ) ProcessTreeManager {
+	// Set the container tree in the creator for container-aware PPID management
+	creator.SetContainerTree(containerTree)
+
 	return &ProcessTreeManagerImpl{
 		creator:       creator,
 		containerTree: containerTree,
@@ -127,26 +130,12 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 
 	processNode, err := ptm.creator.GetProcessNode(int(pid))
 	if err != nil {
-		logger.L().Error("Failed to get process node", helpers.Error(err))
-		nodes, err := ptm.containerTree.GetContainerTreeNodes(containerID, ptm.creator.GetProcessMap())
-		if err != nil {
-			logger.L().Error("Failed to get container tree nodes", helpers.Error(err))
-		}
-		if len(nodes) > 0 {
-			utils.PrintTreeOneLine(&nodes[0])
-		}
+		logger.L().Error("Failed to get process node", helpers.Error(err), helpers.String("processNode", utils.PrintTreeOneLine(processNode)))
 		return apitypes.Process{}, fmt.Errorf("failed to get process node: %v", err)
 	}
 
 	if processNode == nil {
-		logger.L().Error("Failed to get process node", helpers.Error(err))
-		nodes, err := ptm.containerTree.GetContainerTreeNodes(containerID, ptm.creator.GetProcessMap())
-		if err != nil {
-			logger.L().Error("Failed to get container tree nodes", helpers.Error(err))
-		}
-		if len(nodes) > 0 {
-			utils.PrintTreeOneLine(&nodes[0])
-		}
+		logger.L().Error("Failed to get process node", helpers.Error(err), helpers.String("processNode", utils.PrintTreeOneLine(processNode)))
 		return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s", pid, containerID)
 	}
 
@@ -156,11 +145,12 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 		logger.L().Error("Failed to get container subtree", helpers.Error(err))
 		nodes, err := ptm.containerTree.GetContainerTreeNodes(containerID, ptm.creator.GetProcessMap())
 		if err != nil {
-			logger.L().Error("Failed to get container tree nodes", helpers.Error(err))
+			logger.L().Error("Failed to get container tree nodes", helpers.Error(err), helpers.String("processNode", utils.PrintTreeOneLine(processNode)))
 		}
 		if len(nodes) > 0 {
-			utils.PrintTreeOneLine(&nodes[0])
+			logger.L().Error("Failed to get container tree nodes", helpers.String("GetContainerTreeNodes", utils.PrintTreeOneLine(&nodes[0])))
 		}
+		logger.L().Error("Failed to get container subtree", helpers.String("processNode", utils.PrintTreeOneLine(processNode)))
 		return apitypes.Process{}, fmt.Errorf("failed to get container subtree: %v", err)
 	}
 

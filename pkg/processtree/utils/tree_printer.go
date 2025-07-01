@@ -8,7 +8,7 @@ import (
 )
 
 // PrintTreeOneLine prints the process tree in a single line showing the hierarchy
-// Format: "root(pid) -> child1(pid) -> child2(pid) | sibling1(pid) -> grandchild(pid)"
+// Format: "root(pid,ppid) -> child1(pid,ppid) -> child2(pid,ppid) | sibling1(pid,ppid) -> grandchild(pid,ppid)"
 func PrintTreeOneLine(process *apitypes.Process) string {
 	if process == nil {
 		return "nil"
@@ -30,11 +30,11 @@ func printTreeOneLineRecursive(process *apitypes.Process, result *strings.Builde
 		result.WriteString(" -> ")
 	}
 
-	// Format: comm(pid) or just pid if comm is empty
+	// Format: comm(pid,ppid) or pid(pid,ppid) if comm is empty
 	if process.Comm != "" {
-		result.WriteString(fmt.Sprintf("%s(%d)", process.Comm, process.PID))
+		result.WriteString(fmt.Sprintf("%s(%d,%d)", process.Comm, process.PID, process.PPID))
 	} else {
-		result.WriteString(fmt.Sprintf("pid(%d)", process.PID))
+		result.WriteString(fmt.Sprintf("pid(%d,%d)", process.PID, process.PPID))
 	}
 
 	// Handle children
@@ -56,9 +56,9 @@ func printTreeOneLineRecursive(process *apitypes.Process, result *strings.Builde
 					result.WriteString(" | ")
 					// Add the parent prefix for siblings
 					if process.Comm != "" {
-						result.WriteString(fmt.Sprintf("%s(%d) -> ", process.Comm, process.PID))
+						result.WriteString(fmt.Sprintf("%s(%d,%d) -> ", process.Comm, process.PID, process.PPID))
 					} else {
-						result.WriteString(fmt.Sprintf("pid(%d) -> ", process.PID))
+						result.WriteString(fmt.Sprintf("pid(%d,%d) -> ", process.PID, process.PPID))
 					}
 					// For siblings, we don't want the recursive call to add another arrow
 					printTreeOneLineRecursive(child, result, 0)
@@ -72,7 +72,7 @@ func printTreeOneLineRecursive(process *apitypes.Process, result *strings.Builde
 }
 
 // PrintTreeOneLineCompact prints a more compact version of the tree
-// Format: "root->child1->child2|sibling1->grandchild"
+// Format: "root(ppid)->child1(ppid)->child2(ppid)|sibling1(ppid)->grandchild(ppid)"
 func PrintTreeOneLineCompact(process *apitypes.Process) string {
 	if process == nil {
 		return "nil"
@@ -94,11 +94,11 @@ func printTreeOneLineCompactRecursive(process *apitypes.Process, result *strings
 		result.WriteString("->")
 	}
 
-	// Use comm if available, otherwise just pid
+	// Use comm if available, otherwise just pid, and include ppid in parentheses
 	if process.Comm != "" {
-		result.WriteString(process.Comm)
+		result.WriteString(fmt.Sprintf("%s(%d)", process.Comm, process.PPID))
 	} else {
-		result.WriteString(fmt.Sprintf("%d", process.PID))
+		result.WriteString(fmt.Sprintf("%d(%d)", process.PID, process.PPID))
 	}
 
 	// Handle children
@@ -120,9 +120,9 @@ func printTreeOneLineCompactRecursive(process *apitypes.Process, result *strings
 					result.WriteString("|")
 					// Add the parent prefix for siblings
 					if process.Comm != "" {
-						result.WriteString(process.Comm)
+						result.WriteString(fmt.Sprintf("%s(%d)", process.Comm, process.PPID))
 					} else {
-						result.WriteString(fmt.Sprintf("%d", process.PID))
+						result.WriteString(fmt.Sprintf("%d(%d)", process.PID, process.PPID))
 					}
 					result.WriteString("->")
 					// For siblings, we don't want the recursive call to add another arrow
@@ -136,8 +136,8 @@ func printTreeOneLineCompactRecursive(process *apitypes.Process, result *strings
 	}
 }
 
-// PrintTreeOneLineWithPIDs prints the tree with only PIDs for maximum compactness
-// Format: "1->2->3|2->4"
+// PrintTreeOneLineWithPIDs prints the tree with PIDs and PPIDs for maximum compactness
+// Format: "1(0)->2(1)->3(2)|2(1)->4(2)"
 func PrintTreeOneLineWithPIDs(process *apitypes.Process) string {
 	if process == nil {
 		return "nil"
@@ -154,11 +154,11 @@ func printTreeOneLineWithPIDsRecursive(process *apitypes.Process, result *string
 		return
 	}
 
-	// Add the current process PID
+	// Add the current process PID and PPID
 	if depth > 0 {
 		result.WriteString("->")
 	}
-	result.WriteString(fmt.Sprintf("%d", process.PID))
+	result.WriteString(fmt.Sprintf("%d(%d)", process.PID, process.PPID))
 
 	// Handle children
 	if len(process.ChildrenMap) > 0 {
@@ -177,8 +177,8 @@ func printTreeOneLineWithPIDsRecursive(process *apitypes.Process, result *string
 			for i, child := range children {
 				if i > 0 {
 					result.WriteString("|")
-					// Add the parent PID for siblings
-					result.WriteString(fmt.Sprintf("%d->", process.PID))
+					// Add the parent PID and PPID for siblings
+					result.WriteString(fmt.Sprintf("%d(%d)->", process.PID, process.PPID))
 					// For siblings, we don't want the recursive call to add another arrow
 					printTreeOneLineWithPIDsRecursive(child, result, 0)
 				} else {

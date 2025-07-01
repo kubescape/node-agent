@@ -92,6 +92,7 @@ func (ef *EventFeeder) convertExecEvent(execEvent *events.ExecEvent) ProcessEven
 		PPID:        execEvent.Ppid,
 		Comm:        execEvent.Comm,
 		Path:        execEvent.ExePath,
+		Pcomm:       execEvent.Pcomm,
 		StartTimeNs: uint64(time.Now().UnixNano()), // Use current time as start time for now
 	}
 

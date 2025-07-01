@@ -1,8 +1,11 @@
 package ruleengine
 
 import (
+	"math/rand"
+
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -110,7 +113,7 @@ func (rule *R0001UnexpectedProcessLaunched) CreateRuleFailure(eventType utils.Ev
 
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm)),
+			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s%s%s", execEvent.Comm, execEvent.ExePath, execEvent.Pcomm, strconv.Itoa(rand.Int()), strconv.Itoa(rand.Int()))),
 			AlertName:   rule.Name(),
 			InfectedPID: execEvent.Pid,
 			Arguments: map[string]interface{}{
