@@ -38,20 +38,6 @@ func (sc *StorageHttpClientMock) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.S
 	return SBOM, nil
 }
 
-func (sc *StorageHttpClientMock) IncrementImageUse(imageID string) {
-	if _, ok := sc.ImageCounters[imageID]; !ok {
-		sc.ImageCounters[imageID] = 0
-	}
-	sc.ImageCounters[imageID]++
-}
-
-func (sc *StorageHttpClientMock) DecrementImageUse(imageID string) {
-	if _, ok := sc.ImageCounters[imageID]; !ok {
-		sc.ImageCounters[imageID] = 0
-	}
-	sc.ImageCounters[imageID]--
-}
-
 func (sc *StorageHttpClientMock) CreateContainerProfile(profile *v1beta1.ContainerProfile, namespace string) error {
 	sc.ContainerProfiles = append(sc.ContainerProfiles, profile)
 	return nil

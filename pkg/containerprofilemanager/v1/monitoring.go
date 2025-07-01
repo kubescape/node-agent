@@ -128,7 +128,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 			helpers.String("slug", slug),
 			helpers.Int("container index", watchedContainer.ContainerIndex),
 			helpers.String("container ID", watchedContainer.ContainerID),
-			helpers.String("k8s workload", watchedContainer.K8sContainerID))
+			helpers.String("k8s workload", watchedContainer.Wlid))
 	}
 
 	// Get syscalls using peek function

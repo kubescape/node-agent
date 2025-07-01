@@ -54,33 +54,28 @@ func (c ContainerType) String() string {
 }
 
 type WatchedContainerData struct {
-	InstanceID                                 instanceidhandler.IInstanceID
-	UpdateDataTicker                           *time.Ticker
-	SyncChannel                                chan error
-	AckChan                                    chan struct{}
-	RelevantRealtimeFilesByIdentifier          map[string]bool
-	RelevantRelationshipsArtifactsByIdentifier map[string]bool
-	RelevantArtifactsFilesByIdentifier         map[string]bool
-	ParentResourceVersion                      string
-	ContainerID                                string
-	ImageTag                                   string
-	ImageID                                    string
-	Wlid                                       string
-	K8sContainerID                             string
-	ContainerType                              ContainerType
-	ContainerIndex                             int
-	ContainerInfos                             map[ContainerType][]ContainerInfo
-	NsMntId                                    uint64
-	InitialDelayExpired                        bool
-	statusUpdated                              bool
-	status                                     WatchedContainerStatus
-	completionStatus                           WatchedContainerCompletionStatus
-	ParentWorkloadSelector                     *metav1.LabelSelector
-	SeccompProfilePath                         *string
-	PreRunningContainer                        bool
-	SeriesID                                   string
-	PreviousReportTimestamp                    time.Time
-	CurrentReportTimestamp                     time.Time
+	InstanceID              instanceidhandler.IInstanceID
+	UpdateDataTicker        *time.Ticker
+	SyncChannel             chan error
+	AckChan                 chan struct{}
+	ParentResourceVersion   string
+	ContainerID             string
+	ImageTag                string
+	ImageID                 string
+	Wlid                    string
+	ContainerType           ContainerType
+	ContainerIndex          int
+	ContainerInfos          map[ContainerType][]ContainerInfo
+	NsMntId                 uint64
+	InitialDelayExpired     bool
+	status                  WatchedContainerStatus
+	completionStatus        WatchedContainerCompletionStatus
+	ParentWorkloadSelector  *metav1.LabelSelector
+	SeccompProfilePath      *string
+	PreRunningContainer     bool
+	SeriesID                string
+	PreviousReportTimestamp time.Time
+	CurrentReportTimestamp  time.Time
 }
 
 type ContainerInfo struct {
@@ -97,9 +92,10 @@ func GetLabels(watchedContainer *WatchedContainerData, stripContainer bool) map[
 		} else if stripContainer && i == helpersv1.ContainerNameMetadataKey {
 			delete(labels, i)
 		} else {
-			if i == helpersv1.KindMetadataKey {
+			switch i {
+			case helpersv1.KindMetadataKey:
 				labels[i] = wlid.GetKindFromWlid(watchedContainer.Wlid)
-			} else if i == helpersv1.NameMetadataKey {
+			case helpersv1.NameMetadataKey:
 				labels[i] = wlid.GetNameFromWlid(watchedContainer.Wlid)
 			}
 			errs := validation.IsValidLabelValue(labels[i])
@@ -129,23 +125,13 @@ func (watchedContainer *WatchedContainerData) GetCompletionStatus() WatchedConta
 func (watchedContainer *WatchedContainerData) SetStatus(newStatus WatchedContainerStatus) {
 	if newStatus != watchedContainer.status {
 		watchedContainer.status = newStatus
-		watchedContainer.statusUpdated = true
 	}
 }
 
 func (watchedContainer *WatchedContainerData) SetCompletionStatus(newStatus WatchedContainerCompletionStatus) {
 	if newStatus != watchedContainer.completionStatus {
 		watchedContainer.completionStatus = newStatus
-		watchedContainer.statusUpdated = true
 	}
-}
-
-func (watchedContainer *WatchedContainerData) ResetStatusUpdatedFlag() {
-	watchedContainer.statusUpdated = false
-}
-
-func (watchedContainer *WatchedContainerData) StatusUpdated() bool {
-	return watchedContainer.statusUpdated
 }
 
 func (watchedContainer *WatchedContainerData) SetContainerInfo(wl workloadinterface.IWorkload, containerName string) error {

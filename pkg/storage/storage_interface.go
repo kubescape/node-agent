@@ -7,9 +7,6 @@ import (
 type StorageClient interface {
 	CreateContainerProfile(profile *v1beta1.ContainerProfile, namespace string) error
 	CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error)
-	GetSBOM(name string) (*v1beta1.SBOMSyft, error) // TODO: remove this method as it is unused @matthias?
 	GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error)
 	ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error)
-	IncrementImageUse(imageID string) // TODO: remove this method as it is unused @matthias?
-	DecrementImageUse(imageID string) // TODO: remove this method as it is unused @matthias?
 }
