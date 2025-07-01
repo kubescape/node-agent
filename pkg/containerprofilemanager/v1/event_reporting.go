@@ -105,12 +105,12 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event eve
 
 // ReportSymlinkEvent reports a symlink creation event for a container
 func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event *tracersymlinktype.Event) {
-	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
 		if cpm.enricher != nil {
 			symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
 			go cpm.enricher.EnrichEvent(containerID, event, symlinkIdentifier)
 		}
-		return size.Of(event.OldPath + event.NewPath), nil // FIXME this is not correct
+		return nil
 	})
 
 	cpm.logEventError(err, "symlink", containerID)
@@ -118,12 +118,12 @@ func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event
 
 // ReportHardlinkEvent reports a hardlink creation event for a container
 func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, event *tracerhardlinktype.Event) {
-	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
 		if cpm.enricher != nil {
 			hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
 			go cpm.enricher.EnrichEvent(containerID, event, hardlinkIdentifier)
 		}
-		return size.Of(event.OldPath + event.NewPath), nil // FIXME this is not correct
+		return nil
 	})
 
 	cpm.logEventError(err, "hardlink", containerID)
