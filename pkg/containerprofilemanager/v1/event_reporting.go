@@ -133,7 +133,6 @@ func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, even
 func (cpm *ContainerProfileManager) ReportHTTPEvent(containerID string, event *tracerhttptype.Event) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if event.Response == nil {
-			logger.L().Debug("HTTP event without response", helpers.String("containerID", containerID))
 			return 0, nil
 		}
 
