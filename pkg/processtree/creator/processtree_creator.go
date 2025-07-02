@@ -11,14 +11,16 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
+	"github.com/kubescape/node-agent/pkg/processtree/reparenting"
 	"github.com/kubescape/node-agent/pkg/processtree/utils"
 )
 
 type processTreeCreatorImpl struct {
-	mutex         sync.RWMutex
-	processMap    map[uint32]*apitypes.Process  // PID -> Process
-	exitedCache   *lru.Cache[uint32, time.Time] // LRU cache for exited process hashes with TTL
-	containerTree containerprocesstree.ContainerProcessTree
+	mutex            sync.RWMutex
+	processMap       map[uint32]*apitypes.Process  // PID -> Process
+	exitedCache      *lru.Cache[uint32, time.Time] // LRU cache for exited process hashes with TTL
+	containerTree    containerprocesstree.ContainerProcessTree
+	reparentingLogic reparenting.ReparentingLogic
 }
 
 func NewProcessTreeCreator() ProcessTreeCreator {
@@ -29,9 +31,17 @@ func NewProcessTreeCreator() ProcessTreeCreator {
 		exitedCache = nil
 	}
 
+	// Create reparenting logic
+	reparentingLogic, err := reparenting.NewReparentingLogic()
+	if err != nil {
+		logger.L().Warning("Failed to create reparenting logic, using fallback", helpers.Error(err))
+		reparentingLogic = nil
+	}
+
 	return &processTreeCreatorImpl{
-		processMap:  make(map[uint32]*apitypes.Process),
-		exitedCache: exitedCache,
+		processMap:       make(map[uint32]*apitypes.Process),
+		exitedCache:      exitedCache,
+		reparentingLogic: reparentingLogic,
 	}
 }
 
@@ -330,17 +340,43 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 		}
 	}
 
-	// Update children's PPID to 1 (init process) since they become orphaned
-	for childCommPID, child := range proc.ChildrenMap {
-		if child != nil {
-			child.PPID = 1 // Adopted by init process
+	// Handle reparenting of orphaned children using the reparenting logic
+	if len(proc.ChildrenMap) > 0 {
+		children := make([]*apitypes.Process, 0, len(proc.ChildrenMap))
+		for _, child := range proc.ChildrenMap {
+			if child != nil {
+				children = append(children, child)
+			}
+		}
 
-			// Add child to init process (PID 1) if it exists
-			if initProc, initExists := pt.processMap[1]; initExists {
-				if initProc.ChildrenMap == nil {
-					initProc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+		if pt.reparentingLogic != nil {
+			// Use the reparenting logic to determine the new parent
+			result := pt.reparentingLogic.HandleProcessExit(event.PID, children, pt.containerTree, pt.processMap)
+
+			logger.L().Info("Exit: Reparenting result",
+				helpers.String("pid", fmt.Sprintf("%d", event.PID)),
+				helpers.String("strategy", result.Strategy),
+				helpers.String("new_parent_pid", fmt.Sprintf("%d", result.NewParentPID)),
+				helpers.String("verified", fmt.Sprintf("%t", result.Verified)),
+				helpers.String("children_count", fmt.Sprintf("%d", len(children))))
+
+			// Update children's PPID to the new parent and link them
+			for _, child := range children {
+				if child != nil {
+					child.PPID = result.NewParentPID
+					pt.linkProcessToParent(child)
 				}
-				initProc.ChildrenMap[childCommPID] = child
+			}
+		} else {
+			// Fallback to init process (PID 1) if reparenting logic is not available
+			logger.L().Warning("Exit: Reparenting logic not available, using fallback to init",
+				helpers.String("pid", fmt.Sprintf("%d", event.PID)))
+
+			for _, child := range children {
+				if child != nil {
+					child.PPID = 1 // Adopted by init process
+					pt.linkProcessToParent(child)
+				}
 			}
 		}
 	}
