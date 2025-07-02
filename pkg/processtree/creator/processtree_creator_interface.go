@@ -17,4 +17,8 @@ type ProcessTreeCreator interface {
 	GetProcessNode(pid int) (*apitypes.Process, error)
 	// Set the container tree for container-aware PPID management
 	SetContainerTree(containerTree containerprocesstree.ContainerProcessTree)
+	// Stop the process tree creator and cleanup resources
+	Stop()
+	// Trigger immediate exit cleanup (for testing purposes)
+	TriggerExitCleanup()
 }

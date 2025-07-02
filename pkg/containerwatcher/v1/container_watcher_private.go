@@ -369,6 +369,12 @@ func (ch *IGContainerWatcher) startTracers() error {
 		}
 		logger.L().Info("started fork tracing")
 
+		if err := ch.startExitTracing(); err != nil {
+			logger.L().Error("IGContainerWatcher - error starting exit tracing", helpers.Error(err))
+			return err
+		}
+		logger.L().Info("started exit tracing")
+
 		if err := ch.startHardlinkTracing(); err != nil {
 			logger.L().Error("IGContainerWatcher - error starting hardlink tracing", helpers.Error(err))
 			return err
@@ -481,6 +487,12 @@ func (ch *IGContainerWatcher) stopTracers() error {
 		// Stop fork tracer
 		if err := ch.stopForkTracing(); err != nil {
 			logger.L().Error("IGContainerWatcher - error stopping fork tracing", helpers.Error(err))
+			errs = errors.Join(errs, err)
+		}
+
+		// Stop exit tracer
+		if err := ch.stopExitTracing(); err != nil {
+			logger.L().Error("IGContainerWatcher - error stopping exit tracing", helpers.Error(err))
 			errs = errors.Join(errs, err)
 		}
 

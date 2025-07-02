@@ -31,5 +31,6 @@ const (
 	PtraceEventType       EventType = "ptrace"
 	IoUringEventType      EventType = "iouring"
 	ForkEventType         EventType = "fork"
+	ExitEventType         EventType = "exit"
 	AllEventType          EventType = "all"
 )

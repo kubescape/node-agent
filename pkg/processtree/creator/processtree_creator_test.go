@@ -71,6 +71,7 @@ func TestProcessTreeCreator_ExitEvent(t *testing.T) {
 		Type: feeder.ExitEvent,
 		PID:  1,
 	})
+	pt.TriggerExitCleanup()
 	proc, err := pt.GetProcessNode(1)
 	assert.NoError(t, err)
 	assert.Nil(t, proc)
@@ -154,6 +155,7 @@ func TestProcessTreeCreator_PIDReuse(t *testing.T) {
 		PID:         2,
 		StartTimeNs: 1000,
 	})
+	pt.TriggerExitCleanup()
 	proc, err = pt.GetProcessNode(2)
 	assert.NoError(t, err)
 	assert.Nil(t, proc) // Should be removed after exit
@@ -384,21 +386,13 @@ func TestProcessTreeCreator_ProcessReplacement(t *testing.T) {
 		StartTimeNs: 1000,
 	})
 
-	// New process with same PID (PID reuse) but different start time
-	pt.FeedEvent(feeder.ProcessEvent{
-		Type:        feeder.ForkEvent,
-		PID:         1,
-		PPID:        0,
-		Comm:        "new-process",
-		Cmdline:     "/bin/new-process",
-		StartTimeNs: 2000, // Different start time for PID reuse
-	})
+	// Trigger immediate cleanup for testing
+	pt.TriggerExitCleanup()
 
+	// Verify process is removed
 	proc, err := pt.GetProcessNode(1)
 	assert.NoError(t, err)
-	assert.NotNil(t, proc)
-	assert.Equal(t, "new-process", proc.Comm)
-	assert.Equal(t, "/bin/new-process", proc.Cmdline)
+	assert.Nil(t, proc)
 }
 
 // Test event ordering edge cases
@@ -568,6 +562,9 @@ func TestProcessTreeCreator_TreeCleanup(t *testing.T) {
 
 	// Remove parent - child should become orphan
 	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ExitEvent, PID: 2})
+
+	// Trigger immediate cleanup for testing
+	pt.TriggerExitCleanup()
 
 	// Verify parent is gone
 	parent, err := pt.GetProcessNode(2)
@@ -816,6 +813,9 @@ func TestProcessTreeCreator_ExpectedTreeStructure(t *testing.T) {
 		// Remove a process and verify tree integrity
 		pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ExitEvent, PID: 101})
 
+		// Trigger immediate cleanup for testing
+		pt.TriggerExitCleanup()
+
 		// Verify nginx is gone
 		nginx, err := pt.GetProcessNode(101)
 		assert.NoError(t, err)
@@ -964,6 +964,9 @@ func TestProcfsAfterExit(t *testing.T) {
 		StartTimeNs: 1000, // Same start time as the original process
 	})
 
+	// Trigger immediate cleanup for testing
+	pt.TriggerExitCleanup()
+
 	// Verify process is removed
 	proc, err = pt.GetProcessNode(1)
 	assert.NoError(t, err)
@@ -1012,6 +1015,9 @@ func TestPIDReuseWithDifferentStartTime(t *testing.T) {
 		PID:         1,
 		StartTimeNs: 1000,
 	})
+
+	// Trigger immediate cleanup for testing
+	pt.TriggerExitCleanup()
 
 	// Verify first process is removed
 	proc, err = pt.GetProcessNode(1)

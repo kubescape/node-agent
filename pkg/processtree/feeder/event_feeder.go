@@ -6,6 +6,7 @@ import (
 	"time"
 
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	tracerexittype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/types"
 	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -75,6 +76,8 @@ func (ef *EventFeeder) ReportEvent(eventType utils.EventType, event utils.K8sEve
 		processEvent = ef.convertExecEvent(event.(*events.ExecEvent))
 	case utils.ForkEventType:
 		processEvent = ef.convertForkEvent(event.(*tracerforktype.Event))
+	case utils.ExitEventType:
+		processEvent = ef.convertExitEvent(event.(*tracerexittype.Event))
 	default:
 		// Unknown event type, ignore
 		return
@@ -152,6 +155,36 @@ func (ef *EventFeeder) convertForkEvent(forkEvent *tracerforktype.Event) Process
 	// Set container context if available
 	if forkEvent.Runtime.ContainerID != "" {
 		event.ContainerID = forkEvent.Runtime.ContainerID
+	}
+
+	return event
+}
+
+// convertExitEvent converts an ExitEvent to ProcessEvent
+func (ef *EventFeeder) convertExitEvent(exitEvent *tracerexittype.Event) ProcessEvent {
+	event := ProcessEvent{
+		Type:        ExitEvent,
+		Timestamp:   time.Now(),
+		PID:         exitEvent.Pid,
+		PPID:        exitEvent.PPid,
+		Comm:        exitEvent.Comm,
+		Path:        exitEvent.ExePath,
+		StartTimeNs: uint64(time.Now().UnixNano()), // Use current time as start time for now
+	}
+
+	// Set UID and GID if available
+	if exitEvent.Uid != 0 {
+		uid := exitEvent.Uid
+		event.Uid = &uid
+	}
+	if exitEvent.Gid != 0 {
+		gid := exitEvent.Gid
+		event.Gid = &gid
+	}
+
+	// Set container context if available
+	if exitEvent.Runtime.ContainerID != "" {
+		event.ContainerID = exitEvent.Runtime.ContainerID
 	}
 
 	return event

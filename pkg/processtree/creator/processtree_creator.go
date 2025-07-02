@@ -21,6 +21,7 @@ type processTreeCreatorImpl struct {
 	exitedCache      *lru.Cache[uint32, time.Time] // LRU cache for exited process hashes with TTL
 	containerTree    containerprocesstree.ContainerProcessTree
 	reparentingLogic reparenting.ReparentingLogic
+	exitCleanup      *ExitCleanupManager
 }
 
 func NewProcessTreeCreator() ProcessTreeCreator {
@@ -38,11 +39,17 @@ func NewProcessTreeCreator() ProcessTreeCreator {
 		reparentingLogic = nil
 	}
 
-	return &processTreeCreatorImpl{
+	creator := &processTreeCreatorImpl{
 		processMap:       make(map[uint32]*apitypes.Process),
 		exitedCache:      exitedCache,
 		reparentingLogic: reparentingLogic,
 	}
+
+	// Create and start the exit cleanup manager
+	creator.exitCleanup = NewExitCleanupManager(creator)
+	creator.exitCleanup.Start()
+
+	return creator
 }
 
 func (pt *processTreeCreatorImpl) SetContainerTree(containerTree containerprocesstree.ContainerProcessTree) {
@@ -98,6 +105,20 @@ func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, er
 		return nil, nil
 	}
 	return pt.shallowCopyProcess(proc), nil
+}
+
+// Stop stops the process tree creator and cleanup resources
+func (pt *processTreeCreatorImpl) Stop() {
+	if pt.exitCleanup != nil {
+		pt.exitCleanup.Stop()
+	}
+}
+
+// TriggerExitCleanup triggers immediate exit cleanup (for testing purposes)
+func (pt *processTreeCreatorImpl) TriggerExitCleanup() {
+	if pt.exitCleanup != nil {
+		pt.exitCleanup.forceCleanup()
+	}
 }
 
 // handleForkEvent handles fork events - only fills properties if they are empty or don't exist
@@ -320,7 +341,8 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	pt.linkProcessToParent(proc)
 }
 
-// handleExitEvent handles exit events - removes process and updates orphaned children
+// handleExitEvent handles exit events - immediate removal for simple cases, delayed cleanup for reparenting
+// Caller must hold pt.mutex
 func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 	proc, exists := pt.processMap[event.PID]
 	if !exists {
@@ -333,58 +355,20 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 		pt.exitedCache.Add(processHash, time.Now())
 	}
 
-	// Remove from parent's children list first
-	if proc.PPID != 0 {
-		if parent, parentExists := pt.processMap[proc.PPID]; parentExists {
-			delete(parent.ChildrenMap, apitypes.CommPID{Comm: proc.Comm, PID: event.PID})
+	// Collect children for reparenting
+	children := make([]*apitypes.Process, 0, len(proc.ChildrenMap))
+	for _, child := range proc.ChildrenMap {
+		if child != nil {
+			children = append(children, child)
 		}
 	}
 
-	// Handle reparenting of orphaned children using the reparenting logic
-	if len(proc.ChildrenMap) > 0 {
-		children := make([]*apitypes.Process, 0, len(proc.ChildrenMap))
-		for _, child := range proc.ChildrenMap {
-			if child != nil {
-				children = append(children, child)
-			}
-		}
+	// Add to delayed cleanup for reparenting scenarios
+	pt.exitCleanup.AddPendingExit(event, children)
 
-		if pt.reparentingLogic != nil {
-			// Use the reparenting logic to determine the new parent
-			result := pt.reparentingLogic.HandleProcessExit(event.PID, children, pt.containerTree, pt.processMap)
-
-			logger.L().Info("Exit: Reparenting result",
-				helpers.String("pid", fmt.Sprintf("%d", event.PID)),
-				helpers.String("strategy", result.Strategy),
-				helpers.String("new_parent_pid", fmt.Sprintf("%d", result.NewParentPID)),
-				helpers.String("verified", fmt.Sprintf("%t", result.Verified)),
-				helpers.String("children_count", fmt.Sprintf("%d", len(children))))
-
-			// Update children's PPID to the new parent and link them
-			for _, child := range children {
-				if child != nil {
-					child.PPID = result.NewParentPID
-					pt.linkProcessToParent(child)
-				}
-			}
-		} else {
-			// Fallback to init process (PID 1) if reparenting logic is not available
-			logger.L().Warning("Exit: Reparenting logic not available, using fallback to init",
-				helpers.String("pid", fmt.Sprintf("%d", event.PID)))
-
-			for _, child := range children {
-				if child != nil {
-					child.PPID = 1 // Adopted by init process
-					pt.linkProcessToParent(child)
-				}
-			}
-		}
-	}
-
-	// Only remove the exiting process, not its descendants
-	logger.L().Info("Exit: Removing process",
-		helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)))
-	delete(pt.processMap, event.PID)
+	logger.L().Info("Exit: Added to delayed cleanup (has children)",
+		helpers.String("pid", fmt.Sprintf("%d", event.PID)),
+		helpers.String("children_count", fmt.Sprintf("%d", len(children))))
 }
 
 func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Process {

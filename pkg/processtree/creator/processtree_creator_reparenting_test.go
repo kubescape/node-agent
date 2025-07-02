@@ -63,6 +63,7 @@ func TestProcessTreeCreator_HandleExitEvent_WithReparenting(t *testing.T) {
 
 	// Handle the exit event
 	creator.handleExitEvent(exitEvent)
+	creator.TriggerExitCleanup()
 
 	// Verify that parent was removed
 	assert.Nil(t, creator.processMap[parentPID], "Parent process should be removed")
@@ -144,6 +145,7 @@ func TestProcessTreeCreator_HandleExitEvent_ContainerdScenario(t *testing.T) {
 
 	// Handle the exit event
 	creator.handleExitEvent(exitEvent)
+	creator.TriggerExitCleanup()
 
 	// Verify that parent was removed
 	assert.Nil(t, creator.processMap[parentPID], "Parent process should be removed")
@@ -180,6 +182,7 @@ func TestProcessTreeCreator_HandleExitEvent_NoChildren(t *testing.T) {
 
 	// Handle the exit event
 	creator.handleExitEvent(exitEvent)
+	creator.TriggerExitCleanup()
 
 	// Verify that parent was removed
 	assert.Nil(t, creator.processMap[parentPID], "Parent process should be removed")
@@ -197,6 +200,7 @@ func TestProcessTreeCreator_HandleExitEvent_ProcessNotExists(t *testing.T) {
 
 	// Handle the exit event - should not panic or error
 	creator.handleExitEvent(exitEvent)
+	creator.TriggerExitCleanup()
 
 	// Verify that nothing was changed
 	assert.Len(t, creator.processMap, 0, "Process map should remain empty")
@@ -314,6 +318,7 @@ func TestProcessTreeCreator_ExitEvent_ComplexScenarios(t *testing.T) {
 	}
 
 	creator.handleExitEvent(exitEvent)
+	creator.TriggerExitCleanup()
 
 	// Verify parent is removed
 	assert.Nil(t, creator.processMap[10], "Parent should be removed")
@@ -341,6 +346,7 @@ func TestProcessTreeCreator_ExitEvent_RepeatedExits(t *testing.T) {
 		StartTimeNs: 1000,
 	}
 	creator.handleExitEvent(exitEvent1)
+	creator.TriggerExitCleanup()
 
 	// Process should be removed
 	assert.Nil(t, creator.processMap[100], "Process should be removed after first exit")
@@ -352,6 +358,7 @@ func TestProcessTreeCreator_ExitEvent_RepeatedExits(t *testing.T) {
 		StartTimeNs: 2000,
 	}
 	creator.handleExitEvent(exitEvent2)
+	creator.TriggerExitCleanup()
 
 	// Process should still be nil
 	assert.Nil(t, creator.processMap[100], "Process should remain removed after second exit")
@@ -371,6 +378,7 @@ func TestProcessTreeCreator_ExitEvent_WithReusedPID(t *testing.T) {
 		StartTimeNs: 1000,
 	}
 	creator.handleExitEvent(exitEvent1)
+	creator.TriggerExitCleanup()
 
 	// Process should be removed
 	assert.Nil(t, creator.processMap[100], "First process should be removed")
@@ -386,6 +394,7 @@ func TestProcessTreeCreator_ExitEvent_WithReusedPID(t *testing.T) {
 		StartTimeNs: 1000, // Old start time
 	}
 	creator.handleExitEvent(exitEvent2)
+	creator.TriggerExitCleanup()
 
 	// Current behavior: new process will be removed because handleExitEvent only checks PID, not start time
 	assert.Nil(t, creator.processMap[100], "New process is removed because handleExitEvent only checks PID")
@@ -401,6 +410,7 @@ func TestProcessTreeCreator_ExitEvent_WithReusedPID(t *testing.T) {
 		StartTimeNs: 2000, // New start time - different from the old one
 	}
 	creator.handleExitEvent(exitEvent3)
+	creator.TriggerExitCleanup()
 
 	// Process should be removed
 	assert.Nil(t, creator.processMap[100], "New process should be removed with correct start time")
@@ -448,6 +458,7 @@ func TestProcessTreeCreator_ExitEvent_ReparentingStrategies(t *testing.T) {
 				StartTimeNs: uint64(time.Now().UnixNano()),
 			}
 			creator.handleExitEvent(exitEvent)
+			creator.TriggerExitCleanup()
 
 			// Verify child is reparented correctly
 			assert.Nil(t, creator.processMap[100], "Parent should be removed")
@@ -493,6 +504,9 @@ func TestProcessTreeCreator_ExitEvent_ConcurrentExits(t *testing.T) {
 	}
 
 	wg.Wait()
+
+	// Trigger cleanup to process all pending exits
+	creator.TriggerExitCleanup()
 
 	// Verify all processes are removed
 	for i := 0; i < numProcesses; i++ {
@@ -545,6 +559,7 @@ func TestProcessTreeCreator_ExitEvent_WithContainerTree(t *testing.T) {
 		StartTimeNs: uint64(time.Now().UnixNano()),
 	}
 	creator.handleExitEvent(exitEvent)
+	creator.TriggerExitCleanup()
 
 	// Verify container is removed
 	assert.Nil(t, creator.processMap[100], "Container process should be removed")
@@ -566,6 +581,7 @@ func TestProcessTreeCreator_ExitEvent_EdgeCases(t *testing.T) {
 		StartTimeNs: uint64(time.Now().UnixNano()),
 	}
 	creator.handleExitEvent(exitEvent1) // Should not panic
+	creator.TriggerExitCleanup()
 
 	// Test 2: Exit process with empty ChildrenMap
 	process2 := &apitypes.Process{
@@ -581,6 +597,7 @@ func TestProcessTreeCreator_ExitEvent_EdgeCases(t *testing.T) {
 		StartTimeNs: uint64(time.Now().UnixNano()),
 	}
 	creator.handleExitEvent(exitEvent2) // Should not panic
+	creator.TriggerExitCleanup()
 
 	// Test 3: Exit process with nil child in ChildrenMap
 	process3 := &apitypes.Process{
@@ -597,6 +614,7 @@ func TestProcessTreeCreator_ExitEvent_EdgeCases(t *testing.T) {
 		StartTimeNs: uint64(time.Now().UnixNano()),
 	}
 	creator.handleExitEvent(exitEvent3) // Should not panic
+	creator.TriggerExitCleanup()
 
 	// Verify all processes are removed
 	assert.Nil(t, creator.processMap[100], "Process1 should be removed")
@@ -632,6 +650,7 @@ func TestProcessTreeCreator_ExitEvent_ReparentingVerification(t *testing.T) {
 		StartTimeNs: uint64(time.Now().UnixNano()),
 	}
 	creator.handleExitEvent(exitEvent)
+	creator.TriggerExitCleanup()
 
 	// Verify reparenting result
 	assert.Nil(t, creator.processMap[100], "Parent should be removed")

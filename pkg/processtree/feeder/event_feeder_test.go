@@ -8,8 +8,10 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	tracerexittype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEventFeeder_ReportEvent(t *testing.T) {
@@ -129,5 +131,42 @@ func TestEventFeeder_NotStarted(t *testing.T) {
 		t.Fatal("Expected no event when feeder is not started")
 	case <-time.After(100 * time.Millisecond):
 		// This is expected - no event should be sent
+	}
+}
+
+func TestEventFeeder_ExitEvent(t *testing.T) {
+	ef := NewEventFeeder()
+	ctx := context.Background()
+	err := ef.Start(ctx)
+	require.NoError(t, err)
+	defer ef.Stop()
+
+	// Create a channel to receive events
+	eventChan := make(chan ProcessEvent, 1)
+	ef.Subscribe(eventChan)
+
+	// Create a mock exit event
+	exitEvent := &tracerexittype.Event{
+		Pid:        123,
+		PPid:       1,
+		Comm:       "test-process",
+		ExePath:    "/usr/bin/test",
+		ExitCode:   0,
+		ExitSignal: 0,
+	}
+
+	// Report the exit event
+	ef.ReportEvent(utils.ExitEventType, exitEvent)
+
+	// Wait for the event
+	select {
+	case event := <-eventChan:
+		assert.Equal(t, ExitEvent, event.Type)
+		assert.Equal(t, uint32(123), event.PID)
+		assert.Equal(t, uint32(1), event.PPID)
+		assert.Equal(t, "test-process", event.Comm)
+		assert.Equal(t, "/usr/bin/test", event.Path)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for exit event")
 	}
 }
