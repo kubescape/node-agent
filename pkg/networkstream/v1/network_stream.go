@@ -416,7 +416,7 @@ func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid uint32, com
 }
 
 func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream) error {
-	if !ns.cfg.KubernetesMode {
+	if !ns.cfg.KubernetesMode || ns.cfg.Exporters.HTTPExporterConfig == nil {
 		return nil
 	}
 
