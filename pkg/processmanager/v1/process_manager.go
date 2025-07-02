@@ -254,8 +254,6 @@ func (p *ProcessManager) GetProcessTreeForPID(containerID string, pid apitypes.C
 
 	result, exists := p.processTree.Load(pid)
 	if !exists {
-		logger.L().Debug("ProcessManager - process not found in tree, fetching from /proc",
-			helpers.Interface("pid", pid))
 		process, err := p.getProcessFromProc(int(pid.PID))
 		if err != nil {
 			return apitypes.Process{}, fmt.Errorf("process %d not found: %v", pid.PID, err)
