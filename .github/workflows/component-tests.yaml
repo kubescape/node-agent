@@ -92,7 +92,7 @@ jobs:
           STORAGE_TAG=$(./tests/scripts/storage-tag.sh)
           echo "Storage tag that will be used: ${STORAGE_TAG}"
           # helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=${{ needs.build-and-push-image.outputs.image_tag }} --set nodeAgent.image.repository=${{ needs.build-and-push-image.outputs.image_repo }} --set storage.image.tag=${STORAGE_TAG} -n kubescape --create-namespace --wait --timeout 5m --debug
-          helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=${{ needs.build-and-push-image.outputs.image_tag }} --set nodeAgent.image.repository=${{ needs.build-and-push-image.outputs.image_repo }} --set storage.image.repository=quay.io/matthiasb_1/storage --set storage.image.tag=fixns -n kubescape --create-namespace --wait --timeout 5m --debug
+          helm upgrade --install kubescape ./tests/chart --set clusterName=`kubectl config current-context` --set nodeAgent.image.tag=${{ needs.build-and-push-image.outputs.image_tag }} --set nodeAgent.image.repository=${{ needs.build-and-push-image.outputs.image_repo }} --set storage.image.repository=quay.io/matthiasb_1/storage --set storage.image.tag=rc2 -n kubescape --create-namespace --wait --timeout 5m --debug
           # Check that the node-agent pod is running
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=node-agent -n kubescape --timeout=300s
           sleep 5
