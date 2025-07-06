@@ -196,7 +196,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		},
 	}
 
-	if err := cpm.storageClient.CreateContainerProfile(containerProfile, container.K8s.Namespace, watchedContainer.ContainerID); err != nil {
+	if err := cpm.enqueueContainerProfile(containerProfile, watchedContainer.ContainerID); err != nil {
 		// Empty the container data to prevent reporting the same data again
 		containerData.emptyEvents()
 		return err
@@ -213,7 +213,11 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	return nil
 }
 
-// OnQueueError implements the storage.ErrorCallback interface
+func (cpm *ContainerProfileManager) enqueueContainerProfile(containerProfile *v1beta1.ContainerProfile, containerID string) error {
+	return cpm.queueData.Enqueue(containerProfile, containerID)
+}
+
+// OnQueueError implements the queue.ErrorCallback interface
 // This method is called by the queue when it encounters ObjectTooLargeError or ObjectCompletedError
 func (cpm *ContainerProfileManager) OnQueueError(_ *v1beta1.ContainerProfile, containerID string, err error) {
 	err = cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {

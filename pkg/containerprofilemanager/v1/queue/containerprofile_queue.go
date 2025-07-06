@@ -1,4 +1,4 @@
-package storage
+package queue
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"github.com/joncrlsn/dque"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file"
 )
@@ -43,12 +42,17 @@ type ProfileCreator interface {
 	CreateContainerProfileDirect(profile *v1beta1.ContainerProfile) error
 }
 
+// ErrorCallback defines the interface for handling queue processing errors
+type ErrorCallback interface {
+	OnQueueError(profile *v1beta1.ContainerProfile, containerID string, err error)
+}
+
 // QueueData holds the data and configuration for the queue processing.
 type QueueData struct {
 	queue         *dque.DQue
 	ctx           context.Context
 	creator       ProfileCreator
-	errorCallback storage.ErrorCallback
+	errorCallback ErrorCallback
 	maxQueueSize  int
 	retryInterval time.Duration
 
@@ -65,7 +69,7 @@ type QueueConfig struct {
 	MaxQueueSize    int
 	RetryInterval   time.Duration
 	ItemsPerSegment int
-	ErrorCallback   storage.ErrorCallback
+	ErrorCallback   ErrorCallback
 }
 
 // NewQueueData creates a new QueueData instance with simple LRU behavior
@@ -288,13 +292,6 @@ func (qd *QueueData) GetQueueStats() map[string]interface{} {
 		"retryInterval": qd.retryInterval.String(),
 		"running":       qd.running,
 	}
-}
-
-// SetErrorCallback sets the error callback for the queue
-func (qd *QueueData) SetErrorCallback(errorCallback storage.ErrorCallback) {
-	qd.mu.Lock()
-	defer qd.mu.Unlock()
-	qd.errorCallback = errorCallback
 }
 
 // Close gracefully shuts down the queue

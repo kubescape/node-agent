@@ -2,6 +2,9 @@ package containerprofilemanager
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -9,8 +12,11 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
+	"github.com/kubescape/node-agent/pkg/containerprofilemanager/v1/queue"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -67,6 +73,7 @@ type ContainerProfileManager struct {
 	seccompManager    seccompmanager.SeccompManagerClient
 	enricher          containerprofilemanager.Enricher
 	ruleBindingCache  rulebindingmanager.RuleBindingCache
+	queueData         *queue.QueueData
 
 	// Container storage with embedded locking
 	containers   map[string]*ContainerEntry
@@ -89,7 +96,7 @@ func NewContainerProfileManager(
 	enricher containerprofilemanager.Enricher,
 	ruleBindingCache rulebindingmanager.RuleBindingCache,
 ) (*ContainerProfileManager, error) {
-	return &ContainerProfileManager{
+	containerProfileManager := &ContainerProfileManager{
 		ctx:                          ctx,
 		cfg:                          cfg,
 		k8sClient:                    k8sClient,
@@ -101,8 +108,48 @@ func NewContainerProfileManager(
 		ruleBindingCache:             ruleBindingCache,
 		containers:                   make(map[string]*ContainerEntry),
 		maxSniffTimeNotificationChan: make([]chan *containercollection.Container, 0),
-	}, nil
+	}
+
+	// Initialize queue
+	queueDir := os.Getenv("QUEUE_DIR")
+	if queueDir == "" {
+		queueDir = queue.DefaultQueueDir
+		logger.L().Info("QUEUE_DIR is not set, using default directory", helpers.String("default", queue.DefaultQueueDir))
+	}
+
+	// Get max queue size from environment or use default
+	maxQueueSize := queue.DefaultMaxQueueSize
+	if maxSizeStr := os.Getenv("MAX_QUEUE_SIZE"); maxSizeStr != "" {
+		if size, err := strconv.Atoi(maxSizeStr); err == nil && size > 0 {
+			maxQueueSize = size
+		}
+	}
+
+	// Initialize queue with storage as the ProfileCreator
+	queueData, err := queue.NewQueueData(ctx, storageClient, queue.QueueConfig{
+		QueueName:       queue.DefaultQueueName,
+		QueueDir:        queueDir,
+		MaxQueueSize:    maxQueueSize,
+		RetryInterval:   queue.DefaultRetryInterval,
+		ItemsPerSegment: queue.ItemsPerSegment,
+		ErrorCallback:   containerProfileManager,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize queue: %w", err)
+	}
+
+	containerProfileManager.queueData = queueData
+
+	// Start queue processing
+	containerProfileManager.queueData.Start()
+
+	logger.L().Info("container profile manager initialized with persistent queue",
+		helpers.String("queueDir", queueDir),
+		helpers.Int("maxQueueSize", maxQueueSize),
+		helpers.Int("currentQueueSize", queueData.GetQueueSize()))
+
+	return containerProfileManager, nil
 }
 
 var _ containerprofilemanager.ContainerProfileManagerClient = (*ContainerProfileManager)(nil)
-var _ storage.ErrorCallback = (*ContainerProfileManager)(nil)
+var _ queue.ErrorCallback = (*ContainerProfileManager)(nil)

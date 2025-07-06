@@ -294,9 +294,8 @@ func TestStorage_CreateContainerProfile(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create fake storage: %v", err)
 			}
-			defer sc.queueData.Close() // Ensure queue is closed after test
 
-			err = sc.CreateContainerProfile(tt.profile, tt.namespace, "test-container-id")
+			err = sc.CreateContainerProfileDirect(tt.profile)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateContainerProfile() error = %v, wantErr %v", err, tt.wantErr)
 				return

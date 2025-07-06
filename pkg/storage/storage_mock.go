@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"github.com/kubescape/node-agent/pkg/containerprofilemanager/v1/queue"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -19,6 +20,7 @@ type StorageHttpClientMock struct {
 }
 
 var _ StorageClient = (*StorageHttpClientMock)(nil)
+var _ queue.ProfileCreator = (*StorageHttpClientMock)(nil)
 
 func (sc *StorageHttpClientMock) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
 	sc.SyftSBOMs = append(sc.SyftSBOMs, SBOM)
@@ -38,11 +40,7 @@ func (sc *StorageHttpClientMock) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.S
 	return SBOM, nil
 }
 
-func (sc *StorageHttpClientMock) CreateContainerProfile(profile *v1beta1.ContainerProfile, namespace string, containerID string) error {
+func (sc *StorageHttpClientMock) CreateContainerProfileDirect(profile *v1beta1.ContainerProfile) error {
 	sc.ContainerProfiles = append(sc.ContainerProfiles, profile)
 	return nil
-}
-
-func (sc *StorageHttpClientMock) SetErrorCallback(errorCallback ErrorCallback) {
-	// noop
 }
