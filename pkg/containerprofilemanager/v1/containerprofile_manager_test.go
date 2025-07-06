@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"os"
 	"testing"
 	"time"
 
@@ -485,6 +486,16 @@ func TestCalculateSHA256CallStackHash(t *testing.T) {
 }
 
 func TestContainerProfileManagerCreation(t *testing.T) {
+	// Create a unique temporary directory for this test
+	tempDir, err := os.MkdirTemp("", "fake-storage-queue-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir) // Clean up after test
+
+	// Override the queue directory for this test
+	t.Setenv("QUEUE_DIR", tempDir)
+
 	cfg := config.Config{
 		InitialDelay:     1 * time.Second,
 		MaxSniffingTime:  5 * time.Minute,
@@ -586,6 +597,16 @@ func TestContainerDataEmptyEvents(t *testing.T) {
 }
 
 func TestContainerProfileManagerRegisterPeekFunc(t *testing.T) {
+	// Create a unique temporary directory for this test
+	tempDir, err := os.MkdirTemp("", "fake-storage-queue-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir) // Clean up after test
+
+	// Override the queue directory for this test
+	t.Setenv("QUEUE_DIR", tempDir)
+
 	cfg := config.Config{}
 	ctx := context.TODO()
 	k8sClient := &k8sclient.K8sClientMock{}
