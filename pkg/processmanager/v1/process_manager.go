@@ -405,7 +405,6 @@ func (p *ProcessManager) cleanup() {
 	})
 
 	for pid := range deadPids {
-		logger.L().Debug("ProcessManager - removing dead process", helpers.Interface("pid", pid))
 		p.removeProcessUnsafe(pid)
 	}
 }

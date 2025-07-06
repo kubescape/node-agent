@@ -105,3 +105,4 @@ func NewContainerProfileManager(
 }
 
 var _ containerprofilemanager.ContainerProfileManagerClient = (*ContainerProfileManager)(nil)
+var _ storage.ErrorCallback = (*ContainerProfileManager)(nil)

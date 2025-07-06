@@ -94,6 +94,7 @@ func CreateStorage(ctx context.Context, namespace string, maxElapsedTime time.Du
 		MaxQueueSize:    maxQueueSize,
 		RetryInterval:   DefaultRetryInterval,
 		ItemsPerSegment: ItemsPerSegment,
+		ErrorCallback:   nil, // Will be set later
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize queue: %w", err)
@@ -130,6 +131,7 @@ func CreateFakeStorage(namespace string) (*Storage, error) {
 		MaxQueueSize:    DefaultMaxQueueSize,
 		RetryInterval:   DefaultRetryInterval,
 		ItemsPerSegment: ItemsPerSegment,
+		ErrorCallback:   nil, // Will be set later if needed
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create fake queue: %w", err)
@@ -184,4 +186,11 @@ func getMultiplier() *int {
 		}
 	}
 	return nil
+}
+
+// SetErrorCallback sets the error callback for the queue after storage creation
+func (sc *Storage) SetErrorCallback(errorCallback storage.ErrorCallback) {
+	if sc.queueData != nil {
+		sc.queueData.SetErrorCallback(errorCallback)
+	}
 }

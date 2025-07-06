@@ -295,7 +295,7 @@ func TestStorage_CreateContainerProfile(t *testing.T) {
 			}
 			defer sc.queueData.Close() // Ensure queue is closed after test
 
-			err = sc.CreateContainerProfile(tt.profile, tt.namespace)
+			err = sc.CreateContainerProfile(tt.profile, tt.namespace, "test-container-id")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateContainerProfile() error = %v, wantErr %v", err, tt.wantErr)
 				return

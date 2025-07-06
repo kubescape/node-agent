@@ -9,6 +9,7 @@ import (
 	"github.com/joncrlsn/dque"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file"
 )
@@ -17,18 +18,19 @@ const (
 	// DefaultQueueName is the default name for the queue.
 	DefaultQueueName = "container-profiles-queue"
 	// DefaultRetryInterval is the default interval between retries for processing a queue item.
-	DefaultRetryInterval = 30 * time.Second
+	DefaultRetryInterval = 5 * time.Second
 	// DefaultQueueDir is the default directory for the queue.
 	DefaultQueueDir = "/profiles"
 	// ItemsPerSegment is the number of items per segment in the queue.
 	ItemsPerSegment = 100
 	// DefaultMaxQueueSize is the default maximum size of the queue
-	DefaultMaxQueueSize = 500
+	DefaultMaxQueueSize = 1000
 )
 
 // QueuedContainerProfile represents a container profile queued for creation
 type QueuedContainerProfile struct {
-	Profile *v1beta1.ContainerProfile `json:"profile"`
+	Profile     *v1beta1.ContainerProfile `json:"profile"`
+	ContainerID string                    `json:"containerID"`
 }
 
 // QueuedContainerProfileBuilder creates a new QueuedContainerProfile instance for dque
@@ -46,6 +48,7 @@ type QueueData struct {
 	queue         *dque.DQue
 	ctx           context.Context
 	creator       ProfileCreator
+	errorCallback storage.ErrorCallback
 	maxQueueSize  int
 	retryInterval time.Duration
 
@@ -62,6 +65,7 @@ type QueueConfig struct {
 	MaxQueueSize    int
 	RetryInterval   time.Duration
 	ItemsPerSegment int
+	ErrorCallback   storage.ErrorCallback
 }
 
 // NewQueueData creates a new QueueData instance with simple LRU behavior
@@ -93,6 +97,7 @@ func NewQueueData(ctx context.Context, creator ProfileCreator, config QueueConfi
 		queue:         queue,
 		ctx:           ctx,
 		creator:       creator,
+		errorCallback: config.ErrorCallback,
 		maxQueueSize:  config.MaxQueueSize,
 		retryInterval: config.RetryInterval,
 		stopChan:      make(chan struct{}),
@@ -121,7 +126,7 @@ func (qd *QueueData) Start() {
 }
 
 // Enqueue adds a new container profile to the queue with LRU eviction
-func (qd *QueueData) Enqueue(profile *v1beta1.ContainerProfile) error {
+func (qd *QueueData) Enqueue(profile *v1beta1.ContainerProfile, containerID string) error {
 	qd.mu.Lock()
 	defer qd.mu.Unlock()
 
@@ -131,7 +136,8 @@ func (qd *QueueData) Enqueue(profile *v1beta1.ContainerProfile) error {
 
 	// Create queued profile
 	queuedProfile := &QueuedContainerProfile{
-		Profile: profile,
+		Profile:     profile,
+		ContainerID: containerID,
 	}
 
 	// Remove oldest items if we're at capacity
@@ -224,9 +230,14 @@ func (qd *QueueData) processAllItems() {
 		err = qd.creator.CreateContainerProfileDirect(queuedProfile.Profile)
 		if err != nil {
 			if err.Error() == file.ObjectTooLargeError.Error() || err.Error() == file.ObjectCompletedError.Error() {
-				logger.L().Debug("failed to create container profile, skipping",
+				logger.L().Debug("got rejected to create container profile, skipping",
 					helpers.String("name", queuedProfile.Profile.Name),
 					helpers.Error(err))
+
+				// Call error callback if provided to propagate the error
+				if qd.errorCallback != nil {
+					qd.errorCallback.OnQueueError(queuedProfile.Profile, queuedProfile.ContainerID, err)
+				}
 				continue
 			}
 			logger.L().Debug("failed to create container profile, requeuing",
@@ -277,6 +288,13 @@ func (qd *QueueData) GetQueueStats() map[string]interface{} {
 		"retryInterval": qd.retryInterval.String(),
 		"running":       qd.running,
 	}
+}
+
+// SetErrorCallback sets the error callback for the queue
+func (qd *QueueData) SetErrorCallback(errorCallback storage.ErrorCallback) {
+	qd.mu.Lock()
+	defer qd.mu.Unlock()
+	qd.errorCallback = errorCallback
 }
 
 // Close gracefully shuts down the queue

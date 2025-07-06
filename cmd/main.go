@@ -213,6 +213,7 @@ func main() {
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating the container profile manager", helpers.Error(err))
 		}
+		storageClient.SetErrorCallback(containerProfileManager)
 	} else {
 		containerProfileManager = containerprofilemanager.CreateContainerProfileManagerMock()
 	}

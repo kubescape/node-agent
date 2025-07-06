@@ -301,12 +301,12 @@ func (cpm *ContainerProfileManager) setContainerData(container *containercollect
 
 	// Set the sync channel
 	if sharedData.SyncChannel == nil {
-		sharedData.SyncChannel = make(chan error, 2)
+		sharedData.SyncChannel = make(chan error, 3) // 2 for (ContainerReachedMaxTime, ContainerHasTerminatedError) and 1 for queue errors
 	}
 
 	// Set the ack channel
 	if sharedData.AckChan == nil {
-		sharedData.AckChan = make(chan struct{}, 1)
+		sharedData.AckChan = make(chan struct{}, 1) // 1 for (ContainerReachedMaxTime, ContainerHasTerminatedError)
 	}
 
 	// Set the update data ticker

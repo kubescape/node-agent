@@ -25,6 +25,7 @@ type ContainerProfileManagerClient interface {
 	ReportNetworkEvent(containerID string, event *tracernetworktype.Event)
 	ReportDroppedEvent(containerID string)
 	RegisterForContainerEndOfLife(notificationChannel chan *containercollection.Container)
+	OnQueueError(profile *v1beta1.ContainerProfile, containerID string, err error)
 }
 
 type Enricher interface {

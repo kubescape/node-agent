@@ -29,7 +29,7 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 
 			watchedContainer.SetStatus(objectcache.WatchedContainerStatusReady)
 			if err := cpm.saveProfile(watchedContainer, container); err != nil {
-				if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container); handledErr != err {
+				if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container); handledErr != nil {
 					return handledErr
 				}
 			}
@@ -69,9 +69,15 @@ func (cpm *ContainerProfileManager) monitorContainer(container *containercollect
 
 			case errors.Is(err, ProfileRequiresSplit):
 				if err := cpm.saveProfile(watchedContainer, container); err != nil {
-					if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container); handledErr != err {
+					if handledErr := cpm.handleSaveProfileError(err, watchedContainer, container); handledErr != nil {
 						return handledErr
 					}
+				}
+
+			default:
+				// Handle queue errors (ObjectTooLargeError or ObjectCompletedError)
+				if err := cpm.handleSaveProfileError(err, watchedContainer, container); err != nil {
+					return err
 				}
 			}
 		}
@@ -98,7 +104,8 @@ func (cpm *ContainerProfileManager) handleSaveProfileError(err error, watchedCon
 			helpers.String("status", string(watchedContainer.GetStatus())),
 			helpers.String("completionStatus", string(watchedContainer.GetCompletionStatus())))
 	}
-	return err
+	// If the error is not something we can handle, we return nil to continue the loop
+	return nil
 }
 
 // saveProfile saves the container profile using the with pattern for safe access
@@ -189,7 +196,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 		},
 	}
 
-	if err := cpm.storageClient.CreateContainerProfile(containerProfile, container.K8s.Namespace); err != nil {
+	if err := cpm.storageClient.CreateContainerProfile(containerProfile, container.K8s.Namespace, watchedContainer.ContainerID); err != nil {
 		// Empty the container data to prevent reporting the same data again
 		containerData.emptyEvents()
 		return err
@@ -204,4 +211,20 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 	containerData.emptyEvents()
 
 	return nil
+}
+
+// OnQueueError implements the storage.ErrorCallback interface
+// This method is called by the queue when it encounters ObjectTooLargeError or ObjectCompletedError
+func (cpm *ContainerProfileManager) OnQueueError(_ *v1beta1.ContainerProfile, containerID string, err error) {
+	err = cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
+		if data.watchedContainerData != nil {
+			data.watchedContainerData.SyncChannel <- err
+		}
+		return nil
+	})
+
+	if err != nil {
+		// It's expected to happen in cases where there are multiple container profiles in the queue.
+		logger.L().Debug("skipping sending queue error to container (container is not found)", helpers.String("containerID", containerID), helpers.Error(err))
+	}
 }

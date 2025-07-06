@@ -73,7 +73,7 @@ func TestQueueBasicOperations(t *testing.T) {
 		},
 	}
 
-	err = queueData.Enqueue(profile)
+	err = queueData.Enqueue(profile, "test-container-id")
 	if err != nil {
 		t.Fatalf("Failed to enqueue profile: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestQueueLRUEviction(t *testing.T) {
 				Namespace: "default",
 			},
 		}
-		err = queueData.Enqueue(profile)
+		err = queueData.Enqueue(profile, "test-container-id")
 		if err != nil {
 			t.Fatalf("Failed to enqueue profile %d: %v", i, err)
 		}
@@ -193,7 +193,7 @@ func TestQueueRetryMechanism(t *testing.T) {
 		},
 	}
 
-	err = queueData.Enqueue(profile)
+	err = queueData.Enqueue(profile, "test-container-id")
 	if err != nil {
 		t.Fatalf("Failed to enqueue profile: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestQueuePersistence(t *testing.T) {
 		},
 	}
 
-	err = queueData1.Enqueue(profile)
+	err = queueData1.Enqueue(profile, "test-container-id")
 	if err != nil {
 		t.Fatalf("Failed to enqueue profile: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestQueueStats(t *testing.T) {
 				Namespace: "default",
 			},
 		}
-		err = queueData.Enqueue(profile)
+		err = queueData.Enqueue(profile, "test-container-id")
 		if err != nil {
 			t.Fatalf("Failed to enqueue profile %d: %v", i, err)
 		}
@@ -379,7 +379,7 @@ func TestQueueEmptyOperation(t *testing.T) {
 				Namespace: "default",
 			},
 		}
-		err = queueData.Enqueue(profile)
+		err = queueData.Enqueue(profile, "test-container-id")
 		if err != nil {
 			t.Fatalf("Failed to enqueue profile %d: %v", i, err)
 		}
@@ -442,7 +442,7 @@ func TestQueueConcurrentOperations(t *testing.T) {
 					},
 				}
 
-				err := queueData.Enqueue(profile)
+				err := queueData.Enqueue(profile, "test-container-id")
 				if err != nil {
 					t.Errorf("Failed to enqueue profile from goroutine %d: %v", goroutineID, err)
 				}
@@ -500,7 +500,7 @@ func TestQueueStopAndRestart(t *testing.T) {
 		},
 	}
 
-	err = queueData.Enqueue(profile)
+	err = queueData.Enqueue(profile, "test-container-id")
 	if err != nil {
 		t.Fatalf("Failed to enqueue profile: %v", err)
 	}
@@ -516,7 +516,7 @@ func TestQueueStopAndRestart(t *testing.T) {
 	}
 
 	// Verify queue is stopped
-	err = queueData.Enqueue(profile)
+	err = queueData.Enqueue(profile, "test-container-id")
 	if err == nil {
 		t.Error("Expected error when enqueueing to stopped queue, got nil")
 	}
@@ -581,7 +581,7 @@ func TestQueueWithDifferentConfigurations(t *testing.T) {
 				},
 			}
 
-			err = queueData.Enqueue(profile)
+			err = queueData.Enqueue(profile, "test-container-id")
 			if err != nil {
 				t.Fatalf("Failed to enqueue profile with config %s: %v", tc.name, err)
 			}
@@ -632,7 +632,7 @@ func BenchmarkQueueEnqueue(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			queueData.Enqueue(profile)
+			queueData.Enqueue(profile, "test-container-id")
 		}
 	})
 }
@@ -668,7 +668,7 @@ func BenchmarkQueueProcessing(b *testing.B) {
 				Namespace: "default",
 			},
 		}
-		queueData.Enqueue(profile)
+		queueData.Enqueue(profile, "test-container-id")
 	}
 
 	b.ResetTimer()

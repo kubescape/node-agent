@@ -70,3 +70,7 @@ func (a ContainerProfileManagerMock) RegisterForContainerEndOfLife(_ chan *conta
 func (a ContainerProfileManagerMock) ReportNetworkEvent(_ string, _ *tracernetworktype.Event) {
 	// noop
 }
+
+func (a ContainerProfileManagerMock) OnQueueError(_ *v1beta1.ContainerProfile, _ string, _ error) {
+	// noop
+}
