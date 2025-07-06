@@ -13,7 +13,8 @@ import (
 )
 
 func TestProcessTreeCreator_FeedEventAndGetNodeTree(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Simulate a fork event: PID 2 (parent 1)
 	pt.FeedEvent(feeder.ProcessEvent{
@@ -39,7 +40,8 @@ func TestProcessTreeCreator_FeedEventAndGetNodeTree(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ExecEvent(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 	pt.FeedEvent(feeder.ProcessEvent{
 		Type: feeder.ForkEvent,
 		PID:  1,
@@ -60,7 +62,8 @@ func TestProcessTreeCreator_ExecEvent(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ExitEvent(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 	pt.FeedEvent(feeder.ProcessEvent{
 		Type: feeder.ForkEvent,
 		PID:  1,
@@ -78,7 +81,8 @@ func TestProcessTreeCreator_ExitEvent(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ProcfsEvent(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 	pt.FeedEvent(feeder.ProcessEvent{
 		Type: feeder.ProcfsEvent,
 		PID:  10,
@@ -92,7 +96,8 @@ func TestProcessTreeCreator_ProcfsEvent(t *testing.T) {
 }
 
 func TestProcessTreeCreator_EnrichProcfsEvent(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 	pt.FeedEvent(feeder.ProcessEvent{
 		Type: feeder.ForkEvent,
 		PID:  1,
@@ -114,7 +119,8 @@ func TestProcessTreeCreator_EnrichProcfsEvent(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ProcfsDoesNotOverwriteNonEmpty(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 	pt.FeedEvent(feeder.ProcessEvent{
 		Type:    feeder.ForkEvent,
 		PID:     1,
@@ -137,7 +143,8 @@ func TestProcessTreeCreator_ProcfsDoesNotOverwriteNonEmpty(t *testing.T) {
 }
 
 func TestProcessTreeCreator_PIDReuse(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 	// First process with PID 2
 	pt.FeedEvent(feeder.ProcessEvent{
 		Type:        feeder.ForkEvent,
@@ -174,7 +181,8 @@ func TestProcessTreeCreator_PIDReuse(t *testing.T) {
 }
 
 func TestProcessTreeCreator_EventOrderings(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 	// Exec before Fork - same process instance
 	pt.FeedEvent(feeder.ProcessEvent{
 		Type:        feeder.ExecEvent,
@@ -216,7 +224,8 @@ func TestProcessTreeCreator_EventOrderings(t *testing.T) {
 }
 
 func TestProcessTreeCreator_Efficiency(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 	n := 10000
 	start := time.Now()
 	for i := 1; i <= n; i++ {
@@ -231,7 +240,8 @@ func TestProcessTreeCreator_Efficiency(t *testing.T) {
 
 // Test field filling logic for Fork events
 func TestProcessTreeCreator_ForkFieldFilling(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Test that fork only fills empty fields
 	pt.FeedEvent(feeder.ProcessEvent{
@@ -267,7 +277,8 @@ func TestProcessTreeCreator_ForkFieldFilling(t *testing.T) {
 
 // Test field filling logic for Exec events
 func TestProcessTreeCreator_ExecFieldOverriding(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Create process with fork
 	pt.FeedEvent(feeder.ProcessEvent{
@@ -303,7 +314,8 @@ func TestProcessTreeCreator_ExecFieldOverriding(t *testing.T) {
 
 // Test field filling logic for Procfs events
 func TestProcessTreeCreator_ProcfsFieldEnrichment(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Create process with some fields
 	pt.FeedEvent(feeder.ProcessEvent{
@@ -337,7 +349,8 @@ func TestProcessTreeCreator_ProcfsFieldEnrichment(t *testing.T) {
 
 // Test complex process tree scenarios
 func TestProcessTreeCreator_ComplexTreeScenarios(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Create a complex tree: init -> systemd -> sshd -> bash -> vim
 	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ForkEvent, PID: 1, PPID: 0, Comm: "init"})
@@ -367,7 +380,8 @@ func TestProcessTreeCreator_ComplexTreeScenarios(t *testing.T) {
 
 // Test process replacement scenarios
 func TestProcessTreeCreator_ProcessReplacement(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Create initial process
 	pt.FeedEvent(feeder.ProcessEvent{
@@ -397,7 +411,8 @@ func TestProcessTreeCreator_ProcessReplacement(t *testing.T) {
 
 // Test event ordering edge cases
 func TestProcessTreeCreator_EventOrderingEdgeCases(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Test: Exit before any other events
 	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ExitEvent, PID: 1})
@@ -429,7 +444,8 @@ func TestProcessTreeCreator_EventOrderingEdgeCases(t *testing.T) {
 
 // Test concurrent access
 func TestProcessTreeCreator_ConcurrentAccess(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	var wg sync.WaitGroup
 	numGoroutines := 10
@@ -479,7 +495,8 @@ func TestProcessTreeCreator_ConcurrentAccess(t *testing.T) {
 
 // Test memory efficiency with large trees
 func TestProcessTreeCreator_MemoryEfficiency(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Create a large tree
 	numProcesses := 1000
@@ -513,7 +530,8 @@ func TestProcessTreeCreator_MemoryEfficiency(t *testing.T) {
 
 // Test field validation and edge cases
 func TestProcessTreeCreator_FieldValidation(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Test with nil UID/GID
 	pt.FeedEvent(feeder.ProcessEvent{
@@ -553,7 +571,8 @@ func TestProcessTreeCreator_FieldValidation(t *testing.T) {
 
 // Test process tree cleanup
 func TestProcessTreeCreator_TreeCleanup(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Create a tree: init -> parent -> child
 	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ForkEvent, PID: 1, PPID: 0, Comm: "init"})
@@ -586,7 +605,8 @@ func TestProcessTreeCreator_TreeCleanup(t *testing.T) {
 
 // Test deep copy functionality
 func TestProcessTreeCreator_DeepCopy(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Create a process with children
 	pt.FeedEvent(feeder.ProcessEvent{Type: feeder.ForkEvent, PID: 1, PPID: 0, Comm: "parent"})
@@ -623,7 +643,8 @@ func countProcesses(proc *apitypes.Process) int {
 
 // Test complex expected tree structure
 func TestProcessTreeCreator_ExpectedTreeStructure(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Define the expected tree structure
 	// This represents a realistic system with multiple containers and processes
@@ -939,7 +960,8 @@ func calculateProcessDepth(pid uint32, tree map[uint32]*ExpectedProcess) int {
 // TestProcfsAfterExit tests the race condition scenario where procfs tries to add
 // a process that has already exited
 func TestProcfsAfterExit(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Create a process
 	pt.FeedEvent(feeder.ProcessEvent{
@@ -992,7 +1014,8 @@ func TestProcfsAfterExit(t *testing.T) {
 // TestPIDReuseWithDifferentStartTime tests that PID reuse works correctly
 // when the start time is different (different process instance)
 func TestPIDReuseWithDifferentStartTime(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Create first process with PID 1 and start time 1000
 	pt.FeedEvent(feeder.ProcessEvent{
@@ -1058,7 +1081,8 @@ func TestPIDReuseWithDifferentStartTime(t *testing.T) {
 // TestEnrichmentStillWorks tests that enrichment still works for existing processes
 // even when there are exited processes with the same PID but different start times
 func TestEnrichmentStillWorks(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Create a process with PID 1 and start time 1000
 	pt.FeedEvent(feeder.ProcessEvent{
@@ -1102,7 +1126,8 @@ func TestEnrichmentStillWorks(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ParentChildRelationshipBuilding(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Create a simple parent-child relationship
 	pt.FeedEvent(feeder.ProcessEvent{
@@ -1135,7 +1160,8 @@ func TestProcessTreeCreator_ParentChildRelationshipBuilding(t *testing.T) {
 // 2. Later event: We get information about PPID 999, including its PPID (998)
 // 3. Problem: When we create PPID 999, we don't check if its parent (PPID 998) exists, so we might not properly link the hierarchy
 func TestProcessTreeCreator_OutOfOrderParentDiscovery(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Step 1: Create process 1000 with PPID 999 (but we don't know about 999 yet)
 	pt.FeedEvent(feeder.ProcessEvent{
@@ -1212,7 +1238,8 @@ func TestProcessTreeCreator_OutOfOrderParentDiscovery(t *testing.T) {
 
 // TestProcessTreeCreator_ComplexOutOfOrderScenario tests a more complex scenario with multiple levels
 func TestProcessTreeCreator_ComplexOutOfOrderScenario(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Create processes in a random order that doesn't follow the hierarchy
 	// This simulates real-world scenarios where events arrive out of order
@@ -1275,7 +1302,8 @@ func TestProcessTreeCreator_ComplexOutOfOrderScenario(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ForkExecNoDuplication(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Simulate a fork event creating a new process
 	forkEvent := feeder.ProcessEvent{
@@ -1338,7 +1366,8 @@ func TestProcessTreeCreator_ForkExecNoDuplication(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ExecBeforeFork(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Simulate exec event arriving before fork (rare but possible)
 	execEvent := feeder.ProcessEvent{
@@ -1390,7 +1419,8 @@ func TestProcessTreeCreator_ExecBeforeFork(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ConcurrentForkExec(t *testing.T) {
-	pt := NewProcessTreeCreator()
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	pt := NewProcessTreeCreator(containerTree)
 	var wg sync.WaitGroup
 
 	// Simulate concurrent fork and exec events for the same PID
@@ -1461,9 +1491,8 @@ func TestProcessTreeCreator_ConcurrentForkExec(t *testing.T) {
 
 // Test container-aware PPID management
 func TestProcessTreeCreator_ContainerAwarePPIDManagement(t *testing.T) {
-	pt := NewProcessTreeCreator()
 	containerTree := containerprocesstree.NewContainerProcessTree()
-	pt.SetContainerTree(containerTree)
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Set up a container with shim PID 100
 	containerID := "test-container-123"
@@ -1529,9 +1558,8 @@ func TestProcessTreeCreator_ContainerAwarePPIDManagement(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ContainerAwarePPIDManagement_ProcFS(t *testing.T) {
-	pt := NewProcessTreeCreator()
 	containerTree := containerprocesstree.NewContainerProcessTree()
-	pt.SetContainerTree(containerTree)
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Set up a container with shim PID 100
 	containerID := "test-container-123"
@@ -1565,9 +1593,8 @@ func TestProcessTreeCreator_ContainerAwarePPIDManagement_ProcFS(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ContainerAwarePPIDManagement_MultipleContainers(t *testing.T) {
-	pt := NewProcessTreeCreator()
 	containerTree := containerprocesstree.NewContainerProcessTree()
-	pt.SetContainerTree(containerTree)
+	pt := NewProcessTreeCreator(containerTree)
 
 	// Set up two containers with different shim PIDs
 	container1ID := "container-1"

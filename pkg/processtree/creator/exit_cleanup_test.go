@@ -5,13 +5,15 @@ import (
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestExitCleanupManager(t *testing.T) {
 	// Create a process tree creator
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 	defer creator.Stop()
 
 	// Create a test process
@@ -69,7 +71,8 @@ func TestExitCleanupManager(t *testing.T) {
 
 func TestExitCleanupManager_NoChildren(t *testing.T) {
 	// Create a process tree creator
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 	defer creator.Stop()
 
 	// Create a test process with no children
@@ -111,7 +114,8 @@ func TestExitCleanupManager_NoChildren(t *testing.T) {
 
 func TestExitCleanupManager_ProcessAlreadyRemoved(t *testing.T) {
 	// Create a process tree creator
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 	defer creator.Stop()
 
 	// Create exit event for a process that doesn't exist

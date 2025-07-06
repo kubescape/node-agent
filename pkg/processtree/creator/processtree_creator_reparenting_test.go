@@ -8,13 +8,15 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestProcessTreeCreator_HandleExitEvent_WithReparenting(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 	require.NotNil(t, creator.reparentingLogic, "Reparenting logic should be initialized")
 
 	// Create a process tree with a parent and children
@@ -78,7 +80,8 @@ func TestProcessTreeCreator_HandleExitEvent_WithReparenting(t *testing.T) {
 }
 
 func TestProcessTreeCreator_HandleExitEvent_ContainerdScenario(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 	require.NotNil(t, creator.reparentingLogic)
 
 	// Create a mock container tree that simulates containerd behavior
@@ -160,7 +163,8 @@ func TestProcessTreeCreator_HandleExitEvent_ContainerdScenario(t *testing.T) {
 }
 
 func TestProcessTreeCreator_HandleExitEvent_NoChildren(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 
 	// Create a process without children
 	parentPID := uint32(100)
@@ -189,7 +193,8 @@ func TestProcessTreeCreator_HandleExitEvent_NoChildren(t *testing.T) {
 }
 
 func TestProcessTreeCreator_HandleExitEvent_ProcessNotExists(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 
 	// Create exit event for non-existent process
 	exitEvent := feeder.ProcessEvent{
@@ -207,7 +212,8 @@ func TestProcessTreeCreator_HandleExitEvent_ProcessNotExists(t *testing.T) {
 }
 
 func TestProcessTreeCreator_Reparenting_EdgeCases(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 
 	// Edge 1: Child already has a parent
 	parent1 := &apitypes.Process{PID: 10, Comm: "parent1", ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
@@ -291,7 +297,8 @@ func (mct *MockContainerTree) IsPPIDUnderAnyContainerSubtree(ppid uint32, fullTr
 func (mct *MockContainerTree) SetShimPIDForTesting(containerID string, shimPID uint32) {}
 
 func TestProcessTreeCreator_ExitEvent_ComplexScenarios(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 
 	// Test 1: Multiple levels of reparenting
 	// Create a deep tree: root -> parent -> child -> grandchild
@@ -333,7 +340,8 @@ func TestProcessTreeCreator_ExitEvent_ComplexScenarios(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ExitEvent_RepeatedExits(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 
 	// Test handling multiple exit events for the same process
 	process := &apitypes.Process{PID: 100, Comm: "test", ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
@@ -365,7 +373,8 @@ func TestProcessTreeCreator_ExitEvent_RepeatedExits(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ExitEvent_WithReusedPID(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 
 	// Test PID reuse scenario
 	process1 := &apitypes.Process{PID: 100, Comm: "process1", ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
@@ -417,7 +426,8 @@ func TestProcessTreeCreator_ExitEvent_WithReusedPID(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ExitEvent_ReparentingStrategies(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 
 	// Test different reparenting strategies
 	tests := []struct {
@@ -472,7 +482,8 @@ func TestProcessTreeCreator_ExitEvent_ReparentingStrategies(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ExitEvent_ConcurrentExits(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 
 	// Test concurrent exit events
 	var wg sync.WaitGroup
@@ -516,7 +527,8 @@ func TestProcessTreeCreator_ExitEvent_ConcurrentExits(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ExitEvent_WithContainerTree(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 
 	// Mock container tree
 	mockContainerTree := &MockContainerTree{
@@ -569,7 +581,8 @@ func TestProcessTreeCreator_ExitEvent_WithContainerTree(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ExitEvent_EdgeCases(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 
 	// Test 1: Exit process with nil ChildrenMap
 	process1 := &apitypes.Process{PID: 100, Comm: "process1"} // nil ChildrenMap
@@ -623,7 +636,8 @@ func TestProcessTreeCreator_ExitEvent_EdgeCases(t *testing.T) {
 }
 
 func TestProcessTreeCreator_ExitEvent_ReparentingVerification(t *testing.T) {
-	creator := NewProcessTreeCreator().(*processTreeCreatorImpl)
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 
 	// Test that reparenting verification works correctly
 	parent := &apitypes.Process{

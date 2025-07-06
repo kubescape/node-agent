@@ -39,8 +39,6 @@ func NewProcessTreeManager(
 	containerTree containerprocesstree.ContainerProcessTree,
 	feeders []feeder.ProcessEventFeeder,
 ) ProcessTreeManager {
-	// Set the container tree in the creator for container-aware PPID management
-	creator.SetContainerTree(containerTree)
 
 	return &ProcessTreeManagerImpl{
 		creator:       creator,
@@ -134,7 +132,7 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 		logger.L().Error("Failed to get container process tree", helpers.Error(err), helpers.String("containerID", containerID), helpers.Int("pid", int(pid)))
 		return apitypes.Process{}, fmt.Errorf("failed to get container process tree: %v", err)
 	}
-	
+
 	return processTree, nil
 }
 

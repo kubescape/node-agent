@@ -24,7 +24,7 @@ type processTreeCreatorImpl struct {
 	exitCleanup      *ExitCleanupManager
 }
 
-func NewProcessTreeCreator() ProcessTreeCreator {
+func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree) ProcessTreeCreator {
 	// Create LRU cache for exited processes with size 1000
 	exitedCache, err := lru.New[uint32, time.Time](1000)
 	if err != nil {
@@ -43,6 +43,7 @@ func NewProcessTreeCreator() ProcessTreeCreator {
 		processMap:       make(map[uint32]*apitypes.Process),
 		exitedCache:      exitedCache,
 		reparentingLogic: reparentingLogic,
+		containerTree:    containerTree,
 	}
 
 	// Create and start the exit cleanup manager

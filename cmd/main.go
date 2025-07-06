@@ -236,7 +236,7 @@ func main() {
 	containerProcessTree := containerprocesstree.NewContainerProcessTree()
 
 	// Create the process tree creator
-	processTreeCreator := processtreecreator.NewProcessTreeCreator()
+	processTreeCreator := processtreecreator.NewProcessTreeCreator(containerProcessTree)
 
 	// Create feeders
 	feeders := []feeder.ProcessEventFeeder{
