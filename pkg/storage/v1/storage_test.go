@@ -5,6 +5,7 @@ import (
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/kubescape/node-agent/pkg/config"
 
@@ -302,20 +303,39 @@ func TestStorage_CreateContainerProfile(t *testing.T) {
 			}
 
 			if !tt.wantErr {
-				// Verify the container profile was created successfully
-				got, err := sc.StorageClient.ContainerProfiles(tt.namespace).Get(context.Background(), tt.profile.Name, v1.GetOptions{})
-				assert.NoError(t, err)
-				assert.Equal(t, tt.profile.Name, got.Name)
-				assert.Equal(t, tt.namespace, got.Namespace)
-				assert.Equal(t, tt.profile.Spec.ImageID, got.Spec.ImageID)
-				assert.Equal(t, tt.profile.Spec.ImageTag, got.Spec.ImageTag)
-				assert.Equal(t, tt.profile.Spec.Capabilities, got.Spec.Capabilities)
-				assert.Equal(t, tt.profile.Spec.Execs, got.Spec.Execs)
-				assert.Equal(t, tt.profile.Spec.Opens, got.Spec.Opens)
-				assert.Equal(t, tt.profile.Spec.Syscalls, got.Spec.Syscalls)
-				assert.Equal(t, tt.profile.Spec.Endpoints, got.Spec.Endpoints)
-				assert.Equal(t, tt.profile.Spec.Egress, got.Spec.Egress)
-				assert.Equal(t, tt.profile.Spec.Ingress, got.Spec.Ingress)
+				// Wait for queue processing to complete
+				// The queue processes items every 5 seconds by default, so we need to wait
+				// We'll wait up to 10 seconds for the profile to be created
+				maxWait := 10 * time.Second
+				checkInterval := 100 * time.Millisecond
+				elapsed := 0 * time.Second
+
+				for elapsed < maxWait {
+					got, err := sc.StorageClient.ContainerProfiles(tt.namespace).Get(context.Background(), tt.profile.Name, v1.GetOptions{})
+					if err == nil {
+						// Profile was found, verify its contents
+						assert.Equal(t, tt.profile.Name, got.Name)
+						assert.Equal(t, tt.namespace, got.Namespace)
+						assert.Equal(t, tt.profile.Spec.ImageID, got.Spec.ImageID)
+						assert.Equal(t, tt.profile.Spec.ImageTag, got.Spec.ImageTag)
+						assert.Equal(t, tt.profile.Spec.Capabilities, got.Spec.Capabilities)
+						assert.Equal(t, tt.profile.Spec.Execs, got.Spec.Execs)
+						assert.Equal(t, tt.profile.Spec.Opens, got.Spec.Opens)
+						assert.Equal(t, tt.profile.Spec.Syscalls, got.Spec.Syscalls)
+						assert.Equal(t, tt.profile.Spec.Endpoints, got.Spec.Endpoints)
+						assert.Equal(t, tt.profile.Spec.Egress, got.Spec.Egress)
+						assert.Equal(t, tt.profile.Spec.Ingress, got.Spec.Ingress)
+						break // Success, exit the loop
+					}
+
+					time.Sleep(checkInterval)
+					elapsed += checkInterval
+				}
+
+				// If we get here, the profile was never found
+				if elapsed >= maxWait {
+					t.Errorf("Container profile was not created within %v", maxWait)
+				}
 			}
 		})
 	}
