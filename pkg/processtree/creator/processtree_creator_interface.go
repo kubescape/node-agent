@@ -2,7 +2,6 @@ package processtreecreator
 
 import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 )
 
@@ -15,8 +14,6 @@ type ProcessTreeCreator interface {
 	GetProcessMap() map[uint32]*apitypes.Process
 	// Optionally: Query for a process node by PID
 	GetProcessNode(pid int) (*apitypes.Process, error)
-	// Set the container tree for container-aware PPID management
-	SetContainerTree(containerTree containerprocesstree.ContainerProcessTree)
 	// Stop the process tree creator and cleanup resources
 	Stop()
 	// Trigger immediate exit cleanup (for testing purposes)

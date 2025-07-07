@@ -53,12 +53,6 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 	return creator
 }
 
-func (pt *processTreeCreatorImpl) SetContainerTree(containerTree containerprocesstree.ContainerProcessTree) {
-	pt.mutex.Lock()
-	defer pt.mutex.Unlock()
-	pt.containerTree = containerTree
-}
-
 func (pt *processTreeCreatorImpl) FeedEvent(event feeder.ProcessEvent) {
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
@@ -135,7 +129,9 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 		// Create new process if it wasn't exited
 		proc = pt.getOrCreateProcess(event.PID)
 		logger.L().Info("Fork: Creating new process",
-			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
+			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)),
+			helpers.String("ppid", fmt.Sprintf("%d", event.PPID)), helpers.String("comm", event.Comm), helpers.String("pcomm", event.Pcomm),
+			helpers.String("cmdline", event.Cmdline))
 	}
 
 	// Check if process is already under any containerd-shim subtree
@@ -183,12 +179,16 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 	// If process doesn't exist, check if it was previously exited
 	if !exists {
 		logger.L().Info("ProcFS: Creating new process",
-			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
+			helpers.String("pid", fmt.Sprintf("%d", event.PID)),
+			helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)),
+			helpers.String("comm", event.Comm), helpers.String("pcomm", event.Pcomm), helpers.String("cmdline", event.Cmdline))
 
 		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
 		if pt.isProcessExited(processHash) {
 			logger.L().Info("ProcFS: Process has already exited",
-				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)))
+				helpers.String("pid", fmt.Sprintf("%d", event.PID)),
+				helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)),
+				helpers.String("comm", event.Comm), helpers.String("pcomm", event.Pcomm), helpers.String("cmdline", event.Cmdline))
 			return // Don't create a new process that has already exited
 		}
 		// Create new process if it wasn't exited
@@ -269,53 +269,27 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 				}
 			}
 		}
-
-		// Enrich the existing process node with exec data (but not PPID if under container)
-		if event.Comm != "" {
-			proc.Comm = event.Comm
+	} else {
+		// If process doesn't exist, check if it was previously exited
+		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
+		if pt.isProcessExited(processHash) {
+			logger.L().Info("Exec: Process has already exited",
+				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
+			return // Don't create a new process that has already exited
 		}
-		if event.Pcomm != "" {
-			proc.Pcomm = event.Pcomm
-		}
-		if event.Cmdline != "" {
-			proc.Cmdline = event.Cmdline
-		}
-		if event.Uid != nil {
-			proc.Uid = event.Uid
-		}
-		if event.Gid != nil {
-			proc.Gid = event.Gid
-		}
-		if event.Cwd != "" {
-			proc.Cwd = event.Cwd
-		}
-		if event.Path != "" {
-			proc.Path = event.Path
-		}
-		if proc.ChildrenMap == nil {
-			proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
-		}
-		pt.linkProcessToParent(proc)
-		return
-	}
-
-	// If process doesn't exist, check if it was previously exited
-	processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
-	if pt.isProcessExited(processHash) {
-		logger.L().Info("Exec: Process has already exited",
+		// Create new process if it wasn't exited (should be rare)
+		proc = pt.getOrCreateProcess(event.PID)
+		logger.L().Info("Exec: Creating new process (no prior fork event)",
 			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
-		return // Don't create a new process that has already exited
 	}
-	// Create new process if it wasn't exited (should be rare)
-	proc = pt.getOrCreateProcess(event.PID)
-	logger.L().Info("Exec: Creating new process (no prior fork event)",
-		helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
-
+	logger.L().Info("Exec: info",
+		helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)),
+		helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)), helpers.String("comm", event.Comm), helpers.String("pcomm", event.Pcomm))
 	// Fill all fields from exec event
 	if event.PPID != 0 {
 		proc.PPID = event.PPID
 	}
-	if event.Comm != "" {
+	if event.Comm != "" && proc.Comm != event.Comm {
 		proc.Comm = event.Comm
 	}
 	if event.Pcomm != "" {
@@ -339,6 +313,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	if proc.ChildrenMap == nil {
 		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
 	}
+
 	pt.linkProcessToParent(proc)
 }
 
