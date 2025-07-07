@@ -127,8 +127,12 @@ func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apit
 	}
 
 	// Check if target is a descendant of root by walking up the parent chain
+	// Add depth limit to prevent infinite loops
+	const maxDepth = 50
 	current := targetNode
-	for current.PPID != 0 {
+	depth := 0
+
+	for current.PPID != 0 && depth < maxDepth {
 		if current.PPID == rootNode.PID {
 			return true
 		}
@@ -137,6 +141,7 @@ func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apit
 			break
 		}
 		current = parent
+		depth++
 	}
 
 	return false
@@ -148,9 +153,12 @@ func (c *containerProcessTreeImpl) findRootNodeBeforeShim(targetNode *apitypes.P
 		return nil
 	}
 
-	// Walk up the parent chain
+	// Walk up the parent chain with depth limit to prevent infinite loops
+	const maxDepth = 50
 	current := targetNode
-	for current.PPID != 0 {
+	depth := 0
+
+	for current.PPID != 0 && depth < maxDepth {
 		parent := fullTree[current.PPID]
 		if parent == nil {
 			break
@@ -162,6 +170,7 @@ func (c *containerProcessTreeImpl) findRootNodeBeforeShim(targetNode *apitypes.P
 		}
 
 		current = parent
+		depth++
 	}
 
 	// If we reach here, the target node itself is the root (no parent found that leads to shim)

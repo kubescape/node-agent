@@ -10,8 +10,10 @@ type ProcessTreeCreator interface {
 	FeedEvent(event feeder.ProcessEvent)
 	// Get the full process tree (returns the root or all processes)
 	GetRootTree() ([]apitypes.Process, error)
-	// Get the process map
+	// Get the process map (shallow copy - much faster)
 	GetProcessMap() map[uint32]*apitypes.Process
+	// Get the process map with deep copy (slower but independent)
+	GetProcessMapDeep() map[uint32]*apitypes.Process
 	// Optionally: Query for a process node by PID
 	GetProcessNode(pid int) (*apitypes.Process, error)
 	// Stop the process tree creator and cleanup resources

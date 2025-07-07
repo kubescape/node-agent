@@ -54,9 +54,6 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 }
 
 func (pt *processTreeCreatorImpl) FeedEvent(event feeder.ProcessEvent) {
-	pt.mutex.Lock()
-	defer pt.mutex.Unlock()
-
 	switch event.Type {
 	case feeder.ForkEvent:
 		pt.handleForkEvent(event)
@@ -76,13 +73,24 @@ func (pt *processTreeCreatorImpl) GetRootTree() ([]apitypes.Process, error) {
 	roots := []apitypes.Process{}
 	for _, proc := range pt.processMap {
 		if proc.PPID == 0 || pt.processMap[proc.PPID] == nil {
-			roots = append(roots, *pt.deepCopyProcess(proc))
+			roots = append(roots, *pt.shallowCopyProcess(proc))
 		}
 	}
 	return roots, nil
 }
 
 func (pt *processTreeCreatorImpl) GetProcessMap() map[uint32]*apitypes.Process {
+	pt.mutex.RLock()
+	defer pt.mutex.RUnlock()
+	processMap := make(map[uint32]*apitypes.Process)
+	for pid, proc := range pt.processMap {
+		processMap[pid] = pt.shallowCopyProcess(proc)
+	}
+	return processMap
+}
+
+// GetProcessMapDeep returns a deep copy of the process map (slower but independent)
+func (pt *processTreeCreatorImpl) GetProcessMapDeep() map[uint32]*apitypes.Process {
 	pt.mutex.RLock()
 	defer pt.mutex.RUnlock()
 	processMap := make(map[uint32]*apitypes.Process)
@@ -118,6 +126,9 @@ func (pt *processTreeCreatorImpl) TriggerExitCleanup() {
 
 // handleForkEvent handles fork events - only fills properties if they are empty or don't exist
 func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
+	pt.mutex.Lock()
+	defer pt.mutex.Unlock()
+
 	proc, exists := pt.processMap[event.PID]
 
 	// If process doesn't exist, check if it was previously exited
@@ -134,8 +145,9 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 			helpers.String("cmdline", event.Cmdline))
 	}
 
-	// Check if process is already under any containerd-shim subtree
-	if !(pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)) {
+	// Check if process is already under any containerd-shim subtree (read-only operation)
+	isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)
+	if !isUnderContainer {
 		// Only set PPID if it is empty or process is not under container subtree
 		if proc.PPID == 0 {
 			proc.PPID = event.PPID
@@ -174,6 +186,9 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 
 // handleProcfsEvent handles procfs events - overrides when existing values are empty or don't exist
 func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
+	pt.mutex.Lock()
+	defer pt.mutex.Unlock()
+
 	proc, exists := pt.processMap[event.PID]
 
 	// If process doesn't exist, check if it was previously exited
@@ -195,10 +210,12 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
-	// Check if process is already under any containerd-shim subtree
-	if !(pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)) {
+	// Check if process is already under any containerd-shim subtree (read-only operation)
+	isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)
+	if !isUnderContainer {
 		// Process is not under container subtree, check if new PPID is under container subtree
-		if pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.processMap) {
+		isPPIDUnderContainer := pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.processMap)
+		if isPPIDUnderContainer {
 			// New PPID is under container subtree, update PPID and log the change
 			logger.L().Info("ProcFS: Updating PPID to container subtree",
 				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
@@ -246,13 +263,18 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 // handleExecEvent handles exec events - always enriches the existing process node if present, never creates a duplicate
 func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	// Always lock for write, as we may update the process node
+	pt.mutex.Lock()
+	defer pt.mutex.Unlock()
+
 	proc, exists := pt.processMap[event.PID]
 
 	if exists {
-		// Check if process is already under any containerd-shim subtree
-		if !(pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)) {
+		// Check if process is already under any containerd-shim subtree (read-only operation)
+		isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)
+		if !isUnderContainer {
 			// Process is not under container subtree, check if new PPID is under container subtree
-			if pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.processMap) {
+			isPPIDUnderContainer := pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.processMap)
+			if isPPIDUnderContainer {
 				// New PPID is under container subtree, update PPID and log the change
 				logger.L().Info("Exec: Updating PPID to container subtree",
 					helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)),
@@ -285,10 +307,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	logger.L().Info("Exec: info",
 		helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)),
 		helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)), helpers.String("comm", event.Comm), helpers.String("pcomm", event.Pcomm))
-	// Fill all fields from exec event
-	if event.PPID != 0 {
-		proc.PPID = event.PPID
-	}
+	// Fill all fields from exec event (PPID is already handled above)
 	if event.Comm != "" && proc.Comm != event.Comm {
 		proc.Comm = event.Comm
 	}
@@ -317,7 +336,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	pt.linkProcessToParent(proc)
 }
 
-// handleExitEvent handles exit events - immediate removal for simple cases, delayed cleanup for reparenting
+// handleExitEvent handles exit events - immediate removal for processes without children, delayed cleanup for reparenting
 // Caller must hold pt.mutex
 func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 	proc, exists := pt.processMap[event.PID]
@@ -339,12 +358,41 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 		}
 	}
 
-	// Add to delayed cleanup for reparenting scenarios
-	pt.exitCleanup.AddPendingExit(event, children)
+	// Hybrid approach: immediate cleanup for processes without children, delayed for processes with children
+	if len(children) == 0 {
+		// Immediate cleanup for processes without children
+		pt.removeProcessImmediately(event.PID)
+		logger.L().Info("Exit: Immediate cleanup (no children)",
+			helpers.String("pid", fmt.Sprintf("%d", event.PID)))
+	} else {
+		// Add to delayed cleanup for reparenting scenarios
+		pt.exitCleanup.AddPendingExit(event, children)
+		logger.L().Info("Exit: Added to delayed cleanup (has children)",
+			helpers.String("pid", fmt.Sprintf("%d", event.PID)),
+			helpers.String("children_count", fmt.Sprintf("%d", len(children))))
+	}
+}
 
-	logger.L().Info("Exit: Added to delayed cleanup (has children)",
-		helpers.String("pid", fmt.Sprintf("%d", event.PID)),
-		helpers.String("children_count", fmt.Sprintf("%d", len(children))))
+// removeProcessImmediately removes a process immediately without reparenting logic
+// Caller must hold pt.mutex
+func (pt *processTreeCreatorImpl) removeProcessImmediately(pid uint32) {
+	proc, exists := pt.processMap[pid]
+	if !exists {
+		return
+	}
+
+	// Remove from parent's children list
+	if proc.PPID != 0 {
+		if parent, parentExists := pt.processMap[proc.PPID]; parentExists {
+			delete(parent.ChildrenMap, apitypes.CommPID{Comm: proc.Comm, PID: pid})
+		}
+	}
+
+	// Remove the process from the map
+	delete(pt.processMap, pid)
+
+	logger.L().Info("Exit: Removed process immediately",
+		helpers.String("pid", fmt.Sprintf("%d", pid)))
 }
 
 func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Process {

@@ -248,7 +248,7 @@ func main() {
 	feeders = append(feeders, eventFeeder)
 
 	// Create procfs feeder for periodic scanning
-	procfsFeeder := feeder.NewProcfsFeeder(1 * time.Second) // Scan every 1 second
+	procfsFeeder := feeder.NewProcfsFeeder(5 * time.Second) // Scan every 5 seconds
 	feeders = append(feeders, procfsFeeder)
 
 	// Create the process tree manager

@@ -11,6 +11,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 )
 
+const (
+	maxPendingExits = 1000 // Maximum number of pending exits before alerting
+)
+
 // ExitCleanupManager handles delayed removal of exited processes
 // NOTE: All public methods must be called with the creator's mutex held.
 type ExitCleanupManager struct {
@@ -32,8 +36,8 @@ type pendingExit struct {
 func NewExitCleanupManager(creator *processTreeCreatorImpl) *ExitCleanupManager {
 	return &ExitCleanupManager{
 		pendingExits:    make(map[uint32]*pendingExit),
-		cleanupInterval: 5 * time.Second,  // Check every 5 seconds
-		cleanupDelay:    15 * time.Second, // Remove after 15 seconds
+		cleanupInterval: 1 * time.Second, // Check every 1 second (more frequent for shorter delay)
+		cleanupDelay:    2 * time.Second, // Remove after 2 seconds (reduced from 15)
 		stopChan:        make(chan struct{}),
 		creator:         creator,
 	}
@@ -59,6 +63,13 @@ func (ecm *ExitCleanupManager) AddPendingExit(event feeder.ProcessEvent, childre
 		return
 	}
 
+	// Memory monitoring: alert if too many pending exits
+	if len(ecm.pendingExits) >= maxPendingExits {
+		logger.L().Warning("Exit: Too many pending exits, potential memory leak",
+			helpers.String("pending_count", fmt.Sprintf("%d", len(ecm.pendingExits))),
+			helpers.String("max_allowed", fmt.Sprintf("%d", maxPendingExits)))
+	}
+
 	ecm.pendingExits[event.PID] = &pendingExit{
 		PID:         event.PID,
 		StartTimeNs: event.StartTimeNs,
@@ -67,7 +78,8 @@ func (ecm *ExitCleanupManager) AddPendingExit(event feeder.ProcessEvent, childre
 	}
 	logger.L().Info("Exit: Added to pending cleanup",
 		helpers.String("pid", fmt.Sprintf("%d", event.PID)),
-		helpers.String("children_count", fmt.Sprintf("%d", len(children))))
+		helpers.String("children_count", fmt.Sprintf("%d", len(children))),
+		helpers.String("total_pending", fmt.Sprintf("%d", len(ecm.pendingExits))))
 }
 
 // cleanupLoop runs the periodic cleanup
