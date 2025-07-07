@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/goradd/maps"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -108,6 +109,11 @@ func (rule *R0004UnexpectedCapabilityUsed) CreateRuleFailure(eventType utils.Eve
 			},
 			InfectedPID: capEvent.Pid,
 			Severity:    R0004UnexpectedCapabilityUsedRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: capEvent.Comm,
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

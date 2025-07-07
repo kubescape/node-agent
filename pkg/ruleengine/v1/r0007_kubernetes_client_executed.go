@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -159,6 +160,16 @@ func (rule *R0007KubernetesClientExecuted) CreateRuleFailure(eventType utils.Eve
 					"args": execEvent.Args,
 				},
 				Severity: R0007KubernetesClientExecutedDescriptor.Priority,
+				Identifiers: &common.Identifiers{
+					Process: &common.ProcessEntity{
+						Name:        execEvent.Comm,
+						CommandLine: fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+					},
+					File: &common.FileEntity{
+						Name:      filepath.Base(execPath),
+						Directory: filepath.Dir(execPath),
+					},
+				},
 			},
 			RuntimeProcessDetails: apitypes.ProcessTree{
 				ProcessTree: apitypes.Process{
@@ -201,6 +212,16 @@ func (rule *R0007KubernetesClientExecuted) CreateRuleFailure(eventType utils.Eve
 			},
 			InfectedPID: networkEvent.Pid,
 			Severity:    R0007KubernetesClientExecutedDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: networkEvent.Comm,
+				},
+				Network: &common.NetworkEntity{
+					DstIP:    networkEvent.DstEndpoint.Addr,
+					DstPort:  int(networkEvent.Port),
+					Protocol: networkEvent.Proto,
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

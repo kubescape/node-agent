@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
 const (
@@ -110,6 +111,11 @@ func (rule *R1030UnexpectedIouringOperation) CreateRuleFailure(eventType utils.E
 			InfectedPID:     iouringEvent.Pid,
 			Severity:        R1030UnexpectedIouringOperationRuleDescriptor.Priority,
 			ProfileMetadata: nil,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: iouringEvent.Comm,
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -12,6 +13,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
@@ -187,6 +189,15 @@ func (rule *R0002UnexpectedFileAccess) CreateRuleFailure(eventType utils.EventTy
 				"path":  openEventTyped.FullPath,
 			},
 			Severity: R0002UnexpectedFileAccessRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: openEventTyped.Comm,
+				},
+				File: &common.FileEntity{
+					Name:      filepath.Base(openEventTyped.FullPath),
+					Directory: filepath.Dir(openEventTyped.FullPath),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

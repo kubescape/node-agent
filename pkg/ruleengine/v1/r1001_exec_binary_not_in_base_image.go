@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -11,6 +12,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
 const (
@@ -101,6 +103,16 @@ func (rule *R1001ExecBinaryNotInBaseImage) CreateRuleFailure(eventType utils.Eve
 			AlertName:   rule.Name(),
 			InfectedPID: execEvent.Pid,
 			Severity:    R1001ExecBinaryNotInBaseImageRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name:        execEvent.Comm,
+					CommandLine: fmt.Sprintf("%s %s", execEvent.ExePath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+				},
+				File: &common.FileEntity{
+					Name:      filepath.Base(GetExecFullPathFromEvent(execEvent)),
+					Directory: filepath.Dir(GetExecFullPathFromEvent(execEvent)),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
