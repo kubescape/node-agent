@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -9,6 +10,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 
@@ -126,6 +128,15 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType u
 			},
 			InfectedPID: hardlinkEvent.Pid,
 			Severity:    R1012HardlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: hardlinkEvent.Comm,
+				},
+				File: &common.FileEntity{
+					Name:      hardlinkEvent.OldPath,
+					Directory: filepath.Dir(hardlinkEvent.OldPath),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

@@ -2,10 +2,12 @@ package ruleengine
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -119,6 +121,16 @@ func (rule *R0001UnexpectedProcessLaunched) CreateRuleFailure(eventType utils.Ev
 				"args":   execEvent.Args,
 			},
 			Severity: R0001UnexpectedProcessLaunchedRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name:        execEvent.Comm,
+					CommandLine: fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+				},
+				File: &common.FileEntity{
+					Name:      GetExecFullPathFromEvent(execEvent),
+					Directory: filepath.Dir(GetExecFullPathFromEvent(execEvent)),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"path/filepath"
 
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -10,6 +11,7 @@ import (
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
@@ -174,6 +176,15 @@ func (rule *R0010UnexpectedSensitiveFileAccess) CreateRuleFailure(eventType util
 			},
 			InfectedPID: openEvent.Pid,
 			Severity:    R0010UnexpectedSensitiveFileAccessRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: openEvent.Comm,
+				},
+				File: &common.FileEntity{
+					Name:      openEvent.FullPath,
+					Directory: filepath.Dir(openEvent.FullPath),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

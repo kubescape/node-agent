@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
 const (
@@ -119,6 +120,16 @@ func (rule *R1005FilelessExecution) CreateRuleFailure(eventType utils.EventType,
 				"hardlink": execEvent.ExePath,
 			},
 			Severity: R1005FilelessExecutionRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name:        execEvent.Comm,
+					CommandLine: fmt.Sprintf("%s %s", execFullPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+				},
+				File: &common.FileEntity{
+					Name:      execFullPath,
+					Directory: execPathDir,
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

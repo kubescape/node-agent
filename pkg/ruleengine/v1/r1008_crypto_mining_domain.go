@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 
 	"github.com/goradd/maps"
@@ -10,6 +11,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 )
 
@@ -208,6 +210,18 @@ func (rule *R1008CryptoMiningDomainCommunication) CreateRuleFailure(eventType ut
 			AlertName:   rule.Name(),
 			InfectedPID: dnsEvent.Pid,
 			Severity:    R1008CryptoMiningDomainCommunicationRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: dnsEvent.Comm,
+				},
+				File: &common.FileEntity{
+					Name:      dnsEvent.Exepath,
+					Directory: filepath.Dir(dnsEvent.Exepath),
+				},
+				Dns: &common.DnsEntity{
+					Domain: dnsEvent.DNSName,
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

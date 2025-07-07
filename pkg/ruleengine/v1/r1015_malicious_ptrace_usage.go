@@ -2,12 +2,14 @@ package ruleengine
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 
 	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
 )
@@ -85,6 +87,15 @@ func (rule *R1015MaliciousPtraceUsage) CreateRuleFailure(eventType utils.EventTy
 			AlertName:   rule.Name(),
 			InfectedPID: ptraceEvent.Pid,
 			Severity:    R1015MaliciousPtraceUsageRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: ptraceEvent.Comm,
+				},
+				File: &common.FileEntity{
+					Name:      ptraceEvent.ExePath,
+					Directory: filepath.Dir(ptraceEvent.ExePath),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

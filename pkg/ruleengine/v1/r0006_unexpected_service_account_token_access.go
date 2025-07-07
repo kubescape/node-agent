@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -159,6 +160,15 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) CreateRuleFailure(eventTyp
 			},
 			InfectedPID: openEvent.Pid,
 			Severity:    R0006UnexpectedServiceAccountTokenAccessRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: openEvent.Comm,
+				},
+				File: &common.FileEntity{
+					Name:      openEvent.FullPath,
+					Directory: filepath.Dir(openEvent.FullPath),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
