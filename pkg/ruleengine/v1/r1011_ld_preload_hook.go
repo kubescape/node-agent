@@ -3,6 +3,7 @@ package ruleengine
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -11,6 +12,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 )
 
@@ -145,6 +147,16 @@ func (rule *R1011LdPreloadHook) ruleFailureExecEvent(execEvent *events.ExecEvent
 			Arguments:   map[string]interface{}{"envVar": ldHookVar},
 			InfectedPID: execEvent.Pid,
 			Severity:    R1011LdPreloadHookRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name:        execEvent.Comm,
+					CommandLine: fmt.Sprintf("%s %s", execEvent.ExePath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+				},
+				File: &common.FileEntity{
+					Name:      execEvent.ExePath,
+					Directory: filepath.Dir(execEvent.ExePath),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -188,6 +200,15 @@ func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.E
 			},
 			InfectedPID: openEvent.Pid,
 			Severity:    R1011LdPreloadHookRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: openEvent.Comm,
+				},
+				File: &common.FileEntity{
+					Name:      filepath.Base(openEvent.FullPath),
+					Directory: filepath.Dir(openEvent.FullPath),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

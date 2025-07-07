@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -9,6 +10,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 
@@ -128,6 +130,15 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType ut
 			},
 			InfectedPID: symlinkEvent.Pid,
 			Severity:    R1010SymlinkCreatedOverSensitiveFileRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: symlinkEvent.Comm,
+				},
+				File: &common.FileEntity{
+					Name:      filepath.Base(symlinkEvent.OldPath),
+					Directory: filepath.Dir(symlinkEvent.OldPath),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

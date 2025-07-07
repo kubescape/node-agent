@@ -2,9 +2,11 @@ package ruleengine
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -121,6 +123,15 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) CreateRuleFailure(eventType uti
 			},
 			InfectedPID: openEvent.Pid,
 			Severity:    R0008ReadEnvironmentVariablesProcFSRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: openEvent.Comm,
+				},
+				File: &common.FileEntity{
+					Name:      filepath.Base(openEvent.FullPath),
+					Directory: filepath.Dir(openEvent.FullPath),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

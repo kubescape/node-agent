@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/goradd/maps"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -107,6 +108,11 @@ func (rule *R0005UnexpectedDomainRequest) CreateRuleFailure(eventType utils.Even
 	domainEvent, _ := event.(*tracerdnstype.Event)
 	rule.alertedDomains.Set(domainEvent.DNSName, true)
 
+	dstIP := ""
+	if len(domainEvent.Addresses) > 0 {
+		dstIP = domainEvent.Addresses[0]
+	}
+
 	return &GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:    HashStringToMD5(fmt.Sprintf("%s%s", domainEvent.Comm, domainEvent.DNSName)),
@@ -119,6 +125,18 @@ func (rule *R0005UnexpectedDomainRequest) CreateRuleFailure(eventType utils.Even
 				"port":      domainEvent.DstPort,
 			},
 			Severity: R0005UnexpectedDomainRequestRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: domainEvent.Comm,
+				},
+				Dns: &common.DnsEntity{
+					Domain: domainEvent.DNSName,
+				},
+				Network: &common.NetworkEntity{
+					DstIP:    dstIP,
+					Protocol: domainEvent.Protocol,
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

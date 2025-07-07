@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -10,6 +11,7 @@ import (
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
 const (
@@ -87,6 +89,15 @@ func (rule *R1007XMRCryptoMining) CreateRuleFailure(eventType utils.EventType, e
 			AlertName:   rule.Name(),
 			InfectedPID: randomXEvent.Pid,
 			Severity:    R1007XMRCryptoMiningRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: randomXEvent.Comm,
+				},
+				File: &common.FileEntity{
+					Name:      filepath.Base(randomXEvent.ExePath),
+					Directory: filepath.Dir(randomXEvent.ExePath),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
