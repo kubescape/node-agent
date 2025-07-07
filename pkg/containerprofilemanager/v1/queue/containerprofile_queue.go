@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -244,12 +245,23 @@ func (qd *QueueData) processAllItems() {
 				}
 				continue
 			}
+
 			logger.L().Debug("failed to create container profile, requeuing",
 				helpers.String("name", queuedProfile.Profile.Name),
 				helpers.Error(err))
 
-			// Failed - immediately requeue (no delay, no memory storage)
 			qd.requeueImmediate(queuedProfile)
+
+			// Check for "too many requests" error
+			if strings.Contains(err.Error(), "the server has received too many requests and has asked us to try again later") {
+				logger.L().Debug("server overloaded, breaking processing loop and waiting for next interval",
+					helpers.String("name", queuedProfile.Profile.Name),
+					helpers.Error(err))
+
+				// Break from the for loop
+				break
+			}
+
 		} else {
 			logger.L().Info("successfully created container profile",
 				helpers.String("name", queuedProfile.Profile.Name),
