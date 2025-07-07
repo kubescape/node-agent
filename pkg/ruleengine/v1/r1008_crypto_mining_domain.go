@@ -215,7 +215,7 @@ func (rule *R1008CryptoMiningDomainCommunication) CreateRuleFailure(eventType ut
 					Name: dnsEvent.Comm,
 				},
 				File: &common.FileEntity{
-					Name:      dnsEvent.Exepath,
+					Name:      filepath.Base(dnsEvent.Exepath),
 					Directory: filepath.Dir(dnsEvent.Exepath),
 				},
 				Dns: &common.DnsEntity{

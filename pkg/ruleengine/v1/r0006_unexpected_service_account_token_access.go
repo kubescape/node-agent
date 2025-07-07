@@ -165,7 +165,7 @@ func (rule *R0006UnexpectedServiceAccountTokenAccess) CreateRuleFailure(eventTyp
 					Name: openEvent.Comm,
 				},
 				File: &common.FileEntity{
-					Name:      openEvent.FullPath,
+					Name:      filepath.Base(openEvent.FullPath),
 					Directory: filepath.Dir(openEvent.FullPath),
 				},
 			},

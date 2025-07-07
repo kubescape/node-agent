@@ -126,7 +126,7 @@ func (rule *R1005FilelessExecution) CreateRuleFailure(eventType utils.EventType,
 					CommandLine: fmt.Sprintf("%s %s", execFullPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 				},
 				File: &common.FileEntity{
-					Name:      execFullPath,
+					Name:      filepath.Base(execFullPath),
 					Directory: execPathDir,
 				},
 			},

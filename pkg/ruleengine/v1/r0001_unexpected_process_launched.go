@@ -127,7 +127,7 @@ func (rule *R0001UnexpectedProcessLaunched) CreateRuleFailure(eventType utils.Ev
 					CommandLine: fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 				},
 				File: &common.FileEntity{
-					Name:      GetExecFullPathFromEvent(execEvent),
+					Name:      filepath.Base(GetExecFullPathFromEvent(execEvent)),
 					Directory: filepath.Dir(GetExecFullPathFromEvent(execEvent)),
 				},
 			},

@@ -128,7 +128,7 @@ func (rule *R0008ReadEnvironmentVariablesProcFS) CreateRuleFailure(eventType uti
 					Name: openEvent.Comm,
 				},
 				File: &common.FileEntity{
-					Name:      openEvent.FullPath,
+					Name:      filepath.Base(openEvent.FullPath),
 					Directory: filepath.Dir(openEvent.FullPath),
 				},
 			},

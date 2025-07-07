@@ -109,7 +109,7 @@ func (rule *R1001ExecBinaryNotInBaseImage) CreateRuleFailure(eventType utils.Eve
 					CommandLine: fmt.Sprintf("%s %s", execEvent.ExePath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 				},
 				File: &common.FileEntity{
-					Name:      GetExecFullPathFromEvent(execEvent),
+					Name:      filepath.Base(GetExecFullPathFromEvent(execEvent)),
 					Directory: filepath.Dir(GetExecFullPathFromEvent(execEvent)),
 				},
 			},

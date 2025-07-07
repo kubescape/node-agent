@@ -194,7 +194,7 @@ func (rule *R0002UnexpectedFileAccess) CreateRuleFailure(eventType utils.EventTy
 					Name: openEventTyped.Comm,
 				},
 				File: &common.FileEntity{
-					Name:      openEventTyped.FullPath,
+					Name:      filepath.Base(openEventTyped.FullPath),
 					Directory: filepath.Dir(openEventTyped.FullPath),
 				},
 			},

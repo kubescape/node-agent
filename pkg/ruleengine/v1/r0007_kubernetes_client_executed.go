@@ -166,7 +166,7 @@ func (rule *R0007KubernetesClientExecuted) CreateRuleFailure(eventType utils.Eve
 						CommandLine: fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 					},
 					File: &common.FileEntity{
-						Name:      execPath,
+						Name:      filepath.Base(execPath),
 						Directory: filepath.Dir(execPath),
 					},
 				},

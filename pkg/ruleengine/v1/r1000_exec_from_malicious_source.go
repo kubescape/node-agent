@@ -129,7 +129,7 @@ func (rule *R1000ExecFromMaliciousSource) CreateRuleFailure(eventType utils.Even
 					CommandLine: fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 				},
 				File: &common.FileEntity{
-					Name:      execPath,
+					Name:      filepath.Base(execPath),
 					Directory: filepath.Dir(execPath),
 				},
 			},

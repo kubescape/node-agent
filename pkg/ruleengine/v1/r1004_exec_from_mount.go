@@ -115,7 +115,7 @@ func (rule *R1004ExecFromMount) CreateRuleFailure(eventType utils.EventType, eve
 					CommandLine: fmt.Sprintf("%s %s", GetExecFullPathFromEvent(execEvent), strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
 				},
 				File: &common.FileEntity{
-					Name:      GetExecFullPathFromEvent(execEvent),
+					Name:      filepath.Base(GetExecFullPathFromEvent(execEvent)),
 					Directory: filepath.Dir(GetExecFullPathFromEvent(execEvent)),
 				},
 			},

@@ -94,7 +94,7 @@ func (rule *R1007XMRCryptoMining) CreateRuleFailure(eventType utils.EventType, e
 					Name: randomXEvent.Comm,
 				},
 				File: &common.FileEntity{
-					Name:      randomXEvent.ExePath,
+					Name:      filepath.Base(randomXEvent.ExePath),
 					Directory: filepath.Dir(randomXEvent.ExePath),
 				},
 			},

@@ -181,7 +181,7 @@ func (rule *R0010UnexpectedSensitiveFileAccess) CreateRuleFailure(eventType util
 					Name: openEvent.Comm,
 				},
 				File: &common.FileEntity{
-					Name:      openEvent.FullPath,
+					Name:      filepath.Base(openEvent.FullPath),
 					Directory: filepath.Dir(openEvent.FullPath),
 				},
 			},

@@ -205,7 +205,7 @@ func (rule *R1011LdPreloadHook) ruleFailureOpenEvent(openEvent *traceropentype.E
 					Name: openEvent.Comm,
 				},
 				File: &common.FileEntity{
-					Name:      openEvent.FullPath,
+					Name:      filepath.Base(openEvent.FullPath),
 					Directory: filepath.Dir(openEvent.FullPath),
 				},
 			},

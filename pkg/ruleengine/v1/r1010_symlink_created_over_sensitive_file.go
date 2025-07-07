@@ -135,7 +135,7 @@ func (rule *R1010SymlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType ut
 					Name: symlinkEvent.Comm,
 				},
 				File: &common.FileEntity{
-					Name:      symlinkEvent.OldPath,
+					Name:      filepath.Base(symlinkEvent.OldPath),
 					Directory: filepath.Dir(symlinkEvent.OldPath),
 				},
 			},

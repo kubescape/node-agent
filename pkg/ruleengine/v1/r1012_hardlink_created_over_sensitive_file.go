@@ -133,7 +133,7 @@ func (rule *R1012HardlinkCreatedOverSensitiveFile) CreateRuleFailure(eventType u
 					Name: hardlinkEvent.Comm,
 				},
 				File: &common.FileEntity{
-					Name:      hardlinkEvent.OldPath,
+					Name:      filepath.Base(hardlinkEvent.OldPath),
 					Directory: filepath.Dir(hardlinkEvent.OldPath),
 				},
 			},

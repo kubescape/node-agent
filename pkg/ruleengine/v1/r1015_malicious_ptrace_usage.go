@@ -92,7 +92,7 @@ func (rule *R1015MaliciousPtraceUsage) CreateRuleFailure(eventType utils.EventTy
 					Name: ptraceEvent.Comm,
 				},
 				File: &common.FileEntity{
-					Name:      ptraceEvent.ExePath,
+					Name:      filepath.Base(ptraceEvent.ExePath),
 					Directory: filepath.Dir(ptraceEvent.ExePath),
 				},
 			},
