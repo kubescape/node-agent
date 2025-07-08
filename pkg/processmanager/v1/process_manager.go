@@ -20,7 +20,7 @@ import (
 
 const (
 	cleanupInterval = 1 * time.Minute
-	maxTreeDepth    = 50
+	maxTreeDepth    = 200
 	runCCommPrefix  = "runc:["
 )
 
