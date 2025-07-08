@@ -1,7 +1,6 @@
 package processtreecreator
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -145,59 +144,259 @@ func TestExitCleanupManager_ProcessAlreadyRemoved(t *testing.T) {
 	assert.NotContains(t, creator.exitCleanup.pendingExits, uint32(999))
 }
 
-func TestExitCleanupManager_ForceCleanupAtLimit(t *testing.T) {
+func TestExitCleanupManager_AddPendingExit_ProcessExists(t *testing.T) {
 	// Create a process tree creator
 	containerTree := containerprocesstree.NewContainerProcessTree()
 	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
 	defer creator.Stop()
 
-	// Stop the cleanup loop to avoid race conditions during testing
-	creator.exitCleanup.Stop()
+	// Create a test process
+	testPID := uint32(123)
+	testProcess := &apitypes.Process{
+		PID:         testPID,
+		PPID:        1,
+		Comm:        "test-process",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	creator.processMap[testPID] = testProcess
 
-	// Create 1000 processes to test the limit
-	numProcesses := 1000
-	for i := 0; i < numProcesses; i++ {
-		pid := uint32(1000 + i)
-		process := &apitypes.Process{
-			PID:         pid,
-			PPID:        1,
-			Comm:        fmt.Sprintf("process%d", i),
-			ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
-		}
-		creator.processMap[pid] = process
+	// Create child processes
+	child1 := &apitypes.Process{
+		PID:         456,
+		PPID:        testPID,
+		Comm:        "child1",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	child2 := &apitypes.Process{
+		PID:         789,
+		PPID:        testPID,
+		Comm:        "child2",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	children := []*apitypes.Process{child1, child2}
+
+	// Create exit event
+	startTime := uint64(time.Now().UnixNano())
+	exitEvent := feeder.ProcessEvent{
+		Type:        feeder.ExitEvent,
+		PID:         testPID,
+		StartTimeNs: startTime,
 	}
 
-	// Add 999 exits (just under the limit)
-	for i := 0; i < 999; i++ {
-		pid := uint32(1000 + i)
+	// Record time before adding
+	beforeTime := time.Now()
+
+	// Add to pending cleanup
+	creator.exitCleanup.AddPendingExit(exitEvent, children)
+
+	// Verify it was added to pendingExits
+	assert.Contains(t, creator.exitCleanup.pendingExits, testPID)
+
+	// Verify the pending exit has correct fields
+	pending := creator.exitCleanup.pendingExits[testPID]
+	assert.Equal(t, testPID, pending.PID)
+	assert.Equal(t, startTime, pending.StartTimeNs)
+	assert.Equal(t, len(children), len(pending.Children))
+	assert.Equal(t, children, pending.Children)
+
+	// Verify timestamp is reasonable (within 1 second of when we called it)
+	assert.WithinDuration(t, beforeTime, pending.Timestamp, 1*time.Second)
+}
+
+func TestExitCleanupManager_AddPendingExit_ProcessNotExists(t *testing.T) {
+	// Create a process tree creator
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
+	defer creator.Stop()
+
+	// Create exit event for a process that doesn't exist
+	testPID := uint32(999)
+	exitEvent := feeder.ProcessEvent{
+		Type:        feeder.ExitEvent,
+		PID:         testPID,
+		StartTimeNs: uint64(time.Now().UnixNano()),
+	}
+
+	// Create some children
+	child1 := &apitypes.Process{
+		PID:         456,
+		PPID:        testPID,
+		Comm:        "child1",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	children := []*apitypes.Process{child1}
+
+	// Add to pending cleanup
+	creator.exitCleanup.AddPendingExit(exitEvent, children)
+
+	// Verify it was NOT added to pendingExits
+	assert.NotContains(t, creator.exitCleanup.pendingExits, testPID)
+	assert.Empty(t, creator.exitCleanup.pendingExits)
+}
+
+func TestExitCleanupManager_AddPendingExit_WithNoChildren(t *testing.T) {
+	// Create a process tree creator
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
+	defer creator.Stop()
+
+	// Create a test process
+	testPID := uint32(123)
+	testProcess := &apitypes.Process{
+		PID:         testPID,
+		PPID:        1,
+		Comm:        "test-process",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	creator.processMap[testPID] = testProcess
+
+	// Create exit event
+	startTime := uint64(time.Now().UnixNano())
+	exitEvent := feeder.ProcessEvent{
+		Type:        feeder.ExitEvent,
+		PID:         testPID,
+		StartTimeNs: startTime,
+	}
+
+	// Add to pending cleanup with no children
+	creator.exitCleanup.AddPendingExit(exitEvent, []*apitypes.Process{})
+
+	// Verify it was added to pendingExits
+	assert.Contains(t, creator.exitCleanup.pendingExits, testPID)
+
+	// Verify the pending exit has correct fields
+	pending := creator.exitCleanup.pendingExits[testPID]
+	assert.Equal(t, testPID, pending.PID)
+	assert.Equal(t, startTime, pending.StartTimeNs)
+	assert.Empty(t, pending.Children)
+}
+
+func TestExitCleanupManager_AddPendingExit_MultipleAdditions(t *testing.T) {
+	// Create a process tree creator
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
+	defer creator.Stop()
+
+	// Create multiple test processes
+	pids := []uint32{100, 200, 300}
+	for _, pid := range pids {
+		testProcess := &apitypes.Process{
+			PID:         pid,
+			PPID:        1,
+			Comm:        "test-process",
+			ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+		}
+		creator.processMap[pid] = testProcess
+	}
+
+	// Add all processes to pending cleanup
+	for _, pid := range pids {
 		exitEvent := feeder.ProcessEvent{
 			Type:        feeder.ExitEvent,
 			PID:         pid,
-			StartTimeNs: uint64(time.Now().UnixNano()) + uint64(i), // Different start times
+			StartTimeNs: uint64(time.Now().UnixNano()),
 		}
 		creator.exitCleanup.AddPendingExit(exitEvent, []*apitypes.Process{})
 	}
 
-	// Verify we have 999 pending exits
-	assert.Equal(t, 999, len(creator.exitCleanup.pendingExits))
+	// Verify all were added to pendingExits
+	assert.Len(t, creator.exitCleanup.pendingExits, len(pids))
+	for _, pid := range pids {
+		assert.Contains(t, creator.exitCleanup.pendingExits, pid)
+	}
+}
 
-	// Add the 1000th exit - this should trigger force cleanup
-	pid1000 := uint32(1999)
-	exitEvent := feeder.ProcessEvent{
+func TestExitCleanupManager_AddPendingExit_ForceCleanup(t *testing.T) {
+	// Create a process tree creator
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
+	defer creator.Stop()
+
+	// Create maxPendingExits processes to trigger force cleanup
+	numProcesses := maxPendingExits
+	for i := 0; i < numProcesses; i++ {
+		pid := uint32(i + 1)
+		testProcess := &apitypes.Process{
+			PID:         pid,
+			PPID:        1,
+			Comm:        "test-process",
+			ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+		}
+		creator.processMap[pid] = testProcess
+	}
+
+	// Add processes one by one - the last one should trigger force cleanup
+	for i := 0; i < numProcesses; i++ {
+		pid := uint32(i + 1)
+		exitEvent := feeder.ProcessEvent{
+			Type:        feeder.ExitEvent,
+			PID:         pid,
+			StartTimeNs: uint64(time.Now().UnixNano()),
+		}
+		creator.exitCleanup.AddPendingExit(exitEvent, []*apitypes.Process{})
+	}
+
+	// After adding maxPendingExits processes, force cleanup should have been triggered
+	// All processes should be removed from pendingExits due to forceCleanup
+	assert.Empty(t, creator.exitCleanup.pendingExits)
+
+	// All processes should also be removed from processMap
+	for i := 0; i < numProcesses; i++ {
+		pid := uint32(i + 1)
+		assert.NotContains(t, creator.processMap, pid)
+	}
+}
+
+func TestExitCleanupManager_AddPendingExit_OverwriteExisting(t *testing.T) {
+	// Create a process tree creator
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
+	defer creator.Stop()
+
+	// Create a test process
+	testPID := uint32(123)
+	testProcess := &apitypes.Process{
+		PID:         testPID,
+		PPID:        1,
+		Comm:        "test-process",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	creator.processMap[testPID] = testProcess
+
+	// Add first exit event
+	firstStartTime := uint64(time.Now().UnixNano())
+	firstExitEvent := feeder.ProcessEvent{
 		Type:        feeder.ExitEvent,
-		PID:         pid1000,
-		StartTimeNs: uint64(time.Now().UnixNano()),
+		PID:         testPID,
+		StartTimeNs: firstStartTime,
 	}
-	creator.exitCleanup.AddPendingExit(exitEvent, []*apitypes.Process{})
+	firstChild := &apitypes.Process{PID: 456, PPID: testPID, Comm: "child1"}
+	creator.exitCleanup.AddPendingExit(firstExitEvent, []*apitypes.Process{firstChild})
 
-	// Verify that all pending exits were cleaned up
-	assert.Equal(t, 1, len(creator.exitCleanup.pendingExits), "Should only have the last added exit")
-	assert.Contains(t, creator.exitCleanup.pendingExits, pid1000, "Should have the last added exit")
+	// Verify first addition
+	assert.Contains(t, creator.exitCleanup.pendingExits, testPID)
+	firstPending := creator.exitCleanup.pendingExits[testPID]
+	assert.Equal(t, firstStartTime, firstPending.StartTimeNs)
+	assert.Len(t, firstPending.Children, 1)
 
-	// Verify that processes were removed from the process map
-	for i := 0; i < 999; i++ {
-		pid := uint32(1000 + i)
-		assert.NotContains(t, creator.processMap, pid, fmt.Sprintf("Process %d should be removed", pid))
+	// Add second exit event (should overwrite the first one)
+	time.Sleep(1 * time.Millisecond) // Small delay to ensure different timestamp
+	secondStartTime := uint64(time.Now().UnixNano())
+	secondExitEvent := feeder.ProcessEvent{
+		Type:        feeder.ExitEvent,
+		PID:         testPID,
+		StartTimeNs: secondStartTime,
 	}
-	assert.Contains(t, creator.processMap, pid1000, "Process 1000 should still exist")
+	secondChild := &apitypes.Process{PID: 789, PPID: testPID, Comm: "child2"}
+	creator.exitCleanup.AddPendingExit(secondExitEvent, []*apitypes.Process{secondChild})
+
+	// Verify second addition overwrote the first
+	assert.Contains(t, creator.exitCleanup.pendingExits, testPID)
+	secondPending := creator.exitCleanup.pendingExits[testPID]
+	assert.Equal(t, secondStartTime, secondPending.StartTimeNs)
+	assert.Len(t, secondPending.Children, 1)
+	assert.Equal(t, secondChild, secondPending.Children[0])
+
+	// Verify we still have only one pending exit for this PID
+	assert.Len(t, creator.exitCleanup.pendingExits, 1)
 }

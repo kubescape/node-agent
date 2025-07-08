@@ -70,6 +70,17 @@ func (ecm *ExitCleanupManager) AddPendingExit(event feeder.ProcessEvent, childre
 		return
 	}
 
+	ecm.pendingExits[event.PID] = &pendingExit{
+		PID:         event.PID,
+		StartTimeNs: event.StartTimeNs,
+		Timestamp:   time.Now(),
+		Children:    children,
+	}
+	logger.L().Info("Exit: Added to pending cleanup",
+		helpers.String("pid", fmt.Sprintf("%d", event.PID)),
+		helpers.String("children_count", fmt.Sprintf("%d", len(children))),
+		helpers.String("total_pending", fmt.Sprintf("%d", len(ecm.pendingExits))))
+
 	// Memory monitoring: alert if too many pending exits
 	if len(ecm.pendingExits) >= maxPendingExits {
 		logger.L().Warning("Exit: Too many pending exits, forcing cleanup",
@@ -82,17 +93,6 @@ func (ecm *ExitCleanupManager) AddPendingExit(event feeder.ProcessEvent, childre
 		logger.L().Info("Exit: Forced cleanup completed",
 			helpers.String("remaining_pending", fmt.Sprintf("%d", len(ecm.pendingExits))))
 	}
-
-	ecm.pendingExits[event.PID] = &pendingExit{
-		PID:         event.PID,
-		StartTimeNs: event.StartTimeNs,
-		Timestamp:   time.Now(),
-		Children:    children,
-	}
-	logger.L().Info("Exit: Added to pending cleanup",
-		helpers.String("pid", fmt.Sprintf("%d", event.PID)),
-		helpers.String("children_count", fmt.Sprintf("%d", len(children))),
-		helpers.String("total_pending", fmt.Sprintf("%d", len(ecm.pendingExits))))
 }
 
 // cleanupLoop runs the periodic cleanup
