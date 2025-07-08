@@ -1,6 +1,7 @@
 package processtreecreator
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -142,4 +143,61 @@ func TestExitCleanupManager_ProcessAlreadyRemoved(t *testing.T) {
 
 	// Verify it was removed from pending exits (should still not be present)
 	assert.NotContains(t, creator.exitCleanup.pendingExits, uint32(999))
+}
+
+func TestExitCleanupManager_ForceCleanupAtLimit(t *testing.T) {
+	// Create a process tree creator
+	containerTree := containerprocesstree.NewContainerProcessTree()
+	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
+	defer creator.Stop()
+
+	// Stop the cleanup loop to avoid race conditions during testing
+	creator.exitCleanup.Stop()
+
+	// Create 1000 processes to test the limit
+	numProcesses := 1000
+	for i := 0; i < numProcesses; i++ {
+		pid := uint32(1000 + i)
+		process := &apitypes.Process{
+			PID:         pid,
+			PPID:        1,
+			Comm:        fmt.Sprintf("process%d", i),
+			ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+		}
+		creator.processMap[pid] = process
+	}
+
+	// Add 999 exits (just under the limit)
+	for i := 0; i < 999; i++ {
+		pid := uint32(1000 + i)
+		exitEvent := feeder.ProcessEvent{
+			Type:        feeder.ExitEvent,
+			PID:         pid,
+			StartTimeNs: uint64(time.Now().UnixNano()) + uint64(i), // Different start times
+		}
+		creator.exitCleanup.AddPendingExit(exitEvent, []*apitypes.Process{})
+	}
+
+	// Verify we have 999 pending exits
+	assert.Equal(t, 999, len(creator.exitCleanup.pendingExits))
+
+	// Add the 1000th exit - this should trigger force cleanup
+	pid1000 := uint32(1999)
+	exitEvent := feeder.ProcessEvent{
+		Type:        feeder.ExitEvent,
+		PID:         pid1000,
+		StartTimeNs: uint64(time.Now().UnixNano()),
+	}
+	creator.exitCleanup.AddPendingExit(exitEvent, []*apitypes.Process{})
+
+	// Verify that all pending exits were cleaned up
+	assert.Equal(t, 1, len(creator.exitCleanup.pendingExits), "Should only have the last added exit")
+	assert.Contains(t, creator.exitCleanup.pendingExits, pid1000, "Should have the last added exit")
+
+	// Verify that processes were removed from the process map
+	for i := 0; i < 999; i++ {
+		pid := uint32(1000 + i)
+		assert.NotContains(t, creator.processMap, pid, fmt.Sprintf("Process %d should be removed", pid))
+	}
+	assert.Contains(t, creator.processMap, pid1000, "Process 1000 should still exist")
 }

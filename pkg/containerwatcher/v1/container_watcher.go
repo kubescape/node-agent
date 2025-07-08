@@ -276,15 +276,6 @@ func CreateIGContainerWatcher(cfg config.Config,
 		// Report to process tree feeder first
 		processTreeFeeder.ReportEvent(utils.ExecveEventType, &event)
 
-		// Wait for process processing to complete before rule evaluation
-		// Use event timestamp as start time for consistency with process tree
-		startTimeNs := uint64(event.Timestamp)
-		if err := processManager.WaitForProcessProcessing(event.Pid, startTimeNs, 100*time.Millisecond); err != nil {
-			logger.L().Warning("Failed to wait for process processing, continuing with rule evaluation",
-				helpers.String("pid", fmt.Sprintf("%d", event.Pid)),
-				helpers.Error(err))
-		}
-
 		// Now report to rule manager and other components
 		ruleManager.ReportEvent(utils.ExecveEventType, &event)
 		malwareManager.ReportEvent(utils.ExecveEventType, &event)

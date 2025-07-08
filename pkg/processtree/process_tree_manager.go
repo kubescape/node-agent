@@ -13,7 +13,6 @@ import (
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
-	"github.com/kubescape/node-agent/pkg/processtree/utils"
 )
 
 // ProcessTreeManagerImpl implements the ProcessTreeManager interface
@@ -27,7 +26,7 @@ type ProcessTreeManagerImpl struct {
 	eventChan chan feeder.ProcessEvent
 
 	// Processed events tracking
-	processedExecEvents *lru.Cache[uint32, time.Time] // PID+StartTime hash -> processing time
+	processedExecEvents *lru.Cache[uint32, bool] // PID -> processed flag
 
 	// Lifecycle management
 	ctx     context.Context
@@ -45,7 +44,7 @@ func NewProcessTreeManager(
 ) ProcessTreeManager {
 
 	// Create LRU cache for processed exec events with size 1000
-	processedExecEvents, err := lru.New[uint32, time.Time](1000)
+	processedExecEvents, err := lru.New[uint32, bool](10000)
 	if err != nil {
 		// Fallback to nil cache if creation fails
 		processedExecEvents = nil
@@ -198,8 +197,7 @@ func (ptm *ProcessTreeManagerImpl) eventProcessor() {
 
 			// Track processed exec events
 			if event.Type == feeder.ExecEvent && ptm.processedExecEvents != nil {
-				processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
-				ptm.processedExecEvents.Add(processHash, time.Now())
+				ptm.processedExecEvents.Add(event.PID, true)
 			}
 		}
 	}
@@ -249,14 +247,13 @@ func (ptm *ProcessTreeManagerImpl) handleTimeoutError(containerID string, pid ui
 
 // WaitForProcessProcessing waits for a process to be processed by the process tree manager
 // This ensures that the process tree is updated before rule evaluation
-func (ptm *ProcessTreeManagerImpl) WaitForProcessProcessing(pid uint32, startTimeNs uint64, timeout time.Duration) error {
+func (ptm *ProcessTreeManagerImpl) WaitForProcessProcessing(pid uint32, timeout time.Duration) error {
 	if ptm.processedExecEvents == nil {
 		// If cache is not available, wait a short time and return
 		time.Sleep(10 * time.Millisecond)
 		return nil
 	}
 
-	processHash := utils.HashTaskID(pid, startTimeNs)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -267,14 +264,12 @@ func (ptm *ProcessTreeManagerImpl) WaitForProcessProcessing(pid uint32, startTim
 		select {
 		case <-ctx.Done():
 			logger.L().Debug("Timeout waiting for process processing",
-				helpers.String("pid", fmt.Sprintf("%d", pid)),
-				helpers.String("startTimeNs", fmt.Sprintf("%d", startTimeNs)))
-			return fmt.Errorf("timeout waiting for process processing: pid=%d, startTimeNs=%d", pid, startTimeNs)
+				helpers.String("pid", fmt.Sprintf("%d", pid)))
+			return fmt.Errorf("timeout waiting for process processing: pid=%d", pid)
 		case <-ticker.C:
-			if _, exists := ptm.processedExecEvents.Get(processHash); exists {
+			if _, exists := ptm.processedExecEvents.Get(pid); exists {
 				logger.L().Debug("Process processing completed",
-					helpers.String("pid", fmt.Sprintf("%d", pid)),
-					helpers.String("startTimeNs", fmt.Sprintf("%d", startTimeNs)))
+					helpers.String("pid", fmt.Sprintf("%d", pid)))
 				return nil
 			}
 		}

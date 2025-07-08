@@ -357,6 +357,14 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
 	runtimeProcessDetails := ruleFailure.GetRuntimeProcessDetails()
 
+	// Wait for process processing to complete before getting the process tree
+	pid := ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID
+	if err := rm.processManager.WaitForProcessProcessing(pid, 100*time.Millisecond); err != nil {
+		logger.L().Warning("Failed to wait for process processing, continuing with rule evaluation",
+			helpers.String("pid", fmt.Sprintf("%d", pid)),
+			helpers.Error(err))
+	}
+
 	err = backoff.Retry(func() error {
 		tree, err := rm.processManager.GetContainerProcessTree(
 			ruleFailure.GetRuntimeProcessDetails().ContainerID,

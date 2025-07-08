@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	maxPendingExits = 1000 // Maximum number of pending exits before alerting
+	maxPendingExits = 1000 // Maximum number of pending exits before forcing cleanup
 )
 
 // ExitCleanupManager handles delayed removal of exited processes
@@ -50,7 +50,14 @@ func (ecm *ExitCleanupManager) Start() {
 
 // Stop stops the cleanup goroutine
 func (ecm *ExitCleanupManager) Stop() {
-	close(ecm.stopChan)
+	select {
+	case <-ecm.stopChan:
+		// Channel already closed, do nothing
+		return
+	default:
+		// Channel not closed yet, close it
+		close(ecm.stopChan)
+	}
 }
 
 // AddPendingExit adds a process to the pending exit list
@@ -65,9 +72,15 @@ func (ecm *ExitCleanupManager) AddPendingExit(event feeder.ProcessEvent, childre
 
 	// Memory monitoring: alert if too many pending exits
 	if len(ecm.pendingExits) >= maxPendingExits {
-		logger.L().Warning("Exit: Too many pending exits, potential memory leak",
+		logger.L().Warning("Exit: Too many pending exits, forcing cleanup",
 			helpers.String("pending_count", fmt.Sprintf("%d", len(ecm.pendingExits))),
 			helpers.String("max_allowed", fmt.Sprintf("%d", maxPendingExits)))
+
+		// Force cleanup of all pending exits to prevent memory leak
+		ecm.forceCleanup()
+
+		logger.L().Info("Exit: Forced cleanup completed",
+			helpers.String("remaining_pending", fmt.Sprintf("%d", len(ecm.pendingExits))))
 	}
 
 	ecm.pendingExits[event.PID] = &pendingExit{
@@ -142,8 +155,8 @@ func (ecm *ExitCleanupManager) forceCleanup() {
 		return toRemove[i].StartTimeNs < toRemove[j].StartTimeNs
 	})
 
-	// Remove the processes in order
 	for _, pending := range toRemove {
+		logger.L().Info("ForceCleanup: Removing PID", helpers.String("pid", fmt.Sprintf("%d", pending.PID)))
 		ecm.removeProcess(pending.PID)
 	}
 
@@ -156,18 +169,17 @@ func (ecm *ExitCleanupManager) forceCleanup() {
 // removeProcess removes a process from the tree and handles reparenting
 // Caller must hold creator.mutex
 func (ecm *ExitCleanupManager) removeProcess(pid uint32) {
+	logger.L().Info("removeProcess: Called", helpers.String("pid", fmt.Sprintf("%d", pid)))
 	pending := ecm.pendingExits[pid]
 	if pending == nil {
+		logger.L().Warning("removeProcess: pendingExits[pid] is nil", helpers.String("pid", fmt.Sprintf("%d", pid)))
 		return
 	}
 
-	// Get the process from the creator's map
 	proc, exists := ecm.creator.processMap[pid]
 	if !exists {
-		// Process was already removed, just clean up our pending list
+		logger.L().Warning("removeProcess: processMap[pid] does not exist", helpers.String("pid", fmt.Sprintf("%d", pid)))
 		delete(ecm.pendingExits, pid)
-		logger.L().Info("Exit: Process already removed from map",
-			helpers.String("pid", fmt.Sprintf("%d", pid)))
 		return
 	}
 
