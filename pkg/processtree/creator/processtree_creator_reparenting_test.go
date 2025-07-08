@@ -242,12 +242,12 @@ func TestProcessTreeCreator_Reparenting_EdgeCases(t *testing.T) {
 	// Edge 3: Child is nil
 	creator.linkProcessToParent(nil) // Should not panic
 
-	// Edge 4: Parent is its own child (cycle)
+	// Edge 4: Parent is its own child (cycle) - should be prevented
 	cycle := &apitypes.Process{PID: 42, PPID: 42, Comm: "cycle", ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
 	creator.processMap[42] = cycle
-	creator.linkProcessToParent(cycle) // Should not panic or infinite loop
+	creator.linkProcessToParent(cycle) // Should detect and prevent circular reference
 	_, inSelf := cycle.ChildrenMap[apitypes.CommPID{Comm: cycle.Comm, PID: cycle.PID}]
-	assert.True(t, inSelf, "Process can be its own child (cycle)")
+	assert.False(t, inSelf, "Process should not be its own child (circular reference prevented)")
 
 	// Edge 5: Child already in new parent's ChildrenMap
 	parent3 := &apitypes.Process{PID: 50, Comm: "parent3", ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}

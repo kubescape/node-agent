@@ -58,8 +58,10 @@ func TestExitCleanupManager(t *testing.T) {
 	// Wait a bit longer than the cleanup delay
 	time.Sleep(200 * time.Millisecond)
 
-	// Trigger cleanup manually
+	// Trigger cleanup manually (with proper mutex locking)
+	creator.mutex.Lock()
 	creator.exitCleanup.performCleanup()
+	creator.mutex.Unlock()
 
 	// Verify process was removed
 	assert.NotContains(t, creator.processMap, testPID)
@@ -105,8 +107,10 @@ func TestExitCleanupManager_NoChildren(t *testing.T) {
 	// Wait a bit longer than the cleanup delay
 	time.Sleep(200 * time.Millisecond)
 
-	// Trigger cleanup manually
+	// Trigger cleanup manually (with proper mutex locking)
+	creator.mutex.Lock()
 	creator.exitCleanup.performCleanup()
+	creator.mutex.Unlock()
 
 	// Verify process was removed
 	assert.NotContains(t, creator.processMap, testPID)
@@ -131,8 +135,10 @@ func TestExitCleanupManager_ProcessAlreadyRemoved(t *testing.T) {
 	// Verify it was NOT added to pending exits
 	assert.NotContains(t, creator.exitCleanup.pendingExits, uint32(999))
 
-	// Trigger cleanup manually
+	// Trigger cleanup manually (with proper mutex locking)
+	creator.mutex.Lock()
 	creator.exitCleanup.performCleanup()
+	creator.mutex.Unlock()
 
 	// Verify it was removed from pending exits (should still not be present)
 	assert.NotContains(t, creator.exitCleanup.pendingExits, uint32(999))

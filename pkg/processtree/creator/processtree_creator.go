@@ -118,7 +118,10 @@ func (pt *processTreeCreatorImpl) Stop() {
 // TriggerExitCleanup triggers immediate exit cleanup (for testing purposes)
 func (pt *processTreeCreatorImpl) TriggerExitCleanup() {
 	if pt.exitCleanup != nil {
+		// Acquire mutex before calling forceCleanup to prevent race conditions
+		pt.mutex.Lock()
 		pt.exitCleanup.forceCleanup()
+		pt.mutex.Unlock()
 	}
 }
 
@@ -395,41 +398,11 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 		}
 	}
 
-	// Hybrid approach: immediate cleanup for processes without children, delayed for processes with children
-	if len(children) == 0 {
-		// Immediate cleanup for processes without children
-		pt.removeProcessImmediately(event.PID)
-		logger.L().Info("Exit: Immediate cleanup (no children)",
-			helpers.String("pid", fmt.Sprintf("%d", event.PID)))
-	} else {
-		// Add to delayed cleanup for reparenting scenarios
-		pt.exitCleanup.AddPendingExit(event, children)
-		logger.L().Info("Exit: Added to delayed cleanup (has children)",
-			helpers.String("pid", fmt.Sprintf("%d", event.PID)),
-			helpers.String("children_count", fmt.Sprintf("%d", len(children))))
-	}
-}
-
-// removeProcessImmediately removes a process immediately without reparenting logic
-// Caller must hold pt.mutex
-func (pt *processTreeCreatorImpl) removeProcessImmediately(pid uint32) {
-	proc, exists := pt.processMap[pid]
-	if !exists {
-		return
-	}
-
-	// Remove from parent's children list
-	if proc.PPID != 0 {
-		if parent, parentExists := pt.processMap[proc.PPID]; parentExists {
-			delete(parent.ChildrenMap, apitypes.CommPID{Comm: proc.Comm, PID: pid})
-		}
-	}
-
-	// Remove the process from the map
-	delete(pt.processMap, pid)
-
-	logger.L().Info("Exit: Removed process immediately",
-		helpers.String("pid", fmt.Sprintf("%d", pid)))
+	// Add to delayed cleanup for reparenting scenarios
+	pt.exitCleanup.AddPendingExit(event, children)
+	logger.L().Info("Exit: Added to delayed cleanup (has children)",
+		helpers.String("pid", fmt.Sprintf("%d", event.PID)),
+		helpers.String("children_count", fmt.Sprintf("%d", len(children))))
 }
 
 func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Process {
@@ -490,6 +463,16 @@ func (pt *processTreeCreatorImpl) linkProcessToParent(proc *apitypes.Process) {
 	if proc == nil || proc.PPID == 0 {
 		return
 	}
+
+	// Prevent circular references: a process cannot be its own parent
+	if proc.PPID == proc.PID {
+		logger.L().Warning("Process tree: Detected circular reference, skipping parent link",
+			helpers.String("pid", fmt.Sprintf("%d", proc.PID)),
+			helpers.String("ppid", fmt.Sprintf("%d", proc.PPID)),
+			helpers.String("comm", proc.Comm))
+		return
+	}
+
 	parent := pt.getOrCreateProcess(proc.PPID)
 	if parent.ChildrenMap == nil {
 		parent.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
@@ -503,6 +486,15 @@ func (pt *processTreeCreatorImpl) linkProcessToParent(proc *apitypes.Process) {
 func (pt *processTreeCreatorImpl) updateProcessPPID(proc *apitypes.Process, newPPID uint32) {
 	if proc == nil || proc.PPID == newPPID {
 		return // No change needed
+	}
+
+	// Prevent circular references: a process cannot be its own parent
+	if newPPID == proc.PID {
+		logger.L().Warning("Process tree: Detected circular reference in PPID update, skipping",
+			helpers.String("pid", fmt.Sprintf("%d", proc.PID)),
+			helpers.String("new_ppid", fmt.Sprintf("%d", newPPID)),
+			helpers.String("comm", proc.Comm))
+		return
 	}
 
 	// Remove from old parent's children map

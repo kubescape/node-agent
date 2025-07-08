@@ -37,7 +37,7 @@ func NewExitCleanupManager(creator *processTreeCreatorImpl) *ExitCleanupManager 
 	return &ExitCleanupManager{
 		pendingExits:    make(map[uint32]*pendingExit),
 		cleanupInterval: 1 * time.Second, // Check every 1 second (more frequent for shorter delay)
-		cleanupDelay:    2 * time.Second, // Remove after 2 seconds (reduced from 15)
+		cleanupDelay:    5 * time.Second, // Remove after 2 seconds (reduced from 15)
 		stopChan:        make(chan struct{}),
 		creator:         creator,
 	}
@@ -92,7 +92,10 @@ func (ecm *ExitCleanupManager) cleanupLoop() {
 		case <-ecm.stopChan:
 			return
 		case <-ticker.C:
+			// Acquire mutex before calling performCleanup to prevent race conditions
+			ecm.creator.mutex.Lock()
 			ecm.performCleanup()
+			ecm.creator.mutex.Unlock()
 		}
 	}
 }
