@@ -96,7 +96,7 @@ func (ef *EventFeeder) convertExecEvent(execEvent *events.ExecEvent) ProcessEven
 		Comm:        execEvent.Comm,
 		Path:        execEvent.ExePath,
 		Pcomm:       execEvent.Pcomm,
-		StartTimeNs: uint64(time.Now().UnixNano()), // Use current time as start time for now
+		StartTimeNs: uint64(execEvent.Timestamp), // Use event timestamp for consistency
 	}
 
 	// Convert command line arguments to string
@@ -139,7 +139,7 @@ func (ef *EventFeeder) convertForkEvent(forkEvent *tracerforktype.Event) Process
 		PPID:        forkEvent.PPid,
 		Comm:        forkEvent.Comm,
 		Path:        forkEvent.ExePath,
-		StartTimeNs: uint64(time.Now().UnixNano()), // Use current time as start time for now
+		StartTimeNs: uint64(forkEvent.Timestamp), // Use event timestamp for consistency
 	}
 
 	// Set UID and GID if available
@@ -169,7 +169,7 @@ func (ef *EventFeeder) convertExitEvent(exitEvent *tracerexittype.Event) Process
 		PPID:        exitEvent.PPid,
 		Comm:        exitEvent.Comm,
 		Path:        exitEvent.ExePath,
-		StartTimeNs: uint64(time.Now().UnixNano()), // Use current time as start time for now
+		StartTimeNs: uint64(exitEvent.Timestamp), // Use event timestamp for consistency
 	}
 
 	// Set UID and GID if available
