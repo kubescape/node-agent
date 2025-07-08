@@ -24,7 +24,7 @@ func TestExitCleanupManager(t *testing.T) {
 		Comm:        "test-process",
 		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
 	}
-	creator.processMap[testPID] = testProcess
+	creator.processMap.Set(testPID, testProcess)
 
 	// Create a child process
 	childPID := uint32(456)
@@ -34,7 +34,7 @@ func TestExitCleanupManager(t *testing.T) {
 		Comm:        "child-process",
 		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
 	}
-	creator.processMap[childPID] = childProcess
+	creator.processMap.Set(childPID, childProcess)
 	testProcess.ChildrenMap[apitypes.CommPID{Comm: childProcess.Comm, PID: childPID}] = childProcess
 
 	// Create exit event
@@ -48,8 +48,8 @@ func TestExitCleanupManager(t *testing.T) {
 	creator.exitCleanup.AddPendingExit(exitEvent, []*apitypes.Process{childProcess})
 
 	// Verify process is still in the map
-	assert.Contains(t, creator.processMap, testPID)
-	assert.Contains(t, creator.processMap, childPID)
+	assert.NotNil(t, creator.processMap.Get(testPID))
+	assert.NotNil(t, creator.processMap.Get(childPID))
 
 	// Wait for cleanup (with a shorter delay for testing)
 	creator.exitCleanup.cleanupDelay = 100 * time.Millisecond
@@ -64,8 +64,8 @@ func TestExitCleanupManager(t *testing.T) {
 	creator.mutex.Unlock()
 
 	// Verify process was removed
-	assert.NotContains(t, creator.processMap, testPID)
-	assert.Contains(t, creator.processMap, childPID) // Child should still exist but be reparented
+	assert.Nil(t, creator.processMap.Get(testPID))
+	assert.NotNil(t, creator.processMap.Get(childPID)) // Child should still exist but be reparented
 
 	// Verify child was reparented to init (PID 1)
 	assert.Equal(t, uint32(1), childProcess.PPID)
@@ -85,7 +85,7 @@ func TestExitCleanupManager_NoChildren(t *testing.T) {
 		Comm:        "test-process",
 		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
 	}
-	creator.processMap[testPID] = testProcess
+	creator.processMap.Set(testPID, testProcess)
 
 	// Create exit event
 	exitEvent := feeder.ProcessEvent{
@@ -98,7 +98,7 @@ func TestExitCleanupManager_NoChildren(t *testing.T) {
 	creator.exitCleanup.AddPendingExit(exitEvent, []*apitypes.Process{})
 
 	// Verify process is still in the map
-	assert.Contains(t, creator.processMap, testPID)
+	assert.NotNil(t, creator.processMap.Get(testPID))
 
 	// Wait for cleanup (with a shorter delay for testing)
 	creator.exitCleanup.cleanupDelay = 100 * time.Millisecond
@@ -113,7 +113,7 @@ func TestExitCleanupManager_NoChildren(t *testing.T) {
 	creator.mutex.Unlock()
 
 	// Verify process was removed
-	assert.NotContains(t, creator.processMap, testPID)
+	assert.Nil(t, creator.processMap.Get(testPID))
 }
 
 func TestExitCleanupManager_ProcessAlreadyRemoved(t *testing.T) {
@@ -133,7 +133,8 @@ func TestExitCleanupManager_ProcessAlreadyRemoved(t *testing.T) {
 	creator.exitCleanup.AddPendingExit(exitEvent, []*apitypes.Process{})
 
 	// Verify it was NOT added to pending exits
-	assert.NotContains(t, creator.exitCleanup.pendingExits, uint32(999))
+	_, exists := creator.exitCleanup.pendingExits.Load(uint32(999))
+	assert.False(t, exists)
 
 	// Trigger cleanup manually (with proper mutex locking)
 	creator.mutex.Lock()
@@ -141,7 +142,8 @@ func TestExitCleanupManager_ProcessAlreadyRemoved(t *testing.T) {
 	creator.mutex.Unlock()
 
 	// Verify it was removed from pending exits (should still not be present)
-	assert.NotContains(t, creator.exitCleanup.pendingExits, uint32(999))
+	_, exists = creator.exitCleanup.pendingExits.Load(uint32(999))
+	assert.False(t, exists)
 }
 
 func TestExitCleanupManager_AddPendingExit_ProcessExists(t *testing.T) {
@@ -158,7 +160,7 @@ func TestExitCleanupManager_AddPendingExit_ProcessExists(t *testing.T) {
 		Comm:        "test-process",
 		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
 	}
-	creator.processMap[testPID] = testProcess
+	creator.processMap.Set(testPID, testProcess)
 
 	// Create child processes
 	child1 := &apitypes.Process{
@@ -190,10 +192,11 @@ func TestExitCleanupManager_AddPendingExit_ProcessExists(t *testing.T) {
 	creator.exitCleanup.AddPendingExit(exitEvent, children)
 
 	// Verify it was added to pendingExits
-	assert.Contains(t, creator.exitCleanup.pendingExits, testPID)
+	value, exists := creator.exitCleanup.pendingExits.Load(testPID)
+	assert.True(t, exists)
 
 	// Verify the pending exit has correct fields
-	pending := creator.exitCleanup.pendingExits[testPID]
+	pending := value.(*pendingExit)
 	assert.Equal(t, testPID, pending.PID)
 	assert.Equal(t, startTime, pending.StartTimeNs)
 	assert.Equal(t, len(children), len(pending.Children))
@@ -230,8 +233,16 @@ func TestExitCleanupManager_AddPendingExit_ProcessNotExists(t *testing.T) {
 	creator.exitCleanup.AddPendingExit(exitEvent, children)
 
 	// Verify it was NOT added to pendingExits
-	assert.NotContains(t, creator.exitCleanup.pendingExits, testPID)
-	assert.Empty(t, creator.exitCleanup.pendingExits)
+	_, exists := creator.exitCleanup.pendingExits.Load(testPID)
+	assert.False(t, exists)
+
+	// Check that the map is empty
+	count := 0
+	creator.exitCleanup.pendingExits.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	assert.Equal(t, 0, count)
 }
 
 func TestExitCleanupManager_AddPendingExit_WithNoChildren(t *testing.T) {
@@ -248,7 +259,7 @@ func TestExitCleanupManager_AddPendingExit_WithNoChildren(t *testing.T) {
 		Comm:        "test-process",
 		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
 	}
-	creator.processMap[testPID] = testProcess
+	creator.processMap.Set(testPID, testProcess)
 
 	// Create exit event
 	startTime := uint64(time.Now().UnixNano())
@@ -262,10 +273,11 @@ func TestExitCleanupManager_AddPendingExit_WithNoChildren(t *testing.T) {
 	creator.exitCleanup.AddPendingExit(exitEvent, []*apitypes.Process{})
 
 	// Verify it was added to pendingExits
-	assert.Contains(t, creator.exitCleanup.pendingExits, testPID)
+	value, exists := creator.exitCleanup.pendingExits.Load(testPID)
+	assert.True(t, exists)
 
 	// Verify the pending exit has correct fields
-	pending := creator.exitCleanup.pendingExits[testPID]
+	pending := value.(*pendingExit)
 	assert.Equal(t, testPID, pending.PID)
 	assert.Equal(t, startTime, pending.StartTimeNs)
 	assert.Empty(t, pending.Children)
@@ -286,7 +298,7 @@ func TestExitCleanupManager_AddPendingExit_MultipleAdditions(t *testing.T) {
 			Comm:        "test-process",
 			ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
 		}
-		creator.processMap[pid] = testProcess
+		creator.processMap.Set(pid, testProcess)
 	}
 
 	// Add all processes to pending cleanup
@@ -300,9 +312,16 @@ func TestExitCleanupManager_AddPendingExit_MultipleAdditions(t *testing.T) {
 	}
 
 	// Verify all were added to pendingExits
-	assert.Len(t, creator.exitCleanup.pendingExits, len(pids))
+	count := 0
+	creator.exitCleanup.pendingExits.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	assert.Equal(t, len(pids), count)
+
 	for _, pid := range pids {
-		assert.Contains(t, creator.exitCleanup.pendingExits, pid)
+		_, exists := creator.exitCleanup.pendingExits.Load(pid)
+		assert.True(t, exists)
 	}
 }
 
@@ -322,7 +341,7 @@ func TestExitCleanupManager_AddPendingExit_ForceCleanup(t *testing.T) {
 			Comm:        "test-process",
 			ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
 		}
-		creator.processMap[pid] = testProcess
+		creator.processMap.Set(pid, testProcess)
 	}
 
 	// Add processes one by one - the last one should trigger force cleanup
@@ -338,12 +357,17 @@ func TestExitCleanupManager_AddPendingExit_ForceCleanup(t *testing.T) {
 
 	// After adding maxPendingExits processes, force cleanup should have been triggered
 	// All processes should be removed from pendingExits due to forceCleanup
-	assert.Empty(t, creator.exitCleanup.pendingExits)
+	count := 0
+	creator.exitCleanup.pendingExits.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	assert.Equal(t, 0, count)
 
 	// All processes should also be removed from processMap
 	for i := 0; i < numProcesses; i++ {
 		pid := uint32(i + 1)
-		assert.NotContains(t, creator.processMap, pid)
+		assert.Nil(t, creator.processMap.Get(pid))
 	}
 }
 
@@ -361,7 +385,7 @@ func TestExitCleanupManager_AddPendingExit_OverwriteExisting(t *testing.T) {
 		Comm:        "test-process",
 		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
 	}
-	creator.processMap[testPID] = testProcess
+	creator.processMap.Set(testPID, testProcess)
 
 	// Add first exit event
 	firstStartTime := uint64(time.Now().UnixNano())
@@ -374,8 +398,9 @@ func TestExitCleanupManager_AddPendingExit_OverwriteExisting(t *testing.T) {
 	creator.exitCleanup.AddPendingExit(firstExitEvent, []*apitypes.Process{firstChild})
 
 	// Verify first addition
-	assert.Contains(t, creator.exitCleanup.pendingExits, testPID)
-	firstPending := creator.exitCleanup.pendingExits[testPID]
+	value, exists := creator.exitCleanup.pendingExits.Load(testPID)
+	assert.True(t, exists)
+	firstPending := value.(*pendingExit)
 	assert.Equal(t, firstStartTime, firstPending.StartTimeNs)
 	assert.Len(t, firstPending.Children, 1)
 
@@ -391,12 +416,18 @@ func TestExitCleanupManager_AddPendingExit_OverwriteExisting(t *testing.T) {
 	creator.exitCleanup.AddPendingExit(secondExitEvent, []*apitypes.Process{secondChild})
 
 	// Verify second addition overwrote the first
-	assert.Contains(t, creator.exitCleanup.pendingExits, testPID)
-	secondPending := creator.exitCleanup.pendingExits[testPID]
+	value, exists = creator.exitCleanup.pendingExits.Load(testPID)
+	assert.True(t, exists)
+	secondPending := value.(*pendingExit)
 	assert.Equal(t, secondStartTime, secondPending.StartTimeNs)
 	assert.Len(t, secondPending.Children, 1)
 	assert.Equal(t, secondChild, secondPending.Children[0])
 
 	// Verify we still have only one pending exit for this PID
-	assert.Len(t, creator.exitCleanup.pendingExits, 1)
+	count := 0
+	creator.exitCleanup.pendingExits.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	assert.Equal(t, 1, count)
 }

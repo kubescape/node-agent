@@ -3,6 +3,7 @@ package processtreecreator
 import (
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -18,11 +19,13 @@ const (
 // ExitCleanupManager handles delayed removal of exited processes
 // NOTE: All public methods must be called with the creator's mutex held.
 type ExitCleanupManager struct {
-	pendingExits    map[uint32]*pendingExit
+	pendingExits    *sync.Map // Thread-safe map for pending exits
 	cleanupInterval time.Duration
 	cleanupDelay    time.Duration
 	stopChan        chan struct{}
 	creator         *processTreeCreatorImpl
+	isCleaningUp    bool       // Flag to track if cleanup is in progress
+	cleanupMutex    sync.Mutex // Mutex to protect cleanup operations
 }
 
 type pendingExit struct {
@@ -35,7 +38,7 @@ type pendingExit struct {
 // NewExitCleanupManager creates a new exit cleanup manager
 func NewExitCleanupManager(creator *processTreeCreatorImpl) *ExitCleanupManager {
 	return &ExitCleanupManager{
-		pendingExits:    make(map[uint32]*pendingExit),
+		pendingExits:    &sync.Map{},
 		cleanupInterval: 1 * time.Second, // Check every 1 second (more frequent for shorter delay)
 		cleanupDelay:    5 * time.Second, // Remove after 2 seconds (reduced from 15)
 		stopChan:        make(chan struct{}),
@@ -64,34 +67,64 @@ func (ecm *ExitCleanupManager) Stop() {
 // Caller must hold creator.mutex
 func (ecm *ExitCleanupManager) AddPendingExit(event feeder.ProcessEvent, children []*apitypes.Process) {
 	// Only add to pendingExits if the process still exists
-	if _, exists := ecm.creator.processMap[event.PID]; !exists {
+	if ecm.creator.processMap.Get(event.PID) == nil {
 		logger.L().Info("Exit: Not adding to pending cleanup, process already removed",
 			helpers.String("pid", fmt.Sprintf("%d", event.PID)))
 		return
 	}
 
-	ecm.pendingExits[event.PID] = &pendingExit{
+	ecm.pendingExits.Store(event.PID, &pendingExit{
 		PID:         event.PID,
 		StartTimeNs: event.StartTimeNs,
 		Timestamp:   time.Now(),
 		Children:    children,
-	}
+	})
+
+	pendingCount := 0
+	ecm.pendingExits.Range(func(key, value interface{}) bool {
+		pendingCount++
+		return true
+	})
+
 	logger.L().Info("Exit: Added to pending cleanup",
 		helpers.String("pid", fmt.Sprintf("%d", event.PID)),
 		helpers.String("children_count", fmt.Sprintf("%d", len(children))),
-		helpers.String("total_pending", fmt.Sprintf("%d", len(ecm.pendingExits))))
+		helpers.String("total_pending", fmt.Sprintf("%d", pendingCount)))
 
 	// Memory monitoring: alert if too many pending exits
-	if len(ecm.pendingExits) >= maxPendingExits {
+	if pendingCount >= maxPendingExits {
 		logger.L().Warning("Exit: Too many pending exits, forcing cleanup",
-			helpers.String("pending_count", fmt.Sprintf("%d", len(ecm.pendingExits))),
+			helpers.String("pending_count", fmt.Sprintf("%d", pendingCount)),
 			helpers.String("max_allowed", fmt.Sprintf("%d", maxPendingExits)))
 
+		// Check if cleanup is already in progress to avoid recursive calls
+		ecm.cleanupMutex.Lock()
+		if ecm.isCleaningUp {
+			ecm.cleanupMutex.Unlock()
+			logger.L().Debug("Exit: Cleanup already in progress, skipping force cleanup")
+			return
+		}
+		ecm.isCleaningUp = true
+		ecm.cleanupMutex.Unlock()
+
 		// Force cleanup of all pending exits to prevent memory leak
+		// Note: Since we're already holding the creator.mutex, we can call forceCleanup directly
+		// The forceCleanup method assumes the caller holds the mutex
 		ecm.forceCleanup()
 
+		// Reset cleanup flag
+		ecm.cleanupMutex.Lock()
+		ecm.isCleaningUp = false
+		ecm.cleanupMutex.Unlock()
+
+		remainingCount := 0
+		ecm.pendingExits.Range(func(key, value interface{}) bool {
+			remainingCount++
+			return true
+		})
+
 		logger.L().Info("Exit: Forced cleanup completed",
-			helpers.String("remaining_pending", fmt.Sprintf("%d", len(ecm.pendingExits))))
+			helpers.String("remaining_pending", fmt.Sprintf("%d", remainingCount)))
 	}
 }
 
@@ -105,10 +138,24 @@ func (ecm *ExitCleanupManager) cleanupLoop() {
 		case <-ecm.stopChan:
 			return
 		case <-ticker.C:
+			// Check if cleanup is already in progress
+			ecm.cleanupMutex.Lock()
+			if ecm.isCleaningUp {
+				ecm.cleanupMutex.Unlock()
+				continue
+			}
+			ecm.isCleaningUp = true
+			ecm.cleanupMutex.Unlock()
+
 			// Acquire mutex before calling performCleanup to prevent race conditions
 			ecm.creator.mutex.Lock()
 			ecm.performCleanup()
 			ecm.creator.mutex.Unlock()
+
+			// Reset cleanup flag
+			ecm.cleanupMutex.Lock()
+			ecm.isCleaningUp = false
+			ecm.cleanupMutex.Unlock()
 		}
 	}
 }
@@ -119,12 +166,13 @@ func (ecm *ExitCleanupManager) performCleanup() {
 	now := time.Now()
 	toRemove := make([]*pendingExit, 0)
 
-	// Find processes that should be removed
-	for _, pending := range ecm.pendingExits {
+	ecm.pendingExits.Range(func(key, value interface{}) bool {
+		pending := value.(*pendingExit)
 		if now.Sub(pending.Timestamp) >= ecm.cleanupDelay {
 			toRemove = append(toRemove, pending)
 		}
-	}
+		return true
+	})
 
 	// Sort by StartTimeNs (oldest first)
 	sort.Slice(toRemove, func(i, j int) bool {
@@ -146,9 +194,12 @@ func (ecm *ExitCleanupManager) performCleanup() {
 // Caller must hold creator.mutex
 func (ecm *ExitCleanupManager) forceCleanup() {
 	toRemove := make([]*pendingExit, 0)
-	for _, pending := range ecm.pendingExits {
+
+	ecm.pendingExits.Range(func(key, value interface{}) bool {
+		pending := value.(*pendingExit)
 		toRemove = append(toRemove, pending)
-	}
+		return true
+	})
 
 	// Sort by StartTimeNs (oldest first)
 	sort.Slice(toRemove, func(i, j int) bool {
@@ -170,16 +221,18 @@ func (ecm *ExitCleanupManager) forceCleanup() {
 // Caller must hold creator.mutex
 func (ecm *ExitCleanupManager) removeProcess(pid uint32) {
 	logger.L().Info("removeProcess: Called", helpers.String("pid", fmt.Sprintf("%d", pid)))
-	pending := ecm.pendingExits[pid]
-	if pending == nil {
-		logger.L().Warning("removeProcess: pendingExits[pid] is nil", helpers.String("pid", fmt.Sprintf("%d", pid)))
+
+	pendingValue, exists := ecm.pendingExits.Load(pid)
+	if !exists {
+		logger.L().Warning("removeProcess: pendingExits[pid] does not exist", helpers.String("pid", fmt.Sprintf("%d", pid)))
 		return
 	}
+	pending := pendingValue.(*pendingExit)
 
-	proc, exists := ecm.creator.processMap[pid]
-	if !exists {
+	proc := ecm.creator.processMap.Get(pid)
+	if proc == nil {
 		logger.L().Warning("removeProcess: processMap[pid] does not exist", helpers.String("pid", fmt.Sprintf("%d", pid)))
-		delete(ecm.pendingExits, pid)
+		ecm.pendingExits.Delete(pid)
 		return
 	}
 
@@ -187,7 +240,7 @@ func (ecm *ExitCleanupManager) removeProcess(pid uint32) {
 	if len(pending.Children) > 0 {
 		if ecm.creator.reparentingLogic != nil {
 			// Use the reparenting logic to determine the new parent
-			result := ecm.creator.reparentingLogic.HandleProcessExit(pid, pending.Children, ecm.creator.containerTree, ecm.creator.processMap)
+			result := ecm.creator.reparentingLogic.HandleProcessExit(pid, pending.Children, ecm.creator.containerTree, ecm.creator.getProcessMapAsRegularMap())
 
 			logger.L().Info("Exit: Delayed reparenting result",
 				helpers.String("pid", fmt.Sprintf("%d", pid)),
@@ -219,14 +272,15 @@ func (ecm *ExitCleanupManager) removeProcess(pid uint32) {
 
 	// Remove from parent's children list
 	if proc.PPID != 0 {
-		if parent, parentExists := ecm.creator.processMap[proc.PPID]; parentExists {
+		if parent := ecm.creator.processMap.Get(proc.PPID); parent != nil {
 			delete(parent.ChildrenMap, apitypes.CommPID{Comm: proc.Comm, PID: pid})
 		}
 	}
 
 	// Remove the process from the map
-	delete(ecm.creator.processMap, pid)
-	delete(ecm.pendingExits, pid)
+	ecm.creator.processMap.Delete(pid)
+
+	ecm.pendingExits.Delete(pid)
 
 	logger.L().Info("Exit: Removed process after delay",
 		helpers.String("pid", fmt.Sprintf("%d", pid)),

@@ -23,7 +23,7 @@ func TestProcessTreeCreator_CircularReferencePrevention(t *testing.T) {
 	}
 
 	// Add to process map
-	creator.processMap[42] = circularProcess
+	creator.processMap.Set(42, circularProcess)
 
 	// Try to link the process to its parent (should be prevented)
 	creator.linkProcessToParent(circularProcess)

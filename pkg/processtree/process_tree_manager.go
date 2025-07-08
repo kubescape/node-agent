@@ -167,8 +167,9 @@ func (ptm *ProcessTreeManagerImpl) getContainerProcessTreeInternal(containerID s
 		return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s", pid, containerID)
 	}
 
-	// Get the container subtree starting from the node just before shim PID
-	containerSubtree, err := ptm.containerTree.GetContainerSubtree(containerID, pid, ptm.creator.GetProcessMap())
+	// Get the container subtree atomically to avoid concurrent map access issues
+	// This ensures that the ChildrenMap iteration in DeepCopy() is safe
+	containerSubtree, err := ptm.creator.GetContainerSubtreeAtomic(ptm.containerTree, containerID, pid)
 	if err != nil {
 		return apitypes.Process{}, fmt.Errorf("failed to get container subtree: %v", err)
 	}
@@ -228,6 +229,9 @@ func (ptm *ProcessTreeManagerImpl) retryGetContainerProcessTree(containerID stri
 }
 
 func (ptm *ProcessTreeManagerImpl) handleTimeoutError(containerID string, pid uint32, originalErr error) (apitypes.Process, error) {
+	ptm.mutex.RLock()
+	defer ptm.mutex.RUnlock()
+
 	processNode, _ := ptm.creator.GetProcessNode(int(pid))
 	logger.L().Error("Failed to get process node after waiting", helpers.Error(originalErr))
 
@@ -237,12 +241,8 @@ func (ptm *ProcessTreeManagerImpl) handleTimeoutError(containerID string, pid ui
 	}
 
 	// Try to get container subtree one more time for better error logging
-	processMap := ptm.creator.GetProcessMap()
-	if processMap == nil {
-		return apitypes.Process{}, fmt.Errorf("process map not available")
-	}
-
-	containerSubtree, subtreeErr := ptm.containerTree.GetContainerSubtree(containerID, pid, processMap)
+	// Use atomic operation to avoid concurrent map access issues
+	containerSubtree, subtreeErr := ptm.creator.GetContainerSubtreeAtomic(ptm.containerTree, containerID, pid)
 	if subtreeErr != nil {
 		return apitypes.Process{}, fmt.Errorf("failed to get container subtree after waiting: %v", subtreeErr)
 	}

@@ -74,14 +74,33 @@ func (ds *DockerStrategy) isDockerProcess(proc *apitypes.Process) bool {
 // GetNewParentPID determines the new parent PID for orphaned children
 // For Docker, orphaned processes are typically reparented to the docker daemon
 func (ds *DockerStrategy) GetNewParentPID(exitingPID uint32, children []*apitypes.Process, containerTree containerprocesstree.ContainerProcessTree, processMap map[uint32]*apitypes.Process) uint32 {
-	// Look for docker daemon process in the process map
-	for pid, proc := range processMap {
+	// Instead of iterating over the entire process map, walk up the process tree
+	// from the exiting process to find a docker-related parent
+	currentPID := exitingPID
+	visited := make(map[uint32]bool)
+	maxDepth := 100 // Prevent infinite loops
+
+	for depth := 0; depth < maxDepth; depth++ {
+		if currentPID == 0 || visited[currentPID] {
+			break
+		}
+		visited[currentPID] = true
+
+		proc := processMap[currentPID]
+		if proc == nil {
+			break
+		}
+
+		// Check if current process is dockerd
 		if ds.isDockerProcess(proc) && strings.Contains(strings.ToLower(proc.Comm), "dockerd") {
 			logger.L().Info("DockerStrategy: Reparenting to dockerd",
 				helpers.String("exiting_pid", fmt.Sprintf("%d", exitingPID)),
-				helpers.String("dockerd_pid", fmt.Sprintf("%d", pid)))
-			return pid
+				helpers.String("dockerd_pid", fmt.Sprintf("%d", currentPID)))
+			return currentPID
 		}
+
+		// Move up to parent
+		currentPID = proc.PPID
 	}
 
 	// Fallback to init process
