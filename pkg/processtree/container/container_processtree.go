@@ -112,7 +112,7 @@ func (c *containerProcessTreeImpl) GetContainerSubtree(containerID string, targe
 		return apitypes.Process{}, fmt.Errorf("failed to find root node before shim for target %d", targetPID)
 	}
 
-	return *rootNode, nil
+	return *rootNode.DeepCopy(), nil
 }
 
 // isProcessInSubtree checks if a process is within the subtree of a given root node

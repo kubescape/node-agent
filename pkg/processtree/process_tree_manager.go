@@ -237,7 +237,12 @@ func (ptm *ProcessTreeManagerImpl) handleTimeoutError(containerID string, pid ui
 	}
 
 	// Try to get container subtree one more time for better error logging
-	containerSubtree, subtreeErr := ptm.containerTree.GetContainerSubtree(containerID, pid, ptm.creator.GetProcessMap())
+	processMap := ptm.creator.GetProcessMap()
+	if processMap == nil {
+		return apitypes.Process{}, fmt.Errorf("process map not available")
+	}
+
+	containerSubtree, subtreeErr := ptm.containerTree.GetContainerSubtree(containerID, pid, processMap)
 	if subtreeErr != nil {
 		return apitypes.Process{}, fmt.Errorf("failed to get container subtree after waiting: %v", subtreeErr)
 	}
