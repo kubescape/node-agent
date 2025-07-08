@@ -154,7 +154,7 @@ func (qd *QueueData) Enqueue(profile *v1beta1.ContainerProfile, containerID stri
 		return fmt.Errorf("failed to enqueue profile: %w", err)
 	}
 
-	logger.L().Info("container profile enqueued",
+	logger.L().Debug("container profile enqueued",
 		helpers.String("name", profile.Name),
 		helpers.String("namespace", profile.Namespace),
 		helpers.Int("queueSize", qd.queue.Size()))
