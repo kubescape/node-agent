@@ -41,6 +41,7 @@ func (cpm *ContainerProfileManager) withContainer(containerID string, fn func(*c
 					helpers.String("containerID", containerID),
 					helpers.String("wlid", entry.data.watchedContainerData.Wlid))
 				entry.data.watchedContainerData.SyncChannel <- ProfileRequiresSplit
+				entry.data.size.Store(0) // Prevent multiple splits (race condition)
 			}
 		}
 	}
