@@ -62,7 +62,7 @@ func (pt *processTreeCreatorImpl) FeedEvent(event feeder.ProcessEvent) {
 	case feeder.ExecEvent:
 		pt.handleExecEvent(event)
 	case feeder.ExitEvent:
-		pt.handleExitEvent(event)
+		// pt.handleExitEvent(event)
 	}
 }
 
@@ -82,11 +82,9 @@ func (pt *processTreeCreatorImpl) GetRootTree() ([]apitypes.Process, error) {
 func (pt *processTreeCreatorImpl) GetProcessMap() map[uint32]*apitypes.Process {
 	pt.mutex.RLock()
 	defer pt.mutex.RUnlock()
-	processMap := make(map[uint32]*apitypes.Process)
-	for pid, proc := range pt.processMap {
-		processMap[pid] = pt.shallowCopyProcess(proc)
-	}
-	return processMap
+	// Return the original map since callers only read from it and proper locking is in place
+	// This avoids unnecessary copying and improves performance
+	return pt.processMap
 }
 
 // GetProcessMapDeep returns a deep copy of the process map (slower but independent)
@@ -145,12 +143,30 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 			helpers.String("cmdline", event.Cmdline))
 	}
 
-	// Check if process is already under any containerd-shim subtree (read-only operation)
-	isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)
-	if !isUnderContainer {
-		// Only set PPID if it is empty or process is not under container subtree
-		if proc.PPID == 0 {
-			proc.PPID = event.PPID
+	// New reparenting strategy:
+	// 1. If new PPID is under container subtree, update regardless of current state
+	// 2. Else if process is already under container, do nothing
+	// 3. Else do standard PPID update logic
+
+	// First check if new PPID is under any container subtree
+	isPPIDUnderContainer := pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.processMap)
+	if isPPIDUnderContainer {
+		// New PPID is under container subtree, update PPID and log the change
+		logger.L().Info("Fork: Updating PPID to container subtree",
+			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
+		pt.updateProcessPPID(proc, event.PPID)
+	} else {
+		// Check if process is already under any containerd-shim subtree
+		isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)
+		if isUnderContainer {
+			// Process is already under container subtree, do nothing
+			logger.L().Debug("Fork: Process already under container subtree, no PPID update",
+				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("current_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
+		} else {
+			// Standard PPID update logic for non-container processes (only if empty for fork events)
+			if proc.PPID == 0 {
+				pt.updateProcessPPID(proc, event.PPID)
+			}
 		}
 	}
 
@@ -180,8 +196,6 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 	if proc.ChildrenMap == nil {
 		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
 	}
-
-	pt.linkProcessToParent(proc)
 }
 
 // handleProcfsEvent handles procfs events - overrides when existing values are empty or don't exist
@@ -210,22 +224,31 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
-	// Check if process is already under any containerd-shim subtree (read-only operation)
-	isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)
-	if !isUnderContainer {
-		// Process is not under container subtree, check if new PPID is under container subtree
-		isPPIDUnderContainer := pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.processMap)
-		if isPPIDUnderContainer {
-			// New PPID is under container subtree, update PPID and log the change
-			logger.L().Info("ProcFS: Updating PPID to container subtree",
-				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
-			proc.PPID = event.PPID
+	// New reparenting strategy:
+	// 1. If new PPID is under container subtree, update regardless of current state
+	// 2. Else if process is already under container, do nothing
+	// 3. Else do standard PPID update logic
+
+	// First check if new PPID is under any container subtree
+	isPPIDUnderContainer := pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.processMap)
+	if isPPIDUnderContainer {
+		// New PPID is under container subtree, update PPID and log the change
+		logger.L().Info("ProcFS: Updating PPID to container subtree",
+			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
+		pt.updateProcessPPID(proc, event.PPID)
+	} else {
+		// Check if process is already under any containerd-shim subtree
+		isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)
+		if isUnderContainer {
+			// Process is already under container subtree, do nothing
+			logger.L().Debug("ProcFS: Process already under container subtree, no PPID update",
+				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("current_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
 		} else {
 			// Standard PPID update logic for non-container processes
 			if event.PPID != 0 && proc.PPID == 0 {
 				logger.L().Info("ProcFS: Setting PPID",
 					helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
-				proc.PPID = event.PPID
+				pt.updateProcessPPID(proc, event.PPID)
 			}
 		}
 	}
@@ -256,8 +279,6 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 	if proc.ChildrenMap == nil {
 		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
 	}
-
-	pt.linkProcessToParent(proc)
 }
 
 // handleExecEvent handles exec events - always enriches the existing process node if present, never creates a duplicate
@@ -269,17 +290,26 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	proc, exists := pt.processMap[event.PID]
 
 	if exists {
-		// Check if process is already under any containerd-shim subtree (read-only operation)
-		isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)
-		if !isUnderContainer {
-			// Process is not under container subtree, check if new PPID is under container subtree
-			isPPIDUnderContainer := pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.processMap)
-			if isPPIDUnderContainer {
-				// New PPID is under container subtree, update PPID and log the change
-				logger.L().Info("Exec: Updating PPID to container subtree",
-					helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)),
-					helpers.String("Pcomm", event.Pcomm), helpers.String("comm", event.Comm), helpers.String("cmdline", event.Cmdline))
-				proc.PPID = event.PPID
+		// New reparenting strategy:
+		// 1. If new PPID is under container subtree, update regardless of current state
+		// 2. Else if process is already under container, do nothing
+		// 3. Else do standard PPID update logic
+
+		// First check if new PPID is under any container subtree
+		isPPIDUnderContainer := pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.processMap)
+		if isPPIDUnderContainer {
+			// New PPID is under container subtree, update PPID and log the change
+			logger.L().Info("Exec: Updating PPID to container subtree",
+				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)),
+				helpers.String("Pcomm", event.Pcomm), helpers.String("comm", event.Comm), helpers.String("cmdline", event.Cmdline))
+			pt.updateProcessPPID(proc, event.PPID)
+		} else {
+			// Check if process is already under any containerd-shim subtree
+			isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.processMap)
+			if isUnderContainer {
+				// Process is already under container subtree, do nothings
+				logger.L().Debug("Exec: Process already under container subtree, no PPID update",
+					helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("current_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
 			} else {
 				// Standard PPID update logic for non-container processes
 				if event.PPID != 0 {
@@ -287,7 +317,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 						helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)),
 						helpers.String("ppid", fmt.Sprintf("%d", event.PPID)), helpers.String("Pcomm", event.Pcomm),
 						helpers.String("comm", event.Comm), helpers.String("cmdline", event.Cmdline))
-					proc.PPID = event.PPID
+					pt.updateProcessPPID(proc, event.PPID)
 				}
 			}
 		}
@@ -332,8 +362,6 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	if proc.ChildrenMap == nil {
 		proc.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
 	}
-
-	pt.linkProcessToParent(proc)
 }
 
 // handleExitEvent handles exit events - immediate removal for processes without children, delayed cleanup for reparenting
@@ -459,4 +487,26 @@ func (pt *processTreeCreatorImpl) linkProcessToParent(proc *apitypes.Process) {
 	}
 	key := apitypes.CommPID{Comm: proc.Comm, PID: proc.PID}
 	parent.ChildrenMap[key] = proc
+}
+
+// updateProcessPPID safely updates a process's PPID by removing it from the old parent's
+// children map and adding it to the new parent's children map
+func (pt *processTreeCreatorImpl) updateProcessPPID(proc *apitypes.Process, newPPID uint32) {
+	if proc == nil || proc.PPID == newPPID {
+		return // No change needed
+	}
+
+	// Remove from old parent's children map
+	if proc.PPID != 0 {
+		if oldParent, exists := pt.processMap[proc.PPID]; exists && oldParent.ChildrenMap != nil {
+			key := apitypes.CommPID{Comm: proc.Comm, PID: proc.PID}
+			delete(oldParent.ChildrenMap, key)
+		}
+	}
+
+	// Update PPID
+	proc.PPID = newPPID
+
+	// Add to new parent's children map
+	pt.linkProcessToParent(proc)
 }

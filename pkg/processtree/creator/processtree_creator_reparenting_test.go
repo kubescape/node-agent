@@ -330,16 +330,13 @@ func TestProcessTreeCreator_ExitEvent_ComplexScenarios(t *testing.T) {
 	// Verify parent is removed
 	assert.Nil(t, creator.processMap[10], "Parent should be removed")
 
-	// Verify child and grandchild are reparented to root
-	// Note: In test environment, procfs verification fails and uses original PPID
-	// This is expected behavior when procfs data doesn't match expected reparenting
-	assert.Equal(t, uint32(2), creator.processMap[100].PPID, "Child should be reparented to root, but procfs verification fails in test")
+	// Verify child is reparented to root (init)
+	assert.Equal(t, uint32(1), creator.processMap[100].PPID, "Child should be reparented to init")
 	assert.Equal(t, uint32(100), creator.processMap[1000].PPID, "Grandchild should keep its parent")
 
-	// Verify root has both child and grandchild in its subtree
-	// Note: Since procfs verification failed, the child is not actually reparented to root
+	// Verify root has the child in its subtree
 	rootAfter := creator.processMap[1]
-	assert.NotContains(t, rootAfter.ChildrenMap, apitypes.CommPID{Comm: "child", PID: 100}, "Root should not have child due to procfs verification failure")
+	assert.Contains(t, rootAfter.ChildrenMap, apitypes.CommPID{Comm: "child", PID: 100}, "Root should have child after reparenting")
 }
 
 func TestProcessTreeCreator_ExitEvent_RepeatedExits(t *testing.T) {

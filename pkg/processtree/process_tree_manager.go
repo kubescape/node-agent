@@ -12,7 +12,6 @@ import (
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
-	"github.com/kubescape/node-agent/pkg/processtree/utils"
 )
 
 // ProcessTreeManagerImpl implements the ProcessTreeManager interface
@@ -122,7 +121,7 @@ func (ptm *ProcessTreeManagerImpl) GetHostProcessTree() ([]apitypes.Process, err
 func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32) (apitypes.Process, error) {
 	// Process exec is async, so we need to wait for it to be processed
 	// TODO: Remove this once we add a source event node, then check if fork wait, exec continue
-	// time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	processTree, err := ptm.getContainerProcessTreeInternal(containerID, pid)
 	if err == nil {
@@ -192,7 +191,7 @@ func (ptm *ProcessTreeManagerImpl) cleanup() {
 }
 
 func (ptm *ProcessTreeManagerImpl) retryGetContainerProcessTree(containerID string, pid uint32, originalErr error) (apitypes.Process, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 101*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
 	ticker := time.NewTicker(50 * time.Millisecond)
@@ -213,7 +212,7 @@ func (ptm *ProcessTreeManagerImpl) retryGetContainerProcessTree(containerID stri
 
 func (ptm *ProcessTreeManagerImpl) handleTimeoutError(containerID string, pid uint32, originalErr error) (apitypes.Process, error) {
 	processNode, _ := ptm.creator.GetProcessNode(int(pid))
-	logger.L().Error("Failed to get process node after waiting", helpers.Error(originalErr), helpers.String("processNode", utils.PrintTreeOneLine(processNode)))
+	logger.L().Error("Failed to get process node after waiting", helpers.Error(originalErr))
 
 	if processNode == nil {
 		logger.L().Error("Process not found after waiting", helpers.String("pid", fmt.Sprintf("%d", pid)), helpers.String("containerID", containerID))
@@ -223,22 +222,8 @@ func (ptm *ProcessTreeManagerImpl) handleTimeoutError(containerID string, pid ui
 	// Try to get container subtree one more time for better error logging
 	containerSubtree, subtreeErr := ptm.containerTree.GetContainerSubtree(containerID, pid, ptm.creator.GetProcessMap())
 	if subtreeErr != nil {
-		ptm.logContainerSubtreeError(containerID, pid, processNode, subtreeErr)
 		return apitypes.Process{}, fmt.Errorf("failed to get container subtree after waiting: %v", subtreeErr)
 	}
 
 	return containerSubtree, nil
-}
-
-func (ptm *ProcessTreeManagerImpl) logContainerSubtreeError(containerID string, pid uint32, processNode *apitypes.Process, subtreeErr error) {
-	logger.L().Error("Failed to get container subtree after waiting", helpers.Error(subtreeErr))
-
-	nodes, nodesErr := ptm.containerTree.GetContainerTreeNodes(containerID, ptm.creator.GetProcessMap())
-	if nodesErr != nil {
-		logger.L().Error("Failed to get container tree nodes after waiting", helpers.Error(nodesErr), helpers.String("processNode", utils.PrintTreeOneLine(processNode)))
-	}
-	if len(nodes) > 0 {
-		logger.L().Error("Container tree nodes after waiting", helpers.String("GetContainerTreeNodes", utils.PrintTreeOneLine(&nodes[0])))
-	}
-	logger.L().Error("Failed to get container subtree after waiting", helpers.String("processNode", utils.PrintTreeOneLine(processNode)))
 }

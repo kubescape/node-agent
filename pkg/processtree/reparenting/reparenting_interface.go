@@ -23,9 +23,6 @@ type ReparentingLogic interface {
 	// HandleProcessExit handles the reparenting of orphaned children when a process exits
 	HandleProcessExit(exitingPID uint32, children []*apitypes.Process, containerTree containerprocesstree.ContainerProcessTree, processMap map[uint32]*apitypes.Process) ReparentingResult
 
-	// VerifyReparenting verifies that the reparenting was successful by checking procfs
-	VerifyReparenting(childPID uint32, expectedNewParentPID uint32) (bool, error)
-
 	// AddStrategy adds a new reparenting strategy
 	AddStrategy(strategy ReparentingStrategy)
 
