@@ -263,7 +263,7 @@ func (qd *QueueData) processAllItems() {
 			}
 
 		} else {
-			logger.L().Info("successfully created container profile",
+			logger.L().Debug("successfully created container profile",
 				helpers.String("name", queuedProfile.Profile.Name),
 				helpers.String("namespace", queuedProfile.Profile.Namespace))
 		}
