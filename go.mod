@@ -34,12 +34,12 @@ require (
 	github.com/kubescape/backend v0.0.25
 	github.com/kubescape/go-logger v0.0.24
 	github.com/kubescape/k8s-interface v0.0.197
-	github.com/kubescape/storage v0.0.179
+	github.com/kubescape/storage v0.0.199
 	github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
-	github.com/panjf2000/ants/v2 v2.10.0
+	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/prometheus/alertmanager v0.27.0
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/procfs v0.16.1
@@ -372,7 +372,5 @@ require (
 replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5-0.20230524185006-155d84c555d6
 
 replace github.com/mholt/archiver/v3 v3.5.1 => github.com/anchore/archiver/v3 v3.5.2
-
-replace github.com/kubescape/storage => github.com/kubescape/storage v0.0.186-0.20250617125531-c8c841418020
 
 replace github.com/inspektor-gadget/inspektor-gadget => github.com/amirmalka/inspektor-gadget v0.39.1-0.20250511132413-c7a2a761237a
