@@ -167,9 +167,8 @@ func (ptm *ProcessTreeManagerImpl) getContainerProcessTreeInternal(containerID s
 		return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s", pid, containerID)
 	}
 
-	// Get the container subtree atomically to avoid concurrent map access issues
-	// This ensures that the ChildrenMap iteration in DeepCopy() is safe
-	containerSubtree, err := ptm.creator.GetContainerSubtreeAtomic(ptm.containerTree, containerID, pid)
+	// Get the container subtree (no longer needs to be atomic in single-threaded design)
+	containerSubtree, err := ptm.creator.GetContainerSubtree(ptm.containerTree, containerID, pid)
 	if err != nil {
 		return apitypes.Process{}, fmt.Errorf("failed to get container subtree: %v", err)
 	}
@@ -241,8 +240,7 @@ func (ptm *ProcessTreeManagerImpl) handleTimeoutError(containerID string, pid ui
 	}
 
 	// Try to get container subtree one more time for better error logging
-	// Use atomic operation to avoid concurrent map access issues
-	containerSubtree, subtreeErr := ptm.creator.GetContainerSubtreeAtomic(ptm.containerTree, containerID, pid)
+	containerSubtree, subtreeErr := ptm.creator.GetContainerSubtree(ptm.containerTree, containerID, pid)
 	if subtreeErr != nil {
 		return apitypes.Process{}, fmt.Errorf("failed to get container subtree after waiting: %v", subtreeErr)
 	}

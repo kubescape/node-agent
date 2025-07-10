@@ -217,51 +217,37 @@ func TestContainerProcessTreeImpl_ListContainers_Empty(t *testing.T) {
 	assert.NotNil(t, result) // Should return empty slice, not nil
 }
 
-func TestContainerProcessTreeImpl_ConcurrentAccess(t *testing.T) {
+func TestContainerProcessTreeImpl_SequentialAccess(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
-	// Test concurrent access to the container process tree
-	done := make(chan bool)
+	// Add containers sequentially (single-threaded design)
+	for i := 0; i < 100; i++ {
+		containerID := fmt.Sprintf("container-%d", i)
+		// Direct assignment since no mutex is needed in single-threaded design
+		cpt.containerIdToShimPid[containerID] = uint32(50 + i)
+	}
 
-	// Goroutine 1: Add containers using proper method
-	go func() {
-		for i := 0; i < 100; i++ {
-			containerID := fmt.Sprintf("container-%d", i)
-			// Use the proper locking mechanism to avoid race conditions
-			cpt.mutex.Lock()
-			cpt.containerIdToShimPid[containerID] = uint32(50 + i)
-			cpt.mutex.Unlock()
-		}
-		done <- true
-	}()
+	// List containers
+	for i := 0; i < 10; i++ {
+		containers := cpt.ListContainers()
+		assert.Len(t, containers, 100)
+	}
 
-	// Goroutine 2: List containers
-	go func() {
-		for i := 0; i < 100; i++ {
-			cpt.ListContainers()
+	// Get container trees
+	fullTree := map[uint32]*apitypes.Process{
+		50: {
+			PID:  50,
+			PPID: 1,
+			Comm: "containerd-shim",
+		},
+	}
+	for i := 0; i < 10; i++ {
+		trees, err := cpt.GetContainerTreeNodes("container-0", fullTree)
+		assert.NoError(t, err)
+		if trees != nil {
+			assert.GreaterOrEqual(t, len(trees), 1)
 		}
-		done <- true
-	}()
-
-	// Goroutine 3: Get container trees
-	go func() {
-		fullTree := map[uint32]*apitypes.Process{
-			50: {
-				PID:  50,
-				PPID: 1,
-				Comm: "containerd-shim",
-			},
-		}
-		for i := 0; i < 100; i++ {
-			cpt.GetContainerTreeNodes("container-0", fullTree)
-		}
-		done <- true
-	}()
-
-	// Wait for all goroutines to complete
-	<-done
-	<-done
-	<-done
+	}
 
 	// Verify the final state is consistent
 	containers := cpt.ListContainers()

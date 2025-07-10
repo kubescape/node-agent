@@ -2,37 +2,23 @@ package processtreecreator
 
 import (
 	"fmt"
-	"sync"
-	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/kubescape/node-agent/pkg/processtree/reparenting"
-	"github.com/kubescape/node-agent/pkg/processtree/utils"
 )
 
 type processTreeCreatorImpl struct {
-	mutex            sync.RWMutex
 	processMap       maps.SafeMap[uint32, *apitypes.Process] // PID -> Process
-	exitedCache      *lru.Cache[uint32, time.Time]           // LRU cache for exited process hashes with TTL
 	containerTree    containerprocesstree.ContainerProcessTree
 	reparentingLogic reparenting.ReparentingLogic
-	exitCleanup      *ExitCleanupManager
 }
 
 func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree) ProcessTreeCreator {
-	// Create LRU cache for exited processes with size 1000
-	exitedCache, err := lru.New[uint32, time.Time](1000)
-	if err != nil {
-		// Fallback to nil cache if creation fails
-		exitedCache = nil
-	}
-
 	// Create reparenting logic
 	reparentingLogic, err := reparenting.NewReparentingLogic()
 	if err != nil {
@@ -40,18 +26,11 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 		reparentingLogic = nil
 	}
 
-	creator := &processTreeCreatorImpl{
+	return &processTreeCreatorImpl{
 		processMap:       maps.SafeMap[uint32, *apitypes.Process]{},
-		exitedCache:      exitedCache,
 		reparentingLogic: reparentingLogic,
 		containerTree:    containerTree,
 	}
-
-	// Create and start the exit cleanup manager
-	creator.exitCleanup = NewExitCleanupManager(creator)
-	creator.exitCleanup.Start()
-
-	return creator
 }
 
 func (pt *processTreeCreatorImpl) FeedEvent(event feeder.ProcessEvent) {
@@ -68,8 +47,6 @@ func (pt *processTreeCreatorImpl) FeedEvent(event feeder.ProcessEvent) {
 }
 
 func (pt *processTreeCreatorImpl) GetRootTree() ([]apitypes.Process, error) {
-	pt.mutex.RLock()
-	defer pt.mutex.RUnlock()
 	// Find root processes (those whose parent is not in the map or PPID==0)
 	roots := []apitypes.Process{}
 	for _, proc := range pt.processMap.Values() {
@@ -81,8 +58,6 @@ func (pt *processTreeCreatorImpl) GetRootTree() ([]apitypes.Process, error) {
 }
 
 func (pt *processTreeCreatorImpl) GetProcessMap() map[uint32]*apitypes.Process {
-	pt.mutex.RLock()
-	defer pt.mutex.RUnlock()
 	// Convert SafeMap to regular map for compatibility
 	processMap := make(map[uint32]*apitypes.Process)
 	pt.processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
@@ -94,8 +69,6 @@ func (pt *processTreeCreatorImpl) GetProcessMap() map[uint32]*apitypes.Process {
 
 // GetProcessMapDeep returns a deep copy of the process map (slower but independent)
 func (pt *processTreeCreatorImpl) GetProcessMapDeep() map[uint32]*apitypes.Process {
-	pt.mutex.RLock()
-	defer pt.mutex.RUnlock()
 	processMap := make(map[uint32]*apitypes.Process)
 	pt.processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
 		processMap[pid] = pt.deepCopyProcess(proc)
@@ -105,8 +78,6 @@ func (pt *processTreeCreatorImpl) GetProcessMapDeep() map[uint32]*apitypes.Proce
 }
 
 func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, error) {
-	pt.mutex.RLock()
-	defer pt.mutex.RUnlock()
 	proc := pt.processMap.Get(uint32(pid))
 	if proc == nil {
 		return nil, nil
@@ -116,19 +87,22 @@ func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, er
 
 // Stop stops the process tree creator and cleanup resources
 func (pt *processTreeCreatorImpl) Stop() {
-	if pt.exitCleanup != nil {
-		pt.exitCleanup.Stop()
-	}
+	// No cleanup needed for single-threaded operation
 }
 
-// TriggerExitCleanup triggers immediate exit cleanup (for testing purposes)
-func (pt *processTreeCreatorImpl) TriggerExitCleanup() {
-	if pt.exitCleanup != nil {
-		// Acquire mutex before calling forceCleanup to prevent race conditions
-		pt.mutex.Lock()
-		pt.exitCleanup.forceCleanup()
-		pt.mutex.Unlock()
+// GetContainerSubtree performs container subtree operation (no longer needs to be atomic)
+func (pt *processTreeCreatorImpl) GetContainerSubtree(containerTree interface{}, containerID string, targetPID uint32) (apitypes.Process, error) {
+	// Type assert the container tree
+	ct, ok := containerTree.(containerprocesstree.ContainerProcessTree)
+	if !ok {
+		return apitypes.Process{}, fmt.Errorf("invalid container tree type")
 	}
+
+	// Convert SafeMap to regular map for compatibility
+	processMap := pt.getProcessMapAsRegularMap()
+
+	// Perform the container subtree operation
+	return ct.GetContainerSubtree(containerID, targetPID, processMap)
 }
 
 // getProcessMapAsRegularMap converts SafeMap to regular map for compatibility with existing interfaces
@@ -141,39 +115,12 @@ func (pt *processTreeCreatorImpl) getProcessMapAsRegularMap() map[uint32]*apityp
 	return processMap
 }
 
-// GetContainerSubtreeAtomic performs container subtree operation atomically
-// This ensures that the process map is not modified during the DeepCopy operation
-func (pt *processTreeCreatorImpl) GetContainerSubtreeAtomic(containerTree interface{}, containerID string, targetPID uint32) (apitypes.Process, error) {
-	pt.mutex.RLock()
-	defer pt.mutex.RUnlock()
-
-	// Type assert the container tree
-	ct, ok := containerTree.(containerprocesstree.ContainerProcessTree)
-	if !ok {
-		return apitypes.Process{}, fmt.Errorf("invalid container tree type")
-	}
-
-	// Convert SafeMap to regular map for compatibility
-	processMap := pt.getProcessMapAsRegularMap()
-
-	// Perform the container subtree operation while holding the mutex
-	return ct.GetContainerSubtree(containerID, targetPID, processMap)
-}
-
 // handleForkEvent handles fork events - only fills properties if they are empty or don't exist
 func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
-	pt.mutex.Lock()
-	defer pt.mutex.Unlock()
-
 	proc := pt.processMap.Get(event.PID)
 
-	// If process doesn't exist, check if it was previously exited
+	// If process doesn't exist, create it
 	if proc == nil {
-		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
-		if pt.isProcessExited(processHash) {
-			return // Don't create a new process that has already exited
-		}
-		// Create new process if it wasn't exited
 		proc = pt.getOrCreateProcess(event.PID)
 		logger.L().Info("Fork: Creating new process",
 			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)),
@@ -241,27 +188,15 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 
 // handleProcfsEvent handles procfs events - overrides when existing values are empty or don't exist
 func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
-	pt.mutex.Lock()
-	defer pt.mutex.Unlock()
-
 	proc := pt.processMap.Get(event.PID)
 
-	// If process doesn't exist, check if it was previously exited
+	// If process doesn't exist, create it
 	if proc == nil {
 		logger.L().Info("ProcFS: Creating new process",
 			helpers.String("pid", fmt.Sprintf("%d", event.PID)),
 			helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)),
 			helpers.String("comm", event.Comm), helpers.String("pcomm", event.Pcomm), helpers.String("cmdline", event.Cmdline))
 
-		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
-		if pt.isProcessExited(processHash) {
-			logger.L().Info("ProcFS: Process has already exited",
-				helpers.String("pid", fmt.Sprintf("%d", event.PID)),
-				helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)),
-				helpers.String("comm", event.Comm), helpers.String("pcomm", event.Pcomm), helpers.String("cmdline", event.Cmdline))
-			return // Don't create a new process that has already exited
-		}
-		// Create new process if it wasn't exited
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
@@ -327,10 +262,6 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 
 // handleExecEvent handles exec events - always enriches the existing process node if present, never creates a duplicate
 func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
-	// Always lock for write, as we may update the process node
-	pt.mutex.Lock()
-	defer pt.mutex.Unlock()
-
 	proc := pt.processMap.Get(event.PID)
 
 	if proc != nil {
@@ -353,7 +284,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 				// Check if process is already under any containerd-shim subtree
 				isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.getProcessMapAsRegularMap())
 				if isUnderContainer {
-					// Process is already under container subtree, do nothings
+					// Process is already under container subtree, do nothing
 					logger.L().Debug("Exec: Process already under container subtree, no PPID update",
 						helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("current_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
 				} else {
@@ -369,21 +300,16 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 			}
 		}
 	} else {
-		// If process doesn't exist, check if it was previously exited
-		processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
-		if pt.isProcessExited(processHash) {
-			logger.L().Info("Exec: Process has already exited",
-				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
-			return // Don't create a new process that has already exited
-		}
-		// Create new process if it wasn't exited (should be rare)
+		// If process doesn't exist, create it (should be rare)
 		proc = pt.getOrCreateProcess(event.PID)
 		logger.L().Info("Exec: Creating new process (no prior fork event)",
 			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
 	}
+
 	logger.L().Info("Exec: info",
 		helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)),
 		helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)), helpers.String("comm", event.Comm), helpers.String("pcomm", event.Pcomm))
+
 	// Fill all fields from exec event (PPID is already handled above)
 	if event.Comm != "" && proc.Comm != event.Comm {
 		proc.Comm = event.Comm
@@ -411,18 +337,11 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	}
 }
 
-// handleExitEvent handles exit events - immediate removal for processes without children, delayed cleanup for reparenting
-// Caller must hold pt.mutex
+// handleExitEvent handles exit events - immediate removal and reparenting
 func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 	proc := pt.processMap.Get(event.PID)
 	if proc == nil {
 		return // Process doesn't exist, nothing to clean up
-	}
-
-	// Create unique hash for this process instance and mark it as exited
-	processHash := utils.HashTaskID(event.PID, event.StartTimeNs)
-	if pt.exitedCache != nil {
-		pt.exitedCache.Add(processHash, time.Now())
 	}
 
 	// Collect children for reparenting
@@ -433,10 +352,53 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 		}
 	}
 
-	// Add to delayed cleanup for reparenting scenarios
-	pt.exitCleanup.AddPendingExit(event, children)
-	logger.L().Info("Exit: Added to delayed cleanup (has children)",
+	// Handle reparenting of orphaned children immediately
+	if len(children) > 0 {
+		if pt.reparentingLogic != nil {
+			// Use the reparenting logic to determine the new parent
+			result := pt.reparentingLogic.HandleProcessExit(event.PID, children, pt.containerTree, pt.getProcessMapAsRegularMap())
+
+			logger.L().Info("Exit: Immediate reparenting",
+				helpers.String("pid", fmt.Sprintf("%d", event.PID)),
+				helpers.String("strategy", result.Strategy),
+				helpers.String("new_parent_pid", fmt.Sprintf("%d", result.NewParentPID)),
+				helpers.String("verified", fmt.Sprintf("%t", result.Verified)),
+				helpers.String("children_count", fmt.Sprintf("%d", len(children))))
+
+			// Update children's PPID to the new parent and link them
+			for _, child := range children {
+				if child != nil {
+					child.PPID = result.NewParentPID
+					pt.linkProcessToParent(child)
+				}
+			}
+		} else {
+			// Fallback to init process (PID 1) if reparenting logic is not available
+			logger.L().Warning("Exit: Reparenting logic not available, using fallback to init",
+				helpers.String("pid", fmt.Sprintf("%d", event.PID)))
+
+			for _, child := range children {
+				if child != nil {
+					child.PPID = 1 // Adopted by init process
+					pt.linkProcessToParent(child)
+				}
+			}
+		}
+	}
+
+	// Remove from parent's children list
+	if proc.PPID != 0 {
+		if parent := pt.processMap.Get(proc.PPID); parent != nil {
+			delete(parent.ChildrenMap, apitypes.CommPID{Comm: proc.Comm, PID: event.PID})
+		}
+	}
+
+	// Remove the process from the map immediately
+	pt.processMap.Delete(event.PID)
+
+	logger.L().Info("Exit: Removed process immediately",
 		helpers.String("pid", fmt.Sprintf("%d", event.PID)),
+		helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)),
 		helpers.String("children_count", fmt.Sprintf("%d", len(children))))
 }
 
@@ -474,24 +436,6 @@ func (pt *processTreeCreatorImpl) shallowCopyProcess(proc *apitypes.Process) *ap
 	// ChildrenMap points to the same map (shared reference)
 	// This is safe for read-only access and much faster
 	return &copy
-}
-
-// isProcessExited checks if a process hash has been marked as exited
-// and cleans up expired entries (older than 1 hour)
-func (pt *processTreeCreatorImpl) isProcessExited(processHash uint32) bool {
-	if pt.exitedCache == nil {
-		return false
-	}
-
-	if exitTime, exists := pt.exitedCache.Get(processHash); exists {
-		// Check if the entry has expired (1 hour TTL)
-		if time.Since(exitTime) > time.Hour {
-			pt.exitedCache.Remove(processHash)
-			return false
-		}
-		return true
-	}
-	return false
 }
 
 // linkProcessToParent ensures proc is added as a child to its parent (if PPID != 0)

@@ -2,7 +2,6 @@ package containerprocesstree
 
 import (
 	"fmt"
-	"sync"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -13,7 +12,6 @@ import (
 
 type containerProcessTreeImpl struct {
 	containerIdToShimPid map[string]uint32
-	mutex                sync.RWMutex
 }
 
 func NewContainerProcessTree() ContainerProcessTree {
@@ -23,9 +21,6 @@ func NewContainerProcessTree() ContainerProcessTree {
 }
 
 func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.PubSubEvent) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
 	containerID := notif.Container.Runtime.BasicRuntimeMetadata.ContainerID
 
 	switch notif.Type {
@@ -50,9 +45,7 @@ func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.P
 }
 
 func (c *containerProcessTreeImpl) GetContainerTreeNodes(containerID string, fullTree map[uint32]*apitypes.Process) ([]apitypes.Process, error) {
-	c.mutex.RLock()
 	shimPID, ok := c.containerIdToShimPid[containerID]
-	c.mutex.RUnlock()
 	if !ok {
 		logger.L().Debug("GetContainerTree Not found Shim PID", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 		return nil, nil
@@ -79,9 +72,7 @@ func (c *containerProcessTreeImpl) GetContainerTreeNodes(containerID string, ful
 }
 
 func (c *containerProcessTreeImpl) GetContainerSubtree(containerID string, targetPID uint32, fullTree map[uint32]*apitypes.Process) (apitypes.Process, error) {
-	c.mutex.RLock()
 	shimPID, ok := c.containerIdToShimPid[containerID]
-	c.mutex.RUnlock()
 	if !ok {
 		logger.L().Debug("GetContainerSubtree Not found Shim PID", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 		return apitypes.Process{}, fmt.Errorf("container %s not found", containerID)
@@ -169,8 +160,6 @@ func (c *containerProcessTreeImpl) findRootNodeBeforeShim(targetNode *apitypes.P
 }
 
 func (c *containerProcessTreeImpl) ListContainers() []string {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
 	ids := make([]string, 0, len(c.containerIdToShimPid))
 	for id := range c.containerIdToShimPid {
 		ids = append(ids, id)
@@ -180,16 +169,11 @@ func (c *containerProcessTreeImpl) ListContainers() []string {
 
 // SetShimPIDForTesting manually sets the shim PID for a container (for testing purposes only)
 func (c *containerProcessTreeImpl) SetShimPIDForTesting(containerID string, shimPID uint32) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
 	c.containerIdToShimPid[containerID] = shimPID
 }
 
 // IsProcessUnderAnyContainerSubtree checks if a process is under any containerd-shim subtree
 func (c *containerProcessTreeImpl) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree map[uint32]*apitypes.Process) bool {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-
 	// Check each container's shim subtree
 	for _, shimPID := range c.containerIdToShimPid {
 		shimNode := fullTree[shimPID]
@@ -211,9 +195,6 @@ func (c *containerProcessTreeImpl) IsProcessUnderAnyContainerSubtree(pid uint32,
 
 // GetShimPIDForProcess returns the shim PID for a given process if it's under a container subtree
 func (c *containerProcessTreeImpl) GetShimPIDForProcess(pid uint32, fullTree map[uint32]*apitypes.Process) (uint32, bool) {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-
 	// Check each container's shim subtree
 	for _, shimPID := range c.containerIdToShimPid {
 		shimNode := fullTree[shimPID]
@@ -235,9 +216,6 @@ func (c *containerProcessTreeImpl) GetShimPIDForProcess(pid uint32, fullTree map
 
 // IsPPIDUnderAnyContainerSubtree checks if a PPID is under any container subtree
 func (c *containerProcessTreeImpl) IsPPIDUnderAnyContainerSubtree(ppid uint32, fullTree map[uint32]*apitypes.Process) bool {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-
 	// Check each container's shim subtree
 	for _, shimPID := range c.containerIdToShimPid {
 		shimNode := fullTree[shimPID]

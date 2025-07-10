@@ -16,10 +16,8 @@ type ProcessTreeCreator interface {
 	GetProcessMapDeep() map[uint32]*apitypes.Process
 	// Optionally: Query for a process node by PID
 	GetProcessNode(pid int) (*apitypes.Process, error)
-	// Get container subtree atomically (thread-safe)
-	GetContainerSubtreeAtomic(containerTree interface{}, containerID string, targetPID uint32) (apitypes.Process, error)
+	// Get container subtree (no longer needs to be atomic in single-threaded design)
+	GetContainerSubtree(containerTree interface{}, containerID string, targetPID uint32) (apitypes.Process, error)
 	// Stop the process tree creator and cleanup resources
 	Stop()
-	// Trigger immediate exit cleanup (for testing purposes)
-	TriggerExitCleanup()
 }
