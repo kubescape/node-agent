@@ -27,10 +27,6 @@ func TestUnstructuredToPod(t *testing.T) {
 		},
 		{
 			name: TestNginx,
-			kind: TestKindAA,
-		},
-		{
-			name: TestNginx,
 			kind: TestKindAP,
 		},
 		{
@@ -48,10 +44,6 @@ func TestUnstructuredToPod(t *testing.T) {
 		{
 			name: TestCollection,
 			kind: TestKindDeploy,
-		},
-		{
-			name: TestCollection,
-			kind: TestKindAA,
 		},
 		{
 			name: TestCollection,

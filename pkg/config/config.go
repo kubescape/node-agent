@@ -24,10 +24,10 @@ type Config struct {
 	MaxJitterPercentage            int                             `mapstructure:"maxJitterPercentage"`
 	MaxImageSize                   int64                           `mapstructure:"maxImageSize"`
 	MaxSBOMSize                    int                             `mapstructure:"maxSBOMSize"`
+	MaxTsProfileSize               int64                           `mapstructure:"maxTsProfileSize"`
 	EnableFullPathTracing          bool                            `mapstructure:"fullPathTracingEnabled"`
 	EnableApplicationProfile       bool                            `mapstructure:"applicationProfileServiceEnabled"`
 	EnableMalwareDetection         bool                            `mapstructure:"malwareDetectionEnabled"`
-	EnablePartialProfileGeneration bool                            `mapstructure:"partialProfileGenerationEnabled"`
 	EnablePrometheusExporter       bool                            `mapstructure:"prometheusExporterEnabled"`
 	EnableRuntimeDetection         bool                            `mapstructure:"runtimeDetectionEnabled"`
 	EnableHttpDetection            bool                            `mapstructure:"httpDetectionEnabled"`
@@ -53,6 +53,7 @@ type Config struct {
 	ExcludeJsonPaths               []string                        `mapstructure:"excludeJsonPaths"`
 	ProfilesCacheRefreshRate       time.Duration                   `mapstructure:"profilesCacheRefreshRate"`
 	RuleCoolDown                   rulecooldown.RuleCooldownConfig `mapstructure:"ruleCooldown"`
+	EnablePartialProfileGeneration bool                            `mapstructure:"partialProfileGenerationEnabled"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -68,6 +69,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("maxJitterPercentage", 5)
 	viper.SetDefault("maxImageSize", 5*1024*1024*1024)
 	viper.SetDefault("maxSBOMSize", 20*1024*1024)
+	viper.SetDefault("maxTsProfileSize", 2*1024*1024)
 	viper.SetDefault("namespaceName", os.Getenv(NamespaceEnvVar))
 	viper.SetDefault("nodeName", os.Getenv(NodeNameEnvVar))
 	viper.SetDefault("podName", os.Getenv(PodNameEnvVar))

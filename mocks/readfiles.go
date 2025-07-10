@@ -21,7 +21,6 @@ const (
 	TestKindRS     TestKinds = "ReplicaSet"
 	TestKindDeploy TestKinds = "Deployment"
 	TestKindAP     TestKinds = "ApplicationProfile"
-	TestKindAA     TestKinds = "ApplicationActivity"
 	TestKindNN     TestKinds = "NetworkNeighborhood"
 )
 
@@ -92,11 +91,6 @@ func UnstructuredToRuntime(u *unstructured.Unstructured) k8sruntime.Object {
 		if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(u.Object, ap); err == nil {
 			return ap
 		}
-	case TestKindAA:
-		aa := &v1beta1.ApplicationActivity{}
-		if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(u.Object, aa); err == nil {
-			return aa
-		}
 	case TestKindNN:
 		nn := &v1beta1.NetworkNeighborhood{}
 		if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(u.Object, nn); err == nil {
@@ -148,13 +142,6 @@ func GetBytes(kind TestKinds, name TestName) []byte {
 			return readFile(nginxDeploymentBytes)
 		case TestCollection:
 			return readFile(collectionDeploymentBytes)
-		}
-	case TestKindAA:
-		switch name {
-		case TestNginx:
-			return readFile(nginxApplicationActivityBytes)
-		case TestCollection:
-			return readFile(collectionApplicationActivityBytes)
 		}
 	case TestKindAP:
 		switch name {

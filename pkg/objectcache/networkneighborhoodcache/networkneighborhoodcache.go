@@ -183,12 +183,12 @@ func (nnc *NetworkNeighborhoodCacheImpl) updateAllNetworkNeighborhoods(ctx conte
 			// Update the network neighborhood in the cache
 			if existingNN, exists := nnc.workloadIDToNetworkNeighborhood.Load(workloadID); exists {
 				// If the network neighborhood already exists and it's complete/completed, continue to the next one
-				if existingNN.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Complete {
+				if existingNN.Annotations[helpersv1.CompletionMetadataKey] == helpersv1.Full {
 					continue
 				}
 
 				// If the new network neighborhood is not complete and we already have a completed/partial one, skip it
-				if nn.Annotations[helpersv1.CompletionMetadataKey] != helpersv1.Complete {
+				if nn.Annotations[helpersv1.CompletionMetadataKey] != helpersv1.Full {
 					continue
 				}
 			}
@@ -424,8 +424,8 @@ func (nnc *NetworkNeighborhoodCacheImpl) deleteContainer(containerID string) {
 }
 
 // waitForSharedContainerData waits for shared container data to be available
-func (nnc *NetworkNeighborhoodCacheImpl) waitForSharedContainerData(containerID string, ctx context.Context) (*utils.WatchedContainerData, error) {
-	return backoff.Retry(ctx, func() (*utils.WatchedContainerData, error) {
+func (nnc *NetworkNeighborhoodCacheImpl) waitForSharedContainerData(containerID string, ctx context.Context) (*objectcache.WatchedContainerData, error) {
+	return backoff.Retry(ctx, func() (*objectcache.WatchedContainerData, error) {
 		if sharedData := nnc.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
 			return sharedData, nil
 		}

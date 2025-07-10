@@ -1,7 +1,6 @@
 package seccompmanager
 
 import (
-	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -141,7 +140,7 @@ func Test_getProfilesDir(t *testing.T) {
 				t.Setenv("KUBELET_ROOT", tt.kubeletRoot)
 			}
 			got, err := getProfilesDir()
-			if !tt.wantErr(t, err, fmt.Sprintf("getProfilesDir()")) {
+			if !tt.wantErr(t, err, "getProfilesDir()") {
 				return
 			}
 			assert.Equalf(t, tt.want, got, "getProfilesDir()")

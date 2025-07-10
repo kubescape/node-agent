@@ -7,7 +7,6 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,7 +25,7 @@ type K8sObjectCacheImpl struct {
 	k8sClient               k8sclient.K8sClientInterface
 	pods                    maps.SafeMap[string, *corev1.Pod]
 	apiServerIpAddress      string
-	containerIDToSharedData maps.SafeMap[string, *utils.WatchedContainerData]
+	containerIDToSharedData maps.SafeMap[string, *objectcache.WatchedContainerData]
 }
 
 func NewK8sObjectCache(nodeName string, k8sClient k8sclient.K8sClientInterface) (*K8sObjectCacheImpl, error) {
@@ -34,7 +33,7 @@ func NewK8sObjectCache(nodeName string, k8sClient k8sclient.K8sClientInterface) 
 		k8sClient:               k8sClient,
 		nodeName:                nodeName,
 		pods:                    maps.SafeMap[string, *corev1.Pod]{},
-		containerIDToSharedData: maps.SafeMap[string, *utils.WatchedContainerData]{},
+		containerIDToSharedData: maps.SafeMap[string, *objectcache.WatchedContainerData]{},
 	}
 
 	if err := k.setApiServerIpAddress(); err != nil {
@@ -83,11 +82,11 @@ func (k *K8sObjectCacheImpl) GetPods() []*corev1.Pod {
 	return k.pods.Values()
 }
 
-func (k *K8sObjectCacheImpl) SetSharedContainerData(containerID string, data *utils.WatchedContainerData) {
+func (k *K8sObjectCacheImpl) SetSharedContainerData(containerID string, data *objectcache.WatchedContainerData) {
 	k.containerIDToSharedData.Set(containerID, data)
 }
 
-func (k *K8sObjectCacheImpl) GetSharedContainerData(containerID string) *utils.WatchedContainerData {
+func (k *K8sObjectCacheImpl) GetSharedContainerData(containerID string) *objectcache.WatchedContainerData {
 	if data, ok := k.containerIDToSharedData.Load(containerID); ok {
 		return data
 	}

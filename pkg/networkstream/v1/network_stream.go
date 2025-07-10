@@ -28,6 +28,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
+const (
+	timeoutDefaultSeconds = 5 // Default timeout for HTTP requests if not set in the config
+)
+
 type NetworkStream struct {
 	networkEventsStorage      apitypes.NetworkStream
 	eventsStorageMutex        sync.RWMutex // Mutex to protect access to networkEventsStorage.Containers
@@ -55,6 +59,13 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 		k8sInventory.Start() // We do not stop it here, as we need it to be running for the whole lifetime of the NetworkStream.
 	}
 
+	var timeoutSeconds int
+	if cfg.Exporters.HTTPExporterConfig != nil && cfg.Exporters.HTTPExporterConfig.TimeoutSeconds > 0 {
+		timeoutSeconds = cfg.Exporters.HTTPExporterConfig.TimeoutSeconds
+	} else {
+		timeoutSeconds = timeoutDefaultSeconds
+	}
+
 	ns := NetworkStream{
 		networkEventsStorage: apitypes.NetworkStream{
 			Entities: make(map[string]apitypes.NetworkStreamEntity),
@@ -65,7 +76,7 @@ func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache obj
 		dnsResolver:    dnsResolver,
 		k8sInventory:   k8sInventory,
 		httpClient: &http.Client{
-			Timeout: time.Duration(cfg.Exporters.HTTPExporterConfig.TimeoutSeconds) * time.Second,
+			Timeout: time.Duration(timeoutSeconds) * time.Second,
 		},
 		nodeName:                  nodeName,
 		eventsNotificationChannel: eventsNotificationChannel,
@@ -136,8 +147,8 @@ func (ns *NetworkStream) enrichWorkloadDetails(containerID string) {
 	ns.eventsStorageMutex.Unlock()
 }
 
-func (ns *NetworkStream) waitForSharedContainerData(containerID string) (*utils.WatchedContainerData, error) {
-	return backoff.Retry(context.Background(), func() (*utils.WatchedContainerData, error) {
+func (ns *NetworkStream) waitForSharedContainerData(containerID string) (*objectcache.WatchedContainerData, error) {
+	return backoff.Retry(context.Background(), func() (*objectcache.WatchedContainerData, error) {
 		if sharedData := ns.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
 			return sharedData, nil
 		}
@@ -351,11 +362,11 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 
 			if len(slimPod.OwnerReferences) > 0 {
 				workloadKind = slimPod.OwnerReferences[0].Kind
-				if utils.WorkloadKind(workloadKind) == utils.ReplicaSet {
-					workloadKind = string(utils.Deployment)
+				if WorkloadKind(workloadKind) == ReplicaSet {
+					workloadKind = string(Deployment)
 				}
 				// TODO: handle similar cases for CronJob -> Job -> Pod.
-				workloadName = utils.ExtractWorkloadName(slimPod.Name, utils.WorkloadKind(workloadKind))
+				workloadName = extractWorkloadName(slimPod.Name, WorkloadKind(workloadKind))
 			}
 
 			networkEvent.WorkloadName = workloadName
@@ -405,7 +416,7 @@ func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid uint32, com
 }
 
 func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream) error {
-	if !ns.cfg.KubernetesMode {
+	if !ns.cfg.KubernetesMode || ns.cfg.Exporters.HTTPExporterConfig == nil {
 		return nil
 	}
 

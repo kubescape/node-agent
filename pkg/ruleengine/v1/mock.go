@@ -7,7 +7,6 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/objectcache/applicationprofilecache/callstackcache"
-	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -25,7 +24,7 @@ type RuleObjectCacheMock struct {
 	podStatus               *corev1.PodStatus
 	nn                      *v1beta1.NetworkNeighborhood
 	dnsCache                map[string]string
-	containerIDToSharedData maps.SafeMap[string, *utils.WatchedContainerData]
+	containerIDToSharedData maps.SafeMap[string, *objectcache.WatchedContainerData]
 }
 
 func (r *RuleObjectCacheMock) GetApplicationProfile(string) *v1beta1.ApplicationProfile {
@@ -70,10 +69,10 @@ func (r *RuleObjectCacheMock) GetPods() []*corev1.Pod {
 	return []*corev1.Pod{{Spec: *r.podSpec, Status: *r.podStatus}}
 }
 
-func (r *RuleObjectCacheMock) SetSharedContainerData(containerID string, data *utils.WatchedContainerData) {
+func (r *RuleObjectCacheMock) SetSharedContainerData(containerID string, data *objectcache.WatchedContainerData) {
 	r.containerIDToSharedData.Set(containerID, data)
 }
-func (r *RuleObjectCacheMock) GetSharedContainerData(containerID string) *utils.WatchedContainerData {
+func (r *RuleObjectCacheMock) GetSharedContainerData(containerID string) *objectcache.WatchedContainerData {
 	if data, ok := r.containerIDToSharedData.Load(containerID); ok {
 		return data
 	}
