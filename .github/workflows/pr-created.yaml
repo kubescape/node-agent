@@ -15,6 +15,7 @@ jobs:
   pr-created:
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-created.yaml@main
     with:
+      HELM_BRANCH: "timeseries"
       GO_VERSION: "1.24"
       CGO_ENABLED: 0
     secrets: inherit

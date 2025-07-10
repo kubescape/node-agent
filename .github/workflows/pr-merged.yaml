@@ -36,6 +36,7 @@ jobs:
       GO111MODULE: "on"
       BUILD_PLATFORM: linux/amd64,linux/arm64
       GO_VERSION: "1.24"
+      HELM_BRANCH: "timeseries"
       REQUIRED_TESTS: '[
                         "relevantCVEs",
                         "relevancy_enabled_stop_sniffing",
