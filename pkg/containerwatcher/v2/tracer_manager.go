@@ -14,16 +14,12 @@ type V2TracerManager struct {
 }
 
 // NewV2TracerManager creates a new v2 tracer manager
-func NewV2TracerManager(containerWatcher *NewContainerWatcher) *V2TracerManager {
+func NewV2TracerManager(containerWatcher *NewContainerWatcher, tracerFactory containerwatcherroot.TracerFactoryInterface) *V2TracerManager {
 	return &V2TracerManager{
 		containerWatcher: containerWatcher,
 		tracerManager:    containerwatcherroot.NewTracerManager(),
+		tracerFactory:    tracerFactory,
 	}
-}
-
-// SetTracerFactory sets the tracer factory
-func (vtm *V2TracerManager) SetTracerFactory(factory containerwatcherroot.TracerFactoryInterface) {
-	vtm.tracerFactory = factory
 }
 
 // StartAllTracers starts all enabled tracers

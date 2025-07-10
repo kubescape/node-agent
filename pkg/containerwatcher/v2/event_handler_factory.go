@@ -1,7 +1,10 @@
 package containerwatcher
 
 import (
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -35,7 +38,9 @@ func (ma *ManagerAdapter) ReportEvent(eventType utils.EventType, event utils.K8s
 
 // EventHandlerFactory manages the mapping of event types to their managers
 type EventHandlerFactory struct {
-	handlers map[utils.EventType][]Manager
+	handlers                 map[utils.EventType][]Manager
+	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]]
+	thirdPartyEnricher       containerwatcher.TaskBasedEnricher
 }
 
 // NewEventHandlerFactory creates a new event handler factory
@@ -47,9 +52,13 @@ func NewEventHandlerFactory(
 	malwareManager malwaremanager.MalwareManagerClient,
 	networkStreamClient networkstream.NetworkStreamClient,
 	metrics metricsmanager.MetricsManager,
+	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *EventHandlerFactory {
 	factory := &EventHandlerFactory{
-		handlers: make(map[utils.EventType][]Manager),
+		handlers:                 make(map[utils.EventType][]Manager),
+		thirdPartyEventReceivers: thirdPartyEventReceivers,
+		thirdPartyEnricher:       thirdPartyEnricher,
 	}
 
 	// Create adapters for managers that don't implement the Manager interface directly
@@ -94,14 +103,31 @@ func (ehf *EventHandlerFactory) GetManagers(eventType utils.EventType) ([]Manage
 
 // ProcessEvent processes an enriched event
 func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent EnrichedEvent) {
-	managers, exists := ehf.handlers[enrichedEvent.EventType]
-	if !exists {
-		return
+	// For now, process directly without third party enrichment
+	// TODO: Implement proper third party enrichment support
+	ehf.processEventWithManagers(enrichedEvent.EventType, enrichedEvent.Event)
+}
+
+// processEventWithManagers processes an event with the registered managers and third party receivers
+func (ehf *EventHandlerFactory) processEventWithManagers(eventType utils.EventType, event utils.K8sEvent) {
+	// Process with registered managers
+	managers, exists := ehf.handlers[eventType]
+	if exists {
+		for _, manager := range managers {
+			manager.ReportEvent(eventType, event)
+		}
 	}
 
-	// Loop over managers and report the event
-	for _, manager := range managers {
-		manager.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
+	// Report to third party event receivers
+	ehf.reportEventToThirdPartyTracers(eventType, event)
+}
+
+// reportEventToThirdPartyTracers reports events to third party event receivers
+func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(eventType utils.EventType, event utils.K8sEvent) {
+	if ehf.thirdPartyEventReceivers != nil && ehf.thirdPartyEventReceivers.Has(eventType) {
+		for receiver := range ehf.thirdPartyEventReceivers.Get(eventType).Iter() {
+			receiver.ReportEvent(eventType, event)
+		}
 	}
 }
 

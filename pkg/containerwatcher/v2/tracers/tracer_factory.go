@@ -5,16 +5,20 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	containerwatcherv2 "github.com/kubescape/node-agent/pkg/containerwatcher/v2"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
+
+// EventQueueInterface defines the interface for adding events to the queue
+type EventQueueInterface interface {
+	AddEventDirect(eventType utils.EventType, event utils.K8sEvent)
+}
 
 // TracerFactory creates and manages all tracer instances
 type TracerFactory struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	orderedEventQueue   *containerwatcherv2.OrderedEventQueue
+	orderedEventQueue   EventQueueInterface
 	socketEnricher      *socketenricher.SocketEnricher
 }
 
@@ -23,7 +27,7 @@ func NewTracerFactory(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	orderedEventQueue *containerwatcherv2.OrderedEventQueue,
+	orderedEventQueue EventQueueInterface,
 	socketEnricher *socketenricher.SocketEnricher,
 ) *TracerFactory {
 	return &TracerFactory{

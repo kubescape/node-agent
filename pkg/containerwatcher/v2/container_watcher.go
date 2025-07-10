@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/containerwatcher/v2/tracers"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -140,6 +141,8 @@ func CreateNewContainerWatcher(
 		malwareManager,
 		networkStreamClient,
 		metrics,
+		thirdPartyEventReceivers,
+		thirdPartyEnricher,
 	)
 
 	// Create tracer manager
@@ -199,15 +202,6 @@ func CreateNewContainerWatcher(
 	}, nil
 }
 
-func processEvents(enrichedEvents []EnrichedEvent, eventHandlerFactory *EventHandlerFactory) {
-	// Process events through the event handler factory
-	for _, event := range enrichedEvents {
-		// TODO: Implement event handling logic
-		_ = eventHandlerFactory
-		_ = event
-	}
-}
-
 // Start initializes and starts the container watcher
 func (ncw *NewContainerWatcher) Start(ctx context.Context) error {
 	ncw.mutex.Lock()
@@ -225,8 +219,17 @@ func (ncw *NewContainerWatcher) Start(ctx context.Context) error {
 	_ = containerManager
 	ncw.containerManager = containerManager
 
+	// Create tracer factory
+	tracerFactory := tracers.NewTracerFactory(
+		ncw.containerCollection,
+		ncw.tracerCollection,
+		ncw.containerSelector,
+		ncw.orderedEventQueue,
+		ncw.socketEnricher,
+	)
+
 	// Initialize tracer manager
-	tracerManagerV2 := NewV2TracerManager(ncw)
+	tracerManagerV2 := NewV2TracerManager(ncw, tracerFactory)
 	if err := tracerManagerV2.StartAllTracers(ctx); err != nil {
 		return fmt.Errorf("starting tracer manager: %w", err)
 	}
@@ -287,6 +290,55 @@ func (ncw *NewContainerWatcher) Ready() bool {
 	return ncw.running
 }
 
+// GetContainerCollection returns the container collection
+func (ncw *NewContainerWatcher) GetContainerCollection() *containercollection.ContainerCollection {
+	return ncw.containerCollection
+}
+
+// GetTracerCollection returns the tracer collection
+func (ncw *NewContainerWatcher) GetTracerCollection() *tracercollection.TracerCollection {
+	return ncw.tracerCollection
+}
+
+// GetSocketEnricher returns the socket enricher
+func (ncw *NewContainerWatcher) GetSocketEnricher() *socketenricher.SocketEnricher {
+	return ncw.socketEnricher
+}
+
+// GetContainerSelector returns the container selector
+func (ncw *NewContainerWatcher) GetContainerSelector() *containercollection.ContainerSelector {
+	return &ncw.containerSelector
+}
+
+// RegisterCustomTracer registers a custom tracer
+func (ncw *NewContainerWatcher) RegisterCustomTracer(tracer containerwatcher.CustomTracer) error {
+	ncw.thirdPartyTracers.Add(tracer)
+	return nil
+}
+
+// UnregisterCustomTracer unregisters a custom tracer
+func (ncw *NewContainerWatcher) UnregisterCustomTracer(tracer containerwatcher.CustomTracer) error {
+	ncw.thirdPartyTracers.Remove(tracer)
+	return nil
+}
+
+// RegisterContainerReceiver registers a container receiver
+func (ncw *NewContainerWatcher) RegisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
+	ncw.thirdPartyContainerReceivers.Add(receiver)
+}
+
+// UnregisterContainerReceiver unregisters a container receiver
+func (ncw *NewContainerWatcher) UnregisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
+	ncw.thirdPartyContainerReceivers.Remove(receiver)
+}
+
+func processEvents(enrichedEvents []EnrichedEvent, eventHandlerFactory *EventHandlerFactory) {
+	// Process events through the event handler factory
+	for _, event := range enrichedEvents {
+		eventHandlerFactory.ProcessEvent(event)
+	}
+}
+
 // eventProcessingLoop continuously processes events from the ordered event queue
 func (ncw *NewContainerWatcher) eventProcessingLoop() {
 	for {
@@ -294,13 +346,13 @@ func (ncw *NewContainerWatcher) eventProcessingLoop() {
 		case <-ncw.ctx.Done():
 			return
 		case events := <-ncw.orderedEventQueue.GetOutputChannel():
-			ncw.processEvents(events)
+			ncw.enrichAndProcess(events)
 		}
 	}
 }
 
-// processEvents processes a batch of events
-func (ncw *NewContainerWatcher) processEvents(events []eventEntry) {
+// enrichAndProcess processes a batch of events
+func (ncw *NewContainerWatcher) enrichAndProcess(events []eventEntry) {
 	// Enrich events with additional data
 	enrichedEvents := ncw.enrichEvents(events)
 
@@ -347,46 +399,4 @@ func isProcessTreeEvent(eventType utils.EventType) bool {
 	return eventType == utils.ExecveEventType ||
 		eventType == utils.ExitEventType ||
 		eventType == utils.ForkEventType
-}
-
-// GetContainerCollection returns the container collection
-func (ncw *NewContainerWatcher) GetContainerCollection() *containercollection.ContainerCollection {
-	return ncw.containerCollection
-}
-
-// GetTracerCollection returns the tracer collection
-func (ncw *NewContainerWatcher) GetTracerCollection() *tracercollection.TracerCollection {
-	return ncw.tracerCollection
-}
-
-// GetSocketEnricher returns the socket enricher
-func (ncw *NewContainerWatcher) GetSocketEnricher() *socketenricher.SocketEnricher {
-	return ncw.socketEnricher
-}
-
-// GetContainerSelector returns the container selector
-func (ncw *NewContainerWatcher) GetContainerSelector() *containercollection.ContainerSelector {
-	return &ncw.containerSelector
-}
-
-// RegisterCustomTracer registers a custom tracer
-func (ncw *NewContainerWatcher) RegisterCustomTracer(tracer containerwatcher.CustomTracer) error {
-	ncw.thirdPartyTracers.Add(tracer)
-	return nil
-}
-
-// UnregisterCustomTracer unregisters a custom tracer
-func (ncw *NewContainerWatcher) UnregisterCustomTracer(tracer containerwatcher.CustomTracer) error {
-	ncw.thirdPartyTracers.Remove(tracer)
-	return nil
-}
-
-// RegisterContainerReceiver registers a container receiver
-func (ncw *NewContainerWatcher) RegisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
-	ncw.thirdPartyContainerReceivers.Add(receiver)
-}
-
-// UnregisterContainerReceiver unregisters a container receiver
-func (ncw *NewContainerWatcher) UnregisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
-	ncw.thirdPartyContainerReceivers.Remove(receiver)
 }

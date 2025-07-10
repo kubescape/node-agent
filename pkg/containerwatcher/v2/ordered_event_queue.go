@@ -148,12 +148,6 @@ func (oeq *OrderedEventQueue) addEvent(eventType utils.EventType, event utils.K8
 	oeq.eventBuffer = append(oeq.eventBuffer, eventEntry)
 }
 
-// getContainerID extracts container ID from the event
-func (oeq *OrderedEventQueue) getContainerID(event utils.K8sEvent) string {
-	// TODO: Implement this
-	return ""
-}
-
 // collectionLoop runs the periodic collection and processing of events
 func (oeq *OrderedEventQueue) collectionLoop() {
 	ticker := time.NewTicker(oeq.collectionInterval)
