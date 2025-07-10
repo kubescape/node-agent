@@ -10,7 +10,7 @@ import (
 
 // EventQueueInterface defines the interface for adding events to the queue
 type EventQueueInterface interface {
-	AddEventDirect(eventType utils.EventType, event utils.K8sEvent)
+	AddEventDirect(eventType utils.EventType, event utils.K8sEvent, containerID string, processID uint32)
 }
 
 // TracerFactory creates and manages all tracer instances
@@ -183,8 +183,8 @@ func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManage
 }
 
 // createEventCallback creates a simple callback that sends events directly to the ordered event queue
-func (tf *TracerFactory) createEventCallback(eventType utils.EventType) func(utils.K8sEvent) {
-	return func(event utils.K8sEvent) {
-		tf.orderedEventQueue.AddEventDirect(eventType, event)
+func (tf *TracerFactory) createEventCallback(eventType utils.EventType) func(utils.K8sEvent, string, uint32) {
+	return func(event utils.K8sEvent, containerID string, processID uint32) {
+		tf.orderedEventQueue.AddEventDirect(eventType, event, containerID, processID)
 	}
 }

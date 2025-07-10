@@ -24,7 +24,7 @@ type TopTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent)
+	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *toptracer.Tracer
 }
 
@@ -33,7 +33,7 @@ func NewTopTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent),
+	eventCallback func(utils.K8sEvent, string, uint32),
 ) *TopTracer {
 	return &TopTracer{
 		containerCollection: containerCollection,

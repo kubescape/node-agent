@@ -27,6 +27,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
+	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
@@ -66,6 +67,7 @@ type NewContainerWatcher struct {
 	orderedEventQueue   *OrderedEventQueue
 	eventHandlerFactory *EventHandlerFactory
 	processTreeManager  processtree.ProcessTreeManager
+	processTreeFeeder   *feeder.EventFeeder
 	tracerManager       *containerwatcher.TracerManager
 
 	// Managers
@@ -118,6 +120,7 @@ func CreateNewContainerWatcher(
 	objectCache objectcache.ObjectCache,
 	networkStreamClient networkstream.NetworkStreamClient,
 	containerProcessTree containerprocesstree.ContainerProcessTree,
+	processTreeFeeder *feeder.EventFeeder,
 ) (*NewContainerWatcher, error) {
 
 	// Create container collection
@@ -184,6 +187,7 @@ func CreateNewContainerWatcher(
 		orderedEventQueue:   orderedEventQueue,
 		eventHandlerFactory: eventHandlerFactory,
 		processTreeManager:  processTreeManager,
+		processTreeFeeder:   processTreeFeeder,
 		tracerManager:       tracerManager,
 		workerPool:          workerPool,
 
@@ -370,28 +374,27 @@ func (ncw *NewContainerWatcher) enrichEvents(events []eventEntry) []EnrichedEven
 		event := entry.Event
 		eventType := entry.EventType
 
-		// Extract PID for process tree enrichment
-		pid := ncw.extractPID(event)
-
 		// Enrich with process tree data if it's a process-related event
-		if isProcessTreeEvent(eventType) && pid > 0 {
-			// TODO: Add process tree enrichment logic
+		if isProcessTreeEvent(eventType) {
+			ncw.processTreeFeeder.ReportEvent(eventType, event)
+		}
+
+		processTree, err := ncw.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
+		if err != nil {
+			logger.L().Error("Failed to get container process tree", helpers.Error(err))
+			continue
 		}
 
 		enrichedEvents = append(enrichedEvents, EnrichedEvent{
-			Event:     event,
-			EventType: eventType,
-			// TODO: Add PID field to EnrichedEvent struct
+			Event:       event,
+			EventType:   eventType,
+			ProcessTree: processTree,
+			ContainerID: entry.ContainerID,
+			Timestamp:   entry.Timestamp,
 		})
 	}
 
 	return enrichedEvents
-}
-
-// extractPID extracts the PID from an event
-func (ncw *NewContainerWatcher) extractPID(event utils.K8sEvent) uint32 {
-	// TODO: Implement PID extraction logic based on event type
-	return 0
 }
 
 // isProcessTreeEvent checks if an event type is related to process tree

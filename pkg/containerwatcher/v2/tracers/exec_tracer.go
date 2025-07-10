@@ -22,7 +22,7 @@ type ExecTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent)
+	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracerexec.Tracer
 }
 
@@ -31,7 +31,7 @@ func NewExecTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent),
+	eventCallback func(utils.K8sEvent, string, uint32),
 ) *ExecTracer {
 	return &ExecTracer{
 		containerCollection: containerCollection,
@@ -115,6 +115,10 @@ func (et *ExecTracer) handleEvent(event *events.ExecEvent, syscalls []uint64) {
 	// TODO: Implement syscall enrichment logic
 	// For now, just pass the event to the callback
 	if et.eventCallback != nil {
-		et.eventCallback(event)
+		// Extract container ID and process ID from the exec event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		et.eventCallback(event, containerID, processID)
 	}
 }

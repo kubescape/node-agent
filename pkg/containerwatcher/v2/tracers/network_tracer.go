@@ -26,7 +26,7 @@ type NetworkTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent)
+	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracernetwork.Tracer
 	socketEnricher      *socketenricher.SocketEnricher
 	kubeIPInstance      operators.OperatorInstance
@@ -38,7 +38,7 @@ func NewNetworkTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent),
+	eventCallback func(utils.K8sEvent, string, uint32),
 	socketEnricher *socketenricher.SocketEnricher,
 ) *NetworkTracer {
 	return &NetworkTracer{
@@ -146,7 +146,11 @@ func (nt *NetworkTracer) networkEventCallback(event *tracernetworktypes.Event) {
 	}
 
 	if nt.eventCallback != nil {
-		nt.eventCallback(event)
+		// Extract container ID and process ID from the network event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		nt.eventCallback(event, containerID, processID)
 	}
 }
 

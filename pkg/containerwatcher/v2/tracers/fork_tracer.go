@@ -20,7 +20,7 @@ type ForkTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent)
+	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracerfork.Tracer
 }
 
@@ -29,7 +29,7 @@ func NewForkTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent),
+	eventCallback func(utils.K8sEvent, string, uint32),
 ) *ForkTracer {
 	return &ForkTracer{
 		containerCollection: containerCollection,
@@ -102,6 +102,10 @@ func (ft *ForkTracer) forkEventCallback(event *tracerforktype.Event) {
 	}
 
 	if ft.eventCallback != nil {
-		ft.eventCallback(event)
+		// Extract container ID and process ID from the fork event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		ft.eventCallback(event, containerID, processID)
 	}
 }

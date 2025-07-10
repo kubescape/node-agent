@@ -24,7 +24,7 @@ type SSHTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent)
+	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracerssh.Tracer
 	socketEnricher      *socketenricher.SocketEnricher
 }
@@ -34,7 +34,7 @@ func NewSSHTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent),
+	eventCallback func(utils.K8sEvent, string, uint32),
 	socketEnricher *socketenricher.SocketEnricher,
 ) *SSHTracer {
 	return &SSHTracer{
@@ -133,6 +133,10 @@ func (st *SSHTracer) sshEventCallback(event *tracersshtype.Event) {
 	st.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
 
 	if st.eventCallback != nil {
-		st.eventCallback(event)
+		// Extract container ID and process ID from the SSH event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		st.eventCallback(event, containerID, processID)
 	}
 }

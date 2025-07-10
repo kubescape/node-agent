@@ -15,9 +15,11 @@ import (
 
 // eventEntry represents an event in the queue with its type and timestamp
 type eventEntry struct {
-	EventType utils.EventType
-	Event     utils.K8sEvent
-	Timestamp time.Time
+	EventType   utils.EventType
+	Event       utils.K8sEvent
+	Timestamp   time.Time
+	ContainerID string
+	ProcessID   uint32
 }
 
 // OrderedEventQueue manages a queue of events that are collected and sorted by timestamp
@@ -96,7 +98,7 @@ func (oeq *OrderedEventQueue) Stop() {
 	}
 
 	// Process any remaining events
-	oeq.processBuffer()
+	oeq.processBufferLocked()
 
 	// Close output channel
 	close(oeq.outputChan)
@@ -110,18 +112,18 @@ func (oeq *OrderedEventQueue) GetOutputChannel() <-chan []eventEntry {
 }
 
 // AddEventDirect adds an event directly to the buffer using the event's timestamp if available
-func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event utils.K8sEvent) {
+func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event utils.K8sEvent, containerID string, processID uint32) {
 	var timestamp time.Time
 	if tsGetter, ok := event.(interface{ GetTimestamp() int64 }); ok {
 		timestamp = time.Unix(0, tsGetter.GetTimestamp())
 	} else {
 		timestamp = time.Now()
 	}
-	oeq.addEvent(eventType, event, timestamp)
+	oeq.addEvent(eventType, event, timestamp, containerID, processID)
 }
 
 // addEvent adds an event to the buffer
-func (oeq *OrderedEventQueue) addEvent(eventType utils.EventType, event utils.K8sEvent, timestamp time.Time) {
+func (oeq *OrderedEventQueue) addEvent(eventType utils.EventType, event utils.K8sEvent, timestamp time.Time, containerID string, processID uint32) {
 	oeq.bufferMutex.Lock()
 	defer oeq.bufferMutex.Unlock()
 
@@ -136,13 +138,15 @@ func (oeq *OrderedEventQueue) addEvent(eventType utils.EventType, event utils.K8
 		logger.L().Warning("Event buffer full, triggering immediate processing",
 			helpers.Int("bufferSize", len(oeq.eventBuffer)),
 			helpers.Int("maxBufferSize", oeq.maxBufferSize))
-		oeq.processBuffer()
+		oeq.processBufferLocked()
 	}
 
 	eventEntry := eventEntry{
-		EventType: eventType,
-		Event:     event,
-		Timestamp: timestamp,
+		EventType:   eventType,
+		Event:       event,
+		Timestamp:   timestamp,
+		ContainerID: containerID,
+		ProcessID:   processID,
 	}
 
 	oeq.eventBuffer = append(oeq.eventBuffer, eventEntry)
@@ -167,7 +171,11 @@ func (oeq *OrderedEventQueue) collectionLoop() {
 func (oeq *OrderedEventQueue) processBuffer() {
 	oeq.bufferMutex.Lock()
 	defer oeq.bufferMutex.Unlock()
+	oeq.processBufferLocked()
+}
 
+// processBufferLocked processes the current buffer of events (assumes mutex is already held)
+func (oeq *OrderedEventQueue) processBufferLocked() {
 	if len(oeq.eventBuffer) == 0 {
 		return
 	}

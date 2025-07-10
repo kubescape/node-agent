@@ -20,7 +20,7 @@ type PtraceTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent)
+	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracerptrace.Tracer
 }
 
@@ -29,7 +29,7 @@ func NewPtraceTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent),
+	eventCallback func(utils.K8sEvent, string, uint32),
 ) *PtraceTracer {
 	return &PtraceTracer{
 		containerCollection: containerCollection,
@@ -102,6 +102,10 @@ func (pt *PtraceTracer) ptraceEventCallback(event *tracerptracetype.Event) {
 	}
 
 	if pt.eventCallback != nil {
-		pt.eventCallback(event)
+		// Extract container ID and process ID from the ptrace event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		pt.eventCallback(event, containerID, processID)
 	}
 }

@@ -21,7 +21,7 @@ type CapabilitiesTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent)
+	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracercapabilities.Tracer
 }
 
@@ -30,7 +30,7 @@ func NewCapabilitiesTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent),
+	eventCallback func(utils.K8sEvent, string, uint32),
 ) *CapabilitiesTracer {
 	return &CapabilitiesTracer{
 		containerCollection: containerCollection,
@@ -108,7 +108,11 @@ func (ct *CapabilitiesTracer) capabilitiesEventCallback(event *tracercapabilitie
 	}
 
 	if ct.eventCallback != nil {
-		ct.eventCallback(event)
+		// Extract container ID and process ID from the capabilities event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		ct.eventCallback(event, containerID, processID)
 	}
 }
 

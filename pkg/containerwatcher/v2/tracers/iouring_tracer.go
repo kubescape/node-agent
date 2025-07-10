@@ -22,7 +22,7 @@ type IoUringTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent)
+	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *traceriouring.Tracer
 }
 
@@ -31,7 +31,7 @@ func NewIoUringTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent),
+	eventCallback func(utils.K8sEvent, string, uint32),
 ) *IoUringTracer {
 	return &IoUringTracer{
 		containerCollection: containerCollection,
@@ -111,6 +111,10 @@ func (it *IoUringTracer) iouringEventCallback(event *traceriouringtype.Event) {
 	}
 
 	if it.eventCallback != nil {
-		it.eventCallback(event)
+		// Extract container ID and process ID from the IoUring event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		it.eventCallback(event, containerID, processID)
 	}
 }

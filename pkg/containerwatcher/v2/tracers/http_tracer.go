@@ -26,7 +26,7 @@ type HTTPTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent)
+	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracerhttp.Tracer
 }
 
@@ -35,7 +35,7 @@ func NewHTTPTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent),
+	eventCallback func(utils.K8sEvent, string, uint32),
 ) *HTTPTracer {
 	return &HTTPTracer{
 		containerCollection: containerCollection,
@@ -119,6 +119,10 @@ func (ht *HTTPTracer) httpEventCallback(event *tracerhttptype.Event) {
 	}
 
 	if ht.eventCallback != nil {
-		ht.eventCallback(event)
+		// Extract container ID and process ID from the HTTP event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		ht.eventCallback(event, containerID, processID)
 	}
 }

@@ -23,7 +23,7 @@ type HardlinkTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent)
+	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracerhardlink.Tracer
 }
 
@@ -32,7 +32,7 @@ func NewHardlinkTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent),
+	eventCallback func(utils.K8sEvent, string, uint32),
 ) *HardlinkTracer {
 	return &HardlinkTracer{
 		containerCollection: containerCollection,
@@ -118,6 +118,10 @@ func (ht *HardlinkTracer) handleEvent(event *tracerhardlinktype.Event, syscalls 
 	// TODO: Implement syscall enrichment logic
 	// For now, just pass the event to the callback
 	if ht.eventCallback != nil {
-		ht.eventCallback(event)
+		// Extract container ID and process ID from the hardlink event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		ht.eventCallback(event, containerID, processID)
 	}
 }

@@ -24,7 +24,7 @@ type DNSTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent)
+	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracerdns.Tracer
 	socketEnricher      *socketenricher.SocketEnricher
 }
@@ -34,7 +34,7 @@ func NewDNSTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent),
+	eventCallback func(utils.K8sEvent, string, uint32),
 	socketEnricher *socketenricher.SocketEnricher,
 ) *DNSTracer {
 	return &DNSTracer{
@@ -133,6 +133,10 @@ func (dt *DNSTracer) dnsEventCallback(event *tracerdnstype.Event) {
 	dt.containerCollection.EnrichByNetNs(&event.CommonData, event.NetNsID)
 
 	if dt.eventCallback != nil {
-		dt.eventCallback(event)
+		// Extract container ID and process ID from the DNS event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		dt.eventCallback(event, containerID, processID)
 	}
 }

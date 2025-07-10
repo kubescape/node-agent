@@ -23,7 +23,7 @@ type RandomXTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent)
+	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracerandomx.Tracer
 }
 
@@ -32,7 +32,7 @@ func NewRandomXTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent),
+	eventCallback func(utils.K8sEvent, string, uint32),
 ) *RandomXTracer {
 	return &RandomXTracer{
 		containerCollection: containerCollection,
@@ -116,6 +116,10 @@ func (rt *RandomXTracer) randomxEventCallback(event *tracerandomxtype.Event) {
 	}
 
 	if rt.eventCallback != nil {
-		rt.eventCallback(event)
+		// Extract container ID and process ID from the RandomX event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		rt.eventCallback(event, containerID, processID)
 	}
 }
