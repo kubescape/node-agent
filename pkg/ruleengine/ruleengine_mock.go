@@ -17,6 +17,7 @@ func (r *RuleCreatorMock) CreateRulesByTags(tags []string) []RuleEvaluator {
 	}
 	return rl
 }
+
 func (r *RuleCreatorMock) CreateRuleByID(id string) RuleEvaluator {
 	return &RuleMock{RuleID: id}
 }
