@@ -1,8 +1,12 @@
 package containerwatcher
 
 import (
+	"fmt"
+
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
@@ -114,6 +118,9 @@ func (ehf *EventHandlerFactory) processEventWithManagers(eventType utils.EventTy
 	managers, exists := ehf.handlers[eventType]
 	if exists {
 		for _, manager := range managers {
+			logger.L().Info("Processing event with manager",
+				helpers.String("event", string(eventType)),
+				helpers.String("manager", fmt.Sprintf("%T", manager)))
 			manager.ReportEvent(eventType, event)
 		}
 	}
@@ -182,4 +189,7 @@ func (ehf *EventHandlerFactory) registerHandlers(
 
 	// Exit events
 	ehf.handlers[utils.ExitEventType] = []Manager{ruleManager, metrics}
+
+	// Procfs events
+	ehf.handlers[utils.ProcfsEventType] = []Manager{ruleManager, metrics}
 }

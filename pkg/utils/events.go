@@ -32,5 +32,6 @@ const (
 	IoUringEventType      EventType = "iouring"
 	ForkEventType         EventType = "fork"
 	ExitEventType         EventType = "exit"
+	ProcfsEventType       EventType = "procfs"
 	AllEventType          EventType = "all"
 )

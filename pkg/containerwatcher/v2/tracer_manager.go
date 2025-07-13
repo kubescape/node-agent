@@ -2,8 +2,12 @@ package containerwatcher
 
 import (
 	"context"
+	"fmt"
+	"time"
 
+	"github.com/kubescape/go-logger"
 	containerwatcherroot "github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 // V2TracerManager handles all tracer-related operations for v2
@@ -29,7 +33,30 @@ func (vtm *V2TracerManager) StartAllTracers(ctx context.Context) error {
 		vtm.tracerFactory.CreateAllTracers(vtm.tracerManager)
 	}
 
-	// Start all enabled tracers
+	// Start procfs tracer 5 seconds before other tracers
+	var procfsTracer containerwatcherroot.TracerInterface
+	if tracer, exists := vtm.tracerManager.GetTracer(utils.ProcfsEventType); exists {
+		procfsTracer = tracer
+		// Remove procfs tracer from manager temporarily to avoid double-starting
+		delete(vtm.tracerManager.GetAllTracers(), utils.ProcfsEventType)
+
+		if procfsTracer.IsEnabled(vtm.containerWatcher.cfg) {
+			logger.L().Info("Starting procfs tracer 5 seconds before other tracers")
+			if err := procfsTracer.Start(ctx); err != nil {
+				return fmt.Errorf("starting procfs tracer: %w", err)
+			}
+		}
+	}
+
+	// Wait 5 seconds before starting other tracers
+	select {
+	case <-time.After(5 * time.Second):
+		// Continue with other tracers
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// Start all other enabled tracers
 	if err := vtm.tracerManager.StartAllTracers(ctx, vtm.containerWatcher.cfg); err != nil {
 		return err
 	}

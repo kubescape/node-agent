@@ -277,6 +277,14 @@ func (ncw *NewContainerWatcher) Start(ctx context.Context) error {
 		}
 	})
 
+	// Start ordered event queue BEFORE tracers
+	if err := ncw.orderedEventQueue.Start(ctx); err != nil {
+		return fmt.Errorf("starting ordered event queue: %w", err)
+	}
+
+	// Start event processing loop
+	go ncw.eventProcessingLoop()
+
 	// Create tracer factory
 	tracerFactory := tracers.NewTracerFactory(
 		ncw.containerCollection,
@@ -295,14 +303,6 @@ func (ncw *NewContainerWatcher) Start(ctx context.Context) error {
 		return fmt.Errorf("starting tracer manager: %w", err)
 	}
 	ncw.tracerManagerV2 = tracerManagerV2
-
-	// Start ordered event queue
-	if err := ncw.orderedEventQueue.Start(ctx); err != nil {
-		return fmt.Errorf("starting ordered event queue: %w", err)
-	}
-
-	// Start event processing loop
-	go ncw.eventProcessingLoop()
 
 	ncw.running = true
 	logger.L().Info("NewContainerWatcher started successfully")
@@ -330,7 +330,7 @@ func (ncw *NewContainerWatcher) Stop() {
 		ncw.tracerManagerV2.StopAllTracers()
 	}
 
-	// Stop ordered event queue
+	// Stop ordered event queue (after tracers are stopped)
 	if ncw.orderedEventQueue != nil {
 		ncw.orderedEventQueue.Stop()
 	}
@@ -396,6 +396,7 @@ func (ncw *NewContainerWatcher) UnregisterContainerReceiver(receiver containerwa
 func processEvents(enrichedEvents []EnrichedEvent, eventHandlerFactory *EventHandlerFactory) {
 	// Process events through the event handler factory
 	for _, event := range enrichedEvents {
+		logger.L().Info("Processing event", helpers.String("event", string(event.EventType)))
 		eventHandlerFactory.ProcessEvent(event)
 	}
 }
@@ -416,6 +417,7 @@ func (ncw *NewContainerWatcher) eventProcessingLoop() {
 func (ncw *NewContainerWatcher) enrichAndProcess(events []eventEntry) {
 	// Enrich events with additional data
 	enrichedEvents := ncw.enrichEvents(events)
+	logger.L().Info("Enriched events", helpers.Int("count", len(enrichedEvents)))
 
 	// Submit to worker pool for processing
 	if err := ncw.workerPool.Invoke(enrichedEvents); err != nil {
@@ -434,6 +436,11 @@ func (ncw *NewContainerWatcher) enrichEvents(events []eventEntry) []EnrichedEven
 		// Enrich with process tree data if it's a process-related event
 		if isProcessTreeEvent(eventType) {
 			ncw.processTreeFeeder.ReportEvent(eventType, event)
+		}
+
+		if eventType == utils.ProcfsEventType {
+			logger.L().Info("Processing procfs event", helpers.String("event", string(eventType)))
+			continue
 		}
 
 		processTree, err := ncw.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
