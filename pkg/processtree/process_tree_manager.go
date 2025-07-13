@@ -75,10 +75,10 @@ func (ptm *ProcessTreeManagerImpl) Start(ctx context.Context) error {
 
 	// Start all feeders
 	for _, f := range ptm.feeders {
-		if err := f.Start(ptm.ctx); err != nil {
-			ptm.cleanup()
-			return fmt.Errorf("failed to start feeder: %v", err)
-		}
+		// if err := f.Start(ptm.ctx); err != nil {
+		// 	ptm.cleanup()
+		// 	return fmt.Errorf("failed to start feeder: %v", err)
+		// }
 		// Subscribe the feeder to our event channel
 		f.Subscribe(ptm.eventChan)
 	}

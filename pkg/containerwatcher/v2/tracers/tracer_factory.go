@@ -1,10 +1,18 @@
 package tracers
 
 import (
+	"context"
+	"fmt"
+
+	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -15,11 +23,14 @@ type EventQueueInterface interface {
 
 // TracerFactory creates and manages all tracer instances
 type TracerFactory struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	orderedEventQueue   EventQueueInterface
-	socketEnricher      *socketenricher.SocketEnricher
+	containerCollection       *containercollection.ContainerCollection
+	tracerCollection          *tracercollection.TracerCollection
+	containerSelector         containercollection.ContainerSelector
+	orderedEventQueue         EventQueueInterface
+	socketEnricher            *socketenricher.SocketEnricher
+	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
+	ruleManager               rulemanager.RuleManagerClient
+	thirdPartyTracers         mapset.Set[containerwatcher.CustomTracer]
 }
 
 // NewTracerFactory creates a new tracer factory
@@ -29,18 +40,31 @@ func NewTracerFactory(
 	containerSelector containercollection.ContainerSelector,
 	orderedEventQueue EventQueueInterface,
 	socketEnricher *socketenricher.SocketEnricher,
+	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient,
+	ruleManager rulemanager.RuleManagerClient,
+	thirdPartyTracers mapset.Set[containerwatcher.CustomTracer],
 ) *TracerFactory {
 	return &TracerFactory{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		orderedEventQueue:   orderedEventQueue,
-		socketEnricher:      socketEnricher,
+		containerCollection:       containerCollection,
+		tracerCollection:          tracerCollection,
+		containerSelector:         containerSelector,
+		orderedEventQueue:         orderedEventQueue,
+		socketEnricher:            socketEnricher,
+		applicationProfileManager: applicationProfileManager,
+		ruleManager:               ruleManager,
+		thirdPartyTracers:         thirdPartyTracers,
 	}
 }
 
 // CreateAllTracers creates all available tracers and registers them with the manager
 func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManager) {
+	// Create syscall tracer (seccomp)
+	syscallTracer := NewSyscallTracer()
+	manager.RegisterTracer(syscallTracer)
+
+	// Register syscall tracer peek functions with managers
+	tf.registerSyscallTracerPeekFunctions(syscallTracer)
+
 	// Create exec tracer
 	execTracer := NewExecTracer(
 		tf.containerCollection,
@@ -182,9 +206,40 @@ func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManage
 	manager.RegisterTracer(topTracer)
 }
 
+// StartThirdPartyTracers starts all registered third-party tracers
+func (tf *TracerFactory) StartThirdPartyTracers(ctx context.Context) error {
+	for tracer := range tf.thirdPartyTracers.Iter() {
+		if err := tracer.Start(); err != nil {
+			logger.L().Error("error starting custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+			return fmt.Errorf("starting custom tracer %s: %w", tracer.Name(), err)
+		}
+		logger.L().Info("started custom tracer", helpers.String("tracer", tracer.Name()))
+	}
+	return nil
+}
+
+// StopThirdPartyTracers stops all registered third-party tracers
+func (tf *TracerFactory) StopThirdPartyTracers() {
+	for tracer := range tf.thirdPartyTracers.Iter() {
+		if err := tracer.Stop(); err != nil {
+			logger.L().Error("error stopping custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+		}
+	}
+}
+
 // createEventCallback creates a simple callback that sends events directly to the ordered event queue
 func (tf *TracerFactory) createEventCallback(eventType utils.EventType) func(utils.K8sEvent, string, uint32) {
 	return func(event utils.K8sEvent, containerID string, processID uint32) {
 		tf.orderedEventQueue.AddEventDirect(eventType, event, containerID, processID)
+	}
+}
+
+// registerSyscallTracerPeekFunctions registers the syscall tracer peek functions with the managers
+func (tf *TracerFactory) registerSyscallTracerPeekFunctions(syscallTracer *SyscallTracer) {
+	if tf.applicationProfileManager != nil {
+		tf.applicationProfileManager.RegisterPeekFunc(syscallTracer.Peek)
+	}
+	if tf.ruleManager != nil {
+		tf.ruleManager.RegisterPeekFunc(syscallTracer.Peek)
 	}
 }

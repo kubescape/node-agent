@@ -268,9 +268,14 @@ func (ncw *NewContainerWatcher) Start(ctx context.Context) error {
 
 	// Initialize container manager
 	containerManager := NewContainerManager(ncw)
-	// TODO: Implement container manager start logic
-	_ = containerManager
 	ncw.containerManager = containerManager
+
+	// Start container collection (similar to v1 startContainerCollection)
+	logger.L().TimedWrapper("StartContainerCollection", 5*time.Second, func() {
+		if err := containerManager.StartContainerCollection(ctx); err != nil {
+			logger.L().Error("error starting container collection", helpers.Error(err))
+		}
+	})
 
 	// Create tracer factory
 	tracerFactory := tracers.NewTracerFactory(
@@ -279,6 +284,9 @@ func (ncw *NewContainerWatcher) Start(ctx context.Context) error {
 		ncw.containerSelector,
 		ncw.orderedEventQueue,
 		ncw.socketEnricher,
+		ncw.applicationProfileManager,
+		ncw.ruleManager,
+		ncw.thirdPartyTracers,
 	)
 
 	// Initialize tracer manager
@@ -314,7 +322,7 @@ func (ncw *NewContainerWatcher) Stop() {
 
 	// Stop container manager
 	if ncw.containerManager != nil {
-		// TODO: Implement container manager stop logic
+		ncw.containerManager.StopContainerCollection()
 	}
 
 	// Stop tracer manager
