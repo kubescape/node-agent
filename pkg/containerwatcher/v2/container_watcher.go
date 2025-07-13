@@ -153,7 +153,7 @@ func CreateNewContainerWatcher(
 
 	// Create worker pool for processing events
 	workerPool, err := ants.NewPoolWithFunc(cfg.WorkerPoolSize, func(i interface{}) {
-		enrichedEvents := i.([]EnrichedEvent)
+		enrichedEvents := i.([]*containerwatcher.EnrichedEvent)
 		processEvents(enrichedEvents, eventHandlerFactory)
 	})
 	if err != nil {
@@ -393,7 +393,7 @@ func (ncw *NewContainerWatcher) UnregisterContainerReceiver(receiver containerwa
 	ncw.thirdPartyContainerReceivers.Remove(receiver)
 }
 
-func processEvents(enrichedEvents []EnrichedEvent, eventHandlerFactory *EventHandlerFactory) {
+func processEvents(enrichedEvents []*containerwatcher.EnrichedEvent, eventHandlerFactory *EventHandlerFactory) {
 	// Process events through the event handler factory
 	for _, event := range enrichedEvents {
 		if event.EventType == utils.ExecveEventType {
@@ -428,8 +428,8 @@ func (ncw *NewContainerWatcher) enrichAndProcess(events []eventEntry) {
 }
 
 // enrichEvents enriches events with additional data like process tree information
-func (ncw *NewContainerWatcher) enrichEvents(events []eventEntry) []EnrichedEvent {
-	enrichedEvents := make([]EnrichedEvent, 0, len(events))
+func (ncw *NewContainerWatcher) enrichEvents(events []eventEntry) []*containerwatcher.EnrichedEvent {
+	enrichedEvents := make([]*containerwatcher.EnrichedEvent, 0, len(events))
 
 	for _, entry := range events {
 		event := entry.Event
@@ -446,7 +446,7 @@ func (ncw *NewContainerWatcher) enrichEvents(events []eventEntry) []EnrichedEven
 
 		processTree, _ := ncw.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
 
-		enrichedEvents = append(enrichedEvents, EnrichedEvent{
+		enrichedEvents = append(enrichedEvents, &containerwatcher.EnrichedEvent{
 			Event:       event,
 			EventType:   eventType,
 			ProcessTree: processTree,

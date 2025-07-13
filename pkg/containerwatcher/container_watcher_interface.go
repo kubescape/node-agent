@@ -2,7 +2,9 @@ package containerwatcher
 
 import (
 	"context"
+	"time"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
@@ -35,10 +37,22 @@ type EventReceiver interface {
 	ReportEvent(eventType utils.EventType, event utils.K8sEvent)
 }
 
+type EnrichedEventReceiver interface {
+	ReportEnrichedEvent(enrichedEvent *EnrichedEvent)
+}
+
 type ContainerReceiver interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
 }
 
 type TaskBasedEnricher interface {
 	SubmitEnrichmentTask(event utils.EnrichEvent, syscalls []uint64, callback ResultCallback)
+}
+
+type EnrichedEvent struct {
+	EventType   utils.EventType
+	Event       utils.K8sEvent
+	Timestamp   time.Time
+	ContainerID string
+	ProcessTree apitypes.Process
 }

@@ -102,7 +102,7 @@ func (ehf *EventHandlerFactory) GetManagers(eventType utils.EventType) ([]Manage
 }
 
 // ProcessEvent processes an enriched event
-func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent EnrichedEvent) {
+func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *containerwatcher.EnrichedEvent) {
 	// For now, process directly without third party enrichment
 	// TODO: Implement proper third party enrichment support
 	ehf.processEventWithManagers(enrichedEvent.EventType, enrichedEvent.Event)

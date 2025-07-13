@@ -5,6 +5,7 @@ import (
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 )
@@ -33,7 +34,7 @@ func TestNewEnrichedEvent(t *testing.T) {
 
 func TestEnrichedEvent_Structure(t *testing.T) {
 	// Test the structure of enriched event
-	enrichedEvent := &EnrichedEvent{
+	enrichedEvent := &containerwatcher.EnrichedEvent{
 		EventType:   utils.OpenEventType,
 		Event:       MockEvent{ID: "open-event"},
 		Timestamp:   time.Now(),
@@ -146,7 +147,7 @@ func TestEnrichedEvent_TimestampOrdering(t *testing.T) {
 	// Test timestamp ordering for event processing
 	baseTime := time.Now()
 
-	events := []*EnrichedEvent{
+	events := []*containerwatcher.EnrichedEvent{
 		NewEnrichedEvent(utils.ExecveEventType, MockEvent{ID: "third"}, baseTime.Add(2*time.Second), "container", apitypes.Process{}),
 		NewEnrichedEvent(utils.OpenEventType, MockEvent{ID: "first"}, baseTime, "container", apitypes.Process{}),
 		NewEnrichedEvent(utils.NetworkEventType, MockEvent{ID: "second"}, baseTime.Add(1*time.Second), "container", apitypes.Process{}),

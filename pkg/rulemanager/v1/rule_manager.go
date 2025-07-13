@@ -20,6 +20,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
@@ -264,6 +265,25 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 	rm.syscallPeekFunc = peek
 }
 
+func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *containerwatcher.EnrichedEvent) {
+	event := enrichedEvent.Event
+	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Warning("RuleManager - failed to get namespace and pod name from custom event")
+		return
+	}
+
+	// list custom rules
+	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
+	res := rm.processEvent(enrichedEvent.EventType, event, rules)
+	if res != nil {
+		runtimeProcessDetails := res.GetRuntimeProcessDetails()
+		runtimeProcessDetails.ProcessTree = enrichedEvent.ProcessTree
+		res.SetRuntimeProcessDetails(runtimeProcessDetails)
+		rm.exporter.SendRuleAlert(res)
+	}
+}
+
 func (rm *RuleManager) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
 	if event.GetNamespace() == "" || event.GetPod() == "" {
 		logger.L().Warning("RuleManager - failed to get namespace and pod name from custom event")
@@ -272,15 +292,18 @@ func (rm *RuleManager) ReportEvent(eventType utils.EventType, event utils.K8sEve
 
 	// list custom rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	rm.processEvent(eventType, event, rules)
+	res := rm.processEvent(eventType, event, rules)
+	if res != nil {
+		rm.exporter.SendRuleAlert(res)
+	}
 }
 
-func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEvent, rules []ruleengine.RuleEvaluator) {
+func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEvent, rules []ruleengine.RuleEvaluator) ruleengine.RuleFailure {
 	podId := utils.CreateK8sPodID(event.GetNamespace(), event.GetPod())
 	details, ok := rm.podToWlid.Load(podId)
 	if !ok {
 		logger.L().Debug("RuleManager - pod not present in podToWlid, skipping event", helpers.String("podId", podId))
-		return
+		return nil
 	}
 	for _, rule := range rules {
 		if rule == nil {
@@ -303,11 +326,13 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 			if res != nil {
 				res.SetWorkloadDetails(details)
 				rm.exporter.SendRuleAlert(res)
+				return res
 			}
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())
 	}
+	return nil
 }
 
 func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {
@@ -354,44 +379,6 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 	}
 
 	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
-	runtimeProcessDetails := ruleFailure.GetRuntimeProcessDetails()
-
-	// Wait for process processing to complete before getting the process tree
-	pid := ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID
-	if err := rm.processManager.WaitForProcessProcessing(pid, 100*time.Millisecond); err != nil {
-		logger.L().Warning("Failed to wait for process processing, continuing with rule evaluation",
-			helpers.String("pid", fmt.Sprintf("%d", pid)),
-			helpers.Error(err))
-	}
-
-	// err = backoff.Retry(func() error {
-	// 	tree, err := rm.processManager.GetContainerProcessTree(
-	// 		ruleFailure.GetRuntimeProcessDetails().ContainerID,
-	// 		ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID,
-	// 	)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	runtimeProcessDetails.ProcessTree = tree
-	// 	return nil
-	// }, backoff.NewExponentialBackOff(
-	// 	backoff.WithInitialInterval(50*time.Millisecond),
-	// 	backoff.WithMaxInterval(200*time.Millisecond),
-	// 	backoff.WithMaxElapsedTime(500*time.Millisecond),
-	// ))
-
-	if err != nil && rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeProcessDetails().ContainerID) {
-		logger.L().Debug("RuleManager - failed to get process tree, trying to get process tree from shim",
-			helpers.Error(err),
-			helpers.String("container ID", ruleFailure.GetRuntimeProcessDetails().ContainerID))
-
-		if tree, err := utils.CreateProcessTree(&runtimeProcessDetails.ProcessTree,
-			rm.containerIdToShimPid.Get(ruleFailure.GetRuntimeProcessDetails().ContainerID)); err == nil {
-			runtimeProcessDetails.ProcessTree = tree
-		}
-	}
-
-	ruleFailure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
 	// Enrich RuntimeAlertK8sDetails
 	runtimek8sdetails := ruleFailure.GetRuntimeAlertK8sDetails()
@@ -430,7 +417,7 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
 
-	if cloudServices := rm.dnsManager.ResolveContainerProcessToCloudServices(ruleFailure.GetTriggerEvent().Runtime.ContainerID, runtimeProcessDetails.ProcessTree.PID); cloudServices != nil {
+	if cloudServices := rm.dnsManager.ResolveContainerProcessToCloudServices(ruleFailure.GetTriggerEvent().Runtime.ContainerID, ruleFailure.GetBaseRuntimeAlert().InfectedPID); cloudServices != nil {
 		ruleFailure.SetCloudServices(cloudServices.ToSlice())
 	}
 
