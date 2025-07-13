@@ -279,6 +279,10 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *containerwatcher.Enric
 	if res != nil {
 		runtimeProcessDetails := res.GetRuntimeProcessDetails()
 		runtimeProcessDetails.ProcessTree = enrichedEvent.ProcessTree
+		if enrichedEvent.ProcessTree.PID == 0 {
+			logger.L().Warning("RuleManager - process tree pid is 0", helpers.String("event", fmt.Sprintf("%+v", enrichedEvent)))
+		}
+
 		res.SetRuntimeProcessDetails(runtimeProcessDetails)
 		rm.exporter.SendRuleAlert(res)
 	}

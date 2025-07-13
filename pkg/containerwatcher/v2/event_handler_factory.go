@@ -105,16 +105,22 @@ func (ehf *EventHandlerFactory) GetManagers(eventType utils.EventType) ([]Manage
 func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *containerwatcher.EnrichedEvent) {
 	// For now, process directly without third party enrichment
 	// TODO: Implement proper third party enrichment support
-	ehf.processEventWithManagers(enrichedEvent.EventType, enrichedEvent.Event)
+	ehf.processEventWithManagers(enrichedEvent)
 }
 
 // processEventWithManagers processes an event with the registered managers and third party receivers
-func (ehf *EventHandlerFactory) processEventWithManagers(eventType utils.EventType, event utils.K8sEvent) {
+func (ehf *EventHandlerFactory) processEventWithManagers(enrichedEvent *containerwatcher.EnrichedEvent) {
 	// Process with registered managers
+	eventType := enrichedEvent.EventType
+	event := enrichedEvent.Event
 	managers, exists := ehf.handlers[eventType]
 	if exists {
 		for _, manager := range managers {
-			manager.ReportEvent(eventType, event)
+			if enricher_manager, ok := manager.(containerwatcher.EnrichedEventReceiver); ok {
+				enricher_manager.ReportEnrichedEvent(enrichedEvent)
+			} else {
+				manager.ReportEvent(eventType, event)
+			}
 		}
 	}
 
