@@ -34,6 +34,7 @@ func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.P
 		if process, err := c.getProcessFromProc(int(containerPID)); err == nil {
 			shimPID := process.PPID
 			c.containerIdToShimPid[containerID] = shimPID
+			logger.L().Info("ContainerProcessTree.ContainerCallback - added container", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 		} else {
 			logger.L().Warning("ContainerProcessTree.ContainerCallback - failed to get container process info",
 				helpers.String("containerID", containerID),
@@ -41,20 +42,19 @@ func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.P
 		}
 	case containercollection.EventTypeRemoveContainer:
 		delete(c.containerIdToShimPid, containerID)
+		logger.L().Info("ContainerProcessTree.ContainerCallback - removed container", helpers.String("containerID", containerID))
 	}
 }
 
 func (c *containerProcessTreeImpl) GetContainerTreeNodes(containerID string, fullTree map[uint32]*apitypes.Process) ([]apitypes.Process, error) {
 	shimPID, ok := c.containerIdToShimPid[containerID]
 	if !ok {
-		logger.L().Debug("GetContainerTree Not found Shim PID", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 		return nil, nil
 	}
 
 	// Find the process node for the shim PID
 	shimNode := fullTree[shimPID]
 	if shimNode == nil {
-		logger.L().Debug("GetContainerTree Not found Shim PID", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 		return nil, nil
 	}
 
@@ -74,21 +74,18 @@ func (c *containerProcessTreeImpl) GetContainerTreeNodes(containerID string, ful
 func (c *containerProcessTreeImpl) GetContainerSubtree(containerID string, targetPID uint32, fullTree map[uint32]*apitypes.Process) (apitypes.Process, error) {
 	shimPID, ok := c.containerIdToShimPid[containerID]
 	if !ok {
-		logger.L().Debug("GetContainerSubtree Not found Shim PID", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 		return apitypes.Process{}, fmt.Errorf("container %s not found", containerID)
 	}
 
 	// Find the process node for the shim PID
 	shimNode := fullTree[shimPID]
 	if shimNode == nil {
-		logger.L().Debug("GetContainerSubtree Not found Shim PID", helpers.String("containerID", containerID), helpers.Interface("shimPID", shimPID))
 		return apitypes.Process{}, fmt.Errorf("shim process %d not found in process tree", shimPID)
 	}
 
 	// Find the target process node
 	targetNode := fullTree[targetPID]
 	if targetNode == nil {
-		logger.L().Debug("GetContainerSubtree Target PID not found", helpers.String("containerID", containerID), helpers.Interface("targetPID", targetPID))
 		return apitypes.Process{}, fmt.Errorf("target process %d not found in process tree", targetPID)
 	}
 

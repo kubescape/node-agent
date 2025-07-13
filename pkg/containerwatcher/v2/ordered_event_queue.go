@@ -195,8 +195,8 @@ func (oeq *OrderedEventQueue) processBufferLocked() {
 	// Send sorted events to output channel
 	select {
 	case oeq.outputChan <- eventsToOutput:
-		logger.L().Debug("Sent sorted events to output", helpers.Int("eventCount", len(eventsToOutput)))
+		// logger.L().Debug("Sent sorted events to output", helpers.Int("eventCount", len(eventsToOutput)))
 	default:
-		logger.L().Warning("Output channel full, dropping events", helpers.Int("eventCount", len(eventsToOutput)))
+		// logger.L().Warning("Output channel full, dropping events", helpers.Int("eventCount", len(eventsToOutput)))
 	}
 }

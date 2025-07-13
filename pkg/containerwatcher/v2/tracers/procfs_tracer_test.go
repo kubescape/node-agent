@@ -92,7 +92,7 @@ func TestProcfsTracer_StartStop(t *testing.T) {
 }
 
 func TestProcfsEvent_InterfaceMethods(t *testing.T) {
-	event := &ProcfsEvent{
+	event := &utils.ProcfsEvent{
 		Type:      types.NORMAL,
 		Timestamp: time.Now(),
 		PID:       123,

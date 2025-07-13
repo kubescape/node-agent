@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
@@ -243,14 +242,6 @@ func main() {
 		feeder.NewEventFeeder(),
 	}
 
-	// Create event feeder for exec/fork/exit events
-	eventFeeder := feeder.NewEventFeeder()
-	feeders = append(feeders, eventFeeder)
-
-	// Create procfs feeder for periodic scanning
-	procfsFeeder := feeder.NewProcfsFeeder(5 * time.Second) // Scan every 5 seconds
-	feeders = append(feeders, procfsFeeder)
-
 	// Create the process tree manager
 	processTreeManager = processtree.NewProcessTreeManager(
 		processTreeCreator,
@@ -367,7 +358,7 @@ func main() {
 	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
 		igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager,
 		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
-		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree, eventFeeder)
+		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree, feeders[0].(*feeder.EventFeeder))
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

@@ -8,8 +8,6 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
@@ -75,10 +73,10 @@ func (ptm *ProcessTreeManagerImpl) Start(ctx context.Context) error {
 
 	// Start all feeders
 	for _, f := range ptm.feeders {
-		// if err := f.Start(ptm.ctx); err != nil {
-		// 	ptm.cleanup()
-		// 	return fmt.Errorf("failed to start feeder: %v", err)
-		// }
+		if err := f.Start(ptm.ctx); err != nil {
+			ptm.cleanup()
+			return fmt.Errorf("failed to start feeder: %v", err)
+		}
 		// Subscribe the feeder to our event channel
 		f.Subscribe(ptm.eventChan)
 	}
@@ -143,7 +141,6 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 	// If we failed, wait up to 500ms for events to be processed and try again
 	processTree, err = ptm.retryGetContainerProcessTree(containerID, pid, err)
 	if err != nil {
-		logger.L().Error("Failed to get container process tree", helpers.Error(err), helpers.String("containerID", containerID), helpers.Int("pid", int(pid)))
 		return apitypes.Process{}, fmt.Errorf("failed to get container process tree: %v", err)
 	}
 
@@ -232,10 +229,8 @@ func (ptm *ProcessTreeManagerImpl) handleTimeoutError(containerID string, pid ui
 	defer ptm.mutex.RUnlock()
 
 	processNode, _ := ptm.creator.GetProcessNode(int(pid))
-	logger.L().Error("Failed to get process node after waiting", helpers.Error(originalErr))
 
 	if processNode == nil {
-		logger.L().Error("Process not found after waiting", helpers.String("pid", fmt.Sprintf("%d", pid)), helpers.String("containerID", containerID))
 		return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s after waiting", pid, containerID)
 	}
 
@@ -266,13 +261,9 @@ func (ptm *ProcessTreeManagerImpl) WaitForProcessProcessing(pid uint32, timeout 
 	for {
 		select {
 		case <-ctx.Done():
-			logger.L().Debug("Timeout waiting for process processing",
-				helpers.String("pid", fmt.Sprintf("%d", pid)))
 			return fmt.Errorf("timeout waiting for process processing: pid=%d", pid)
 		case <-ticker.C:
 			if _, exists := ptm.processedExecEvents.Get(pid); exists {
-				logger.L().Debug("Process processing completed",
-					helpers.String("pid", fmt.Sprintf("%d", pid)))
 				return nil
 			}
 		}

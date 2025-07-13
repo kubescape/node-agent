@@ -78,6 +78,8 @@ func (ef *EventFeeder) ReportEvent(eventType utils.EventType, event utils.K8sEve
 		processEvent = ef.convertForkEvent(event.(*tracerforktype.Event))
 	case utils.ExitEventType:
 		processEvent = ef.convertExitEvent(event.(*tracerexittype.Event))
+	case utils.ProcfsEventType:
+		processEvent = ef.convertProcfsEvent(event.(*utils.ProcfsEvent))
 	default:
 		// Unknown event type, ignore
 		return
@@ -185,6 +187,29 @@ func (ef *EventFeeder) convertExitEvent(exitEvent *tracerexittype.Event) Process
 	// Set container context if available
 	if exitEvent.Runtime.ContainerID != "" {
 		event.ContainerID = exitEvent.Runtime.ContainerID
+	}
+
+	return event
+}
+
+// convertProcfsEvent converts a ProcfsEvent to ProcessEvent
+func (ef *EventFeeder) convertProcfsEvent(procfsEvent *utils.ProcfsEvent) ProcessEvent {
+	event := ProcessEvent{
+		Type:        ProcfsEvent,
+		Timestamp:   procfsEvent.Timestamp,
+		PID:         procfsEvent.PID,
+		PPID:        procfsEvent.PPID,
+		Comm:        procfsEvent.Comm,
+		Pcomm:       procfsEvent.Pcomm,
+		Cmdline:     procfsEvent.Cmdline,
+		Uid:         procfsEvent.Uid,
+		Gid:         procfsEvent.Gid,
+		Cwd:         procfsEvent.Cwd,
+		Path:        procfsEvent.Path,
+		StartTimeNs: procfsEvent.StartTimeNs,
+		ContainerID: procfsEvent.ContainerID,
+		HostPID:     procfsEvent.HostPID,
+		HostPPID:    procfsEvent.HostPPID,
 	}
 
 	return event

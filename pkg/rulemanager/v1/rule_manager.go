@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/cenkalti/backoff/v4"
 	backoffv5 "github.com/cenkalti/backoff/v5"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/dustin/go-humanize"
@@ -365,21 +364,21 @@ func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) rul
 			helpers.Error(err))
 	}
 
-	err = backoff.Retry(func() error {
-		tree, err := rm.processManager.GetContainerProcessTree(
-			ruleFailure.GetRuntimeProcessDetails().ContainerID,
-			ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID,
-		)
-		if err != nil {
-			return err
-		}
-		runtimeProcessDetails.ProcessTree = tree
-		return nil
-	}, backoff.NewExponentialBackOff(
-		backoff.WithInitialInterval(50*time.Millisecond),
-		backoff.WithMaxInterval(200*time.Millisecond),
-		backoff.WithMaxElapsedTime(500*time.Millisecond),
-	))
+	// err = backoff.Retry(func() error {
+	// 	tree, err := rm.processManager.GetContainerProcessTree(
+	// 		ruleFailure.GetRuntimeProcessDetails().ContainerID,
+	// 		ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID,
+	// 	)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	runtimeProcessDetails.ProcessTree = tree
+	// 	return nil
+	// }, backoff.NewExponentialBackOff(
+	// 	backoff.WithInitialInterval(50*time.Millisecond),
+	// 	backoff.WithMaxInterval(200*time.Millisecond),
+	// 	backoff.WithMaxElapsedTime(500*time.Millisecond),
+	// ))
 
 	if err != nil && rm.containerIdToShimPid.Has(ruleFailure.GetRuntimeProcessDetails().ContainerID) {
 		logger.L().Debug("RuleManager - failed to get process tree, trying to get process tree from shim",

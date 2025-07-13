@@ -106,9 +106,11 @@ func (cm *ContainerManager) StartContainerCollection(ctx context.Context) error 
 	}
 
 	// Initialize the container collection
+	logger.L().Info("ContainerManager - initializing container collection with options", helpers.Int("optionCount", len(opts)))
 	if err := ncw.containerCollection.Initialize(opts...); err != nil {
 		return fmt.Errorf("initializing container collection: %w", err)
 	}
+	logger.L().Info("ContainerManager - container collection initialized successfully")
 
 	// Start monitoring for rule bindings notifications
 	go ncw.startRunningContainers()

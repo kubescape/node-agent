@@ -20,12 +20,17 @@ const (
 
 // containerCallback handles container events synchronously
 func (ncw *NewContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
-	logger.L().Debug("NewContainerWatcher.containerCallback - received container event", helpers.String("event", fmt.Sprintf("%+v", notif)), helpers.String("container", fmt.Sprintf("%+v", notif.Container)))
+	logger.L().Info("NewContainerWatcher.containerCallback - received container event", helpers.String("event", fmt.Sprintf("%+v", notif)), helpers.String("container", fmt.Sprintf("%+v", notif.Container)))
 	if notif.Container == nil || notif.Container.Runtime.ContainerID == "" {
+		logger.L().Info("NewContainerWatcher.containerCallback - container is nil or has empty ContainerID")
 		return
 	}
 	// check if the container should be ignored
 	if ncw.cfg.IgnoreContainer(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.K8s.PodLabels) {
+		logger.L().Info("NewContainerWatcher.containerCallback - container ignored",
+			helpers.String("namespace", notif.Container.K8s.Namespace),
+			helpers.String("podName", notif.Container.K8s.PodName),
+			helpers.String("containerID", notif.Container.Runtime.ContainerID))
 		// avoid loops when the container is being removed
 		if notif.Type == containercollection.EventTypeAddContainer {
 			ncw.unregisterContainer(notif.Container)
@@ -33,6 +38,11 @@ func (ncw *NewContainerWatcher) containerCallback(notif containercollection.PubS
 		return
 	}
 	// scale up the pool size if needed pkg/config/config.go:66
+	logger.L().Info("NewContainerWatcher.containerCallback - processing container",
+		helpers.String("containerID", notif.Container.Runtime.ContainerID),
+		helpers.String("namespace", notif.Container.K8s.Namespace),
+		helpers.String("podName", notif.Container.K8s.PodName),
+		helpers.Int("callbackCount", len(ncw.callbacks)))
 	for _, callback := range ncw.callbacks {
 		ncw.pool.Submit(func() {
 			callback(notif)
