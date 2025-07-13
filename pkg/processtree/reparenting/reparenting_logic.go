@@ -31,10 +31,8 @@ func NewReparentingLogic() (ReparentingLogic, error) {
 
 // addDefaultStrategies adds the default reparenting strategies in priority order
 func (rl *reparentingLogicImpl) addDefaultStrategies() {
-	// Add strategies in priority order: containerd (highest), docker, systemd, default (lowest)
+	// Add only containerd and default strategies
 	rl.AddStrategy(&strategies.ContainerdStrategy{})
-	rl.AddStrategy(&strategies.DockerStrategy{})
-	rl.AddStrategy(&strategies.SystemdStrategy{})
 	rl.AddStrategy(&strategies.DefaultStrategy{})
 }
 
@@ -52,7 +50,28 @@ func (rl *reparentingLogicImpl) HandleProcessExit(exitingPID uint32, children []
 		}
 	}
 
-	// Scan strategies in exact order: containerd → docker → systemd → default
+	// First, try to use the PPID of the exiting process if it exists
+	if exitingProcess, exists := processMap[exitingPID]; exists {
+		ppid := exitingProcess.PPID
+		if ppid > 0 {
+			// Check if the parent process still exists in the process map
+			if _, parentExists := processMap[ppid]; parentExists {
+				logger.L().Info("Reparenting: Using PPID of exiting process",
+					helpers.String("exiting_pid", fmt.Sprintf("%d", exitingPID)),
+					helpers.String("new_parent_pid", fmt.Sprintf("%d", ppid)),
+					helpers.String("children_count", fmt.Sprintf("%d", len(children))))
+
+				return ReparentingResult{
+					NewParentPID: ppid,
+					Strategy:     "ppid",
+					Verified:     true,
+					Error:        nil,
+				}
+			}
+		}
+	}
+
+	// If PPID is not available or doesn't exist, fallback to strategies
 	var selectedStrategy ReparentingStrategy
 	for _, strategy := range rl.strategies {
 		if strategy.IsApplicable(exitingPID, containerTree, processMap) {
@@ -69,7 +88,7 @@ func (rl *reparentingLogicImpl) HandleProcessExit(exitingPID uint32, children []
 	// Get the new parent PID from the selected strategy
 	newParentPID := selectedStrategy.GetNewParentPID(exitingPID, children, containerTree, processMap)
 
-	logger.L().Info("Reparenting: Selected strategy",
+	logger.L().Info("Reparenting: Using fallback strategy",
 		helpers.String("strategy", selectedStrategy.Name()),
 		helpers.String("exiting_pid", fmt.Sprintf("%d", exitingPID)),
 		helpers.String("new_parent_pid", fmt.Sprintf("%d", newParentPID)),

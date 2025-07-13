@@ -17,7 +17,7 @@ func TestNewReparentingLogic(t *testing.T) {
 	assert.NotNil(t, rl)
 
 	strategies := rl.GetStrategies()
-	assert.Len(t, strategies, 4) // containerd, docker, systemd, default
+	assert.Len(t, strategies, 2) // containerd, default only
 
 	// Check that all expected strategies are present
 	strategyNames := make(map[string]bool)
@@ -26,15 +26,11 @@ func TestNewReparentingLogic(t *testing.T) {
 	}
 
 	assert.True(t, strategyNames["containerd"])
-	assert.True(t, strategyNames["docker"])
-	assert.True(t, strategyNames["systemd"])
 	assert.True(t, strategyNames["default"])
 
-	// Explicitly verify the order: containerd → docker → systemd → default
+	// Explicitly verify the order: containerd → default
 	assert.Equal(t, "containerd", strategies[0].Name())
-	assert.Equal(t, "docker", strategies[1].Name())
-	assert.Equal(t, "systemd", strategies[2].Name())
-	assert.Equal(t, "default", strategies[3].Name())
+	assert.Equal(t, "default", strategies[1].Name())
 }
 
 func TestContainerdStrategy(t *testing.T) {
@@ -47,83 +43,6 @@ func TestContainerdStrategy(t *testing.T) {
 	// Test GetNewParentPID - should return 1 when no container tree
 	newParentPID := cs.GetNewParentPID(100, nil, nil, make(map[uint32]*apitypes.Process))
 	assert.Equal(t, uint32(1), newParentPID)
-}
-
-func TestSystemdStrategy(t *testing.T) {
-	ss := &strategies.SystemdStrategy{}
-	assert.Equal(t, "systemd", ss.Name())
-
-	processMap := map[uint32]*apitypes.Process{
-		100: {
-			PID:  100,
-			PPID: 1,
-			Comm: "systemd-user-sessions",
-		},
-		200: {
-			PID:  200,
-			PPID: 100,
-			Comm: "some-process",
-		},
-		1: {
-			PID:  1,
-			PPID: 0,
-			Comm: "systemd",
-		},
-	}
-
-	// Test IsApplicable with systemd process
-	assert.True(t, ss.IsApplicable(100, nil, processMap))
-
-	// Test IsApplicable with child of systemd process
-	assert.True(t, ss.IsApplicable(200, nil, processMap))
-
-	// Test IsApplicable with non-systemd process (not under systemd)
-	processMap[300] = &apitypes.Process{
-		PID:  300,
-		PPID: 999, // Different parent, not systemd
-		Comm: "nginx",
-	}
-	assert.False(t, ss.IsApplicable(300, nil, processMap))
-
-	// Test GetNewParentPID
-	newParentPID := ss.GetNewParentPID(100, nil, nil, processMap)
-	assert.Equal(t, uint32(1), newParentPID)
-}
-
-func TestDockerStrategy(t *testing.T) {
-	ds := &strategies.DockerStrategy{}
-	assert.Equal(t, "docker", ds.Name())
-
-	processMap := map[uint32]*apitypes.Process{
-		100: {
-			PID:  100,
-			PPID: 1,
-			Comm: "dockerd",
-		},
-		200: {
-			PID:  200,
-			PPID: 100,
-			Comm: "docker-proxy",
-		},
-	}
-
-	// Test IsApplicable with docker process
-	assert.True(t, ds.IsApplicable(100, nil, processMap))
-
-	// Test IsApplicable with child of docker process
-	assert.True(t, ds.IsApplicable(200, nil, processMap))
-
-	// Test IsApplicable with non-docker process
-	processMap[300] = &apitypes.Process{
-		PID:  300,
-		PPID: 1,
-		Comm: "nginx",
-	}
-	assert.False(t, ds.IsApplicable(300, nil, processMap))
-
-	// Test GetNewParentPID
-	newParentPID := ds.GetNewParentPID(200, nil, nil, processMap)
-	assert.Equal(t, uint32(100), newParentPID) // Should return dockerd PID
 }
 
 func TestDefaultStrategy(t *testing.T) {
@@ -167,6 +86,11 @@ func TestReparentingLogic_HandleProcessExit_WithChildren(t *testing.T) {
 	}
 
 	processMap := map[uint32]*apitypes.Process{
+		1: {
+			PID:  1,
+			PPID: 0,
+			Comm: "init",
+		},
 		100: {
 			PID:  100,
 			PPID: 1,
@@ -177,9 +101,10 @@ func TestReparentingLogic_HandleProcessExit_WithChildren(t *testing.T) {
 	}
 
 	result := rl.HandleProcessExit(100, children, nil, processMap)
-	assert.Equal(t, uint32(1), result.NewParentPID) // Should use default strategy
-	assert.Equal(t, "default", result.Strategy)
-	// Note: verification will fail in tests since we can't access real procfs
+	assert.Equal(t, uint32(1), result.NewParentPID) // Should use PPID of exiting process
+	assert.Equal(t, "ppid", result.Strategy)
+	assert.True(t, result.Verified)
+	assert.Nil(t, result.Error)
 }
 
 func TestReparentingLogic_AddStrategy(t *testing.T) {
@@ -221,104 +146,6 @@ func (cts *CustomTestStrategy) GetNewParentPID(exitingPID uint32, children []*ap
 	return 888 // Always return PID 888
 }
 
-func TestDockerStrategy_Hierarchy(t *testing.T) {
-	ds := &strategies.DockerStrategy{}
-
-	// Create a docker hierarchy: dockerd -> docker-proxy -> nginx -> worker
-	processMap := map[uint32]*apitypes.Process{
-		1: {
-			PID:  1,
-			PPID: 0,
-			Comm: "init",
-		},
-		100: {
-			PID:  100,
-			PPID: 1,
-			Comm: "dockerd",
-		},
-		200: {
-			PID:  200,
-			PPID: 100,
-			Comm: "docker-proxy",
-		},
-		300: {
-			PID:  300,
-			PPID: 200,
-			Comm: "nginx",
-		},
-		400: {
-			PID:  400,
-			PPID: 300,
-			Comm: "nginx-worker",
-		},
-	}
-
-	// Test that all processes in the docker hierarchy are applicable
-	assert.True(t, ds.IsApplicable(100, nil, processMap)) // dockerd
-	assert.True(t, ds.IsApplicable(200, nil, processMap)) // docker-proxy
-	assert.True(t, ds.IsApplicable(300, nil, processMap)) // nginx
-	assert.True(t, ds.IsApplicable(400, nil, processMap)) // nginx-worker
-
-	// Test that processes outside the docker hierarchy are not applicable
-	processMap[500] = &apitypes.Process{
-		PID:  500,
-		PPID: 1,
-		Comm: "nginx",
-	}
-	assert.False(t, ds.IsApplicable(500, nil, processMap))
-}
-
-func TestSystemdStrategy_Hierarchy(t *testing.T) {
-	ss := &strategies.SystemdStrategy{}
-
-	// Create a systemd hierarchy: systemd -> systemd-user-sessions -> user-process
-	processMap := map[uint32]*apitypes.Process{
-		1: {
-			PID:  1,
-			PPID: 0,
-			Comm: "systemd",
-		},
-		100: {
-			PID:  100,
-			PPID: 1,
-			Comm: "systemd-user-sessions",
-		},
-		200: {
-			PID:  200,
-			PPID: 100,
-			Comm: "user-process",
-		},
-		300: {
-			PID:  300,
-			PPID: 200,
-			Comm: "child-process",
-		},
-	}
-
-	// Test that all processes in the systemd hierarchy are applicable
-	assert.True(t, ss.IsApplicable(1, nil, processMap))   // systemd
-	assert.True(t, ss.IsApplicable(100, nil, processMap)) // systemd-user-sessions
-	assert.True(t, ss.IsApplicable(200, nil, processMap)) // user-process
-	assert.True(t, ss.IsApplicable(300, nil, processMap)) // child-process
-
-	// Test that processes outside the systemd hierarchy are not applicable
-	// Create a process that's not under systemd (different parent chain)
-	processMap[500] = &apitypes.Process{
-		PID:  500,
-		PPID: 999, // Different parent, not systemd
-		Comm: "nginx",
-	}
-	assert.False(t, ss.IsApplicable(500, nil, processMap))
-
-	// Test that a process with systemd as direct parent should be applicable
-	processMap[600] = &apitypes.Process{
-		PID:  600,
-		PPID: 1, // Direct child of systemd
-		Comm: "nginx",
-	}
-	assert.True(t, ss.IsApplicable(600, nil, processMap))
-}
-
 func TestStrategyPriority(t *testing.T) {
 	rl, err := NewReparentingLogic()
 	require.NoError(t, err)
@@ -329,7 +156,7 @@ func TestStrategyPriority(t *testing.T) {
 		containerProcesses: map[uint32]bool{100: true},
 	}
 
-	// Create a process that could be under both containerd and docker
+	// Create a process that could be under containerd but PPID takes priority
 	processMap := map[uint32]*apitypes.Process{
 		100: {
 			PID:  100,
@@ -344,7 +171,7 @@ func TestStrategyPriority(t *testing.T) {
 		1: {
 			PID:  1,
 			PPID: 0,
-			Comm: "systemd",
+			Comm: "init",
 		},
 	}
 
@@ -356,27 +183,27 @@ func TestStrategyPriority(t *testing.T) {
 		},
 	}
 
-	// Test that containerd strategy takes priority (first in order)
+	// Test that PPID strategy takes priority over containerd strategy
 	result := rl.HandleProcessExit(100, children, mockContainerTree, processMap)
-	assert.Equal(t, "containerd", result.Strategy)
-	assert.Equal(t, uint32(50), result.NewParentPID) // Should reparent to shim
+	assert.Equal(t, "ppid", result.Strategy)
+	assert.Equal(t, uint32(50), result.NewParentPID) // Should reparent to PPID (which is also shim)
 }
 
 func TestStrategyOrderScanning(t *testing.T) {
 	rl, err := NewReparentingLogic()
 	require.NoError(t, err)
 
-	// Create a process that's under docker but not containerd
+	// Create a process that should use PPID
 	processMap := map[uint32]*apitypes.Process{
 		100: {
 			PID:  100,
 			PPID: 1,
-			Comm: "dockerd",
+			Comm: "daemon",
 		},
 		200: {
 			PID:  200,
 			PPID: 100,
-			Comm: "docker-proxy",
+			Comm: "worker",
 		},
 		300: {
 			PID:  300,
@@ -386,7 +213,7 @@ func TestStrategyOrderScanning(t *testing.T) {
 		1: {
 			PID:  1,
 			PPID: 0,
-			Comm: "systemd",
+			Comm: "init",
 		},
 	}
 
@@ -398,10 +225,10 @@ func TestStrategyOrderScanning(t *testing.T) {
 		},
 	}
 
-	// Test that docker strategy is selected (containerd not applicable, docker is)
+	// Test that PPID strategy is selected first
 	result := rl.HandleProcessExit(300, children, nil, processMap)
-	assert.Equal(t, "docker", result.Strategy)
-	assert.Equal(t, uint32(100), result.NewParentPID) // Should reparent to dockerd
+	assert.Equal(t, "ppid", result.Strategy)
+	assert.Equal(t, uint32(200), result.NewParentPID) // Should reparent to PPID
 }
 
 func TestProcfsDataUsageOnMismatch(t *testing.T) {
@@ -416,7 +243,7 @@ func TestProcfsDataUsageOnMismatch(t *testing.T) {
 		1: {
 			PID:  1,
 			PPID: 0,
-			Comm: "systemd",
+			Comm: "init",
 		},
 		100: {
 			PID:  100,
@@ -433,10 +260,10 @@ func TestProcfsDataUsageOnMismatch(t *testing.T) {
 		},
 	}
 
-	// Test that systemd strategy is selected (containerd and docker not applicable)
+	// Test that PPID strategy is selected first
 	result := rl.HandleProcessExit(100, children, nil, processMap)
-	assert.Equal(t, "systemd", result.Strategy)
-	assert.Equal(t, uint32(1), result.NewParentPID) // Should reparent to systemd
+	assert.Equal(t, "ppid", result.Strategy)
+	assert.Equal(t, uint32(1), result.NewParentPID) // Should reparent to PPID
 
 	// Note: In a real scenario with procfs mismatch, the actual PPID from procfs would be used
 	// This would require mocking the procfs interface to test the mismatch scenario
@@ -446,18 +273,17 @@ func TestFirstApplicableStrategyWins(t *testing.T) {
 	rl, err := NewReparentingLogic()
 	require.NoError(t, err)
 
-	// Create a process that could be under multiple hierarchies
-	// This tests that the first applicable strategy in the order wins
+	// Create a process that should use PPID first
 	processMap := map[uint32]*apitypes.Process{
 		1: {
 			PID:  1,
 			PPID: 0,
-			Comm: "systemd",
+			Comm: "init",
 		},
 		100: {
 			PID:  100,
 			PPID: 1,
-			Comm: "dockerd", // This could be both docker and systemd
+			Comm: "daemon",
 		},
 		200: {
 			PID:  200,
@@ -474,11 +300,127 @@ func TestFirstApplicableStrategyWins(t *testing.T) {
 		},
 	}
 
-	// Test that docker strategy is selected (first applicable in order: containerd -> docker -> systemd -> default)
-	// Even though the process is also under systemd, docker comes first in the order
+	// Test that PPID strategy is selected first (highest priority)
 	result := rl.HandleProcessExit(200, children, nil, processMap)
-	assert.Equal(t, "docker", result.Strategy)
-	assert.Equal(t, uint32(100), result.NewParentPID) // Should reparent to dockerd
+	assert.Equal(t, "ppid", result.Strategy)
+	assert.Equal(t, uint32(100), result.NewParentPID) // Should reparent to PPID
+}
+
+func TestPPIDReparenting(t *testing.T) {
+	rl, err := NewReparentingLogic()
+	require.NoError(t, err)
+
+	// Test case where PPID exists and is valid
+	processMap := map[uint32]*apitypes.Process{
+		50: {
+			PID:  50,
+			PPID: 1,
+			Comm: "parent",
+		},
+		100: {
+			PID:  100,
+			PPID: 50,
+			Comm: "exiting",
+		},
+		200: {
+			PID:  200,
+			PPID: 100,
+			Comm: "child",
+		},
+	}
+
+	children := []*apitypes.Process{
+		{
+			PID:  200,
+			PPID: 100,
+			Comm: "child",
+		},
+	}
+
+	result := rl.HandleProcessExit(100, children, nil, processMap)
+	assert.Equal(t, uint32(50), result.NewParentPID) // Should use PPID of exiting process
+	assert.Equal(t, "ppid", result.Strategy)
+	assert.True(t, result.Verified)
+	assert.Nil(t, result.Error)
+}
+
+func TestPPIDReparentingFallback(t *testing.T) {
+	rl, err := NewReparentingLogic()
+	require.NoError(t, err)
+
+	// Test case where PPID doesn't exist in processMap
+	processMap := map[uint32]*apitypes.Process{
+		100: {
+			PID:  100,
+			PPID: 999, // PPID doesn't exist in processMap
+			Comm: "exiting",
+		},
+		200: {
+			PID:  200,
+			PPID: 100,
+			Comm: "child",
+		},
+	}
+
+	children := []*apitypes.Process{
+		{
+			PID:  200,
+			PPID: 100,
+			Comm: "child",
+		},
+	}
+
+	result := rl.HandleProcessExit(100, children, nil, processMap)
+	// Should fallback to default strategy since PPID doesn't exist
+	assert.Equal(t, uint32(1), result.NewParentPID)
+	assert.Equal(t, "default", result.Strategy)
+	assert.True(t, result.Verified)
+	assert.Nil(t, result.Error)
+}
+
+func TestPPIDReparentingWithContainerd(t *testing.T) {
+	rl, err := NewReparentingLogic()
+	require.NoError(t, err)
+
+	// Create a mock container tree that indicates the process is under containerd
+	mockContainerTree := &MockContainerTree{
+		shimPID:            50,
+		containerProcesses: map[uint32]bool{100: true},
+	}
+
+	// Test case where PPID doesn't exist, but containerd strategy applies
+	processMap := map[uint32]*apitypes.Process{
+		50: {
+			PID:  50,
+			PPID: 1,
+			Comm: "containerd-shim",
+		},
+		100: {
+			PID:  100,
+			PPID: 999, // PPID doesn't exist in processMap
+			Comm: "exiting",
+		},
+		200: {
+			PID:  200,
+			PPID: 100,
+			Comm: "child",
+		},
+	}
+
+	children := []*apitypes.Process{
+		{
+			PID:  200,
+			PPID: 100,
+			Comm: "child",
+		},
+	}
+
+	result := rl.HandleProcessExit(100, children, mockContainerTree, processMap)
+	// Should use containerd strategy since PPID doesn't exist
+	assert.Equal(t, uint32(50), result.NewParentPID) // Should use shim PID
+	assert.Equal(t, "containerd", result.Strategy)
+	assert.True(t, result.Verified)
+	assert.Nil(t, result.Error)
 }
 
 // MockContainerTree is a mock implementation for testing

@@ -444,7 +444,10 @@ func (ncw *NewContainerWatcher) enrichEvents(events []eventEntry) []*containerwa
 			continue
 		}
 
-		processTree, _ := ncw.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
+		processTree, err := ncw.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
+		if err != nil {
+			continue
+		}
 
 		enrichedEvents = append(enrichedEvents, &containerwatcher.EnrichedEvent{
 			Event:       event,

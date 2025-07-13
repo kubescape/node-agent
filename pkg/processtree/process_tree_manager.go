@@ -129,10 +129,6 @@ func (ptm *ProcessTreeManagerImpl) GetHostProcessTree() ([]apitypes.Process, err
 }
 
 func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32) (apitypes.Process, error) {
-	// Process exec is async, so we need to wait for it to be processed
-	// TODO: Remove this once we add a source event node, then check if fork wait, exec continue
-	time.Sleep(50 * time.Millisecond)
-
 	processTree, err := ptm.getContainerProcessTreeInternal(containerID, pid)
 	if err == nil {
 		return processTree, nil

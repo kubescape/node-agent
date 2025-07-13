@@ -200,33 +200,35 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
-	// Skip PPID update if new PPID is the same as current PPID (optimization)
-	if event.PPID != proc.PPID {
-		// New reparenting strategy:
-		// 1. If new PPID is under container subtree, update regardless of current state
-		// 2. Else if process is already under container, do nothing
-		// 3. Else do standard PPID update logic
+	// New reparenting strategy:
+	// 1. If new PPID is under container subtree, update regardless of current state
+	// 2. Else if process is already under container, do nothing
+	// 3. Else do standard PPID update logic
 
-		// First check if new PPID is under any container subtree
-		isPPIDUnderContainer := pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.getProcessMapAsRegularMap())
-		if isPPIDUnderContainer {
-			// New PPID is under container subtree, update PPID and log the change
-			logger.L().Info("ProcFS: Updating PPID to container subtree",
-				helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
-			pt.updateProcessPPID(proc, event.PPID)
-		} else {
-			// Check if process is already under any containerd-shim subtree
-			isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.getProcessMapAsRegularMap())
-			if isUnderContainer {
-				// Process is already under container subtree, do nothing
-				logger.L().Debug("ProcFS: Process already under container subtree, no PPID update",
-					helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("current_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
+	// First check if new PPID is under any container subtree
+	if event.PPID != proc.PPID {
+		isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.getProcessMapAsRegularMap())
+		if !isUnderContainer {
+			isPPIDUnderContainer := pt.containerTree != nil && event.PPID != 0 && pt.containerTree.IsPPIDUnderAnyContainerSubtree(event.PPID, pt.getProcessMapAsRegularMap())
+			if isPPIDUnderContainer {
+				// New PPID is under container subtree, update PPID and log the change
+				logger.L().Info("ProcFS: Updating PPID to container subtree",
+					helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
+				pt.updateProcessPPID(proc, event.PPID)
 			} else {
-				// Standard PPID update logic for non-container processes
-				if event.PPID != 0 && proc.PPID == 0 {
-					logger.L().Info("ProcFS: Setting PPID",
-						helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
-					pt.updateProcessPPID(proc, event.PPID)
+				// Check if process is already under any containerd-shim subtree
+				isUnderContainer := pt.containerTree != nil && pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PID, pt.getProcessMapAsRegularMap())
+				if isUnderContainer {
+					// Process is already under container subtree, do nothing
+					logger.L().Debug("ProcFS: Process already under container subtree, no PPID update",
+						helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("current_ppid", fmt.Sprintf("%d", proc.PPID)), helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)))
+				} else {
+					// Standard PPID update logic for non-container processes
+					if event.PPID != 0 && proc.PPID == 0 {
+						logger.L().Info("ProcFS: Setting PPID",
+							helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
+						pt.updateProcessPPID(proc, event.PPID)
+					}
 				}
 			}
 		}
