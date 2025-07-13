@@ -6,14 +6,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/kubescape/node-agent/pkg/containerwatcher/v1"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
 
 type HealthManager struct {
-	containerWatcher *containerwatcher.IGContainerWatcher
+	containerWatcher containerwatcher.ContainerWatcher
 	port             int
 }
 
@@ -23,7 +23,7 @@ func NewHealthManager() *HealthManager {
 	}
 }
 
-func (h *HealthManager) SetContainerWatcher(containerWatcher *containerwatcher.IGContainerWatcher) {
+func (h *HealthManager) SetContainerWatcher(containerWatcher containerwatcher.ContainerWatcher) {
 	h.containerWatcher = containerWatcher
 }
 

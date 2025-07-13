@@ -206,6 +206,55 @@ func CreateNewContainerWatcher(
 	}, nil
 }
 
+// CreateIGContainerWatcher creates a new container watcher with the ordered event processing design
+// This function maintains compatibility with the v1 API while using the new v2 implementation
+func CreateIGContainerWatcher(
+	cfg config.Config,
+	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient,
+	k8sClient *k8sinterface.KubernetesApi,
+	igK8sClient *containercollection.K8sClient,
+	networkManagerClient networkmanager.NetworkManagerClient,
+	dnsManagerClient dnsmanager.DNSManagerClient,
+	metrics metricsmanager.MetricsManager,
+	ruleManager rulemanager.RuleManagerClient,
+	malwareManager malwaremanager.MalwareManagerClient,
+	sbomManager sbommanager.SbomManagerClient,
+	ruleBindingPodNotify *chan rulebindingmanager.RuleBindingNotify,
+	runtime *containerutilsTypes.RuntimeConfig,
+	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
+	processTreeManager processtree.ProcessTreeManager,
+	clusterName string,
+	objectCache objectcache.ObjectCache,
+	networkStreamClient networkstream.NetworkStreamClient,
+	containerProcessTree containerprocesstree.ContainerProcessTree,
+	processTreeFeeder *feeder.EventFeeder,
+) (containerwatcher.ContainerWatcher, error) {
+
+	return CreateNewContainerWatcher(
+		cfg,
+		applicationProfileManager,
+		k8sClient,
+		igK8sClient,
+		networkManagerClient,
+		dnsManagerClient,
+		metrics,
+		ruleManager,
+		malwareManager,
+		sbomManager,
+		ruleBindingPodNotify,
+		runtime,
+		thirdPartyEventReceivers,
+		thirdPartyEnricher,
+		processTreeManager,
+		clusterName,
+		objectCache,
+		networkStreamClient,
+		containerProcessTree,
+		processTreeFeeder,
+	)
+}
+
 // Start initializes and starts the container watcher
 func (ncw *NewContainerWatcher) Start(ctx context.Context) error {
 	ncw.mutex.Lock()

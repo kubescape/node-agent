@@ -25,7 +25,7 @@ import (
 	applicationprofilemanagerv1 "github.com/kubescape/node-agent/pkg/applicationprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/cloudmetadata"
 	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/containerwatcher/v1"
+	containerwatcherv2 "github.com/kubescape/node-agent/pkg/containerwatcher/v2"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
@@ -364,7 +364,7 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
+	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
 		igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager,
 		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
 		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree, eventFeeder)
