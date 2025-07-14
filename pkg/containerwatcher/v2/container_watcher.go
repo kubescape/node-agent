@@ -69,6 +69,7 @@ type NewContainerWatcher struct {
 	processTreeManager  processtree.ProcessTreeManager
 	processTreeFeeder   *feeder.EventFeeder
 	tracerManager       *containerwatcher.TracerManager
+	eventEnricher       *EventEnricher
 
 	// Managers
 	containerManager *ContainerManager
@@ -148,6 +149,9 @@ func CreateNewContainerWatcher(
 		thirdPartyEnricher,
 	)
 
+	// Create event enricher
+	eventEnricher := NewEventEnricher(processTreeManager, processTreeFeeder)
+
 	// Create tracer manager
 	tracerManager := containerwatcher.NewTracerManager()
 
@@ -189,6 +193,7 @@ func CreateNewContainerWatcher(
 		processTreeManager:  processTreeManager,
 		processTreeFeeder:   processTreeFeeder,
 		tracerManager:       tracerManager,
+		eventEnricher:       eventEnricher,
 		workerPool:          workerPool,
 
 		// Third party components
@@ -418,53 +423,10 @@ func (ncw *NewContainerWatcher) eventProcessingLoop() {
 // enrichAndProcess processes a batch of events
 func (ncw *NewContainerWatcher) enrichAndProcess(events []eventEntry) {
 	// Enrich events with additional data
-	enrichedEvents := ncw.enrichEvents(events)
-	// logger.L().Info("Enriched events", helpers.Int("count", len(enrichedEvents)))
+	enrichedEvents := ncw.eventEnricher.EnrichEvents(events)
 
 	// Submit to worker pool for processing
 	if err := ncw.workerPool.Invoke(enrichedEvents); err != nil {
 		logger.L().Error("Failed to submit events to worker pool", helpers.Error(err))
 	}
-}
-
-// enrichEvents enriches events with additional data like process tree information
-func (ncw *NewContainerWatcher) enrichEvents(events []eventEntry) []*containerwatcher.EnrichedEvent {
-	enrichedEvents := make([]*containerwatcher.EnrichedEvent, 0, len(events))
-
-	for _, entry := range events {
-		event := entry.Event
-		eventType := entry.EventType
-
-		// Enrich with process tree data if it's a process-related event
-		if isProcessTreeEvent(eventType) {
-			ncw.processTreeFeeder.ReportEvent(eventType, event)
-		}
-
-		if eventType == utils.ProcfsEventType {
-			continue
-		}
-
-		processTree, err := ncw.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
-		if err != nil {
-			continue
-		}
-
-		enrichedEvents = append(enrichedEvents, &containerwatcher.EnrichedEvent{
-			Event:       event,
-			EventType:   eventType,
-			ProcessTree: processTree,
-			ContainerID: entry.ContainerID,
-			Timestamp:   entry.Timestamp,
-		})
-	}
-
-	return enrichedEvents
-}
-
-// isProcessTreeEvent checks if an event type is related to process tree
-func isProcessTreeEvent(eventType utils.EventType) bool {
-	return eventType == utils.ExecveEventType ||
-		eventType == utils.ExitEventType ||
-		eventType == utils.ForkEventType ||
-		eventType == utils.ProcfsEventType
 }
