@@ -9,14 +9,12 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/processtree"
-	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 // EventEnricher handles event enrichment with metrics and logging
 type EventEnricher struct {
 	processTreeManager processtree.ProcessTreeManager
-	processTreeFeeder  *feeder.EventFeeder
 
 	// Metrics
 	totalEventsProcessed int64
@@ -27,11 +25,9 @@ type EventEnricher struct {
 // NewEventEnricher creates a new event enricher
 func NewEventEnricher(
 	processTreeManager processtree.ProcessTreeManager,
-	processTreeFeeder *feeder.EventFeeder,
 ) *EventEnricher {
 	return &EventEnricher{
 		processTreeManager: processTreeManager,
-		processTreeFeeder:  processTreeFeeder,
 	}
 }
 
@@ -45,20 +41,20 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 		eventType := entry.EventType
 
 		if isProcessTreeEvent(eventType) {
-			ee.processTreeFeeder.ReportEvent(eventType, event)
+			// Use the blocking ReportEvent method to ensure synchronous processing
+			if err := ee.processTreeManager.ReportEvent(eventType, event); err != nil {
+				logger.L().Error("PROC - Failed to report event to process tree", helpers.Error(err),
+					helpers.String("eventType", string(eventType)),
+					helpers.String("pid", fmt.Sprintf("%d", entry.ProcessID)))
+			}
 		}
 
-		if eventType == utils.ProcfsEventType {
+		if eventType == utils.ProcfsEventType || eventType == utils.ForkEventType {
 			continue
 		}
 
 		processTree, err := ee.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
 		if err != nil {
-			if eventType == utils.ExecveEventType {
-				logger.L().Error("PROC - Failed to get container process tree", helpers.Error(err),
-					helpers.String("pid", fmt.Sprintf("%d", entry.ProcessID)),
-					helpers.String("containerID", entry.ContainerID))
-			}
 			continue
 		}
 
@@ -72,8 +68,6 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 	}
 
 	processingTime := time.Since(startTime)
-
-	logger.L().Info("PROC - Enriched events", helpers.Int("enrichedEvents", len(enrichedEvents)))
 
 	ee.updateMetrics(int64(len(events)), processingTime)
 

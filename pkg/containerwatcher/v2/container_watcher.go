@@ -150,7 +150,7 @@ func CreateNewContainerWatcher(
 	)
 
 	// Create event enricher
-	eventEnricher := NewEventEnricher(processTreeManager, processTreeFeeder)
+	eventEnricher := NewEventEnricher(processTreeManager)
 
 	// Create tracer manager
 	tracerManager := containerwatcher.NewTracerManager()

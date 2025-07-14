@@ -273,9 +273,6 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		// Report to process tree feeder first
-		processTreeFeeder.ReportEvent(utils.ExecveEventType, &event)
-
 		// Now report to rule manager and other components
 		ruleManager.ReportEvent(utils.ExecveEventType, &event)
 		malwareManager.ReportEvent(utils.ExecveEventType, &event)
@@ -557,7 +554,6 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		processTreeFeeder.ReportEvent(utils.ForkEventType, &event)
 		metrics.ReportEvent(utils.ForkEventType)
 		ruleManager.ReportEvent(utils.ForkEventType, &event)
 
@@ -579,7 +575,6 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		processTreeFeeder.ReportEvent(utils.ExitEventType, &event)
 		metrics.ReportEvent(utils.ExitEventType)
 		ruleManager.ReportEvent(utils.ExitEventType, &event)
 

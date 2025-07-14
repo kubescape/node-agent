@@ -348,7 +348,7 @@ func (pt *processTreeCreatorImpl) updateProcessPPID(proc *apitypes.Process, newP
 
 	isUnderContainer := pt.containerTree.IsProcessUnderAnyContainerSubtree(proc.PID, pt.getProcessMapAsRegularMap())
 	if isUnderContainer {
-		logger.L().Info("PROC - Under container", helpers.String("pid", fmt.Sprintf("%d", proc.PID)))
+		logger.L().Info("PROC - Under container", helpers.String("pid", fmt.Sprintf("%d", proc.PID)), helpers.String("new_ppid", fmt.Sprintf("%d", newPPID)))
 	}
 }
 

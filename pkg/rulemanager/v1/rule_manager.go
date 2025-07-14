@@ -275,6 +275,13 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *containerwatcher.Enric
 	// list custom rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
+	if enrichedEvent.EventType == utils.ExecveEventType {
+		logger.L().Info("PROC - RuleManager - execve event", helpers.String("event", fmt.Sprintf("%+v", enrichedEvent)),
+			helpers.String("containerID", enrichedEvent.ContainerID),
+			helpers.String("processID", fmt.Sprintf("%d", enrichedEvent.ProcessTree.PID)),
+			helpers.String("new_ppid", fmt.Sprintf("%d", enrichedEvent.ProcessTree.PPID)))
+	}
+
 	res := rm.processEvent(enrichedEvent.EventType, event, rules)
 	if res != nil {
 		runtimeProcessDetails := res.GetRuntimeProcessDetails()

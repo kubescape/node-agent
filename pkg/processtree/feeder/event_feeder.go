@@ -1,7 +1,7 @@
 package feeder
 
 import (
-	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -13,11 +13,7 @@ import (
 
 // EventFeeder implements ProcessEventFeeder by receiving events from container watcher
 type EventFeeder struct {
-	subscribers []chan<- ProcessEvent
-	mutex       sync.RWMutex
-	ctx         context.Context
-	cancel      context.CancelFunc
-	started     bool
+	mutex sync.RWMutex
 }
 
 // NewEventFeeder creates a new event feeder
@@ -25,67 +21,19 @@ func NewEventFeeder() *EventFeeder {
 	return &EventFeeder{}
 }
 
-// Start begins the event feeder
-func (ef *EventFeeder) Start(ctx context.Context) error {
-	ef.mutex.Lock()
-	defer ef.mutex.Unlock()
-
-	if ef.started {
-		return nil // Already started
-	}
-
-	ef.ctx, ef.cancel = context.WithCancel(ctx)
-	ef.started = true
-
-	return nil
-}
-
-// Stop stops the event feeder
-func (ef *EventFeeder) Stop() error {
-	ef.mutex.Lock()
-	defer ef.mutex.Unlock()
-
-	if ef.cancel != nil {
-		ef.cancel()
-	}
-
-	return nil
-}
-
-// Subscribe adds a channel to receive process events
-func (ef *EventFeeder) Subscribe(ch chan<- ProcessEvent) {
-	ef.mutex.Lock()
-	defer ef.mutex.Unlock()
-
-	ef.subscribers = append(ef.subscribers, ch)
-}
-
-// ReportEvent handles events from the container watcher and converts them to ProcessEvent
-func (ef *EventFeeder) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
-	ef.mutex.RLock()
-	defer ef.mutex.RUnlock()
-
-	if !ef.started {
-		return
-	}
-
-	var processEvent ProcessEvent
-
+func (ef *EventFeeder) ConvertEvent(eventType utils.EventType, event utils.K8sEvent) (ProcessEvent, error) {
 	switch eventType {
 	case utils.ExecveEventType:
-		processEvent = ef.convertExecEvent(event.(*events.ExecEvent))
+		return ef.convertExecEvent(event.(*events.ExecEvent)), nil
 	case utils.ForkEventType:
-		processEvent = ef.convertForkEvent(event.(*tracerforktype.Event))
+		return ef.convertForkEvent(event.(*tracerforktype.Event)), nil
 	case utils.ExitEventType:
-		processEvent = ef.convertExitEvent(event.(*tracerexittype.Event))
+		return ef.convertExitEvent(event.(*tracerexittype.Event)), nil
 	case utils.ProcfsEventType:
-		processEvent = ef.convertProcfsEvent(event.(*utils.ProcfsEvent))
+		return ef.convertProcfsEvent(event.(*utils.ProcfsEvent)), nil
 	default:
-		// Unknown event type, ignore
-		return
+		return ProcessEvent{}, fmt.Errorf("unsupported event type: %s", eventType)
 	}
-
-	ef.broadcastEvent(processEvent)
 }
 
 // convertExecEvent converts an ExecEvent to ProcessEvent
@@ -213,16 +161,4 @@ func (ef *EventFeeder) convertProcfsEvent(procfsEvent *utils.ProcfsEvent) Proces
 	}
 
 	return event
-}
-
-// broadcastEvent sends an event to all subscribers
-func (ef *EventFeeder) broadcastEvent(event ProcessEvent) {
-	for _, ch := range ef.subscribers {
-		select {
-		case ch <- event:
-		default:
-			// Channel is full, skip this subscriber
-			// In a real implementation, you might want to log this
-		}
-	}
 }

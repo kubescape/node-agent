@@ -237,23 +237,15 @@ func main() {
 	// Create the process tree creator
 	processTreeCreator := processtreecreator.NewProcessTreeCreator(containerProcessTree)
 
-	// Create feeders
-	feeders := []feeder.ProcessEventFeeder{
-		feeder.NewEventFeeder(),
-	}
+	// Create event feeder for synchronous processing
+	eventFeeder := feeder.NewEventFeeder()
 
 	// Create the process tree manager
 	processTreeManager = processtree.NewProcessTreeManager(
 		processTreeCreator,
 		containerProcessTree,
-		feeders,
+		eventFeeder,
 	)
-
-	// Start the process tree manager
-	if err := processTreeManager.Start(ctx); err != nil {
-		logger.L().Ctx(ctx).Fatal("error starting process tree manager", helpers.Error(err))
-	}
-	defer processTreeManager.Stop()
 
 	if cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
 		cloudMetadata, err = cloudmetadata.GetCloudMetadata(ctx, k8sClient, cfg.NodeName)
@@ -358,7 +350,7 @@ func main() {
 	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, applicationProfileManager, k8sClient,
 		igK8sClient, networkManagerClient, dnsManagerClient, prometheusExporter, ruleManager,
 		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
-		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree, feeders[0].(*feeder.EventFeeder))
+		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree, eventFeeder)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
