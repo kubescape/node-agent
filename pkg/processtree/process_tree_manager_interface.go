@@ -8,6 +8,5 @@ import (
 type ProcessTreeManager interface {
 	GetHostProcessTree() ([]apitypes.Process, error)
 	GetContainerProcessTree(containerID string, pid uint32) (apitypes.Process, error)
-	GetProcessNode(pid int) (*apitypes.Process, error)
 	ReportEvent(eventType utils.EventType, event utils.K8sEvent) error
 }

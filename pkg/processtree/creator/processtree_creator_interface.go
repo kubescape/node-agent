@@ -15,5 +15,4 @@ type ProcessTreeCreator interface {
 	// Optionally: Query for a process node by PID
 	GetProcessNode(pid int) (*apitypes.Process, error)
 	// Stop the process tree creator and cleanup resources
-	Stop()
 }

@@ -5,7 +5,6 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
@@ -17,8 +16,6 @@ type processTreeCreatorImpl struct {
 	processMap       maps.SafeMap[uint32, *apitypes.Process] // PID -> Process
 	containerTree    containerprocesstree.ContainerProcessTree
 	reparentingLogic reparenting.ReparentingLogic
-	// LRU cache to track processes under containerd-shim: key is "pid:startTimeNs"
-	containerdShimCache *lru.Cache[string, bool]
 }
 
 func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree) ProcessTreeCreator {
@@ -29,18 +26,10 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 		reparentingLogic = nil
 	}
 
-	// Create LRU cache for containerd-shim processes (10,000 entries)
-	containerdShimCache, err := lru.New[string, bool](10000)
-	if err != nil {
-		logger.L().Warning("Failed to create containerd-shim cache, using fallback", helpers.Error(err))
-		containerdShimCache = nil
-	}
-
 	return &processTreeCreatorImpl{
-		processMap:          maps.SafeMap[uint32, *apitypes.Process]{},
-		reparentingLogic:    reparentingLogic,
-		containerTree:       containerTree,
-		containerdShimCache: containerdShimCache,
+		processMap:       maps.SafeMap[uint32, *apitypes.Process]{},
+		reparentingLogic: reparentingLogic,
+		containerTree:    containerTree,
 	}
 }
 
@@ -62,7 +51,7 @@ func (pt *processTreeCreatorImpl) GetRootTree() ([]apitypes.Process, error) {
 	roots := []apitypes.Process{}
 	for _, proc := range pt.processMap.Values() {
 		if proc.PPID == 0 || pt.processMap.Get(proc.PPID) == nil {
-			roots = append(roots, *pt.shallowCopyProcess(proc))
+			roots = append(roots, *proc)
 		}
 	}
 	return roots, nil
@@ -86,11 +75,39 @@ func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, er
 	return pt.shallowCopyProcess(proc), nil
 }
 
-// Stop stops the process tree creator and cleanup resources
-func (pt *processTreeCreatorImpl) Stop() {
-	// Clean up LRU cache
-	if pt.containerdShimCache != nil {
-		pt.containerdShimCache.Purge()
+// GetContainerSubtree performs container subtree operation (no longer needs to be atomic)
+func (pt *processTreeCreatorImpl) GetContainerSubtree(containerTree interface{}, containerID string, targetPID uint32) (apitypes.Process, error) {
+	// Type assert the container tree
+	ct, ok := containerTree.(containerprocesstree.ContainerProcessTree)
+	if !ok {
+		return apitypes.Process{}, fmt.Errorf("invalid container tree type")
+	}
+
+	// Convert SafeMap to regular map for compatibility
+	processMap := pt.getProcessMapAsRegularMap()
+
+	// Perform the container subtree operation
+	return ct.GetContainerSubtree(containerID, targetPID, processMap)
+}
+
+// UpdatePPID handles PPID updates using the new reparenting strategy
+func (pt *processTreeCreatorImpl) UpdatePPID(proc *apitypes.Process, event feeder.ProcessEvent) {
+	if event.PPID != proc.PPID && event.PPID != 0 {
+		// New reparenting strategy:
+		// 1. If new PPID is under container subtree, update regardless of current state
+		// 2. Else if process is already under container, do nothing
+		// 3. Else do standard PPID update logic
+
+		// First check if new PPID is under any container subtree
+		IsNewPPIDUnderContainer := pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PPID, pt.getProcessMapAsRegularMap())
+		if IsNewPPIDUnderContainer {
+			pt.updateProcessPPID(proc, event.PPID)
+		} else {
+			isCurrentUnderContainer := pt.containerTree.IsProcessUnderAnyContainerSubtree(proc.PID, pt.getProcessMapAsRegularMap())
+			if !isCurrentUnderContainer {
+				pt.updateProcessPPID(proc, event.PPID)
+			}
+		}
 	}
 }
 
@@ -98,24 +115,12 @@ func (pt *processTreeCreatorImpl) Stop() {
 func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 	proc := pt.processMap.Get(event.PID)
 
-	// If process doesn't exist, create it
 	if proc == nil {
 		proc = pt.getOrCreateProcess(event.PID)
-		logger.L().Info("PROC - Fork: Creating new process",
-			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)),
-			helpers.String("ppid", fmt.Sprintf("%d", event.PPID)), helpers.String("comm", event.Comm), helpers.String("pcomm", event.Pcomm),
-			helpers.String("cmdline", event.Cmdline))
 	}
 
-	// Skip PPID update if new PPID is the same as current PPID (optimization)
-	if event.PPID != proc.PPID {
-		// Use new reparenting strategy
-		if pt.shouldUpdatePPID(event.PID, event.StartTimeNs) {
-			pt.updateProcessPPID(proc, event.PPID)
-		}
-	}
+	pt.UpdatePPID(proc, event)
 
-	// Only set fields if they are empty or don't exist (enrichment)
 	if proc.Comm == "" {
 		proc.Comm = event.Comm
 	}
@@ -143,28 +148,15 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 	}
 }
 
-// handleProcfsEvent handles procfs events - overrides when existing values are empty or don't exist
 func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 	proc := pt.processMap.Get(event.PID)
 
-	// If process doesn't exist, create it
 	if proc == nil {
-		logger.L().Info("PROC - ProcFS: Creating new process",
-			helpers.String("pid", fmt.Sprintf("%d", event.PID)),
-			helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)),
-			helpers.String("comm", event.Comm), helpers.String("pcomm", event.Pcomm), helpers.String("cmdline", event.Cmdline))
-
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
-	// Use new reparenting strategy
-	if event.PPID != proc.PPID {
-		if pt.shouldUpdatePPID(event.PID, event.StartTimeNs) {
-			pt.updateProcessPPID(proc, event.PPID)
-		}
-	}
+	pt.UpdatePPID(proc, event)
 
-	// Override fields if the new value is non-empty and the existing value is empty or default (enrichment)
 	if event.Comm != "" && proc.Comm == "" {
 		proc.Comm = event.Comm
 	}
@@ -192,30 +184,14 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 	}
 }
 
-// handleExecEvent handles exec events - always enriches the existing process node if present, never creates a duplicate
 func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	proc := pt.processMap.Get(event.PID)
-
-	if proc != nil {
-		// Skip PPID update if new PPID is the same as current PPID (optimization)
-		if event.PPID != proc.PPID {
-			// Use new reparenting strategy
-			if pt.shouldUpdatePPID(event.PID, event.StartTimeNs) {
-				pt.updateProcessPPID(proc, event.PPID)
-			}
-		}
-	} else {
-		// If process doesn't exist, create it (should be rare)
+	if proc == nil {
 		proc = pt.getOrCreateProcess(event.PID)
-		logger.L().Info("PROC - Exec: Creating new process (no prior fork event)",
-			helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)), helpers.String("ppid", fmt.Sprintf("%d", event.PPID)))
 	}
 
-	logger.L().Info("PROC - Exec: info",
-		helpers.String("pid", fmt.Sprintf("%d", event.PID)), helpers.String("old_ppid", fmt.Sprintf("%d", proc.PPID)),
-		helpers.String("new_ppid", fmt.Sprintf("%d", event.PPID)), helpers.String("comm", event.Comm), helpers.String("pcomm", event.Pcomm))
+	pt.UpdatePPID(proc, event)
 
-	// Fill all fields from exec event (PPID is already handled above)
 	if event.Comm != "" && proc.Comm != event.Comm {
 		proc.Comm = event.Comm
 	}
@@ -246,10 +222,9 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 	proc := pt.processMap.Get(event.PID)
 	if proc == nil {
-		return // Process doesn't exist, nothing to clean up
+		return
 	}
 
-	// Collect children for reparenting
 	children := make([]*apitypes.Process, 0, len(proc.ChildrenMap))
 	for _, child := range proc.ChildrenMap {
 		if child != nil {
@@ -257,54 +232,30 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 		}
 	}
 
-	// Handle reparenting of orphaned children immediately
 	if len(children) > 0 {
-		if pt.reparentingLogic != nil {
-			// Use the reparenting logic to determine the new parent
-			result := pt.reparentingLogic.HandleProcessExit(event.PID, children, pt.containerTree, pt.getProcessMapAsRegularMap())
-
-			logger.L().Info("PROC - Exit: Immediate reparenting",
-				helpers.String("pid", fmt.Sprintf("%d", event.PID)),
-				helpers.String("strategy", result.Strategy),
-				helpers.String("new_parent_pid", fmt.Sprintf("%d", result.NewParentPID)),
-				helpers.String("verified", fmt.Sprintf("%t", result.Verified)),
-				helpers.String("children_count", fmt.Sprintf("%d", len(children))))
-
-			// Update children's PPID to the new parent and link them
-			for _, child := range children {
-				if child != nil {
-					child.PPID = result.NewParentPID
-					pt.linkProcessToParent(child)
-				}
+		result := pt.reparentingLogic.HandleProcessExit(event.PID, children, pt.containerTree, pt.getProcessMapAsRegularMap())
+		for _, child := range children {
+			if child != nil {
+				child.PPID = result.NewParentPID
+				pt.linkProcessToParent(child)
 			}
-		} else {
-			// Fallback to init process (PID 1) if reparenting logic is not available
-			logger.L().Warning("Exit: Reparenting logic not available, using fallback to init",
-				helpers.String("pid", fmt.Sprintf("%d", event.PID)))
-
-			for _, child := range children {
-				if child != nil {
-					child.PPID = 1 // Adopted by init process
-					pt.linkProcessToParent(child)
-				}
+		}
+	} else {
+		for _, child := range children {
+			if child != nil {
+				child.PPID = 1
+				pt.linkProcessToParent(child)
 			}
 		}
 	}
 
-	// Remove from parent's children list
 	if proc.PPID != 0 {
 		if parent := pt.processMap.Get(proc.PPID); parent != nil {
 			delete(parent.ChildrenMap, apitypes.CommPID{Comm: proc.Comm, PID: event.PID})
 		}
 	}
 
-	// Remove the process from the map immediately
 	pt.processMap.Delete(event.PID)
-
-	logger.L().Info("PROC - Exit: Removed process immediately",
-		helpers.String("pid", fmt.Sprintf("%d", event.PID)),
-		helpers.String("start_time_ns", fmt.Sprintf("%d", event.StartTimeNs)),
-		helpers.String("children_count", fmt.Sprintf("%d", len(children))))
 }
 
 func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Process {
@@ -314,8 +265,67 @@ func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Proce
 	}
 	proc = &apitypes.Process{PID: pid, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
 	pt.processMap.Set(pid, proc)
-	pt.linkProcessToParent(proc)
 	return proc
+}
+
+// linkProcessToParent ensures proc is added as a child to its parent (if PPID != 0)
+func (pt *processTreeCreatorImpl) linkProcessToParent(proc *apitypes.Process) {
+	if proc == nil || proc.PPID == 0 {
+		return
+	}
+
+	// Prevent circular references: a process cannot be its own parent
+	if proc.PPID == proc.PID {
+		logger.L().Warning("Process tree: Detected circular reference, skipping parent link",
+			helpers.String("pid", fmt.Sprintf("%d", proc.PID)),
+			helpers.String("ppid", fmt.Sprintf("%d", proc.PPID)),
+			helpers.String("comm", proc.Comm))
+		return
+	}
+
+	parent := pt.getOrCreateProcess(proc.PPID)
+	if parent.ChildrenMap == nil {
+		parent.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
+	}
+	key := apitypes.CommPID{Comm: proc.Comm, PID: proc.PID}
+	parent.ChildrenMap[key] = proc
+}
+
+// updateProcessPPID safely updates a process's PPID by removing it from the old parent's
+// children map and adding it to the new parent's children map
+func (pt *processTreeCreatorImpl) updateProcessPPID(proc *apitypes.Process, newPPID uint32) {
+	if proc == nil || proc.PPID == newPPID {
+		return // No change needed
+	}
+
+	// Prevent circular references: a process cannot be its own parent
+	if newPPID == proc.PID {
+		return
+	}
+
+	// Remove from old parent's children map
+	if proc.PPID != 0 {
+		if oldParent := pt.processMap.Get(proc.PPID); oldParent != nil && oldParent.ChildrenMap != nil {
+			key := apitypes.CommPID{Comm: proc.Comm, PID: proc.PID}
+			delete(oldParent.ChildrenMap, key)
+		}
+	}
+
+	// Update PPID
+	proc.PPID = newPPID
+
+	// Add to new parent's children map
+	pt.linkProcessToParent(proc)
+}
+
+// getProcessMapAsRegularMap converts SafeMap to regular map for compatibility with existing interfaces
+func (pt *processTreeCreatorImpl) getProcessMapAsRegularMap() map[uint32]*apitypes.Process {
+	processMap := make(map[uint32]*apitypes.Process)
+	pt.processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
+		processMap[pid] = proc
+		return true
+	})
+	return processMap
 }
 
 // shallowCopyProcess creates a shallow copy of a process
@@ -328,73 +338,4 @@ func (pt *processTreeCreatorImpl) shallowCopyProcess(proc *apitypes.Process) *ap
 	// ChildrenMap points to the same map (shared reference)
 	// This is safe for read-only access and much faster
 	return &copy
-}
-
-func (pt *processTreeCreatorImpl) updateProcessPPID(proc *apitypes.Process, newPPID uint32) {
-	if proc == nil || proc.PPID == newPPID {
-		return
-	}
-
-	if proc.PPID != 0 {
-		if oldParent := pt.processMap.Get(proc.PPID); oldParent != nil && oldParent.ChildrenMap != nil {
-			key := apitypes.CommPID{Comm: proc.Comm, PID: proc.PID}
-			delete(oldParent.ChildrenMap, key)
-		}
-	}
-
-	proc.PPID = newPPID
-
-	pt.linkProcessToParent(proc)
-
-	isUnderContainer := pt.containerTree.IsProcessUnderAnyContainerSubtree(proc.PID, pt.getProcessMapAsRegularMap())
-	if isUnderContainer {
-		logger.L().Info("PROC - Under container", helpers.String("pid", fmt.Sprintf("%d", proc.PID)), helpers.String("new_ppid", fmt.Sprintf("%d", newPPID)))
-	}
-}
-
-func (pt *processTreeCreatorImpl) linkProcessToParent(proc *apitypes.Process) {
-	if proc == nil || proc.PPID == 0 {
-		return
-	}
-
-	parent := pt.getOrCreateProcess(proc.PPID)
-	if parent.ChildrenMap == nil {
-		parent.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
-	}
-	key := apitypes.CommPID{Comm: proc.Comm, PID: proc.PID}
-	parent.ChildrenMap[key] = proc
-}
-
-func (pt *processTreeCreatorImpl) shouldUpdatePPID(pid uint32, startTimeNs uint64) bool {
-	cacheKey := pt.getCacheKey(pid, startTimeNs)
-	if cached, exists := pt.containerdShimCache.Get(cacheKey); exists {
-		return cached
-	}
-
-	isUnderContainer := pt.containerTree.IsProcessUnderAnyContainerSubtree(pid, pt.getProcessMapAsRegularMap())
-
-	if isUnderContainer {
-		pt.containerdShimCache.Add(cacheKey, isUnderContainer)
-	}
-
-	if !isUnderContainer {
-		logger.L().Info("PROC - shouldUpdatePPID", helpers.String("pid", fmt.Sprintf("%d", pid)), helpers.String("isUnderContainer", fmt.Sprintf("%t", isUnderContainer)))
-	} else {
-		logger.L().Info("PROC - Not under container", helpers.String("pid", fmt.Sprintf("%d", pid)))
-	}
-
-	return !isUnderContainer
-}
-
-func (pt *processTreeCreatorImpl) getProcessMapAsRegularMap() map[uint32]*apitypes.Process {
-	processMap := make(map[uint32]*apitypes.Process)
-	pt.processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
-		processMap[pid] = proc
-		return true
-	})
-	return processMap
-}
-
-func (pt *processTreeCreatorImpl) getCacheKey(pid uint32, startTimeNs uint64) string {
-	return fmt.Sprintf("%d:%d", pid, startTimeNs)
 }

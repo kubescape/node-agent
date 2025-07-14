@@ -2,6 +2,7 @@ package processtree
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -18,6 +19,7 @@ type ProcessTreeManagerImpl struct {
 	containerTree             containerprocesstree.ContainerProcessTree
 	eventFeeder               *feeder.EventFeeder
 	containerProcessTreeCache *expirable.LRU[string, apitypes.Process] // containerID:pid -> cached result
+	mutex                     sync.RWMutex
 }
 
 // NewProcessTreeManager creates a new process tree manager
@@ -38,6 +40,8 @@ func NewProcessTreeManager(
 }
 
 func (ptm *ProcessTreeManagerImpl) ReportEvent(eventType utils.EventType, event utils.K8sEvent) error {
+	ptm.mutex.Lock()
+	defer ptm.mutex.Unlock()
 	var processEvent feeder.ProcessEvent
 	processEvent, err := ptm.eventFeeder.ConvertEvent(eventType, event)
 	if err != nil {
@@ -45,7 +49,6 @@ func (ptm *ProcessTreeManagerImpl) ReportEvent(eventType utils.EventType, event 
 	}
 
 	ptm.creator.FeedEvent(processEvent)
-
 	return nil
 }
 
@@ -54,6 +57,8 @@ func (ptm *ProcessTreeManagerImpl) GetHostProcessTree() ([]apitypes.Process, err
 }
 
 func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32) (apitypes.Process, error) {
+	ptm.mutex.RLock()
+	defer ptm.mutex.RUnlock()
 	cacheKey := fmt.Sprintf("%s:%d", containerID, pid)
 	if cached, exists := ptm.containerProcessTreeCache.Get(cacheKey); exists {
 		return cached, nil
@@ -76,8 +81,4 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 	ptm.containerProcessTreeCache.Add(cacheKey, containerSubtree)
 
 	return containerSubtree, nil
-}
-
-func (ptm *ProcessTreeManagerImpl) GetProcessNode(pid int) (*apitypes.Process, error) {
-	return ptm.creator.GetProcessNode(pid)
 }
