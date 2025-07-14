@@ -103,18 +103,61 @@ func (c *containerProcessTreeImpl) GetContainerSubtree(containerID string, targe
 	return *rootNode.DeepCopy(), nil
 }
 
-// isProcessInSubtree checks if a process is within the subtree of a given root node
+func (c *containerProcessTreeImpl) ListContainers() []string {
+	ids := make([]string, 0, len(c.containerIdToShimPid))
+	for id := range c.containerIdToShimPid {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (c *containerProcessTreeImpl) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree map[uint32]*apitypes.Process) bool {
+	for _, shimPID := range c.containerIdToShimPid {
+		shimNode := fullTree[shimPID]
+		if shimNode == nil {
+			continue
+		}
+
+		targetNode := fullTree[pid]
+		if targetNode == nil {
+			continue
+		}
+
+		if c.isProcessInSubtree(targetNode, shimNode, fullTree) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *containerProcessTreeImpl) GetShimPIDForProcess(pid uint32, fullTree map[uint32]*apitypes.Process) (uint32, bool) {
+	for _, shimPID := range c.containerIdToShimPid {
+		shimNode := fullTree[shimPID]
+		if shimNode == nil {
+			continue
+		}
+
+		targetNode := fullTree[pid]
+		if targetNode == nil {
+			continue
+		}
+
+		if c.isProcessInSubtree(targetNode, shimNode, fullTree) {
+			return shimPID, true
+		}
+	}
+	return 0, false
+}
+
 func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apitypes.Process, fullTree map[uint32]*apitypes.Process) bool {
 	if targetNode == nil || rootNode == nil {
 		return false
 	}
 
-	// If target is the root, it's in the subtree
 	if targetNode.PID == rootNode.PID {
 		return true
 	}
 
-	// Walk up the parent chain from target until we find the root or reach the top
 	current := targetNode
 	for current.PPID != 0 {
 		if current.PPID == rootNode.PID {
@@ -154,82 +197,6 @@ func (c *containerProcessTreeImpl) findRootNodeBeforeShim(targetNode *apitypes.P
 
 	// If we reach here, the target node itself is the root (no parent found that leads to shim)
 	return current
-}
-
-func (c *containerProcessTreeImpl) ListContainers() []string {
-	ids := make([]string, 0, len(c.containerIdToShimPid))
-	for id := range c.containerIdToShimPid {
-		ids = append(ids, id)
-	}
-	return ids
-}
-
-// SetShimPIDForTesting manually sets the shim PID for a container (for testing purposes only)
-func (c *containerProcessTreeImpl) SetShimPIDForTesting(containerID string, shimPID uint32) {
-	c.containerIdToShimPid[containerID] = shimPID
-}
-
-// IsProcessUnderAnyContainerSubtree checks if a process is under any containerd-shim subtree
-func (c *containerProcessTreeImpl) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree map[uint32]*apitypes.Process) bool {
-	// Check each container's shim subtree
-	for _, shimPID := range c.containerIdToShimPid {
-		shimNode := fullTree[shimPID]
-		if shimNode == nil {
-			continue
-		}
-
-		targetNode := fullTree[pid]
-		if targetNode == nil {
-			continue
-		}
-
-		if c.isProcessInSubtree(targetNode, shimNode, fullTree) {
-			return true
-		}
-	}
-	return false
-}
-
-// GetShimPIDForProcess returns the shim PID for a given process if it's under a container subtree
-func (c *containerProcessTreeImpl) GetShimPIDForProcess(pid uint32, fullTree map[uint32]*apitypes.Process) (uint32, bool) {
-	// Check each container's shim subtree
-	for _, shimPID := range c.containerIdToShimPid {
-		shimNode := fullTree[shimPID]
-		if shimNode == nil {
-			continue
-		}
-
-		targetNode := fullTree[pid]
-		if targetNode == nil {
-			continue
-		}
-
-		if c.isProcessInSubtree(targetNode, shimNode, fullTree) {
-			return shimPID, true
-		}
-	}
-	return 0, false
-}
-
-// IsPPIDUnderAnyContainerSubtree checks if a PPID is under any container subtree
-func (c *containerProcessTreeImpl) IsPPIDUnderAnyContainerSubtree(ppid uint32, fullTree map[uint32]*apitypes.Process) bool {
-	// Check each container's shim subtree
-	for _, shimPID := range c.containerIdToShimPid {
-		shimNode := fullTree[shimPID]
-		if shimNode == nil {
-			continue
-		}
-
-		ppidNode := fullTree[ppid]
-		if ppidNode == nil {
-			continue
-		}
-
-		if c.isProcessInSubtree(ppidNode, shimNode, fullTree) {
-			return true
-		}
-	}
-	return false
 }
 
 // getProcessFromProc retrieves process information from the /proc filesystem

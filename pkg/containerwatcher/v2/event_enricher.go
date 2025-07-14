@@ -1,6 +1,7 @@
 package containerwatcher
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -34,7 +35,6 @@ func NewEventEnricher(
 	}
 }
 
-// EnrichEvents enriches events with additional data like process tree information
 func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.EnrichedEvent {
 	startTime := time.Now()
 
@@ -44,7 +44,6 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 		event := entry.Event
 		eventType := entry.EventType
 
-		// Enrich with process tree data if it's a process-related event
 		if isProcessTreeEvent(eventType) {
 			ee.processTreeFeeder.ReportEvent(eventType, event)
 		}
@@ -55,6 +54,11 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 
 		processTree, err := ee.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
 		if err != nil {
+			if eventType == utils.ExecveEventType {
+				logger.L().Error("PROC - Failed to get container process tree", helpers.Error(err),
+					helpers.String("pid", fmt.Sprintf("%d", entry.ProcessID)),
+					helpers.String("containerID", entry.ContainerID))
+			}
 			continue
 		}
 
@@ -67,19 +71,11 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 		})
 	}
 
-	// Calculate processing time
 	processingTime := time.Since(startTime)
 
-	// Update metrics
-	ee.updateMetrics(int64(len(events)), processingTime)
+	logger.L().Info("PROC - Enriched events", helpers.Int("enrichedEvents", len(enrichedEvents)))
 
-	// Log the enrichment process
-	logger.L().Info("Event enrichment completed",
-		helpers.Int("inputEvents", len(events)),
-		helpers.Int("enrichedEvents", len(enrichedEvents)),
-		helpers.String("processingTime", processingTime.String()),
-		helpers.String("avgTimePerEvent", (processingTime/time.Duration(len(events))).String()),
-	)
+	ee.updateMetrics(int64(len(events)), processingTime)
 
 	return enrichedEvents
 }

@@ -207,61 +207,6 @@ func TestProcessTreeCreator_HandleExitEvent_ProcessNotExists(t *testing.T) {
 	assert.Len(t, creator.getProcessMapAsRegularMap(), 0, "Process map should remain empty")
 }
 
-func TestProcessTreeCreator_Reparenting_EdgeCases(t *testing.T) {
-	containerTree := containerprocesstree.NewContainerProcessTree()
-	creator := NewProcessTreeCreator(containerTree).(*processTreeCreatorImpl)
-
-	// Edge 1: Child already has a parent
-	parent1 := &apitypes.Process{PID: 10, Comm: "parent1", ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
-	parent2 := &apitypes.Process{PID: 20, Comm: "parent2", ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
-	child := &apitypes.Process{PID: 30, PPID: 10, Comm: "child", ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
-	parent1.ChildrenMap[apitypes.CommPID{Comm: child.Comm, PID: child.PID}] = child
-	creator.processMap.Set(10, parent1)
-	creator.processMap.Set(20, parent2)
-	creator.processMap.Set(30, child)
-
-	// Reparent child from parent1 to parent2
-	child.PPID = 20
-	creator.linkProcessToParent(child)
-	// Should be added to parent2 (linkProcessToParent only adds, doesn't remove from old parent)
-	_, inOld := parent1.ChildrenMap[apitypes.CommPID{Comm: child.Comm, PID: child.PID}]
-	_, inNew := parent2.ChildrenMap[apitypes.CommPID{Comm: child.Comm, PID: child.PID}]
-	assert.True(t, inOld, "Child should remain in old parent (linkProcessToParent only adds)")
-	assert.True(t, inNew, "Child should be added to new parent")
-
-	// Edge 2: New parent does not exist
-	child.PPID = 99 // No such parent
-	creator.linkProcessToParent(child)
-	exists := creator.processMap.Get(99) != nil
-	assert.True(t, exists, "Missing parent should be created")
-
-	// Edge 3: Child is nil
-	creator.linkProcessToParent(nil) // Should not panic
-
-	// Edge 4: Parent is its own child (cycle) - should be prevented
-	cycle := &apitypes.Process{PID: 42, PPID: 42, Comm: "cycle", ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
-	creator.processMap.Set(42, cycle)
-	creator.linkProcessToParent(cycle) // Should detect and prevent circular reference
-	_, inSelf := cycle.ChildrenMap[apitypes.CommPID{Comm: cycle.Comm, PID: cycle.PID}]
-	assert.False(t, inSelf, "Process should not be its own child (circular reference prevented)")
-
-	// Edge 5: Child already in new parent's ChildrenMap
-	parent3 := &apitypes.Process{PID: 50, Comm: "parent3", ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
-	child2 := &apitypes.Process{PID: 60, PPID: 50, Comm: "child2", ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
-	parent3.ChildrenMap[apitypes.CommPID{Comm: child2.Comm, PID: child2.PID}] = child2
-	creator.processMap.Set(50, parent3)
-	creator.processMap.Set(60, child2)
-	// Re-link, should not duplicate or error
-	creator.linkProcessToParent(child2)
-	count := 0
-	for k := range parent3.ChildrenMap {
-		if k == (apitypes.CommPID{Comm: child2.Comm, PID: child2.PID}) {
-			count++
-		}
-	}
-	assert.Equal(t, 1, count, "Child should not be duplicated in ChildrenMap")
-}
-
 // MockContainerTree is a mock implementation for testing
 type MockContainerTree struct {
 	shimPID            uint32

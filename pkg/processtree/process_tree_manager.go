@@ -8,6 +8,7 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
@@ -25,6 +26,9 @@ type ProcessTreeManagerImpl struct {
 
 	// Processed events tracking
 	processedExecEvents *lru.Cache[uint32, bool] // PID -> processed flag
+
+	// Container process tree cache with automatic expiration
+	containerProcessTreeCache *expirable.LRU[string, apitypes.Process] // containerID:pid -> cached result
 
 	// Lifecycle management
 	ctx     context.Context
@@ -48,12 +52,16 @@ func NewProcessTreeManager(
 		processedExecEvents = nil
 	}
 
+	// Create expirable LRU cache for container process tree with size 10000 and 1 minute TTL
+	containerProcessTreeCache := expirable.NewLRU[string, apitypes.Process](10000, nil, 1*time.Minute)
+
 	return &ProcessTreeManagerImpl{
-		creator:             creator,
-		containerTree:       containerTree,
-		feeders:             feeders,
-		eventChan:           make(chan feeder.ProcessEvent, 1000), // Buffer for events
-		processedExecEvents: processedExecEvents,
+		creator:                   creator,
+		containerTree:             containerTree,
+		feeders:                   feeders,
+		eventChan:                 make(chan feeder.ProcessEvent, 1000), // Buffer for events
+		processedExecEvents:       processedExecEvents,
+		containerProcessTreeCache: containerProcessTreeCache,
 	}
 }
 
@@ -129,26 +137,16 @@ func (ptm *ProcessTreeManagerImpl) GetHostProcessTree() ([]apitypes.Process, err
 }
 
 func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32) (apitypes.Process, error) {
-	processTree, err := ptm.getContainerProcessTreeInternal(containerID, pid)
-	if err == nil {
-		return processTree, nil
-	}
-
-	// If we failed, wait up to 500ms for events to be processed and try again
-	processTree, err = ptm.retryGetContainerProcessTree(containerID, pid, err)
-	if err != nil {
-		return apitypes.Process{}, fmt.Errorf("failed to get container process tree: %v", err)
-	}
-
-	return processTree, nil
-}
-
-func (ptm *ProcessTreeManagerImpl) getContainerProcessTreeInternal(containerID string, pid uint32) (apitypes.Process, error) {
 	ptm.mutex.RLock()
 	defer ptm.mutex.RUnlock()
 
 	if !ptm.started {
 		return apitypes.Process{}, fmt.Errorf("process tree manager not started")
+	}
+
+	cacheKey := fmt.Sprintf("%s:%d", containerID, pid)
+	if cached, exists := ptm.containerProcessTreeCache.Get(cacheKey); exists {
+		return cached, nil
 	}
 
 	processNode, err := ptm.creator.GetProcessNode(int(pid))
@@ -160,11 +158,12 @@ func (ptm *ProcessTreeManagerImpl) getContainerProcessTreeInternal(containerID s
 		return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s", pid, containerID)
 	}
 
-	// Get the container subtree (no longer needs to be atomic in single-threaded design)
-	containerSubtree, err := ptm.creator.GetContainerSubtree(ptm.containerTree, containerID, pid)
-	if err != nil {
-		return apitypes.Process{}, fmt.Errorf("failed to get container subtree: %v", err)
+	containerSubtree, subtreeErr := ptm.containerTree.GetContainerSubtree(containerID, pid, ptm.creator.GetProcessMap())
+	if subtreeErr != nil {
+		return apitypes.Process{}, fmt.Errorf("failed to get container subtree: %v", subtreeErr)
 	}
+
+	ptm.containerProcessTreeCache.Add(cacheKey, containerSubtree)
 
 	return containerSubtree, nil
 }
@@ -198,45 +197,6 @@ func (ptm *ProcessTreeManagerImpl) eventProcessor() {
 
 func (ptm *ProcessTreeManagerImpl) cleanup() {
 	close(ptm.eventChan)
-}
-
-func (ptm *ProcessTreeManagerImpl) retryGetContainerProcessTree(containerID string, pid uint32, originalErr error) (apitypes.Process, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ptm.handleTimeoutError(containerID, pid, originalErr)
-		case <-ticker.C:
-			processTree, err := ptm.getContainerProcessTreeInternal(containerID, pid)
-			if err == nil {
-				return processTree, nil
-			}
-		}
-	}
-}
-
-func (ptm *ProcessTreeManagerImpl) handleTimeoutError(containerID string, pid uint32, originalErr error) (apitypes.Process, error) {
-	ptm.mutex.RLock()
-	defer ptm.mutex.RUnlock()
-
-	processNode, _ := ptm.creator.GetProcessNode(int(pid))
-
-	if processNode == nil {
-		return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s after waiting", pid, containerID)
-	}
-
-	// Try to get container subtree one more time for better error logging
-	containerSubtree, subtreeErr := ptm.creator.GetContainerSubtree(ptm.containerTree, containerID, pid)
-	if subtreeErr != nil {
-		return apitypes.Process{}, fmt.Errorf("failed to get container subtree after waiting: %v", subtreeErr)
-	}
-
-	return containerSubtree, nil
 }
 
 // WaitForProcessProcessing waits for a process to be processed by the process tree manager
