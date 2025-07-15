@@ -3,10 +3,17 @@ package containerwatcher
 import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
+	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
+	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
+	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
+	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
+
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
@@ -61,8 +68,40 @@ func NewEventHandlerFactory(
 
 	// Create adapters for managers that don't implement the Manager interface directly
 	containerProfileAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
-		// Container profile manager has specific methods for different event types
-		// This would need to be implemented based on the specific event types
+
+		switch eventType {
+		case utils.CapabilitiesEventType:
+			if capEvent, ok := event.(*tracercapabilitiestype.Event); ok {
+				containerProfileManager.ReportCapability(capEvent.Runtime.ContainerID, capEvent.CapName)
+			}
+		case utils.ExecveEventType:
+			if execEvent, ok := event.(*events.ExecEvent); ok {
+				containerProfileManager.ReportFileExec(execEvent.Runtime.ContainerID, *execEvent)
+			}
+		case utils.OpenEventType:
+			if openEvent, ok := event.(*events.OpenEvent); ok {
+				containerProfileManager.ReportFileOpen(openEvent.Runtime.ContainerID, *openEvent)
+			}
+		case utils.HTTPEventType:
+			if httpEvent, ok := event.(*tracerhttptype.Event); ok {
+				containerProfileManager.ReportHTTPEvent(httpEvent.Runtime.ContainerID, httpEvent)
+			}
+		case utils.SymlinkEventType:
+			if symlinkEvent, ok := event.(*tracersymlinktype.Event); ok {
+				containerProfileManager.ReportSymlinkEvent(symlinkEvent.Runtime.ContainerID, symlinkEvent)
+			}
+		case utils.HardlinkEventType:
+			if hardlinkEvent, ok := event.(*tracerhardlinktype.Event); ok {
+				containerProfileManager.ReportHardlinkEvent(hardlinkEvent.Runtime.ContainerID, hardlinkEvent)
+			}
+		case utils.NetworkEventType:
+			if networkEvent, ok := event.(*tracernetworktype.Event); ok {
+				containerProfileManager.ReportNetworkEvent(networkEvent.Runtime.ContainerID, networkEvent)
+			}
+		default:
+			// For event types that don't have specific handling, we might need to add them
+			// or handle them generically
+		}
 	})
 
 	dnsAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
