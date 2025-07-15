@@ -2,6 +2,7 @@ package processtreecreator
 
 import (
 	"fmt"
+	"sync"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
@@ -16,6 +17,11 @@ type processTreeCreatorImpl struct {
 	processMap       maps.SafeMap[uint32, *apitypes.Process] // PID -> Process
 	containerTree    containerprocesstree.ContainerProcessTree
 	reparentingLogic reparenting.ReparentingLogic
+	mutex            sync.RWMutex // Protects process tree modifications
+
+	// Exit manager fields
+	pendingExits        map[uint32]*pendingExit // PID -> pending exit
+	exitCleanupStopChan chan struct{}
 }
 
 func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree) ProcessTreeCreator {
@@ -26,11 +32,24 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 		reparentingLogic = nil
 	}
 
-	return &processTreeCreatorImpl{
+	creator := &processTreeCreatorImpl{
 		processMap:       maps.SafeMap[uint32, *apitypes.Process]{},
 		reparentingLogic: reparentingLogic,
 		containerTree:    containerTree,
+		pendingExits:     make(map[uint32]*pendingExit),
 	}
+
+	return creator
+}
+
+// Start initializes the process tree creator and starts background tasks
+func (pt *processTreeCreatorImpl) Start() {
+	pt.startExitManager()
+}
+
+// Stop shuts down the process tree creator and stops background tasks
+func (pt *processTreeCreatorImpl) Stop() {
+	pt.stopExitManager()
 }
 
 func (pt *processTreeCreatorImpl) FeedEvent(event feeder.ProcessEvent) {
@@ -47,6 +66,9 @@ func (pt *processTreeCreatorImpl) FeedEvent(event feeder.ProcessEvent) {
 }
 
 func (pt *processTreeCreatorImpl) GetRootTree() ([]apitypes.Process, error) {
+	pt.mutex.RLock()
+	defer pt.mutex.RUnlock()
+
 	// Find root processes (those whose parent is not in the map or PPID==0)
 	roots := []apitypes.Process{}
 	for _, proc := range pt.processMap.Values() {
@@ -58,6 +80,9 @@ func (pt *processTreeCreatorImpl) GetRootTree() ([]apitypes.Process, error) {
 }
 
 func (pt *processTreeCreatorImpl) GetProcessMap() map[uint32]*apitypes.Process {
+	pt.mutex.RLock()
+	defer pt.mutex.RUnlock()
+
 	// Convert SafeMap to regular map for compatibility
 	processMap := make(map[uint32]*apitypes.Process)
 	pt.processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
@@ -68,6 +93,9 @@ func (pt *processTreeCreatorImpl) GetProcessMap() map[uint32]*apitypes.Process {
 }
 
 func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, error) {
+	pt.mutex.RLock()
+	defer pt.mutex.RUnlock()
+
 	proc := pt.processMap.Get(uint32(pid))
 	if proc == nil {
 		return nil, nil
@@ -77,6 +105,9 @@ func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, er
 
 // GetContainerSubtree performs container subtree operation (no longer needs to be atomic)
 func (pt *processTreeCreatorImpl) GetContainerSubtree(containerTree interface{}, containerID string, targetPID uint32) (apitypes.Process, error) {
+	pt.mutex.RLock()
+	defer pt.mutex.RUnlock()
+
 	// Type assert the container tree
 	ct, ok := containerTree.(containerprocesstree.ContainerProcessTree)
 	if !ok {
@@ -113,6 +144,9 @@ func (pt *processTreeCreatorImpl) UpdatePPID(proc *apitypes.Process, event feede
 
 // handleForkEvent handles fork events - only fills properties if they are empty or don't exist
 func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
+	pt.mutex.Lock()
+	defer pt.mutex.Unlock()
+
 	proc := pt.processMap.Get(event.PID)
 
 	if proc == nil {
@@ -149,6 +183,9 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 }
 
 func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
+	pt.mutex.Lock()
+	defer pt.mutex.Unlock()
+
 	proc := pt.processMap.Get(event.PID)
 
 	if proc == nil {
@@ -185,6 +222,9 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 }
 
 func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
+	pt.mutex.Lock()
+	defer pt.mutex.Unlock()
+
 	proc := pt.processMap.Get(event.PID)
 	if proc == nil {
 		proc = pt.getOrCreateProcess(event.PID)
@@ -218,13 +258,17 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	}
 }
 
-// handleExitEvent handles exit events - immediate removal and reparenting
+// handleExitEvent handles exit events - now uses delayed removal via integrated exit manager
 func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
+	pt.mutex.Lock()
+	defer pt.mutex.Unlock()
+
 	proc := pt.processMap.Get(event.PID)
 	if proc == nil {
 		return
 	}
 
+	// Collect children for reparenting
 	children := make([]*apitypes.Process, 0, len(proc.ChildrenMap))
 	for _, child := range proc.ChildrenMap {
 		if child != nil {
@@ -232,30 +276,8 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
 		}
 	}
 
-	if len(children) > 0 {
-		result := pt.reparentingLogic.HandleProcessExit(event.PID, children, pt.containerTree, pt.getProcessMapAsRegularMap())
-		for _, child := range children {
-			if child != nil {
-				child.PPID = result.NewParentPID
-				pt.linkProcessToParent(child)
-			}
-		}
-	} else {
-		for _, child := range children {
-			if child != nil {
-				child.PPID = 1
-				pt.linkProcessToParent(child)
-			}
-		}
-	}
-
-	if proc.PPID != 0 {
-		if parent := pt.processMap.Get(proc.PPID); parent != nil {
-			delete(parent.ChildrenMap, apitypes.CommPID{Comm: proc.Comm, PID: event.PID})
-		}
-	}
-
-	pt.processMap.Delete(event.PID)
+	// Add to pending exits for delayed cleanup
+	pt.addPendingExit(event, children)
 }
 
 func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Process {

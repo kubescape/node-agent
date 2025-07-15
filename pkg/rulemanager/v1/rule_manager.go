@@ -336,7 +336,6 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 			res = rm.enrichRuleFailure(res)
 			if res != nil {
 				res.SetWorkloadDetails(details)
-				rm.exporter.SendRuleAlert(res)
 				return res
 			}
 			rm.metrics.ReportRuleAlert(rule.Name())

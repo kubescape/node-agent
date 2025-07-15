@@ -14,5 +14,8 @@ type ProcessTreeCreator interface {
 	GetProcessMap() map[uint32]*apitypes.Process
 	// Optionally: Query for a process node by PID
 	GetProcessNode(pid int) (*apitypes.Process, error)
+	// Start the process tree creator and begin background tasks
+	Start()
 	// Stop the process tree creator and cleanup resources
+	Stop()
 }

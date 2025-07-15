@@ -39,6 +39,16 @@ func NewProcessTreeManager(
 	}
 }
 
+// Start initializes the process tree manager and starts background tasks
+func (ptm *ProcessTreeManagerImpl) Start() {
+	ptm.creator.Start()
+}
+
+// Stop shuts down the process tree manager and stops background tasks
+func (ptm *ProcessTreeManagerImpl) Stop() {
+	ptm.creator.Stop()
+}
+
 func (ptm *ProcessTreeManagerImpl) ReportEvent(eventType utils.EventType, event utils.K8sEvent) error {
 	ptm.mutex.Lock()
 	defer ptm.mutex.Unlock()

@@ -47,6 +47,8 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 					helpers.String("eventType", string(eventType)),
 					helpers.String("pid", fmt.Sprintf("%d", entry.ProcessID)))
 			}
+		} else {
+			continue
 		}
 
 		if eventType == utils.ProcfsEventType || eventType == utils.ForkEventType {
