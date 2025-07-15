@@ -70,11 +70,6 @@ func (pt *processTreeCreatorImpl) addPendingExit(event feeder.ProcessEvent, chil
 		Timestamp:   time.Now(),
 		Children:    children,
 	}
-
-	logger.L().Info("Exit: Added to pending cleanup",
-		helpers.String("pid", fmt.Sprintf("%d", event.PID)),
-		helpers.String("children_count", fmt.Sprintf("%d", len(children))),
-		helpers.String("total_pending", fmt.Sprintf("%d", len(pt.pendingExits))))
 }
 
 // exitCleanupLoop runs the periodic cleanup every 5 minutes
@@ -152,7 +147,7 @@ func (pt *processTreeCreatorImpl) forceCleanupOldest() {
 		removeCount = len(toRemove)
 	}
 
-	logger.L().Info("Exit: Force cleanup starting",
+	logger.L().Debug("Exit: Force cleanup starting",
 		helpers.String("total_pending", fmt.Sprintf("%d", len(pt.pendingExits))),
 		helpers.String("removing_count", fmt.Sprintf("%d", removeCount)))
 
@@ -160,7 +155,7 @@ func (pt *processTreeCreatorImpl) forceCleanupOldest() {
 		pt.removeProcessFromPending(toRemove[i].PID)
 	}
 
-	logger.L().Info("Exit: Force cleanup completed",
+	logger.L().Debug("Exit: Force cleanup completed",
 		helpers.String("remaining_pending", fmt.Sprintf("%d", len(pt.pendingExits))))
 }
 
@@ -185,13 +180,6 @@ func (pt *processTreeCreatorImpl) removeProcessFromPending(pid uint32) {
 		if pt.reparentingLogic != nil {
 			// Use the reparenting logic to determine the new parent
 			result := pt.reparentingLogic.HandleProcessExit(pid, pending.Children, pt.containerTree, pt.getProcessMapAsRegularMap())
-
-			logger.L().Info("Exit: Delayed reparenting result",
-				helpers.String("pid", fmt.Sprintf("%d", pid)),
-				helpers.String("strategy", result.Strategy),
-				helpers.String("new_parent_pid", fmt.Sprintf("%d", result.NewParentPID)),
-				helpers.String("verified", fmt.Sprintf("%t", result.Verified)),
-				helpers.String("children_count", fmt.Sprintf("%d", len(pending.Children))))
 
 			// Update children's PPID to the new parent and link them
 			for _, child := range pending.Children {
@@ -225,7 +213,4 @@ func (pt *processTreeCreatorImpl) removeProcessFromPending(pid uint32) {
 	pt.processMap.Delete(pid)
 	delete(pt.pendingExits, pid)
 
-	logger.L().Info("Exit: Removed process after delay",
-		helpers.String("pid", fmt.Sprintf("%d", pid)),
-		helpers.String("start_time_ns", fmt.Sprintf("%d", pending.StartTimeNs)))
 }

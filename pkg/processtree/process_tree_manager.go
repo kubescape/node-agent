@@ -83,7 +83,7 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 		return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s", pid, containerID)
 	}
 
-	containerSubtree, subtreeErr := ptm.containerTree.GetContainerSubtree(containerID, pid, ptm.creator.GetProcessMap())
+	containerSubtree, subtreeErr := ptm.containerTree.GetPidBranch(containerID, pid, ptm.creator.GetProcessMap())
 	if subtreeErr != nil {
 		return apitypes.Process{}, fmt.Errorf("failed to get container subtree: %v", subtreeErr)
 	}

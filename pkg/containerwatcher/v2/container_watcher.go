@@ -401,9 +401,6 @@ func (ncw *NewContainerWatcher) UnregisterContainerReceiver(receiver containerwa
 func processEvents(enrichedEvents []*containerwatcher.EnrichedEvent, eventHandlerFactory *EventHandlerFactory) {
 	// Process events through the event handler factory
 	for _, event := range enrichedEvents {
-		if event.EventType == utils.ExecveEventType {
-			logger.L().Info("Processing execve event", helpers.String("event", fmt.Sprintf("%+v", event)), helpers.String("processTree", fmt.Sprintf("%+v", event.ProcessTree)))
-		}
 		eventHandlerFactory.ProcessEvent(event)
 	}
 }

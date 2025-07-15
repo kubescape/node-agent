@@ -103,8 +103,8 @@ func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, er
 	return pt.shallowCopyProcess(proc), nil
 }
 
-// GetContainerSubtree performs container subtree operation (no longer needs to be atomic)
-func (pt *processTreeCreatorImpl) GetContainerSubtree(containerTree interface{}, containerID string, targetPID uint32) (apitypes.Process, error) {
+// GetPidBranch performs container branch operation (no longer needs to be atomic)
+func (pt *processTreeCreatorImpl) GetPidBranch(containerTree interface{}, containerID string, targetPID uint32) (apitypes.Process, error) {
 	pt.mutex.RLock()
 	defer pt.mutex.RUnlock()
 
@@ -117,8 +117,8 @@ func (pt *processTreeCreatorImpl) GetContainerSubtree(containerTree interface{},
 	// Convert SafeMap to regular map for compatibility
 	processMap := pt.getProcessMapAsRegularMap()
 
-	// Perform the container subtree operation
-	return ct.GetContainerSubtree(containerID, targetPID, processMap)
+	// Perform the container branch operation
+	return ct.GetPidBranch(containerID, targetPID, processMap)
 }
 
 // UpdatePPID handles PPID updates using the new reparenting strategy
@@ -325,6 +325,11 @@ func (pt *processTreeCreatorImpl) updateProcessPPID(proc *apitypes.Process, newP
 		return
 	}
 
+	// Prevent deeper circular references by checking if newPPID is a descendant of proc
+	if pt.isDescendant(proc.PID, newPPID) {
+		return
+	}
+
 	// Remove from old parent's children map
 	if proc.PPID != 0 {
 		if oldParent := pt.processMap.Get(proc.PPID); oldParent != nil && oldParent.ChildrenMap != nil {
@@ -338,6 +343,28 @@ func (pt *processTreeCreatorImpl) updateProcessPPID(proc *apitypes.Process, newP
 
 	// Add to new parent's children map
 	pt.linkProcessToParent(proc)
+}
+
+// isDescendant checks if targetPID is a descendant of parentPID
+func (pt *processTreeCreatorImpl) isDescendant(parentPID, targetPID uint32) bool {
+	if parentPID == targetPID {
+		return true
+	}
+
+	target := pt.processMap.Get(targetPID)
+	if target == nil {
+		return false
+	}
+
+	current := target
+	for current != nil && current.PPID != 0 {
+		if current.PPID == parentPID {
+			return true
+		}
+		current = pt.processMap.Get(current.PPID)
+	}
+
+	return false
 }
 
 // getProcessMapAsRegularMap converts SafeMap to regular map for compatibility with existing interfaces

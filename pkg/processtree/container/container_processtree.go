@@ -85,7 +85,10 @@ func (c *containerProcessTreeImpl) GetContainerTreeNodes(containerID string, ful
 	return result, nil
 }
 
-func (c *containerProcessTreeImpl) GetContainerSubtree(containerID string, targetPID uint32, fullTree map[uint32]*apitypes.Process) (apitypes.Process, error) {
+// GetPidBranch returns the branch of the process tree from the target PID
+// up to (but not including) the containerd-shim process. This returns a process
+// tree containing only the nodes along the path from target to shim.
+func (c *containerProcessTreeImpl) GetPidBranch(containerID string, targetPID uint32, fullTree map[uint32]*apitypes.Process) (apitypes.Process, error) {
 	c.mutex.RLock()
 	shimPID, ok := c.containerIdToShimPid[containerID]
 	c.mutex.RUnlock()
@@ -111,13 +114,13 @@ func (c *containerProcessTreeImpl) GetContainerSubtree(containerID string, targe
 		return apitypes.Process{}, fmt.Errorf("target process %d is not within container %s subtree", targetPID, containerID)
 	}
 
-	// Walk up the parent chain from target PID until we reach the node just before shim PID
-	rootNode := c.findRootNodeBeforeShim(targetNode, shimPID, fullTree)
-	if rootNode == nil {
-		return apitypes.Process{}, fmt.Errorf("failed to find root node before shim for target %d", targetPID)
+	// Build the branch from target PID up to (but not including) shim
+	branch := c.buildBranchToShim(targetNode, shimPID, fullTree)
+	if branch == nil {
+		return apitypes.Process{}, fmt.Errorf("failed to build branch for target %d", targetPID)
 	}
 
-	return *rootNode.DeepCopy(), nil
+	return *branch, nil
 }
 
 func (c *containerProcessTreeImpl) ListContainers() []string {
@@ -206,30 +209,70 @@ func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apit
 	return false
 }
 
-// findRootNodeBeforeShim walks up the parent chain from targetNode until reaching the node just before shimPID
-func (c *containerProcessTreeImpl) findRootNodeBeforeShim(targetNode *apitypes.Process, shimPID uint32, fullTree map[uint32]*apitypes.Process) *apitypes.Process {
+// buildBranchToShim builds a process tree branch from targetNode up to (but not including) shimPID
+// This creates a new process tree containing only the nodes along the path from target to shim
+func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *apitypes.Process, shimPID uint32, fullTree map[uint32]*apitypes.Process) *apitypes.Process {
+
+	// Create a map to store the branch nodes
+	branchNodes := make(map[uint32]*apitypes.Process)
+
 	if targetNode == nil {
 		return nil
 	}
 
-	// Walk up the parent chain until we find the node whose parent is the shim
+	var pathNodes []*apitypes.Process
 	current := targetNode
 	for current.PPID != 0 {
+		pathNodes = append(pathNodes, current)
+
 		parent := fullTree[current.PPID]
 		if parent == nil {
 			break
 		}
 
-		// If the parent is the shim PID, we've found our root (the current node)
 		if parent.PID == shimPID {
-			return current
+			break
 		}
 
 		current = parent
 	}
 
-	// If we reach here, the target node itself is the root (no parent found that leads to shim)
-	return current
+	if len(pathNodes) == 0 {
+		return nil
+	}
+
+	for _, node := range pathNodes {
+		branchNodes[node.PID] = &apitypes.Process{
+			PID:         node.PID,
+			PPID:        node.PPID,
+			Comm:        node.Comm,
+			Pcomm:       node.Pcomm,
+			Cmdline:     node.Cmdline,
+			Uid:         node.Uid,
+			Gid:         node.Gid,
+			Cwd:         node.Cwd,
+			Path:        node.Path,
+			ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+		}
+	}
+
+	for _, node := range pathNodes {
+		branchNode := branchNodes[node.PID]
+		if branchNode.PPID != 0 && branchNode.PPID != shimPID {
+			if parentBranch, exists := branchNodes[branchNode.PPID]; exists {
+				key := apitypes.CommPID{Comm: branchNode.Comm, PID: branchNode.PID}
+				parentBranch.ChildrenMap[key] = branchNode
+			}
+		}
+	}
+
+	for _, node := range pathNodes {
+		if node.PPID == shimPID {
+			return branchNodes[node.PID]
+		}
+	}
+
+	return branchNodes[shimPID]
 }
 
 // getProcessFromProc retrieves process information from the /proc filesystem

@@ -421,7 +421,7 @@ func TestContainerProcessTreeImpl_Integration(t *testing.T) {
 	assert.Nil(t, tree1)
 }
 
-func TestContainerProcessTreeImpl_GetContainerSubtree_Success(t *testing.T) {
+func TestContainerProcessTreeImpl_GetPidBranch_Success(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
@@ -466,24 +466,25 @@ func TestContainerProcessTreeImpl_GetContainerSubtree_Success(t *testing.T) {
 		101: nginxWorker,
 	}
 
-	// Test getting subtree for nginx-worker (PID 101)
-	// Should return nginx (PID 100) as the root (the node just before shim)
-	result, err := cpt.GetContainerSubtree(containerID, 101, fullTree)
+	// Test getting branch for nginx-worker (PID 101)
+	// Should return nginx (PID 100) as the root, but with only worker (101) as child
+	result, err := cpt.GetPidBranch(containerID, 101, fullTree)
 	assert.NoError(t, err)
 	assert.Equal(t, uint32(100), result.PID)
 	assert.Equal(t, "nginx", result.Comm)
 	assert.Len(t, result.ChildrenMap, 1)
 	assert.Contains(t, result.ChildrenMap, apitypes.CommPID{Comm: "nginx-worker", PID: 101})
 
-	// Test getting subtree for nginx (PID 100)
-	// Should return nginx (PID 100) as the root since its parent is shim
-	result, err = cpt.GetContainerSubtree(containerID, 100, fullTree)
+	// Test getting branch for nginx (PID 100)
+	// Should return nginx (PID 100) as the root with no children (since nginx itself is the target)
+	result, err = cpt.GetPidBranch(containerID, 100, fullTree)
 	assert.NoError(t, err)
 	assert.Equal(t, uint32(100), result.PID)
 	assert.Equal(t, "nginx", result.Comm)
+	assert.Len(t, result.ChildrenMap, 0) // No children since nginx is the target
 }
 
-func TestContainerProcessTreeImpl_GetContainerSubtree_ContainerNotFound(t *testing.T) {
+func TestContainerProcessTreeImpl_GetPidBranch_ContainerNotFound(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	fullTree := map[uint32]*apitypes.Process{
@@ -495,13 +496,13 @@ func TestContainerProcessTreeImpl_GetContainerSubtree_ContainerNotFound(t *testi
 	}
 
 	// Test with non-existent container
-	result, err := cpt.GetContainerSubtree("non-existent", 100, fullTree)
+	result, err := cpt.GetPidBranch("non-existent", 100, fullTree)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "container non-existent not found")
 	assert.Equal(t, apitypes.Process{}, result)
 }
 
-func TestContainerProcessTreeImpl_GetContainerSubtree_ShimNotFound(t *testing.T) {
+func TestContainerProcessTreeImpl_GetPidBranch_ShimNotFound(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	// Pre-populate with a container but shim PID doesn't exist in tree
@@ -518,13 +519,13 @@ func TestContainerProcessTreeImpl_GetContainerSubtree_ShimNotFound(t *testing.T)
 	}
 
 	// Test with non-existent shim PID
-	result, err := cpt.GetContainerSubtree(containerID, 100, fullTree)
+	result, err := cpt.GetPidBranch(containerID, 100, fullTree)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "shim process 999 not found in process tree")
 	assert.Equal(t, apitypes.Process{}, result)
 }
 
-func TestContainerProcessTreeImpl_GetContainerSubtree_TargetNotFound(t *testing.T) {
+func TestContainerProcessTreeImpl_GetPidBranch_TargetNotFound(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
@@ -549,13 +550,13 @@ func TestContainerProcessTreeImpl_GetContainerSubtree_TargetNotFound(t *testing.
 	}
 
 	// Test with non-existent target PID
-	result, err := cpt.GetContainerSubtree(containerID, 999, fullTree)
+	result, err := cpt.GetPidBranch(containerID, 999, fullTree)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "target process 999 not found in process tree")
 	assert.Equal(t, apitypes.Process{}, result)
 }
 
-func TestContainerProcessTreeImpl_GetContainerSubtree_TargetNotInContainer(t *testing.T) {
+func TestContainerProcessTreeImpl_GetPidBranch_TargetNotInContainer(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
@@ -589,13 +590,13 @@ func TestContainerProcessTreeImpl_GetContainerSubtree_TargetNotInContainer(t *te
 	}
 
 	// Test with target PID that's not in the container's subtree
-	result, err := cpt.GetContainerSubtree(containerID, 200, fullTree)
+	result, err := cpt.GetPidBranch(containerID, 200, fullTree)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "target process 200 is not within container test-container-123 subtree")
 	assert.Equal(t, apitypes.Process{}, result)
 }
 
-func TestContainerProcessTreeImpl_GetContainerSubtree_DeepTree(t *testing.T) {
+func TestContainerProcessTreeImpl_GetPidBranch_DeepTree(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
@@ -660,32 +661,32 @@ func TestContainerProcessTreeImpl_GetContainerSubtree_DeepTree(t *testing.T) {
 		103: grandchild,
 	}
 
-	// Test getting subtree for grandchild (PID 103)
-	// Should return nginx (PID 100) as the root (the node just before shim)
-	result, err := cpt.GetContainerSubtree(containerID, 103, fullTree)
+	// Test getting branch for grandchild (PID 103)
+	// Should return nginx (PID 100) as the root, but only with the path to grandchild
+	result, err := cpt.GetPidBranch(containerID, 103, fullTree)
 	assert.NoError(t, err)
 	assert.Equal(t, uint32(100), result.PID)
 	assert.Equal(t, "nginx", result.Comm)
 
-	// Verify the full subtree structure is preserved
+	// Verify the branch structure: nginx -> worker -> child -> grandchild (path only)
 	assert.Len(t, result.ChildrenMap, 1)
 	workerNode := result.ChildrenMap[apitypes.CommPID{Comm: "worker", PID: 101}]
 	assert.NotNil(t, workerNode)
 	assert.Equal(t, uint32(101), workerNode.PID)
-	assert.Len(t, workerNode.ChildrenMap, 1)
+	assert.Len(t, workerNode.ChildrenMap, 1) // Only the path child, not all children
 
 	childNode := workerNode.ChildrenMap[apitypes.CommPID{Comm: "child", PID: 102}]
 	assert.NotNil(t, childNode)
 	assert.Equal(t, uint32(102), childNode.PID)
-	assert.Len(t, childNode.ChildrenMap, 1)
+	assert.Len(t, childNode.ChildrenMap, 1) // Only the path child, not all children
 
 	grandchildNode := childNode.ChildrenMap[apitypes.CommPID{Comm: "grandchild", PID: 103}]
 	assert.NotNil(t, grandchildNode)
 	assert.Equal(t, uint32(103), grandchildNode.PID)
-	assert.Len(t, grandchildNode.ChildrenMap, 0)
+	assert.Len(t, grandchildNode.ChildrenMap, 0) // Leaf node
 }
 
-func TestContainerProcessTreeImpl_GetContainerSubtree_TargetIsShimChild(t *testing.T) {
+func TestContainerProcessTreeImpl_GetPidBranch_TargetIsShimChild(t *testing.T) {
 	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
@@ -720,11 +721,12 @@ func TestContainerProcessTreeImpl_GetContainerSubtree_TargetIsShimChild(t *testi
 		100: nginx,
 	}
 
-	// Test getting subtree for nginx (PID 100) which is a direct child of shim
-	// Should return nginx (PID 100) as the root since its parent is shim
-	result, err := cpt.GetContainerSubtree(containerID, 100, fullTree)
+	// Test getting branch for nginx (PID 100) which is a direct child of shim
+	// Should return nginx (PID 100) as the root with no children (since nginx is the target)
+	result, err := cpt.GetPidBranch(containerID, 100, fullTree)
 	assert.NoError(t, err)
 	assert.Equal(t, uint32(100), result.PID)
 	assert.Equal(t, "nginx", result.Comm)
 	assert.Equal(t, uint32(50), result.PPID) // PPID should still be 50 (shim)
+	assert.Len(t, result.ChildrenMap, 0)     // No children since nginx is the target
 }

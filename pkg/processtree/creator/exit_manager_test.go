@@ -22,7 +22,7 @@ func (m *mockContainerProcessTree) ContainerCallback(notif containercollection.P
 func (m *mockContainerProcessTree) GetContainerTreeNodes(containerID string, fullTree map[uint32]*apitypes.Process) ([]apitypes.Process, error) {
 	return nil, nil
 }
-func (m *mockContainerProcessTree) GetContainerSubtree(containerID string, targetPID uint32, fullTree map[uint32]*apitypes.Process) (apitypes.Process, error) {
+func (m *mockContainerProcessTree) GetPidBranch(containerID string, targetPID uint32, fullTree map[uint32]*apitypes.Process) (apitypes.Process, error) {
 	return apitypes.Process{}, nil
 }
 func (m *mockContainerProcessTree) ListContainers() []string {

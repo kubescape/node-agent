@@ -8,7 +8,7 @@ import (
 type ContainerProcessTree interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
 	GetContainerTreeNodes(containerID string, fullTree map[uint32]*apitypes.Process) ([]apitypes.Process, error)
-	GetContainerSubtree(containerID string, targetPID uint32, fullTree map[uint32]*apitypes.Process) (apitypes.Process, error)
+	GetPidBranch(containerID string, targetPID uint32, fullTree map[uint32]*apitypes.Process) (apitypes.Process, error)
 	ListContainers() []string
 	// Check if a process is under any containerd-shim subtree
 	IsProcessUnderAnyContainerSubtree(pid uint32, fullTree map[uint32]*apitypes.Process) bool
