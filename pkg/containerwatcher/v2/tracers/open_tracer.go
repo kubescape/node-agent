@@ -10,7 +10,7 @@ import (
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
-	containerwatcherv1 "github.com/kubescape/node-agent/pkg/containerwatcher/v1"
+
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -106,7 +106,7 @@ func (ot *OpenTracer) openEventCallback(event *traceropentype.Event) {
 	if event.Err > -1 && event.FullPath != "" {
 		openEvent := &events.OpenEvent{Event: *event}
 		// Handle the event with syscall enrichment
-		ot.handleEvent(openEvent, []uint64{containerwatcherv1.SYS_OPEN, containerwatcherv1.SYS_OPENAT})
+		ot.handleEvent(openEvent, []uint64{SYS_OPEN, SYS_OPENAT})
 	}
 }
 

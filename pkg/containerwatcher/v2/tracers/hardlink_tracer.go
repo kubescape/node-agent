@@ -10,7 +10,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
-	containerwatcherv1 "github.com/kubescape/node-agent/pkg/containerwatcher/v1"
+
 	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -110,7 +110,7 @@ func (ht *HardlinkTracer) hardlinkEventCallback(event *tracerhardlinktype.Event)
 	}
 
 	// Handle the event with syscall enrichment
-	ht.handleEvent(event, []uint64{containerwatcherv1.SYS_LINK, containerwatcherv1.SYS_LINKAT})
+	ht.handleEvent(event, []uint64{SYS_LINK, SYS_LINKAT})
 }
 
 // handleEvent processes the event with syscall enrichment

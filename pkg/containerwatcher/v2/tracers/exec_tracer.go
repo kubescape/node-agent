@@ -10,7 +10,6 @@ import (
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
-	containerwatcherv1 "github.com/kubescape/node-agent/pkg/containerwatcher/v1"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -106,7 +105,7 @@ func (et *ExecTracer) execEventCallback(event *tracerexectype.Event) {
 	if event.Retval > -1 && event.Comm != "" {
 		execEvent := &events.ExecEvent{Event: *event}
 		// Handle the event with syscall enrichment
-		et.handleEvent(execEvent, []uint64{containerwatcherv1.SYS_FORK})
+		et.handleEvent(execEvent, []uint64{SYS_FORK})
 	}
 }
 

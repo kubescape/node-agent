@@ -10,7 +10,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
-	containerwatcherv1 "github.com/kubescape/node-agent/pkg/containerwatcher/v1"
+
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -110,7 +110,7 @@ func (st *SymlinkTracer) symlinkEventCallback(event *tracersymlinktype.Event) {
 	}
 
 	// Handle the event with syscall enrichment
-	st.handleEvent(event, []uint64{containerwatcherv1.SYS_SYMLINK, containerwatcherv1.SYS_SYMLINKAT})
+	st.handleEvent(event, []uint64{SYS_SYMLINK, SYS_SYMLINKAT})
 }
 
 // handleEvent processes the event with syscall enrichment

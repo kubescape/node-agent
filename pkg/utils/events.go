@@ -1,16 +1,13 @@
 package utils
 
 import (
-	"time"
-
-	(
 	"fmt"
 	"path/filepath"
+	"time"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-)
 )
 
 type K8sEvent interface {
