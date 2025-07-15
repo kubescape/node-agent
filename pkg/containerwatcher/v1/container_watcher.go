@@ -28,8 +28,8 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -54,7 +54,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
-	"github.com/kubescape/node-agent/pkg/networkmanager"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
@@ -201,8 +200,8 @@ type IGContainerWatcher struct {
 var _ containerwatcher.ContainerWatcher = (*IGContainerWatcher)(nil)
 
 func CreateIGContainerWatcher(cfg config.Config,
-	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient, k8sClient *k8sinterface.KubernetesApi,
-	igK8sClient *containercollection.K8sClient, networkManagerClient networkmanager.NetworkManagerClient,
+	containerProfileManager containerprofilemanager.ContainerProfileManagerClient, k8sClient *k8sinterface.KubernetesApi,
+	igK8sClient *containercollection.K8sClient,
 	dnsManagerClient dnsmanager.DNSManagerClient, metrics metricsmanager.MetricsManager, ruleManager rulemanager.RuleManagerClient,
 	malwareManager malwaremanager.MalwareManagerClient, sbomManager sbommanager.SbomManagerClient,
 	ruleBindingPodNotify *chan rulebinding.RuleBindingNotify, runtime *containerutilsTypes.RuntimeConfig,
@@ -219,7 +218,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		return nil, fmt.Errorf("creating tracer collection: %w", err)
 	}
 
-	rulePolicyReporter := rulepolicy.NewRulePolicyReporter(ruleManager, applicationProfileManager)
+	rulePolicyReporter := rulepolicy.NewRulePolicyReporter(ruleManager, containerProfileManager)
 
 	// Create a capabilities worker pool
 	capabilitiesWorkerPool, err := ants.NewPoolWithFunc(capabilitiesWorkerPoolSize, func(i interface{}) {
@@ -234,8 +233,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		}
 
 		metrics.ReportEvent(utils.CapabilitiesEventType)
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
-		applicationProfileManager.ReportCapability(k8sContainerID, event.CapName)
+		containerProfileManager.ReportCapability(event.Runtime.ContainerID, event.CapName)
 		ruleManager.ReportEvent(utils.CapabilitiesEventType, &event)
 
 		// Report capabilities to event receivers
@@ -266,10 +264,8 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
-
 		if isDroppedEvent(event.Type, event.Message) {
-			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
+			containerProfileManager.ReportDroppedEvent(event.Runtime.ContainerID)
 			return
 		}
 
@@ -277,8 +273,8 @@ func CreateIGContainerWatcher(cfg config.Config,
 		ruleManager.ReportEvent(utils.ExecveEventType, &event)
 		malwareManager.ReportEvent(utils.ExecveEventType, &event)
 		metrics.ReportEvent(utils.ExecveEventType)
-		applicationProfileManager.ReportFileExec(k8sContainerID, event)
-		rulePolicyReporter.ReportEvent(utils.ExecveEventType, &event, k8sContainerID, event.Comm)
+		containerProfileManager.ReportFileExec(event.Runtime.ContainerID, event)
+		rulePolicyReporter.ReportEvent(utils.ExecveEventType, &event, event.Runtime.ContainerID, event.Comm)
 
 		// Report exec events to event receivers
 		reportEventToThirdPartyTracers(utils.ExecveEventType, &event, thirdPartyEventReceivers)
@@ -298,10 +294,8 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
-
 		if isDroppedEvent(event.Type, event.Message) {
-			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
+			containerProfileManager.ReportDroppedEvent(event.Runtime.ContainerID)
 			return
 		}
 
@@ -310,7 +304,7 @@ func CreateIGContainerWatcher(cfg config.Config,
 		}
 
 		metrics.ReportEvent(utils.OpenEventType)
-		applicationProfileManager.ReportFileOpen(k8sContainerID, event)
+		containerProfileManager.ReportFileOpen(event.Runtime.ContainerID, event)
 		ruleManager.ReportEvent(utils.OpenEventType, &event)
 		malwareManager.ReportEvent(utils.OpenEventType, &event)
 
@@ -332,14 +326,13 @@ func CreateIGContainerWatcher(cfg config.Config,
 		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
 			return
 		}
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
 
 		if isDroppedEvent(event.Type, event.Message) {
-			networkManagerClient.ReportDroppedEvent(k8sContainerID)
+			containerProfileManager.ReportDroppedEvent(event.Runtime.ContainerID)
 			return
 		}
 		metrics.ReportEvent(utils.NetworkEventType)
-		networkManagerClient.ReportNetworkEvent(k8sContainerID, event)
+		containerProfileManager.ReportNetworkEvent(event.Runtime.ContainerID, &event)
 		ruleManager.ReportEvent(utils.NetworkEventType, &event)
 		networkStreamClient.ReportEvent(utils.NetworkEventType, &event)
 
@@ -411,12 +404,11 @@ func CreateIGContainerWatcher(cfg config.Config,
 		if cfg.IgnoreContainer(event.GetNamespace(), event.GetPod(), event.K8s.PodLabels) {
 			return
 		}
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
 
 		metrics.ReportEvent(utils.SymlinkEventType)
-		applicationProfileManager.ReportSymlinkEvent(k8sContainerID, &event)
+		containerProfileManager.ReportSymlinkEvent(event.Runtime.ContainerID, &event)
 		ruleManager.ReportEvent(utils.SymlinkEventType, &event)
-		rulePolicyReporter.ReportEvent(utils.SymlinkEventType, &event, k8sContainerID, event.Comm)
+		rulePolicyReporter.ReportEvent(utils.SymlinkEventType, &event, event.Runtime.ContainerID, event.Comm)
 		// Report symlink events to event receivers
 		reportEventToThirdPartyTracers(utils.SymlinkEventType, &event, thirdPartyEventReceivers)
 	})
@@ -433,12 +425,10 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
-
 		metrics.ReportEvent(utils.HardlinkEventType)
-		applicationProfileManager.ReportHardlinkEvent(k8sContainerID, &event)
+		containerProfileManager.ReportHardlinkEvent(event.Runtime.ContainerID, &event)
 		ruleManager.ReportEvent(utils.HardlinkEventType, &event)
-		rulePolicyReporter.ReportEvent(utils.HardlinkEventType, &event, k8sContainerID, event.Comm)
+		rulePolicyReporter.ReportEvent(utils.HardlinkEventType, &event, event.Runtime.ContainerID, event.Comm)
 		// Report hardlink events to event receivers
 		reportEventToThirdPartyTracers(utils.HardlinkEventType, &event, thirdPartyEventReceivers)
 	})
@@ -476,15 +466,13 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
-
 		if isDroppedEvent(event.Type, event.Message) {
-			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
+			containerProfileManager.ReportDroppedEvent(event.Runtime.ContainerID)
 			return
 		}
 
 		metrics.ReportEvent(utils.HTTPEventType)
-		applicationProfileManager.ReportHTTPEvent(k8sContainerID, &event)
+		containerProfileManager.ReportHTTPEvent(event.Runtime.ContainerID, &event)
 		ruleManager.ReportEvent(utils.HTTPEventType, &event)
 
 		reportEventToThirdPartyTracers(utils.HTTPEventType, &event, thirdPartyEventReceivers)
@@ -529,15 +517,13 @@ func CreateIGContainerWatcher(cfg config.Config,
 			return
 		}
 
-		k8sContainerID := utils.CreateK8sContainerID(event.K8s.Namespace, event.K8s.PodName, event.Runtime.ContainerID)
-
 		if isDroppedEvent(event.Type, event.Message) {
-			applicationProfileManager.ReportDroppedEvent(k8sContainerID)
+			containerProfileManager.ReportDroppedEvent(event.Runtime.ContainerID)
 			return
 		}
 
 		ruleManager.ReportEvent(utils.IoUringEventType, &event)
-		rulePolicyReporter.ReportEvent(utils.IoUringEventType, &event, k8sContainerID, event.Identifier)
+		rulePolicyReporter.ReportEvent(utils.IoUringEventType, &event, event.Runtime.ContainerID, event.Identifier)
 	})
 
 	if err != nil {
@@ -628,13 +614,13 @@ func CreateIGContainerWatcher(cfg config.Config,
 
 		// Channels
 		capabilitiesWorkerChan: make(chan *tracercapabilitiestype.Event, 1000),
-		execWorkerChan:         make(chan *events.ExecEvent, 10000),
-		openWorkerChan:         make(chan *events.OpenEvent, 500000),
+		execWorkerChan:         make(chan *events.ExecEvent, 1000),
+		openWorkerChan:         make(chan *events.OpenEvent, 1000),
 		topWorkerChan:          make(chan *top.Event[toptypes.Stats], 1000),
 		ptraceWorkerChan:       make(chan *tracerptracetype.Event, 1000),
-		networkWorkerChan:      make(chan *tracernetworktype.Event, 500000),
-		dnsWorkerChan:          make(chan *tracerdnstype.Event, 100000),
-		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 5000),
+		networkWorkerChan:      make(chan *tracernetworktype.Event, 1000),
+		dnsWorkerChan:          make(chan *tracerdnstype.Event, 1000),
+		randomxWorkerChan:      make(chan *tracerandomxtype.Event, 1000),
 		symlinkWorkerChan:      make(chan *tracersymlinktype.Event, 1000),
 		hardlinkWorkerChan:     make(chan *tracerhardlinktype.Event, 1000),
 		sshWorkerChan:          make(chan *tracersshtype.Event, 1000),
@@ -644,15 +630,16 @@ func CreateIGContainerWatcher(cfg config.Config,
 		exitWorkerChan:         make(chan *tracerexittype.Event, 1000),
 
 		// cache
-		ruleBindingPodNotify:         ruleBindingPodNotify,
-		ruleManagedPods:              mapset.NewSet[string](),
-		runtime:                      runtime,
-		thirdPartyTracers:            mapset.NewSet[containerwatcher.CustomTracer](),
-		thirdPartyContainerReceivers: mapset.NewSet[containerwatcher.ContainerReceiver](),
-		thirdPartyEnricher:           thirdPartyEnricher,
-		processManager:               processManager,
-		pool:                         workerpool.NewWithMaxRunningTime(cfg.WorkerPoolSize, 30*time.Second),
-		objectCache:                  objectCache,
+		ruleBindingPodNotify:            ruleBindingPodNotify,
+		ruleManagedPods:                 mapset.NewSet[string](),
+		runtime:                         runtime,
+		thirdPartyTracers:               mapset.NewSet[containerwatcher.CustomTracer](),
+		thirdPartyContainerReceivers:    mapset.NewSet[containerwatcher.ContainerReceiver](),
+		thirdPartyEnricher:              thirdPartyEnricher,
+		processManager:                  processManager,
+		pool:                            workerpool.NewWithMaxRunningTime(cfg.WorkerPoolSize, 30*time.Second),
+		objectCache:                     objectCache,
+		containerEolNotificationChannel: make(chan *containercollection.Container),
 	}, nil
 }
 
@@ -699,6 +686,24 @@ func (ch *IGContainerWatcher) UnregisterContainerReceiver(receiver containerwatc
 func (ch *IGContainerWatcher) Start(ctx context.Context) error {
 	if !ch.running {
 		var err error
+
+		go func() {
+			// Read from the container EOL notification channel and call unregisterContainer
+			for {
+				select {
+				case container := <-ch.containerEolNotificationChannel:
+					if container != nil {
+						logger.L().Debug("Container EOL notification received", helpers.String("containerID", container.Runtime.ContainerID))
+						ch.unregisterContainer(container)
+					}
+				case <-ctx.Done():
+					logger.L().Ctx(ctx).Info("Stopping container EOL notification handler")
+					return
+				}
+			}
+		}()
+
+		ch.containerProfileManager.RegisterForContainerEndOfLife(ch.containerEolNotificationChannel)
 
 		logger.L().TimedWrapper(utils.FuncName(ch.startContainerCollection), 5*time.Second, func() {
 			err = ch.startContainerCollection(ctx)

@@ -47,6 +47,8 @@ spec:
       {{- if .Values.clamav.volumes }}
       {{- toYaml .Values.clamav.volumes | nindent 8 }}
       {{- end }}
+        - name: profiles
+          emptyDir: {}
         - name: {{ .Values.global.cloudConfig }}
           configMap:
             name: {{ .Values.global.cloudConfig }}
@@ -147,6 +149,9 @@ spec:
             mountPath: /etc/config/config.json
             readOnly: true
             subPath: "config.json"
+          - name: profiles
+            mountPath: /profiles
+            readOnly: false
       nodeSelector:
       {{- if .Values.nodeAgent.nodeSelector }}
       {{- toYaml .Values.nodeAgent.nodeSelector | nindent 8 }}

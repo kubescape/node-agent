@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -137,7 +138,7 @@ func TestR0011UnexpectedNetworkTraffic(t *testing.T) {
 	e.DstEndpoint.Addr = "5.5.5.5"
 	e.Port = 81
 	originalAnnotations := nn.GetAnnotations()
-	nn.Annotations = map[string]string{"kubescape.io/completion": string(utils.WatchedContainerCompletionStatusPartial)}
+	nn.Annotations = map[string]string{"kubescape.io/completion": string(objectcache.WatchedContainerCompletionStatusPartial)}
 	objCache.SetNetworkNeighborhood(nn)
 	ruleResult = ruleprocess.ProcessRule(r, utils.NetworkEventType, e, &objCache)
 	if ruleResult != nil {

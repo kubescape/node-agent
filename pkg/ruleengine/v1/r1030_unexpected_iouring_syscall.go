@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/kubescape/go-logger"
@@ -9,9 +10,11 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/ruleengine/v1/helpers/iouring"
+	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
 const (
@@ -82,7 +85,9 @@ func (rule *R1030UnexpectedIouringOperation) EvaluateRuleWithProfile(eventType u
 
 	iouringEvent, _ := event.(*traceriouringtype.Event)
 	if allowed, err := IsAllowed(&iouringEvent.Event, objCache, iouringEvent.Comm, R1030ID); err != nil {
-		logger.L().Error("RuleManager - failed to check if iouring event is allowed", helpers.Error(err))
+		if !errors.Is(err, ruleprocess.NoProfileAvailable) {
+			logger.L().Debug("RuleManager - failed to check if iouring event is allowed", helpers.Error(err))
+		}
 		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, err
 	} else if allowed {
 		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
@@ -110,6 +115,11 @@ func (rule *R1030UnexpectedIouringOperation) CreateRuleFailure(eventType utils.E
 			InfectedPID:     iouringEvent.Pid,
 			Severity:        R1030UnexpectedIouringOperationRuleDescriptor.Priority,
 			ProfileMetadata: nil,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: iouringEvent.Comm,
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

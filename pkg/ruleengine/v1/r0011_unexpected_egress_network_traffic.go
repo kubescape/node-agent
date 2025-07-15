@@ -7,6 +7,7 @@ import (
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/goradd/maps"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -98,7 +99,7 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) EvaluateRuleWithProfile(eventTy
 
 	// Skip partially watched containers.
 	if annotations := nn.GetAnnotations(); annotations != nil {
-		if annotations["kubescape.io/completion"] == string(utils.WatchedContainerCompletionStatusPartial) {
+		if annotations["kubescape.io/completion"] == string(objectcache.WatchedContainerCompletionStatusPartial) {
 			return ruleengine.DetectionResult{IsFailure: false, Payload: nil}, nil
 		}
 	}
@@ -139,6 +140,16 @@ func (rule *R0011UnexpectedEgressNetworkTraffic) CreateRuleFailure(eventType uti
 				"proto": networkEvent.Proto,
 			},
 			Severity: R0011UnexpectedEgressNetworkTrafficRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: networkEvent.Comm,
+				},
+				Network: &common.NetworkEntity{
+					DstIP:    networkEvent.DstEndpoint.Addr,
+					DstPort:  int(networkEvent.Port),
+					Protocol: networkEvent.Proto,
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

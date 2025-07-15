@@ -221,7 +221,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 				helpers.String("sbomName", sbomName),
 				helpers.String("nodeName", wipSbom.Annotations[NodeNameMetadataKey]))
 			return
-		case wipSbom.Annotations[helpersv1.StatusMetadataKey] == helpersv1.Ready:
+		case wipSbom.Annotations[helpersv1.StatusMetadataKey] == helpersv1.Learning:
 			// only skip if the SBOM was created with the same version of tool
 			if wipSbom.Annotations[helpersv1.ToolVersionMetadataKey] == s.version {
 				logger.L().Debug("SbomManager - SBOM is already created, skipping",
@@ -362,7 +362,7 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 		// clear the spec
 		wipSbom.Spec = v1beta1.SBOMSyftSpec{}
 	} else {
-		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Ready
+		wipSbom.Annotations[helpersv1.StatusMetadataKey] = helpersv1.Learning
 	}
 	// save the SBOM
 	_, err = s.storageClient.ReplaceSBOM(wipSbom)
@@ -382,8 +382,8 @@ func (s *SbomManager) processContainer(notif containercollection.PubSubEvent) {
 		helpers.String("sbomName", sbomName))
 }
 
-func (s *SbomManager) waitForSharedContainerData(containerID string) (*utils.WatchedContainerData, error) {
-	return backoff.Retry(context.Background(), func() (*utils.WatchedContainerData, error) {
+func (s *SbomManager) waitForSharedContainerData(containerID string) (*objectcache.WatchedContainerData, error) {
+	return backoff.Retry(context.Background(), func() (*objectcache.WatchedContainerData, error) {
 		if sharedData := s.k8sObjectCache.GetSharedContainerData(containerID); sharedData != nil {
 			return sharedData, nil
 		}

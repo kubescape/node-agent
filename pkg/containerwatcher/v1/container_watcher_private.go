@@ -16,12 +16,9 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/utils"
-)
-
-const (
-	MaxSniffingTimeLabel = "kubescape.io/max-sniffing-time"
 )
 
 func (ch *IGContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
@@ -55,29 +52,9 @@ func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.P
 			helpers.String("k8s workload", k8sContainerID),
 			helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
-		// Check if Pod has a label of max sniffing time
-		sniffingTime := utils.AddJitter(ch.cfg.MaxSniffingTime, ch.cfg.MaxJitterPercentage)
-		if podLabelMaxSniffingTime, ok := notif.Container.K8s.PodLabels[MaxSniffingTimeLabel]; ok {
-			if duration, err := time.ParseDuration(podLabelMaxSniffingTime); err == nil {
-				sniffingTime = duration
-			} else {
-				logger.L().Debug("IGContainerWatcher.containerCallback - parsing sniffing time in label", helpers.Error(err), helpers.String("podLabelMaxSniffingTime", podLabelMaxSniffingTime))
-			}
-		}
 
 		// Set shared watched container data
 		go ch.setSharedWatchedContainerData(notif.Container)
-
-		time.AfterFunc(sniffingTime, func() {
-			logger.L().Debug("IGContainerWatcher.containerCallback - monitoring time ended",
-				helpers.String("container ID", notif.Container.Runtime.ContainerID),
-				helpers.String("k8s workload", k8sContainerID),
-				helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
-				helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
-			ch.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
-			ch.networkManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
-			ch.unregisterContainer(notif.Container)
-		})
 	case containercollection.EventTypeRemoveContainer:
 		logger.L().Debug("IGContainerWatcher.containerCallback - remove container event received",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
@@ -90,7 +67,7 @@ func (ch *IGContainerWatcher) containerCallbackAsync(notif containercollection.P
 
 func (ch *IGContainerWatcher) setSharedWatchedContainerData(container *containercollection.Container) {
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
-	var sharedWatchedContainerData *utils.WatchedContainerData
+	var sharedWatchedContainerData *objectcache.WatchedContainerData
 	err := backoff.Retry(func() error {
 		data, err := ch.getSharedWatchedContainerData(container)
 		if err != nil {
@@ -116,8 +93,8 @@ func (ch *IGContainerWatcher) setSharedWatchedContainerData(container *container
 	ch.objectCache.K8sObjectCache().SetSharedContainerData(container.Runtime.ContainerID, sharedWatchedContainerData)
 }
 
-func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*utils.WatchedContainerData, error) {
-	watchedContainer := utils.WatchedContainerData{
+func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*objectcache.WatchedContainerData, error) {
+	watchedContainer := objectcache.WatchedContainerData{
 		ContainerID: container.Runtime.ContainerID,
 		// we get ImageID and ImageTag from the pod spec for consistency with operator
 	}
@@ -136,7 +113,7 @@ func (ch *IGContainerWatcher) getSharedWatchedContainerData(container *container
 	}
 	pod := wl.(*workloadinterface.Workload)
 	// fill container type, index and names
-	if watchedContainer.ContainerType == utils.Unknown {
+	if watchedContainer.ContainerType == objectcache.Unknown {
 		if err := watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName); err != nil {
 			return nil, fmt.Errorf("failed to set container info: %w", err)
 		}
@@ -202,8 +179,7 @@ func (ch *IGContainerWatcher) startContainerCollection(ctx context.Context) erro
 
 	ch.callbacks = []containercollection.FuncNotify{
 		ch.containerCallbackAsync,
-		ch.applicationProfileManager.ContainerCallback,
-		ch.networkManager.ContainerCallback,
+		ch.containerProfileManager.ContainerCallback,
 		ch.objectCache.ApplicationProfileCache().ContainerCallback,
 		ch.objectCache.NetworkNeighborhoodCache().ContainerCallback,
 		ch.malwareManager.ContainerCallback,

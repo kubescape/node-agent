@@ -252,8 +252,8 @@ func (rm *RuleManager) ContainerCallback(notif containercollection.PubSubEvent) 
 	}
 }
 
-func (rm *RuleManager) waitForSharedContainerData(containerID string) (*utils.WatchedContainerData, error) {
-	return backoffv5.Retry(context.Background(), func() (*utils.WatchedContainerData, error) {
+func (rm *RuleManager) waitForSharedContainerData(containerID string) (*objectcache.WatchedContainerData, error) {
+	return backoffv5.Retry(context.Background(), func() (*objectcache.WatchedContainerData, error) {
 		if sharedData := rm.objectCache.K8sObjectCache().GetSharedContainerData(containerID); sharedData != nil {
 			return sharedData, nil
 		}

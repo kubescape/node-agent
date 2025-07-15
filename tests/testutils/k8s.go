@@ -335,7 +335,7 @@ func (w *TestWorkload) WaitForApplicationProfileCompletionWithBlacklist(maxRetri
 		}
 		return fmt.Errorf("application profile is not in status 'completed'")
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
-		logger.L().Info("waiting for app profile", helpers.Error(err), helpers.String("retry in", d.String()))
+		logger.L().Info("waiting for app profile", helpers.Error(err), helpers.String("retry in", d.String()), helpers.String("current time", time.Now().Format(time.RFC3339)))
 	})
 }
 
@@ -351,7 +351,7 @@ func (w *TestWorkload) WaitForApplicationProfile(maxRetries uint64, expectedStat
 		}
 		return fmt.Errorf("application profile is not in status '%s'", expectedStatus)
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
-		logger.L().Info("waiting for app profile", helpers.Error(err), helpers.String("retry in", d.String()))
+		logger.L().Info("waiting for app profile", helpers.Error(err), helpers.String("retry in", d.String()), helpers.String("current time", time.Now().Format(time.RFC3339)))
 	})
 }
 
@@ -374,9 +374,11 @@ func (w *TestWorkload) WaitForNetworkNeighborhoodCompletionWithBlacklist(maxRetr
 			}
 			return nil
 		}
+		// Print the network neighborhood details
+		logger.L().Info("network neighborhood details", helpers.Interface("annotations", networkNeighborhood.Annotations), helpers.Interface("labels", networkNeighborhood.Labels))
 		return fmt.Errorf("network neighborhood is not in status 'completed'")
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
-		logger.L().Info("waiting for network neighborhood", helpers.Error(err), helpers.String("retry in", d.String()))
+		logger.L().Info("waiting for network neighborhood", helpers.Error(err), helpers.String("retry in", d.String()), helpers.String("current time", time.Now().Format(time.RFC3339)))
 	})
 }
 
@@ -392,7 +394,7 @@ func (w *TestWorkload) WaitForNetworkNeighborhood(maxRetries uint64, expectedSta
 		}
 		return fmt.Errorf("network neighborhood is not in status '%s'", expectedStatus)
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(10*time.Second), maxRetries), func(err error, d time.Duration) {
-		logger.L().Info("waiting for network neighborhood", helpers.Error(err), helpers.String("retry in", d.String()))
+		logger.L().Info("waiting for network neighborhood", helpers.Error(err), helpers.String("retry in", d.String()), helpers.String("current time", time.Now().Format(time.RFC3339)))
 	})
 }
 

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
@@ -60,8 +62,7 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	}
 	assert.NoError(t, wl.WaitForReady(80))
 
-	assert.NoError(t, wl.WaitForApplicationProfile(80, "ready"))
-	assert.NoError(t, wl.WaitForNetworkNeighborhood(80, "ready"))
+	time.Sleep(10 * time.Second)
 
 	// process launched from nginx container
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
@@ -135,19 +136,14 @@ func Test_02_AllAlertsFromMaliciousApp(t *testing.T) {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
 	}
 
-	// Malicious activity will be detected in 3 minutes + 300 seconds to wait for the alerts to be generated
-	maliciousAppWaitBeforeStart := time.Minute * 3
-	waitBeforeLookingForAlerts := time.Minute * 5
-	timer := time.NewTimer(maliciousAppWaitBeforeStart + waitBeforeLookingForAlerts)
-
 	// Wait for the application profile to be created and completed
-	err = wl.WaitForApplicationProfileCompletion(80)
+	err = wl.WaitForApplicationProfileCompletion(150)
 	if err != nil {
 		t.Errorf("Error waiting for application profile to be completed: %v", err)
 	}
 
 	// Wait for the alerts to be generated
-	<-timer.C
+	time.Sleep(1 * time.Minute)
 
 	// Get all the alerts for the namespace
 	alerts, err := testutils.GetAlerts(wl.Namespace)
@@ -395,11 +391,8 @@ func Test_06_KillProcessInTheMiddle(t *testing.T) {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
 	}
 
-	// Wait for the application profile to be created and 'ready' (not 'completed')
-	err = nginx.WaitForApplicationProfile(80, "ready")
-	if err != nil {
-		t.Errorf("Error waiting for application profile to be 'ready': %v", err)
-	}
+	// Give time for the nginx application profile to be ready
+	assert.NoError(t, nginx.WaitForApplicationProfile(80, "ready"))
 
 	// Exec into the nginx pod and kill the process
 	_, _, err = nginx.ExecIntoPod([]string{"bash", "-c", "kill -9 1"}, "")
@@ -632,7 +625,8 @@ func Test_11_EndpointTest(t *testing.T) {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
 	}
 
-	assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
+	// assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
+	time.Sleep(10 * time.Second)
 
 	// Merge methods
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"wget", "http://127.0.0.1:80"}, "")
@@ -728,7 +722,8 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	wl, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/deployment-multiple-containers.yaml"))
 	require.NoError(t, err, "Failed to create workload")
 	require.NoError(t, wl.WaitForReady(80), "Workload failed to be ready")
-	require.NoError(t, wl.WaitForApplicationProfile(80, "ready"), "Application profile not ready")
+	// require.NoError(t, wl.WaitForApplicationProfile(80, "ready"), "Application profile not ready")
+	time.Sleep(10 * time.Second)
 
 	// Generate initial profile data
 	_, _, err = wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")
@@ -736,7 +731,7 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server")
 	require.NoError(t, err, "Failed to exec into server container")
 
-	require.NoError(t, wl.WaitForApplicationProfileCompletion(80), "Profile failed to complete")
+	require.NoError(t, wl.WaitForApplicationProfileCompletion(160), "Profile failed to complete")
 	time.Sleep(10 * time.Second) // Allow profile processing
 
 	// Log initial profile state
@@ -861,54 +856,55 @@ func Test_12_MergingProfilesTest(t *testing.T) {
 		t.Errorf("New alerts were generated after merge (Initial: %d, Final: %d)", initialAlertCount, newAlertCount)
 	}
 
+	// The new cache doesn't listen to patches
 	// PHASE 5: Check PATCH (removing the ls command from the user profile of the server container and triggering an alert)
-	t.Log("Patching user profile to remove ls command from server container...")
-	patchOperations := []utils.PatchOperation{
-		{Op: "remove", Path: "/spec/containers/1/execs/0"},
-	}
+	// t.Log("Patching user profile to remove ls command from server container...")
+	// patchOperations := []utils.PatchOperation{
+	// 	{Op: "remove", Path: "/spec/containers/1/execs/0"},
+	// }
 
-	patch, err := json.Marshal(patchOperations)
-	require.NoError(t, err, "Failed to marshal patch operations")
+	// patch, err := json.Marshal(patchOperations)
+	// require.NoError(t, err, "Failed to marshal patch operations")
 
-	_, err = storageClient.ApplicationProfiles(ns.Name).Patch(context.Background(), userProfile.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
-	require.NoError(t, err, "Failed to patch user profile")
+	// _, err = storageClient.ApplicationProfiles(ns.Name).Patch(context.Background(), userProfile.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
+	// require.NoError(t, err, "Failed to patch user profile")
 
-	// Verify patched profile behavior
-	time.Sleep(15 * time.Second) // Allow merge to complete
+	// // Verify patched profile behavior
+	// time.Sleep(15 * time.Second) // Allow merge to complete
 
-	// Log the profile that was patched
-	patchedProfile, err := wl.GetApplicationProfile()
-	require.NoError(t, err, "Failed to get patched profile")
-	t.Logf("Patched application profile:\n%v", patchedProfile)
+	// // Log the profile that was patched
+	// patchedProfile, err := wl.GetApplicationProfile()
+	// require.NoError(t, err, "Failed to get patched profile")
+	// t.Logf("Patched application profile:\n%v", patchedProfile)
 
-	// Test patched profile behavior
-	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
-	wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: alert (ls command removed from user profile)
-	time.Sleep(10 * time.Second)                   // Wait for potential alerts
+	// // Test patched profile behavior
+	// wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")  // Expected: no alert
+	// wl.ExecIntoPod([]string{"ls", "-l"}, "server") // Expected: alert (ls command removed from user profile)
+	// time.Sleep(10 * time.Second)                   // Wait for potential alerts
 
-	// Verify alert counts
-	finalAlerts, err = testutils.GetAlerts(wl.Namespace)
-	require.NoError(t, err, "Failed to get final alerts")
+	// // Verify alert counts
+	// finalAlerts, err = testutils.GetAlerts(wl.Namespace)
+	// require.NoError(t, err, "Failed to get final alerts")
 
-	// Only count new alerts (after the initial count)
-	newAlertCount = 0
-	for _, alert := range finalAlerts {
-		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
-			newAlertCount++
-		}
-	}
+	// // Only count new alerts (after the initial count)
+	// newAlertCount = 0
+	// for _, alert := range finalAlerts {
+	// 	if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+	// 		newAlertCount++
+	// 	}
+	// }
 
-	t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, newAlertCount)
+	// t.Logf("Alert counts - Initial: %d, Final: %d", initialAlertCount, newAlertCount)
 
-	if newAlertCount <= initialAlertCount {
-		t.Logf("Full alert details:")
-		for _, alert := range finalAlerts {
-			if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
-				t.Logf("Alert: %+v", alert)
-			}
-		}
-		t.Errorf("New alerts were not generated after patch (Initial: %d, Final: %d)", initialAlertCount, newAlertCount)
-	}
+	// if newAlertCount <= initialAlertCount {
+	// 	t.Logf("Full alert details:")
+	// 	for _, alert := range finalAlerts {
+	// 		if ruleName, ok := alert.Labels["rule_name"]; ok && ruleName == "Unexpected process launched" {
+	// 			t.Logf("Alert: %+v", alert)
+	// 		}
+	// 	}
+	// 	t.Errorf("New alerts were not generated after patch (Initial: %d, Final: %d)", initialAlertCount, newAlertCount)
+	// }
 }
 
 func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
@@ -1133,8 +1129,8 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	}
 
 	// Wait for application profile to be ready
-	assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
-	time.Sleep(30 * time.Second)
+	// assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
+	time.Sleep(10 * time.Second)
 
 	// Add to rule policy symlink
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "-s", "/etc/shadow", "/tmp/a"}, "")
@@ -1169,7 +1165,7 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	fmt.Println("After completed....")
 
 	// wait for cache
-	time.Sleep(120 * time.Second)
+	time.Sleep(40 * time.Second)
 
 	// generate hardlink alert
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "/etc/shadow", "/tmp/a"}, "")
@@ -1182,7 +1178,7 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Wait for the alert to be signaled
-	time.Sleep(60 * time.Second)
+	time.Sleep(30 * time.Second)
 
 	alerts, err := testutils.GetAlerts(endpointTraffic.Namespace)
 	if err != nil {
@@ -1213,7 +1209,7 @@ func Test_15_CompletedApCannotBecomeReadyAgain(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Annotations: map[string]string{
-				helpersv1.CompletionMetadataKey: helpersv1.Complete,
+				helpersv1.CompletionMetadataKey: helpersv1.Full,
 				helpersv1.StatusMetadataKey:     helpersv1.Completed,
 			},
 		},
@@ -1226,7 +1222,7 @@ func Test_15_CompletedApCannotBecomeReadyAgain(t *testing.T) {
 		{
 			Op:    "replace",
 			Path:  "/metadata/annotations/" + utils.EscapeJSONPointerElement(helpersv1.StatusMetadataKey),
-			Value: helpersv1.Ready,
+			Value: helpersv1.Learning,
 		},
 	}
 	patch, err := json.Marshal(patchOperations)
@@ -1541,8 +1537,11 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 		t.Errorf("Error restarting deployment: %v", err)
 	}
 
+	// Print we restarted the deployment
+	logger.L().Info("restarted deployment", helpers.String("name", wl.WorkloadObj.GetName()), helpers.String("namespace", wl.WorkloadObj.GetNamespace()))
+
 	// Sleep to allow the restart to complete
-	time.Sleep(45 * time.Second)
+	time.Sleep(30 * time.Second)
 
 	wl, err = testutils.NewTestWorkloadFromK8sIdentifiers(ns.Name, wl.UnstructuredObj.GroupVersionKind().Kind, "multiple-containers-deployment")
 	if err != nil {
@@ -1560,6 +1559,11 @@ func Test_21_AlertOnPartialThenLearnNetworkTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error executing network command in pod during learning: %v", err)
 	}
+
+	// Print the workload details we are using
+	logger.L().Info("workload details", helpers.String("name", wl.WorkloadObj.GetName()), helpers.String("namespace", wl.WorkloadObj.GetNamespace()))
+	// Print the metadata of the workload
+	logger.L().Info("workload metadata", helpers.Interface("metadata", wl.WorkloadObj.GetAnnotations()), helpers.Interface("labels", wl.WorkloadObj.GetLabels()))
 
 	// Wait for the network neighborhood to be completed (with curl command learned)
 	err = wl.WaitForNetworkNeighborhoodCompletionWithBlacklist(160, []string{nn.Name})

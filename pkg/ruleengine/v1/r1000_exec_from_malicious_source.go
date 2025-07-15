@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
 const (
@@ -122,6 +123,16 @@ func (rule *R1000ExecFromMaliciousSource) CreateRuleFailure(eventType utils.Even
 				"hardlink": execEvent.ExePath,
 			},
 			Severity: R1000ExecFromMaliciousSourceDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name:        execEvent.Comm,
+					CommandLine: fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
+				},
+				File: &common.FileEntity{
+					Name:      filepath.Base(execPath),
+					Directory: filepath.Dir(execPath),
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{

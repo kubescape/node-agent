@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerprofilemanager/v1/queue"
 	"github.com/kubescape/node-agent/pkg/storage"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -28,16 +29,15 @@ const (
 )
 
 type Storage struct {
-	StorageClient          spdxv1beta1.SpdxV1beta1Interface
-	maxElapsedTime         time.Duration
-	maxJsonPatchOperations int
-	namespace              string
-	multiplier             *int // used for testing to multiply the resources by this
+	StorageClient spdxv1beta1.SpdxV1beta1Interface
+	namespace     string
+	multiplier    *int // used for testing to multiply the resources by this
 }
 
 var _ storage.StorageClient = (*Storage)(nil)
+var _ queue.ProfileCreator = (*Storage)(nil)
 
-func CreateStorage(namespace string, maxElapsedTime time.Duration) (*Storage, error) {
+func CreateStorage(ctx context.Context, namespace string, maxElapsedTime time.Duration) (*Storage, error) {
 	var cfg *rest.Config
 	kubeconfig := os.Getenv(KubeConfig)
 	// use the current context in kubeconfig
@@ -67,60 +67,52 @@ func CreateStorage(namespace string, maxElapsedTime time.Duration) (*Storage, er
 		return nil, fmt.Errorf("too many retries waiting for storage: %w", err)
 	}
 
-	return &Storage{
-		StorageClient:          clientset.SpdxV1beta1(),
-		maxElapsedTime:         maxElapsedTime,
-		maxJsonPatchOperations: 9999,
-		namespace:              namespace,
-		multiplier:             getMultiplier(),
-	}, nil
+	storage := &Storage{
+		StorageClient: clientset.SpdxV1beta1(),
+		namespace:     namespace,
+		multiplier:    getMultiplier(),
+	}
+
+	return storage, nil
+
 }
 
 func CreateFakeStorage(namespace string) (*Storage, error) {
-	return &Storage{
+	storage := &Storage{
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
 		namespace:     namespace,
-	}, nil
+		multiplier:    getMultiplier(),
+	}
+
+	return storage, nil
 }
 
-func (sc Storage) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
+func (sc *Storage) CreateSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Create(context.Background(), SBOM, metav1.CreateOptions{})
 }
 
-func (sc Storage) GetSBOM(name string) (*v1beta1.SBOMSyft, error) {
-	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{})
-}
-
-func (sc Storage) GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error) {
+func (sc *Storage) GetSBOMMeta(name string) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Get(context.Background(), name, metav1.GetOptions{ResourceVersion: softwarecomposition.ResourceVersionMetadata})
 }
 
-func (sc Storage) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
+func (sc *Storage) ReplaceSBOM(SBOM *v1beta1.SBOMSyft) (*v1beta1.SBOMSyft, error) {
 	return sc.StorageClient.SBOMSyfts(sc.namespace).Update(context.Background(), SBOM, metav1.UpdateOptions{})
 }
 
-func (sc Storage) IncrementImageUse(_ string) {
-	// noop
-}
-
-func (sc Storage) DecrementImageUse(_ string) {
-	// noop
-}
-
-func (sc Storage) modifyName(n string) string {
+func (sc *Storage) modifyName(n string) string {
 	if sc.multiplier != nil {
 		return fmt.Sprintf("%s-%d", n, *sc.multiplier)
 	}
 	return n
 }
 
-func (sc Storage) modifyNameP(n *string) {
+func (sc *Storage) modifyNameP(n *string) {
 	if sc.multiplier != nil {
 		*n = fmt.Sprintf("%s-%d", *n, *sc.multiplier)
 	}
 }
 
-func (sc Storage) revertNameP(n *string) {
+func (sc *Storage) revertNameP(n *string) {
 	if sc.multiplier != nil {
 		*n = strings.TrimSuffix(*n, fmt.Sprintf("-%d", *sc.multiplier))
 	}

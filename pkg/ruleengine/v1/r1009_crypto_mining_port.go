@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -128,6 +129,16 @@ func (rule *R1009CryptoMiningRelatedPort) CreateRuleFailure(eventType utils.Even
 			},
 			InfectedPID: networkEvent.Pid,
 			Severity:    R1009CryptoMiningRelatedPortRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: networkEvent.Comm,
+				},
+				Network: &common.NetworkEntity{
+					DstIP:    networkEvent.DstEndpoint.Addr,
+					DstPort:  int(networkEvent.Port),
+					Protocol: networkEvent.Proto,
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
@@ -140,7 +151,7 @@ func (rule *R1009CryptoMiningRelatedPort) CreateRuleFailure(eventType utils.Even
 		},
 		TriggerEvent: networkEvent.Event,
 		RuleAlert: apitypes.RuleAlert{
-			RuleDescription: fmt.Sprintf("Communication on a commonly used crypto mining port: %d", networkEvent.Port),
+			RuleDescription: fmt.Sprintf("Detected crypto mining related port communication on port %d to %s with protocol %s", networkEvent.Port, networkEvent.DstEndpoint.Addr, networkEvent.Proto),
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
 			PodName:   networkEvent.GetPod(),

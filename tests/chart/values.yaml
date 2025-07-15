@@ -34,7 +34,7 @@ storage:
   image:
     repository: quay.io/kubescape/storage
     tag: v0.0.156
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   cleanupInterval: "6h"
   labels:
     app.kubernetes.io/name: "storage"

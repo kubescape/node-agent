@@ -18,7 +18,7 @@ rules:
   resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
   verbs: ["get", "watch", "list"]
 - apiGroups: ["spdx.softwarecomposition.kubescape.io"]
-  resources: ["applicationactivities", "applicationprofiles", "networkneighborses", "networkneighborhoods"]
+  resources: ["applicationactivities", "applicationprofiles", "networkneighborses", "networkneighborhoods", "containerprofiles"]
   verbs: ["create", "get", "update", "watch", "list", "patch"]
 - apiGroups: ["kubescape.io"]
   resources: ["runtimerulealertbindings"]

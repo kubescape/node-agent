@@ -13,7 +13,6 @@ import (
 	"github.com/anchore/syft/syft/file"
 	"github.com/anchore/syft/syft/source"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/kubescape/node-agent/pkg/utils"
 	imagedigest "github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
@@ -163,7 +162,7 @@ func toLayers(ds []imagedigest.Digest, ms []string) ([]source.LayerMetadata, int
 	layers := make([]source.LayerMetadata, len(ds))
 	msLen := len(ms)
 	for i, d := range ds {
-		s := utils.DiskUsage(ms[msLen-i-1])
+		s := diskUsage(ms[msLen-i-1])
 		totalSize += s
 		layers[i] = source.LayerMetadata{
 			MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",

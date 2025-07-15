@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 
 	"github.com/kubescape/go-logger"
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
@@ -198,6 +199,16 @@ func (rule *R1003MaliciousSSHConnection) CreateRuleFailure(eventType utils.Event
 				"dstPort": sshEvent.DstPort,
 			},
 			Severity: R1003MaliciousSSHConnectionRuleDescriptor.Priority,
+			Identifiers: &common.Identifiers{
+				Process: &common.ProcessEntity{
+					Name: sshEvent.Comm,
+				},
+				Network: &common.NetworkEntity{
+					DstIP:    sshEvent.DstIP,
+					DstPort:  int(sshEvent.DstPort),
+					Protocol: "TCP",
+				},
+			},
 		},
 		RuntimeProcessDetails: apitypes.ProcessTree{
 			ProcessTree: apitypes.Process{
