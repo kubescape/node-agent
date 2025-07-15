@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -80,8 +81,6 @@ func (ncw *NewContainerWatcher) containerCallbackAsync(notif containercollection
 				helpers.String("k8s workload", k8sContainerID),
 				helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
 				helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
-			ncw.applicationProfileManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
-			ncw.networkManager.ContainerReachedMaxTime(notif.Container.Runtime.ContainerID)
 			ncw.unregisterContainer(notif.Container)
 		})
 	case containercollection.EventTypeRemoveContainer:
@@ -97,7 +96,7 @@ func (ncw *NewContainerWatcher) containerCallbackAsync(notif containercollection
 // setSharedWatchedContainerData sets shared container data with retry logic
 func (ncw *NewContainerWatcher) setSharedWatchedContainerData(container *containercollection.Container) {
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
-	var sharedWatchedContainerData *utils.WatchedContainerData
+	var sharedWatchedContainerData *objectcache.WatchedContainerData
 	err := backoff.Retry(func() error {
 		data, err := ncw.getSharedWatchedContainerData(container)
 		if err != nil {
@@ -124,8 +123,8 @@ func (ncw *NewContainerWatcher) setSharedWatchedContainerData(container *contain
 }
 
 // getSharedWatchedContainerData gets shared container data from Kubernetes
-func (ncw *NewContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*utils.WatchedContainerData, error) {
-	watchedContainer := utils.WatchedContainerData{
+func (ncw *NewContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*objectcache.WatchedContainerData, error) {
+	watchedContainer := objectcache.WatchedContainerData{
 		ContainerID: container.Runtime.ContainerID,
 		// we get ImageID and ImageTag from the pod spec for consistency with operator
 	}
@@ -144,7 +143,7 @@ func (ncw *NewContainerWatcher) getSharedWatchedContainerData(container *contain
 	}
 	pod := wl.(*workloadinterface.Workload)
 	// fill container type, index and names
-	if watchedContainer.ContainerType == utils.Unknown {
+	if watchedContainer.ContainerType == objectcache.Unknown {
 		if err := watchedContainer.SetContainerInfo(pod, container.K8s.ContainerName); err != nil {
 			return nil, fmt.Errorf("failed to set container info: %w", err)
 		}

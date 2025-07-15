@@ -15,14 +15,13 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/containerwatcher/v2/tracers"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
-	"github.com/kubescape/node-agent/pkg/networkmanager"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
@@ -47,16 +46,15 @@ type NewContainerWatcher struct {
 	agentStartTime    time.Time
 
 	// Clients
-	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
-	igK8sClient               *containercollection.K8sClient
-	k8sClient                 *k8sinterface.KubernetesApi
-	networkManager            networkmanager.NetworkManagerClient
-	dnsManager                dnsmanager.DNSManagerClient
-	ruleManager               rulemanager.RuleManagerClient
-	malwareManager            malwaremanager.MalwareManagerClient
-	sbomManager               sbommanager.SbomManagerClient
-	networkStreamClient       networkstream.NetworkStreamClient
-	containerProcessTree      containerprocesstree.ContainerProcessTree
+	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
+	igK8sClient             *containercollection.K8sClient
+	k8sClient               *k8sinterface.KubernetesApi
+	dnsManager              dnsmanager.DNSManagerClient
+	ruleManager             rulemanager.RuleManagerClient
+	malwareManager          malwaremanager.MalwareManagerClient
+	sbomManager             sbommanager.SbomManagerClient
+	networkStreamClient     networkstream.NetworkStreamClient
+	containerProcessTree    containerprocesstree.ContainerProcessTree
 
 	// IG Collections
 	containerCollection *containercollection.ContainerCollection
@@ -103,10 +101,9 @@ var _ containerwatcher.ContainerWatcher = (*NewContainerWatcher)(nil)
 // CreateNewContainerWatcher creates a new container watcher with the ordered event processing design
 func CreateNewContainerWatcher(
 	cfg config.Config,
-	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient,
+	containerProfileManager containerprofilemanager.ContainerProfileManagerClient,
 	k8sClient *k8sinterface.KubernetesApi,
 	igK8sClient *containercollection.K8sClient,
-	networkManagerClient networkmanager.NetworkManagerClient,
 	dnsManagerClient dnsmanager.DNSManagerClient,
 	metrics metricsmanager.MetricsManager,
 	ruleManager rulemanager.RuleManagerClient,
@@ -138,8 +135,7 @@ func CreateNewContainerWatcher(
 
 	// Create event handler factory
 	eventHandlerFactory := NewEventHandlerFactory(
-		applicationProfileManager,
-		networkManagerClient,
+		containerProfileManager,
 		dnsManagerClient,
 		ruleManager,
 		malwareManager,
@@ -172,16 +168,15 @@ func CreateNewContainerWatcher(
 		agentStartTime:    time.Now(),
 
 		// Clients
-		applicationProfileManager: applicationProfileManager,
-		igK8sClient:               igK8sClient,
-		k8sClient:                 k8sClient,
-		networkManager:            networkManagerClient,
-		dnsManager:                dnsManagerClient,
-		ruleManager:               ruleManager,
-		malwareManager:            malwareManager,
-		sbomManager:               sbomManager,
-		networkStreamClient:       networkStreamClient,
-		containerProcessTree:      containerProcessTree,
+		containerProfileManager: containerProfileManager,
+		igK8sClient:             igK8sClient,
+		k8sClient:               k8sClient,
+		dnsManager:              dnsManagerClient,
+		ruleManager:             ruleManager,
+		malwareManager:          malwareManager,
+		sbomManager:             sbomManager,
+		networkStreamClient:     networkStreamClient,
+		containerProcessTree:    containerProcessTree,
 
 		// IG Collections
 		containerCollection: containerCollection,
@@ -215,10 +210,9 @@ func CreateNewContainerWatcher(
 // This function maintains compatibility with the v1 API while using the new v2 implementation
 func CreateIGContainerWatcher(
 	cfg config.Config,
-	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient,
+	containerProfileManager containerprofilemanager.ContainerProfileManagerClient,
 	k8sClient *k8sinterface.KubernetesApi,
 	igK8sClient *containercollection.K8sClient,
-	networkManagerClient networkmanager.NetworkManagerClient,
 	dnsManagerClient dnsmanager.DNSManagerClient,
 	metrics metricsmanager.MetricsManager,
 	ruleManager rulemanager.RuleManagerClient,
@@ -238,10 +232,9 @@ func CreateIGContainerWatcher(
 
 	return CreateNewContainerWatcher(
 		cfg,
-		applicationProfileManager,
+		containerProfileManager,
 		k8sClient,
 		igK8sClient,
-		networkManagerClient,
 		dnsManagerClient,
 		metrics,
 		ruleManager,
@@ -297,7 +290,7 @@ func (ncw *NewContainerWatcher) Start(ctx context.Context) error {
 		ncw.containerSelector,
 		ncw.orderedEventQueue,
 		ncw.socketEnricher,
-		ncw.applicationProfileManager,
+		ncw.containerProfileManager,
 		ncw.ruleManager,
 		ncw.thirdPartyTracers,
 	)

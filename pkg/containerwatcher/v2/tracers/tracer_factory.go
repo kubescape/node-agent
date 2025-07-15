@@ -10,7 +10,7 @@ import (
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
+	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -21,16 +21,16 @@ type EventQueueInterface interface {
 	AddEventDirect(eventType utils.EventType, event utils.K8sEvent, containerID string, processID uint32)
 }
 
-// TracerFactory creates and manages all tracer instances
+// TracerFactory manages the creation and configuration of all tracers
 type TracerFactory struct {
-	containerCollection       *containercollection.ContainerCollection
-	tracerCollection          *tracercollection.TracerCollection
-	containerSelector         containercollection.ContainerSelector
-	orderedEventQueue         EventQueueInterface
-	socketEnricher            *socketenricher.SocketEnricher
-	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient
-	ruleManager               rulemanager.RuleManagerClient
-	thirdPartyTracers         mapset.Set[containerwatcher.CustomTracer]
+	containerCollection     *containercollection.ContainerCollection
+	tracerCollection        *tracercollection.TracerCollection
+	containerSelector       containercollection.ContainerSelector
+	orderedEventQueue       EventQueueInterface
+	socketEnricher          *socketenricher.SocketEnricher
+	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
+	ruleManager             rulemanager.RuleManagerClient
+	thirdPartyTracers       mapset.Set[containerwatcher.CustomTracer]
 }
 
 // NewTracerFactory creates a new tracer factory
@@ -40,23 +40,23 @@ func NewTracerFactory(
 	containerSelector containercollection.ContainerSelector,
 	orderedEventQueue EventQueueInterface,
 	socketEnricher *socketenricher.SocketEnricher,
-	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient,
+	containerProfileManager containerprofilemanager.ContainerProfileManagerClient,
 	ruleManager rulemanager.RuleManagerClient,
 	thirdPartyTracers mapset.Set[containerwatcher.CustomTracer],
 ) *TracerFactory {
 	return &TracerFactory{
-		containerCollection:       containerCollection,
-		tracerCollection:          tracerCollection,
-		containerSelector:         containerSelector,
-		orderedEventQueue:         orderedEventQueue,
-		socketEnricher:            socketEnricher,
-		applicationProfileManager: applicationProfileManager,
-		ruleManager:               ruleManager,
-		thirdPartyTracers:         thirdPartyTracers,
+		containerCollection:     containerCollection,
+		tracerCollection:        tracerCollection,
+		containerSelector:       containerSelector,
+		orderedEventQueue:       orderedEventQueue,
+		socketEnricher:          socketEnricher,
+		containerProfileManager: containerProfileManager,
+		ruleManager:             ruleManager,
+		thirdPartyTracers:       thirdPartyTracers,
 	}
 }
 
-// CreateAllTracers creates all available tracers and registers them with the manager
+// CreateAllTracers creates all configured tracers
 func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManager) {
 	// Create procfs tracer (starts 5 seconds before other tracers)
 	procfsTracer := NewProcfsTracer(
@@ -137,37 +137,15 @@ func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManage
 	)
 	manager.RegisterTracer(hardlinkTracer)
 
-	// Create network tracer (requires socket enricher)
-	if tf.socketEnricher != nil {
-		networkTracer := NewNetworkTracer(
-			tf.containerCollection,
-			tf.tracerCollection,
-			tf.containerSelector,
-			tf.createEventCallback(utils.NetworkEventType),
-			tf.socketEnricher,
-		)
-		manager.RegisterTracer(networkTracer)
-
-		// Create DNS tracer (requires socket enricher)
-		dnsTracer := NewDNSTracer(
-			tf.containerCollection,
-			tf.tracerCollection,
-			tf.containerSelector,
-			tf.createEventCallback(utils.DnsEventType),
-			tf.socketEnricher,
-		)
-		manager.RegisterTracer(dnsTracer)
-
-		// Create SSH tracer (requires socket enricher)
-		sshTracer := NewSSHTracer(
-			tf.containerCollection,
-			tf.tracerCollection,
-			tf.containerSelector,
-			tf.createEventCallback(utils.SSHEventType),
-			tf.socketEnricher,
-		)
-		manager.RegisterTracer(sshTracer)
-	}
+	// Create SSH tracer
+	sshTracer := NewSSHTracer(
+		tf.containerCollection,
+		tf.tracerCollection,
+		tf.containerSelector,
+		tf.createEventCallback(utils.SSHEventType),
+		tf.socketEnricher,
+	)
+	manager.RegisterTracer(sshTracer)
 
 	// Create HTTP tracer
 	httpTracer := NewHTTPTracer(
@@ -178,6 +156,35 @@ func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManage
 	)
 	manager.RegisterTracer(httpTracer)
 
+	// Create network tracer
+	networkTracer := NewNetworkTracer(
+		tf.containerCollection,
+		tf.tracerCollection,
+		tf.containerSelector,
+		tf.createEventCallback(utils.NetworkEventType),
+		tf.socketEnricher,
+	)
+	manager.RegisterTracer(networkTracer)
+
+	// Create DNS tracer
+	dnsTracer := NewDNSTracer(
+		tf.containerCollection,
+		tf.tracerCollection,
+		tf.containerSelector,
+		tf.createEventCallback(utils.DnsEventType),
+		tf.socketEnricher,
+	)
+	manager.RegisterTracer(dnsTracer)
+
+	// Create randomX tracer
+	randomXTracer := NewRandomXTracer(
+		tf.containerCollection,
+		tf.tracerCollection,
+		tf.containerSelector,
+		tf.createEventCallback(utils.RandomXEventType),
+	)
+	manager.RegisterTracer(randomXTracer)
+
 	// Create ptrace tracer
 	ptraceTracer := NewPtraceTracer(
 		tf.containerCollection,
@@ -187,7 +194,7 @@ func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManage
 	)
 	manager.RegisterTracer(ptraceTracer)
 
-	// Create iouring tracer
+	// Create io_uring tracer
 	iouringTracer := NewIoUringTracer(
 		tf.containerCollection,
 		tf.tracerCollection,
@@ -195,15 +202,6 @@ func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManage
 		tf.createEventCallback(utils.IoUringEventType),
 	)
 	manager.RegisterTracer(iouringTracer)
-
-	// Create randomx tracer
-	randomxTracer := NewRandomXTracer(
-		tf.containerCollection,
-		tf.tracerCollection,
-		tf.containerSelector,
-		tf.createEventCallback(utils.RandomXEventType),
-	)
-	manager.RegisterTracer(randomxTracer)
 
 	// Create top tracer
 	topTracer := NewTopTracer(
@@ -245,8 +243,8 @@ func (tf *TracerFactory) createEventCallback(eventType utils.EventType) func(uti
 
 // registerSyscallTracerPeekFunctions registers the syscall tracer peek functions with the managers
 func (tf *TracerFactory) registerSyscallTracerPeekFunctions(syscallTracer *SyscallTracer) {
-	if tf.applicationProfileManager != nil {
-		tf.applicationProfileManager.RegisterPeekFunc(syscallTracer.Peek)
+	if tf.containerProfileManager != nil {
+		tf.containerProfileManager.RegisterPeekFunc(syscallTracer.Peek)
 	}
 	if tf.ruleManager != nil {
 		tf.ruleManager.RegisterPeekFunc(syscallTracer.Peek)

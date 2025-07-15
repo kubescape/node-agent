@@ -3,12 +3,11 @@ package containerwatcher
 import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
-	"github.com/kubescape/node-agent/pkg/applicationprofilemanager"
+	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
-	"github.com/kubescape/node-agent/pkg/networkmanager"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -45,8 +44,7 @@ type EventHandlerFactory struct {
 
 // NewEventHandlerFactory creates a new event handler factory
 func NewEventHandlerFactory(
-	applicationProfileManager applicationprofilemanager.ApplicationProfileManagerClient,
-	networkManager networkmanager.NetworkManagerClient,
+	containerProfileManager containerprofilemanager.ContainerProfileManagerClient,
 	dnsManager dnsmanager.DNSManagerClient,
 	ruleManager rulemanager.RuleManagerClient,
 	malwareManager malwaremanager.MalwareManagerClient,
@@ -62,13 +60,8 @@ func NewEventHandlerFactory(
 	}
 
 	// Create adapters for managers that don't implement the Manager interface directly
-	appProfileAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
-		// Application profile manager has specific methods for different event types
-		// This would need to be implemented based on the specific event types
-	})
-
-	networkAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
-		// Network manager has specific methods for different event types
+	containerProfileAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
+		// Container profile manager has specific methods for different event types
 		// This would need to be implemented based on the specific event types
 	})
 
@@ -83,8 +76,7 @@ func NewEventHandlerFactory(
 
 	// Register managers for each event type
 	factory.registerHandlers(
-		appProfileAdapter,
-		networkAdapter,
+		containerProfileAdapter,
 		dnsAdapter,
 		ruleManager,
 		malwareManager,
@@ -95,52 +87,26 @@ func NewEventHandlerFactory(
 	return factory
 }
 
-// GetManagers returns the managers for a specific event type
-func (ehf *EventHandlerFactory) GetManagers(eventType utils.EventType) ([]Manager, bool) {
-	managers, exists := ehf.handlers[eventType]
-	return managers, exists
-}
-
-// ProcessEvent processes an enriched event
+// ProcessEvent processes an event through all registered handlers
 func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *containerwatcher.EnrichedEvent) {
-	// For now, process directly without third party enrichment
-	// TODO: Implement proper third party enrichment support
-	ehf.processEventWithManagers(enrichedEvent)
-}
-
-// processEventWithManagers processes an event with the registered managers and third party receivers
-func (ehf *EventHandlerFactory) processEventWithManagers(enrichedEvent *containerwatcher.EnrichedEvent) {
-	// Process with registered managers
-	eventType := enrichedEvent.EventType
-	event := enrichedEvent.Event
-	managers, exists := ehf.handlers[eventType]
-	if exists {
-		for _, manager := range managers {
-			if enricher_manager, ok := manager.(containerwatcher.EnrichedEventReceiver); ok {
-				enricher_manager.ReportEnrichedEvent(enrichedEvent)
-			} else {
-				manager.ReportEvent(eventType, event)
-			}
-		}
+	// Get handlers for this event type
+	handlers, exists := ehf.handlers[enrichedEvent.EventType]
+	if !exists {
+		return
 	}
 
-	// Report to third party event receivers
-	ehf.reportEventToThirdPartyTracers(eventType, event)
-}
-
-// reportEventToThirdPartyTracers reports events to third party event receivers
-func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(eventType utils.EventType, event utils.K8sEvent) {
-	if ehf.thirdPartyEventReceivers != nil && ehf.thirdPartyEventReceivers.Has(eventType) {
-		for receiver := range ehf.thirdPartyEventReceivers.Get(eventType).Iter() {
-			receiver.ReportEvent(eventType, event)
-		}
+	// Process event through each handler
+	for _, handler := range handlers {
+		handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
 	}
+
+	// Report to third-party event receivers
+	ehf.reportEventToThirdPartyTracers(enrichedEvent.EventType, enrichedEvent.Event)
 }
 
-// registerHandlers registers all event type managers
+// registerHandlers registers all handlers for different event types
 func (ehf *EventHandlerFactory) registerHandlers(
-	applicationProfileManager *ManagerAdapter,
-	networkManager *ManagerAdapter,
+	containerProfileManager *ManagerAdapter,
 	dnsManager *ManagerAdapter,
 	ruleManager rulemanager.RuleManagerClient,
 	malwareManager malwaremanager.MalwareManagerClient,
@@ -148,16 +114,16 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	metrics *ManagerAdapter,
 ) {
 	// Capabilities events
-	ehf.handlers[utils.CapabilitiesEventType] = []Manager{applicationProfileManager, ruleManager, metrics}
+	ehf.handlers[utils.CapabilitiesEventType] = []Manager{containerProfileManager, ruleManager, metrics}
 
 	// Exec events
-	ehf.handlers[utils.ExecveEventType] = []Manager{applicationProfileManager, ruleManager, malwareManager, metrics}
+	ehf.handlers[utils.ExecveEventType] = []Manager{containerProfileManager, ruleManager, malwareManager, metrics}
 
 	// Open events
-	ehf.handlers[utils.OpenEventType] = []Manager{applicationProfileManager, ruleManager, malwareManager, metrics}
+	ehf.handlers[utils.OpenEventType] = []Manager{containerProfileManager, ruleManager, malwareManager, metrics}
 
 	// Network events
-	ehf.handlers[utils.NetworkEventType] = []Manager{networkManager, ruleManager, networkStreamClient, metrics}
+	ehf.handlers[utils.NetworkEventType] = []Manager{containerProfileManager, ruleManager, networkStreamClient, metrics}
 
 	// DNS events
 	ehf.handlers[utils.DnsEventType] = []Manager{dnsManager, ruleManager, networkStreamClient, metrics}
@@ -166,16 +132,16 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	ehf.handlers[utils.RandomXEventType] = []Manager{ruleManager, metrics}
 
 	// Symlink events
-	ehf.handlers[utils.SymlinkEventType] = []Manager{applicationProfileManager, ruleManager, metrics}
+	ehf.handlers[utils.SymlinkEventType] = []Manager{containerProfileManager, ruleManager, metrics}
 
 	// Hardlink events
-	ehf.handlers[utils.HardlinkEventType] = []Manager{applicationProfileManager, ruleManager, metrics}
+	ehf.handlers[utils.HardlinkEventType] = []Manager{containerProfileManager, ruleManager, metrics}
 
 	// SSH events
 	ehf.handlers[utils.SSHEventType] = []Manager{ruleManager, metrics}
 
 	// HTTP events
-	ehf.handlers[utils.HTTPEventType] = []Manager{applicationProfileManager, ruleManager, metrics}
+	ehf.handlers[utils.HTTPEventType] = []Manager{containerProfileManager, ruleManager, metrics}
 
 	// Ptrace events
 	ehf.handlers[utils.PtraceEventType] = []Manager{ruleManager}
@@ -191,4 +157,13 @@ func (ehf *EventHandlerFactory) registerHandlers(
 
 	// Procfs events
 	ehf.handlers[utils.ProcfsEventType] = []Manager{ruleManager, metrics}
+}
+
+// reportEventToThirdPartyTracers reports events to third-party tracers
+func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(eventType utils.EventType, event utils.K8sEvent) {
+	if ehf.thirdPartyEventReceivers != nil && ehf.thirdPartyEventReceivers.Has(eventType) {
+		for receiver := range ehf.thirdPartyEventReceivers.Get(eventType).Iter() {
+			receiver.ReportEvent(eventType, event)
+		}
+	}
 }

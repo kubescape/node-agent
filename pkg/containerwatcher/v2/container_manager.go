@@ -62,8 +62,7 @@ func (cm *ContainerManager) StartContainerCollection(ctx context.Context) error 
 	// Set up container callbacks
 	ncw.callbacks = []containercollection.FuncNotify{
 		ncw.containerCallbackAsync,
-		ncw.applicationProfileManager.ContainerCallback,
-		ncw.networkManager.ContainerCallback,
+		ncw.containerProfileManager.ContainerCallback,
 		ncw.objectCache.ApplicationProfileCache().ContainerCallback,
 		ncw.objectCache.NetworkNeighborhoodCache().ContainerCallback,
 		ncw.malwareManager.ContainerCallback,
