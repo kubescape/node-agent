@@ -20,6 +20,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/containerwatcher/v2/tracers"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkstream"
@@ -133,6 +134,8 @@ func CreateNewContainerWatcher(
 	// Create ordered event queue (50ms collection interval, default buffer size)
 	orderedEventQueue := NewOrderedEventQueue(500*time.Millisecond, 10000, processTreeManager)
 
+	rulePolicyReporter := rulepolicy.NewRulePolicyReporter(ruleManager, containerProfileManager)
+
 	// Create event handler factory
 	eventHandlerFactory := NewEventHandlerFactory(
 		containerProfileManager,
@@ -143,6 +146,7 @@ func CreateNewContainerWatcher(
 		metrics,
 		thirdPartyEventReceivers,
 		thirdPartyEnricher,
+		rulePolicyReporter,
 	)
 
 	// Create event enricher

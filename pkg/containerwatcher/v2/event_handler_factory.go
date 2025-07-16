@@ -4,6 +4,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
+	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
@@ -11,7 +12,9 @@ import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
+	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -59,6 +62,7 @@ func NewEventHandlerFactory(
 	metrics metricsmanager.MetricsManager,
 	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
+	rulePolicyReporter *rulepolicy.RulePolicyReporter,
 ) *EventHandlerFactory {
 	factory := &EventHandlerFactory{
 		handlers:                 make(map[utils.EventType][]Manager),
@@ -68,7 +72,6 @@ func NewEventHandlerFactory(
 
 	// Create adapters for managers that don't implement the Manager interface directly
 	containerProfileAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
-
 		switch eventType {
 		case utils.CapabilitiesEventType:
 			if capEvent, ok := event.(*tracercapabilitiestype.Event); ok {
@@ -104,9 +107,37 @@ func NewEventHandlerFactory(
 		}
 	})
 
+	rulePolicyAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
+		switch eventType {
+		case utils.ExecveEventType:
+			if execEvent, ok := event.(*events.ExecEvent); ok {
+				rulePolicyReporter.ReportEvent(eventType, event, execEvent.Runtime.ContainerID, execEvent.Comm)
+			}
+		case utils.SymlinkEventType:
+			if symlinkEvent, ok := event.(*tracersymlinktype.Event); ok {
+				rulePolicyReporter.ReportEvent(eventType, event, symlinkEvent.Runtime.ContainerID, symlinkEvent.Comm)
+			}
+		case utils.HardlinkEventType:
+			if hardlinkEvent, ok := event.(*tracerhardlinktype.Event); ok {
+				rulePolicyReporter.ReportEvent(eventType, event, hardlinkEvent.Runtime.ContainerID, hardlinkEvent.Comm)
+			}
+
+		case utils.IoUringEventType:
+			if iouringEvent, ok := event.(*traceriouringtype.Event); ok {
+				rulePolicyReporter.ReportEvent(eventType, event, iouringEvent.Runtime.ContainerID, iouringEvent.Identifier)
+			}
+		}
+	})
+
 	dnsAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
 		// DNS manager has specific methods for different event types
 		// This would need to be implemented based on the specific event types
+		switch eventType {
+		case utils.DnsEventType:
+			if dnsEvent, ok := event.(*tracerdnstype.Event); ok {
+				dnsManager.ReportEvent(*dnsEvent)
+			}
+		}
 	})
 
 	metricsAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
@@ -121,6 +152,7 @@ func NewEventHandlerFactory(
 		malwareManager,
 		networkStreamClient,
 		metricsAdapter,
+		rulePolicyAdapter,
 	)
 
 	return factory
@@ -151,12 +183,13 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	malwareManager malwaremanager.MalwareManagerClient,
 	networkStreamClient networkstream.NetworkStreamClient,
 	metrics *ManagerAdapter,
+	rulePolicy *ManagerAdapter,
 ) {
 	// Capabilities events
 	ehf.handlers[utils.CapabilitiesEventType] = []Manager{containerProfileManager, ruleManager, metrics}
 
 	// Exec events
-	ehf.handlers[utils.ExecveEventType] = []Manager{containerProfileManager, ruleManager, malwareManager, metrics}
+	ehf.handlers[utils.ExecveEventType] = []Manager{containerProfileManager, ruleManager, malwareManager, metrics, rulePolicy}
 
 	// Open events
 	ehf.handlers[utils.OpenEventType] = []Manager{containerProfileManager, ruleManager, malwareManager, metrics}
@@ -171,10 +204,10 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	ehf.handlers[utils.RandomXEventType] = []Manager{ruleManager, metrics}
 
 	// Symlink events
-	ehf.handlers[utils.SymlinkEventType] = []Manager{containerProfileManager, ruleManager, metrics}
+	ehf.handlers[utils.SymlinkEventType] = []Manager{containerProfileManager, ruleManager, metrics, rulePolicy}
 
 	// Hardlink events
-	ehf.handlers[utils.HardlinkEventType] = []Manager{containerProfileManager, ruleManager, metrics}
+	ehf.handlers[utils.HardlinkEventType] = []Manager{containerProfileManager, ruleManager, metrics, rulePolicy}
 
 	// SSH events
 	ehf.handlers[utils.SSHEventType] = []Manager{ruleManager, metrics}
@@ -186,7 +219,7 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	ehf.handlers[utils.PtraceEventType] = []Manager{ruleManager}
 
 	// IoUring events
-	ehf.handlers[utils.IoUringEventType] = []Manager{ruleManager}
+	ehf.handlers[utils.IoUringEventType] = []Manager{ruleManager, rulePolicy}
 
 	// Fork events
 	ehf.handlers[utils.ForkEventType] = []Manager{ruleManager, metrics}
