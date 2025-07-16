@@ -138,6 +138,8 @@ func CreateNewContainerWatcher(
 
 	// Create event handler factory
 	eventHandlerFactory := NewEventHandlerFactory(
+		cfg,
+		containerCollection,
 		containerProfileManager,
 		dnsManagerClient,
 		ruleManager,

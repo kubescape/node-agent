@@ -3,9 +3,13 @@ package containerwatcher
 import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
@@ -50,10 +54,14 @@ type EventHandlerFactory struct {
 	handlers                 map[utils.EventType][]Manager
 	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]]
 	thirdPartyEnricher       containerwatcher.TaskBasedEnricher
+	cfg                      config.Config
+	containerCollection      *containercollection.ContainerCollection
 }
 
 // NewEventHandlerFactory creates a new event handler factory
 func NewEventHandlerFactory(
+	cfg config.Config,
+	containerCollection *containercollection.ContainerCollection,
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient,
 	dnsManager dnsmanager.DNSManagerClient,
 	ruleManager rulemanager.RuleManagerClient,
@@ -68,6 +76,8 @@ func NewEventHandlerFactory(
 		handlers:                 make(map[utils.EventType][]Manager),
 		thirdPartyEventReceivers: thirdPartyEventReceivers,
 		thirdPartyEnricher:       thirdPartyEnricher,
+		cfg:                      cfg,
+		containerCollection:      containerCollection,
 	}
 
 	// Create adapters for managers that don't implement the Manager interface directly
@@ -160,6 +170,26 @@ func NewEventHandlerFactory(
 
 // ProcessEvent processes an event through all registered handlers
 func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *containerwatcher.EnrichedEvent) {
+	// Get container information to check if it should be ignored
+	container, err := ehf.getContainerInfo(enrichedEvent.ContainerID)
+	if err != nil {
+		// If we can't get container info, skip processing
+		return
+	}
+
+	// If container is found, check if it should be ignored
+	if container != nil {
+		if ehf.cfg.IgnoreContainer(container.K8s.Namespace, container.K8s.PodName, container.K8s.PodLabels) {
+			logger.L().Info("Skipping event for ignored container",
+				helpers.String("containerID", enrichedEvent.ContainerID),
+				helpers.String("namespace", container.K8s.Namespace),
+				helpers.String("podName", container.K8s.PodName),
+				helpers.Interface("podLabels", container.K8s.PodLabels),
+			)
+			return
+		}
+	}
+
 	// Get handlers for this event type
 	handlers, exists := ehf.handlers[enrichedEvent.EventType]
 	if !exists {
@@ -238,4 +268,16 @@ func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(eventType utils.E
 			receiver.ReportEvent(eventType, event)
 		}
 	}
+}
+
+// getContainerInfo retrieves container information by container ID
+func (ehf *EventHandlerFactory) getContainerInfo(containerID string) (*containercollection.Container, error) {
+	// Get all containers and search for the one with matching ID
+	containers := ehf.containerCollection.GetContainersBySelector(&containercollection.ContainerSelector{})
+	for _, container := range containers {
+		if container.Runtime.ContainerID == containerID {
+			return container, nil
+		}
+	}
+	return nil, nil // Container not found
 }

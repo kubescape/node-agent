@@ -55,7 +55,7 @@ nodeAgent:
     pullPolicy: IfNotPresent
 
   config:
-    maxLearningPeriod: 2m
+    maxLearningPeriod: 3m
     learningPeriod: 1m
     updatePeriod: 30s
     maxDelaySeconds: 1

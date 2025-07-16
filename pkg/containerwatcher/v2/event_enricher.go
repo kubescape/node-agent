@@ -53,10 +53,7 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 			continue
 		}
 
-		processTree, err := ee.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
-		if err != nil {
-			continue
-		}
+		processTree, _ := ee.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
 
 		enrichedEvents = append(enrichedEvents, &containerwatcher.EnrichedEvent{
 			Event:       event,
