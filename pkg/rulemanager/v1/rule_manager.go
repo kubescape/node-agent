@@ -268,11 +268,15 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *containerwatcher.EnrichedEvent) {
 	event := enrichedEvent.Event
 	if event.GetNamespace() == "" || event.GetPod() == "" {
+		logger.L().Warning("RuleManager - failed to get namespace and pod name from custom event",
+			helpers.String("event", fmt.Sprintf("%+v", enrichedEvent)),
+			helpers.String("eventType", string(enrichedEvent.EventType)))
 		return
 	}
 
 	// list custom rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
+
 	res := rm.processEvent(enrichedEvent.EventType, event, rules)
 	if res != nil {
 		if enrichedEvent.ProcessTree.PID == 0 {

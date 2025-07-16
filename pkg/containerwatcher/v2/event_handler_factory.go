@@ -198,7 +198,11 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *containerwatcher.Enr
 
 	// Process event through each handler
 	for _, handler := range handlers {
-		handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
+		if enrichedHandler, ok := handler.(containerwatcher.EnrichedEventReceiver); ok {
+			enrichedHandler.ReportEnrichedEvent(enrichedEvent)
+		} else {
+			handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
+		}
 	}
 
 	// Report to third-party event receivers
