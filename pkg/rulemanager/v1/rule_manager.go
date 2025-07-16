@@ -268,28 +268,21 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *containerwatcher.EnrichedEvent) {
 	event := enrichedEvent.Event
 	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Warning("RuleManager - failed to get namespace and pod name from custom event")
 		return
 	}
 
 	// list custom rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-
-	if enrichedEvent.EventType == utils.ExecveEventType {
-		logger.L().Info("PROC - RuleManager - execve event", helpers.String("event", fmt.Sprintf("%+v", enrichedEvent)),
-			helpers.String("containerID", enrichedEvent.ContainerID),
-			helpers.String("processID", fmt.Sprintf("%d", enrichedEvent.ProcessTree.PID)),
-			helpers.String("new_ppid", fmt.Sprintf("%d", enrichedEvent.ProcessTree.PPID)))
-	}
-
 	res := rm.processEvent(enrichedEvent.EventType, event, rules)
 	if res != nil {
+		if enrichedEvent.ProcessTree.PID == 0 {
+			if tree, err := utils.CreateProcessTree(&enrichedEvent.ProcessTree,
+				rm.containerIdToShimPid.Get(enrichedEvent.ContainerID)); err == nil {
+				enrichedEvent.ProcessTree = tree
+			}
+		}
 		runtimeProcessDetails := res.GetRuntimeProcessDetails()
 		runtimeProcessDetails.ProcessTree = enrichedEvent.ProcessTree
-		if enrichedEvent.ProcessTree.PID == 0 {
-			logger.L().Warning("RuleManager - process tree pid is 0", helpers.String("event", fmt.Sprintf("%+v", enrichedEvent)))
-		}
-
 		res.SetRuntimeProcessDetails(runtimeProcessDetails)
 		rm.exporter.SendRuleAlert(res)
 	}
