@@ -156,8 +156,27 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 					// Comm:        container.OciConfig.Process.Args[0],
 					SyscallName: syscall,
 				}
+				failures := rm.processEvent(utils.SyscallEventType, &event, rules)
+				for _, failure := range failures {
 
-				rm.processEvent(utils.SyscallEventType, &event, rules)
+					tree, err := rm.processManager.GetContainerProcessTree(container.Runtime.ContainerID, event.Pid)
+					if err != nil {
+						process := apitypes.Process{
+							PID: event.Pid,
+						}
+						tree, err = utils.CreateProcessTree(&process,
+							rm.containerIdToShimPid.Get(container.Runtime.ContainerID))
+						if err != nil {
+							logger.L().Error("RuleManager - failed to create process tree fallback", helpers.Error(err))
+						}
+					}
+
+					runtimeProcessDetails := failure.GetRuntimeProcessDetails()
+					runtimeProcessDetails.ProcessTree = tree
+					failure.SetRuntimeProcessDetails(runtimeProcessDetails)
+
+					rm.exporter.SendRuleAlert(failure)
+				}
 			}
 		}
 	}

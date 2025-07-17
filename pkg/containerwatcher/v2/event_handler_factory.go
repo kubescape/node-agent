@@ -260,8 +260,8 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	// Procfs events
 	ehf.handlers[utils.ProcfsEventType] = []Manager{ruleManager, metrics}
 
-	// Syscall events
-	ehf.handlers[utils.SyscallEventType] = []Manager{ruleManager, metrics}
+	// Note: SyscallEventType is not registered here because the syscall tracer
+	// doesn't generate events - it only provides a peek function for other components
 }
 
 // reportEventToThirdPartyTracers reports events to third-party tracers

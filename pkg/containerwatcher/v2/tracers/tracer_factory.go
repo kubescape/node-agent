@@ -67,12 +67,9 @@ func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManage
 	)
 	manager.RegisterTracer(procfsTracer)
 
-	// Create syscall tracer (seccomp)
-	syscallTracer := NewSyscallTracer()
+	// Create syscall tracer (seccomp) - handles its own peek function registration
+	syscallTracer := NewSyscallTracer(tf.containerProfileManager, tf.ruleManager)
 	manager.RegisterTracer(syscallTracer)
-
-	// Register syscall tracer peek functions with managers
-	tf.registerSyscallTracerPeekFunctions(syscallTracer)
 
 	// Create exec tracer
 	execTracer := NewExecTracer(
@@ -238,15 +235,5 @@ func (tf *TracerFactory) StopThirdPartyTracers() {
 func (tf *TracerFactory) createEventCallback(eventType utils.EventType) func(utils.K8sEvent, string, uint32) {
 	return func(event utils.K8sEvent, containerID string, processID uint32) {
 		tf.orderedEventQueue.AddEventDirect(eventType, event, containerID, processID)
-	}
-}
-
-// registerSyscallTracerPeekFunctions registers the syscall tracer peek functions with the managers
-func (tf *TracerFactory) registerSyscallTracerPeekFunctions(syscallTracer *SyscallTracer) {
-	if tf.containerProfileManager != nil {
-		tf.containerProfileManager.RegisterPeekFunc(syscallTracer.Peek)
-	}
-	if tf.ruleManager != nil {
-		tf.ruleManager.RegisterPeekFunc(syscallTracer.Peek)
 	}
 }

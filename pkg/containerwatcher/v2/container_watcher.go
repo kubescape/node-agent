@@ -419,7 +419,6 @@ func (ncw *NewContainerWatcher) eventProcessingLoop() {
 // enrichAndProcess processes a batch of events
 func (ncw *NewContainerWatcher) enrichAndProcess(events []eventEntry) {
 	// Enrich events with additional data
-
 	enrichedEvents := ncw.eventEnricher.EnrichEvents(events)
 
 	// Submit to worker pool for processing
