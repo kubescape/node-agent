@@ -279,8 +279,8 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *containerwatcher.Enric
 	// list custom rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
-	res := rm.processEvent(enrichedEvent.EventType, event, rules)
-	if res != nil {
+	failures := rm.processEvent(enrichedEvent.EventType, event, rules)
+	for _, failure := range failures {
 		if enrichedEvent.ProcessTree.PID == 0 {
 			process := apitypes.Process{
 				PID:  enrichedEvent.PID,
@@ -294,28 +294,19 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *containerwatcher.Enric
 				logger.L().Error("RuleManager - failed to create process tree fallback", helpers.Error(err))
 			}
 		}
-		runtimeProcessDetails := res.GetRuntimeProcessDetails()
+		runtimeProcessDetails := failure.GetRuntimeProcessDetails()
 		runtimeProcessDetails.ProcessTree = enrichedEvent.ProcessTree
-		res.SetRuntimeProcessDetails(runtimeProcessDetails)
-		rm.exporter.SendRuleAlert(res)
+		failure.SetRuntimeProcessDetails(runtimeProcessDetails)
+		rm.exporter.SendRuleAlert(failure)
 	}
 }
 
 func (rm *RuleManager) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
-	if event.GetNamespace() == "" || event.GetPod() == "" {
-		logger.L().Warning("RuleManager - failed to get namespace and pod name from custom event")
-		return
-	}
-
-	// list custom rules
-	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
-	res := rm.processEvent(eventType, event, rules)
-	if res != nil {
-		rm.exporter.SendRuleAlert(res)
-	}
+	logger.L().Info("RuleManager - Deprecated - ReportEvent")
 }
 
-func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEvent, rules []ruleengine.RuleEvaluator) ruleengine.RuleFailure {
+func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEvent, rules []ruleengine.RuleEvaluator) []ruleengine.RuleFailure {
+	results := []ruleengine.RuleFailure{}
 	podId := utils.CreateK8sPodID(event.GetNamespace(), event.GetPod())
 	details, ok := rm.podToWlid.Load(podId)
 	if !ok {
@@ -342,13 +333,13 @@ func (rm *RuleManager) processEvent(eventType utils.EventType, event utils.K8sEv
 			res = rm.enrichRuleFailure(res)
 			if res != nil {
 				res.SetWorkloadDetails(details)
-				return res
+				results = append(results, res)
 			}
 			rm.metrics.ReportRuleAlert(rule.Name())
 		}
 		rm.metrics.ReportRuleProcessed(rule.Name())
 	}
-	return nil
+	return results
 }
 
 func (rm *RuleManager) enrichRuleFailure(ruleFailure ruleengine.RuleFailure) ruleengine.RuleFailure {

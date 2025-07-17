@@ -20,7 +20,7 @@ spec:
           - name: WAIT_FOR_SIGTERM
             value: "true"
           - name: WAIT_BEFORE_START
-            value: "4m"
+            value: "3m"
         securityContext:
           capabilities:
             add: ["IPC_OWNER"]
