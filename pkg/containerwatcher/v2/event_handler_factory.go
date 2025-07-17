@@ -173,8 +173,22 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *containerwatcher.Enr
 	// Get container information to check if it should be ignored
 	container, err := ehf.getContainerInfo(enrichedEvent.ContainerID)
 	if err != nil || container == nil {
-		// If we can't get container info, skip processing
+		if enrichedEvent.EventType == utils.ExecveEventType {
+			logger.L().Error("AFEK - Failed to get container info",
+				helpers.String("containerID", enrichedEvent.ContainerID),
+				helpers.Error(err),
+			)
+		}
 		return
+	}
+
+	if enrichedEvent.EventType == utils.ExecveEventType {
+		logger.L().Info("AFEK - Container info",
+			helpers.String("containerID", enrichedEvent.ContainerID),
+			helpers.String("namespace", container.K8s.Namespace),
+			helpers.String("podName", container.K8s.PodName),
+			helpers.Interface("podLabels", container.K8s.PodLabels),
+		)
 	}
 
 	if ehf.cfg.IgnoreContainer(container.K8s.Namespace, container.K8s.PodName, container.K8s.PodLabels) {
