@@ -1,6 +1,7 @@
 package processtreecreator
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -44,6 +45,11 @@ func (m *MockContainerProcessTree) ListContainers() []string {
 func (m *MockContainerProcessTree) GetShimPIDForProcess(pid uint32, fullTree map[uint32]*apitypes.Process) (uint32, bool) {
 	args := m.Called(pid, fullTree)
 	return args.Get(0).(uint32), args.Bool(1)
+}
+
+func (m *MockContainerProcessTree) GetPidByContainerID(containerID string) (uint32, error) {
+	args := m.Called(containerID)
+	return args.Get(0).(uint32), args.Error(1)
 }
 
 func TestNewProcessTreeCreator(t *testing.T) {
@@ -173,6 +179,7 @@ func TestHandleExecEvent(t *testing.T) {
 
 	// Mock container tree methods
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
+	mockContainerTree.On("GetPidByContainerID", "test-container-123").Return(uint32(999), nil)
 
 	// First create a process with fork event
 	forkEvent := feeder.ProcessEvent{
@@ -185,15 +192,16 @@ func TestHandleExecEvent(t *testing.T) {
 
 	// Now send exec event that should update the process
 	execEvent := feeder.ProcessEvent{
-		Type:    feeder.ExecEvent,
-		PID:     1234,
-		PPID:    1000,
-		Comm:    "new-process",
-		Cmdline: "new-process --arg",
-		Uid:     &[]uint32{1000}[0],
-		Gid:     &[]uint32{1000}[0],
-		Cwd:     "/home/user",
-		Path:    "/usr/bin/new-process",
+		Type:        feeder.ExecEvent,
+		PID:         1234,
+		PPID:        1000,
+		Comm:        "new-process",
+		Cmdline:     "new-process --arg",
+		Uid:         &[]uint32{1000}[0],
+		Gid:         &[]uint32{1000}[0],
+		Cwd:         "/home/user",
+		Path:        "/usr/bin/new-process",
+		ContainerID: "test-container-123",
 	}
 
 	creator.FeedEvent(execEvent)
@@ -202,13 +210,113 @@ func TestHandleExecEvent(t *testing.T) {
 	proc := impl.processMap.Get(1234)
 	assert.NotNil(t, proc)
 	assert.Equal(t, uint32(1234), proc.PID)
-	assert.Equal(t, uint32(1000), proc.PPID)
+	assert.Equal(t, uint32(999), proc.PPID)   // Should be updated to shim PID
 	assert.Equal(t, "new-process", proc.Comm) // Should be updated
 	assert.Equal(t, "new-process --arg", proc.Cmdline)
 	assert.Equal(t, uint32(1000), *proc.Uid)
 	assert.Equal(t, uint32(1000), *proc.Gid)
 	assert.Equal(t, "/home/user", proc.Cwd)
 	assert.Equal(t, "/usr/bin/new-process", proc.Path)
+
+	mockContainerTree.AssertExpectations(t)
+}
+
+func TestHandleExecEventWithGetPidByContainerIDError(t *testing.T) {
+	mockContainerTree := &MockContainerProcessTree{}
+	creator := NewProcessTreeCreator(mockContainerTree)
+	impl := creator.(*processTreeCreatorImpl)
+
+	// Mock container tree methods - GetPidByContainerID returns an error
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
+	mockContainerTree.On("GetPidByContainerID", "test-container-123").Return(uint32(0), fmt.Errorf("container not found"))
+
+	// First create a process with fork event
+	forkEvent := feeder.ProcessEvent{
+		Type: feeder.ForkEvent,
+		PID:  1234,
+		PPID: 1000,
+		Comm: "old-process",
+	}
+	creator.FeedEvent(forkEvent)
+
+	// Now send exec event that should update the process
+	execEvent := feeder.ProcessEvent{
+		Type:        feeder.ExecEvent,
+		PID:         1234,
+		PPID:        1000,
+		Comm:        "new-process",
+		Cmdline:     "new-process --arg",
+		Uid:         &[]uint32{1000}[0],
+		Gid:         &[]uint32{1000}[0],
+		Cwd:         "/home/user",
+		Path:        "/usr/bin/new-process",
+		ContainerID: "test-container-123",
+	}
+
+	creator.FeedEvent(execEvent)
+
+	// Verify process was updated but PPID remains unchanged since GetPidByContainerID failed
+	proc := impl.processMap.Get(1234)
+	assert.NotNil(t, proc)
+	assert.Equal(t, uint32(1234), proc.PID)
+	assert.Equal(t, uint32(1000), proc.PPID)  // Should remain unchanged due to error
+	assert.Equal(t, "new-process", proc.Comm) // Should be updated
+	assert.Equal(t, "new-process --arg", proc.Cmdline)
+	assert.Equal(t, uint32(1000), *proc.Uid)
+	assert.Equal(t, uint32(1000), *proc.Gid)
+	assert.Equal(t, "/home/user", proc.Cwd)
+	assert.Equal(t, "/usr/bin/new-process", proc.Path)
+
+	mockContainerTree.AssertExpectations(t)
+}
+
+func TestHandleExecEventProcessAlreadyUnderContainer(t *testing.T) {
+	mockContainerTree := &MockContainerProcessTree{}
+	creator := NewProcessTreeCreator(mockContainerTree)
+	impl := creator.(*processTreeCreatorImpl)
+
+	// Mock container tree methods - process is already under container subtree
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(true)
+	// GetPidByContainerID should not be called since process is already under container
+
+	// First create a process with fork event
+	forkEvent := feeder.ProcessEvent{
+		Type: feeder.ForkEvent,
+		PID:  1234,
+		PPID: 1000,
+		Comm: "old-process",
+	}
+	creator.FeedEvent(forkEvent)
+
+	// Now send exec event that should update the process
+	execEvent := feeder.ProcessEvent{
+		Type:        feeder.ExecEvent,
+		PID:         1234,
+		PPID:        1000,
+		Comm:        "new-process",
+		Cmdline:     "new-process --arg",
+		Uid:         &[]uint32{1000}[0],
+		Gid:         &[]uint32{1000}[0],
+		Cwd:         "/home/user",
+		Path:        "/usr/bin/new-process",
+		ContainerID: "test-container-123",
+	}
+
+	creator.FeedEvent(execEvent)
+
+	// Verify process was updated but PPID remains unchanged since it's already under container
+	proc := impl.processMap.Get(1234)
+	assert.NotNil(t, proc)
+	assert.Equal(t, uint32(1234), proc.PID)
+	assert.Equal(t, uint32(1000), proc.PPID)  // Should remain unchanged
+	assert.Equal(t, "new-process", proc.Comm) // Should be updated
+	assert.Equal(t, "new-process --arg", proc.Cmdline)
+	assert.Equal(t, uint32(1000), *proc.Uid)
+	assert.Equal(t, uint32(1000), *proc.Gid)
+	assert.Equal(t, "/home/user", proc.Cwd)
+	assert.Equal(t, "/usr/bin/new-process", proc.Path)
+
+	mockContainerTree.AssertExpectations(t)
 }
 
 func TestHandleExitEvent(t *testing.T) {

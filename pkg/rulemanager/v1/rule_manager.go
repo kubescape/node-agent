@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	backoffv5 "github.com/cenkalti/backoff/v5"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -280,7 +282,12 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *containerwatcher.Enric
 	res := rm.processEvent(enrichedEvent.EventType, event, rules)
 	if res != nil {
 		if enrichedEvent.ProcessTree.PID == 0 {
-			if tree, err := utils.CreateProcessTree(&enrichedEvent.ProcessTree,
+			process := apitypes.Process{
+				PID:  enrichedEvent.PID,
+				PPID: enrichedEvent.PPID,
+			}
+
+			if tree, err := utils.CreateProcessTree(&process,
 				rm.containerIdToShimPid.Get(enrichedEvent.ContainerID)); err == nil {
 				enrichedEvent.ProcessTree = tree
 			}

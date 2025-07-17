@@ -232,6 +232,14 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 
 	pt.UpdatePPID(proc, event)
 
+	isCurrentUnderContainer := pt.containerTree.IsProcessUnderAnyContainerSubtree(proc.PID, pt.getProcessMapAsRegularMap())
+	if !isCurrentUnderContainer {
+		shimPid, err := pt.containerTree.GetPidByContainerID(event.ContainerID)
+		if err == nil {
+			pt.updateProcessPPID(proc, shimPid)
+		}
+	}
+
 	if event.Comm != "" && proc.Comm != event.Comm {
 		proc.Comm = event.Comm
 	}

@@ -34,6 +34,9 @@ func (m *mockContainerProcessTree) IsProcessUnderAnyContainerSubtree(pid uint32,
 func (m *mockContainerProcessTree) GetShimPIDForProcess(pid uint32, fullTree map[uint32]*apitypes.Process) (uint32, bool) {
 	return 0, false
 }
+func (m *mockContainerProcessTree) GetPidByContainerID(containerID string) (uint32, error) {
+	return 0, nil
+}
 
 // Mock reparenting logic for testing
 type mockReparentingLogic struct{}

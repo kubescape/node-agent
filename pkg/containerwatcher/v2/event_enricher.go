@@ -61,6 +61,7 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 			ProcessTree: processTree,
 			ContainerID: entry.ContainerID,
 			Timestamp:   entry.Timestamp,
+			PID:         entry.ProcessID,
 		})
 	}
 

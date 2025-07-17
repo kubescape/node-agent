@@ -14,4 +14,5 @@ type ContainerProcessTree interface {
 	IsProcessUnderAnyContainerSubtree(pid uint32, fullTree map[uint32]*apitypes.Process) bool
 	// Get the shim PID for a given process if it's under a container subtree
 	GetShimPIDForProcess(pid uint32, fullTree map[uint32]*apitypes.Process) (uint32, bool)
+	GetPidByContainerID(containerID string) (uint32, error)
 }

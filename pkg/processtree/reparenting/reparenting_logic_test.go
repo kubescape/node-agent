@@ -452,3 +452,7 @@ func (mct *MockContainerTree) IsPPIDUnderAnyContainerSubtree(ppid uint32, fullTr
 	return mct.containerProcesses[ppid]
 }
 func (mct *MockContainerTree) SetShimPIDForTesting(containerID string, shimPID uint32) {}
+
+func (mct *MockContainerTree) GetPidByContainerID(containerID string) (uint32, error) {
+	return 0, nil
+}

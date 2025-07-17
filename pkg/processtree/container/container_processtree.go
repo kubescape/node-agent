@@ -185,6 +185,18 @@ func (c *containerProcessTreeImpl) GetShimPIDForProcess(pid uint32, fullTree map
 	return 0, false
 }
 
+func (c *containerProcessTreeImpl) GetPidByContainerID(containerID string) (uint32, error) {
+	c.mutex.RLock()
+	shimPID, ok := c.containerIdToShimPid[containerID]
+	c.mutex.RUnlock()
+
+	if !ok {
+		return 0, fmt.Errorf("container %s not found", containerID)
+	}
+
+	return shimPID, nil
+}
+
 func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apitypes.Process, fullTree map[uint32]*apitypes.Process) bool {
 	if targetNode == nil || rootNode == nil {
 		return false

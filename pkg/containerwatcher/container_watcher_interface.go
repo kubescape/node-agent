@@ -55,4 +55,6 @@ type EnrichedEvent struct {
 	Timestamp   time.Time
 	ContainerID string
 	ProcessTree apitypes.Process
+	PID         uint32
+	PPID        uint32
 }
