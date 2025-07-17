@@ -87,6 +87,11 @@ func Test_01_BasicAlertTest(t *testing.T) {
 	appProfile, _ := wl.GetApplicationProfile()
 	appProfileJson, _ := json.Marshal(appProfile)
 
+	networkNeighborhood, _ := wl.GetNetworkNeighborhood()
+	networkNeighborhoodJson, _ := json.Marshal(networkNeighborhood)
+
+	t.Logf("network neighborhood: %v", string(networkNeighborhoodJson))
+
 	t.Logf("application profile: %v", string(appProfileJson))
 
 	wl.ExecIntoPod([]string{"ls", "-l"}, "nginx")                                           // no alert expected
