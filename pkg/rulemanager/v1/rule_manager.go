@@ -290,6 +290,8 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *containerwatcher.Enric
 			if tree, err := utils.CreateProcessTree(&process,
 				rm.containerIdToShimPid.Get(enrichedEvent.ContainerID)); err == nil {
 				enrichedEvent.ProcessTree = tree
+			} else {
+				logger.L().Error("RuleManager - failed to create process tree fallback", helpers.Error(err))
 			}
 		}
 		runtimeProcessDetails := res.GetRuntimeProcessDetails()

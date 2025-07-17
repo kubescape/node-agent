@@ -259,6 +259,9 @@ func (ehf *EventHandlerFactory) registerHandlers(
 
 	// Procfs events
 	ehf.handlers[utils.ProcfsEventType] = []Manager{ruleManager, metrics}
+
+	// Syscall events
+	ehf.handlers[utils.SyscallEventType] = []Manager{ruleManager, metrics}
 }
 
 // reportEventToThirdPartyTracers reports events to third-party tracers
