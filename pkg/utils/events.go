@@ -20,6 +20,8 @@ type EnrichEvent interface {
 	GetPID() uint64
 	SetExtra(extra interface{})
 	GetExtra() interface{}
+	GetPod() string
+	GetNamespace() string
 }
 
 type EventType string

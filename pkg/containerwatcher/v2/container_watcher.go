@@ -299,6 +299,7 @@ func (ncw *NewContainerWatcher) Start(ctx context.Context) error {
 		ncw.containerProfileManager,
 		ncw.ruleManager,
 		ncw.thirdPartyTracers,
+		ncw.thirdPartyEnricher,
 	)
 
 	// Initialize tracer manager

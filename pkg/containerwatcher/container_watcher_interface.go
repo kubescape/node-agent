@@ -11,7 +11,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-type ResultCallback func(utils.EnrichEvent)
+type ResultCallback func(utils.K8sEvent, string, uint32)
 
 type ContainerWatcher interface {
 	Ready() bool

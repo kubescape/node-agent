@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 
 	tracerhardlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/tracer"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
@@ -25,6 +26,7 @@ type HardlinkTracer struct {
 	containerSelector   containercollection.ContainerSelector
 	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracerhardlink.Tracer
+	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
 }
 
 // NewHardlinkTracer creates a new hardlink tracer
@@ -33,12 +35,14 @@ func NewHardlinkTracer(
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
 	eventCallback func(utils.K8sEvent, string, uint32),
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *HardlinkTracer {
 	return &HardlinkTracer{
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,
 		containerSelector:   containerSelector,
 		eventCallback:       eventCallback,
+		thirdPartyEnricher:  thirdPartyEnricher,
 	}
 }
 
@@ -115,13 +119,11 @@ func (ht *HardlinkTracer) hardlinkEventCallback(event *tracerhardlinktype.Event)
 
 // handleEvent processes the event with syscall enrichment
 func (ht *HardlinkTracer) handleEvent(event *tracerhardlinktype.Event, syscalls []uint64) {
-	// TODO: Implement syscall enrichment logic
-	// For now, just pass the event to the callback
 	if ht.eventCallback != nil {
 		// Extract container ID and process ID from the hardlink event
 		containerID := event.Runtime.ContainerID
 		processID := event.Pid
 
-		ht.eventCallback(event, containerID, processID)
+		EnrichEvent(ht.thirdPartyEnricher, event, syscalls, ht.eventCallback, containerID, processID)
 	}
 }

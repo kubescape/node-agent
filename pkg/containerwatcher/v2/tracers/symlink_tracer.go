@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 
 	tracersymlink "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/tracer"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
@@ -25,6 +26,7 @@ type SymlinkTracer struct {
 	containerSelector   containercollection.ContainerSelector
 	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracersymlink.Tracer
+	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
 }
 
 // NewSymlinkTracer creates a new symlink tracer
@@ -33,12 +35,14 @@ func NewSymlinkTracer(
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
 	eventCallback func(utils.K8sEvent, string, uint32),
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *SymlinkTracer {
 	return &SymlinkTracer{
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,
 		containerSelector:   containerSelector,
 		eventCallback:       eventCallback,
+		thirdPartyEnricher:  thirdPartyEnricher,
 	}
 }
 
@@ -115,13 +119,11 @@ func (st *SymlinkTracer) symlinkEventCallback(event *tracersymlinktype.Event) {
 
 // handleEvent processes the event with syscall enrichment
 func (st *SymlinkTracer) handleEvent(event *tracersymlinktype.Event, syscalls []uint64) {
-	// TODO: Implement syscall enrichment logic
-	// For now, just pass the event to the callback
 	if st.eventCallback != nil {
 		// Extract container ID and process ID from the symlink event
 		containerID := event.Runtime.ContainerID
 		processID := event.Pid
 
-		st.eventCallback(event, containerID, processID)
+		EnrichEvent(st.thirdPartyEnricher, event, syscalls, st.eventCallback, containerID, processID)
 	}
 }

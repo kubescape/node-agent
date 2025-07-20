@@ -10,6 +10,7 @@ import (
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -25,6 +26,7 @@ type OpenTracer struct {
 	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *traceropen.Tracer
 	cfg                 config.Config
+	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
 }
 
 // NewOpenTracer creates a new open tracer
@@ -33,12 +35,14 @@ func NewOpenTracer(
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
 	eventCallback func(utils.K8sEvent, string, uint32),
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *OpenTracer {
 	return &OpenTracer{
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,
 		containerSelector:   containerSelector,
 		eventCallback:       eventCallback,
+		thirdPartyEnricher:  thirdPartyEnricher,
 	}
 }
 
@@ -118,13 +122,10 @@ func (ot *OpenTracer) openEventCallback(event *traceropentype.Event) {
 
 // handleEvent processes the event with syscall enrichment
 func (ot *OpenTracer) handleEvent(event *events.OpenEvent, syscalls []uint64) {
-	// TODO: Implement syscall enrichment logic
-	// For now, just pass the event to the callback
 	if ot.eventCallback != nil {
-		// Extract container ID and process ID from the open event
 		containerID := event.Runtime.ContainerID
 		processID := event.Pid
 
-		ot.eventCallback(event, containerID, processID)
+		EnrichEvent(ot.thirdPartyEnricher, event, syscalls, ot.eventCallback, containerID, processID)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -23,6 +24,7 @@ type ExecTracer struct {
 	containerSelector   containercollection.ContainerSelector
 	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *tracerexec.Tracer
+	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
 }
 
 // NewExecTracer creates a new exec tracer
@@ -31,12 +33,14 @@ func NewExecTracer(
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
 	eventCallback func(utils.K8sEvent, string, uint32),
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *ExecTracer {
 	return &ExecTracer{
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,
 		containerSelector:   containerSelector,
 		eventCallback:       eventCallback,
+		thirdPartyEnricher:  thirdPartyEnricher,
 	}
 }
 
@@ -120,13 +124,9 @@ func (et *ExecTracer) execEventCallback(event *tracerexectype.Event) {
 
 // handleEvent processes the event with syscall enrichment
 func (et *ExecTracer) handleEvent(event *events.ExecEvent, syscalls []uint64) {
-	// TODO: Implement syscall enrichment logic
-	// For now, just pass the event to the callback
 	if et.eventCallback != nil {
-		// Extract container ID and process ID from the exec event
 		containerID := event.Runtime.ContainerID
 		processID := event.Pid
-
-		et.eventCallback(event, containerID, processID)
+		EnrichEvent(et.thirdPartyEnricher, event, syscalls, et.eventCallback, containerID, processID)
 	}
 }

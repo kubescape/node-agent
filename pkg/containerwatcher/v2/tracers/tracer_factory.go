@@ -31,6 +31,7 @@ type TracerFactory struct {
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
 	ruleManager             rulemanager.RuleManagerClient
 	thirdPartyTracers       mapset.Set[containerwatcher.CustomTracer]
+	thirdPartyEnricher      containerwatcher.TaskBasedEnricher
 }
 
 // NewTracerFactory creates a new tracer factory
@@ -43,6 +44,7 @@ func NewTracerFactory(
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient,
 	ruleManager rulemanager.RuleManagerClient,
 	thirdPartyTracers mapset.Set[containerwatcher.CustomTracer],
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *TracerFactory {
 	return &TracerFactory{
 		containerCollection:     containerCollection,
@@ -53,6 +55,7 @@ func NewTracerFactory(
 		containerProfileManager: containerProfileManager,
 		ruleManager:             ruleManager,
 		thirdPartyTracers:       thirdPartyTracers,
+		thirdPartyEnricher:      thirdPartyEnricher,
 	}
 }
 
@@ -77,6 +80,7 @@ func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManage
 		tf.tracerCollection,
 		tf.containerSelector,
 		tf.createEventCallback(utils.ExecveEventType),
+		tf.thirdPartyEnricher,
 	)
 	manager.RegisterTracer(execTracer)
 
@@ -104,6 +108,7 @@ func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManage
 		tf.tracerCollection,
 		tf.containerSelector,
 		tf.createEventCallback(utils.OpenEventType),
+		tf.thirdPartyEnricher,
 	)
 	manager.RegisterTracer(openTracer)
 
@@ -122,6 +127,7 @@ func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManage
 		tf.tracerCollection,
 		tf.containerSelector,
 		tf.createEventCallback(utils.SymlinkEventType),
+		tf.thirdPartyEnricher,
 	)
 	manager.RegisterTracer(symlinkTracer)
 
@@ -131,6 +137,7 @@ func (tf *TracerFactory) CreateAllTracers(manager *containerwatcher.TracerManage
 		tf.tracerCollection,
 		tf.containerSelector,
 		tf.createEventCallback(utils.HardlinkEventType),
+		tf.thirdPartyEnricher,
 	)
 	manager.RegisterTracer(hardlinkTracer)
 
