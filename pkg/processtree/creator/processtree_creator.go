@@ -121,6 +121,28 @@ func (pt *processTreeCreatorImpl) GetPidBranch(containerTree interface{}, contai
 	return ct.GetPidBranch(containerID, targetPID, processMap)
 }
 
+// GetHostProcessBranch builds a process tree branch from the given PID up to the root (init process)
+func (pt *processTreeCreatorImpl) GetHostProcessBranch(pid uint32) (apitypes.Process, error) {
+	pt.mutex.RLock()
+	defer pt.mutex.RUnlock()
+
+	// Find the target process
+	targetProc := pt.processMap.Get(pid)
+	if targetProc == nil {
+		return apitypes.Process{}, fmt.Errorf("process with PID %d not found", pid)
+	}
+
+	// 1. Extract pid node from full tree - already have it as targetProc
+	// 2. Traverse back to the first node (root) by PPID to build the path
+	pathToRoot := pt.buildPathToRoot(targetProc)
+	if len(pathToRoot) == 0 {
+		return apitypes.Process{}, fmt.Errorf("failed to build path to root for PID %d", pid)
+	}
+
+	// 3. Return branch node - build the branch from root down to target
+	return pt.buildBranchFromPath(pathToRoot), nil
+}
+
 // UpdatePPID handles PPID updates using the new reparenting strategy
 func (pt *processTreeCreatorImpl) UpdatePPID(proc *apitypes.Process, event feeder.ProcessEvent) {
 	if event.PPID != proc.PPID && event.PPID != 0 {

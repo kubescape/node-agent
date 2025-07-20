@@ -10,7 +10,7 @@ type ProcessTreeManager interface {
 	Start()
 	// Stop shuts down the process tree manager and stops background tasks
 	Stop()
-	GetHostProcessTree() ([]apitypes.Process, error)
+	GetHostProcessTree(pid uint32) (apitypes.Process, error)
 	GetContainerProcessTree(containerID string, pid uint32) (apitypes.Process, error)
 	ReportEvent(eventType utils.EventType, event utils.K8sEvent) error
 }
