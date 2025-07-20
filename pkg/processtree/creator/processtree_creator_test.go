@@ -8,6 +8,7 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -54,7 +55,7 @@ func (m *MockContainerProcessTree) GetPidByContainerID(containerID string) (uint
 
 func TestNewProcessTreeCreator(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 
 	assert.NotNil(t, creator)
 
@@ -68,7 +69,7 @@ func TestNewProcessTreeCreator(t *testing.T) {
 
 func TestStartStop(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Initially, exit cleanup channel should be nil
@@ -85,7 +86,7 @@ func TestStartStop(t *testing.T) {
 
 func TestGetOrCreateProcess(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Test creating a new process
@@ -101,7 +102,7 @@ func TestGetOrCreateProcess(t *testing.T) {
 
 func TestHandleForkEvent(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
@@ -139,7 +140,7 @@ func TestHandleForkEvent(t *testing.T) {
 
 func TestHandleProcfsEvent(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
@@ -174,7 +175,7 @@ func TestHandleProcfsEvent(t *testing.T) {
 
 func TestHandleExecEvent(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
@@ -223,7 +224,7 @@ func TestHandleExecEvent(t *testing.T) {
 
 func TestHandleExecEventWithGetPidByContainerIDError(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods - GetPidByContainerID returns an error
@@ -272,7 +273,7 @@ func TestHandleExecEventWithGetPidByContainerIDError(t *testing.T) {
 
 func TestHandleExecEventProcessAlreadyUnderContainer(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods - process is already under container subtree
@@ -321,7 +322,7 @@ func TestHandleExecEventProcessAlreadyUnderContainer(t *testing.T) {
 
 func TestHandleExitEvent(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Start the creator to enable exit manager
@@ -375,7 +376,7 @@ func TestHandleExitEvent(t *testing.T) {
 
 func TestGetRootTree(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 
 	// Mock container tree methods
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
@@ -401,7 +402,7 @@ func TestGetRootTree(t *testing.T) {
 
 func TestGetProcessMap(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 
 	// Mock container tree methods
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
@@ -430,7 +431,7 @@ func TestGetProcessMap(t *testing.T) {
 
 func TestGetProcessNode(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 
 	// Mock container tree methods
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
@@ -459,7 +460,7 @@ func TestGetProcessNode(t *testing.T) {
 
 func TestGetPidBranch(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
@@ -491,7 +492,7 @@ func TestGetPidBranch(t *testing.T) {
 
 func TestUpdatePPID(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Create parent and child processes
@@ -530,7 +531,7 @@ func TestUpdatePPID(t *testing.T) {
 
 func TestLinkProcessToParent(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Create parent and child processes
@@ -556,7 +557,7 @@ func TestLinkProcessToParent(t *testing.T) {
 
 func TestUpdateProcessPPID(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Create parent and child processes
@@ -598,7 +599,7 @@ func TestUpdateProcessPPID(t *testing.T) {
 
 func TestShallowCopyProcess(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Create original process
@@ -638,7 +639,7 @@ func TestShallowCopyProcess(t *testing.T) {
 
 func TestConcurrentAccess(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 
 	// Start the creator
 	creator.Start()
@@ -701,7 +702,7 @@ func TestConcurrentAccess(t *testing.T) {
 
 func TestEventHandlingWithEmptyFields(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
@@ -739,7 +740,7 @@ func TestEventHandlingWithEmptyFields(t *testing.T) {
 
 func TestReparentingIntegration(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Start the creator
@@ -795,7 +796,7 @@ func TestReparentingIntegration(t *testing.T) {
 
 func TestComplexProcessTree(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 
 	// Mock container tree methods
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
@@ -846,7 +847,7 @@ func TestComplexProcessTree(t *testing.T) {
 
 func TestProcessMapConversion(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
@@ -877,7 +878,7 @@ func TestProcessMapConversion(t *testing.T) {
 
 func TestCircularReferencePreventionDeep(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
@@ -916,7 +917,7 @@ func TestPerformanceWithManyProcesses(t *testing.T) {
 	}
 
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 
 	// Don't start the creator to avoid exit manager overhead
 	// creator.Start() is not called to avoid background processing
@@ -961,7 +962,7 @@ func TestPerformanceWithManyProcesses(t *testing.T) {
 // Test GetHostProcessBranch functionality
 func TestGetHostProcessBranch(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Create a process tree:
@@ -1052,7 +1053,7 @@ func TestGetHostProcessBranch(t *testing.T) {
 
 func TestGetHostProcessBranch_SingleProcess(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Create a single root process
@@ -1079,7 +1080,7 @@ func TestGetHostProcessBranch_SingleProcess(t *testing.T) {
 
 func TestGetHostProcessBranch_ProcessNotFound(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 
 	// Test getting branch for non-existent process
 	branch, err := creator.GetHostProcessBranch(999)
@@ -1090,7 +1091,7 @@ func TestGetHostProcessBranch_ProcessNotFound(t *testing.T) {
 
 func TestGetHostProcessBranch_BrokenParentChain(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Create a process with missing parent
@@ -1117,7 +1118,7 @@ func TestGetHostProcessBranch_BrokenParentChain(t *testing.T) {
 
 func TestGetHostProcessBranch_MultipleChildren(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Create process tree where target process has siblings
@@ -1201,7 +1202,7 @@ func TestGetHostProcessBranch_MultipleChildren(t *testing.T) {
 
 func TestBuildPathToRoot(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Create a simple chain: init -> systemd -> target
@@ -1234,7 +1235,7 @@ func TestBuildPathToRoot(t *testing.T) {
 
 func TestBuildBranchFromPath(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree)
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Create process chain

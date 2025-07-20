@@ -229,7 +229,7 @@ func main() {
 	containerProcessTree := containerprocesstree.NewContainerProcessTree()
 
 	// Create the process tree creator
-	processTreeCreator := processtreecreator.NewProcessTreeCreator(containerProcessTree)
+	processTreeCreator := processtreecreator.NewProcessTreeCreator(containerProcessTree, cfg)
 
 	// Create event feeder for synchronous processing
 	eventFeeder := feeder.NewEventFeeder()
@@ -239,6 +239,7 @@ func main() {
 		processTreeCreator,
 		containerProcessTree,
 		eventFeeder,
+		cfg,
 	)
 
 	// Start the process tree manager to activate the exit cleanup manager

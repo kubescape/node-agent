@@ -400,7 +400,7 @@ func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid uint32, com
 		}
 	}
 
-	processTree, err := ns.processTreeManager.GetContainerProcessTree(containerID, pid)
+	processTree, err := ns.processTreeManager.GetBranch(pid, containerID)
 	if err != nil {
 		logger.L().Debug("NetworkStream - failed to get process tree", helpers.Error(err), helpers.Int("pid", int(pid)))
 		return apitypes.ProcessTree{

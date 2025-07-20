@@ -53,7 +53,7 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 			continue
 		}
 
-		processTree, _ := ee.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
+		processTree, _ := ee.processTreeManager.GetBranch(entry.ProcessID, entry.ContainerID)
 
 		enrichedEvents = append(enrichedEvents, &containerwatcher.EnrichedEvent{
 			Event:       event,

@@ -7,6 +7,7 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/kubescape/node-agent/pkg/config"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
@@ -20,6 +21,7 @@ type ProcessTreeManagerImpl struct {
 	eventFeeder               *feeder.EventFeeder
 	containerProcessTreeCache *expirable.LRU[string, apitypes.Process] // containerID:pid -> cached result
 	mutex                     sync.RWMutex
+	config                    config.Config
 }
 
 // NewProcessTreeManager creates a new process tree manager
@@ -27,6 +29,7 @@ func NewProcessTreeManager(
 	creator processtreecreator.ProcessTreeCreator,
 	containerTree containerprocesstree.ContainerProcessTree,
 	eventFeeder *feeder.EventFeeder,
+	config config.Config,
 ) ProcessTreeManager {
 
 	containerProcessTreeCache := expirable.NewLRU[string, apitypes.Process](10000, nil, 1*time.Minute)
@@ -36,6 +39,7 @@ func NewProcessTreeManager(
 		containerTree:             containerTree,
 		eventFeeder:               eventFeeder,
 		containerProcessTreeCache: containerProcessTreeCache,
+		config:                    config,
 	}
 }
 
@@ -93,4 +97,11 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 	ptm.containerProcessTreeCache.Add(cacheKey, containerSubtree)
 
 	return containerSubtree, nil
+}
+
+func (ptm *ProcessTreeManagerImpl) GetBranch(pid uint32, containerID string) (apitypes.Process, error) {
+	if ptm.config.KubernetesMode {
+		return ptm.GetContainerProcessTree(containerID, pid)
+	}
+	return ptm.GetHostProcessTree(pid)
 }

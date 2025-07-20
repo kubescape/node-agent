@@ -8,6 +8,7 @@ import (
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/config"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/kubescape/node-agent/pkg/processtree/reparenting"
@@ -18,13 +19,14 @@ type processTreeCreatorImpl struct {
 	containerTree    containerprocesstree.ContainerProcessTree
 	reparentingLogic reparenting.ReparentingLogic
 	mutex            sync.RWMutex // Protects process tree modifications
+	config           config.Config
 
 	// Exit manager fields
 	pendingExits        map[uint32]*pendingExit // PID -> pending exit
 	exitCleanupStopChan chan struct{}
 }
 
-func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree) ProcessTreeCreator {
+func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree, config config.Config) ProcessTreeCreator {
 	// Create reparenting logic
 	reparentingLogic, err := reparenting.NewReparentingLogic()
 	if err != nil {
@@ -37,6 +39,7 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 		reparentingLogic: reparentingLogic,
 		containerTree:    containerTree,
 		pendingExits:     make(map[uint32]*pendingExit),
+		config:           config,
 	}
 
 	return creator
@@ -151,6 +154,12 @@ func (pt *processTreeCreatorImpl) UpdatePPID(proc *apitypes.Process, event feede
 		// 2. Else if process is already under container, do nothing
 		// 3. Else do standard PPID update logic
 
+		// Host mode: update PPID regardless of current state
+		if !pt.config.KubernetesMode {
+			pt.updateProcessPPID(proc, event.PPID)
+			return
+		}
+
 		// First check if new PPID is under any container subtree
 		IsNewPPIDUnderContainer := pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PPID, pt.getProcessMapAsRegularMap())
 		if IsNewPPIDUnderContainer {
@@ -254,11 +263,13 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 
 	pt.UpdatePPID(proc, event)
 
-	isCurrentUnderContainer := pt.containerTree.IsProcessUnderAnyContainerSubtree(proc.PID, pt.getProcessMapAsRegularMap())
-	if !isCurrentUnderContainer {
-		shimPid, err := pt.containerTree.GetPidByContainerID(event.ContainerID)
-		if err == nil {
-			pt.updateProcessPPID(proc, shimPid)
+	if pt.config.KubernetesMode {
+		isCurrentUnderContainer := pt.containerTree.IsProcessUnderAnyContainerSubtree(proc.PID, pt.getProcessMapAsRegularMap())
+		if !isCurrentUnderContainer {
+			shimPid, err := pt.containerTree.GetPidByContainerID(event.ContainerID)
+			if err == nil {
+				pt.updateProcessPPID(proc, shimPid)
+			}
 		}
 	}
 

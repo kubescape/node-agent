@@ -13,4 +13,6 @@ type ProcessTreeManager interface {
 	GetHostProcessTree(pid uint32) (apitypes.Process, error)
 	GetContainerProcessTree(containerID string, pid uint32) (apitypes.Process, error)
 	ReportEvent(eventType utils.EventType, event utils.K8sEvent) error
+
+	GetBranch(pid uint32, containerID string) (apitypes.Process, error)
 }
