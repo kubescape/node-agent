@@ -244,17 +244,10 @@ func (cd *containerData) createNetworkNeighbor(networkEvent NetworkEvent, namesp
 		neighborEntry.IPAddress = networkEvent.Destination.IPAddress
 
 		if dnsResolverClient != nil {
-			logger.L().Info("AFEK - Resolving IP address",
-				helpers.String("ip", networkEvent.Destination.IPAddress),
-			)
 			domain, ok := dnsResolverClient.ResolveIPAddress(networkEvent.Destination.IPAddress)
 			if ok {
 				neighborEntry.DNS = domain
 				neighborEntry.DNSNames = []string{domain}
-			} else {
-				logger.L().Error("AFEK - Failed to resolve IP address",
-					helpers.String("ip", networkEvent.Destination.IPAddress),
-				)
 			}
 		}
 	}

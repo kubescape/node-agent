@@ -24,6 +24,7 @@ type OpenTracer struct {
 	containerSelector   containercollection.ContainerSelector
 	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *traceropen.Tracer
+	cfg                 config.Config
 }
 
 // NewOpenTracer creates a new open tracer
@@ -92,6 +93,7 @@ func (ot *OpenTracer) GetEventType() utils.EventType {
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (ot *OpenTracer) IsEnabled(cfg interface{}) bool {
 	if config, ok := cfg.(config.Config); ok {
+		ot.cfg = config
 		return config.EnableApplicationProfile || config.EnableRuntimeDetection
 	}
 	return false
@@ -101,6 +103,10 @@ func (ot *OpenTracer) IsEnabled(cfg interface{}) bool {
 func (ot *OpenTracer) openEventCallback(event *traceropentype.Event) {
 	if event.Type == types.DEBUG {
 		return
+	}
+
+	if ot.cfg.EnableFullPathTracing {
+		event.Path = event.FullPath
 	}
 
 	if event.Err > -1 && event.FullPath != "" {

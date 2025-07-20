@@ -102,6 +102,15 @@ func (et *ExecTracer) execEventCallback(event *tracerexectype.Event) {
 		return
 	}
 
+	path := event.Comm
+	if len(event.Args) > 0 {
+		path = event.Args[0]
+	}
+
+	if path == "" {
+		return
+	}
+
 	if event.Retval > -1 && event.Comm != "" {
 		execEvent := &events.ExecEvent{Event: *event}
 		// Handle the event with syscall enrichment

@@ -124,6 +124,14 @@ func (dt *DNSTracer) dnsEventCallback(event *tracerdnstype.Event) {
 		return
 	}
 
+	if event.Qr != tracerdnstype.DNSPktTypeResponse {
+		return
+	}
+
+	if event.NumAnswers == 0 {
+		return
+	}
+
 	if isDroppedEvent(event.Type, event.Message) {
 		logger.L().Warning("dns tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
 		return
