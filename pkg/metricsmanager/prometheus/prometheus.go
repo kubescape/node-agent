@@ -2,7 +2,6 @@ package metricsmanager
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top"
 	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
@@ -17,11 +16,8 @@ import (
 
 const (
 	prometheusRuleIdLabel = "rule_id"
-	programIdLabel        = "program_id"
 	programTypeLabel      = "program_type"
 	programNameLabel      = "program_name"
-	processName           = "process_name"
-	processId             = "process_id"
 )
 
 var _ metricsmanager.MetricsManager = (*PrometheusMetric)(nil)
@@ -96,42 +92,42 @@ func NewPrometheusMetric() *PrometheusMetric {
 		programRuntimeGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "node_agent_program_current_runtime",
 			Help: "Current runtime of programs by program ID",
-		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+		}, []string{programTypeLabel, programNameLabel}),
 
 		programRunCountGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "node_agent_program_current_run_count",
 			Help: "Current run count of programs by program ID",
-		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+		}, []string{programTypeLabel, programNameLabel}),
 
 		programTotalRuntimeGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "node_agent_program_total_runtime",
 			Help: "Total runtime of programs by program ID",
-		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+		}, []string{programTypeLabel, programNameLabel}),
 
 		programTotalRunCountGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "node_agent_program_total_run_count",
 			Help: "Total run count of programs by program ID",
-		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+		}, []string{programTypeLabel, programNameLabel}),
 
 		programMapMemoryGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "node_agent_program_map_memory",
 			Help: "Map memory usage of programs by program ID",
-		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+		}, []string{programTypeLabel, programNameLabel}),
 
 		programMapCountGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "node_agent_program_map_count",
 			Help: "Map count of programs by program ID",
-		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+		}, []string{programTypeLabel, programNameLabel}),
 
 		programCpuUsageGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "node_agent_program_total_cpu_usage",
 			Help: "Total CPU usage of programs by program ID",
-		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+		}, []string{programTypeLabel, programNameLabel}),
 
 		programPerCpuUsageGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "node_agent_program_per_cpu_usage",
 			Help: "Per-CPU usage of programs by program ID",
-		}, []string{programIdLabel, programTypeLabel, programNameLabel, processId, processName}),
+		}, []string{programTypeLabel, programNameLabel}),
 	}
 }
 
@@ -202,21 +198,9 @@ func (p *PrometheusMetric) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
 	logger.L().Debug("reporting ebpf stats", helpers.Int("stats_count", len(stats.Stats)))
 
 	for _, stat := range stats.Stats {
-		programIDStr := strconv.FormatUint(uint64(stat.ProgramID), 10)
-
 		labels := prometheus.Labels{
-			programIdLabel:   programIDStr,
 			programTypeLabel: stat.Type,
 			programNameLabel: stat.Name,
-			processId:        "unknown",
-			processName:      "unknown",
-		}
-
-		if len(stat.Processes) > 0 {
-			pid := stat.Processes[0].Pid
-			pname := stat.Processes[0].Comm
-			labels[processId] = strconv.Itoa(int(pid))
-			labels[processName] = pname
 		}
 
 		p.programRuntimeGauge.With(labels).Set(float64(stat.CurrentRuntime))
