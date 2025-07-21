@@ -348,7 +348,7 @@ func main() {
 	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, containerProfileManager, k8sClient,
 		igK8sClient, dnsManagerClient, prometheusExporter, ruleManager,
 		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
-		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree, eventFeeder)
+		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

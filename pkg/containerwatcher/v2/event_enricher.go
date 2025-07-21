@@ -44,7 +44,7 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 			// Use the blocking ReportEvent method to ensure synchronous processing
 			if err := ee.processTreeManager.ReportEvent(eventType, event); err != nil {
 				logger.L().Error("Failed to report event to process tree", helpers.Error(err),
-				helpers.String("eventType", string(eventType)),
+					helpers.String("eventType", string(eventType)),
 					helpers.String("pid", fmt.Sprintf("%d", entry.ProcessID)))
 			}
 		}
@@ -67,6 +67,10 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 	processingTime := time.Since(startTime)
 
 	ee.updateMetrics(int64(len(events)), processingTime)
+
+	logger.L().Debug("AFEK - Enriched events", helpers.Int("count", len(enrichedEvents)), helpers.String("processingTime", processingTime.String()),
+		helpers.Int("totalEventsProcessed", int(ee.totalEventsProcessed)), helpers.String("totalProcessingTime", ee.totalProcessingTime.String()),
+		helpers.Int("original events", len(events)))
 
 	return enrichedEvents
 }

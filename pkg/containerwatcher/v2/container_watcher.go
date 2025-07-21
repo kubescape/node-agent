@@ -118,7 +118,6 @@ func CreateContainerWatcher(
 	objectCache objectcache.ObjectCache,
 	networkStreamClient networkstream.NetworkStreamClient,
 	containerProcessTree containerprocesstree.ContainerProcessTree,
-	processTreeFeeder *feeder.EventFeeder,
 ) (*ContainerWatcher, error) {
 
 	// Create container collection
@@ -131,7 +130,7 @@ func CreateContainerWatcher(
 	}
 
 	// Create ordered event queue (50ms collection interval, increased buffer size)
-	orderedEventQueue := NewOrderedEventQueue(50*time.Millisecond, 100000, processTreeManager)
+	orderedEventQueue := NewOrderedEventQueue(250*time.Millisecond, 100000, processTreeManager)
 
 	rulePolicyReporter := rulepolicy.NewRulePolicyReporter(ruleManager, containerProfileManager)
 
@@ -188,7 +187,6 @@ func CreateContainerWatcher(
 		orderedEventQueue:   orderedEventQueue,
 		eventHandlerFactory: eventHandlerFactory,
 		processTreeManager:  processTreeManager,
-		processTreeFeeder:   processTreeFeeder,
 		eventEnricher:       eventEnricher,
 		workerPool:          workerPool,
 
@@ -228,7 +226,6 @@ func CreateIGContainerWatcher(
 	objectCache objectcache.ObjectCache,
 	networkStreamClient networkstream.NetworkStreamClient,
 	containerProcessTree containerprocesstree.ContainerProcessTree,
-	processTreeFeeder *feeder.EventFeeder,
 ) (containerwatcher.ContainerWatcher, error) {
 
 	return CreateContainerWatcher(
@@ -250,7 +247,6 @@ func CreateIGContainerWatcher(
 		objectCache,
 		networkStreamClient,
 		containerProcessTree,
-		processTreeFeeder,
 	)
 }
 
@@ -427,34 +423,10 @@ func (ncw *ContainerWatcher) enrichAndProcess(events []eventEntry) {
 		logger.L().Error("AFEK - Execve events mismatch", helpers.Int("exec", exec), helpers.Int("enrichedExec", enrichedExec))
 	}
 
-	// Submit individual events to worker pool for better parallelism and load balancing
-	// Process each event individually with retry mechanism to prevent event loss
-	maxRetries := 10
-	baseRetryDelay := 10 * time.Millisecond
-
 	for _, enrichedEvent := range enrichedEvents {
-		retryDelay := baseRetryDelay
-		for attempt := 0; attempt < maxRetries; attempt++ {
-			if err := ncw.workerPool.Invoke(enrichedEvent); err != nil {
-				if attempt < maxRetries-1 {
-					logger.L().Debug("Worker pool busy, retrying single event...",
-						helpers.Int("attempt", attempt+1),
-						helpers.Int("maxRetries", maxRetries),
-						helpers.String("eventType", string(enrichedEvent.EventType)),
-						helpers.String("containerID", enrichedEvent.ContainerID),
-						helpers.Error(err))
-					time.Sleep(retryDelay)
-					retryDelay *= 2 // Exponential backoff
-					continue
-				}
-				logger.L().Error("Failed to submit event to worker pool after retries",
-					helpers.Int("attempts", maxRetries),
-					helpers.String("eventType", string(enrichedEvent.EventType)),
-					helpers.String("containerID", enrichedEvent.ContainerID),
-					helpers.Error(err))
-			}
-			break
+		err := ncw.workerPool.Invoke(enrichedEvent)
+		if err != nil {
+			logger.L().Error("AFEK - Failed to submit event to worker pool", helpers.String("eventType", string(enrichedEvent.EventType)), helpers.String("containerID", enrichedEvent.ContainerID), helpers.Error(err))
 		}
 	}
-
 }
