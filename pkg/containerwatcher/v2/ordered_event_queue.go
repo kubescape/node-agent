@@ -52,7 +52,7 @@ func NewOrderedEventQueue(collectionInterval time.Duration, maxBufferSize int, p
 		maxBufferSize:      maxBufferSize,
 		eventBuffer:        make([]eventEntry, 0, maxBufferSize),
 		processTreeManager: processTreeManager,
-		outputChan:         make(chan []eventEntry, 1000), // Increased from 10 to 1000
+		outputChan:         make(chan []eventEntry, 10000),
 	}
 }
 

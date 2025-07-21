@@ -1707,14 +1707,11 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error creating workload: %v", err)
 	}
+
 	err = endpointTraffic.WaitForReady(80)
 	if err != nil {
 		t.Errorf("Error waiting for workload to be ready: %v", err)
 	}
-
-	// Wait for application profile to be ready
-	// assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
-	time.Sleep(10 * time.Second)
 
 	err = endpointTraffic.WaitForApplicationProfileCompletion(80)
 	if err != nil {
@@ -1725,8 +1722,10 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 	time.Sleep(30 * time.Second)
 
 	// Add to rule policy symlink
-	_, _, err = endpointTraffic.ExecIntoPod([]string{"/bin/sh", "-c", "python3 /root/python_spawner.py 50"}, "")
+	buf, _, err := endpointTraffic.ExecIntoPod([]string{"/bin/sh", "-c", "python3 /root/python_spawner.py 50"}, "")
 	assert.NoError(t, err)
+
+	t.Logf("Output: %s", buf)
 
 	t.Logf("Waiting for the alert to be signaled")
 
@@ -1741,7 +1740,7 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 	found := false
 
 	for _, alert := range alerts {
-		if alert.Labels["rule_name"] == "Unexpected process launched" && alert.Labels["pcomm"] == "cust_proc_49" &&
+		if alert.Labels["rule_name"] == "Unexpected process launched" && alert.Labels["pcomm"] == "proc_49" &&
 			alert.Labels["namespace"] == endpointTraffic.Namespace {
 			found = true
 			if alert.Labels["processtree_depth"] != "50" {
