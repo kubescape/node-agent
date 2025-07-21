@@ -225,3 +225,31 @@ func GetProcessFromProcessTree(process *apitypes.Process, pid uint32) *apitypes.
 
 	return nil
 }
+
+// CalculateProcessTreeDepth calculates the maximum depth of a process tree.
+// The depth is the maximum number of levels from the root process to any leaf process.
+// A single process (no children) has a depth of 1.
+func CalculateProcessTreeDepth(process *apitypes.Process) int {
+	if process == nil {
+		return 0
+	}
+
+	// Ensure migration from old Children slice to ChildrenMap
+	process.MigrateToMap()
+
+	// If no children, this is a leaf node with depth 1
+	if len(process.ChildrenMap) == 0 {
+		return 1
+	}
+
+	// Find the maximum depth among all children and add 1 for current level
+	maxChildDepth := 0
+	for _, child := range process.ChildrenMap {
+		childDepth := CalculateProcessTreeDepth(child)
+		if childDepth > maxChildDepth {
+			maxChildDepth = childDepth
+		}
+	}
+
+	return maxChildDepth + 1
+}

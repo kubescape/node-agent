@@ -223,8 +223,6 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
-	pt.UpdatePPID(proc, event)
-
 	if event.Comm != "" && proc.Comm == "" {
 		proc.Comm = event.Comm
 	}

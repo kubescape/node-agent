@@ -132,7 +132,7 @@ func CreateNewContainerWatcher(
 	}
 
 	// Create ordered event queue (50ms collection interval, default buffer size)
-	orderedEventQueue := NewOrderedEventQueue(500*time.Millisecond, 10000, processTreeManager)
+	orderedEventQueue := NewOrderedEventQueue(50*time.Millisecond, 10000, processTreeManager)
 
 	rulePolicyReporter := rulepolicy.NewRulePolicyReporter(ruleManager, containerProfileManager)
 

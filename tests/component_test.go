@@ -1699,3 +1699,48 @@ func Test_23_RuleCooldownTest(t *testing.T) {
 	// Verify the specific alert details
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
 }
+
+func Test_24_ProcessTreeDepthTest(t *testing.T) {
+	ns := testutils.NewRandomNamespace()
+
+	endpointTraffic, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/tree.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+	err = endpointTraffic.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
+
+	// Wait for application profile to be ready
+	// assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
+	time.Sleep(10 * time.Second)
+
+	err = endpointTraffic.WaitForApplicationProfileCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+
+	// wait for cache
+	time.Sleep(30 * time.Second)
+
+	// Add to rule policy symlink
+	_, _, err = endpointTraffic.ExecIntoPod([]string{"/bin/sh", "-c", "python3 /root/python_spawner.py 50"}, "")
+	assert.NoError(t, err)
+
+	// Wait for the alert to be signaled
+	time.Sleep(60 * time.Second)
+
+	alerts, err := testutils.GetAlerts(endpointTraffic.Namespace)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	for _, alert := range alerts {
+		if alert.Labels["rule_name"] == "Unexpected process launched" && alert.Labels["pcomm"] == "cust_proc_49" {
+			if alert.Labels["processtree_depth"] != "50" {
+				t.Errorf("Unexpected process tree depth: %v", alert.Labels["processtree_depth"])
+			}
+		}
+	}
+}
