@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	maxPendingExits = 20000           // Maximum number of pending exits before forcing cleanup
-	cleanupInterval = 1 * time.Minute // Check every 5 minutes
-	cleanupDelay    = 5 * time.Minute // Remove after 5 minutes
+	maxPendingExits = 20000            // Maximum number of pending exits before forcing cleanup
+	cleanupInterval = 1 * time.Minute  // Check every 1 minute
+	cleanupDelay    = 10 * time.Minute // Remove after 10 minutes
 )
 
 type pendingExit struct {
@@ -91,7 +91,6 @@ func (pt *processTreeCreatorImpl) exitCleanupLoop() {
 func (pt *processTreeCreatorImpl) performExitCleanup() {
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
-
 	now := time.Now()
 	var toRemove []*pendingExit
 

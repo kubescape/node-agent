@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: endpoint-traffic
-        image: armoafekb/afek-b-tests:ptrace_test
+        image: armoafekb/afek-b-tests:processstree
         imagePullPolicy: Always
         # Create a volume mount for the script
         volumeMounts:

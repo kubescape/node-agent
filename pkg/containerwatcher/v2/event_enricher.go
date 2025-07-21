@@ -52,8 +52,7 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 		if eventType == utils.ProcfsEventType || eventType == utils.ForkEventType {
 			continue
 		}
-
-		processTree, _ := ee.processTreeManager.GetBranch(entry.ProcessID, entry.ContainerID)
+		processTree, _ := ee.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
 
 		enrichedEvents = append(enrichedEvents, &containerwatcher.EnrichedEvent{
 			Event:       event,

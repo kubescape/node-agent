@@ -98,10 +98,3 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 
 	return containerSubtree, nil
 }
-
-func (ptm *ProcessTreeManagerImpl) GetBranch(pid uint32, containerID string) (apitypes.Process, error) {
-	if ptm.config.KubernetesMode {
-		return ptm.GetContainerProcessTree(containerID, pid)
-	}
-	return ptm.GetHostProcessTree(pid)
-}
