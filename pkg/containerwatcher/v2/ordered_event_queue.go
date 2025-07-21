@@ -52,7 +52,7 @@ func NewOrderedEventQueue(collectionInterval time.Duration, maxBufferSize int, p
 		maxBufferSize:      maxBufferSize,
 		eventBuffer:        make([]eventEntry, 0, maxBufferSize),
 		processTreeManager: processTreeManager,
-		outputChan:         make(chan []eventEntry, 10),
+		outputChan:         make(chan []eventEntry, 1000), // Increased from 10 to 1000
 	}
 }
 
@@ -128,8 +128,11 @@ func (oeq *OrderedEventQueue) addEvent(eventType utils.EventType, event utils.K8
 	defer oeq.bufferMutex.Unlock()
 
 	if !oeq.started || oeq.stopped {
-		logger.L().Warning("Ordered event queue not started or stopped, dropping event",
-			helpers.String("eventType", string(eventType)))
+		logger.L().Warning("DROPPING EVENT - Ordered event queue not started or stopped",
+			helpers.String("eventType", string(eventType)),
+			helpers.String("containerID", containerID),
+			helpers.String("started", fmt.Sprintf("%v", oeq.started)),
+			helpers.String("stopped", fmt.Sprintf("%v", oeq.stopped)))
 		return
 	}
 
@@ -138,6 +141,7 @@ func (oeq *OrderedEventQueue) addEvent(eventType utils.EventType, event utils.K8
 		logger.L().Warning("Event buffer full, triggering immediate processing",
 			helpers.Int("bufferSize", len(oeq.eventBuffer)),
 			helpers.Int("maxBufferSize", oeq.maxBufferSize))
+		logger.L().Debug("AFEK - processBufferLocked Processing buffer", helpers.Int("bufferSize", len(oeq.eventBuffer)))
 		oeq.processBufferLocked()
 	}
 
@@ -196,6 +200,6 @@ func (oeq *OrderedEventQueue) processBufferLocked() {
 	select {
 	case oeq.outputChan <- eventsToOutput:
 	default:
-		// logger.L().Warning("Output channel full, dropping events", helpers.Int("eventCount", len(eventsToOutput)))
+		logger.L().Warning("Output channel full, dropping events", helpers.Int("eventCount", len(eventsToOutput)))
 	}
 }

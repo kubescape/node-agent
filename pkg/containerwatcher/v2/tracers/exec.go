@@ -9,6 +9,8 @@ import (
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -112,6 +114,9 @@ func (et *ExecTracer) execEventCallback(event *tracerexectype.Event) {
 	}
 
 	if path == "" {
+		logger.L().Debug("DROPPING EVENT - Exec event has empty path",
+			helpers.String("containerID", event.Runtime.ContainerID),
+			helpers.String("comm", event.Comm))
 		return
 	}
 
@@ -119,6 +124,11 @@ func (et *ExecTracer) execEventCallback(event *tracerexectype.Event) {
 		execEvent := &events.ExecEvent{Event: *event}
 		// Handle the event with syscall enrichment
 		et.handleEvent(execEvent, []uint64{SYS_FORK})
+	} else {
+		logger.L().Debug("DROPPING EVENT - Exec event validation failed",
+			helpers.String("containerID", event.Runtime.ContainerID),
+			helpers.String("comm", event.Comm),
+			helpers.Int("retval", int(event.Retval)))
 	}
 }
 

@@ -1728,6 +1728,8 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"/bin/sh", "-c", "python3 /root/python_spawner.py 50"}, "")
 	assert.NoError(t, err)
 
+	t.Logf("Waiting for the alert to be signaled")
+
 	// Wait for the alert to be signaled
 	time.Sleep(60 * time.Second)
 
@@ -1739,7 +1741,8 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 	found := false
 
 	for _, alert := range alerts {
-		if alert.Labels["rule_name"] == "Unexpected process launched" && alert.Labels["pcomm"] == "cust_proc_49" {
+		if alert.Labels["rule_name"] == "Unexpected process launched" && alert.Labels["pcomm"] == "cust_proc_49" &&
+			alert.Labels["namespace"] == endpointTraffic.Namespace {
 			found = true
 			if alert.Labels["processtree_depth"] != "50" {
 				t.Errorf("Unexpected process tree depth: %v", alert.Labels["processtree_depth"])
@@ -1748,4 +1751,5 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 	}
 
 	assert.True(t, found, "Expected to find an alert for the process tree depth")
+	t.Logf("Found alerts for the process tree depth: %v", alerts)
 }

@@ -44,7 +44,7 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 			// Use the blocking ReportEvent method to ensure synchronous processing
 			if err := ee.processTreeManager.ReportEvent(eventType, event); err != nil {
 				logger.L().Error("Failed to report event to process tree", helpers.Error(err),
-					helpers.String("eventType", string(eventType)),
+				helpers.String("eventType", string(eventType)),
 					helpers.String("pid", fmt.Sprintf("%d", entry.ProcessID)))
 			}
 		}

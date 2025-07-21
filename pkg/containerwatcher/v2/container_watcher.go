@@ -130,8 +130,8 @@ func CreateContainerWatcher(
 		return nil, fmt.Errorf("creating tracer collection: %w", err)
 	}
 
-	// Create ordered event queue (50ms collection interval, default buffer size)
-	orderedEventQueue := NewOrderedEventQueue(50*time.Millisecond, 10000, processTreeManager)
+	// Create ordered event queue (50ms collection interval, increased buffer size)
+	orderedEventQueue := NewOrderedEventQueue(50*time.Millisecond, 100000, processTreeManager)
 
 	rulePolicyReporter := rulepolicy.NewRulePolicyReporter(ruleManager, containerProfileManager)
 
@@ -153,10 +153,10 @@ func CreateContainerWatcher(
 	// Create event enricher
 	eventEnricher := NewEventEnricher(processTreeManager)
 
-	// Create worker pool for processing events
+	// Create worker pool for processing individual events
 	workerPool, err := ants.NewPoolWithFunc(cfg.WorkerPoolSize, func(i interface{}) {
-		enrichedEvents := i.([]*containerwatcher.EnrichedEvent)
-		processEvents(enrichedEvents, eventHandlerFactory)
+		enrichedEvent := i.(*containerwatcher.EnrichedEvent)
+		eventHandlerFactory.ProcessEvent(enrichedEvent)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating worker pool: %w", err)
@@ -393,13 +393,6 @@ func (ncw *ContainerWatcher) UnregisterContainerReceiver(receiver containerwatch
 	ncw.thirdPartyContainerReceivers.Remove(receiver)
 }
 
-func processEvents(enrichedEvents []*containerwatcher.EnrichedEvent, eventHandlerFactory *EventHandlerFactory) {
-	// Process events through the event handler factory
-	for _, event := range enrichedEvents {
-		eventHandlerFactory.ProcessEvent(event)
-	}
-}
-
 // eventProcessingLoop continuously processes events from the ordered event queue
 func (ncw *ContainerWatcher) eventProcessingLoop() {
 	for {
@@ -415,10 +408,53 @@ func (ncw *ContainerWatcher) eventProcessingLoop() {
 // enrichAndProcess processes a batch of events
 func (ncw *ContainerWatcher) enrichAndProcess(events []eventEntry) {
 	// Enrich events with additional data
-	enrichedEvents := ncw.eventEnricher.EnrichEvents(events)
-
-	// Submit to worker pool for processing
-	if err := ncw.workerPool.Invoke(enrichedEvents); err != nil {
-		logger.L().Error("Failed to submit events to worker pool", helpers.Error(err))
+	exec := 0
+	for _, event := range events {
+		if event.EventType == utils.ExecveEventType {
+			exec++
+		}
 	}
+
+	enrichedEvents := ncw.eventEnricher.EnrichEvents(events)
+	enrichedExec := 0
+	for _, event := range enrichedEvents {
+		if event.EventType == utils.ExecveEventType {
+			enrichedExec++
+		}
+	}
+
+	if exec != enrichedExec {
+		logger.L().Error("AFEK - Execve events mismatch", helpers.Int("exec", exec), helpers.Int("enrichedExec", enrichedExec))
+	}
+
+	// Submit individual events to worker pool for better parallelism and load balancing
+	// Process each event individually with retry mechanism to prevent event loss
+	maxRetries := 10
+	baseRetryDelay := 10 * time.Millisecond
+
+	for _, enrichedEvent := range enrichedEvents {
+		retryDelay := baseRetryDelay
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			if err := ncw.workerPool.Invoke(enrichedEvent); err != nil {
+				if attempt < maxRetries-1 {
+					logger.L().Debug("Worker pool busy, retrying single event...",
+						helpers.Int("attempt", attempt+1),
+						helpers.Int("maxRetries", maxRetries),
+						helpers.String("eventType", string(enrichedEvent.EventType)),
+						helpers.String("containerID", enrichedEvent.ContainerID),
+						helpers.Error(err))
+					time.Sleep(retryDelay)
+					retryDelay *= 2 // Exponential backoff
+					continue
+				}
+				logger.L().Error("Failed to submit event to worker pool after retries",
+					helpers.Int("attempts", maxRetries),
+					helpers.String("eventType", string(enrichedEvent.EventType)),
+					helpers.String("containerID", enrichedEvent.ContainerID),
+					helpers.Error(err))
+			}
+			break
+		}
+	}
+
 }
