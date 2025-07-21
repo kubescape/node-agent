@@ -103,7 +103,7 @@ func TestAddRunningContainers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			slices.Sort(tt.expectedRuleManagedPods)
 
-			ncw := NewContainerWatcher{
+			ncw := ContainerWatcher{
 				cfg:                 config.Config{NamespaceName: tt.ignore.namespace},
 				ruleManagedPods:     mapset.NewSet[string](tt.preRuleManagedPods...),
 				containerCollection: &containercollection.ContainerCollection{},
@@ -176,7 +176,7 @@ func TestUnregisterContainer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ncw := NewContainerWatcher{
+			ncw := ContainerWatcher{
 				ruleManagedPods:     mapset.NewSet[string](tt.preRuleManagedPods...),
 				containerCollection: &containercollection.ContainerCollection{},
 				objectCache:         &objectcache.ObjectCacheMock{},

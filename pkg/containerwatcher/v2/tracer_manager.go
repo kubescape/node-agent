@@ -12,33 +12,49 @@ import (
 
 // V2TracerManager handles all tracer-related operations for v2
 type V2TracerManager struct {
-	containerWatcher *NewContainerWatcher
-	tracerManager    *containerwatcherroot.TracerManager
+	containerWatcher *ContainerWatcher
+	tracers          map[utils.EventType]containerwatcherroot.TracerInterface
 	tracerFactory    containerwatcherroot.TracerFactoryInterface
 }
 
 // NewV2TracerManager creates a new v2 tracer manager
-func NewV2TracerManager(containerWatcher *NewContainerWatcher, tracerFactory containerwatcherroot.TracerFactoryInterface) *V2TracerManager {
+func NewV2TracerManager(containerWatcher *ContainerWatcher, tracerFactory containerwatcherroot.TracerFactoryInterface) *V2TracerManager {
 	return &V2TracerManager{
 		containerWatcher: containerWatcher,
-		tracerManager:    containerwatcherroot.NewTracerManager(),
+		tracers:          make(map[utils.EventType]containerwatcherroot.TracerInterface),
 		tracerFactory:    tracerFactory,
 	}
+}
+
+// RegisterTracer registers a tracer with the manager
+func (vtm *V2TracerManager) RegisterTracer(tracer containerwatcherroot.TracerInterface) {
+	vtm.tracers[tracer.GetEventType()] = tracer
+}
+
+// GetTracer returns a tracer by event type
+func (vtm *V2TracerManager) GetTracer(eventType utils.EventType) (containerwatcherroot.TracerInterface, bool) {
+	tracer, exists := vtm.tracers[eventType]
+	return tracer, exists
+}
+
+// GetAllTracers returns all registered tracers
+func (vtm *V2TracerManager) GetAllTracers() map[utils.EventType]containerwatcherroot.TracerInterface {
+	return vtm.tracers
 }
 
 // StartAllTracers starts all enabled tracers
 func (vtm *V2TracerManager) StartAllTracers(ctx context.Context) error {
 	// Create and register all tracers
 	if vtm.tracerFactory != nil {
-		vtm.tracerFactory.CreateAllTracers(vtm.tracerManager)
+		vtm.tracerFactory.CreateAllTracers(vtm)
 	}
 
 	// Start procfs tracer 5 seconds before other tracers
 	var procfsTracer containerwatcherroot.TracerInterface
-	if tracer, exists := vtm.tracerManager.GetTracer(utils.ProcfsEventType); exists {
+	if tracer, exists := vtm.GetTracer(utils.ProcfsEventType); exists {
 		procfsTracer = tracer
 		// Remove procfs tracer from manager temporarily to avoid double-starting
-		delete(vtm.tracerManager.GetAllTracers(), utils.ProcfsEventType)
+		delete(vtm.tracers, utils.ProcfsEventType)
 
 		if procfsTracer.IsEnabled(vtm.containerWatcher.cfg) {
 			logger.L().Info("Starting procfs tracer 5 seconds before other tracers")
@@ -57,8 +73,12 @@ func (vtm *V2TracerManager) StartAllTracers(ctx context.Context) error {
 	}
 
 	// Start all other enabled tracers
-	if err := vtm.tracerManager.StartAllTracers(ctx, vtm.containerWatcher.cfg); err != nil {
-		return err
+	for _, tracer := range vtm.tracers {
+		if tracer.IsEnabled(vtm.containerWatcher.cfg) {
+			if err := tracer.Start(ctx); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Start third-party tracers through the factory
@@ -82,5 +102,12 @@ func (vtm *V2TracerManager) StopAllTracers() error {
 		factory.StopThirdPartyTracers()
 	}
 
-	return vtm.tracerManager.StopAllTracers()
+	// Stop all registered tracers
+	var lastErr error
+	for _, tracer := range vtm.tracers {
+		if err := tracer.Stop(); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
 }

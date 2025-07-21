@@ -1736,11 +1736,16 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 		t.Errorf("Error getting alerts: %v", err)
 	}
 
+	found := false
+
 	for _, alert := range alerts {
 		if alert.Labels["rule_name"] == "Unexpected process launched" && alert.Labels["pcomm"] == "cust_proc_49" {
+			found = true
 			if alert.Labels["processtree_depth"] != "50" {
 				t.Errorf("Unexpected process tree depth: %v", alert.Labels["processtree_depth"])
 			}
 		}
 	}
+
+	assert.True(t, found, "Expected to find an alert for the process tree depth")
 }

@@ -17,13 +17,13 @@ import (
 
 // ContainerManager handles all container-related operations
 type ContainerManager struct {
-	containerWatcher *NewContainerWatcher
+	containerWatcher *ContainerWatcher
 	kubeIPInstance   operators.OperatorInstance
 	kubeNameInstance operators.OperatorInstance
 }
 
 // NewContainerManager creates a new container manager
-func NewContainerManager(containerWatcher *NewContainerWatcher) *ContainerManager {
+func NewContainerManager(containerWatcher *ContainerWatcher) *ContainerManager {
 	return &ContainerManager{
 		containerWatcher: containerWatcher,
 	}
@@ -127,14 +127,14 @@ func (cm *ContainerManager) StopContainerCollection() {
 }
 
 // startRunningContainers monitors for rule binding notifications
-func (ncw *NewContainerWatcher) startRunningContainers() {
+func (ncw *ContainerWatcher) startRunningContainers() {
 	for n := range *ncw.ruleBindingPodNotify {
 		ncw.addRunningContainers(&n)
 	}
 }
 
 // addRunningContainers handles rule binding notifications
-func (ncw *NewContainerWatcher) addRunningContainers(notf *rulebindingmanager.RuleBindingNotify) {
+func (ncw *ContainerWatcher) addRunningContainers(notf *rulebindingmanager.RuleBindingNotify) {
 	pod := notf.GetPod()
 
 	// skip containers that should be ignored

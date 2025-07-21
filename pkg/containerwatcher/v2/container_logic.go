@@ -20,7 +20,7 @@ const (
 )
 
 // containerCallback handles container events synchronously
-func (ncw *NewContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
+func (ncw *ContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
 	logger.L().Info("NewContainerWatcher.containerCallback - received container event", helpers.String("event", fmt.Sprintf("%+v", notif)), helpers.String("container", fmt.Sprintf("%+v", notif.Container)))
 	if notif.Container == nil || notif.Container.Runtime.ContainerID == "" {
 		logger.L().Info("NewContainerWatcher.containerCallback - container is nil or has empty ContainerID")
@@ -52,7 +52,7 @@ func (ncw *NewContainerWatcher) containerCallback(notif containercollection.PubS
 }
 
 // containerCallbackAsync handles container events asynchronously
-func (ncw *NewContainerWatcher) containerCallbackAsync(notif containercollection.PubSubEvent) {
+func (ncw *ContainerWatcher) containerCallbackAsync(notif containercollection.PubSubEvent) {
 	k8sContainerID := utils.CreateK8sContainerID(notif.Container.K8s.Namespace, notif.Container.K8s.PodName, notif.Container.Runtime.ContainerID)
 
 	switch notif.Type {
@@ -94,7 +94,7 @@ func (ncw *NewContainerWatcher) containerCallbackAsync(notif containercollection
 }
 
 // setSharedWatchedContainerData sets shared container data with retry logic
-func (ncw *NewContainerWatcher) setSharedWatchedContainerData(container *containercollection.Container) {
+func (ncw *ContainerWatcher) setSharedWatchedContainerData(container *containercollection.Container) {
 	// don't start monitoring until we have the instanceID - need to retry until the Pod is updated
 	var sharedWatchedContainerData *objectcache.WatchedContainerData
 	err := backoff.Retry(func() error {
@@ -123,7 +123,7 @@ func (ncw *NewContainerWatcher) setSharedWatchedContainerData(container *contain
 }
 
 // getSharedWatchedContainerData gets shared container data from Kubernetes
-func (ncw *NewContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*objectcache.WatchedContainerData, error) {
+func (ncw *ContainerWatcher) getSharedWatchedContainerData(container *containercollection.Container) (*objectcache.WatchedContainerData, error) {
 	watchedContainer := objectcache.WatchedContainerData{
 		ContainerID: container.Runtime.ContainerID,
 		// we get ImageID and ImageTag from the pod spec for consistency with operator
@@ -189,7 +189,7 @@ func (ncw *NewContainerWatcher) getSharedWatchedContainerData(container *contain
 }
 
 // unregisterContainer unregisters a container from monitoring
-func (ncw *NewContainerWatcher) unregisterContainer(container *containercollection.Container) {
+func (ncw *ContainerWatcher) unregisterContainer(container *containercollection.Container) {
 	if ncw.ruleManagedPods.Contains(utils.CreateK8sPodID(container.K8s.Namespace, container.K8s.PodName)) {
 		// the container should still be monitored
 		logger.L().Debug("NewContainerWatcher - container should still be monitored",

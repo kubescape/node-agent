@@ -36,8 +36,8 @@ import (
 	"github.com/panjf2000/ants/v2"
 )
 
-// NewContainerWatcher represents the new container watcher implementation
-type NewContainerWatcher struct {
+// ContainerWatcher represents the new container watcher implementation
+type ContainerWatcher struct {
 	running bool
 	// Configuration
 	cfg               config.Config
@@ -67,7 +67,6 @@ type NewContainerWatcher struct {
 	eventHandlerFactory *EventHandlerFactory
 	processTreeManager  processtree.ProcessTreeManager
 	processTreeFeeder   *feeder.EventFeeder
-	tracerManager       *containerwatcher.TracerManager
 	eventEnricher       *EventEnricher
 
 	// Managers
@@ -97,10 +96,10 @@ type NewContainerWatcher struct {
 	callbacks []containercollection.FuncNotify
 }
 
-var _ containerwatcher.ContainerWatcher = (*NewContainerWatcher)(nil)
+var _ containerwatcher.ContainerWatcher = (*ContainerWatcher)(nil)
 
-// CreateNewContainerWatcher creates a new container watcher with the ordered event processing design
-func CreateNewContainerWatcher(
+// CreateContainerWatcher creates a new container watcher with the ordered event processing design
+func CreateContainerWatcher(
 	cfg config.Config,
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient,
 	k8sClient *k8sinterface.KubernetesApi,
@@ -120,7 +119,7 @@ func CreateNewContainerWatcher(
 	networkStreamClient networkstream.NetworkStreamClient,
 	containerProcessTree containerprocesstree.ContainerProcessTree,
 	processTreeFeeder *feeder.EventFeeder,
-) (*NewContainerWatcher, error) {
+) (*ContainerWatcher, error) {
 
 	// Create container collection
 	containerCollection := &containercollection.ContainerCollection{}
@@ -154,9 +153,6 @@ func CreateNewContainerWatcher(
 	// Create event enricher
 	eventEnricher := NewEventEnricher(processTreeManager)
 
-	// Create tracer manager
-	tracerManager := containerwatcher.NewTracerManager()
-
 	// Create worker pool for processing events
 	workerPool, err := ants.NewPoolWithFunc(cfg.WorkerPoolSize, func(i interface{}) {
 		enrichedEvents := i.([]*containerwatcher.EnrichedEvent)
@@ -166,7 +162,7 @@ func CreateNewContainerWatcher(
 		return nil, fmt.Errorf("creating worker pool: %w", err)
 	}
 
-	return &NewContainerWatcher{
+	return &ContainerWatcher{
 		// Configuration
 		cfg:               cfg,
 		containerSelector: containercollection.ContainerSelector{},
@@ -193,7 +189,6 @@ func CreateNewContainerWatcher(
 		eventHandlerFactory: eventHandlerFactory,
 		processTreeManager:  processTreeManager,
 		processTreeFeeder:   processTreeFeeder,
-		tracerManager:       tracerManager,
 		eventEnricher:       eventEnricher,
 		workerPool:          workerPool,
 
@@ -236,7 +231,7 @@ func CreateIGContainerWatcher(
 	processTreeFeeder *feeder.EventFeeder,
 ) (containerwatcher.ContainerWatcher, error) {
 
-	return CreateNewContainerWatcher(
+	return CreateContainerWatcher(
 		cfg,
 		containerProfileManager,
 		k8sClient,
@@ -260,7 +255,7 @@ func CreateIGContainerWatcher(
 }
 
 // Start initializes and starts the container watcher
-func (ncw *NewContainerWatcher) Start(ctx context.Context) error {
+func (ncw *ContainerWatcher) Start(ctx context.Context) error {
 	ncw.mutex.Lock()
 	defer ncw.mutex.Unlock()
 
@@ -315,7 +310,7 @@ func (ncw *NewContainerWatcher) Start(ctx context.Context) error {
 }
 
 // Stop gracefully stops the container watcher
-func (ncw *NewContainerWatcher) Stop() {
+func (ncw *ContainerWatcher) Stop() {
 	ncw.mutex.Lock()
 	defer ncw.mutex.Unlock()
 
@@ -350,51 +345,51 @@ func (ncw *NewContainerWatcher) Stop() {
 }
 
 // Ready returns true if the container watcher is ready to process events
-func (ncw *NewContainerWatcher) Ready() bool {
+func (ncw *ContainerWatcher) Ready() bool {
 	ncw.mutex.RLock()
 	defer ncw.mutex.RUnlock()
 	return ncw.running
 }
 
 // GetContainerCollection returns the container collection
-func (ncw *NewContainerWatcher) GetContainerCollection() *containercollection.ContainerCollection {
+func (ncw *ContainerWatcher) GetContainerCollection() *containercollection.ContainerCollection {
 	return ncw.containerCollection
 }
 
 // GetTracerCollection returns the tracer collection
-func (ncw *NewContainerWatcher) GetTracerCollection() *tracercollection.TracerCollection {
+func (ncw *ContainerWatcher) GetTracerCollection() *tracercollection.TracerCollection {
 	return ncw.tracerCollection
 }
 
 // GetSocketEnricher returns the socket enricher
-func (ncw *NewContainerWatcher) GetSocketEnricher() *socketenricher.SocketEnricher {
+func (ncw *ContainerWatcher) GetSocketEnricher() *socketenricher.SocketEnricher {
 	return ncw.socketEnricher
 }
 
 // GetContainerSelector returns the container selector
-func (ncw *NewContainerWatcher) GetContainerSelector() *containercollection.ContainerSelector {
+func (ncw *ContainerWatcher) GetContainerSelector() *containercollection.ContainerSelector {
 	return &ncw.containerSelector
 }
 
 // RegisterCustomTracer registers a custom tracer
-func (ncw *NewContainerWatcher) RegisterCustomTracer(tracer containerwatcher.CustomTracer) error {
+func (ncw *ContainerWatcher) RegisterCustomTracer(tracer containerwatcher.CustomTracer) error {
 	ncw.thirdPartyTracers.Add(tracer)
 	return nil
 }
 
 // UnregisterCustomTracer unregisters a custom tracer
-func (ncw *NewContainerWatcher) UnregisterCustomTracer(tracer containerwatcher.CustomTracer) error {
+func (ncw *ContainerWatcher) UnregisterCustomTracer(tracer containerwatcher.CustomTracer) error {
 	ncw.thirdPartyTracers.Remove(tracer)
 	return nil
 }
 
 // RegisterContainerReceiver registers a container receiver
-func (ncw *NewContainerWatcher) RegisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
+func (ncw *ContainerWatcher) RegisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
 	ncw.thirdPartyContainerReceivers.Add(receiver)
 }
 
 // UnregisterContainerReceiver unregisters a container receiver
-func (ncw *NewContainerWatcher) UnregisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
+func (ncw *ContainerWatcher) UnregisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
 	ncw.thirdPartyContainerReceivers.Remove(receiver)
 }
 
@@ -406,7 +401,7 @@ func processEvents(enrichedEvents []*containerwatcher.EnrichedEvent, eventHandle
 }
 
 // eventProcessingLoop continuously processes events from the ordered event queue
-func (ncw *NewContainerWatcher) eventProcessingLoop() {
+func (ncw *ContainerWatcher) eventProcessingLoop() {
 	for {
 		select {
 		case <-ncw.ctx.Done():
@@ -418,7 +413,7 @@ func (ncw *NewContainerWatcher) eventProcessingLoop() {
 }
 
 // enrichAndProcess processes a batch of events
-func (ncw *NewContainerWatcher) enrichAndProcess(events []eventEntry) {
+func (ncw *ContainerWatcher) enrichAndProcess(events []eventEntry) {
 	// Enrich events with additional data
 	enrichedEvents := ncw.eventEnricher.EnrichEvents(events)
 
