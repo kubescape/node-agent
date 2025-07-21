@@ -56,7 +56,7 @@ func (pt *processTreeCreatorImpl) stopExitManager() {
 func (pt *processTreeCreatorImpl) addPendingExit(event feeder.ProcessEvent, children []*apitypes.Process) {
 	// Check if we've reached the maximum pending exits
 	if len(pt.pendingExits) >= maxPendingExits {
-		logger.L().Warning("Exit: Maximum pending exits reached, forcing cleanup",
+		logger.L().Debug("Exit: Maximum pending exits reached, forcing cleanup",
 			helpers.String("pending_count", fmt.Sprintf("%d", len(pt.pendingExits))),
 			helpers.String("max_allowed", fmt.Sprintf("%d", maxPendingExits)))
 
@@ -115,8 +115,6 @@ func (pt *processTreeCreatorImpl) performExitCleanup() {
 		pt.removeProcessFromPending(pending.PID)
 	}
 
-	logger.L().Info("Exit: Cleaned up processes",
-		helpers.String("count", fmt.Sprintf("%d", len(toRemove))))
 }
 
 // forceCleanupOldest removes the oldest 25% of pending processes to make room
@@ -145,10 +143,6 @@ func (pt *processTreeCreatorImpl) forceCleanupOldest() {
 	if removeCount > len(toRemove) {
 		removeCount = len(toRemove)
 	}
-
-	logger.L().Debug("Exit: Force cleanup starting",
-		helpers.String("total_pending", fmt.Sprintf("%d", len(pt.pendingExits))),
-		helpers.String("removing_count", fmt.Sprintf("%d", removeCount)))
 
 	for i := 0; i < removeCount; i++ {
 		pt.removeProcessFromPending(toRemove[i].PID)
@@ -188,10 +182,6 @@ func (pt *processTreeCreatorImpl) removeProcessFromPending(pid uint32) {
 				}
 			}
 		} else {
-			// Fallback to init process (PID 1) if reparenting logic is not available
-			logger.L().Warning("Exit: Reparenting logic not available, using fallback to init",
-				helpers.String("pid", fmt.Sprintf("%d", pid)))
-
 			for _, child := range pending.Children {
 				if child != nil {
 					child.PPID = 1 // Adopted by init process

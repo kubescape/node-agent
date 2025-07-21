@@ -1,11 +1,7 @@
 package strategies
 
 import (
-	"fmt"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 )
 
@@ -30,15 +26,9 @@ func (cs *ContainerdStrategy) GetNewParentPID(exitingPID uint32, children []*api
 	if containerTree != nil {
 		shimPID, found := containerTree.GetShimPIDForProcess(exitingPID, processMap)
 		if found {
-			logger.L().Info("ContainerdStrategy: Reparenting to shim",
-				helpers.String("exiting_pid", fmt.Sprintf("%d", exitingPID)),
-				helpers.String("shim_pid", fmt.Sprintf("%d", shimPID)))
 			return shimPID
 		}
 	}
 
-	// Fallback to init process if shim not found or containerTree is nil
-	logger.L().Warning("ContainerdStrategy: Shim not found or containerTree is nil, falling back to init",
-		helpers.String("exiting_pid", fmt.Sprintf("%d", exitingPID)))
 	return 1
 }

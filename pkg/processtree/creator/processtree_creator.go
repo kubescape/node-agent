@@ -337,10 +337,6 @@ func (pt *processTreeCreatorImpl) linkProcessToParent(proc *apitypes.Process) {
 
 	// Prevent circular references: a process cannot be its own parent
 	if proc.PPID == proc.PID {
-		logger.L().Warning("Process tree: Detected circular reference, skipping parent link",
-			helpers.String("pid", fmt.Sprintf("%d", proc.PID)),
-			helpers.String("ppid", fmt.Sprintf("%d", proc.PPID)),
-			helpers.String("comm", proc.Comm))
 		return
 	}
 
