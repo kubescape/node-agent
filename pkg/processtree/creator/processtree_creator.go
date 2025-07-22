@@ -223,25 +223,25 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
-	if event.Comm != "" && proc.Comm == "" {
+	if event.Comm != "" {
 		proc.Comm = event.Comm
 	}
-	if event.Pcomm != "" && proc.Pcomm == "" {
+	if event.Pcomm != "" {
 		proc.Pcomm = event.Pcomm
 	}
-	if event.Cmdline != "" && proc.Cmdline == "" {
+	if event.Cmdline != "" {
 		proc.Cmdline = event.Cmdline
 	}
-	if event.Uid != nil && proc.Uid == nil {
+	if event.Uid != nil {
 		proc.Uid = event.Uid
 	}
-	if event.Gid != nil && proc.Gid == nil {
+	if event.Gid != nil {
 		proc.Gid = event.Gid
 	}
-	if event.Cwd != "" && proc.Cwd == "" {
+	if event.Cwd != "" {
 		proc.Cwd = event.Cwd
 	}
-	if event.Path != "" && proc.Path == "" {
+	if event.Path != "" {
 		proc.Path = event.Path
 	}
 
@@ -271,7 +271,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 		}
 	}
 
-	if event.Comm != "" && proc.Comm != event.Comm {
+	if event.Comm != "" {
 		proc.Comm = event.Comm
 	}
 	if event.Pcomm != "" {

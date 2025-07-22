@@ -1740,8 +1740,7 @@ func Test_24_ProcessTreeDepthTest(t *testing.T) {
 	found := false
 
 	for _, alert := range alerts {
-		if alert.Labels["rule_name"] == "Unexpected process launched" && (alert.Labels["pcomm"] == "proc_9" || alert.Labels["pcomm"] == "python3") {
-			found = true
+		if alert.Labels["rule_name"] == "Unexpected process launched" {
 			if alert.Labels["processtree_depth"] == "10" {
 				found = true
 				break
