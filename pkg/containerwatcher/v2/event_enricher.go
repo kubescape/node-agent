@@ -68,10 +68,6 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*ebpfevents.Enriche
 
 	ee.updateMetrics(int64(len(events)), processingTime)
 
-	logger.L().Debug("AFEK - Enriched events", helpers.Int("count", len(enrichedEvents)), helpers.String("processingTime", processingTime.String()),
-		helpers.Int("totalEventsProcessed", int(ee.totalEventsProcessed)), helpers.String("totalProcessingTime", ee.totalProcessingTime.String()),
-		helpers.Int("original events", len(events)))
-
 	return enrichedEvents
 }
 

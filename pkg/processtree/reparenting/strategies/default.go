@@ -5,22 +5,34 @@ import (
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 )
 
-// DefaultStrategy handles reparenting for general cases
 type DefaultStrategy struct{}
 
 func (defs *DefaultStrategy) Name() string {
-	return "default"
+	return "fallback"
 }
 
-// IsApplicable checks if this strategy is applicable for the given scenario
-// Default strategy is always applicable as a fallback
 func (defs *DefaultStrategy) IsApplicable(exitingPID uint32, containerTree containerprocesstree.ContainerProcessTree, processMap map[uint32]*apitypes.Process) bool {
-	// Default strategy is always applicable as a fallback
-	return true
+	if exitingProcess, exists := processMap[exitingPID]; exists {
+		ppid := exitingProcess.PPID
+		if ppid > 0 {
+			if _, parentExists := processMap[ppid]; parentExists {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
-// GetNewParentPID determines the new parent PID for orphaned children
-// Default behavior: reparent to init process (PID 1)
 func (defs *DefaultStrategy) GetNewParentPID(exitingPID uint32, children []*apitypes.Process, containerTree containerprocesstree.ContainerProcessTree, processMap map[uint32]*apitypes.Process) uint32 {
-	return 1
+	if exitingProcess, exists := processMap[exitingPID]; exists {
+		ppid := exitingProcess.PPID
+		if ppid > 0 {
+			if _, parentExists := processMap[ppid]; parentExists {
+				return ppid
+			}
+		}
+	}
+
+	return 0
 }

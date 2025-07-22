@@ -29,6 +29,11 @@ func (m *MockContainerProcessTree) IsProcessUnderAnyContainerSubtree(pid uint32,
 	return args.Bool(0)
 }
 
+func (m *MockContainerProcessTree) IsProcessUnderContainer(pid uint32, containerID string, processMap map[uint32]*apitypes.Process) bool {
+	args := m.Called(pid, containerID, processMap)
+	return args.Bool(0)
+}
+
 func (m *MockContainerProcessTree) ContainerCallback(notif containercollection.PubSubEvent) {
 	m.Called(notif)
 }
@@ -164,7 +169,7 @@ func TestHandleProcfsEvent(t *testing.T) {
 	proc := impl.processMap.Get(1234)
 	assert.NotNil(t, proc)
 	assert.Equal(t, uint32(1234), proc.PID)
-	assert.Equal(t, uint32(1000), proc.PPID)
+	assert.Equal(t, uint32(0), proc.PPID) // PPID is not set in handleProcfsEvent
 	assert.Equal(t, "test-process", proc.Comm)
 	assert.Equal(t, "test-process --arg", proc.Cmdline)
 	assert.Equal(t, uint32(1000), *proc.Uid)
@@ -175,11 +180,11 @@ func TestHandleProcfsEvent(t *testing.T) {
 
 func TestHandleExecEvent(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: true})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
+	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.AnythingOfType("map[uint32]*armotypes.Process")).Return(false)
 	mockContainerTree.On("GetPidByContainerID", "test-container-123").Return(uint32(999), nil)
 
 	// First create a process with fork event
@@ -224,11 +229,11 @@ func TestHandleExecEvent(t *testing.T) {
 
 func TestHandleExecEventWithGetPidByContainerIDError(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: true})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods - GetPidByContainerID returns an error
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
+	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.AnythingOfType("map[uint32]*armotypes.Process")).Return(false)
 	mockContainerTree.On("GetPidByContainerID", "test-container-123").Return(uint32(0), fmt.Errorf("container not found"))
 
 	// First create a process with fork event
@@ -273,11 +278,11 @@ func TestHandleExecEventWithGetPidByContainerIDError(t *testing.T) {
 
 func TestHandleExecEventProcessAlreadyUnderContainer(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: true})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods - process is already under container subtree
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(true)
+	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.AnythingOfType("map[uint32]*armotypes.Process")).Return(true)
 	// GetPidByContainerID should not be called since process is already under container
 
 	// First create a process with fork event
@@ -464,8 +469,6 @@ func TestGetPidBranch(t *testing.T) {
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
-
 	expectedProcess := apitypes.Process{
 		PID:  1234,
 		Comm: "container-process",
@@ -492,7 +495,7 @@ func TestGetPidBranch(t *testing.T) {
 
 func TestUpdatePPID(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
+	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: true})
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Create parent and child processes
@@ -512,11 +515,12 @@ func TestUpdatePPID(t *testing.T) {
 	newParent := impl.getOrCreateProcess(2000)
 
 	// Test case 1: New PPID is under container, should always update
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", uint32(2000), mock.AnythingOfType("map[uint32]*armotypes.Process")).Return(true)
+	mockContainerTree.On("IsProcessUnderContainer", uint32(2000), mock.AnythingOfType("string"), mock.AnythingOfType("map[uint32]*armotypes.Process")).Return(true)
 
 	event := feeder.ProcessEvent{
-		PID:  1234,
-		PPID: 2000,
+		PID:         1234,
+		PPID:        2000,
+		ContainerID: "test-container-123",
 	}
 
 	impl.UpdatePPID(child, event)

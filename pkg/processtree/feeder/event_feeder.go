@@ -2,7 +2,6 @@ package feeder
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -11,12 +10,9 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-// EventFeeder implements ProcessEventFeeder by receiving events from container watcher
 type EventFeeder struct {
-	mutex sync.RWMutex
 }
 
-// NewEventFeeder creates a new event feeder
 func NewEventFeeder() *EventFeeder {
 	return &EventFeeder{}
 }

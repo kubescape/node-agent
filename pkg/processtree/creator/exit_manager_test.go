@@ -31,6 +31,10 @@ func (m *mockContainerProcessTree) ListContainers() []string {
 func (m *mockContainerProcessTree) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree map[uint32]*apitypes.Process) bool {
 	return false
 }
+func (m *mockContainerProcessTree) IsProcessUnderContainer(pid uint32, containerID string, fullTree map[uint32]*apitypes.Process) bool {
+	return false
+}
+
 func (m *mockContainerProcessTree) GetShimPIDForProcess(pid uint32, fullTree map[uint32]*apitypes.Process) (uint32, bool) {
 	return 0, false
 }
@@ -41,13 +45,8 @@ func (m *mockContainerProcessTree) GetPidByContainerID(containerID string) (uint
 // Mock reparenting logic for testing
 type mockReparentingLogic struct{}
 
-func (m *mockReparentingLogic) HandleProcessExit(exitingPID uint32, children []*apitypes.Process, containerTree containerprocesstree.ContainerProcessTree, processMap map[uint32]*apitypes.Process) reparenting.ReparentingResult {
-	return reparenting.ReparentingResult{
-		NewParentPID: 1, // Always reparent to init
-		Strategy:     "test",
-		Verified:     true,
-		Error:        nil,
-	}
+func (m *mockReparentingLogic) Reparent(exitingPID uint32, children []*apitypes.Process, containerTree containerprocesstree.ContainerProcessTree, processMap map[uint32]*apitypes.Process) (uint32, error) {
+	return 1, nil
 }
 
 func (m *mockReparentingLogic) AddStrategy(strategy reparenting.ReparentingStrategy) {}
@@ -58,10 +57,10 @@ func (m *mockReparentingLogic) GetStrategies() []reparenting.ReparentingStrategy
 // Helper function to create a test process tree creator
 func createTestProcessTreeCreator() *processTreeCreatorImpl {
 	return &processTreeCreatorImpl{
-		processMap:       maps.SafeMap[uint32, *apitypes.Process]{},
-		containerTree:    &mockContainerProcessTree{},
-		reparentingLogic: &mockReparentingLogic{},
-		pendingExits:     make(map[uint32]*pendingExit),
+		processMap:             maps.SafeMap[uint32, *apitypes.Process]{},
+		containerTree:          &mockContainerProcessTree{},
+		reparenting_strategies: &mockReparentingLogic{},
+		pendingExits:           make(map[uint32]*pendingExit),
 	}
 }
 
@@ -194,7 +193,7 @@ func TestExitManager_RemoveProcessFromPending(t *testing.T) {
 
 	// Remove the process
 	pt.mutex.Lock()
-	pt.removeProcessFromPending(100)
+	pt.exitByPid(100)
 	pt.mutex.Unlock()
 
 	// Check that process was removed from maps
@@ -310,7 +309,7 @@ func TestExitManager_ForceCleanupAllPendingExits(t *testing.T) {
 	}
 
 	for _, pending := range toRemove {
-		pt.removeProcessFromPending(pending.PID)
+		pt.exitByPid(pending.PID)
 	}
 	pt.mutex.Unlock()
 
@@ -504,53 +503,4 @@ func TestExitManager_CleanupLoop(t *testing.T) {
 	assert.Equal(t, 0, len(pt.pendingExits), "Process should be cleaned up")
 	assert.Nil(t, pt.processMap.Get(100), "Process should be removed from map")
 	pt.mutex.RUnlock()
-}
-
-// Benchmark test for performance
-func BenchmarkExitManager_AddPendingExit(b *testing.B) {
-	pt := createTestProcessTreeCreator()
-
-	// Create processes
-	for i := 0; i < b.N; i++ {
-		pid := uint32(i + 1)
-		parent := createTestProcess(pid, 1, "parent")
-		pt.processMap.Set(pid, parent)
-	}
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		pid := uint32(i + 1)
-		pt.mutex.Lock()
-		event := createTestExitEvent(pid, uint64(i))
-		pt.addPendingExit(event, []*apitypes.Process{})
-		pt.mutex.Unlock()
-	}
-}
-
-func BenchmarkExitManager_RemoveProcessFromPending(b *testing.B) {
-	pt := createTestProcessTreeCreator()
-
-	// Setup: create processes and add them to pending exits
-	for i := 0; i < b.N; i++ {
-		pid := uint32(i + 1)
-		parent := createTestProcess(pid, 1, "parent")
-		pt.processMap.Set(pid, parent)
-
-		pt.pendingExits[pid] = &pendingExit{
-			PID:         pid,
-			StartTimeNs: uint64(i),
-			Timestamp:   time.Now(),
-			Children:    []*apitypes.Process{},
-		}
-	}
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		pid := uint32(i + 1)
-		pt.mutex.Lock()
-		pt.removeProcessFromPending(pid)
-		pt.mutex.Unlock()
-	}
 }

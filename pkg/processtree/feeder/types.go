@@ -1,7 +1,6 @@
 package feeder
 
 import (
-	"context"
 	"time"
 )
 
@@ -13,12 +12,6 @@ const (
 	ExitEvent
 	ProcfsEvent
 )
-
-type ProcessEventFeeder interface {
-	Start(ctx context.Context) error
-	Stop() error
-	Subscribe(chan<- ProcessEvent)
-}
 
 type ProcessEvent struct {
 	Type      ProcessEventType

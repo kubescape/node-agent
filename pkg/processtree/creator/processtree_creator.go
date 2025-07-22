@@ -15,11 +15,11 @@ import (
 )
 
 type processTreeCreatorImpl struct {
-	processMap       maps.SafeMap[uint32, *apitypes.Process] // PID -> Process
-	containerTree    containerprocesstree.ContainerProcessTree
-	reparentingLogic reparenting.ReparentingLogic
-	mutex            sync.RWMutex // Protects process tree modifications
-	config           config.Config
+	processMap             maps.SafeMap[uint32, *apitypes.Process] // PID -> Process
+	containerTree          containerprocesstree.ContainerProcessTree
+	reparenting_strategies reparenting.ReparentingStrategies
+	mutex                  sync.RWMutex // Protects process tree modifications
+	config                 config.Config
 
 	// Exit manager fields
 	pendingExits        map[uint32]*pendingExit // PID -> pending exit
@@ -35,11 +35,11 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 	}
 
 	creator := &processTreeCreatorImpl{
-		processMap:       maps.SafeMap[uint32, *apitypes.Process]{},
-		reparentingLogic: reparentingLogic,
-		containerTree:    containerTree,
-		pendingExits:     make(map[uint32]*pendingExit),
-		config:           config,
+		processMap:             maps.SafeMap[uint32, *apitypes.Process]{},
+		reparenting_strategies: reparentingLogic,
+		containerTree:          containerTree,
+		pendingExits:           make(map[uint32]*pendingExit),
+		config:                 config,
 	}
 
 	return creator
@@ -161,11 +161,11 @@ func (pt *processTreeCreatorImpl) UpdatePPID(proc *apitypes.Process, event feede
 		}
 
 		// First check if new PPID is under any container subtree
-		IsNewPPIDUnderContainer := pt.containerTree.IsProcessUnderAnyContainerSubtree(event.PPID, pt.getProcessMapAsRegularMap())
+		IsNewPPIDUnderContainer := pt.containerTree.IsProcessUnderContainer(event.PPID, event.ContainerID, pt.getProcessMapAsRegularMap())
 		if IsNewPPIDUnderContainer {
 			pt.updateProcessPPID(proc, event.PPID)
 		} else {
-			isCurrentUnderContainer := pt.containerTree.IsProcessUnderAnyContainerSubtree(proc.PID, pt.getProcessMapAsRegularMap())
+			isCurrentUnderContainer := pt.containerTree.IsProcessUnderContainer(proc.PID, event.ContainerID, pt.getProcessMapAsRegularMap())
 			if !isCurrentUnderContainer {
 				pt.updateProcessPPID(proc, event.PPID)
 			}
@@ -262,7 +262,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 	pt.UpdatePPID(proc, event)
 
 	if pt.config.KubernetesMode {
-		isCurrentUnderContainer := pt.containerTree.IsProcessUnderAnyContainerSubtree(proc.PID, pt.getProcessMapAsRegularMap())
+		isCurrentUnderContainer := pt.containerTree.IsProcessUnderContainer(proc.PID, event.ContainerID, pt.getProcessMapAsRegularMap())
 		if !isCurrentUnderContainer {
 			shimPid, err := pt.containerTree.GetPidByContainerID(event.ContainerID)
 			if err == nil {
