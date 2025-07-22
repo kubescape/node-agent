@@ -130,7 +130,7 @@ func CreateContainerWatcher(
 	}
 
 	// Create ordered event queue (50ms collection interval, increased buffer size)
-	orderedEventQueue := NewOrderedEventQueue(250*time.Millisecond, 100000, processTreeManager)
+	orderedEventQueue := NewOrderedEventQueue(50*time.Millisecond, 1000000, processTreeManager)
 
 	rulePolicyReporter := rulepolicy.NewRulePolicyReporter(ruleManager, containerProfileManager)
 
@@ -269,9 +269,7 @@ func (ncw *ContainerWatcher) Start(ctx context.Context) error {
 	})
 
 	// Start ordered event queue BEFORE tracers
-	if err := ncw.orderedEventQueue.Start(ctx); err != nil {
-		return fmt.Errorf("starting ordered event queue: %w", err)
-	}
+	// No need to start queue anymore - it's just a data structure
 
 	// Start event processing loop
 	go ncw.eventProcessingLoop()
@@ -320,10 +318,7 @@ func (ncw *ContainerWatcher) Stop() {
 		ncw.tracerManagerV2.StopAllTracers()
 	}
 
-	// Stop ordered event queue (after tracers are stopped)
-	if ncw.orderedEventQueue != nil {
-		ncw.orderedEventQueue.Stop()
-	}
+	// No need to stop queue - it's just a data structure
 
 	// Stop worker pool
 	if ncw.workerPool != nil {
@@ -383,29 +378,58 @@ func (ncw *ContainerWatcher) UnregisterContainerReceiver(receiver containerwatch
 	ncw.thirdPartyContainerReceivers.Remove(receiver)
 }
 
-// eventProcessingLoop continuously processes events from the ordered event queue
 func (ncw *ContainerWatcher) eventProcessingLoop() {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ncw.ctx.Done():
 			return
-		case event := <-ncw.orderedEventQueue.GetOutputChannel():
-			ncw.enrichAndProcess(event)
+		case <-ticker.C:
+			ncw.processQueueBatch()
+		case <-ncw.orderedEventQueue.GetFullQueueAlertChannel():
+			logger.L().Debug("AFEK - ContainerWatcher - Processing events due to full queue alert")
+			ncw.processQueueBatch()
 		}
 	}
 }
 
-// enrichAndProcess processes a single event
+func (ncw *ContainerWatcher) processQueueBatch() {
+	processedCount := 0
+	for !ncw.orderedEventQueue.Empty() {
+		event, ok := ncw.orderedEventQueue.PopEvent()
+		if !ok {
+			break
+		}
+		ncw.enrichAndProcess(event)
+		processedCount++
+	}
+
+	logger.L().Debug("AFEK - ContainerWatcher - Processed event batch",
+		helpers.Int("eventCount", processedCount),
+		helpers.Int("queueSize", ncw.orderedEventQueue.Size()))
+}
+
 func (ncw *ContainerWatcher) enrichAndProcess(event eventEntry) {
-	// Convert single event to slice for compatibility with existing enricher
-	events := []eventEntry{event}
-	enrichedEvents := ncw.eventEnricher.EnrichEvents(events)
+	if event.EventType == utils.ExecveEventType {
+		logger.L().Debug("AFEK - ContainerWatcher - Execve event",
+			helpers.String("eventType", string(event.EventType)),
+			helpers.String("containerID", event.ContainerID),
+			helpers.String("event", fmt.Sprintf("%+v", event)))
+	}
+
+	enrichedEvent := ncw.eventEnricher.EnrichEvents(event)
+
+	if event.EventType == utils.ExecveEventType && enrichedEvent == nil {
+		logger.L().Error("AFEK - ContainerWatcher - No enriched events for execve event",
+			helpers.String("eventType", string(event.EventType)),
+			helpers.String("containerID", event.ContainerID))
+	}
 
 	// Process the enriched event (should be exactly one)
-	for _, enrichedEvent := range enrichedEvents {
-		err := ncw.workerPool.Invoke(enrichedEvent)
-		if err != nil {
-			logger.L().Error("AFEK - Failed to submit event to worker pool", helpers.String("eventType", string(enrichedEvent.EventType)), helpers.String("containerID", enrichedEvent.ContainerID), helpers.Error(err))
-		}
+	err := ncw.workerPool.Invoke(enrichedEvent)
+	if err != nil {
+		logger.L().Error("AFEK - Failed to submit event to worker pool", helpers.String("eventType", string(enrichedEvent.EventType)), helpers.String("containerID", enrichedEvent.ContainerID), helpers.Error(err))
 	}
 }

@@ -245,6 +245,7 @@ require (
 	github.com/ncw/directio v1.0.5 // indirect
 	github.com/nwaples/rardecode v1.1.3 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
+	github.com/oleiade/lane/v2 v2.0.0 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/olvrng/ujson v1.1.0 // indirect
 	github.com/opencontainers/runtime-spec v1.2.1 // indirect

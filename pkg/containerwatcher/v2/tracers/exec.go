@@ -104,7 +104,17 @@ func (et *ExecTracer) IsEnabled(cfg interface{}) bool {
 
 // execEventCallback handles exec events from the tracer
 func (et *ExecTracer) execEventCallback(event *tracerexectype.Event) {
+
+	logger.L().Debug("AFEK - Exec event",
+		helpers.String("containerID", event.Runtime.ContainerID),
+		helpers.String("comm", event.Comm),
+		helpers.String("path", event.Args[0]),
+		helpers.Int("retval", int(event.Retval)))
+
 	if event.Type == types.DEBUG {
+		logger.L().Debug("AFEK - Exec event is debug",
+			helpers.String("containerID", event.Runtime.ContainerID),
+			helpers.String("comm", event.Comm))
 		return
 	}
 
@@ -114,7 +124,7 @@ func (et *ExecTracer) execEventCallback(event *tracerexectype.Event) {
 	}
 
 	if path == "" {
-		logger.L().Debug("DROPPING EVENT - Exec event has empty path",
+		logger.L().Debug("AFEK - Exec event has empty path",
 			helpers.String("containerID", event.Runtime.ContainerID),
 			helpers.String("comm", event.Comm))
 		return
@@ -125,7 +135,7 @@ func (et *ExecTracer) execEventCallback(event *tracerexectype.Event) {
 		// Handle the event with syscall enrichment
 		et.handleEvent(execEvent, []uint64{SYS_FORK})
 	} else {
-		logger.L().Debug("DROPPING EVENT - Exec event validation failed",
+		logger.L().Debug("AFEK - Exec event validation failed",
 			helpers.String("containerID", event.Runtime.ContainerID),
 			helpers.String("comm", event.Comm),
 			helpers.Int("retval", int(event.Retval)))

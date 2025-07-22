@@ -82,7 +82,7 @@ func Test_01_BasicAlertTest(t *testing.T) {
 		t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
 	}
 
-	time.Sleep(50 * time.Second)
+	time.Sleep(30 * time.Second)
 
 	appProfile, _ := wl.GetApplicationProfile()
 	appProfileJson, _ := json.Marshal(appProfile)

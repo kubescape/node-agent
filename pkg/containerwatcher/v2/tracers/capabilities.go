@@ -9,8 +9,6 @@ import (
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -100,9 +98,6 @@ func (ct *CapabilitiesTracer) IsEnabled(cfg interface{}) bool {
 // capabilitiesEventCallback handles capabilities events from the tracer
 func (ct *CapabilitiesTracer) capabilitiesEventCallback(event *tracercapabilitiestype.Event) {
 	if event.Type == types.DEBUG {
-		logger.L().Debug("DROPPING EVENT - Debug event type",
-			helpers.String("containerID", event.Runtime.ContainerID),
-			helpers.String("tracer", "capabilities"))
 		return
 	}
 

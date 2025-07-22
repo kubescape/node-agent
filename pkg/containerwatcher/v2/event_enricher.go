@@ -2,7 +2,6 @@ package containerwatcher
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -15,11 +14,6 @@ import (
 // EventEnricher handles event enrichment with metrics and logging
 type EventEnricher struct {
 	processTreeManager processtree.ProcessTreeManager
-
-	// Metrics
-	totalEventsProcessed int64
-	totalProcessingTime  time.Duration
-	metricsMutex         sync.RWMutex
 }
 
 // NewEventEnricher creates a new event enricher
@@ -31,53 +25,44 @@ func NewEventEnricher(
 	}
 }
 
-func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*ebpfevents.EnrichedEvent {
-	startTime := time.Now()
+func (ee *EventEnricher) EnrichEvents(entry eventEntry) *ebpfevents.EnrichedEvent {
+	start := time.Now()
 
-	enrichedEvents := make([]*ebpfevents.EnrichedEvent, 0, len(events))
+	eventType := entry.EventType
+	event := entry.Event
 
-	for _, entry := range events {
-		event := entry.Event
-		eventType := entry.EventType
-
-		if isProcessTreeEvent(eventType) {
-			// Use the blocking ReportEvent method to ensure synchronous processing
-			if err := ee.processTreeManager.ReportEvent(eventType, event); err != nil {
-				logger.L().Error("Failed to report event to process tree", helpers.Error(err),
-					helpers.String("eventType", string(eventType)),
-					helpers.String("pid", fmt.Sprintf("%d", entry.ProcessID)))
-			}
+	if isProcessTreeEvent(eventType) {
+		if err := ee.processTreeManager.ReportEvent(eventType, event); err != nil {
+			logger.L().Error("Failed to report event to process tree", helpers.Error(err),
+				helpers.String("eventType", string(eventType)),
+				helpers.String("pid", fmt.Sprintf("%d", entry.ProcessID)))
 		}
-
-		if eventType == utils.ProcfsEventType || eventType == utils.ForkEventType {
-			continue
-		}
-		processTree, _ := ee.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
-
-		enrichedEvents = append(enrichedEvents, &ebpfevents.EnrichedEvent{
-			Event:       event,
-			EventType:   eventType,
-			ProcessTree: processTree,
-			ContainerID: entry.ContainerID,
-			Timestamp:   entry.Timestamp,
-			PID:         entry.ProcessID,
-		})
 	}
 
-	processingTime := time.Since(startTime)
+	processTree, _ := ee.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
 
-	ee.updateMetrics(int64(len(events)), processingTime)
+	enrichedEvent := &ebpfevents.EnrichedEvent{
+		Event:       event,
+		EventType:   eventType,
+		ProcessTree: processTree,
+		ContainerID: entry.ContainerID,
+		Timestamp:   entry.Timestamp,
+		PID:         entry.ProcessID,
+	}
 
-	return enrichedEvents
-}
+	elapsed := time.Since(start)
 
-// updateMetrics updates the internal metrics counters
-func (ee *EventEnricher) updateMetrics(eventCount int64, processingTime time.Duration) {
-	ee.metricsMutex.Lock()
-	defer ee.metricsMutex.Unlock()
+	if elapsed > time.Millisecond {
+		logger.L().Warning("AFEK - Event enrichment took too long",
+			helpers.String("eventType", string(eventType)),
+			helpers.String("containerID", entry.ContainerID),
+			helpers.Int("pid", int(entry.ProcessID)),
+			helpers.String("duration", elapsed.String()),
+			helpers.String("target", "50μs"),
+			helpers.String("slowdownFactor", fmt.Sprintf("%.1fx", float64(elapsed.Nanoseconds())/50000.0)))
+	}
 
-	ee.totalEventsProcessed += eventCount
-	ee.totalProcessingTime += processingTime
+	return enrichedEvent
 }
 
 // isProcessTreeEvent checks if an event type is related to process tree

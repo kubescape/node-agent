@@ -295,6 +295,13 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		return
 	}
 
+	if enrichedEvent.EventType == utils.ExecveEventType {
+		logger.L().Error("AFEK - RuleManager - Enriched events for execve event",
+			helpers.String("eventType", string(enrichedEvent.EventType)),
+			helpers.String("containerID", enrichedEvent.ContainerID),
+			helpers.String("event", fmt.Sprintf("%+v", enrichedEvent)))
+	}
+
 	// list custom rules
 	rules := rm.ruleBindingCache.ListRulesForPod(event.GetNamespace(), event.GetPod())
 
