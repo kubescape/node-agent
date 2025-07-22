@@ -3,7 +3,6 @@ package utils
 import (
 	"fmt"
 	"path/filepath"
-	"time"
 
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
@@ -45,45 +44,6 @@ const (
 	ProcfsEventType       EventType = "procfs"
 	AllEventType          EventType = "all"
 )
-
-// ProcfsEvent represents a procfs event that can be processed by the ordered event queue
-type ProcfsEvent struct {
-	Type        types.EventType `json:"type"`
-	Timestamp   time.Time       `json:"timestamp"`
-	PID         uint32          `json:"pid"`
-	PPID        uint32          `json:"ppid"`
-	Comm        string          `json:"comm"`
-	Pcomm       string          `json:"pcomm"`
-	Cmdline     string          `json:"cmdline"`
-	Uid         *uint32         `json:"uid"`
-	Gid         *uint32         `json:"gid"`
-	Cwd         string          `json:"cwd"`
-	Path        string          `json:"path"`
-	StartTimeNs uint64          `json:"start_time_ns"`
-	ContainerID string          `json:"container_id"`
-	HostPID     int             `json:"host_pid"`
-	HostPPID    int             `json:"host_ppid"`
-}
-
-// GetType returns the event type
-func (pe *ProcfsEvent) GetType() types.EventType {
-	return pe.Type
-}
-
-// GetTimestamp returns the event timestamp
-func (pe *ProcfsEvent) GetTimestamp() time.Time {
-	return pe.Timestamp
-}
-
-// GetNamespace returns the namespace (empty for procfs events)
-func (pe *ProcfsEvent) GetNamespace() string {
-	return ""
-}
-
-// GetPod returns the pod name (empty for procfs events)
-func (pe *ProcfsEvent) GetPod() string {
-	return ""
-}
 
 // Get the path of the file on the node.
 func GetHostFilePathFromEvent(event K8sEvent, containerPid uint32) (string, error) {

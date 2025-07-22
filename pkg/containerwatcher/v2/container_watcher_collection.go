@@ -15,8 +15,8 @@ import (
 )
 
 // StartContainerCollection starts the container collection
-func (ncw *ContainerWatcher) StartContainerCollection(ctx context.Context) error {
-	ncw.ctx = ctx
+func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error {
+	cw.ctx = ctx
 
 	// This is needed when not running as gadget.
 	// https://github.com/inspektor-gadget/inspektor-gadget/blob/9a797dc046f8bc1f45e85f15db7e99dd4e5cb6e5/cmd/ig/containers/containers.go#L45-L46
@@ -28,37 +28,37 @@ func (ncw *ContainerWatcher) StartContainerCollection(ctx context.Context) error
 	containerEventFuncs := []containercollection.FuncNotify{
 		func(event containercollection.PubSubEvent) {
 			logger.L().TimedWrapper("synchronous containerCallback", 5*time.Second, func() {
-				ncw.containerCallback(event)
+				cw.containerCallback(event)
 			})
 		},
 	}
 
 	// Initialize socket enricher for network tracers
-	if ncw.cfg.EnableNetworkTracing || ncw.cfg.EnableRuntimeDetection {
+	if cw.cfg.EnableNetworkTracing || cw.cfg.EnableRuntimeDetection {
 		socketEnricher, err := socketenricher.NewSocketEnricher()
 		if err != nil {
-			logger.L().Error("NewContainerWatcher - error creating socket enricher", helpers.Error(err))
+			logger.L().Error("ContainerWatcher - error creating socket enricher", helpers.Error(err))
 			return fmt.Errorf("creating socket enricher: %w", err)
 		}
-		ncw.socketEnricher = socketEnricher
+		cw.socketEnricher = socketEnricher
 	}
 
 	// Set up container callbacks
-	ncw.callbacks = []containercollection.FuncNotify{
-		ncw.containerCallbackAsync,
-		ncw.containerProfileManager.ContainerCallback,
-		ncw.objectCache.ApplicationProfileCache().ContainerCallback,
-		ncw.objectCache.NetworkNeighborhoodCache().ContainerCallback,
-		ncw.malwareManager.ContainerCallback,
-		ncw.ruleManager.ContainerCallback,
-		ncw.sbomManager.ContainerCallback,
-		ncw.dnsManager.ContainerCallback,
-		ncw.networkStreamClient.ContainerCallback,
-		ncw.containerProcessTree.ContainerCallback,
+	cw.callbacks = []containercollection.FuncNotify{
+		cw.containerCallbackAsync,
+		cw.containerProfileManager.ContainerCallback,
+		cw.objectCache.ApplicationProfileCache().ContainerCallback,
+		cw.objectCache.NetworkNeighborhoodCache().ContainerCallback,
+		cw.malwareManager.ContainerCallback,
+		cw.ruleManager.ContainerCallback,
+		cw.sbomManager.ContainerCallback,
+		cw.dnsManager.ContainerCallback,
+		cw.networkStreamClient.ContainerCallback,
+		cw.containerProcessTree.ContainerCallback,
 	}
 
-	for receiver := range ncw.thirdPartyContainerReceivers.Iter() {
-		ncw.callbacks = append(ncw.callbacks, receiver.ContainerCallback)
+	for receiver := range cw.thirdPartyContainerReceivers.Iter() {
+		cw.callbacks = append(cw.callbacks, receiver.ContainerCallback)
 	}
 
 	// Define the different options for the container collection instance
@@ -76,13 +76,13 @@ func (ncw *ContainerWatcher) StartContainerCollection(ctx context.Context) error
 		containercollection.WithLinuxNamespaceEnrichment(),
 
 		// Get containers created with container runtimes
-		containercollection.WithContainerRuntimeEnrichment(ncw.runtime),
+		containercollection.WithContainerRuntimeEnrichment(cw.runtime),
 
 		// Get containers created with ebpf (works also if hostPid=false)
 		containercollection.WithContainerFanotifyEbpf(),
 
 		// WithTracerCollection enables the interation between the TracerCollection and ContainerCollection packages.
-		containercollection.WithTracerCollection(ncw.tracerCollection),
+		containercollection.WithTracerCollection(cw.tracerCollection),
 
 		// WithProcEnrichment enables the enrichment of events with process information
 		containercollection.WithProcEnrichment(),
@@ -90,39 +90,39 @@ func (ncw *ContainerWatcher) StartContainerCollection(ctx context.Context) error
 
 	// Initialize the container collection
 	logger.L().Info("ContainerManager - initializing container collection with options", helpers.Int("optionCount", len(opts)))
-	if err := ncw.containerCollection.Initialize(opts...); err != nil {
+	if err := cw.containerCollection.Initialize(opts...); err != nil {
 		return fmt.Errorf("initializing container collection: %w", err)
 	}
 	logger.L().Info("ContainerManager - container collection initialized successfully")
 
 	// Start monitoring for rule bindings notifications
-	go ncw.startRunningContainers()
+	go cw.startRunningContainers()
 
 	return nil
 }
 
 // StopContainerCollection stops the container collection
-func (ncw *ContainerWatcher) StopContainerCollection() {
-	if ncw.containerCollection != nil {
-		ncw.tracerCollection.Close()
-		ncw.containerCollection.Close()
+func (cw *ContainerWatcher) StopContainerCollection() {
+	if cw.containerCollection != nil {
+		cw.tracerCollection.Close()
+		cw.containerCollection.Close()
 	}
 }
 
 // startRunningContainers monitors for rule binding notifications
-func (ncw *ContainerWatcher) startRunningContainers() {
-	for n := range *ncw.ruleBindingPodNotify {
-		ncw.addRunningContainers(&n)
+func (cw *ContainerWatcher) startRunningContainers() {
+	for n := range *cw.ruleBindingPodNotify {
+		cw.addRunningContainers(&n)
 	}
 }
 
 // addRunningContainers handles rule binding notifications
-func (ncw *ContainerWatcher) addRunningContainers(notf *rulebindingmanager.RuleBindingNotify) {
+func (cw *ContainerWatcher) addRunningContainers(notf *rulebindingmanager.RuleBindingNotify) {
 	pod := notf.GetPod()
 
 	// skip containers that should be ignored
-	if ncw.cfg.IgnoreContainer(pod.GetNamespace(), pod.GetName(), pod.GetLabels()) {
-		logger.L().Debug("NewContainerWatcher - skipping pod", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod name", pod.GetName()))
+	if cw.cfg.IgnoreContainer(pod.GetNamespace(), pod.GetName(), pod.GetLabels()) {
+		logger.L().Debug("ContainerWatcher - skipping pod", helpers.String("namespace", pod.GetNamespace()), helpers.String("pod name", pod.GetName()))
 		return
 	}
 
@@ -131,8 +131,8 @@ func (ncw *ContainerWatcher) addRunningContainers(notf *rulebindingmanager.RuleB
 	switch notf.GetAction() {
 	case rulebindingmanager.Added:
 		// add to the list of pods that are being monitored because of rules
-		ncw.ruleManagedPods.Add(k8sPodID)
+		cw.ruleManagedPods.Add(k8sPodID)
 	case rulebindingmanager.Removed:
-		ncw.ruleManagedPods.Remove(k8sPodID)
+		cw.ruleManagedPods.Remove(k8sPodID)
 	}
 }

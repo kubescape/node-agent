@@ -11,7 +11,6 @@
 #ifndef PATH_MAX
 #define PATH_MAX 512
 #endif
-
 // Note: the path should always be in the bottom of the struct to avoid trimming of data.
 struct event {
     gadget_timestamp timestamp;

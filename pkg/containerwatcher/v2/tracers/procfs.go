@@ -11,6 +11,8 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -18,6 +20,8 @@ import (
 const (
 	procfsTraceName = "trace_procfs"
 )
+
+var _ containerwatcher.TracerInterface = (*ProcfsTracer)(nil)
 
 // ProcfsTracer implements TracerInterface for procfs events
 type ProcfsTracer struct {
@@ -35,13 +39,14 @@ func NewProcfsTracer(
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
 	eventCallback func(utils.K8sEvent, string, uint32),
+	cfg config.Config,
 ) *ProcfsTracer {
 	return &ProcfsTracer{
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,
 		containerSelector:   containerSelector,
 		eventCallback:       eventCallback,
-		procfsFeeder:        feeder.NewProcfsFeeder(5 * time.Second), // Scan every 5 seconds
+		procfsFeeder:        feeder.NewProcfsFeeder(cfg.ProcfsScanInterval), // Scan every 5 seconds
 	}
 }
 
@@ -119,7 +124,7 @@ func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan feed
 func (pt *ProcfsTracer) handleProcfsEvent(event feeder.ProcessEvent) {
 	// Create a procfs event that can be processed by the ordered event queue
 	// Use current time as event timestamp, not the process timestamp
-	procfsEvent := &utils.ProcfsEvent{
+	procfsEvent := &events.ProcfsEvent{
 		Type:        types.NORMAL,
 		Timestamp:   time.Now(),
 		PID:         event.PID,

@@ -11,6 +11,7 @@ import (
 	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -18,6 +19,8 @@ const (
 	topTraceName = "trace_top"
 	maxRows      = 1000
 )
+
+var _ containerwatcher.TracerInterface = (*TopTracer)(nil)
 
 // TopTracer implements TracerInterface for top events (Prometheus metrics)
 type TopTracer struct {

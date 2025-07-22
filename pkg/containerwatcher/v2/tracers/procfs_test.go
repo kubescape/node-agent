@@ -9,6 +9,7 @@ import (
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
+	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,6 +29,7 @@ func TestNewProcfsTracer(t *testing.T) {
 		tracerCollection,
 		containercollection.ContainerSelector{},
 		eventCallback,
+		config.Config{ProcfsScanInterval: 5 * time.Second},
 	)
 
 	assert.NotNil(t, tracer)
@@ -46,6 +48,7 @@ func TestProcfsTracer_IsEnabled(t *testing.T) {
 		tracerCollection,
 		containercollection.ContainerSelector{},
 		nil,
+		config.Config{ProcfsScanInterval: 5 * time.Second},
 	)
 
 	// Test with runtime detection enabled
@@ -67,6 +70,7 @@ func TestProcfsTracer_StartStop(t *testing.T) {
 		tracerCollection,
 		containercollection.ContainerSelector{},
 		nil,
+		config.Config{ProcfsScanInterval: 5 * time.Second},
 	)
 
 	ctx := context.Background()
@@ -92,7 +96,7 @@ func TestProcfsTracer_StartStop(t *testing.T) {
 }
 
 func TestProcfsEvent_InterfaceMethods(t *testing.T) {
-	event := &utils.ProcfsEvent{
+	event := &events.ProcfsEvent{
 		Type:      types.NORMAL,
 		Timestamp: time.Now(),
 		PID:       123,

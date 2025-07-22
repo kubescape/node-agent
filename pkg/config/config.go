@@ -55,6 +55,7 @@ type Config struct {
 	ProfilesCacheRefreshRate       time.Duration                   `mapstructure:"profilesCacheRefreshRate"`
 	RuleCoolDown                   rulecooldown.RuleCooldownConfig `mapstructure:"ruleCooldown"`
 	EnablePartialProfileGeneration bool                            `mapstructure:"partialProfileGenerationEnabled"`
+	ProcfsScanInterval             time.Duration                   `mapstructure:"procfsScanInterval"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -89,6 +90,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("ruleCooldown.ruleCooldownOnProfileFailure", true)
 	viper.SetDefault("ruleCooldown.ruleCooldownMaxSize", 10000)
 	viper.SetDefault("partialProfileGenerationEnabled", true)
+	viper.SetDefault("procfsScanInterval", 5*time.Second)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()

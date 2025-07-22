@@ -18,6 +18,8 @@ import (
 
 const openTraceName = "trace_open"
 
+var _ containerwatcher.TracerInterface = (*OpenTracer)(nil)
+
 // OpenTracer implements TracerInterface for open events
 type OpenTracer struct {
 	containerCollection *containercollection.ContainerCollection

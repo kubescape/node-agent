@@ -10,12 +10,15 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	traceriouring "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer"
 	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 const iouringTraceName = "trace_iouring"
+
+var _ containerwatcher.TracerInterface = (*IoUringTracer)(nil)
 
 // IoUringTracer implements TracerInterface for io_uring events
 type IoUringTracer struct {

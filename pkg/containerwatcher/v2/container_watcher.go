@@ -253,19 +253,19 @@ func CreateIGContainerWatcher(
 }
 
 // Start initializes and starts the container watcher
-func (ncw *ContainerWatcher) Start(ctx context.Context) error {
-	ncw.mutex.Lock()
-	defer ncw.mutex.Unlock()
+func (cw *ContainerWatcher) Start(ctx context.Context) error {
+	cw.mutex.Lock()
+	defer cw.mutex.Unlock()
 
-	if ncw.running {
+	if cw.running {
 		return fmt.Errorf("container watcher is already running")
 	}
 
-	ncw.ctx = ctx
+	cw.ctx = ctx
 
 	// Start container collection (similar to v1 startContainerCollection)
 	logger.L().TimedWrapper("StartContainerCollection", 5*time.Second, func() {
-		if err := ncw.StartContainerCollection(ctx); err != nil {
+		if err := cw.StartContainerCollection(ctx); err != nil {
 			logger.L().Error("error starting container collection", helpers.Error(err))
 		}
 	})
@@ -274,167 +274,168 @@ func (ncw *ContainerWatcher) Start(ctx context.Context) error {
 	// No need to start queue anymore - it's just a data structure
 
 	// Start event processing loop
-	go ncw.eventProcessingLoop()
+	go cw.eventProcessingLoop()
 
 	// Start worker pool goroutine
-	go ncw.workerPoolLoop()
+	go cw.workerPoolLoop()
 
 	// Create tracer factory
 	tracerFactory := tracers.NewTracerFactory(
-		ncw.containerCollection,
-		ncw.tracerCollection,
-		ncw.containerSelector,
-		ncw.orderedEventQueue,
-		ncw.socketEnricher,
-		ncw.containerProfileManager,
-		ncw.ruleManager,
-		ncw.thirdPartyTracers,
-		ncw.thirdPartyEnricher,
+		cw.containerCollection,
+		cw.tracerCollection,
+		cw.containerSelector,
+		cw.orderedEventQueue,
+		cw.socketEnricher,
+		cw.containerProfileManager,
+		cw.ruleManager,
+		cw.thirdPartyTracers,
+		cw.thirdPartyEnricher,
+		cw.cfg,
 	)
 
 	// Initialize tracer manager
-	tracerManagerV2 := NewTracerManager(ncw.cfg, tracerFactory)
+	tracerManagerV2 := NewTracerManager(cw.cfg, tracerFactory)
 	if err := tracerManagerV2.StartAllTracers(ctx); err != nil {
 		return fmt.Errorf("starting tracer manager: %w", err)
 	}
-	ncw.tracerManagerV2 = tracerManagerV2
+	cw.tracerManagerV2 = tracerManagerV2
 
-	ncw.running = true
-	logger.L().Info("NewContainerWatcher started successfully")
+	cw.running = true
+	logger.L().Info("ContainerWatcher started successfully")
 	return nil
 }
 
 // Stop gracefully stops the container watcher
-func (ncw *ContainerWatcher) Stop() {
-	ncw.mutex.Lock()
-	defer ncw.mutex.Unlock()
+func (cw *ContainerWatcher) Stop() {
+	cw.mutex.Lock()
+	defer cw.mutex.Unlock()
 
-	if !ncw.running {
+	if !cw.running {
 		return
 	}
 
-	logger.L().Info("Stopping NewContainerWatcher...")
+	logger.L().Info("Stopping ContainerWatcher...")
 
 	// Stop container manager
-	ncw.StopContainerCollection()
+	cw.StopContainerCollection()
 
 	// Stop tracer manager
-	if ncw.tracerManagerV2 != nil {
-		ncw.tracerManagerV2.StopAllTracers()
+	if cw.tracerManagerV2 != nil {
+		cw.tracerManagerV2.StopAllTracers()
 	}
 
 	// No need to stop queue - it's just a data structure
 
 	// Close worker channel to signal worker goroutine to stop
-	if ncw.workerChan != nil {
-		close(ncw.workerChan)
+	if cw.workerChan != nil {
+		close(cw.workerChan)
 	}
 
 	// Stop worker pool
-	if ncw.workerPool != nil {
-		ncw.workerPool.Release()
+	if cw.workerPool != nil {
+		cw.workerPool.Release()
 	}
 
-	ncw.running = false
-	logger.L().Info("NewContainerWatcher stopped successfully")
+	cw.running = false
+	logger.L().Info("ContainerWatcher stopped successfully")
 }
 
 // Ready returns true if the container watcher is ready to process events
-func (ncw *ContainerWatcher) Ready() bool {
-	ncw.mutex.RLock()
-	defer ncw.mutex.RUnlock()
-	return ncw.running
+func (cw *ContainerWatcher) Ready() bool {
+	cw.mutex.RLock()
+	defer cw.mutex.RUnlock()
+	return cw.running
 }
 
 // GetContainerCollection returns the container collection
-func (ncw *ContainerWatcher) GetContainerCollection() *containercollection.ContainerCollection {
-	return ncw.containerCollection
+func (cw *ContainerWatcher) GetContainerCollection() *containercollection.ContainerCollection {
+	return cw.containerCollection
 }
 
 // GetTracerCollection returns the tracer collection
-func (ncw *ContainerWatcher) GetTracerCollection() *tracercollection.TracerCollection {
-	return ncw.tracerCollection
+func (cw *ContainerWatcher) GetTracerCollection() *tracercollection.TracerCollection {
+	return cw.tracerCollection
 }
 
 // GetSocketEnricher returns the socket enricher
-func (ncw *ContainerWatcher) GetSocketEnricher() *socketenricher.SocketEnricher {
-	return ncw.socketEnricher
+func (cw *ContainerWatcher) GetSocketEnricher() *socketenricher.SocketEnricher {
+	return cw.socketEnricher
 }
 
 // GetContainerSelector returns the container selector
-func (ncw *ContainerWatcher) GetContainerSelector() *containercollection.ContainerSelector {
-	return &ncw.containerSelector
+func (cw *ContainerWatcher) GetContainerSelector() *containercollection.ContainerSelector {
+	return &cw.containerSelector
 }
 
 // RegisterCustomTracer registers a custom tracer
-func (ncw *ContainerWatcher) RegisterCustomTracer(tracer containerwatcher.CustomTracer) error {
-	ncw.thirdPartyTracers.Add(tracer)
+func (cw *ContainerWatcher) RegisterCustomTracer(tracer containerwatcher.CustomTracer) error {
+	cw.thirdPartyTracers.Add(tracer)
 	return nil
 }
 
 // UnregisterCustomTracer unregisters a custom tracer
-func (ncw *ContainerWatcher) UnregisterCustomTracer(tracer containerwatcher.CustomTracer) error {
-	ncw.thirdPartyTracers.Remove(tracer)
+func (cw *ContainerWatcher) UnregisterCustomTracer(tracer containerwatcher.CustomTracer) error {
+	cw.thirdPartyTracers.Remove(tracer)
 	return nil
 }
 
 // RegisterContainerReceiver registers a container receiver
-func (ncw *ContainerWatcher) RegisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
-	ncw.thirdPartyContainerReceivers.Add(receiver)
+func (cw *ContainerWatcher) RegisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
+	cw.thirdPartyContainerReceivers.Add(receiver)
 }
 
 // UnregisterContainerReceiver unregisters a container receiver
-func (ncw *ContainerWatcher) UnregisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
-	ncw.thirdPartyContainerReceivers.Remove(receiver)
+func (cw *ContainerWatcher) UnregisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
+	cw.thirdPartyContainerReceivers.Remove(receiver)
 }
 
-func (ncw *ContainerWatcher) eventProcessingLoop() {
+func (cw *ContainerWatcher) eventProcessingLoop() {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ncw.ctx.Done():
+		case <-cw.ctx.Done():
 			return
 		case <-ticker.C:
-			ncw.processQueueBatch()
-		case <-ncw.orderedEventQueue.GetFullQueueAlertChannel():
+			cw.processQueueBatch()
+		case <-cw.orderedEventQueue.GetFullQueueAlertChannel():
 			logger.L().Warning("ContainerWatcher - Processing events due to full queue alert")
-			ncw.processQueueBatch()
+			cw.processQueueBatch()
 		}
 	}
 }
 
-func (ncw *ContainerWatcher) workerPoolLoop() {
+func (cw *ContainerWatcher) workerPoolLoop() {
 	for {
 		select {
-		case <-ncw.ctx.Done():
+		case <-cw.ctx.Done():
 			return
-		case enrichedEvent := <-ncw.workerChan:
-			ncw.workerPool.Invoke(enrichedEvent)
+		case enrichedEvent := <-cw.workerChan:
+			cw.workerPool.Invoke(enrichedEvent)
 		}
 	}
 }
 
-func (ncw *ContainerWatcher) processQueueBatch() {
+func (cw *ContainerWatcher) processQueueBatch() {
 	const batchSize = 1000
 	processedCount := 0
-	for !ncw.orderedEventQueue.Empty() && processedCount < batchSize {
-		event, ok := ncw.orderedEventQueue.PopEvent()
+	for !cw.orderedEventQueue.Empty() && processedCount < batchSize {
+		event, ok := cw.orderedEventQueue.PopEvent()
 		if !ok {
 			break
 		}
-		ncw.enrichAndProcess(event)
+		cw.enrichAndProcess(event)
 		processedCount++
 	}
 
 }
 
-func (ncw *ContainerWatcher) enrichAndProcess(entry eventEntry) {
-	enrichedEvent := ncw.eventEnricher.EnrichEvents(entry)
+func (cw *ContainerWatcher) enrichAndProcess(entry eventEntry) {
+	enrichedEvent := cw.eventEnricher.EnrichEvents(entry)
 
 	select {
-	case ncw.workerChan <- enrichedEvent:
+	case cw.workerChan <- enrichedEvent:
 	default:
 		logger.L().Warning("ContainerWatcher - Worker channel full, dropping event",
 			helpers.String("eventType", string(entry.EventType)),

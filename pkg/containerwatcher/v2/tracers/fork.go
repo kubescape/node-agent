@@ -8,12 +8,15 @@ import (
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	tracerfork "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/tracer"
 	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 const forkTraceName = "trace_fork"
+
+var _ containerwatcher.TracerInterface = (*ForkTracer)(nil)
 
 // ForkTracer implements TracerInterface for fork events
 type ForkTracer struct {

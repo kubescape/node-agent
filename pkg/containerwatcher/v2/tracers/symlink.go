@@ -19,6 +19,8 @@ import (
 
 const symlinkTraceName = "trace_symlink"
 
+var _ containerwatcher.TracerInterface = (*SymlinkTracer)(nil)
+
 // SymlinkTracer implements TracerInterface for symlink events
 type SymlinkTracer struct {
 	containerCollection *containercollection.ContainerCollection

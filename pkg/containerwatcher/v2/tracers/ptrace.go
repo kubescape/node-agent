@@ -8,12 +8,15 @@ import (
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	tracerptrace "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer"
 	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 const ptraceTraceName = "trace_ptrace"
+
+var _ containerwatcher.TracerInterface = (*PtraceTracer)(nil)
 
 // PtraceTracer implements TracerInterface for ptrace events
 type PtraceTracer struct {

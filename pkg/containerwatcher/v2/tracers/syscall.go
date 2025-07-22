@@ -7,11 +7,14 @@ import (
 	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 const syscallTraceName = "syscall_tracer"
+
+var _ containerwatcher.TracerInterface = (*SyscallTracer)(nil)
 
 // SyscallTracer implements TracerInterface for syscall/seccomp events
 type SyscallTracer struct {

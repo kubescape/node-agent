@@ -19,6 +19,8 @@ import (
 
 const hardlinkTraceName = "trace_hardlink"
 
+var _ containerwatcher.TracerInterface = (*HardlinkTracer)(nil)
+
 // HardlinkTracer implements TracerInterface for hardlink events
 type HardlinkTracer struct {
 	containerCollection *containercollection.ContainerCollection

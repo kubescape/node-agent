@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	tracerhttp "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/tracer"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -20,6 +21,8 @@ const (
 	StatusOK         = 200
 	StatusBadRequest = 300
 )
+
+var _ containerwatcher.TracerInterface = (*HTTPTracer)(nil)
 
 // HTTPTracer implements TracerInterface for HTTP events
 type HTTPTracer struct {

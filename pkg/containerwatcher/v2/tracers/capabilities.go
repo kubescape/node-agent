@@ -10,10 +10,13 @@ import (
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 const capabilitiesTraceName = "trace_capabilities"
+
+var _ containerwatcher.TracerInterface = (*CapabilitiesTracer)(nil)
 
 // CapabilitiesTracer implements TracerInterface for capabilities events
 type CapabilitiesTracer struct {

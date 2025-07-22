@@ -26,7 +26,7 @@ func (ef *EventFeeder) ConvertEvent(eventType utils.EventType, event utils.K8sEv
 	case utils.ExitEventType:
 		return ef.convertExitEvent(event.(*tracerexittype.Event)), nil
 	case utils.ProcfsEventType:
-		return ef.convertProcfsEvent(event.(*utils.ProcfsEvent)), nil
+		return ef.convertProcfsEvent(event.(*events.ProcfsEvent)), nil
 	default:
 		return ProcessEvent{}, fmt.Errorf("unsupported event type: %s", eventType)
 	}
@@ -137,7 +137,7 @@ func (ef *EventFeeder) convertExitEvent(exitEvent *tracerexittype.Event) Process
 }
 
 // convertProcfsEvent converts a ProcfsEvent to ProcessEvent
-func (ef *EventFeeder) convertProcfsEvent(procfsEvent *utils.ProcfsEvent) ProcessEvent {
+func (ef *EventFeeder) convertProcfsEvent(procfsEvent *events.ProcfsEvent) ProcessEvent {
 	event := ProcessEvent{
 		Type:        ProcfsEvent,
 		Timestamp:   procfsEvent.Timestamp,

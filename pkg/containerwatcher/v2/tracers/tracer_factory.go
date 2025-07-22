@@ -10,6 +10,7 @@ import (
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
@@ -32,6 +33,7 @@ type TracerFactory struct {
 	ruleManager             rulemanager.RuleManagerClient
 	thirdPartyTracers       mapset.Set[containerwatcher.CustomTracer]
 	thirdPartyEnricher      containerwatcher.TaskBasedEnricher
+	cfg                     config.Config
 }
 
 // NewTracerFactory creates a new tracer factory
@@ -45,6 +47,7 @@ func NewTracerFactory(
 	ruleManager rulemanager.RuleManagerClient,
 	thirdPartyTracers mapset.Set[containerwatcher.CustomTracer],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
+	cfg config.Config,
 ) *TracerFactory {
 	return &TracerFactory{
 		containerCollection:     containerCollection,
@@ -56,6 +59,7 @@ func NewTracerFactory(
 		ruleManager:             ruleManager,
 		thirdPartyTracers:       thirdPartyTracers,
 		thirdPartyEnricher:      thirdPartyEnricher,
+		cfg:                     cfg,
 	}
 }
 
@@ -67,6 +71,7 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.tracerCollection,
 		tf.containerSelector,
 		tf.createEventCallback(utils.ProcfsEventType),
+		tf.cfg,
 	)
 	manager.RegisterTracer(procfsTracer)
 

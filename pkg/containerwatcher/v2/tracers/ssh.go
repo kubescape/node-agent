@@ -12,12 +12,15 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	tracerssh "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/tracer"
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 const sshTraceName = "trace_ssh"
+
+var _ containerwatcher.TracerInterface = (*SSHTracer)(nil)
 
 // SSHTracer implements TracerInterface for SSH events
 type SSHTracer struct {

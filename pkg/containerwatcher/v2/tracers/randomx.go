@@ -11,12 +11,15 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	tracerandomx "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/tracer"
 	tracerandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 const randomxTraceName = "trace_randomx"
+
+var _ containerwatcher.TracerInterface = (*RandomXTracer)(nil)
 
 // RandomXTracer implements TracerInterface for RandomX events
 type RandomXTracer struct {

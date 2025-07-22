@@ -8,12 +8,15 @@ import (
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	tracerexit "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/tracer"
 	tracerexittype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 const exitTraceName = "trace_exit"
+
+var _ containerwatcher.TracerInterface = (*ExitTracer)(nil)
 
 // ExitTracer implements TracerInterface for exit events
 type ExitTracer struct {

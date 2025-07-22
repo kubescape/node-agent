@@ -14,10 +14,13 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 const dnsTraceName = "trace_dns"
+
+var _ containerwatcher.TracerInterface = (*DNSTracer)(nil)
 
 // DNSTracer implements TracerInterface for DNS events
 type DNSTracer struct {

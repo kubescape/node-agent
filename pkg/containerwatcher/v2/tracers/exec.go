@@ -17,6 +17,8 @@ import (
 
 const execTraceName = "trace_exec"
 
+var _ containerwatcher.TracerInterface = (*ExecTracer)(nil)
+
 // ExecTracer implements TracerInterface for exec events
 type ExecTracer struct {
 	containerCollection *containercollection.ContainerCollection

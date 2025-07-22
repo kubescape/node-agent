@@ -16,10 +16,13 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 const networkTraceName = "trace_network"
+
+var _ containerwatcher.TracerInterface = (*NetworkTracer)(nil)
 
 // NetworkTracer implements TracerInterface for network events
 type NetworkTracer struct {

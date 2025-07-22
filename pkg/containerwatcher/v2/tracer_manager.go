@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	containerwatcherroot "github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -50,6 +51,7 @@ func (vtm *TracerManager) StartAllTracers(ctx context.Context) error {
 			if err := tracer.Start(ctx); err != nil {
 				return err
 			}
+			logger.L().Info("Started tracer", helpers.String("tracer", tracer.GetName()))
 		}
 	}
 
@@ -73,21 +75,18 @@ func (vtm *TracerManager) StopAllTracers() error {
 }
 
 func (vtm *TracerManager) startProcfsTracer(ctx context.Context) error {
-	var procfsTracer containerwatcherroot.TracerInterface
 	if tracer, exists := vtm.GetTracer(utils.ProcfsEventType); exists {
-		procfsTracer = tracer
 		delete(vtm.tracers, utils.ProcfsEventType)
-
-		if procfsTracer.IsEnabled(vtm.cfg) {
+		if tracer.IsEnabled(vtm.cfg) {
 			logger.L().Info("Starting procfs tracer 5 seconds before other tracers")
-			if err := procfsTracer.Start(ctx); err != nil {
+			if err := tracer.Start(ctx); err != nil {
 				return fmt.Errorf("starting procfs tracer: %w", err)
 			}
 		}
 	}
 
 	select {
-	case <-time.After(5 * time.Second):
+	case <-time.After(vtm.cfg.ProcfsScanInterval):
 	case <-ctx.Done():
 		return ctx.Err()
 	}

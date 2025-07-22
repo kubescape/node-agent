@@ -86,7 +86,6 @@ func (pt *processTreeCreatorImpl) GetProcessMap() map[uint32]*apitypes.Process {
 	pt.mutex.RLock()
 	defer pt.mutex.RUnlock()
 
-	// Convert SafeMap to regular map for compatibility
 	processMap := make(map[uint32]*apitypes.Process)
 	pt.processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
 		processMap[pid] = proc
@@ -117,7 +116,6 @@ func (pt *processTreeCreatorImpl) GetPidBranch(containerTree interface{}, contai
 		return apitypes.Process{}, fmt.Errorf("invalid container tree type")
 	}
 
-	// Convert SafeMap to regular map for compatibility
 	processMap := pt.getProcessMapAsRegularMap()
 
 	// Perform the container branch operation
@@ -402,7 +400,6 @@ func (pt *processTreeCreatorImpl) isDescendant(parentPID, targetPID uint32) bool
 	return false
 }
 
-// getProcessMapAsRegularMap converts SafeMap to regular map for compatibility with existing interfaces
 func (pt *processTreeCreatorImpl) getProcessMapAsRegularMap() map[uint32]*apitypes.Process {
 	processMap := make(map[uint32]*apitypes.Process)
 	pt.processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
@@ -412,14 +409,10 @@ func (pt *processTreeCreatorImpl) getProcessMapAsRegularMap() map[uint32]*apityp
 	return processMap
 }
 
-// shallowCopyProcess creates a shallow copy of a process
-// This is much faster and suitable for read-only access
 func (pt *processTreeCreatorImpl) shallowCopyProcess(proc *apitypes.Process) *apitypes.Process {
 	if proc == nil {
 		return nil
 	}
 	copy := *proc
-	// ChildrenMap points to the same map (shared reference)
-	// This is safe for read-only access and much faster
 	return &copy
 }
