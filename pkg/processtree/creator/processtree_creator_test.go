@@ -9,6 +9,7 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/config"
+	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -796,6 +797,166 @@ func TestReparentingIntegration(t *testing.T) {
 	assert.Len(t, pendingExit.Children, 1)
 	assert.Equal(t, uint32(5678), pendingExit.Children[0].PID)
 	impl.mutex.Unlock()
+}
+
+// Note: The original TestReparentingStrategiesIntegration was removed because it relied on exit manager timing
+// which is too slow for unit tests (10 minutes). Instead, use TestReparentingLogicDirect which tests
+// the reparenting logic directly and is much more reliable.
+
+func TestReparentingLogicDirect(t *testing.T) {
+	// Test the reparenting logic directly without relying on exit manager timing
+	t.Run("DefaultStrategy_Direct", func(t *testing.T) {
+		containerTree := containerprocesstree.NewContainerProcessTree()
+		creator := NewProcessTreeCreator(containerTree, config.Config{KubernetesMode: false})
+		impl := creator.(*processTreeCreatorImpl)
+
+		// Create process tree: init(1) -> parent(1000) -> child(1234) -> grandchild(5678)
+		events := []feeder.ProcessEvent{
+			{Type: feeder.ForkEvent, PID: 1, PPID: 0, Comm: "init"},
+			{Type: feeder.ForkEvent, PID: 1000, PPID: 1, Comm: "parent"},
+			{Type: feeder.ForkEvent, PID: 1234, PPID: 1000, Comm: "child"},
+			{Type: feeder.ForkEvent, PID: 5678, PPID: 1234, Comm: "grandchild"},
+		}
+
+		for _, event := range events {
+			creator.FeedEvent(event)
+		}
+
+		// Verify initial structure
+		parent := impl.processMap.Get(1000)
+		child := impl.processMap.Get(1234)
+		grandchild := impl.processMap.Get(5678)
+
+		assert.NotNil(t, parent)
+		assert.NotNil(t, child)
+		assert.NotNil(t, grandchild)
+		assert.Equal(t, uint32(1000), child.PPID)
+		assert.Equal(t, uint32(1234), grandchild.PPID)
+
+		// Test reparenting logic directly
+		children := []*apitypes.Process{grandchild}
+		newParentPID, err := impl.reparenting_strategies.Reparent(1234, children, containerTree, impl.getProcessMapAsRegularMap())
+
+		assert.NoError(t, err)
+		assert.Equal(t, uint32(1000), newParentPID, "Should use Default Strategy to reparent to parent's parent")
+
+		// Apply the reparenting
+		for _, child := range children {
+			if child != nil {
+				child.PPID = newParentPID
+				impl.linkProcessToParent(child)
+			}
+		}
+
+		// Verify reparenting worked
+		updatedGrandchild := impl.processMap.Get(5678)
+		assert.NotNil(t, updatedGrandchild)
+		assert.Equal(t, uint32(1000), updatedGrandchild.PPID, "Grandchild should be reparented to parent")
+	})
+
+	t.Run("FallbackStrategy_Direct", func(t *testing.T) {
+		containerTree := containerprocesstree.NewContainerProcessTree()
+		creator := NewProcessTreeCreator(containerTree, config.Config{KubernetesMode: false})
+		impl := creator.(*processTreeCreatorImpl)
+
+		// Create process tree: orphan(1234) -> child(5678)
+		events := []feeder.ProcessEvent{
+			{Type: feeder.ForkEvent, PID: 1234, PPID: 0, Comm: "orphan"}, // True orphan with no parent
+			{Type: feeder.ForkEvent, PID: 5678, PPID: 1234, Comm: "child"},
+		}
+
+		for _, event := range events {
+			creator.FeedEvent(event)
+		}
+
+		// Verify initial structure
+		orphan := impl.processMap.Get(1234)
+		child := impl.processMap.Get(5678)
+
+		assert.NotNil(t, orphan)
+		assert.NotNil(t, child)
+		assert.Equal(t, uint32(1234), child.PPID)
+
+		// Test reparenting logic directly
+		children := []*apitypes.Process{child}
+		newParentPID, err := impl.reparenting_strategies.Reparent(1234, children, containerTree, impl.getProcessMapAsRegularMap())
+
+		assert.NoError(t, err)
+		// The Default Strategy should be used first since the orphan has a PPID (999)
+		// But since parent 999 doesn't exist in the process map, it should fall back to 0
+		// Then the Fallback Strategy should be used to return 1
+		assert.Equal(t, uint32(1), newParentPID, "Should use Fallback Strategy to reparent to init")
+
+		// Apply the reparenting
+		for _, child := range children {
+			if child != nil {
+				child.PPID = newParentPID
+				impl.linkProcessToParent(child)
+			}
+		}
+
+		// Verify reparenting worked
+		updatedChild := impl.processMap.Get(5678)
+		assert.NotNil(t, updatedChild)
+		assert.Equal(t, uint32(1), updatedChild.PPID, "Child should be reparented to init")
+	})
+
+	t.Run("ContainerStrategy_Direct", func(t *testing.T) {
+		mockContainerTree := &MockContainerProcessTree{}
+		creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: true})
+		impl := creator.(*processTreeCreatorImpl)
+
+		// Mock all container tree methods to avoid unexpected calls
+		mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
+		mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.AnythingOfType("map[uint32]*armotypes.Process")).Return(false)
+		mockContainerTree.On("GetPidByContainerID", mock.AnythingOfType("string")).Return(uint32(0), nil)
+
+		// Create container process tree: containerd-shim(50) -> nginx(100) -> worker(200)
+		events := []feeder.ProcessEvent{
+			{Type: feeder.ForkEvent, PID: 50, PPID: 1, Comm: "containerd-shim"},
+			{Type: feeder.ForkEvent, PID: 100, PPID: 50, Comm: "nginx"},
+			{Type: feeder.ForkEvent, PID: 200, PPID: 100, Comm: "nginx-worker"},
+		}
+
+		for _, event := range events {
+			creator.FeedEvent(event)
+		}
+
+		// Now override the mock for the specific test case
+		mockContainerTree.On("IsProcessUnderAnyContainerSubtree", uint32(100), mock.Anything).Return(true)
+		mockContainerTree.On("GetShimPIDForProcess", uint32(100), mock.Anything).Return(uint32(50), true)
+
+		// Verify initial structure
+		shim := impl.processMap.Get(50)
+		nginx := impl.processMap.Get(100)
+		worker := impl.processMap.Get(200)
+
+		assert.NotNil(t, shim)
+		assert.NotNil(t, nginx)
+		assert.NotNil(t, worker)
+		assert.Equal(t, uint32(50), nginx.PPID)
+		assert.Equal(t, uint32(100), worker.PPID)
+
+		// Test reparenting logic directly
+		children := []*apitypes.Process{worker}
+		newParentPID, err := impl.reparenting_strategies.Reparent(100, children, mockContainerTree, impl.getProcessMapAsRegularMap())
+
+		assert.NoError(t, err)
+		assert.Equal(t, uint32(50), newParentPID, "Should use Container Strategy to reparent to shim")
+
+		// Apply the reparenting
+		for _, child := range children {
+			if child != nil {
+				child.PPID = newParentPID
+				impl.linkProcessToParent(child)
+			}
+		}
+
+		// Verify reparenting worked
+		updatedWorker := impl.processMap.Get(200)
+		assert.NotNil(t, updatedWorker)
+		assert.Equal(t, uint32(50), updatedWorker.PPID, "Worker should be reparented to shim")
+	})
 }
 
 func TestComplexProcessTree(t *testing.T) {
