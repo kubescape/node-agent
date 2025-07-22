@@ -1,8 +1,11 @@
 package containerwatcher
 
 import (
+	"fmt"
+	"reflect"
 	"time"
 
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/processtree"
@@ -43,10 +46,31 @@ func (oeq *OrderedEventQueue) GetFullQueueAlertChannel() <-chan struct{} {
 
 func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event utils.K8sEvent, containerID string, processID uint32) {
 	var timestamp time.Time
-	if tsGetter, ok := event.(interface{ GetTimestamp() int64 }); ok {
-		timestamp = time.Unix(0, tsGetter.GetTimestamp())
+
+	// Try to get timestamp using reflection to access the embedded Timestamp field
+	eventValue := reflect.ValueOf(event)
+	if eventValue.Kind() == reflect.Ptr {
+		eventValue = eventValue.Elem()
+	}
+
+	timestampField := eventValue.FieldByName("Timestamp")
+	if timestampField.IsValid() && timestampField.CanInterface() {
+		if ts, ok := timestampField.Interface().(igtypes.Time); ok {
+			timestamp = time.Unix(0, int64(ts))
+		} else if ts, ok := timestampField.Interface().(int64); ok {
+			timestamp = time.Unix(0, ts)
+		} else if ts, ok := timestampField.Interface().(time.Time); ok {
+			timestamp = ts
+		} else {
+			logger.L().Warning("AFEK - Ordered event queue - Timestamp field has unexpected type",
+				helpers.String("eventType", string(eventType)),
+				helpers.String("containerID", containerID),
+				helpers.String("timestampType", fmt.Sprintf("%T", timestampField.Interface())))
+			timestamp = time.Now()
+		}
 	} else {
-		logger.L().Warning("AFEK - Ordered event queue - Event has no timestamp",
+		// Fallback: use current time
+		logger.L().Warning("AFEK - Ordered event queue - Event has no timestamp, using current time",
 			helpers.String("eventType", string(eventType)),
 			helpers.String("containerID", containerID))
 		timestamp = time.Now()

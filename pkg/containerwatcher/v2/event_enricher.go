@@ -2,7 +2,6 @@ package containerwatcher
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -26,8 +25,6 @@ func NewEventEnricher(
 }
 
 func (ee *EventEnricher) EnrichEvents(entry eventEntry) *ebpfevents.EnrichedEvent {
-	start := time.Now()
-
 	eventType := entry.EventType
 	event := entry.Event
 
@@ -48,18 +45,6 @@ func (ee *EventEnricher) EnrichEvents(entry eventEntry) *ebpfevents.EnrichedEven
 		ContainerID: entry.ContainerID,
 		Timestamp:   entry.Timestamp,
 		PID:         entry.ProcessID,
-	}
-
-	elapsed := time.Since(start)
-
-	if elapsed > time.Millisecond {
-		logger.L().Warning("AFEK - Event enrichment took too long",
-			helpers.String("eventType", string(eventType)),
-			helpers.String("containerID", entry.ContainerID),
-			helpers.Int("pid", int(entry.ProcessID)),
-			helpers.String("duration", elapsed.String()),
-			helpers.String("target", "50μs"),
-			helpers.String("slowdownFactor", fmt.Sprintf("%.1fx", float64(elapsed.Nanoseconds())/50000.0)))
 	}
 
 	return enrichedEvent
