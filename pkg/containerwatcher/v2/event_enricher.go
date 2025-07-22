@@ -3,6 +3,7 @@ package containerwatcher
 import (
 	"fmt"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	ebpfevents "github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -25,6 +26,8 @@ func NewEventEnricher(
 }
 
 func (ee *EventEnricher) EnrichEvents(entry eventEntry) *ebpfevents.EnrichedEvent {
+	var processTree apitypes.Process
+
 	eventType := entry.EventType
 	event := entry.Event
 
@@ -34,9 +37,10 @@ func (ee *EventEnricher) EnrichEvents(entry eventEntry) *ebpfevents.EnrichedEven
 				helpers.String("eventType", string(eventType)),
 				helpers.String("pid", fmt.Sprintf("%d", entry.ProcessID)))
 		}
+		processTree, _ = ee.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID, false)
+	} else {
+		processTree, _ = ee.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID, true)
 	}
-
-	processTree, _ := ee.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
 
 	enrichedEvent := &ebpfevents.EnrichedEvent{
 		Event:       event,

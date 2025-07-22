@@ -430,14 +430,14 @@ func (ncw *ContainerWatcher) processQueueBatch() {
 
 }
 
-func (ncw *ContainerWatcher) enrichAndProcess(event eventEntry) {
-	enrichedEvent := ncw.eventEnricher.EnrichEvents(event)
+func (ncw *ContainerWatcher) enrichAndProcess(entry eventEntry) {
+	enrichedEvent := ncw.eventEnricher.EnrichEvents(entry)
 
 	select {
 	case ncw.workerChan <- enrichedEvent:
 	default:
 		logger.L().Warning("ContainerWatcher - Worker channel full, dropping event",
-			helpers.String("eventType", string(event.EventType)),
-			helpers.String("containerID", event.ContainerID))
+			helpers.String("eventType", string(entry.EventType)),
+			helpers.String("containerID", entry.ContainerID))
 	}
 }

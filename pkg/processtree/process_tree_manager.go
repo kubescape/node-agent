@@ -73,9 +73,9 @@ func (ptm *ProcessTreeManagerImpl) GetHostProcessTree(pid uint32) (apitypes.Proc
 	return ptm.creator.GetHostProcessBranch(pid)
 }
 
-func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32) (apitypes.Process, error) {
+func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32, useCache bool) (apitypes.Process, error) {
 	cacheKey := fmt.Sprintf("%s:%d", containerID, pid)
-	if cached, exists := ptm.containerProcessTreeCache.Get(cacheKey); exists {
+	if cached, exists := ptm.containerProcessTreeCache.Get(cacheKey); exists && useCache {
 		return cached, nil
 	}
 

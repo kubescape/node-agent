@@ -159,7 +159,7 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 				failures := rm.processEvent(utils.SyscallEventType, &event, rules)
 				for _, failure := range failures {
 
-					tree, err := rm.processManager.GetContainerProcessTree(container.Runtime.ContainerID, event.Pid)
+					tree, err := rm.processManager.GetContainerProcessTree(container.Runtime.ContainerID, event.Pid, true)
 					if err != nil {
 						process := apitypes.Process{
 							PID: event.Pid,
