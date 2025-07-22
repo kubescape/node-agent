@@ -7,7 +7,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	ebpfevents "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -31,10 +31,10 @@ func NewEventEnricher(
 	}
 }
 
-func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.EnrichedEvent {
+func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*ebpfevents.EnrichedEvent {
 	startTime := time.Now()
 
-	enrichedEvents := make([]*containerwatcher.EnrichedEvent, 0, len(events))
+	enrichedEvents := make([]*ebpfevents.EnrichedEvent, 0, len(events))
 
 	for _, entry := range events {
 		event := entry.Event
@@ -54,7 +54,7 @@ func (ee *EventEnricher) EnrichEvents(events []eventEntry) []*containerwatcher.E
 		}
 		processTree, _ := ee.processTreeManager.GetContainerProcessTree(entry.ContainerID, entry.ProcessID)
 
-		enrichedEvents = append(enrichedEvents, &containerwatcher.EnrichedEvent{
+		enrichedEvents = append(enrichedEvents, &ebpfevents.EnrichedEvent{
 			Event:       event,
 			EventType:   eventType,
 			ProcessTree: processTree,

@@ -1,14 +1,39 @@
-package containerwatcher
+package events
 
 import (
 	"testing"
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 )
+
+// MockEvent implements utils.K8sEvent interface for testing
+type MockEvent struct {
+	ID        string
+	Timestamp int64
+	Pod       string
+	Namespace string
+}
+
+func (m MockEvent) GetTimestamp() int64 {
+	return m.Timestamp
+}
+
+func (m MockEvent) GetPod() string {
+	if m.Pod == "" {
+		return "test-pod"
+	}
+	return m.Pod
+}
+
+func (m MockEvent) GetNamespace() string {
+	if m.Namespace == "" {
+		return "test-namespace"
+	}
+	return m.Namespace
+}
 
 func TestNewEnrichedEvent(t *testing.T) {
 	// Test creating a new enriched event
@@ -34,7 +59,7 @@ func TestNewEnrichedEvent(t *testing.T) {
 
 func TestEnrichedEvent_Structure(t *testing.T) {
 	// Test the structure of enriched event
-	enrichedEvent := &containerwatcher.EnrichedEvent{
+	enrichedEvent := &EnrichedEvent{
 		EventType:   utils.OpenEventType,
 		Event:       MockEvent{ID: "open-event"},
 		Timestamp:   time.Now(),
@@ -147,7 +172,7 @@ func TestEnrichedEvent_TimestampOrdering(t *testing.T) {
 	// Test timestamp ordering for event processing
 	baseTime := time.Now()
 
-	events := []*containerwatcher.EnrichedEvent{
+	events := []*EnrichedEvent{
 		NewEnrichedEvent(utils.ExecveEventType, MockEvent{ID: "third"}, baseTime.Add(2*time.Second), "container", apitypes.Process{}),
 		NewEnrichedEvent(utils.OpenEventType, MockEvent{ID: "first"}, baseTime, "container", apitypes.Process{}),
 		NewEnrichedEvent(utils.NetworkEventType, MockEvent{ID: "second"}, baseTime.Add(1*time.Second), "container", apitypes.Process{}),

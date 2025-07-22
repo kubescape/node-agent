@@ -2,7 +2,9 @@ package tracers
 
 import (
 	"reflect"
+	"strings"
 
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -15,4 +17,10 @@ func EnrichEvent(thirdPartyEnricher containerwatcher.TaskBasedEnricher, event ut
 		callback(event, containerID, processID)
 	}
 
+}
+
+func isDroppedEvent(eventType types.EventType, message string) bool {
+	return eventType != types.NORMAL &&
+		eventType != types.DEBUG &&
+		strings.Contains(message, "stop tracing container")
 }

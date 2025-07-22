@@ -3,7 +3,6 @@ package tracers
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
@@ -119,11 +118,4 @@ func (ct *CapabilitiesTracer) capabilitiesEventCallback(event *tracercapabilitie
 
 		ct.eventCallback(event, containerID, processID)
 	}
-}
-
-// isDroppedEvent checks if an event should be dropped
-func isDroppedEvent(eventType types.EventType, message string) bool {
-	return eventType != types.NORMAL &&
-		eventType != types.DEBUG &&
-		strings.Contains(message, "stop tracing container")
 }

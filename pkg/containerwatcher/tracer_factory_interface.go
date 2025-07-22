@@ -1,11 +1,15 @@
 package containerwatcher
 
-// TracerRegistrar defines the interface for registering tracers
-type TracerRegistrar interface {
+import "context"
+
+// TracerRegistrer defines the interface for registering tracers
+type TracerRegistrer interface {
 	RegisterTracer(tracer TracerInterface)
 }
 
 // TracerFactoryInterface defines the interface for creating tracers
 type TracerFactoryInterface interface {
-	CreateAllTracers(manager TracerRegistrar)
+	CreateAllTracers(manager TracerRegistrer)
+	StartThirdPartyTracers(ctx context.Context) error
+	StopThirdPartyTracers()
 }

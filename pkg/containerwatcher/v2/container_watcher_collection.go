@@ -6,7 +6,6 @@ import (
 	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"github.com/kubescape/go-logger"
@@ -15,23 +14,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-// ContainerManager handles all container-related operations
-type ContainerManager struct {
-	containerWatcher *ContainerWatcher
-	kubeIPInstance   operators.OperatorInstance
-	kubeNameInstance operators.OperatorInstance
-}
-
-// NewContainerManager creates a new container manager
-func NewContainerManager(containerWatcher *ContainerWatcher) *ContainerManager {
-	return &ContainerManager{
-		containerWatcher: containerWatcher,
-	}
-}
-
 // StartContainerCollection starts the container collection
-func (cm *ContainerManager) StartContainerCollection(ctx context.Context) error {
-	ncw := cm.containerWatcher
+func (ncw *ContainerWatcher) StartContainerCollection(ctx context.Context) error {
 	ncw.ctx = ctx
 
 	// This is needed when not running as gadget.
@@ -118,8 +102,7 @@ func (cm *ContainerManager) StartContainerCollection(ctx context.Context) error 
 }
 
 // StopContainerCollection stops the container collection
-func (cm *ContainerManager) StopContainerCollection() {
-	ncw := cm.containerWatcher
+func (ncw *ContainerWatcher) StopContainerCollection() {
 	if ncw.containerCollection != nil {
 		ncw.tracerCollection.Close()
 		ncw.containerCollection.Close()

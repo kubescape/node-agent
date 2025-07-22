@@ -60,7 +60,7 @@ func NewTracerFactory(
 }
 
 // CreateAllTracers creates all configured tracers
-func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistrar) {
+func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistrer) {
 	// Create procfs tracer (starts 5 seconds before other tracers)
 	procfsTracer := NewProcfsTracer(
 		tf.containerCollection,

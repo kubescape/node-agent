@@ -22,8 +22,8 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -204,7 +204,7 @@ func (ns *NetworkStream) Start() {
 	}()
 }
 
-func (ns *NetworkStream) ReportEnrichedEvent(enrichedEvent *containerwatcher.EnrichedEvent) {
+func (ns *NetworkStream) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
 	eventType := enrichedEvent.EventType
 	event := enrichedEvent.Event
 	switch eventType {

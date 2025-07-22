@@ -20,6 +20,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/containerwatcher/v2/tracers"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
@@ -70,8 +71,7 @@ type ContainerWatcher struct {
 	eventEnricher       *EventEnricher
 
 	// Managers
-	containerManager *ContainerManager
-	tracerManagerV2  *V2TracerManager
+	tracerManagerV2 *TracerManager
 
 	// Worker pool for processing events
 	workerPool *ants.PoolWithFunc
@@ -154,7 +154,7 @@ func CreateContainerWatcher(
 
 	// Create worker pool for processing individual events
 	workerPool, err := ants.NewPoolWithFunc(cfg.WorkerPoolSize, func(i interface{}) {
-		enrichedEvent := i.(*containerwatcher.EnrichedEvent)
+		enrichedEvent := i.(*events.EnrichedEvent)
 		eventHandlerFactory.ProcessEvent(enrichedEvent)
 	})
 	if err != nil {
@@ -261,13 +261,9 @@ func (ncw *ContainerWatcher) Start(ctx context.Context) error {
 
 	ncw.ctx = ctx
 
-	// Initialize container manager
-	containerManager := NewContainerManager(ncw)
-	ncw.containerManager = containerManager
-
 	// Start container collection (similar to v1 startContainerCollection)
 	logger.L().TimedWrapper("StartContainerCollection", 5*time.Second, func() {
-		if err := containerManager.StartContainerCollection(ctx); err != nil {
+		if err := ncw.StartContainerCollection(ctx); err != nil {
 			logger.L().Error("error starting container collection", helpers.Error(err))
 		}
 	})
@@ -294,7 +290,7 @@ func (ncw *ContainerWatcher) Start(ctx context.Context) error {
 	)
 
 	// Initialize tracer manager
-	tracerManagerV2 := NewV2TracerManager(ncw, tracerFactory)
+	tracerManagerV2 := NewTracerManager(ncw.cfg, tracerFactory)
 	if err := tracerManagerV2.StartAllTracers(ctx); err != nil {
 		return fmt.Errorf("starting tracer manager: %w", err)
 	}
@@ -317,9 +313,7 @@ func (ncw *ContainerWatcher) Stop() {
 	logger.L().Info("Stopping NewContainerWatcher...")
 
 	// Stop container manager
-	if ncw.containerManager != nil {
-		ncw.containerManager.StopContainerCollection()
-	}
+	ncw.StopContainerCollection()
 
 	// Stop tracer manager
 	if ncw.tracerManagerV2 != nil {
