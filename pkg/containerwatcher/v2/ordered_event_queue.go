@@ -32,8 +32,9 @@ type OrderedEventQueue struct {
 	eventBuffer []eventEntry
 	bufferMutex sync.Mutex
 
-	// Output channel - only sorted events
-	outputChan chan []eventEntry
+	// Channels for event processing
+	sendingChan chan eventEntry // Intermediate channel for sorted events
+	outputChan  chan eventEntry // Output channel - individual sorted events
 
 	// Process tree manager for enriching events
 	processTreeManager processtree.ProcessTreeManager
@@ -52,7 +53,8 @@ func NewOrderedEventQueue(collectionInterval time.Duration, maxBufferSize int, p
 		maxBufferSize:      maxBufferSize,
 		eventBuffer:        make([]eventEntry, 0, maxBufferSize),
 		processTreeManager: processTreeManager,
-		outputChan:         make(chan []eventEntry, 10000),
+		sendingChan:        make(chan eventEntry, maxBufferSize*2), // Buffered intermediate channel
+		outputChan:         make(chan eventEntry),                  // Unbuffered output channel for immediate backpressure
 	}
 }
 
@@ -74,6 +76,9 @@ func (oeq *OrderedEventQueue) Start(ctx context.Context) error {
 
 	// Start the collection timer
 	go oeq.collectionLoop()
+
+	// Start the sending goroutine that reads from sendingChan and sends to outputChan
+	go oeq.sendingLoop()
 
 	logger.L().Info("Ordered event queue started",
 		helpers.String("collectionInterval", oeq.collectionInterval.String()),
@@ -100,18 +105,16 @@ func (oeq *OrderedEventQueue) Stop() {
 	// Process any remaining events
 	oeq.processBufferLocked()
 
-	// Close output channel
-	close(oeq.outputChan)
+	// Close sending channel (which will cause sendingLoop to exit and close outputChan)
+	close(oeq.sendingChan)
 
 	logger.L().Info("Ordered event queue stopped")
 }
 
-// GetOutputChannel returns the output channel for sorted events
-func (oeq *OrderedEventQueue) GetOutputChannel() <-chan []eventEntry {
+func (oeq *OrderedEventQueue) GetOutputChannel() <-chan eventEntry {
 	return oeq.outputChan
 }
 
-// AddEventDirect adds an event directly to the buffer using the event's timestamp if available
 func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event utils.K8sEvent, containerID string, processID uint32) {
 	var timestamp time.Time
 	if tsGetter, ok := event.(interface{ GetTimestamp() int64 }); ok {
@@ -122,17 +125,11 @@ func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event ut
 	oeq.addEvent(eventType, event, timestamp, containerID, processID)
 }
 
-// addEvent adds an event to the buffer
 func (oeq *OrderedEventQueue) addEvent(eventType utils.EventType, event utils.K8sEvent, timestamp time.Time, containerID string, processID uint32) {
 	oeq.bufferMutex.Lock()
 	defer oeq.bufferMutex.Unlock()
 
 	if !oeq.started || oeq.stopped {
-		logger.L().Warning("DROPPING EVENT - Ordered event queue not started or stopped",
-			helpers.String("eventType", string(eventType)),
-			helpers.String("containerID", containerID),
-			helpers.String("started", fmt.Sprintf("%v", oeq.started)),
-			helpers.String("stopped", fmt.Sprintf("%v", oeq.stopped)))
 		return
 	}
 
@@ -141,7 +138,6 @@ func (oeq *OrderedEventQueue) addEvent(eventType utils.EventType, event utils.K8
 		logger.L().Warning("Event buffer full, triggering immediate processing",
 			helpers.Int("bufferSize", len(oeq.eventBuffer)),
 			helpers.Int("maxBufferSize", oeq.maxBufferSize))
-		logger.L().Debug("AFEK - processBufferLocked Processing buffer", helpers.Int("bufferSize", len(oeq.eventBuffer)))
 		oeq.processBufferLocked()
 	}
 
@@ -171,6 +167,30 @@ func (oeq *OrderedEventQueue) collectionLoop() {
 	}
 }
 
+// sendingLoop reads from sendingChan and sends individual events to outputChan (blocking)
+func (oeq *OrderedEventQueue) sendingLoop() {
+	defer close(oeq.outputChan)
+
+	for {
+		select {
+		case <-oeq.ctx.Done():
+			return
+		case event, ok := <-oeq.sendingChan:
+			if !ok {
+				// sendingChan is closed, exit
+				return
+			}
+			// Blocking send to output channel - this ensures no events are dropped
+			select {
+			case oeq.outputChan <- event:
+				// Event sent successfully
+			case <-oeq.ctx.Done():
+				return
+			}
+		}
+	}
+}
+
 // processBuffer processes the current buffer of events
 func (oeq *OrderedEventQueue) processBuffer() {
 	oeq.bufferMutex.Lock()
@@ -184,22 +204,26 @@ func (oeq *OrderedEventQueue) processBufferLocked() {
 		return
 	}
 
-	// Sort events by timestamp
 	sort.Slice(oeq.eventBuffer, func(i, j int) bool {
 		return oeq.eventBuffer[i].Timestamp.Before(oeq.eventBuffer[j].Timestamp)
 	})
-
-	// Create a copy of the buffer for output
-	eventsToOutput := make([]eventEntry, len(oeq.eventBuffer))
-	copy(eventsToOutput, oeq.eventBuffer)
-
-	// Clear the buffer
-	oeq.eventBuffer = oeq.eventBuffer[:0]
-
-	// Send sorted events to output channel
-	select {
-	case oeq.outputChan <- eventsToOutput:
-	default:
-		logger.L().Warning("Output channel full, dropping events", helpers.Int("eventCount", len(eventsToOutput)))
+	for _, event := range oeq.eventBuffer {
+		select {
+		case oeq.sendingChan <- event:
+		case <-oeq.ctx.Done():
+			oeq.eventBuffer = oeq.eventBuffer[:0]
+			return
+		default:
+			logger.L().Warning("Sending channel full, blocking until space available")
+			select {
+			case oeq.sendingChan <- event:
+				// Event sent after waiting
+			case <-oeq.ctx.Done():
+				oeq.eventBuffer = oeq.eventBuffer[:0]
+				return
+			}
+		}
 	}
+
+	oeq.eventBuffer = oeq.eventBuffer[:0]
 }

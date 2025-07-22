@@ -54,14 +54,14 @@ func (ptm *ProcessTreeManagerImpl) Stop() {
 }
 
 func (ptm *ProcessTreeManagerImpl) ReportEvent(eventType utils.EventType, event utils.K8sEvent) error {
-	ptm.mutex.Lock()
-	defer ptm.mutex.Unlock()
 	var processEvent feeder.ProcessEvent
 	processEvent, err := ptm.eventFeeder.ConvertEvent(eventType, event)
 	if err != nil {
 		return fmt.Errorf("failed to convert event: %v", err)
 	}
 
+	ptm.mutex.Lock()
+	defer ptm.mutex.Unlock()
 	ptm.creator.FeedEvent(processEvent)
 	return nil
 }
@@ -73,12 +73,13 @@ func (ptm *ProcessTreeManagerImpl) GetHostProcessTree(pid uint32) (apitypes.Proc
 }
 
 func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32) (apitypes.Process, error) {
-	ptm.mutex.RLock()
-	defer ptm.mutex.RUnlock()
 	cacheKey := fmt.Sprintf("%s:%d", containerID, pid)
 	if cached, exists := ptm.containerProcessTreeCache.Get(cacheKey); exists {
 		return cached, nil
 	}
+
+	ptm.mutex.RLock()
+	defer ptm.mutex.RUnlock()
 
 	processNode, err := ptm.creator.GetProcessNode(int(pid))
 	if err != nil {

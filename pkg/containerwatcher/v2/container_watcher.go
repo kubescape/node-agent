@@ -395,34 +395,19 @@ func (ncw *ContainerWatcher) eventProcessingLoop() {
 		select {
 		case <-ncw.ctx.Done():
 			return
-		case events := <-ncw.orderedEventQueue.GetOutputChannel():
-			ncw.enrichAndProcess(events)
+		case event := <-ncw.orderedEventQueue.GetOutputChannel():
+			ncw.enrichAndProcess(event)
 		}
 	}
 }
 
-// enrichAndProcess processes a batch of events
-func (ncw *ContainerWatcher) enrichAndProcess(events []eventEntry) {
-	// Enrich events with additional data
-	exec := 0
-	for _, event := range events {
-		if event.EventType == utils.ExecveEventType {
-			exec++
-		}
-	}
-
+// enrichAndProcess processes a single event
+func (ncw *ContainerWatcher) enrichAndProcess(event eventEntry) {
+	// Convert single event to slice for compatibility with existing enricher
+	events := []eventEntry{event}
 	enrichedEvents := ncw.eventEnricher.EnrichEvents(events)
-	enrichedExec := 0
-	for _, event := range enrichedEvents {
-		if event.EventType == utils.ExecveEventType {
-			enrichedExec++
-		}
-	}
 
-	if exec != enrichedExec {
-		logger.L().Error("AFEK - Execve events mismatch", helpers.Int("exec", exec), helpers.Int("enrichedExec", enrichedExec))
-	}
-
+	// Process the enriched event (should be exactly one)
 	for _, enrichedEvent := range enrichedEvents {
 		err := ncw.workerPool.Invoke(enrichedEvent)
 		if err != nil {
