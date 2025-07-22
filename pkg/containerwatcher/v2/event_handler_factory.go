@@ -7,8 +7,6 @@ import (
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
@@ -190,9 +188,6 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	// Get handlers for this event type
 	handlers, exists := ehf.handlers[enrichedEvent.EventType]
 	if !exists {
-		logger.L().Warning("DROPPING EVENT - No handlers registered for event type",
-			helpers.String("eventType", string(enrichedEvent.EventType)),
-			helpers.String("containerID", enrichedEvent.ContainerID))
 		return
 	}
 
@@ -254,15 +249,6 @@ func (ehf *EventHandlerFactory) registerHandlers(
 
 	// IoUring events
 	ehf.handlers[utils.IoUringEventType] = []Manager{ruleManager, rulePolicy}
-
-	// Fork events
-	ehf.handlers[utils.ForkEventType] = []Manager{ruleManager, metrics}
-
-	// Exit events
-	ehf.handlers[utils.ExitEventType] = []Manager{ruleManager, metrics}
-
-	// Procfs events
-	ehf.handlers[utils.ProcfsEventType] = []Manager{ruleManager, metrics}
 
 	// Note: SyscallEventType is not registered here because the syscall tracer
 	// doesn't generate events - it only provides a peek function for other components
