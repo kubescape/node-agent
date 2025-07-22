@@ -75,6 +75,7 @@ type ContainerWatcher struct {
 
 	// Worker pool for processing events
 	workerPool *ants.PoolWithFunc
+	workerChan chan *events.EnrichedEvent // Channel for worker pool invocation
 
 	// Third party components
 	thirdPartyTracers            mapset.Set[containerwatcher.CustomTracer]
@@ -189,6 +190,7 @@ func CreateContainerWatcher(
 		processTreeManager:  processTreeManager,
 		eventEnricher:       eventEnricher,
 		workerPool:          workerPool,
+		workerChan:          make(chan *events.EnrichedEvent, cfg.WorkerPoolSize*4), // Buffer size 4x worker pool size
 
 		// Third party components
 		thirdPartyTracers:            mapset.NewSet[containerwatcher.CustomTracer](),
@@ -274,6 +276,9 @@ func (ncw *ContainerWatcher) Start(ctx context.Context) error {
 	// Start event processing loop
 	go ncw.eventProcessingLoop()
 
+	// Start worker pool goroutine
+	go ncw.workerPoolLoop()
+
 	// Create tracer factory
 	tracerFactory := tracers.NewTracerFactory(
 		ncw.containerCollection,
@@ -319,6 +324,11 @@ func (ncw *ContainerWatcher) Stop() {
 	}
 
 	// No need to stop queue - it's just a data structure
+
+	// Close worker channel to signal worker goroutine to stop
+	if ncw.workerChan != nil {
+		close(ncw.workerChan)
+	}
 
 	// Stop worker pool
 	if ncw.workerPool != nil {
@@ -395,9 +405,42 @@ func (ncw *ContainerWatcher) eventProcessingLoop() {
 	}
 }
 
+func (ncw *ContainerWatcher) workerPoolLoop() {
+	for {
+		select {
+		case <-ncw.ctx.Done():
+			return
+		case enrichedEvent := <-ncw.workerChan:
+			// Performance monitoring for workerPool.Invoke
+			workerStart := time.Now()
+			err := ncw.workerPool.Invoke(enrichedEvent)
+			workerDuration := time.Since(workerStart)
+
+			// Log if workerPool.Invoke takes longer than 50ms
+			if workerDuration > 50*time.Millisecond {
+				logger.L().Warning("AFEK - Slow workerPool.Invoke execution",
+					helpers.String("eventType", string(enrichedEvent.EventType)),
+					helpers.String("containerID", enrichedEvent.ContainerID),
+					helpers.String("workerDuration", workerDuration.String()))
+			}
+
+			if err != nil {
+				logger.L().Error("AFEK - Failed to submit event to worker pool",
+					helpers.String("eventType", string(enrichedEvent.EventType)),
+					helpers.String("containerID", enrichedEvent.ContainerID),
+					helpers.Error(err))
+			}
+		}
+	}
+}
+
 func (ncw *ContainerWatcher) processQueueBatch() {
+	const batchSize = 1000
+
 	processedCount := 0
-	for !ncw.orderedEventQueue.Empty() {
+	firstEventTime := time.Now()
+
+	for !ncw.orderedEventQueue.Empty() && processedCount < batchSize {
 		event, ok := ncw.orderedEventQueue.PopEvent()
 		if !ok {
 			break
@@ -406,30 +449,23 @@ func (ncw *ContainerWatcher) processQueueBatch() {
 		processedCount++
 	}
 
-	logger.L().Debug("AFEK - ContainerWatcher - Processed event batch",
-		helpers.Int("eventCount", processedCount),
-		helpers.Int("queueSize", ncw.orderedEventQueue.Size()))
+	if processedCount > 0 {
+		logger.L().Debug("AFEK - ContainerWatcher - Processed event batch for all",
+			helpers.Int("eventCount", processedCount),
+			helpers.Int("queueSize", ncw.orderedEventQueue.Size()),
+			helpers.String("duration", time.Since(firstEventTime).String()),
+			helpers.String("avgPerEvent", (time.Since(firstEventTime)/time.Duration(processedCount)).String()))
+	}
 }
 
 func (ncw *ContainerWatcher) enrichAndProcess(event eventEntry) {
-	if event.EventType == utils.ExecveEventType {
-		logger.L().Debug("AFEK - ContainerWatcher - Execve event",
-			helpers.String("eventType", string(event.EventType)),
-			helpers.String("containerID", event.ContainerID),
-			helpers.String("event", fmt.Sprintf("%+v", event)))
-	}
-
 	enrichedEvent := ncw.eventEnricher.EnrichEvents(event)
 
-	if event.EventType == utils.ExecveEventType && enrichedEvent == nil {
-		logger.L().Error("AFEK - ContainerWatcher - No enriched events for execve event",
+	select {
+	case ncw.workerChan <- enrichedEvent:
+	default:
+		logger.L().Warning("AFEK - Worker channel full, dropping event",
 			helpers.String("eventType", string(event.EventType)),
 			helpers.String("containerID", event.ContainerID))
-	}
-
-	// Process the enriched event (should be exactly one)
-	err := ncw.workerPool.Invoke(enrichedEvent)
-	if err != nil {
-		logger.L().Error("AFEK - Failed to submit event to worker pool", helpers.String("eventType", string(enrichedEvent.EventType)), helpers.String("containerID", enrichedEvent.ContainerID), helpers.Error(err))
 	}
 }

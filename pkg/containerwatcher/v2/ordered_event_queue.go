@@ -1,7 +1,6 @@
 package containerwatcher
 
 import (
-	"fmt"
 	"reflect"
 	"time"
 
@@ -62,17 +61,9 @@ func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event ut
 		} else if ts, ok := timestampField.Interface().(time.Time); ok {
 			timestamp = ts
 		} else {
-			logger.L().Warning("AFEK - Ordered event queue - Timestamp field has unexpected type",
-				helpers.String("eventType", string(eventType)),
-				helpers.String("containerID", containerID),
-				helpers.String("timestampType", fmt.Sprintf("%T", timestampField.Interface())))
 			timestamp = time.Now()
 		}
 	} else {
-		// Fallback: use current time
-		logger.L().Warning("AFEK - Ordered event queue - Event has no timestamp, using current time",
-			helpers.String("eventType", string(eventType)),
-			helpers.String("containerID", containerID))
 		timestamp = time.Now()
 	}
 
@@ -88,7 +79,7 @@ func (oeq *OrderedEventQueue) AddEventDirect(eventType utils.EventType, event ut
 	oeq.eventQueue.Push(eventEntry, priority)
 
 	if oeq.eventQueue.Size() >= uint(oeq.maxBufferSize) {
-		logger.L().Warning("AFEK - Ordered event queue - Event queue full, sending processing alert",
+		logger.L().Warning("Ordered event queue - Event queue full, sending processing alert",
 			helpers.Int("queueSize", int(oeq.eventQueue.Size())),
 			helpers.Int("maxBufferSize", oeq.maxBufferSize))
 

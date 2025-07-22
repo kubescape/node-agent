@@ -56,6 +56,7 @@ type EventHandlerFactory struct {
 	thirdPartyEnricher       containerwatcher.TaskBasedEnricher
 	cfg                      config.Config
 	containerCollection      *containercollection.ContainerCollection
+	containerCache           *maps.SafeMap[string, *containercollection.Container] // Cache for container lookups
 }
 
 // NewEventHandlerFactory creates a new event handler factory
@@ -78,6 +79,7 @@ func NewEventHandlerFactory(
 		thirdPartyEnricher:       thirdPartyEnricher,
 		cfg:                      cfg,
 		containerCollection:      containerCollection,
+		containerCache:           &maps.SafeMap[string, *containercollection.Container]{},
 	}
 
 	// Create adapters for managers that don't implement the Manager interface directly
@@ -170,19 +172,18 @@ func NewEventHandlerFactory(
 
 // ProcessEvent processes an event through all registered handlers
 func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent) {
+	if enrichedEvent.ContainerID == "" {
+		return
+	}
+
 	// Get container information to check if it should be ignored
 	container, err := ehf.getContainerInfo(enrichedEvent.ContainerID)
 	if err != nil || container == nil {
-		if enrichedEvent.EventType == utils.ExecveEventType {
-			logger.L().Error("AFEK - Failed to get container info", helpers.Error(err), helpers.String("containerID", enrichedEvent.ContainerID))
-		}
+
 		return
 	}
 
 	if ehf.cfg.IgnoreContainer(container.K8s.Namespace, container.K8s.PodName, container.K8s.PodLabels) {
-		if enrichedEvent.EventType == utils.ExecveEventType {
-			logger.L().Error("AFEK - Container is ignored", helpers.String("containerID", enrichedEvent.ContainerID))
-		}
 		return
 	}
 
@@ -278,10 +279,17 @@ func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(eventType utils.E
 
 // getContainerInfo retrieves container information by container ID
 func (ehf *EventHandlerFactory) getContainerInfo(containerID string) (*containercollection.Container, error) {
+	// Check cache first
+	if container := ehf.containerCache.Get(containerID); container != nil {
+		return container, nil
+	}
+
 	// Get all containers and search for the one with matching ID
 	containers := ehf.containerCollection.GetContainersBySelector(&containercollection.ContainerSelector{})
 	for _, container := range containers {
 		if container.Runtime.ContainerID == containerID {
+			// Cache the result
+			ehf.containerCache.Set(containerID, container)
 			return container, nil
 		}
 	}

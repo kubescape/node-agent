@@ -113,6 +113,14 @@ func (ot *OpenTracer) openEventCallback(event *traceropentype.Event) {
 		event.Path = event.FullPath
 	}
 
+	if event.K8s.ContainerName == "" {
+		return
+	}
+
+	if isDroppedEvent(event.Type, event.Message) {
+		return
+	}
+
 	if event.Err > -1 && event.FullPath != "" {
 		openEvent := &events.OpenEvent{Event: *event}
 		// Handle the event with syscall enrichment

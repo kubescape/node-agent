@@ -63,6 +63,7 @@ func (ptm *ProcessTreeManagerImpl) ReportEvent(eventType utils.EventType, event 
 	ptm.mutex.Lock()
 	defer ptm.mutex.Unlock()
 	ptm.creator.FeedEvent(processEvent)
+
 	return nil
 }
 
@@ -78,10 +79,15 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 		return cached, nil
 	}
 
-	ptm.mutex.RLock()
-	defer ptm.mutex.RUnlock()
+	// Get process node first (minimal lock scope)
+	var processNode *apitypes.Process
+	var err error
+	func() {
+		ptm.mutex.RLock()
+		defer ptm.mutex.RUnlock()
+		processNode, err = ptm.creator.GetProcessNode(int(pid))
+	}()
 
-	processNode, err := ptm.creator.GetProcessNode(int(pid))
 	if err != nil {
 		return apitypes.Process{}, fmt.Errorf("failed to get process node: %v", err)
 	}
@@ -90,11 +96,20 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 		return apitypes.Process{}, fmt.Errorf("process with PID %d not found in container %s", pid, containerID)
 	}
 
-	containerSubtree, subtreeErr := ptm.containerTree.GetPidBranch(containerID, pid, ptm.creator.GetProcessMap())
+	// Get container subtree (separate lock scope)
+	var containerSubtree apitypes.Process
+	var subtreeErr error
+	func() {
+		ptm.mutex.RLock()
+		defer ptm.mutex.RUnlock()
+		containerSubtree, subtreeErr = ptm.containerTree.GetPidBranch(containerID, pid, ptm.creator.GetProcessMap())
+	}()
+
 	if subtreeErr != nil {
 		return apitypes.Process{}, fmt.Errorf("failed to get container subtree: %v", subtreeErr)
 	}
 
+	// Cache the result
 	ptm.containerProcessTreeCache.Add(cacheKey, containerSubtree)
 
 	return containerSubtree, nil
