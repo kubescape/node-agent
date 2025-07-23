@@ -35,31 +35,6 @@ static __always_inline bool valid_uid(uid_t uid)
     return uid != INVALID_UID;
 }
 
-static __always_inline bool has_upper_layer()
-{
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    struct inode *inode = BPF_CORE_READ(task, mm, exe_file, f_inode);
-    if (!inode) {
-        return false;
-    }
-    unsigned long sb_magic = BPF_CORE_READ(inode, i_sb, s_magic);
-
-    if (sb_magic != OVERLAYFS_SUPER_MAGIC) {
-        return false;
-    }
-
-    struct dentry *upperdentry;
-
-    // struct ovl_inode defined in fs/overlayfs/ovl_entry.h
-    // Unfortunately, not exported to vmlinux.h
-    // and not available in /sys/kernel/btf/vmlinux
-    // See https://github.com/cilium/ebpf/pull/1300
-    // We only rely on vfs_inode and __upperdentry relative positions
-    bpf_probe_read_kernel(&upperdentry, sizeof(upperdentry),
-                  ((void *)inode) +
-                      bpf_core_type_size(struct inode));
-    return upperdentry != NULL;
-}
 
 // Helper functions to get task information
 static __always_inline u64 get_task_start_time(struct task_struct *task)
@@ -173,7 +148,6 @@ int tracepoint__sched_fork(struct bpf_raw_tracepoint_args *ctx)
     event->ppid = parent_pid;
     event->uid = uid;
     event->gid = (u32)(uid_gid >> 32);
-    event->upper_layer = has_upper_layer();
     event->child_pid = child_pid;
     event->child_tid = child_tid;
     

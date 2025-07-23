@@ -113,8 +113,6 @@ func (ef *EventFeeder) convertExitEvent(exitEvent *tracerexittype.Event) Process
 		Timestamp:   time.Now(),
 		PID:         exitEvent.Pid,
 		PPID:        exitEvent.PPid,
-		Comm:        exitEvent.Comm,
-		Path:        exitEvent.ExePath,
 		StartTimeNs: uint64(exitEvent.Timestamp), // Use event timestamp for consistency
 	}
 

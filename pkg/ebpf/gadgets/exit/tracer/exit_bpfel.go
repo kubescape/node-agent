@@ -21,8 +21,6 @@ type exitEvent struct {
 	Uid        uint32
 	Gid        uint32
 	UpperLayer bool
-	Comm       [16]uint8
-	Exepath    [512]uint8
 	_          [3]byte
 	ExitCode   uint32
 	ExitSignal uint32

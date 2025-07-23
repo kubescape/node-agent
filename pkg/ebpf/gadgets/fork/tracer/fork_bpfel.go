@@ -13,19 +13,18 @@ import (
 )
 
 type forkEvent struct {
-	Timestamp  uint64
-	MntnsId    uint64
-	Pid        uint32
-	Tid        uint32
-	Ppid       uint32
-	Uid        uint32
-	Gid        uint32
-	UpperLayer bool
-	Comm       [16]uint8
-	Exepath    [512]uint8
-	_          [3]byte
-	ChildPid   uint32
-	ChildTid   uint32
+	Timestamp uint64
+	MntnsId   uint64
+	Pid       uint32
+	Tid       uint32
+	Ppid      uint32
+	Uid       uint32
+	Gid       uint32
+	Comm      [16]uint8
+	Exepath   [512]uint8
+	ChildPid  uint32
+	ChildTid  uint32
+	_         [4]byte
 }
 
 // loadFork returns the embedded CollectionSpec for fork.
