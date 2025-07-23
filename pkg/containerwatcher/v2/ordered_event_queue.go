@@ -21,12 +21,9 @@ type eventEntry struct {
 }
 
 type OrderedEventQueue struct {
-	maxBufferSize int
-
-	eventQueue *lane.PriorityQueue[eventEntry, int64]
-
-	fullQueueAlert chan struct{}
-
+	maxBufferSize      int
+	eventQueue         *lane.PriorityQueue[eventEntry, int64]
+	fullQueueAlert     chan struct{}
 	processTreeManager processtree.ProcessTreeManager
 }
 

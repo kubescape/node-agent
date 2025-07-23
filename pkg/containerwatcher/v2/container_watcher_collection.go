@@ -46,6 +46,7 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 	// Set up container callbacks
 	cw.callbacks = []containercollection.FuncNotify{
 		cw.containerCallbackAsync,
+		cw.containerProcessTree.ContainerCallback,
 		cw.containerProfileManager.ContainerCallback,
 		cw.objectCache.ApplicationProfileCache().ContainerCallback,
 		cw.objectCache.NetworkNeighborhoodCache().ContainerCallback,
@@ -54,7 +55,6 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 		cw.sbomManager.ContainerCallback,
 		cw.dnsManager.ContainerCallback,
 		cw.networkStreamClient.ContainerCallback,
-		cw.containerProcessTree.ContainerCallback,
 	}
 
 	for receiver := range cw.thirdPartyContainerReceivers.Iter() {

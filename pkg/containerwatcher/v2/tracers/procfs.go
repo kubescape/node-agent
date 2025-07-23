@@ -46,7 +46,7 @@ func NewProcfsTracer(
 		tracerCollection:    tracerCollection,
 		containerSelector:   containerSelector,
 		eventCallback:       eventCallback,
-		procfsFeeder:        feeder.NewProcfsFeeder(cfg.ProcfsScanInterval), // Scan every 5 seconds
+		procfsFeeder:        feeder.NewProcfsFeeder(cfg.ProcfsScanInterval),
 	}
 }
 

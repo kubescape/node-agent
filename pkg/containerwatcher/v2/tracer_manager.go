@@ -8,46 +8,48 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
-	containerwatcherroot "github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type TracerManager struct {
-	cfg           config.Config
-	tracers       map[utils.EventType]containerwatcherroot.TracerInterface
-	tracerFactory containerwatcherroot.TracerFactoryInterface
+	cfg               config.Config
+	tracers           map[utils.EventType]containerwatcher.TracerInterface
+	tracerFactory     containerwatcher.TracerFactoryInterface
+	thirdPartyTracers []containerwatcher.CustomTracer
 }
 
-func NewTracerManager(cfg config.Config, tracerFactory containerwatcherroot.TracerFactoryInterface) *TracerManager {
+func NewTracerManager(cfg config.Config, tracerFactory containerwatcher.TracerFactoryInterface) *TracerManager {
 	return &TracerManager{
-		cfg:           cfg,
-		tracers:       make(map[utils.EventType]containerwatcherroot.TracerInterface),
-		tracerFactory: tracerFactory,
+		cfg:               cfg,
+		tracers:           make(map[utils.EventType]containerwatcher.TracerInterface),
+		tracerFactory:     tracerFactory,
+		thirdPartyTracers: make([]containerwatcher.CustomTracer, 0),
 	}
 }
 
-func (vtm *TracerManager) RegisterTracer(tracer containerwatcherroot.TracerInterface) {
-	vtm.tracers[tracer.GetEventType()] = tracer
+func (tm *TracerManager) RegisterTracer(tracer containerwatcher.TracerInterface) {
+	tm.tracers[tracer.GetEventType()] = tracer
 }
 
-func (vtm *TracerManager) GetTracer(eventType utils.EventType) (containerwatcherroot.TracerInterface, bool) {
-	tracer, exists := vtm.tracers[eventType]
+func (tm *TracerManager) GetTracer(eventType utils.EventType) (containerwatcher.TracerInterface, bool) {
+	tracer, exists := tm.tracers[eventType]
 	return tracer, exists
 }
 
-func (vtm *TracerManager) GetAllTracers() map[utils.EventType]containerwatcherroot.TracerInterface {
-	return vtm.tracers
+func (tm *TracerManager) GetAllTracers() map[utils.EventType]containerwatcher.TracerInterface {
+	return tm.tracers
 }
 
-func (vtm *TracerManager) StartAllTracers(ctx context.Context) error {
-	vtm.tracerFactory.CreateAllTracers(vtm)
+func (tm *TracerManager) StartAllTracers(ctx context.Context) error {
+	tm.tracerFactory.CreateAllTracers(tm)
 
-	if err := vtm.startProcfsTracer(ctx); err != nil {
+	if err := tm.startProcfsTracer(ctx); err != nil {
 		return err
 	}
 
-	for _, tracer := range vtm.tracers {
-		if tracer.IsEnabled(vtm.cfg) {
+	for _, tracer := range tm.tracers {
+		if tracer.IsEnabled(tm.cfg) {
 			if err := tracer.Start(ctx); err != nil {
 				return err
 			}
@@ -55,18 +57,19 @@ func (vtm *TracerManager) StartAllTracers(ctx context.Context) error {
 		}
 	}
 
-	if err := vtm.tracerFactory.StartThirdPartyTracers(ctx); err != nil {
+	tm.thirdPartyTracers = tm.tracerFactory.GetThirdPartyTracers()
+	if err := tm.startThirdPartyTracers(); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (vtm *TracerManager) StopAllTracers() error {
-	vtm.tracerFactory.StopThirdPartyTracers()
+func (tm *TracerManager) StopAllTracers() error {
+	tm.stopThirdPartyTracers()
 
 	var lastErr error
-	for _, tracer := range vtm.tracers {
+	for _, tracer := range tm.tracers {
 		if err := tracer.Stop(); err != nil {
 			lastErr = err
 		}
@@ -74,10 +77,10 @@ func (vtm *TracerManager) StopAllTracers() error {
 	return lastErr
 }
 
-func (vtm *TracerManager) startProcfsTracer(ctx context.Context) error {
-	if tracer, exists := vtm.GetTracer(utils.ProcfsEventType); exists {
-		delete(vtm.tracers, utils.ProcfsEventType)
-		if tracer.IsEnabled(vtm.cfg) {
+func (tm *TracerManager) startProcfsTracer(ctx context.Context) error {
+	if tracer, exists := tm.GetTracer(utils.ProcfsEventType); exists {
+		delete(tm.tracers, utils.ProcfsEventType)
+		if tracer.IsEnabled(tm.cfg) {
 			logger.L().Info("Starting procfs tracer 5 seconds before other tracers")
 			if err := tracer.Start(ctx); err != nil {
 				return fmt.Errorf("starting procfs tracer: %w", err)
@@ -86,10 +89,31 @@ func (vtm *TracerManager) startProcfsTracer(ctx context.Context) error {
 	}
 
 	select {
-	case <-time.After(vtm.cfg.ProcfsScanInterval):
+	case <-time.After(tm.cfg.ProcfsScanInterval):
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 
 	return nil
+}
+
+// startThirdPartyTracers starts all registered third-party tracers
+func (tm *TracerManager) startThirdPartyTracers() error {
+	for _, tracer := range tm.thirdPartyTracers {
+		if err := tracer.Start(); err != nil {
+			logger.L().Error("error starting custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+			return fmt.Errorf("starting custom tracer %s: %w", tracer.Name(), err)
+		}
+		logger.L().Info("started custom tracer", helpers.String("tracer", tracer.Name()))
+	}
+	return nil
+}
+
+// stopThirdPartyTracers stops all registered third-party tracers
+func (tm *TracerManager) stopThirdPartyTracers() {
+	for _, tracer := range tm.thirdPartyTracers {
+		if err := tracer.Stop(); err != nil {
+			logger.L().Error("error stopping custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+		}
+	}
 }

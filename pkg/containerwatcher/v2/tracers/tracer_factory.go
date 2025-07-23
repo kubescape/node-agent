@@ -1,15 +1,10 @@
 package tracers
 
 import (
-	"context"
-	"fmt"
-
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
@@ -222,25 +217,13 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	manager.RegisterTracer(topTracer)
 }
 
-// StartThirdPartyTracers starts all registered third-party tracers
-func (tf *TracerFactory) StartThirdPartyTracers(ctx context.Context) error {
+// GetThirdPartyTracers returns all registered third-party tracers
+func (tf *TracerFactory) GetThirdPartyTracers() []containerwatcher.CustomTracer {
+	tracers := make([]containerwatcher.CustomTracer, 0, tf.thirdPartyTracers.Cardinality())
 	for tracer := range tf.thirdPartyTracers.Iter() {
-		if err := tracer.Start(); err != nil {
-			logger.L().Error("error starting custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
-			return fmt.Errorf("starting custom tracer %s: %w", tracer.Name(), err)
-		}
-		logger.L().Info("started custom tracer", helpers.String("tracer", tracer.Name()))
+		tracers = append(tracers, tracer)
 	}
-	return nil
-}
-
-// StopThirdPartyTracers stops all registered third-party tracers
-func (tf *TracerFactory) StopThirdPartyTracers() {
-	for tracer := range tf.thirdPartyTracers.Iter() {
-		if err := tracer.Stop(); err != nil {
-			logger.L().Error("error stopping custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
-		}
-	}
+	return tracers
 }
 
 // createEventCallback creates a simple callback that sends events directly to the ordered event queue
