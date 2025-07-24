@@ -20,3 +20,11 @@ func (event *ExecEvent) GetExtra() interface{} {
 func (event *ExecEvent) GetPID() uint64 {
 	return (uint64(event.Ppid) << 32) | uint64(event.Ptid)
 }
+
+func (event *ExecEvent) ToJson()
+	json, err := json.Marshal(event)
+	if err != nil {
+		return "", err
+	}
+	return string(json), nil
+}
