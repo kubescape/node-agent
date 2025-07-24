@@ -245,6 +245,7 @@ require (
 	github.com/ncw/directio v1.0.5 // indirect
 	github.com/nwaples/rardecode v1.1.3 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
+	github.com/oleiade/lane/v2 v2.0.0 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/olvrng/ujson v1.1.0 // indirect
 	github.com/opencontainers/runtime-spec v1.2.1 // indirect
@@ -283,6 +284,7 @@ require (
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/spf13/cobra v1.9.1 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/stripe/stripe-go/v74 v74.30.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/sylabs/sif/v2 v2.21.1 // indirect

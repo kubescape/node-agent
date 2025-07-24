@@ -6,10 +6,11 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-type ResultCallback func(utils.EnrichEvent)
+type ResultCallback func(utils.K8sEvent, string, uint32)
 
 type ContainerWatcher interface {
 	Ready() bool
@@ -35,10 +36,14 @@ type EventReceiver interface {
 	ReportEvent(eventType utils.EventType, event utils.K8sEvent)
 }
 
+type EnrichedEventReceiver interface {
+	ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent)
+}
+
 type ContainerReceiver interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
 }
 
 type TaskBasedEnricher interface {
-	SubmitEnrichmentTask(event utils.EnrichEvent, syscalls []uint64, callback ResultCallback)
+	SubmitEnrichmentTask(event utils.EnrichEvent, syscalls []uint64, callback ResultCallback, containerID string, processID uint32)
 }

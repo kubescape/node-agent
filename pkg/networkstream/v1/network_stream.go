@@ -23,8 +23,9 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/processmanager"
+	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -44,10 +45,10 @@ type NetworkStream struct {
 	httpClient                *http.Client
 	eventsNotificationChannel chan apitypes.NetworkStream
 	dnsSupport                bool
-	processTreeManager        processmanager.ProcessManagerClient
+	processTreeManager        processtree.ProcessTreeManager
 }
 
-func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, nodeName string, eventsNotificationChannel chan apitypes.NetworkStream, dnsSupport bool, processTreeManager processmanager.ProcessManagerClient) (*NetworkStream, error) {
+func NewNetworkStream(ctx context.Context, cfg config.Config, k8sObjectCache objectcache.K8sObjectCache, dnsResolver dnsmanager.DNSResolver, nodeName string, eventsNotificationChannel chan apitypes.NetworkStream, dnsSupport bool, processTreeManager processtree.ProcessTreeManager) (*NetworkStream, error) {
 	var k8sInventory common.K8sInventoryCache
 
 	if cfg.KubernetesMode {
@@ -203,7 +204,9 @@ func (ns *NetworkStream) Start() {
 	}()
 }
 
-func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
+func (ns *NetworkStream) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
+	eventType := enrichedEvent.EventType
+	event := enrichedEvent.Event
 	switch eventType {
 	case utils.NetworkEventType:
 		networkEvent, ok := event.(*tracernetworktype.Event)
@@ -215,7 +218,7 @@ func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sE
 			return // Ignore localhost events
 		}
 
-		ns.handleNetworkEvent(networkEvent)
+		ns.handleNetworkEvent(networkEvent, &apitypes.ProcessTree{ProcessTree: enrichedEvent.ProcessTree, ContainerID: enrichedEvent.ContainerID})
 	case utils.DnsEventType:
 		if !ns.dnsSupport {
 			return
@@ -229,14 +232,47 @@ func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sE
 			return
 		}
 
-		ns.handleDnsEvent(dnsEvent)
+		ns.handleDnsEvent(dnsEvent, &apitypes.ProcessTree{ProcessTree: enrichedEvent.ProcessTree, ContainerID: enrichedEvent.ContainerID})
 
 	default:
 		logger.L().Error("NetworkStream - unknown event type", helpers.String("event type", string(eventType)))
 	}
 }
 
-func (ns *NetworkStream) handleDnsEvent(event *tracerdnstype.Event) {
+func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
+	switch eventType {
+	case utils.NetworkEventType:
+		networkEvent, ok := event.(*tracernetworktype.Event)
+		if !ok {
+			return
+		}
+
+		if networkEvent.PktType == "HOST" && networkEvent.PodHostIP == networkEvent.DstEndpoint.Addr || networkEvent.DstEndpoint.Addr == "127.0.0.1" {
+			return // Ignore localhost events
+		}
+
+		ns.handleNetworkEvent(networkEvent, nil)
+	case utils.DnsEventType:
+		if !ns.dnsSupport {
+			return
+		}
+
+		dnsEvent, ok := event.(*tracerdnstype.Event)
+		if !ok {
+			return
+		}
+		if !ns.shouldReportDnsEvent(dnsEvent) {
+			return
+		}
+
+		ns.handleDnsEvent(dnsEvent, nil)
+
+	default:
+		logger.L().Error("NetworkStream - unknown event type", helpers.String("event type", string(eventType)))
+	}
+}
+
+func (ns *NetworkStream) handleDnsEvent(event *tracerdnstype.Event, processTree *apitypes.ProcessTree) {
 	ns.eventsStorageMutex.Lock()
 	defer ns.eventsStorageMutex.Unlock()
 
@@ -265,8 +301,8 @@ func (ns *NetworkStream) handleDnsEvent(event *tracerdnstype.Event) {
 		Kind:      apitypes.EndpointKindRaw,
 	}
 
-	processTree := ns.getProcessTreeByPid(event.Runtime.ContainerID, event.Pid, event.Comm)
-	networkEvent.ProcessTree = &processTree
+	processTree = ns.getProcessTreeByPid(event.Pid, event.Comm, processTree)
+	networkEvent.ProcessTree = processTree
 
 	entity.Outbound[event.DNSName] = networkEvent
 	ns.networkEventsStorage.Entities[entityId] = entity
@@ -288,7 +324,7 @@ func (hns *NetworkStream) shouldReportDnsEvent(dnsEvent *tracerdnstype.Event) bo
 	return true
 }
 
-func (ns *NetworkStream) handleNetworkEvent(event *tracernetworktype.Event) {
+func (ns *NetworkStream) handleNetworkEvent(event *tracernetworktype.Event, processTree *apitypes.ProcessTree) {
 	endpointID := getNetworkEndpointIdentifier(event)
 
 	ns.eventsStorageMutex.Lock()
@@ -310,20 +346,20 @@ func (ns *NetworkStream) handleNetworkEvent(event *tracernetworktype.Event) {
 			// If the event already exists, we can skip it
 			return
 		}
-		networkEvent := ns.buildNetworkEvent(event)
+		networkEvent := ns.buildNetworkEvent(event, processTree)
 		entity.Outbound[endpointID] = networkEvent
 	} else {
 		if _, exists := entity.Inbound[endpointID]; exists {
 			// If the event already exists, we can skip it
 			return
 		}
-		networkEvent := ns.buildNetworkEvent(event)
+		networkEvent := ns.buildNetworkEvent(event, processTree)
 		entity.Inbound[endpointID] = networkEvent
 	}
 	ns.networkEventsStorage.Entities[entityId] = entity
 }
 
-func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apitypes.NetworkStreamEvent {
+func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event, processTree *apitypes.ProcessTree) apitypes.NetworkStreamEvent {
 	var domain string
 	var ok bool
 	if event.PktType == "OUTGOING" {
@@ -383,36 +419,10 @@ func (ns *NetworkStream) buildNetworkEvent(event *tracernetworktype.Event) apity
 
 	networkEvent.Kind = apitypes.EndpointKind(event.DstEndpoint.Kind)
 
-	processTree := ns.getProcessTreeByPid(event.Runtime.ContainerID, event.Pid, event.Comm)
-	networkEvent.ProcessTree = &processTree
+	processTree = ns.getProcessTreeByPid(event.Pid, event.Comm, processTree)
+	networkEvent.ProcessTree = processTree
 
 	return networkEvent
-}
-
-func (ns *NetworkStream) getProcessTreeByPid(containerID string, pid uint32, comm string) apitypes.ProcessTree {
-	if containerID == "" || ns.k8sObjectCache == nil {
-		// If we don't have a container ID, we can't get the process tree
-		// So we just return the PID
-		return apitypes.ProcessTree{
-			ProcessTree: apitypes.Process{
-				PID: pid,
-			},
-		}
-	}
-
-	processTree, err := ns.processTreeManager.GetProcessTreeForPID(containerID, apitypes.CommPID{Comm: comm, PID: pid})
-	if err != nil {
-		logger.L().Debug("NetworkStream - failed to get process tree", helpers.Error(err), helpers.Int("pid", int(pid)))
-		return apitypes.ProcessTree{
-			ProcessTree: apitypes.Process{
-				PID: pid,
-			},
-		}
-	}
-
-	return apitypes.ProcessTree{
-		ProcessTree: processTree,
-	}
 }
 
 func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream) error {
@@ -493,5 +503,20 @@ func removeProcessTreeFromEvents(networkStream *apitypes.NetworkStream) {
 			entity.Outbound[eventId] = event
 		}
 		networkStream.Entities[entityId] = entity
+	}
+}
+
+func (ns *NetworkStream) getProcessTreeByPid(pid uint32, comm string, processTree *apitypes.ProcessTree) *apitypes.ProcessTree {
+	if processTree != nil {
+		return processTree
+	}
+
+	logger.L().Debug("NetworkStream - getting process tree by pid", helpers.Int("pid", int(pid)), helpers.String("comm", comm))
+
+	return &apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			PID:  pid,
+			Comm: comm,
+		},
 	}
 }

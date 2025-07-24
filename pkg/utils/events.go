@@ -19,6 +19,8 @@ type EnrichEvent interface {
 	GetPID() uint64
 	SetExtra(extra interface{})
 	GetExtra() interface{}
+	GetPod() string
+	GetNamespace() string
 }
 
 type EventType string
@@ -37,6 +39,9 @@ const (
 	HTTPEventType         EventType = "http"
 	PtraceEventType       EventType = "ptrace"
 	IoUringEventType      EventType = "iouring"
+	ForkEventType         EventType = "fork"
+	ExitEventType         EventType = "exit"
+	ProcfsEventType       EventType = "procfs"
 	AllEventType          EventType = "all"
 )
 

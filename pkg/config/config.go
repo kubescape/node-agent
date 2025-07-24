@@ -49,11 +49,13 @@ type Config struct {
 	KubernetesMode                 bool                            `mapstructure:"kubernetesMode"`
 	NetworkStreamingInterval       time.Duration                   `mapstructure:"networkStreamingInterval"`
 	WorkerPoolSize                 int                             `mapstructure:"workerPoolSize"`
+	EventBatchSize                 int                             `mapstructure:"eventBatchSize"`
 	TestMode                       bool                            `mapstructure:"testMode"`
 	ExcludeJsonPaths               []string                        `mapstructure:"excludeJsonPaths"`
 	ProfilesCacheRefreshRate       time.Duration                   `mapstructure:"profilesCacheRefreshRate"`
 	RuleCoolDown                   rulecooldown.RuleCooldownConfig `mapstructure:"ruleCooldown"`
 	EnablePartialProfileGeneration bool                            `mapstructure:"partialProfileGenerationEnabled"`
+	ProcfsScanInterval             time.Duration                   `mapstructure:"procfsScanInterval"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -78,7 +80,8 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("networkStreamingEnabled", false)
 	viper.SetDefault("kubernetesMode", true)
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
-	viper.SetDefault("workerPoolSize", 10)
+	viper.SetDefault("workerPoolSize", 2000) // Increased from 50 to handle higher event volumes
+	viper.SetDefault("eventBatchSize", 1000)
 	viper.SetDefault("testMode", false)
 	viper.SetDefault("enableEmbeddedSBOMs", false)
 	viper.SetDefault("profilesCacheRefreshRate", 1*time.Minute)
@@ -87,6 +90,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("ruleCooldown.ruleCooldownOnProfileFailure", true)
 	viper.SetDefault("ruleCooldown.ruleCooldownMaxSize", 10000)
 	viper.SetDefault("partialProfileGenerationEnabled", true)
+	viper.SetDefault("procfsScanInterval", 5*time.Second)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()

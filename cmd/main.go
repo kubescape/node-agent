@@ -24,7 +24,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	containerprofilemanagerv1 "github.com/kubescape/node-agent/pkg/containerprofilemanager/v1"
-	"github.com/kubescape/node-agent/pkg/containerwatcher/v1"
+	containerwatcherv2 "github.com/kubescape/node-agent/pkg/containerwatcher/v2"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
@@ -42,8 +42,9 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	"github.com/kubescape/node-agent/pkg/objectcache/networkneighborhoodcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
-	"github.com/kubescape/node-agent/pkg/processmanager"
-	processmanagerv1 "github.com/kubescape/node-agent/pkg/processmanager/v1"
+	processtree "github.com/kubescape/node-agent/pkg/processtree"
+	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
+	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
@@ -218,10 +219,26 @@ func main() {
 	}
 
 	var ruleManager rulemanager.RuleManagerClient
-	var processManager processmanager.ProcessManagerClient
+	var processTreeManager processtree.ProcessTreeManager
 	var objCache objectcache.ObjectCache
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
 	var cloudMetadata *apitypes.CloudMetadata
+
+	// Create the container process tree
+	containerProcessTree := containerprocesstree.NewContainerProcessTree()
+
+	// Create the process tree creator
+	processTreeCreator := processtreecreator.NewProcessTreeCreator(containerProcessTree, cfg)
+
+	// Create the process tree manager
+	processTreeManager = processtree.NewProcessTreeManager(
+		processTreeCreator,
+		containerProcessTree,
+		cfg,
+	)
+
+	// Start the process tree manager to activate the exit cleanup manager
+	processTreeManager.Start()
 
 	if cfg.EnableRuntimeDetection || cfg.EnableMalwareDetection {
 		cloudMetadata, err = cloudmetadata.GetCloudMetadata(ctx, k8sClient, cfg.NodeName)
@@ -231,9 +248,6 @@ func main() {
 	}
 
 	if cfg.EnableRuntimeDetection {
-		// create the process manager
-		processManager = processmanagerv1.CreateProcessManager(ctx)
-
 		// create exporter
 		exporter := exporters.InitExporters(cfg.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
 		dWatcher.AddAdaptor(ruleBindingCache)
@@ -255,7 +269,7 @@ func main() {
 		ruleCooldown := rulecooldown.NewRuleCooldown(cfg.RuleCoolDown)
 
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processManager, dnsResolver, nil, ruleCooldown)
+		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processTreeManager, dnsResolver, nil, ruleCooldown)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
@@ -267,7 +281,6 @@ func main() {
 		dc := &objectcache.DnsCacheMock{}
 		objCache = objectcachev1.NewObjectCache(k8sObjectCache, apc, nnc, dc)
 		ruleBindingNotify = make(chan rulebinding.RuleBindingNotify, 1)
-		processManager = processmanager.CreateProcessManagerMock()
 	}
 
 	// Create the node profile manager
@@ -282,7 +295,7 @@ func main() {
 	// Create the network streaming manager
 	var networkStreamClient networkstream.NetworkStreamClient
 	if cfg.EnableNetworkStreaming {
-		networkStreamClient, err = networkstreamv1.NewNetworkStream(ctx, cfg, k8sObjectCache, dnsResolver, cfg.NodeName, nil, false, processManager)
+		networkStreamClient, err = networkstreamv1.NewNetworkStream(ctx, cfg, k8sObjectCache, dnsResolver, cfg.NodeName, nil, false, processTreeManager)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating NetworkManager", helpers.Error(err))
 		}
@@ -327,10 +340,10 @@ func main() {
 	}
 
 	// Create the container handler
-	mainHandler, err := containerwatcher.CreateIGContainerWatcher(cfg, containerProfileManager, k8sClient,
+	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, containerProfileManager, k8sClient,
 		igK8sClient, dnsManagerClient, prometheusExporter, ruleManager,
 		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
-		processManager, clusterData.ClusterName, objCache, networkStreamClient)
+		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

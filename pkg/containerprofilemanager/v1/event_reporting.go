@@ -46,7 +46,6 @@ func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event eve
 		if data.execs == nil {
 			data.execs = &maps.SafeMap[string, []string]{}
 		}
-
 		path := event.Comm
 		if len(event.Args) > 0 {
 			path = event.Args[0]

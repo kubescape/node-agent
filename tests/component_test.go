@@ -82,10 +82,15 @@ func Test_01_BasicAlertTest(t *testing.T) {
 		t.Errorf("Error waiting for network neighborhood to be completed: %v", err)
 	}
 
-	time.Sleep(10 * time.Second)
+	time.Sleep(30 * time.Second)
 
 	appProfile, _ := wl.GetApplicationProfile()
 	appProfileJson, _ := json.Marshal(appProfile)
+
+	networkNeighborhood, _ := wl.GetNetworkNeighborhood()
+	networkNeighborhoodJson, _ := json.Marshal(networkNeighborhood)
+
+	t.Logf("network neighborhood: %v", string(networkNeighborhoodJson))
 
 	t.Logf("application profile: %v", string(appProfileJson))
 
@@ -1031,7 +1036,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 
 	// PHASE 4: Verify merged behavior (no new alerts)
 	t.Log("Verifying merged network neighborhood behavior...")
-	time.Sleep(25 * time.Second) // Allow merge to complete
+	time.Sleep(60 * time.Second) // Allow merge to complete
 
 	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // Expected: no alert (original)
 	// Try multiple times to ensure alert is removed
@@ -1078,7 +1083,7 @@ func Test_13_MergingNetworkNeighborhoodTest(t *testing.T) {
 	_, err = storageClient.NetworkNeighborhoods(ns.Name).Patch(context.Background(), userNN.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
 	require.NoError(t, err, "Failed to patch user network neighborhood")
 
-	time.Sleep(20 * time.Second) // Allow merge to complete
+	time.Sleep(60 * time.Second) // Allow merge to complete
 
 	// Test alerts after patch
 	_, _, err = wl.ExecIntoPod([]string{"wget", "ebpf.io", "-T", "2", "-t", "1"}, "server") // Expected: no alert
@@ -1693,4 +1698,59 @@ func Test_23_RuleCooldownTest(t *testing.T) {
 
 	// Verify the specific alert details
 	testutils.AssertContains(t, alerts, "Unexpected process launched", "ls", "nginx", []bool{true})
+}
+
+func Test_24_ProcessTreeDepthTest(t *testing.T) {
+	ns := testutils.NewRandomNamespace()
+
+	endpointTraffic, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/tree.yaml"))
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
+
+	err = endpointTraffic.WaitForReady(80)
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
+
+	err = endpointTraffic.WaitForApplicationProfileCompletion(80)
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
+
+	// wait for cache
+	time.Sleep(30 * time.Second)
+
+	// Add to rule policy symlink
+	buf, _, err := endpointTraffic.ExecIntoPod([]string{"/bin/sh", "-c", "python3 /root/python_spawner.py 10"}, "")
+	assert.NoError(t, err)
+
+	t.Logf("Output: %s", buf)
+
+	t.Logf("Waiting for the alert to be signaled")
+
+	// Wait for the alert to be signaled
+	time.Sleep(60 * time.Second)
+
+	alerts, err := testutils.GetAlerts(endpointTraffic.Namespace)
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
+
+	found := false
+
+	for _, alert := range alerts {
+		if alert.Labels["rule_name"] == "Unexpected process launched" {
+			if alert.Labels["processtree_depth"] == "10" {
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		t.Errorf("Expected to find an alert for the process tree depth")
+	}
+
+	t.Logf("Found alerts for the process tree depth: %v", alerts)
 }
