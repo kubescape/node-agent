@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -62,7 +63,7 @@ func (pt *ProcfsTracer) Start(ctx context.Context) error {
 	}
 
 	// Subscribe to procfs events
-	eventChan := make(chan feeder.ProcessEvent, 1000)
+	eventChan := make(chan conversion.ProcessEvent, 1000)
 	pt.procfsFeeder.Subscribe(eventChan)
 
 	// Start event processing goroutine
@@ -109,7 +110,7 @@ func (pt *ProcfsTracer) IsEnabled(cfg interface{}) bool {
 }
 
 // processEvents processes events from the procfs feeder
-func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan feeder.ProcessEvent) {
+func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan conversion.ProcessEvent) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -121,7 +122,7 @@ func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan feed
 }
 
 // handleProcfsEvent handles a single procfs event
-func (pt *ProcfsTracer) handleProcfsEvent(event feeder.ProcessEvent) {
+func (pt *ProcfsTracer) handleProcfsEvent(event conversion.ProcessEvent) {
 	// Create a procfs event that can be processed by the ordered event queue
 	// Use current time as event timestamp, not the process timestamp
 	procfsEvent := &events.ProcfsEvent{

@@ -9,8 +9,8 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/kubescape/node-agent/pkg/config"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
+	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
-	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -18,7 +18,6 @@ import (
 type ProcessTreeManagerImpl struct {
 	creator                   processtreecreator.ProcessTreeCreator
 	containerTree             containerprocesstree.ContainerProcessTree
-	eventFeeder               *feeder.EventFeeder
 	containerProcessTreeCache *expirable.LRU[string, apitypes.Process] // containerID:pid -> cached result
 	mutex                     sync.RWMutex
 	config                    config.Config
@@ -28,7 +27,6 @@ type ProcessTreeManagerImpl struct {
 func NewProcessTreeManager(
 	creator processtreecreator.ProcessTreeCreator,
 	containerTree containerprocesstree.ContainerProcessTree,
-	eventFeeder *feeder.EventFeeder,
 	config config.Config,
 ) ProcessTreeManager {
 
@@ -37,7 +35,6 @@ func NewProcessTreeManager(
 	return &ProcessTreeManagerImpl{
 		creator:                   creator,
 		containerTree:             containerTree,
-		eventFeeder:               eventFeeder,
 		containerProcessTreeCache: containerProcessTreeCache,
 		config:                    config,
 	}
@@ -54,8 +51,8 @@ func (ptm *ProcessTreeManagerImpl) Stop() {
 }
 
 func (ptm *ProcessTreeManagerImpl) ReportEvent(eventType utils.EventType, event utils.K8sEvent) error {
-	var processEvent feeder.ProcessEvent
-	processEvent, err := ptm.eventFeeder.ConvertEvent(eventType, event)
+	var processEvent conversion.ProcessEvent
+	processEvent, err := conversion.ConvertEvent(eventType, event)
 	if err != nil {
 		return fmt.Errorf("failed to convert event: %v", err)
 	}

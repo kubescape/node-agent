@@ -45,7 +45,6 @@ import (
 	processtree "github.com/kubescape/node-agent/pkg/processtree"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
-	feeder "github.com/kubescape/node-agent/pkg/processtree/feeder"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
@@ -231,14 +230,10 @@ func main() {
 	// Create the process tree creator
 	processTreeCreator := processtreecreator.NewProcessTreeCreator(containerProcessTree, cfg)
 
-	// Create event feeder for synchronous processing
-	eventFeeder := feeder.NewEventFeeder()
-
 	// Create the process tree manager
 	processTreeManager = processtree.NewProcessTreeManager(
 		processTreeCreator,
 		containerProcessTree,
-		eventFeeder,
 		cfg,
 	)
 

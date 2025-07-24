@@ -1,4 +1,4 @@
-package feeder
+package conversion
 
 import (
 	"fmt"
@@ -10,30 +10,23 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-type EventFeeder struct {
-}
-
-func NewEventFeeder() *EventFeeder {
-	return &EventFeeder{}
-}
-
-func (ef *EventFeeder) ConvertEvent(eventType utils.EventType, event utils.K8sEvent) (ProcessEvent, error) {
+func ConvertEvent(eventType utils.EventType, event utils.K8sEvent) (ProcessEvent, error) {
 	switch eventType {
 	case utils.ExecveEventType:
-		return ef.convertExecEvent(event.(*events.ExecEvent)), nil
+		return convertExecEvent(event.(*events.ExecEvent)), nil
 	case utils.ForkEventType:
-		return ef.convertForkEvent(event.(*tracerforktype.Event)), nil
+		return convertForkEvent(event.(*tracerforktype.Event)), nil
 	case utils.ExitEventType:
-		return ef.convertExitEvent(event.(*tracerexittype.Event)), nil
+		return convertExitEvent(event.(*tracerexittype.Event)), nil
 	case utils.ProcfsEventType:
-		return ef.convertProcfsEvent(event.(*events.ProcfsEvent)), nil
+		return convertProcfsEvent(event.(*events.ProcfsEvent)), nil
 	default:
 		return ProcessEvent{}, fmt.Errorf("unsupported event type: %s", eventType)
 	}
 }
 
 // convertExecEvent converts an ExecEvent to ProcessEvent
-func (ef *EventFeeder) convertExecEvent(execEvent *events.ExecEvent) ProcessEvent {
+func convertExecEvent(execEvent *events.ExecEvent) ProcessEvent {
 	event := ProcessEvent{
 		Type:        ExecEvent,
 		Timestamp:   time.Now(),
@@ -77,7 +70,7 @@ func (ef *EventFeeder) convertExecEvent(execEvent *events.ExecEvent) ProcessEven
 }
 
 // convertForkEvent converts a ForkEvent to ProcessEvent
-func (ef *EventFeeder) convertForkEvent(forkEvent *tracerforktype.Event) ProcessEvent {
+func convertForkEvent(forkEvent *tracerforktype.Event) ProcessEvent {
 	event := ProcessEvent{
 		Type:        ForkEvent,
 		Timestamp:   time.Now(),
@@ -107,7 +100,7 @@ func (ef *EventFeeder) convertForkEvent(forkEvent *tracerforktype.Event) Process
 }
 
 // convertExitEvent converts an ExitEvent to ProcessEvent
-func (ef *EventFeeder) convertExitEvent(exitEvent *tracerexittype.Event) ProcessEvent {
+func convertExitEvent(exitEvent *tracerexittype.Event) ProcessEvent {
 	event := ProcessEvent{
 		Type:        ExitEvent,
 		Timestamp:   time.Now(),
@@ -135,7 +128,7 @@ func (ef *EventFeeder) convertExitEvent(exitEvent *tracerexittype.Event) Process
 }
 
 // convertProcfsEvent converts a ProcfsEvent to ProcessEvent
-func (ef *EventFeeder) convertProcfsEvent(procfsEvent *events.ProcfsEvent) ProcessEvent {
+func convertProcfsEvent(procfsEvent *events.ProcfsEvent) ProcessEvent {
 	event := ProcessEvent{
 		Type:        ProcfsEvent,
 		Timestamp:   procfsEvent.Timestamp,

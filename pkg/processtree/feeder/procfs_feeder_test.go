@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -57,13 +58,13 @@ func TestProcfsFeeder_Stop(t *testing.T) {
 
 func TestProcfsFeeder_Subscribe(t *testing.T) {
 	feeder := NewProcfsFeeder(100 * time.Millisecond)
-	ch := make(chan ProcessEvent, 1)
+	ch := make(chan conversion.ProcessEvent, 1)
 
 	feeder.Subscribe(ch)
 	assert.Len(t, feeder.subscribers, 1)
 
 	// Test multiple subscribers
-	ch2 := make(chan ProcessEvent, 1)
+	ch2 := make(chan conversion.ProcessEvent, 1)
 	feeder.Subscribe(ch2)
 	assert.Len(t, feeder.subscribers, 2)
 }
@@ -80,7 +81,7 @@ func TestProcfsFeeder_ReadProcessInfo(t *testing.T) {
 	// Test reading info for PID 1 (init process)
 	event, err := feeder.readProcessInfo(1)
 	assert.NoError(t, err)
-	assert.Equal(t, ProcfsEvent, event.Type)
+	assert.Equal(t, conversion.ProcfsEvent, event.Type)
 	assert.Equal(t, uint32(1), event.PID)
 	assert.NotEmpty(t, event.Comm)
 	assert.Zero(t, event.PPID) // init should have PPID 0
@@ -129,14 +130,14 @@ func TestProcfsFeeder_ProcessSpecificPID(t *testing.T) {
 
 func TestProcfsFeeder_BroadcastEvent(t *testing.T) {
 	feeder := NewProcfsFeeder(100 * time.Millisecond)
-	ch1 := make(chan ProcessEvent, 1)
-	ch2 := make(chan ProcessEvent, 1)
+	ch1 := make(chan conversion.ProcessEvent, 1)
+	ch2 := make(chan conversion.ProcessEvent, 1)
 
 	feeder.Subscribe(ch1)
 	feeder.Subscribe(ch2)
 
-	event := ProcessEvent{
-		Type:      ProcfsEvent,
+	event := conversion.ProcessEvent{
+		Type:      conversion.ProcfsEvent,
 		Timestamp: time.Now(),
 		PID:       123,
 		Comm:      "test-process",

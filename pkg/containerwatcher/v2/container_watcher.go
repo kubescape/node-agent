@@ -28,7 +28,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
-	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
@@ -67,7 +66,6 @@ type ContainerWatcher struct {
 	orderedEventQueue   *OrderedEventQueue
 	eventHandlerFactory *EventHandlerFactory
 	processTreeManager  processtree.ProcessTreeManager
-	processTreeFeeder   *feeder.EventFeeder
 	eventEnricher       *EventEnricher
 
 	// Managers

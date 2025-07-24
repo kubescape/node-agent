@@ -8,7 +8,7 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/node-agent/pkg/processtree/feeder"
+	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 )
 
 const (
@@ -47,7 +47,7 @@ func (pt *processTreeCreatorImpl) stopExitManager() {
 	}
 }
 
-func (pt *processTreeCreatorImpl) addPendingExit(event feeder.ProcessEvent, children []*apitypes.Process) {
+func (pt *processTreeCreatorImpl) addPendingExit(event conversion.ProcessEvent, children []*apitypes.Process) {
 	if len(pt.pendingExits) >= maxPendingExits {
 		logger.L().Debug("Exit: Maximum pending exits reached, forcing cleanup",
 			helpers.String("pending_count", fmt.Sprintf("%d", len(pt.pendingExits))),

@@ -10,7 +10,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
-	"github.com/kubescape/node-agent/pkg/processtree/feeder"
+	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/kubescape/node-agent/pkg/processtree/reparenting"
 )
 
@@ -55,15 +55,15 @@ func (pt *processTreeCreatorImpl) Stop() {
 	pt.stopExitManager()
 }
 
-func (pt *processTreeCreatorImpl) FeedEvent(event feeder.ProcessEvent) {
+func (pt *processTreeCreatorImpl) FeedEvent(event conversion.ProcessEvent) {
 	switch event.Type {
-	case feeder.ForkEvent:
+	case conversion.ForkEvent:
 		pt.handleForkEvent(event)
-	case feeder.ProcfsEvent:
+	case conversion.ProcfsEvent:
 		pt.handleProcfsEvent(event)
-	case feeder.ExecEvent:
+	case conversion.ExecEvent:
 		pt.handleExecEvent(event)
-	case feeder.ExitEvent:
+	case conversion.ExitEvent:
 		pt.handleExitEvent(event)
 	}
 }
@@ -145,7 +145,7 @@ func (pt *processTreeCreatorImpl) GetHostProcessBranch(pid uint32) (apitypes.Pro
 }
 
 // UpdatePPID handles PPID updates using the new reparenting strategy
-func (pt *processTreeCreatorImpl) UpdatePPID(proc *apitypes.Process, event feeder.ProcessEvent) {
+func (pt *processTreeCreatorImpl) UpdatePPID(proc *apitypes.Process, event conversion.ProcessEvent) {
 	if event.PPID != proc.PPID && event.PPID != 0 {
 		// New reparenting strategy:
 		// 1. If new PPID is under container subtree, update regardless of current state
@@ -172,7 +172,7 @@ func (pt *processTreeCreatorImpl) UpdatePPID(proc *apitypes.Process, event feede
 }
 
 // handleForkEvent handles fork events - only fills properties if they are empty or don't exist
-func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
+func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent) {
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
@@ -211,7 +211,7 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event feeder.ProcessEvent) {
 	}
 }
 
-func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
+func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEvent) {
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
@@ -248,7 +248,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event feeder.ProcessEvent) {
 	}
 }
 
-func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
+func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent) {
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
@@ -296,7 +296,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event feeder.ProcessEvent) {
 }
 
 // handleExitEvent handles exit events - now uses delayed removal via integrated exit manager
-func (pt *processTreeCreatorImpl) handleExitEvent(event feeder.ProcessEvent) {
+func (pt *processTreeCreatorImpl) handleExitEvent(event conversion.ProcessEvent) {
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 

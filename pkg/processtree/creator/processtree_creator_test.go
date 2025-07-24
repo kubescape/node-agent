@@ -10,7 +10,7 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/node-agent/pkg/config"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
-	"github.com/kubescape/node-agent/pkg/processtree/feeder"
+	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -67,7 +67,6 @@ func TestNewProcessTreeCreator(t *testing.T) {
 
 	// Cast to implementation to check internal state
 	impl := creator.(*processTreeCreatorImpl)
-	assert.NotNil(t, impl.processMap)
 	assert.NotNil(t, impl.containerTree)
 	assert.NotNil(t, impl.pendingExits)
 	assert.Equal(t, mockContainerTree, impl.containerTree)
@@ -114,8 +113,8 @@ func TestHandleForkEvent(t *testing.T) {
 	// Mock container tree methods
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
-	event := feeder.ProcessEvent{
-		Type:    feeder.ForkEvent,
+	event := conversion.ProcessEvent{
+		Type:    conversion.ForkEvent,
 		PID:     1234,
 		PPID:    1000,
 		Comm:    "test-process",
@@ -152,8 +151,8 @@ func TestHandleProcfsEvent(t *testing.T) {
 	// Mock container tree methods
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
-	event := feeder.ProcessEvent{
-		Type:    feeder.ProcfsEvent,
+	event := conversion.ProcessEvent{
+		Type:    conversion.ProcfsEvent,
 		PID:     1234,
 		PPID:    1000,
 		Comm:    "test-process",
@@ -189,8 +188,8 @@ func TestHandleExecEvent(t *testing.T) {
 	mockContainerTree.On("GetPidByContainerID", "test-container-123").Return(uint32(999), nil)
 
 	// First create a process with fork event
-	forkEvent := feeder.ProcessEvent{
-		Type: feeder.ForkEvent,
+	forkEvent := conversion.ProcessEvent{
+		Type: conversion.ForkEvent,
 		PID:  1234,
 		PPID: 1000,
 		Comm: "old-process",
@@ -198,8 +197,8 @@ func TestHandleExecEvent(t *testing.T) {
 	creator.FeedEvent(forkEvent)
 
 	// Now send exec event that should update the process
-	execEvent := feeder.ProcessEvent{
-		Type:        feeder.ExecEvent,
+	execEvent := conversion.ProcessEvent{
+		Type:        conversion.ExecEvent,
 		PID:         1234,
 		PPID:        1000,
 		Comm:        "new-process",
@@ -238,8 +237,8 @@ func TestHandleExecEventWithGetPidByContainerIDError(t *testing.T) {
 	mockContainerTree.On("GetPidByContainerID", "test-container-123").Return(uint32(0), fmt.Errorf("container not found"))
 
 	// First create a process with fork event
-	forkEvent := feeder.ProcessEvent{
-		Type: feeder.ForkEvent,
+	forkEvent := conversion.ProcessEvent{
+		Type: conversion.ForkEvent,
 		PID:  1234,
 		PPID: 1000,
 		Comm: "old-process",
@@ -247,8 +246,8 @@ func TestHandleExecEventWithGetPidByContainerIDError(t *testing.T) {
 	creator.FeedEvent(forkEvent)
 
 	// Now send exec event that should update the process
-	execEvent := feeder.ProcessEvent{
-		Type:        feeder.ExecEvent,
+	execEvent := conversion.ProcessEvent{
+		Type:        conversion.ExecEvent,
 		PID:         1234,
 		PPID:        1000,
 		Comm:        "new-process",
@@ -287,8 +286,8 @@ func TestHandleExecEventProcessAlreadyUnderContainer(t *testing.T) {
 	// GetPidByContainerID should not be called since process is already under container
 
 	// First create a process with fork event
-	forkEvent := feeder.ProcessEvent{
-		Type: feeder.ForkEvent,
+	forkEvent := conversion.ProcessEvent{
+		Type: conversion.ForkEvent,
 		PID:  1234,
 		PPID: 1000,
 		Comm: "old-process",
@@ -296,8 +295,8 @@ func TestHandleExecEventProcessAlreadyUnderContainer(t *testing.T) {
 	creator.FeedEvent(forkEvent)
 
 	// Now send exec event that should update the process
-	execEvent := feeder.ProcessEvent{
-		Type:        feeder.ExecEvent,
+	execEvent := conversion.ProcessEvent{
+		Type:        conversion.ExecEvent,
 		PID:         1234,
 		PPID:        1000,
 		Comm:        "new-process",
@@ -339,8 +338,8 @@ func TestHandleExitEvent(t *testing.T) {
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create parent process
-	parentEvent := feeder.ProcessEvent{
-		Type: feeder.ForkEvent,
+	parentEvent := conversion.ProcessEvent{
+		Type: conversion.ForkEvent,
 		PID:  1000,
 		PPID: 1,
 		Comm: "parent",
@@ -348,8 +347,8 @@ func TestHandleExitEvent(t *testing.T) {
 	creator.FeedEvent(parentEvent)
 
 	// Create child process
-	childEvent := feeder.ProcessEvent{
-		Type: feeder.ForkEvent,
+	childEvent := conversion.ProcessEvent{
+		Type: conversion.ForkEvent,
 		PID:  1234,
 		PPID: 1000,
 		Comm: "child",
@@ -365,8 +364,8 @@ func TestHandleExitEvent(t *testing.T) {
 	assert.Len(t, parent.ChildrenMap, 1)
 
 	// Send exit event for parent
-	exitEvent := feeder.ProcessEvent{
-		Type: feeder.ExitEvent,
+	exitEvent := conversion.ProcessEvent{
+		Type: conversion.ExitEvent,
 		PID:  1000,
 	}
 	creator.FeedEvent(exitEvent)
@@ -388,10 +387,10 @@ func TestGetRootTree(t *testing.T) {
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create process tree: init(1) -> bash(100) -> app(200)
-	events := []feeder.ProcessEvent{
-		{Type: feeder.ForkEvent, PID: 1, PPID: 0, Comm: "init"},
-		{Type: feeder.ForkEvent, PID: 100, PPID: 1, Comm: "bash"},
-		{Type: feeder.ForkEvent, PID: 200, PPID: 100, Comm: "app"},
+	events := []conversion.ProcessEvent{
+		{Type: conversion.ForkEvent, PID: 1, PPID: 0, Comm: "init"},
+		{Type: conversion.ForkEvent, PID: 100, PPID: 1, Comm: "bash"},
+		{Type: conversion.ForkEvent, PID: 200, PPID: 100, Comm: "app"},
 	}
 
 	for _, event := range events {
@@ -414,10 +413,10 @@ func TestGetProcessMap(t *testing.T) {
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create some processes
-	events := []feeder.ProcessEvent{
-		{Type: feeder.ForkEvent, PID: 1, PPID: 0, Comm: "init"},
-		{Type: feeder.ForkEvent, PID: 100, PPID: 1, Comm: "bash"},
-		{Type: feeder.ForkEvent, PID: 200, PPID: 100, Comm: "app"},
+	events := []conversion.ProcessEvent{
+		{Type: conversion.ForkEvent, PID: 1, PPID: 0, Comm: "init"},
+		{Type: conversion.ForkEvent, PID: 100, PPID: 1, Comm: "bash"},
+		{Type: conversion.ForkEvent, PID: 200, PPID: 100, Comm: "app"},
 	}
 
 	for _, event := range events {
@@ -443,8 +442,8 @@ func TestGetProcessNode(t *testing.T) {
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create a process
-	event := feeder.ProcessEvent{
-		Type: feeder.ForkEvent,
+	event := conversion.ProcessEvent{
+		Type: conversion.ForkEvent,
 		PID:  1234,
 		PPID: 1000,
 		Comm: "test-process",
@@ -478,8 +477,8 @@ func TestGetPidBranch(t *testing.T) {
 	mockContainerTree.On("GetPidBranch", "container-123", uint32(1234), mock.AnythingOfType("map[uint32]*armotypes.Process")).Return(expectedProcess, nil)
 
 	// Create some processes
-	event := feeder.ProcessEvent{
-		Type: feeder.ForkEvent,
+	event := conversion.ProcessEvent{
+		Type: conversion.ForkEvent,
 		PID:  1234,
 		PPID: 1000,
 		Comm: "test-process",
@@ -518,7 +517,7 @@ func TestUpdatePPID(t *testing.T) {
 	// Test case 1: New PPID is under container, should always update
 	mockContainerTree.On("IsProcessUnderContainer", uint32(2000), mock.AnythingOfType("string"), mock.AnythingOfType("map[uint32]*armotypes.Process")).Return(true)
 
-	event := feeder.ProcessEvent{
+	event := conversion.ProcessEvent{
 		PID:         1234,
 		PPID:        2000,
 		ContainerID: "test-container-123",
@@ -665,8 +664,8 @@ func TestConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < numOperations; j++ {
 				pid := uint32(goroutineID*numOperations + j + 1000)
-				event := feeder.ProcessEvent{
-					Type: feeder.ForkEvent,
+				event := conversion.ProcessEvent{
+					Type: conversion.ForkEvent,
 					PID:  pid,
 					PPID: 1,
 					Comm: "test-process",
@@ -714,8 +713,8 @@ func TestEventHandlingWithEmptyFields(t *testing.T) {
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Test fork event with minimal fields
-	forkEvent := feeder.ProcessEvent{
-		Type: feeder.ForkEvent,
+	forkEvent := conversion.ProcessEvent{
+		Type: conversion.ForkEvent,
 		PID:  1234,
 		PPID: 1000,
 		Comm: "test-process",
@@ -728,8 +727,8 @@ func TestEventHandlingWithEmptyFields(t *testing.T) {
 	assert.Equal(t, "", proc.Cmdline) // Should be empty
 
 	// Test procfs event that fills in missing fields
-	procfsEvent := feeder.ProcessEvent{
-		Type:    feeder.ProcfsEvent,
+	procfsEvent := conversion.ProcessEvent{
+		Type:    conversion.ProcfsEvent,
 		PID:     1234,
 		Cmdline: "test-process --arg",
 		Cwd:     "/home/user",
@@ -756,10 +755,10 @@ func TestReparentingIntegration(t *testing.T) {
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create a process tree: parent(1000) -> child(1234) -> grandchild(5678)
-	events := []feeder.ProcessEvent{
-		{Type: feeder.ForkEvent, PID: 1000, PPID: 1, Comm: "parent"},
-		{Type: feeder.ForkEvent, PID: 1234, PPID: 1000, Comm: "child"},
-		{Type: feeder.ForkEvent, PID: 5678, PPID: 1234, Comm: "grandchild"},
+	events := []conversion.ProcessEvent{
+		{Type: conversion.ForkEvent, PID: 1000, PPID: 1, Comm: "parent"},
+		{Type: conversion.ForkEvent, PID: 1234, PPID: 1000, Comm: "child"},
+		{Type: conversion.ForkEvent, PID: 5678, PPID: 1234, Comm: "grandchild"},
 	}
 
 	for _, event := range events {
@@ -780,8 +779,8 @@ func TestReparentingIntegration(t *testing.T) {
 	assert.Len(t, child.ChildrenMap, 1)
 
 	// Exit the child process - should trigger reparenting
-	exitEvent := feeder.ProcessEvent{
-		Type: feeder.ExitEvent,
+	exitEvent := conversion.ProcessEvent{
+		Type: conversion.ExitEvent,
 		PID:  1234,
 	}
 	creator.FeedEvent(exitEvent)
@@ -811,11 +810,11 @@ func TestReparentingLogicDirect(t *testing.T) {
 		impl := creator.(*processTreeCreatorImpl)
 
 		// Create process tree: init(1) -> parent(1000) -> child(1234) -> grandchild(5678)
-		events := []feeder.ProcessEvent{
-			{Type: feeder.ForkEvent, PID: 1, PPID: 0, Comm: "init"},
-			{Type: feeder.ForkEvent, PID: 1000, PPID: 1, Comm: "parent"},
-			{Type: feeder.ForkEvent, PID: 1234, PPID: 1000, Comm: "child"},
-			{Type: feeder.ForkEvent, PID: 5678, PPID: 1234, Comm: "grandchild"},
+		events := []conversion.ProcessEvent{
+			{Type: conversion.ForkEvent, PID: 1, PPID: 0, Comm: "init"},
+			{Type: conversion.ForkEvent, PID: 1000, PPID: 1, Comm: "parent"},
+			{Type: conversion.ForkEvent, PID: 1234, PPID: 1000, Comm: "child"},
+			{Type: conversion.ForkEvent, PID: 5678, PPID: 1234, Comm: "grandchild"},
 		}
 
 		for _, event := range events {
@@ -860,9 +859,9 @@ func TestReparentingLogicDirect(t *testing.T) {
 		impl := creator.(*processTreeCreatorImpl)
 
 		// Create process tree: orphan(1234) -> child(5678)
-		events := []feeder.ProcessEvent{
-			{Type: feeder.ForkEvent, PID: 1234, PPID: 0, Comm: "orphan"}, // True orphan with no parent
-			{Type: feeder.ForkEvent, PID: 5678, PPID: 1234, Comm: "child"},
+		events := []conversion.ProcessEvent{
+			{Type: conversion.ForkEvent, PID: 1234, PPID: 0, Comm: "orphan"}, // True orphan with no parent
+			{Type: conversion.ForkEvent, PID: 5678, PPID: 1234, Comm: "child"},
 		}
 
 		for _, event := range events {
@@ -912,10 +911,10 @@ func TestReparentingLogicDirect(t *testing.T) {
 		mockContainerTree.On("GetPidByContainerID", mock.AnythingOfType("string")).Return(uint32(0), nil)
 
 		// Create container process tree: containerd-shim(50) -> nginx(100) -> worker(200)
-		events := []feeder.ProcessEvent{
-			{Type: feeder.ForkEvent, PID: 50, PPID: 1, Comm: "containerd-shim"},
-			{Type: feeder.ForkEvent, PID: 100, PPID: 50, Comm: "nginx"},
-			{Type: feeder.ForkEvent, PID: 200, PPID: 100, Comm: "nginx-worker"},
+		events := []conversion.ProcessEvent{
+			{Type: conversion.ForkEvent, PID: 50, PPID: 1, Comm: "containerd-shim"},
+			{Type: conversion.ForkEvent, PID: 100, PPID: 50, Comm: "nginx"},
+			{Type: conversion.ForkEvent, PID: 200, PPID: 100, Comm: "nginx-worker"},
 		}
 
 		for _, event := range events {
@@ -967,15 +966,15 @@ func TestComplexProcessTree(t *testing.T) {
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create a complex process tree
-	events := []feeder.ProcessEvent{
-		{Type: feeder.ForkEvent, PID: 1, PPID: 0, Comm: "init"},
-		{Type: feeder.ForkEvent, PID: 100, PPID: 1, Comm: "systemd"},
-		{Type: feeder.ForkEvent, PID: 200, PPID: 1, Comm: "kthreadd"},
-		{Type: feeder.ForkEvent, PID: 300, PPID: 100, Comm: "bash"},
-		{Type: feeder.ForkEvent, PID: 400, PPID: 100, Comm: "ssh"},
-		{Type: feeder.ForkEvent, PID: 500, PPID: 300, Comm: "app1"},
-		{Type: feeder.ForkEvent, PID: 600, PPID: 300, Comm: "app2"},
-		{Type: feeder.ForkEvent, PID: 700, PPID: 500, Comm: "worker"},
+	events := []conversion.ProcessEvent{
+		{Type: conversion.ForkEvent, PID: 1, PPID: 0, Comm: "init"},
+		{Type: conversion.ForkEvent, PID: 100, PPID: 1, Comm: "systemd"},
+		{Type: conversion.ForkEvent, PID: 200, PPID: 1, Comm: "kthreadd"},
+		{Type: conversion.ForkEvent, PID: 300, PPID: 100, Comm: "bash"},
+		{Type: conversion.ForkEvent, PID: 400, PPID: 100, Comm: "ssh"},
+		{Type: conversion.ForkEvent, PID: 500, PPID: 300, Comm: "app1"},
+		{Type: conversion.ForkEvent, PID: 600, PPID: 300, Comm: "app2"},
+		{Type: conversion.ForkEvent, PID: 700, PPID: 500, Comm: "worker"},
 	}
 
 	for _, event := range events {
@@ -1019,10 +1018,10 @@ func TestProcessMapConversion(t *testing.T) {
 	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create some processes
-	events := []feeder.ProcessEvent{
-		{Type: feeder.ForkEvent, PID: 1, PPID: 0, Comm: "init"},
-		{Type: feeder.ForkEvent, PID: 100, PPID: 1, Comm: "bash"},
-		{Type: feeder.ForkEvent, PID: 200, PPID: 100, Comm: "app"},
+	events := []conversion.ProcessEvent{
+		{Type: conversion.ForkEvent, PID: 1, PPID: 0, Comm: "init"},
+		{Type: conversion.ForkEvent, PID: 100, PPID: 1, Comm: "bash"},
+		{Type: conversion.ForkEvent, PID: 200, PPID: 100, Comm: "app"},
 	}
 
 	for _, event := range events {
@@ -1095,8 +1094,8 @@ func TestPerformanceWithManyProcesses(t *testing.T) {
 
 	// Create many processes
 	for i := 0; i < numProcesses; i++ {
-		event := feeder.ProcessEvent{
-			Type: feeder.ForkEvent,
+		event := conversion.ProcessEvent{
+			Type: conversion.ForkEvent,
 			PID:  uint32(i + 1000),
 			PPID: 1,
 			Comm: "test-process",

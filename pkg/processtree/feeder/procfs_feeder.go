@@ -9,12 +9,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/prometheus/procfs"
 )
 
 // ProcfsFeeder implements ProcessEventFeeder by reading process information from /proc filesystem
 type ProcfsFeeder struct {
-	subscribers []chan<- ProcessEvent
+	subscribers []chan<- conversion.ProcessEvent
 	mutex       sync.RWMutex
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -68,7 +69,7 @@ func (pf *ProcfsFeeder) Stop() error {
 }
 
 // Subscribe adds a channel to receive process events
-func (pf *ProcfsFeeder) Subscribe(ch chan<- ProcessEvent) {
+func (pf *ProcfsFeeder) Subscribe(ch chan<- conversion.ProcessEvent) {
 	pf.mutex.Lock()
 	defer pf.mutex.Unlock()
 
@@ -128,9 +129,9 @@ func (pf *ProcfsFeeder) processProcfsEntry(pid uint32) {
 }
 
 // readProcessInfo reads process information from procfs for a given PID
-func (pf *ProcfsFeeder) readProcessInfo(pid uint32) (ProcessEvent, error) {
-	event := ProcessEvent{
-		Type:      ProcfsEvent,
+func (pf *ProcfsFeeder) readProcessInfo(pid uint32) (conversion.ProcessEvent, error) {
+	event := conversion.ProcessEvent{
+		Type:      conversion.ProcfsEvent,
 		Timestamp: time.Now(),
 		PID:       pid,
 	}
@@ -206,7 +207,7 @@ func (pf *ProcfsFeeder) getProcessComm(pid uint32) (string, error) {
 }
 
 // broadcastEvent sends an event to all subscribers
-func (pf *ProcfsFeeder) broadcastEvent(event ProcessEvent) {
+func (pf *ProcfsFeeder) broadcastEvent(event conversion.ProcessEvent) {
 	pf.mutex.RLock()
 	defer pf.mutex.RUnlock()
 

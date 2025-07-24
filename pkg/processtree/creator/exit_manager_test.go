@@ -9,7 +9,7 @@ import (
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
-	"github.com/kubescape/node-agent/pkg/processtree/feeder"
+	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/kubescape/node-agent/pkg/processtree/reparenting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,9 +75,9 @@ func createTestProcess(pid uint32, ppid uint32, comm string) *apitypes.Process {
 }
 
 // Helper function to create a test process event
-func createTestExitEvent(pid uint32, startTimeNs uint64) feeder.ProcessEvent {
-	return feeder.ProcessEvent{
-		Type:        feeder.ExitEvent,
+func createTestExitEvent(pid uint32, startTimeNs uint64) conversion.ProcessEvent {
+	return conversion.ProcessEvent{
+		Type:        conversion.ExitEvent,
 		PID:         pid,
 		StartTimeNs: startTimeNs,
 		Timestamp:   time.Now(),

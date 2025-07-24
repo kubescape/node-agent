@@ -2,12 +2,12 @@ package processtreecreator
 
 import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/node-agent/pkg/processtree/feeder"
+	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 )
 
 type ProcessTreeCreator interface {
 	// Feed a new event into the process tree
-	FeedEvent(event feeder.ProcessEvent)
+	FeedEvent(event conversion.ProcessEvent)
 	// Get the full process tree (returns the root or all processes)
 	GetRootTree() ([]apitypes.Process, error)
 	// Get a host process branch from the given PID up to the root
