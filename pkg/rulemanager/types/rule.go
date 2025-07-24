@@ -1,4 +1,4 @@
-package rulemanager
+package types
 
 import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"

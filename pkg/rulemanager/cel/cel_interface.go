@@ -3,11 +3,10 @@ package rulemanager
 import (
 	"encoding/json"
 
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 )
 
-type CELInterface interface {
-	EvaluateRule(event json.Marshaler, expressions []rulemanager.RuleExpression) (bool, error)
+type CELRuleEvaluator interface {
+	EvaluateRule(event json.Marshaler, expressions []types.RuleExpression) (bool, error)
 	EvaluateExpression(event json.Marshaler, expression string) (string, error)
 }
-

@@ -27,7 +27,9 @@ import (
 
 // Manager represents a component that can receive events
 type Manager interface {
-	ReportEvent(eventType utils.EventType, event utils.K8sEvent)
+	// TODO: Find a better way to handle this
+	// containerwatcher.EventReceiver
+	// containerwatcher.EnrichedEventReceiver
 }
 
 // ManagerAdapter adapts different manager interfaces to the common Manager interface
@@ -195,7 +197,7 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	for _, handler := range handlers {
 		if enrichedHandler, ok := handler.(containerwatcher.EnrichedEventReceiver); ok {
 			enrichedHandler.ReportEnrichedEvent(enrichedEvent)
-		} else {
+		} else if handler, ok := handler.(containerwatcher.EventReceiver); ok {
 			handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
 		}
 	}
