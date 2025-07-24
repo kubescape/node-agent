@@ -62,7 +62,9 @@ func TestLoadConfig(t *testing.T) {
 						URL: "http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io",
 					},
 				},
-				WorkerPoolSize: 10,
+				WorkerPoolSize:     2000,
+				EventBatchSize:     2500,
+				ProcfsScanInterval: 5 * time.Second,
 				RuleCoolDown: rulecooldown.RuleCooldownConfig{
 					CooldownDuration:   1 * time.Hour,
 					CooldownAfterCount: 1,

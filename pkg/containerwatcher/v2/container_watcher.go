@@ -416,7 +416,7 @@ func (cw *ContainerWatcher) workerPoolLoop() {
 }
 
 func (cw *ContainerWatcher) processQueueBatch() {
-	const batchSize = 1000
+	batchSize := cw.cfg.EventBatchSize
 	processedCount := 0
 	for !cw.orderedEventQueue.Empty() && processedCount < batchSize {
 		event, ok := cw.orderedEventQueue.PopEvent()
