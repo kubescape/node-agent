@@ -23,7 +23,7 @@ const (
 	JAVA_COMM       = "java"
 )
 
-var LD_PRELOAD_ENV_VARS = []string{"LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH"}
+var  LD_PRELOAD_ENV_VARS = []string{"LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH"}
 
 var R1011LdPreloadHookRuleDescriptor = ruleengine.RuleDescriptor{
 	ID:          R1011ID,
