@@ -9,24 +9,50 @@ import (
 )
 
 type NetworkProfileValidator struct {
+	RequiredEventType utils.EventType
+	objectCache       objectcache.ObjectCache
 }
 
 func NewNetworkProfileValidator(objectCache objectcache.ObjectCache) profilevalidator.ProfileValidator {
-	return &NetworkProfileValidator{}
+	return &NetworkProfileValidator{
+		RequiredEventType: utils.NetworkEventType,
+		objectCache:       objectCache,
+	}
 }
 
-func (v *NetworkProfileValidator) ValidateProfile(event utils.K8sEvent, ap *v1beta1.ApplicationProfileContainer, nn *v1beta1.NetworkNeighborhoodContainer) (bool, error) {
+func (v *NetworkProfileValidator) ValidateProfile(event utils.K8sEvent, ap *v1beta1.ApplicationProfileContainer, nn *v1beta1.NetworkNeighborhoodContainer) (profilevalidator.ProfileValidationResult, error) {
+	checks := profilevalidator.ProfileValidationResult{
+		Checks: []profilevalidator.ProfileValidationCheck{
+			{
+				Name:   "network",
+				Result: false,
+			},
+			{
+				Name:   "dns_resolution",
+				Result: false,
+			},
+		},
+	}
 	networkEvent, ok := event.(*tracernetworktype.Event)
 	if !ok {
-		return false, ErrConversionFailed
+		return profilevalidator.ProfileValidationResult{}, ErrConversionFailed
 	}
 
 	// Check if the network event is in the network neighborhood profile
 	for _, egress := range nn.Egress {
 		if egress.IPAddress == networkEvent.DstEndpoint.Addr {
-			return true, nil
+			checks.GetCheck("network").Result = true
 		}
 	}
 
-	return false, nil
+	domain := v.objectCache.DnsCache().ResolveIpToDomain(networkEvent.DstEndpoint.Addr)
+	if domain != "" {
+		checks.GetCheck("dns_resolution").Result = true
+	}
+
+	return checks, nil
+}
+
+func (v *NetworkProfileValidator) GetRequiredEventType() utils.EventType {
+	return v.RequiredEventType
 }

@@ -11,28 +11,49 @@ import (
 )
 
 type ExecProfileValidator struct {
+	RequiredEventType utils.EventType
 }
 
 func NewExecProfileValidator(objectCache objectcache.ObjectCache) profilevalidator.ProfileValidator {
-	return &ExecProfileValidator{}
+	return &ExecProfileValidator{
+		RequiredEventType: utils.ExecveEventType,
+	}
 }
 
-func (v *ExecProfileValidator) ValidateProfile(event utils.K8sEvent, ap *v1beta1.ApplicationProfileContainer, nn *v1beta1.NetworkNeighborhoodContainer) (bool, error) {
+func (v *ExecProfileValidator) ValidateProfile(event utils.K8sEvent, ap *v1beta1.ApplicationProfileContainer, nn *v1beta1.NetworkNeighborhoodContainer) (profilevalidator.ProfileValidationResult, error) {
+	checks := profilevalidator.ProfileValidationResult{
+		Checks: []profilevalidator.ProfileValidationCheck{
+			{
+				Name:   "exec_path",
+				Result: false,
+			},
+			{
+				Name:   "exec_args",
+				Result: false,
+			},
+		},
+	}
+
 	execEvent, ok := event.(*events.ExecEvent)
 	if !ok {
-		return false, ErrConversionFailed
+		return checks, ErrConversionFailed
 	}
 
 	execPath := execEvent.ExePath
 
 	for _, exec := range ap.Execs {
 		if exec.Path == execPath {
+			checks.GetCheck("exec_path").Result = true
 			// Either compare args false or args match
 			if slices.Compare(exec.Args, execEvent.Args) == 0 {
-				return true, nil
+				checks.GetCheck("exec_args").Result = true
 			}
 		}
 	}
 
-	return false, nil
+	return checks, nil
+}
+
+func (v *ExecProfileValidator) GetRequiredEventType() utils.EventType {
+	return v.RequiredEventType
 }
