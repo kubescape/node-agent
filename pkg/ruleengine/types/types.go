@@ -20,3 +20,7 @@ type SyscallEvent struct {
 type Enricher interface {
 	EnrichRuleFailure(rule ruleengine.RuleFailure) error
 }
+
+func (e SyscallEvent) GetNamespace() string {
+	return e.Event.K8s.Namespace
+}

@@ -12,6 +12,7 @@ import (
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -55,7 +56,6 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 				continue
 			}
 
-			rules := rm.ruleBindingCache.ListRulesForPod(container.K8s.Namespace, container.K8s.PodName)
 			for _, syscall := range syscalls {
 				event := ruleenginetypes.SyscallEvent{
 					Event: eventtypes.Event{
@@ -87,27 +87,30 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 					// Comm:        container.OciConfig.Process.Args[0],
 					SyscallName: syscall,
 				}
-				failures := rm.processEvent(utils.SyscallEventType, &event, rules)
-				for _, failure := range failures {
 
-					tree, err := rm.processManager.GetContainerProcessTree(container.Runtime.ContainerID, event.Pid, true)
+				tree, err := rm.processManager.GetContainerProcessTree(container.Runtime.ContainerID, event.Pid, true)
+				if err != nil {
+					process := apitypes.Process{
+						PID: event.Pid,
+					}
+					tree, err = utils.CreateProcessTree(&process,
+						rm.containerIdToShimPid.Get(container.Runtime.ContainerID))
 					if err != nil {
-						process := apitypes.Process{
-							PID: event.Pid,
-						}
-						tree, err = utils.CreateProcessTree(&process,
-							rm.containerIdToShimPid.Get(container.Runtime.ContainerID))
+						logger.L().Error("RuleManager - failed to create process tree fallback", helpers.Error(err))
+						tree, err = rm.processManager.GetContainerProcessTree(container.Runtime.ContainerID, event.Pid, true)
 						if err != nil {
 							logger.L().Error("RuleManager - failed to create process tree fallback", helpers.Error(err))
+							continue
 						}
 					}
-
-					runtimeProcessDetails := failure.GetRuntimeProcessDetails()
-					runtimeProcessDetails.ProcessTree = tree
-					failure.SetRuntimeProcessDetails(runtimeProcessDetails)
-
-					rm.exporter.SendRuleAlert(failure)
 				}
+
+				rm.ReportEnrichedEvent(&events.EnrichedEvent{
+					EventType:   utils.SyscallEventType,
+					ContainerID: container.Runtime.ContainerID,
+					ProcessTree: tree,
+				})
+
 			}
 		}
 	}

@@ -11,6 +11,7 @@ type Rule struct {
 	Expressions       RuleExpressions            `json:"expressions"`
 	Enabled           bool                       `json:"enabled"`
 	ProfileDependency apitypes.ProfileDependency `json:"profile_dependency"`
+	Severity          int                        `json:"severity"`
 	State             map[string]any             `json:"state"`
 }
 
