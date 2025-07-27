@@ -7,23 +7,27 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 )
 
 var _ CELRuleEvaluator = (*CEL)(nil)
 
 type CEL struct {
-	env *cel.Env
+	env         *cel.Env
+	objectCache objectcache.ObjectCache
 }
 
-func NewCEL() (*CEL, error) {
+func NewCEL(objectCache objectcache.ObjectCache) (*CEL, error) {
 	env, err := cel.NewEnv(
 		cel.Variable("event", cel.AnyType),
+		library.K8s(objectCache.K8sObjectCache()),
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &CEL{env: env}, nil
+	return &CEL{env: env, objectCache: objectCache}, nil
 }
 
 func (c *CEL) EvaluateRule(event json.Marshaler, expressions []types.RuleExpression) (bool, error) {
