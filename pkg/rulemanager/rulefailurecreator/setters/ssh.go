@@ -3,7 +3,7 @@ package setters
 import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracersshtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ssh/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
@@ -16,7 +16,7 @@ func NewSSHCreator() *SSHFailureSetter {
 	return &SSHFailureSetter{}
 }
 
-func (c *SSHFailureSetter) SetFailureMetadata(failure ruleengine.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *SSHFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	sshEvent, ok := enrichedEvent.Event.(*tracersshtype.Event)
 	if !ok {
 		return

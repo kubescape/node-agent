@@ -11,8 +11,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
-	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	corev1 "k8s.io/api/core/v1"
@@ -31,9 +31,9 @@ type RBCache struct {
 	allPods        mapset.Set[string]                                    // set of all pods (also pods without rules)
 	podToRBNames   maps.SafeMap[string, mapset.Set[string]]              // podID -> []rule binding names
 	rbNameToRB     maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding] // rule binding name -> rule binding
-	rbNameToRules  maps.SafeMap[string, []ruleengine.RuleEvaluator]      // rule binding name -> []created rules
+	rbNameToRules  maps.SafeMap[string, []types.Rule]                    // rule binding name -> []created rules
 	rbNameToPods   maps.SafeMap[string, mapset.Set[string]]              // rule binding name -> podIDs
-	ruleCreator    ruleengine.RuleCreator
+	ruleCreator    rulecreator.RuleCreator
 	watchResources []watcher.WatchResource
 	notifiers      []*chan rulebindingmanager.RuleBindingNotify
 }
@@ -42,7 +42,7 @@ func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *RBCache 
 	return &RBCache{
 		nodeName:       nodeName,
 		k8sClient:      k8sClient,
-		ruleCreator:    ruleenginev1.NewRuleCreator(),
+		ruleCreator:    rulecreator.NewRuleCreator(),
 		allPods:        mapset.NewSet[string](),
 		rbNameToRB:     maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding]{},
 		podToRBNames:   maps.SafeMap[string, mapset.Set[string]]{},
@@ -59,8 +59,8 @@ func (c *RBCache) WatchResources() []watcher.WatchResource {
 
 // ------------------ rulebindingmanager.RuleBindingCache methods -----------------------
 
-func (c *RBCache) ListRulesForPod(namespace, name string) []ruleengine.RuleEvaluator {
-	var rulesSlice []ruleengine.RuleEvaluator
+func (c *RBCache) ListRulesForPod(namespace, name string) []types.Rule {
+	var rulesSlice []types.Rule
 
 	podID := utils.CreateK8sPodID(namespace, name)
 	if !c.podToRBNames.Has(podID) {
@@ -339,47 +339,33 @@ func (c *RBCache) deletePod(uniqueName string) {
 	c.podToRBNames.Delete(uniqueName)
 }
 
-func (c *RBCache) createRules(rulesForPod []typesv1.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {
-	var rules []ruleengine.RuleEvaluator
+func (c *RBCache) createRules(rulesForPod []typesv1.RuntimeAlertRuleBindingRule) []types.Rule {
+	var rules []types.Rule
 	// Get the rules that are bound to the container
 	for _, ruleParams := range rulesForPod {
 		rules = append(rules, c.createRule(&ruleParams)...)
 	}
 	return rules
 }
-func (c *RBCache) createRule(r *typesv1.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {
-
+func (c *RBCache) createRule(r *typesv1.RuntimeAlertRuleBindingRule) []types.Rule {
 	if r.RuleID != "" {
-		if ruleDesc := c.ruleCreator.CreateRuleByID(r.RuleID); ruleDesc != nil {
-			if r.Parameters != nil {
-				ruleDesc.SetParameters(r.Parameters)
-			}
-			return []ruleengine.RuleEvaluator{ruleDesc}
-		}
+		rule := c.ruleCreator.CreateRuleByID(r.RuleID)
+		return []types.Rule{rule}
 	}
 	if r.RuleName != "" {
-		if ruleDesc := c.ruleCreator.CreateRuleByName(r.RuleName); ruleDesc != nil {
-			if r.Parameters != nil {
-				ruleDesc.SetParameters(r.Parameters)
-			}
-			return []ruleengine.RuleEvaluator{ruleDesc}
-		}
+		rule := c.ruleCreator.CreateRuleByName(r.RuleName)
+		return []types.Rule{rule}
 	}
 	if len(r.RuleTags) > 0 {
-		if ruleTagsDescs := c.ruleCreator.CreateRulesByTags(r.RuleTags); ruleTagsDescs != nil {
-			for _, ruleDesc := range ruleTagsDescs {
-				if r.Parameters != nil {
-					ruleDesc.SetParameters(r.Parameters)
-				}
-			}
-			return ruleTagsDescs
-		}
+		rules := c.ruleCreator.CreateRulesByTags(r.RuleTags)
+		return rules
 	}
-	return []ruleengine.RuleEvaluator{}
+
+	return []types.Rule{}
 }
 
 // Expose the rule creator to be able to create rules from third party.
-func (c *RBCache) GetRuleCreator() ruleengine.RuleCreator {
+func (c *RBCache) GetRuleCreator() rulecreator.RuleCreator {
 	return c.ruleCreator
 }
 

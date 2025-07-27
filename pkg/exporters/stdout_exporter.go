@@ -6,7 +6,7 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	log "github.com/sirupsen/logrus"
@@ -36,7 +36,7 @@ func InitStdoutExporter(useStdout *bool, cloudmetadata *apitypes.CloudMetadata) 
 	}
 }
 
-func (exporter *StdoutExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+func (exporter *StdoutExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	processTree := failedRule.GetRuntimeProcessDetails().ProcessTree
 	exporter.logger.WithFields(log.Fields{
 		"message":               failedRule.GetRuleAlert().RuleDescription,

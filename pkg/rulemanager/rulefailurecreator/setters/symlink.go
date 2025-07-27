@@ -5,7 +5,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
@@ -18,7 +18,7 @@ func NewSymlinkCreator() *SymlinkFailureSetter {
 	return &SymlinkFailureSetter{}
 }
 
-func (c *SymlinkFailureSetter) SetFailureMetadata(failure ruleengine.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *SymlinkFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	symlinkEvent, ok := enrichedEvent.Event.(*tracersymlinktype.Event)
 	if !ok {
 		return

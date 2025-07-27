@@ -3,7 +3,7 @@ package setters
 import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
@@ -16,7 +16,7 @@ func NewRandomXCreator() *RandomXFailureSetter {
 	return &RandomXFailureSetter{}
 }
 
-func (c *RandomXFailureSetter) SetFailureMetadata(failure ruleengine.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *RandomXFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	randomXEvent, ok := enrichedEvent.Event.(*tracerrandomxtype.Event)
 	if !ok {
 		return

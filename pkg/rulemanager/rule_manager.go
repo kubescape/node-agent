@@ -21,7 +21,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator/validators"
@@ -126,7 +125,7 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
 	eventProfile := rm.getProfileChecks(enrichedEvent)
 
-	rules := []types.Rule{}
+	rules := rm.ruleBindingCache.ListRulesForPod(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
 
 	for _, rule := range rules {
 		if rule.Enabled {
@@ -172,15 +171,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	}
 }
 
-func isEventRelevant(ruleSpec ruleengine.RuleSpec, eventType utils.EventType) bool {
-	for _, i := range ruleSpec.RequiredEventTypes() {
-		if i == eventType {
-			return true
-		}
-	}
-	return false
-}
-
 func (rm *RuleManager) HasApplicableRuleBindings(namespace, name string) bool {
 	return len(rm.ruleBindingCache.ListRulesForPod(namespace, name)) > 0
 }
@@ -213,14 +203,11 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	rules := creator.CreateRulePolicyRulesByEventType(eventType)
 
 	for _, rule := range rules {
-		rule, ok := rule.(ruleengine.RuleCondition)
-		if !ok {
+		if !rule.SupportPolicy {
 			continue
 		}
 
-		if detectionResult := rule.EvaluateRule(eventType, event, rm.objectCache.K8sObjectCache()); detectionResult.IsFailure {
-			results = append(results, rule.ID())
-		}
+		results = append(results, rule.ID)
 	}
 
 	return results

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/exporters"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/spf13/viper"
 )
 

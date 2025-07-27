@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -20,7 +20,7 @@ func NewExecCreator() *ExecFailureSetter {
 	return &ExecFailureSetter{}
 }
 
-func (c *ExecFailureSetter) SetFailureMetadata(failure ruleengine.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *ExecFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	execEvent, ok := enrichedEvent.Event.(*events.ExecEvent)
 	if !ok {
 		return

@@ -5,7 +5,7 @@ import (
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 )
 
 type RuleCooldownConfig struct {
@@ -33,7 +33,7 @@ func NewRuleCooldown(config RuleCooldownConfig) *RuleCooldown {
 	}
 }
 
-func (rc *RuleCooldown) ShouldCooldown(ruleFailures ruleengine.RuleFailure) (bool, int) {
+func (rc *RuleCooldown) ShouldCooldown(ruleFailures types.RuleFailure) (bool, int) {
 	alert := ruleFailures.GetBaseRuntimeAlert()
 	key := alert.UniqueID + ruleFailures.GetRuntimeProcessDetails().ContainerID + ruleFailures.GetRuleId()
 

@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
@@ -17,7 +17,7 @@ func NewOpenCreator() *OpenFailureSetter {
 	return &OpenFailureSetter{}
 }
 
-func (c *OpenFailureSetter) SetFailureMetadata(failure ruleengine.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *OpenFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	openEvent, ok := enrichedEvent.Event.(*events.OpenEvent)
 	if !ok {
 		return

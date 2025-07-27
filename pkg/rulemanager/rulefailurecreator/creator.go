@@ -13,16 +13,16 @@ import (
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/ruleprocess"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 const (
 	maxFileSize = 50 * 1024 * 1024 // 50MB
 )
+
+var ErrRuleShouldNotBeAlerted = errors.New("rule should not be alerted")
 
 type RuleFailureCreator struct {
 	setterByEventType map[utils.EventType]EventMetadataSetter
@@ -47,7 +47,7 @@ func (r *RuleFailureCreator) RegisterCreator(eventType utils.EventType, creator 
 	r.setterByEventType[eventType] = creator
 }
 
-func (r *RuleFailureCreator) CreateRuleFailure(rule types.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) ruleengine.RuleFailure {
+func (r *RuleFailureCreator) CreateRuleFailure(rule types.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure {
 	eventSetter, ok := r.setterByEventType[enrichedEvent.EventType]
 	if !ok {
 		return nil
@@ -86,7 +86,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule types.Rule, enrichedEvent *e
 func (r *RuleFailureCreator) enrichRuleFailure(ruleFailure *types.GenericRuleFailure) {
 	if r.enricher != nil && !reflect.ValueOf(r.enricher).IsNil() {
 		if err := r.enricher.EnrichRuleFailure(ruleFailure); err != nil {
-			if errors.Is(err, ruleprocess.ErrRuleShouldNotBeAlerted) {
+			if errors.Is(err, ErrRuleShouldNotBeAlerted) {
 				return
 			}
 		}

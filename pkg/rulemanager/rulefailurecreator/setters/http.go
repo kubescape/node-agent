@@ -3,7 +3,7 @@ package setters
 import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
@@ -16,7 +16,7 @@ func NewHTTPCreator() *HTTPFailureSetter {
 	return &HTTPFailureSetter{}
 }
 
-func (c *HTTPFailureSetter) SetFailureMetadata(failure ruleengine.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *HTTPFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	httpEvent, ok := enrichedEvent.Event.(*tracerhttptype.Event)
 	if !ok {
 		return

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,7 +14,7 @@ func TestShouldCooldown(t *testing.T) {
 	tests := []struct {
 		name             string
 		config           RuleCooldownConfig
-		ruleFailure      *ruleengine.GenericRuleFailure
+		ruleFailure      *types.GenericRuleFailure
 		expectedCooldown bool
 		expectedCount    int
 		iterations       int
@@ -29,7 +29,7 @@ func TestShouldCooldown(t *testing.T) {
 				OnProfileFailure:   true,
 				MaxSize:            1000,
 			},
-			ruleFailure: &ruleengine.GenericRuleFailure{
+			ruleFailure: &types.GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					UniqueID: "test-alert-1",
 				},
@@ -50,7 +50,7 @@ func TestShouldCooldown(t *testing.T) {
 				OnProfileFailure:   true,
 				MaxSize:            1000,
 			},
-			ruleFailure: &ruleengine.GenericRuleFailure{
+			ruleFailure: &types.GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					UniqueID: "test-alert-2",
 				},
@@ -71,7 +71,7 @@ func TestShouldCooldown(t *testing.T) {
 				OnProfileFailure:   false,
 				MaxSize:            1000,
 			},
-			ruleFailure: &ruleengine.GenericRuleFailure{
+			ruleFailure: &types.GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					UniqueID: "test-alert-3",
 					ProfileMetadata: &apitypes.ProfileMetadata{
@@ -95,7 +95,7 @@ func TestShouldCooldown(t *testing.T) {
 				OnProfileFailure:   true,
 				MaxSize:            1000,
 			},
-			ruleFailure: &ruleengine.GenericRuleFailure{
+			ruleFailure: &types.GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					UniqueID: "test-alert-4",
 				},
@@ -117,7 +117,7 @@ func TestShouldCooldown(t *testing.T) {
 				OnProfileFailure:   true,
 				MaxSize:            1000,
 			},
-			ruleFailure: &ruleengine.GenericRuleFailure{
+			ruleFailure: &types.GenericRuleFailure{
 				BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 					UniqueID: "test-alert-3",
 					ProfileMetadata: &apitypes.ProfileMetadata{
@@ -167,7 +167,7 @@ func TestShouldCooldownImmediate(t *testing.T) {
 		MaxSize:            1000,
 	})
 
-	ruleFailure := &ruleengine.GenericRuleFailure{
+	ruleFailure := &types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID: "test-alert-immediate",
 		},
@@ -195,7 +195,7 @@ func TestShouldCooldownOnProfileFailure(t *testing.T) {
 		MaxSize:            1000,
 	})
 
-	ruleFailure := &ruleengine.GenericRuleFailure{
+	ruleFailure := &types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID: "test-alert-profile",
 			ProfileMetadata: &apitypes.ProfileMetadata{
@@ -232,7 +232,7 @@ func TestShouldCooldownDifferentKeys(t *testing.T) {
 	})
 
 	// First rule failure
-	ruleFailure1 := &ruleengine.GenericRuleFailure{
+	ruleFailure1 := &types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID: "test-alert-1",
 		},
@@ -242,7 +242,7 @@ func TestShouldCooldownDifferentKeys(t *testing.T) {
 	}
 
 	// Second rule failure with different key
-	ruleFailure2 := &ruleengine.GenericRuleFailure{
+	ruleFailure2 := &types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID: "test-alert-2",
 		},
@@ -283,7 +283,7 @@ func TestShouldCooldownMaxSize(t *testing.T) {
 
 	// Fill up the cache
 	for i := 0; i < maxSize; i++ {
-		failure := &ruleengine.GenericRuleFailure{
+		failure := &types.GenericRuleFailure{
 			BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 				UniqueID: fmt.Sprintf("test-alert-%d", i),
 			},
@@ -295,7 +295,7 @@ func TestShouldCooldownMaxSize(t *testing.T) {
 	}
 
 	// Add one more to trigger eviction
-	newFailure := &ruleengine.GenericRuleFailure{
+	newFailure := &types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID: "test-alert-new",
 		},
@@ -310,7 +310,7 @@ func TestShouldCooldownMaxSize(t *testing.T) {
 	assert.Equal(t, 1, count)
 
 	// Verify the oldest entry was evicted by trying to access it
-	oldFailure := &ruleengine.GenericRuleFailure{
+	oldFailure := &types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID: "test-alert-0",
 		},

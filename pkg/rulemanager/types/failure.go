@@ -1,14 +1,10 @@
 package types
 
 import (
-	"github.com/kubescape/node-agent/pkg/ruleengine"
-
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/utils-k8s-go/wlid"
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
-
-var _ ruleengine.RuleFailure = (*GenericRuleFailure)(nil)
 
 type GenericRuleFailure struct {
 	BaseRuntimeAlert       apitypes.BaseRuntimeAlert
@@ -22,6 +18,48 @@ type GenericRuleFailure struct {
 	CloudServices          []string
 	HttpRuleAlert          apitypes.HttpRuleAlert
 	Extra                  interface{}
+}
+
+type RuleFailure interface {
+	// Get Base Runtime Alert
+	GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert
+	// Get Alert Type
+	GetAlertType() apitypes.AlertType
+	// Get Runtime Process Details
+	GetRuntimeProcessDetails() apitypes.ProcessTree
+	// Get Trigger Event
+	GetTriggerEvent() igtypes.Event
+	// Get Rule Description
+	GetRuleAlert() apitypes.RuleAlert
+	// Get K8s Runtime Details
+	GetRuntimeAlertK8sDetails() apitypes.RuntimeAlertK8sDetails
+	// Get Rule ID
+	GetRuleId() string
+	// Get Cloud Services
+	GetCloudServices() []string
+	// Get Http Details
+	GetHttpRuleAlert() apitypes.HttpRuleAlert
+	// Get Alert Platform
+	GetAlertPlatform() apitypes.AlertSourcePlatform
+	// Get Extra
+	GetExtra() interface{}
+
+	// Set Workload Details
+	SetWorkloadDetails(workloadDetails string)
+	// Set Base Runtime Alert
+	SetBaseRuntimeAlert(baseRuntimeAlert apitypes.BaseRuntimeAlert)
+	// Set Runtime Process Details
+	SetRuntimeProcessDetails(runtimeProcessDetails apitypes.ProcessTree)
+	// Set Trigger Event
+	SetTriggerEvent(triggerEvent igtypes.Event)
+	// Set Rule Description
+	SetRuleAlert(ruleAlert apitypes.RuleAlert)
+	// Set K8s Runtime Details
+	SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails apitypes.RuntimeAlertK8sDetails)
+	// Set Cloud Services
+	SetCloudServices(cloudServices []string)
+	// Set Alert Platform
+	SetAlertPlatform(alertPlatform apitypes.AlertSourcePlatform)
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {

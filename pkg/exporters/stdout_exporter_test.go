@@ -6,7 +6,7 @@ import (
 	"time"
 
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"
@@ -53,7 +53,7 @@ func TestStdoutExporter_SendAlert(t *testing.T) {
 	exporter := InitStdoutExporter(nil, nil)
 	assert.NotNil(t, exporter)
 
-	exporter.SendRuleAlert(&ruleengine.GenericRuleFailure{
+	exporter.SendRuleAlert(&types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},

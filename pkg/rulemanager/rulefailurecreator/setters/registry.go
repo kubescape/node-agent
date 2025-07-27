@@ -20,7 +20,5 @@ func RegisterAllSetters(creator rulefailurecreator.RuleFailureCreatorInterface) 
 	creator.RegisterCreator(utils.HTTPEventType, NewHTTPCreator())
 	creator.RegisterCreator(utils.PtraceEventType, NewPtraceCreator())
 	creator.RegisterCreator(utils.IoUringEventType, NewIoUringCreator())
-	creator.RegisterCreator(utils.ForkEventType, NewForkCreator())
-	creator.RegisterCreator(utils.ExitEventType, NewExitCreator())
 	creator.RegisterCreator(utils.RandomXEventType, NewRandomXCreator())
 }

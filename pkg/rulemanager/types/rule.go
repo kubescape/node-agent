@@ -6,12 +6,14 @@ import (
 )
 
 type Rule struct {
+	Enabled           bool                       `json:"enabled"`
 	ID                string                     `json:"id"`
 	Name              string                     `json:"name"`
 	Expressions       RuleExpressions            `json:"expressions"`
-	Enabled           bool                       `json:"enabled"`
 	ProfileDependency apitypes.ProfileDependency `json:"profile_dependency"`
 	Severity          int                        `json:"severity"`
+	SupportPolicy     bool                       `json:"support_policy"`
+	Tags              []string                   `json:"tags"`
 	State             map[string]any             `json:"state"`
 }
 

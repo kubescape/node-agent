@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
@@ -17,7 +17,7 @@ func NewProcfsCreator() *ProcfsFailureSetter {
 	return &ProcfsFailureSetter{}
 }
 
-func (c *ProcfsFailureSetter) SetFailureMetadata(failure ruleengine.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *ProcfsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	procfsEvent, ok := enrichedEvent.Event.(*events.ProcfsEvent)
 	if !ok {
 		return

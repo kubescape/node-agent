@@ -3,7 +3,7 @@ package setters
 import (
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
@@ -16,7 +16,7 @@ func NewDnsCreator() *DnsFailureSetter {
 	return &DnsFailureSetter{}
 }
 
-func (c *DnsFailureSetter) SetFailureMetadata(failure ruleengine.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *DnsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	dnsEvent, ok := enrichedEvent.Event.(*tracerdnstype.Event)
 	if !ok {
 		return

@@ -3,7 +3,7 @@ package setters
 import (
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
@@ -16,7 +16,7 @@ func NewNetworkCreator() *NetworkFailureSetter {
 	return &NetworkFailureSetter{}
 }
 
-func (c *NetworkFailureSetter) SetFailureMetadata(failure ruleengine.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *NetworkFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	networkEvent, ok := enrichedEvent.Event.(*tracernetworktype.Event)
 	if !ok {
 		return

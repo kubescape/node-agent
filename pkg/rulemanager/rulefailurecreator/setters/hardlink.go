@@ -5,7 +5,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
@@ -18,7 +18,7 @@ func NewHardlinkCreator() *HardlinkFailureSetter {
 	return &HardlinkFailureSetter{}
 }
 
-func (c *HardlinkFailureSetter) SetFailureMetadata(failure ruleengine.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *HardlinkFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	hardlinkEvent, ok := enrichedEvent.Event.(*tracerhardlinktype.Event)
 	if !ok {
 		return

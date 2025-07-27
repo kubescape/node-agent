@@ -5,7 +5,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
@@ -18,7 +18,7 @@ func NewPtraceCreator() *PtraceFailureSetter {
 	return &PtraceFailureSetter{}
 }
 
-func (c *PtraceFailureSetter) SetFailureMetadata(failure ruleengine.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *PtraceFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	ptraceEvent, ok := enrichedEvent.Event.(*tracerptracetype.Event)
 	if !ok {
 		return
