@@ -3,6 +3,7 @@ package cel
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/google/cel-go/cel"
 	"github.com/kubescape/go-logger"
@@ -15,8 +16,10 @@ import (
 var _ CELRuleEvaluator = (*CEL)(nil)
 
 type CEL struct {
-	env         *cel.Env
-	objectCache objectcache.ObjectCache
+	env          *cel.Env
+	objectCache  objectcache.ObjectCache
+	programCache map[string]cel.Program
+	cacheMutex   sync.RWMutex
 }
 
 func NewCEL(objectCache objectcache.ObjectCache) (*CEL, error) {
@@ -27,19 +30,60 @@ func NewCEL(objectCache objectcache.ObjectCache) (*CEL, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &CEL{env: env, objectCache: objectCache}, nil
+	return &CEL{
+		env:          env,
+		objectCache:  objectCache,
+		programCache: make(map[string]cel.Program),
+	}, nil
+}
+
+func (c *CEL) registerExpression(expression string) error {
+	c.cacheMutex.Lock()
+	defer c.cacheMutex.Unlock()
+
+	// Check if already compiled
+	if _, exists := c.programCache[expression]; exists {
+		return nil
+	}
+
+	ast, issues := c.env.Compile(expression)
+	if issues != nil {
+		return fmt.Errorf("failed to compile expression: %s", issues.Err())
+	}
+
+	program, err := c.env.Program(ast, cel.EvalOptions(cel.OptOptimize))
+	if err != nil {
+		return fmt.Errorf("failed to create program: %s", err)
+	}
+
+	c.programCache[expression] = program
+	return nil
+}
+
+func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
+	c.cacheMutex.RLock()
+	if program, exists := c.programCache[expression]; exists {
+		c.cacheMutex.RUnlock()
+		return program, nil
+	}
+	c.cacheMutex.RUnlock()
+
+	// If not in cache, compile and cache it
+	if err := c.registerExpression(expression); err != nil {
+		return nil, err
+	}
+
+	c.cacheMutex.RLock()
+	program := c.programCache[expression]
+	c.cacheMutex.RUnlock()
+	return program, nil
 }
 
 func (c *CEL) EvaluateRule(event json.Marshaler, expressions []types.RuleExpression) (bool, error) {
 	for _, expression := range expressions {
-		ast, issues := c.env.Compile(expression.Expression)
-		if issues != nil {
-			return false, fmt.Errorf("failed to compile expression: %s", issues.Err())
-		}
-
-		program, err := c.env.Program(ast)
+		program, err := c.getOrCreateProgram(expression.Expression)
 		if err != nil {
-			return false, fmt.Errorf("failed to create program: %s", err)
+			return false, err
 		}
 
 		eventBytes, err := event.MarshalJSON()
@@ -66,14 +110,9 @@ func (c *CEL) EvaluateRule(event json.Marshaler, expressions []types.RuleExpress
 }
 
 func (c *CEL) EvaluateExpression(event json.Marshaler, expression string) (string, error) {
-	ast, issues := c.env.Compile(expression)
-	if issues != nil {
-		return "", fmt.Errorf("failed to compile expression: %s", issues.Err())
-	}
-
-	program, err := c.env.Program(ast)
+	program, err := c.getOrCreateProgram(expression)
 	if err != nil {
-		return "", fmt.Errorf("failed to create program: %s", err)
+		return "", err
 	}
 
 	eventBytes, err := event.MarshalJSON()

@@ -101,3 +101,5 @@ func (l *k8sLibrary) CompileOptions() []cel.EnvOption {
 func (l *k8sLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
+
+var _ Library = (*k8sLibrary)(nil)
