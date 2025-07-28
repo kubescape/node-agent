@@ -1,8 +1,6 @@
 package cel
 
 import (
-	"encoding/json"
-
 	"github.com/google/cel-go/cel"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 )

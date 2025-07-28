@@ -1,7 +1,6 @@
 package cel
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -79,20 +78,15 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 	return program, nil
 }
 
-func (c *CEL) EvaluateRule(event json.Marshaler, expressions []types.RuleExpression) (bool, error) {
+func (c *CEL) EvaluateRule(event []byte, expressions []types.RuleExpression) (bool, error) {
 	for _, expression := range expressions {
 		program, err := c.getOrCreateProgram(expression.Expression)
 		if err != nil {
 			return false, err
 		}
 
-		eventBytes, err := event.MarshalJSON()
-		if err != nil {
-			return false, fmt.Errorf("failed to marshal event: %s", err)
-		}
-
 		out, _, err := program.Eval(map[string]any{
-			"event": eventBytes,
+			"event": event,
 		})
 		if err != nil {
 			logger.L().Error("evaluation error", helpers.Error(err))
@@ -109,19 +103,14 @@ func (c *CEL) EvaluateRule(event json.Marshaler, expressions []types.RuleExpress
 	return true, nil
 }
 
-func (c *CEL) EvaluateExpression(event json.Marshaler, expression string) (string, error) {
+func (c *CEL) EvaluateExpression(event []byte, expression string) (string, error) {
 	program, err := c.getOrCreateProgram(expression)
 	if err != nil {
 		return "", err
 	}
 
-	eventBytes, err := event.MarshalJSON()
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal event: %s", err)
-	}
-
 	out, _, err := program.Eval(map[string]any{
-		"event": eventBytes,
+		"event": event,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to evaluate expression: %s", err)
