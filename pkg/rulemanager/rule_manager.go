@@ -21,11 +21,11 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
-	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator/validators"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulefailurecreator"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -53,7 +53,7 @@ type RuleManager struct {
 	clusterName             string
 	containerIdToShimPid    maps.SafeMap[string, uint32]
 	containerIdToPid        maps.SafeMap[string, uint32]
-	enricher                ruleenginetypes.Enricher
+	enricher                types.Enricher
 	processManager          processtree.ProcessTreeManager
 	ruleCooldown            *rulecooldown.RuleCooldown
 	CelEvaluator            cel.CELRuleEvaluator
@@ -64,7 +64,7 @@ type RuleManager struct {
 
 var _ RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processtree.ProcessTreeManager, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processtree.ProcessTreeManager, dnsManager dnsmanager.DNSResolver, enricher types.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
 	profileValidatorFactory := profilevalidator.NewProfileValidatorFactory(objectCache)
 	registry := profilevalidator.NewProfileRegistry(objectCache)
 	ruleFailureCreator := rulefailurecreator.NewRuleFailureCreator(enricher, dnsManager)

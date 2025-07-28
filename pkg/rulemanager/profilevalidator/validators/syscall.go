@@ -4,8 +4,8 @@ import (
 	"slices"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -30,7 +30,7 @@ func (v *SyscallProfileValidator) ValidateProfile(event utils.K8sEvent, ap *v1be
 		},
 	}
 
-	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
+	syscallEvent, ok := event.(*types.SyscallEvent)
 	if !ok {
 		return profilevalidator.ProfileValidationResult{}, ErrConversionFailed
 	}

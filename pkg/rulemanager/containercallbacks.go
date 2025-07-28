@@ -14,7 +14,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -57,7 +57,7 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 			}
 
 			for _, syscall := range syscalls {
-				event := ruleenginetypes.SyscallEvent{
+				event := types.SyscallEvent{
 					Event: eventtypes.Event{
 						Timestamp: eventtypes.Time(time.Now().UnixNano()),
 						Type:      eventtypes.NORMAL,

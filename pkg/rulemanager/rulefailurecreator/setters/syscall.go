@@ -2,7 +2,6 @@ package setters
 
 import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
-	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -17,7 +16,7 @@ func NewSyscallCreator() *SyscallFailureSetter {
 }
 
 func (c *SyscallFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	syscallEvent, ok := enrichedEvent.Event.(*ruleenginetypes.SyscallEvent)
+	syscallEvent, ok := enrichedEvent.Event.(*types.SyscallEvent)
 	if !ok {
 		return
 	}
