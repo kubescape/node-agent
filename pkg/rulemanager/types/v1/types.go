@@ -6,20 +6,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type RuleList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Rules           []Rule `json:"rules"`
+type Rules struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Rules []Rule `json:"rules"`
 }
 
 type Rule struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// Specification of the desired behavior of the Rule
-	Spec RuleSpec `json:"spec,omitempty"`
-}
-
-type RuleSpec struct {
 	Enabled           bool                       `json:"enabled"`
 	ID                string                     `json:"id"`
 	Name              string                     `json:"name"`
