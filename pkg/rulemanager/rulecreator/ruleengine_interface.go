@@ -1,7 +1,7 @@
 package rulecreator
 
 import (
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -18,12 +18,12 @@ type ProfileRequirement struct {
 
 // RuleCreator is an interface for creating rules by tags, IDs, and names
 type RuleCreator interface {
-	CreateRulesByTags(tags []string) []types.Rule
-	CreateRuleByID(id string) types.Rule
-	CreateRuleByName(name string) types.Rule
-	RegisterRule(rule types.Rule)
-	CreateRulesByEventType(eventType utils.EventType) []types.Rule
-	CreateRulePolicyRulesByEventType(eventType utils.EventType) []types.Rule
-	CreateAllRules() []types.Rule
+	CreateRulesByTags(tags []string) []typesv1.Rule
+	CreateRuleByID(id string) typesv1.Rule
+	CreateRuleByName(name string) typesv1.Rule
+	RegisterRule(rule typesv1.Rule)
+	CreateRulesByEventType(eventType utils.EventType) []typesv1.Rule
+	CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.Rule
+	CreateAllRules() []typesv1.Rule
 	GetAllRuleIDs() []string
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/node-agent/mocks"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	rulemanagertypesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -166,7 +166,7 @@ func TestRuntimeObjAddHandler(t *testing.T) {
 			r := tt.args.c.ListRulesForPod(tt.args.pod.GetNamespace(), tt.args.pod.GetName())
 			assert.Equal(t, len(tt.expectedRules), len(r))
 			for i := range r {
-				assert.Equal(t, tt.expectedRules[i].ruleID, r[i].ID)
+				assert.Equal(t, tt.expectedRules[i].ruleID, r[i].Spec.ID)
 
 			}
 		})
@@ -563,7 +563,7 @@ func TestDeleteRuleBinding(t *testing.T) {
 			for k, v := range tt.podToRBNames {
 				for _, s := range v {
 					c.rbNameToRB.Set(s, typesv1.RuntimeAlertRuleBinding{})
-					c.rbNameToRules.Set(s, []types.Rule{types.Rule{}})
+					c.rbNameToRules.Set(s, []rulemanagertypesv1.Rule{rulemanagertypesv1.Rule{}})
 
 					if !c.rbNameToPods.Has(s) {
 						c.rbNameToPods.Set(s, mapset.NewSet[string]())

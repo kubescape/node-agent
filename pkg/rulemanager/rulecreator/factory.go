@@ -3,25 +3,25 @@ package rulecreator
 import (
 	"slices"
 
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 var _ RuleCreator = (*RuleCreatorImpl)(nil)
 
 type RuleCreatorImpl struct {
-	Rules []types.Rule
+	Rules []typesv1.Rule
 }
 
 func NewRuleCreator() *RuleCreatorImpl {
 	return &RuleCreatorImpl{}
 }
 
-func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []types.Rule {
-	var rules []types.Rule
+func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []typesv1.Rule {
+	var rules []typesv1.Rule
 	for _, rule := range r.Rules {
 		for _, tag := range tags {
-			if slices.Contains(rule.Tags, tag) {
+			if slices.Contains(rule.Spec.Tags, tag) {
 				rules = append(rules, rule)
 				break
 			}
@@ -30,32 +30,32 @@ func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []types.Rule {
 	return rules
 }
 
-func (r *RuleCreatorImpl) CreateRuleByID(id string) types.Rule {
+func (r *RuleCreatorImpl) CreateRuleByID(id string) typesv1.Rule {
 	for _, rule := range r.Rules {
-		if rule.ID == id {
+		if rule.Spec.ID == id {
 			return rule
 		}
 	}
-	return types.Rule{}
+	return typesv1.Rule{}
 }
 
-func (r *RuleCreatorImpl) CreateRuleByName(name string) types.Rule {
+func (r *RuleCreatorImpl) CreateRuleByName(name string) typesv1.Rule {
 	for _, rule := range r.Rules {
-		if rule.Name == name {
+		if rule.Spec.Name == name {
 			return rule
 		}
 	}
-	return types.Rule{}
+	return typesv1.Rule{}
 }
 
-func (r *RuleCreatorImpl) RegisterRule(rule types.Rule) {
+func (r *RuleCreatorImpl) RegisterRule(rule typesv1.Rule) {
 	r.Rules = append(r.Rules, rule)
 }
 
-func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []types.Rule {
-	var rules []types.Rule
+func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []typesv1.Rule {
+	var rules []typesv1.Rule
 	for _, rule := range r.Rules {
-		for _, expression := range rule.Expressions.RuleExpression {
+		for _, expression := range rule.Spec.Expressions.RuleExpression {
 			if expression.EventType == eventType {
 				rules = append(rules, rule)
 				break
@@ -65,10 +65,10 @@ func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []ty
 	return rules
 }
 
-func (r *RuleCreatorImpl) CreateRulePolicyRulesByEventType(eventType utils.EventType) []types.Rule {
+func (r *RuleCreatorImpl) CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.Rule {
 	rules := r.CreateRulesByEventType(eventType)
 	for _, rule := range rules {
-		if rule.SupportPolicy {
+		if rule.Spec.SupportPolicy {
 			rules = append(rules, rule)
 		}
 	}
@@ -79,13 +79,13 @@ func (r *RuleCreatorImpl) CreateRulePolicyRulesByEventType(eventType utils.Event
 func (r *RuleCreatorImpl) GetAllRuleIDs() []string {
 	var ruleIDs []string
 	for _, rule := range r.Rules {
-		ruleIDs = append(ruleIDs, rule.ID)
+		ruleIDs = append(ruleIDs, rule.Spec.ID)
 	}
 	return ruleIDs
 }
 
-func (r *RuleCreatorImpl) CreateAllRules() []types.Rule {
-	var rules []types.Rule
+func (r *RuleCreatorImpl) CreateAllRules() []typesv1.Rule {
+	var rules []typesv1.Rule
 	for _, rule := range r.Rules {
 		rules = append(rules, rule)
 	}

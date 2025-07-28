@@ -9,7 +9,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 )
 
 var _ CELRuleEvaluator = (*CEL)(nil)
@@ -78,7 +78,7 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 	return program, nil
 }
 
-func (c *CEL) EvaluateRule(event []byte, expressions []types.RuleExpression) (bool, error) {
+func (c *CEL) EvaluateRule(event []byte, expressions []typesv1.RuleExpression) (bool, error) {
 	for _, expression := range expressions {
 		program, err := c.getOrCreateProgram(expression.Expression)
 		if err != nil {

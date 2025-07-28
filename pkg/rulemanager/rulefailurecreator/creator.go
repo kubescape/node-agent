@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -47,7 +48,7 @@ func (r *RuleFailureCreator) RegisterCreator(eventType utils.EventType, creator 
 	r.setterByEventType[eventType] = creator
 }
 
-func (r *RuleFailureCreator) CreateRuleFailure(rule types.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure {
+func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure {
 	eventSetter, ok := r.setterByEventType[enrichedEvent.EventType]
 	if !ok {
 		return nil
@@ -56,8 +57,8 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule types.Rule, enrichedEvent *e
 	ruleFailure := &types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:  uniqueID,
-			AlertName: rule.Name,
-			Severity:  rule.Severity,
+			AlertName: rule.Spec.Name,
+			Severity:  rule.Spec.Severity,
 			Arguments: map[string]interface{}{
 				"message": message,
 			},
@@ -65,7 +66,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule types.Rule, enrichedEvent *e
 		RuleAlert: apitypes.RuleAlert{
 			RuleDescription: message,
 		},
-		RuleID:        rule.ID,
+		RuleID:        rule.Spec.ID,
 		AlertPlatform: apitypes.AlertSourcePlatformK8s,
 	}
 
