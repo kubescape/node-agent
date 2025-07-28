@@ -11,24 +11,39 @@ import (
 )
 
 type DomainProfileValidator struct {
+	RequiredEventType utils.EventType
 }
 
 func NewDomainProfileValidator(objectCache objectcache.ObjectCache) profilevalidator.ProfileValidator {
-	return &DomainProfileValidator{}
+	return &DomainProfileValidator{
+		RequiredEventType: utils.DnsEventType,
+	}
 }
 
-func (v *DomainProfileValidator) ValidateProfile(event utils.K8sEvent, ap *v1beta1.ApplicationProfileContainer, nn *v1beta1.NetworkNeighborhoodContainer) (bool, error) {
+func (v *DomainProfileValidator) ValidateProfile(event utils.K8sEvent, ap *v1beta1.ApplicationProfileContainer, nn *v1beta1.NetworkNeighborhoodContainer) (profilevalidator.ProfileValidationResult, error) {
+	checks := profilevalidator.ProfileValidationResult{
+		Checks: []profilevalidator.ProfileValidationCheck{
+			{
+				Name:   "domain",
+				Result: false,
+			},
+		},
+	}
 	dnsEvent, ok := event.(*tracerdnstype.Event)
 	if !ok {
-		return false, ErrConversionFailed
+		return checks, ErrConversionFailed
 	}
 
 	// Check if the domain is in the network neighborhood profile
 	for _, egress := range nn.Egress {
 		if egress.DNS == dnsEvent.DNSName || slices.Contains(egress.DNSNames, dnsEvent.DNSName) {
-			return true, nil
+			checks.GetCheck("domain").Result = true
 		}
 	}
 
-	return false, nil
+	return checks, nil
+}
+
+func (v *DomainProfileValidator) GetRequiredEventType() utils.EventType {
+	return v.RequiredEventType
 }

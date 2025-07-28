@@ -17,7 +17,6 @@ import (
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
@@ -78,7 +77,7 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event eve
 			path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
 		}
 
-		isSensitive := utils.IsSensitivePath(path, ruleengine.SensitiveFiles)
+		isSensitive := utils.IsSensitivePath(path, []string{})
 		if cpm.enricher != nil && isSensitive {
 			openIdentifier := utils.CalculateSHA256FileOpenHash(path)
 			go cpm.enricher.EnrichEvent(containerID, &event, openIdentifier)

@@ -11,21 +11,37 @@ import (
 )
 
 type CapabilityProfileValidator struct {
+	RequiredEventType utils.EventType
 }
 
 func NewCapabilityProfileValidator(objectCache objectcache.ObjectCache) profilevalidator.ProfileValidator {
-	return &CapabilityProfileValidator{}
+	return &CapabilityProfileValidator{
+		RequiredEventType: utils.CapabilitiesEventType,
+	}
 }
 
-func (v *CapabilityProfileValidator) ValidateProfile(event utils.K8sEvent, ap *v1beta1.ApplicationProfileContainer, nn *v1beta1.NetworkNeighborhoodContainer) (bool, error) {
+func (v *CapabilityProfileValidator) ValidateProfile(event utils.K8sEvent, ap *v1beta1.ApplicationProfileContainer, nn *v1beta1.NetworkNeighborhoodContainer) (profilevalidator.ProfileValidationResult, error) {
+	checks := profilevalidator.ProfileValidationResult{
+		Checks: []profilevalidator.ProfileValidationCheck{
+			{
+				Name:   "capability",
+				Result: false,
+			},
+		},
+	}
+
 	capEvent, ok := event.(*tracercapabilitiestype.Event)
 	if !ok {
-		return false, ErrConversionFailed
+		return checks, ErrConversionFailed
 	}
 
 	if slices.Contains(ap.Capabilities, capEvent.CapName) {
-		return true, nil
+		checks.GetCheck("capability").Result = true
 	}
 
-	return false, nil
+	return checks, nil
+}
+
+func (v *CapabilityProfileValidator) GetRequiredEventType() utils.EventType {
+	return v.RequiredEventType
 }

@@ -8,8 +8,8 @@ import (
 )
 
 type CELRuleEvaluator interface {
-	EvaluateRule(event json.Marshaler, expressions []types.RuleExpression) (bool, error)
-	EvaluateExpression(event json.Marshaler, expression string) (string, error)
+	EvaluateRule(event []byte, expressions []types.RuleExpression) (bool, error)
+	EvaluateExpression(event []byte, expression string) (string, error)
 
 	RegisterHelper(function cel.EnvOption) error
 }

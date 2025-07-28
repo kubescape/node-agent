@@ -4,14 +4,13 @@ import (
 	"errors"
 
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/ruleprocess"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
 func GetApplicationProfile(containerID string, objectCache objectcache.ObjectCache) (*v1beta1.ApplicationProfile, error) {
 	ap := objectCache.ApplicationProfileCache().GetApplicationProfile(containerID)
 	if ap == nil {
-		return nil, ruleprocess.NoProfileAvailable
+		return nil, errors.New("no profile available")
 	}
 	return ap, nil
 }
@@ -19,7 +18,7 @@ func GetApplicationProfile(containerID string, objectCache objectcache.ObjectCac
 func GetNetworkNeighborhood(containerID string, objectCache objectcache.ObjectCache) (*v1beta1.NetworkNeighborhood, error) {
 	nn := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhood(containerID)
 	if nn == nil {
-		return nil, ruleprocess.NoProfileAvailable
+		return nil, errors.New("no profile available")
 	}
 	return nn, nil
 }

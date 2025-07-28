@@ -2,7 +2,7 @@ package types
 
 import (
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 )
 
 type SyscallEvent struct {
@@ -18,5 +18,9 @@ type SyscallEvent struct {
 }
 
 type Enricher interface {
-	EnrichRuleFailure(rule ruleengine.RuleFailure) error
+	EnrichRuleFailure(rule types.RuleFailure) error
+}
+
+func (e SyscallEvent) GetNamespace() string {
+	return e.Event.K8s.Namespace
 }

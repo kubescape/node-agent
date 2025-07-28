@@ -5,7 +5,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -71,7 +71,7 @@ func InitExporters(exportersConfig ExportersConfig, clusterName string, nodeName
 	return &ExporterBus{exporters: exporters}
 }
 
-func (e *ExporterBus) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+func (e *ExporterBus) SendRuleAlert(failedRule types.RuleFailure) {
 	for _, exporter := range e.exporters {
 		exporter.SendRuleAlert(failedRule)
 	}

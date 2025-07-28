@@ -11,21 +11,37 @@ import (
 )
 
 type SyscallProfileValidator struct {
+	RequiredEventType utils.EventType
 }
 
 func NewSyscallProfileValidator(objectCache objectcache.ObjectCache) profilevalidator.ProfileValidator {
-	return &SyscallProfileValidator{}
+	return &SyscallProfileValidator{
+		RequiredEventType: utils.SyscallEventType,
+	}
 }
 
-func (v *SyscallProfileValidator) ValidateProfile(event utils.K8sEvent, ap *v1beta1.ApplicationProfileContainer, nn *v1beta1.NetworkNeighborhoodContainer) (bool, error) {
+func (v *SyscallProfileValidator) ValidateProfile(event utils.K8sEvent, ap *v1beta1.ApplicationProfileContainer, nn *v1beta1.NetworkNeighborhoodContainer) (profilevalidator.ProfileValidationResult, error) {
+	checks := profilevalidator.ProfileValidationResult{
+		Checks: []profilevalidator.ProfileValidationCheck{
+			{
+				Name:   "syscall",
+				Result: false,
+			},
+		},
+	}
+
 	syscallEvent, ok := event.(*ruleenginetypes.SyscallEvent)
 	if !ok {
-		return false, ErrConversionFailed
+		return profilevalidator.ProfileValidationResult{}, ErrConversionFailed
 	}
 
 	if slices.Contains(ap.Syscalls, syscallEvent.SyscallName) {
-		return true, nil
+		checks.GetCheck("syscall").Result = true
 	}
 
-	return false, nil
+	return checks, nil
+}
+
+func (v *SyscallProfileValidator) GetRequiredEventType() utils.EventType {
+	return v.RequiredEventType
 }

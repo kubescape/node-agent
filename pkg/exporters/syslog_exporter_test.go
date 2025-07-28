@@ -7,7 +7,7 @@ import (
 	"time"
 
 	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
-	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	"gopkg.in/mcuadros/go-syslog.v2"
 
@@ -65,7 +65,7 @@ func TestSyslogExporter(t *testing.T) {
 	}
 
 	// Send an alert
-	syslogExp.SendRuleAlert(&ruleenginev1.GenericRuleFailure{
+	syslogExp.SendRuleAlert(&types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
@@ -80,7 +80,7 @@ func TestSyslogExporter(t *testing.T) {
 		},
 	})
 
-	syslogExp.SendRuleAlert(&ruleenginev1.GenericRuleFailure{
+	syslogExp.SendRuleAlert(&types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
