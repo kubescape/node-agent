@@ -49,6 +49,8 @@ import (
 	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
+	"github.com/kubescape/node-agent/pkg/rulemanager/ruleswatcher"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
@@ -188,7 +190,12 @@ func main() {
 
 	var ruleBindingCache *rulebindingcachev1.RBCache
 	if cfg.EnableRuntimeDetection {
-		ruleBindingCache = rulebindingcachev1.NewCache(cfg.NodeName, k8sClient)
+		ruleCreator := rulecreator.NewRuleCreator()
+		ruleBindingCache = rulebindingcachev1.NewCache(cfg.NodeName, k8sClient, ruleCreator)
+		rulesWatcher := ruleswatcher.NewRulesWatcher(k8sClient, ruleCreator, func() {
+			ruleBindingCache.RefreshRuleBindingsRules()
+		})
+		dWatcher.AddAdaptor(rulesWatcher)
 	}
 
 	// Create and DNS managers

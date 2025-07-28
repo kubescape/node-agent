@@ -231,9 +231,11 @@ func (rm *RuleManager) getProfileChecks(enrichedEvent *events.EnrichedEvent) map
 
 func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent, eventProfile map[string]bool) ([]byte, error) {
 	eventWithChecks := map[string]interface{}{
-		"event":  enrichedEvent.Event,
-		"checks": eventProfile,
+		"event":          enrichedEvent.Event,
+		"profile_checks": eventProfile,
 	}
+
+	// profile_checks.exec_path && event.FullPath == profile_checks.exec_path
 
 	serializedEvent, err := json.Marshal(eventWithChecks)
 	if err != nil {

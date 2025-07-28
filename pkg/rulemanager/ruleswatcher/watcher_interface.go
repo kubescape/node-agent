@@ -1,11 +1,14 @@
 package ruleswatcher
 
 import (
-	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
+	"context"
+
+	"github.com/kubescape/node-agent/pkg/watcher"
 )
 
 type RulesWatcher interface {
-	Start()
-	Stop()
-	SetCallback(callback func(rules []typesv1.Rule))
+	watcher.Adaptor
+	InitialSync(ctx context.Context) error
 }
+
+type RulesWatcherCallback = func()

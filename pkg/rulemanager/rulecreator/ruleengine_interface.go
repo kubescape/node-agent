@@ -26,4 +26,10 @@ type RuleCreator interface {
 	CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.Rule
 	CreateAllRules() []typesv1.Rule
 	GetAllRuleIDs() []string
+
+	// Dynamic rule management methods for CRD sync
+	SyncRules(newRules []typesv1.Rule)
+	RemoveRuleByID(id string) bool
+	UpdateRule(rule typesv1.Rule) bool
+	HasRule(id string) bool
 }
