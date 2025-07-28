@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	rulemanagertypesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	corev1 "k8s.io/api/core/v1"
@@ -31,7 +31,7 @@ type RBCache struct {
 	allPods        mapset.Set[string]                                    // set of all pods (also pods without rules)
 	podToRBNames   maps.SafeMap[string, mapset.Set[string]]              // podID -> []rule binding names
 	rbNameToRB     maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding] // rule binding name -> rule binding
-	rbNameToRules  maps.SafeMap[string, []types.Rule]                    // rule binding name -> []created rules
+	rbNameToRules  maps.SafeMap[string, []rulemanagertypesv1.Rule]       // rule binding name -> []created rules
 	rbNameToPods   maps.SafeMap[string, mapset.Set[string]]              // rule binding name -> podIDs
 	ruleCreator    rulecreator.RuleCreator
 	watchResources []watcher.WatchResource
@@ -59,8 +59,8 @@ func (c *RBCache) WatchResources() []watcher.WatchResource {
 
 // ------------------ rulebindingmanager.RuleBindingCache methods -----------------------
 
-func (c *RBCache) ListRulesForPod(namespace, name string) []types.Rule {
-	var rulesSlice []types.Rule
+func (c *RBCache) ListRulesForPod(namespace, name string) []rulemanagertypesv1.Rule {
+	var rulesSlice []rulemanagertypesv1.Rule
 
 	podID := utils.CreateK8sPodID(namespace, name)
 	if !c.podToRBNames.Has(podID) {
@@ -339,29 +339,29 @@ func (c *RBCache) deletePod(uniqueName string) {
 	c.podToRBNames.Delete(uniqueName)
 }
 
-func (c *RBCache) createRules(rulesForPod []typesv1.RuntimeAlertRuleBindingRule) []types.Rule {
-	var rules []types.Rule
+func (c *RBCache) createRules(rulesForPod []typesv1.RuntimeAlertRuleBindingRule) []rulemanagertypesv1.Rule {
+	var rules []rulemanagertypesv1.Rule
 	// Get the rules that are bound to the container
 	for _, ruleParams := range rulesForPod {
 		rules = append(rules, c.createRule(&ruleParams)...)
 	}
 	return rules
 }
-func (c *RBCache) createRule(r *typesv1.RuntimeAlertRuleBindingRule) []types.Rule {
+func (c *RBCache) createRule(r *typesv1.RuntimeAlertRuleBindingRule) []rulemanagertypesv1.Rule {
 	if r.RuleID != "" {
 		rule := c.ruleCreator.CreateRuleByID(r.RuleID)
-		return []types.Rule{rule}
+		return []rulemanagertypesv1.Rule{rule}
 	}
 	if r.RuleName != "" {
 		rule := c.ruleCreator.CreateRuleByName(r.RuleName)
-		return []types.Rule{rule}
+		return []rulemanagertypesv1.Rule{rule}
 	}
 	if len(r.RuleTags) > 0 {
 		rules := c.ruleCreator.CreateRulesByTags(r.RuleTags)
 		return rules
 	}
 
-	return []types.Rule{}
+	return []rulemanagertypesv1.Rule{}
 }
 
 // Expose the rule creator to be able to create rules from third party.

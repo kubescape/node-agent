@@ -1,10 +1,13 @@
-package rulemanager
+package cel
 
 import (
-	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/google/cel-go/cel"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 )
 
 type CELRuleEvaluator interface {
-	EvaluateRule(event []byte, expressions []types.RuleExpression) (bool, error)
+	EvaluateRule(event []byte, expressions []typesv1.RuleExpression) (bool, error)
 	EvaluateExpression(event []byte, expression string) (string, error)
+
+	RegisterHelper(function cel.EnvOption) error
 }
