@@ -114,7 +114,7 @@ func TestCreateRuleFailure_Success(t *testing.T) {
 	cloudServices.Add("aws")
 	mockDNS.On("ResolveContainerProcessToCloudServices", "", uint32(0)).Return(cloudServices)
 
-	result := creator.CreateRuleFailure(rule, enrichedEvent, objectCache, message, uniqueID)
+	result := creator.CreateRuleFailure(rule.Spec, enrichedEvent, objectCache, message, uniqueID)
 
 	assert.NotNil(t, result)
 	assert.Equal(t, uniqueID, result.GetBaseRuntimeAlert().UniqueID)
@@ -149,7 +149,7 @@ func TestCreateRuleFailure_NoEventSetter(t *testing.T) {
 	message := "Test violation"
 	uniqueID := "unique-123"
 
-	result := creator.CreateRuleFailure(rule, enrichedEvent, objectCache, message, uniqueID)
+	result := creator.CreateRuleFailure(rule.Spec, enrichedEvent, objectCache, message, uniqueID)
 
 	assert.Nil(t, result)
 }
@@ -181,7 +181,7 @@ func TestCreateRuleFailure_EnricherError(t *testing.T) {
 	cloudServices := mapset.NewSet[string]()
 	mockDNS.On("ResolveContainerProcessToCloudServices", "", uint32(0)).Return(cloudServices)
 
-	result := creator.CreateRuleFailure(rule, enrichedEvent, objectCache, message, uniqueID)
+	result := creator.CreateRuleFailure(rule.Spec, enrichedEvent, objectCache, message, uniqueID)
 
 	assert.NotNil(t, result)
 	assert.Equal(t, uniqueID, result.GetBaseRuntimeAlert().UniqueID)
@@ -218,7 +218,7 @@ func TestCreateRuleFailure_EnricherShouldNotAlert(t *testing.T) {
 	cloudServices := mapset.NewSet[string]()
 	mockDNS.On("ResolveContainerProcessToCloudServices", "", uint32(0)).Return(cloudServices)
 
-	result := creator.CreateRuleFailure(rule, enrichedEvent, objectCache, message, uniqueID)
+	result := creator.CreateRuleFailure(rule.Spec, enrichedEvent, objectCache, message, uniqueID)
 
 	assert.NotNil(t, result)
 	assert.Equal(t, uniqueID, result.GetBaseRuntimeAlert().UniqueID)
@@ -259,7 +259,7 @@ func TestCreateRuleFailure_WithContainerIdToPid(t *testing.T) {
 	cloudServices := mapset.NewSet[string]()
 	mockDNS.On("ResolveContainerProcessToCloudServices", "", uint32(0)).Return(cloudServices)
 
-	result := creator.CreateRuleFailure(rule, enrichedEvent, objectCache, message, uniqueID)
+	result := creator.CreateRuleFailure(rule.Spec, enrichedEvent, objectCache, message, uniqueID)
 
 	assert.NotNil(t, result)
 	assert.Equal(t, uniqueID, result.GetBaseRuntimeAlert().UniqueID)
@@ -302,7 +302,7 @@ func TestCreateRuleFailure_WithProcessTree(t *testing.T) {
 	cloudServices := mapset.NewSet[string]()
 	mockDNS.On("ResolveContainerProcessToCloudServices", "", uint32(0)).Return(cloudServices)
 
-	result := creator.CreateRuleFailure(rule, enrichedEvent, objectCache, message, uniqueID)
+	result := creator.CreateRuleFailure(rule.Spec, enrichedEvent, objectCache, message, uniqueID)
 
 	assert.NotNil(t, result)
 	assert.Equal(t, uniqueID, result.GetBaseRuntimeAlert().UniqueID)
@@ -344,7 +344,7 @@ func TestCreateRuleFailure_Arguments(t *testing.T) {
 	cloudServices := mapset.NewSet[string]()
 	mockDNS.On("ResolveContainerProcessToCloudServices", "", uint32(0)).Return(cloudServices)
 
-	result := creator.CreateRuleFailure(rule, enrichedEvent, objectCache, message, uniqueID)
+	result := creator.CreateRuleFailure(rule.Spec, enrichedEvent, objectCache, message, uniqueID)
 
 	assert.NotNil(t, result)
 

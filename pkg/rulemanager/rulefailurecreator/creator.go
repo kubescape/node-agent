@@ -47,7 +47,7 @@ func (r *RuleFailureCreator) RegisterCreator(eventType utils.EventType, creator 
 	r.setterByEventType[eventType] = creator
 }
 
-func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure {
+func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.RuleSpec, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure {
 	eventSetter, ok := r.setterByEventType[enrichedEvent.EventType]
 	if !ok {
 		return nil
@@ -56,8 +56,8 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 	ruleFailure := &types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			UniqueID:  uniqueID,
-			AlertName: rule.Spec.Name,
-			Severity:  rule.Spec.Severity,
+			AlertName: rule.Name,
+			Severity:  rule.Severity,
 			Arguments: map[string]interface{}{
 				"message": message,
 			},
@@ -65,7 +65,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 		RuleAlert: apitypes.RuleAlert{
 			RuleDescription: message,
 		},
-		RuleID:        rule.Spec.ID,
+		RuleID:        rule.ID,
 		AlertPlatform: apitypes.AlertSourcePlatformK8s,
 	}
 

@@ -74,7 +74,7 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 		return err
 	}
 
-	var enabledRules []typesv1.Rule
+	var enabledRules []typesv1.RuleSpec
 	for _, item := range unstructuredList.Items {
 		rule, err := unstructuredToRule(&item)
 		if err != nil {
@@ -82,7 +82,7 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 			continue
 		}
 
-		if rule.Spec.Enabled {
+		if rule.Enabled {
 			enabledRules = append(enabledRules, *rule)
 		}
 	}
@@ -98,8 +98,8 @@ func (w *RulesWatcherImpl) InitialSync(ctx context.Context) error {
 	return w.syncAllRulesFromCluster(ctx)
 }
 
-func unstructuredToRule(obj *unstructured.Unstructured) (*typesv1.Rule, error) {
-	rule := &typesv1.Rule{}
+func unstructuredToRule(obj *unstructured.Unstructured) (*typesv1.RuleSpec, error) {
+	rule := &typesv1.RuleSpec{}
 	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, rule); err != nil {
 		return nil, err
 	}

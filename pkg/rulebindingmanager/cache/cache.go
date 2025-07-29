@@ -32,7 +32,7 @@ type RBCache struct {
 	allPods        mapset.Set[string]                                    // set of all pods (also pods without rules)
 	podToRBNames   maps.SafeMap[string, mapset.Set[string]]              // podID -> []rule binding names
 	rbNameToRB     maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding] // rule binding name -> rule binding
-	rbNameToRules  maps.SafeMap[string, []rulemanagertypesv1.Rule]       // rule binding name -> []created rules
+	rbNameToRules  maps.SafeMap[string, []rulemanagertypesv1.RuleSpec]   // rule binding name -> []created rules
 	rbNameToPods   maps.SafeMap[string, mapset.Set[string]]              // rule binding name -> podIDs
 	ruleCreator    rulecreator.RuleCreator
 	watchResources []watcher.WatchResource
@@ -63,11 +63,11 @@ func (c *RBCache) WatchResources() []watcher.WatchResource {
 
 // ------------------ rulebindingmanager.RuleBindingCache methods -----------------------
 
-func (c *RBCache) ListRulesForPod(namespace, name string) []rulemanagertypesv1.Rule {
+func (c *RBCache) ListRulesForPod(namespace, name string) []rulemanagertypesv1.RuleSpec {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
-	var rulesSlice []rulemanagertypesv1.Rule
+	var rulesSlice []rulemanagertypesv1.RuleSpec
 
 	podID := utils.CreateK8sPodID(namespace, name)
 	if !c.podToRBNames.Has(podID) {
@@ -367,29 +367,29 @@ func (c *RBCache) deletePod(uniqueName string) {
 	c.podToRBNames.Delete(uniqueName)
 }
 
-func (c *RBCache) createRules(rulesForPod []typesv1.RuntimeAlertRuleBindingRule) []rulemanagertypesv1.Rule {
-	var rules []rulemanagertypesv1.Rule
+func (c *RBCache) createRules(rulesForPod []typesv1.RuntimeAlertRuleBindingRule) []rulemanagertypesv1.RuleSpec {
+	var rules []rulemanagertypesv1.RuleSpec
 	// Get the rules that are bound to the container
 	for _, ruleParams := range rulesForPod {
 		rules = append(rules, c.createRule(&ruleParams)...)
 	}
 	return rules
 }
-func (c *RBCache) createRule(r *typesv1.RuntimeAlertRuleBindingRule) []rulemanagertypesv1.Rule {
+func (c *RBCache) createRule(r *typesv1.RuntimeAlertRuleBindingRule) []rulemanagertypesv1.RuleSpec {
 	if r.RuleID != "" {
 		rule := c.ruleCreator.CreateRuleByID(r.RuleID)
-		return []rulemanagertypesv1.Rule{rule}
+		return []rulemanagertypesv1.RuleSpec{rule}
 	}
 	if r.RuleName != "" {
 		rule := c.ruleCreator.CreateRuleByName(r.RuleName)
-		return []rulemanagertypesv1.Rule{rule}
+		return []rulemanagertypesv1.RuleSpec{rule}
 	}
 	if len(r.RuleTags) > 0 {
 		rules := c.ruleCreator.CreateRulesByTags(r.RuleTags)
 		return rules
 	}
 
-	return []rulemanagertypesv1.Rule{}
+	return []rulemanagertypesv1.RuleSpec{}
 }
 
 // Expose the rule creator to be able to create rules from third party.

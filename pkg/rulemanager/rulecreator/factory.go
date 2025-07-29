@@ -11,22 +11,19 @@ import (
 var _ RuleCreator = (*RuleCreatorImpl)(nil)
 
 type RuleCreatorImpl struct {
-	Rules []typesv1.Rule
-	mutex sync.RWMutex // Protect concurrent access to Rules slice
+	mutex sync.RWMutex
+	Rules []typesv1.RuleSpec
 }
 
 func NewRuleCreator() *RuleCreatorImpl {
 	return &RuleCreatorImpl{}
 }
 
-func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []typesv1.Rule {
-	r.mutex.RLock()
-	defer r.mutex.RUnlock()
-
-	var rules []typesv1.Rule
+func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []typesv1.RuleSpec {
+	var rules []typesv1.RuleSpec
 	for _, rule := range r.Rules {
 		for _, tag := range tags {
-			if slices.Contains(rule.Spec.Tags, tag) {
+			if slices.Contains(rule.Tags, tag) {
 				rules = append(rules, rule)
 				break
 			}
@@ -35,44 +32,32 @@ func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []typesv1.Rule {
 	return rules
 }
 
-func (r *RuleCreatorImpl) CreateRuleByID(id string) typesv1.Rule {
-	r.mutex.RLock()
-	defer r.mutex.RUnlock()
-
+func (r *RuleCreatorImpl) CreateRuleByID(id string) typesv1.RuleSpec {
 	for _, rule := range r.Rules {
-		if rule.Spec.ID == id {
+		if rule.ID == id {
 			return rule
 		}
 	}
-	return typesv1.Rule{}
+	return typesv1.RuleSpec{}
 }
 
-func (r *RuleCreatorImpl) CreateRuleByName(name string) typesv1.Rule {
-	r.mutex.RLock()
-	defer r.mutex.RUnlock()
-
+func (r *RuleCreatorImpl) CreateRuleByName(name string) typesv1.RuleSpec {
 	for _, rule := range r.Rules {
-		if rule.Spec.Name == name {
+		if rule.Name == name {
 			return rule
 		}
 	}
-	return typesv1.Rule{}
+	return typesv1.RuleSpec{}
 }
 
-func (r *RuleCreatorImpl) RegisterRule(rule typesv1.Rule) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
+func (r *RuleCreatorImpl) RegisterRule(rule typesv1.RuleSpec) {
 	r.Rules = append(r.Rules, rule)
 }
 
-func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []typesv1.Rule {
-	r.mutex.RLock()
-	defer r.mutex.RUnlock()
-
-	var rules []typesv1.Rule
+func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []typesv1.RuleSpec {
+	var rules []typesv1.RuleSpec
 	for _, rule := range r.Rules {
-		for _, expression := range rule.Spec.Expressions.RuleExpression {
+		for _, expression := range rule.Expressions.RuleExpression {
 			if expression.EventType == eventType {
 				rules = append(rules, rule)
 				break
@@ -82,10 +67,10 @@ func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []ty
 	return rules
 }
 
-func (r *RuleCreatorImpl) CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.Rule {
+func (r *RuleCreatorImpl) CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.RuleSpec {
 	rules := r.CreateRulesByEventType(eventType)
 	for _, rule := range rules {
-		if rule.Spec.SupportPolicy {
+		if rule.SupportPolicy {
 			rules = append(rules, rule)
 		}
 	}
@@ -99,16 +84,13 @@ func (r *RuleCreatorImpl) GetAllRuleIDs() []string {
 
 	var ruleIDs []string
 	for _, rule := range r.Rules {
-		ruleIDs = append(ruleIDs, rule.Spec.ID)
+		ruleIDs = append(ruleIDs, rule.ID)
 	}
 	return ruleIDs
 }
 
-func (r *RuleCreatorImpl) CreateAllRules() []typesv1.Rule {
-	r.mutex.RLock()
-	defer r.mutex.RUnlock()
-
-	var rules []typesv1.Rule
+func (r *RuleCreatorImpl) CreateAllRules() []typesv1.RuleSpec {
+	var rules []typesv1.RuleSpec
 	for _, rule := range r.Rules {
 		rules = append(rules, rule)
 	}
@@ -117,23 +99,23 @@ func (r *RuleCreatorImpl) CreateAllRules() []typesv1.Rule {
 
 // SyncRules replaces the current rules with the new set of rules
 // It removes rules that are no longer present and adds/updates existing ones
-func (r *RuleCreatorImpl) SyncRules(newRules []typesv1.Rule) {
+func (r *RuleCreatorImpl) SyncRules(newRules []typesv1.RuleSpec) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
 	// Create a map of new rules by ID for quick lookup
-	newRuleMap := make(map[string]typesv1.Rule)
+	newRuleMap := make(map[string]typesv1.RuleSpec)
 	for _, rule := range newRules {
-		newRuleMap[rule.Spec.ID] = rule
+		newRuleMap[rule.ID] = rule
 	}
 
 	// Remove rules that are no longer present
-	var updatedRules []typesv1.Rule
+	var updatedRules []typesv1.RuleSpec
 	for _, existingRule := range r.Rules {
-		if newRule, exists := newRuleMap[existingRule.Spec.ID]; exists {
+		if newRule, exists := newRuleMap[existingRule.ID]; exists {
 			// Rule still exists, use the new version
 			updatedRules = append(updatedRules, newRule)
-			delete(newRuleMap, existingRule.Spec.ID) // Mark as processed
+			delete(newRuleMap, existingRule.ID) // Mark as processed
 		}
 		// If rule doesn't exist in newRuleMap, it's removed (not added to updatedRules)
 	}
@@ -152,7 +134,7 @@ func (r *RuleCreatorImpl) RemoveRuleByID(id string) bool {
 	defer r.mutex.Unlock()
 
 	for i, rule := range r.Rules {
-		if rule.Spec.ID == id {
+		if rule.ID == id {
 			// Remove the rule by slicing
 			r.Rules = append(r.Rules[:i], r.Rules[i+1:]...)
 			return true
@@ -162,12 +144,12 @@ func (r *RuleCreatorImpl) RemoveRuleByID(id string) bool {
 }
 
 // UpdateRule updates an existing rule or adds it if it doesn't exist
-func (r *RuleCreatorImpl) UpdateRule(rule typesv1.Rule) bool {
+func (r *RuleCreatorImpl) UpdateRule(rule typesv1.RuleSpec) bool {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
 	for i, existingRule := range r.Rules {
-		if existingRule.Spec.ID == rule.Spec.ID {
+		if existingRule.ID == rule.ID {
 			r.Rules[i] = rule
 			return true
 		}
@@ -184,7 +166,7 @@ func (r *RuleCreatorImpl) HasRule(id string) bool {
 	defer r.mutex.RUnlock()
 
 	for _, rule := range r.Rules {
-		if rule.Spec.ID == id {
+		if rule.ID == id {
 			return true
 		}
 	}

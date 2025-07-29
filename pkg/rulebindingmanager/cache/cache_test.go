@@ -166,7 +166,7 @@ func TestRuntimeObjAddHandler(t *testing.T) {
 			r := tt.args.c.ListRulesForPod(tt.args.pod.GetNamespace(), tt.args.pod.GetName())
 			assert.Equal(t, len(tt.expectedRules), len(r))
 			for i := range r {
-				assert.Equal(t, tt.expectedRules[i].ruleID, r[i].Spec.ID)
+				assert.Equal(t, tt.expectedRules[i].ruleID, r[i].ID)
 
 			}
 		})
@@ -563,7 +563,7 @@ func TestDeleteRuleBinding(t *testing.T) {
 			for k, v := range tt.podToRBNames {
 				for _, s := range v {
 					c.rbNameToRB.Set(s, typesv1.RuntimeAlertRuleBinding{})
-					c.rbNameToRules.Set(s, []rulemanagertypesv1.Rule{rulemanagertypesv1.Rule{}})
+					c.rbNameToRules.Set(s, []rulemanagertypesv1.RuleSpec{rulemanagertypesv1.RuleSpec{}})
 
 					if !c.rbNameToPods.Has(s) {
 						c.rbNameToPods.Set(s, mapset.NewSet[string]())

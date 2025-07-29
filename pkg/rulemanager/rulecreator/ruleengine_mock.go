@@ -8,70 +8,63 @@ import (
 var _ RuleCreator = (*RuleCreatorMock)(nil)
 
 type RuleCreatorMock struct {
-	Rules []typesv1.Rule
+	Rules []typesv1.RuleSpec
 }
 
-func (r *RuleCreatorMock) CreateRulesByTags(tags []string) []typesv1.Rule {
-	var rl []typesv1.Rule
+func (r *RuleCreatorMock) CreateRulesByTags(tags []string) []typesv1.RuleSpec {
+	var rl []typesv1.RuleSpec
 	for _, t := range tags {
-		rl = append(rl, typesv1.Rule{
-			Spec: typesv1.RuleSpec{
-				Name: t,
-				Tags: []string{t},
-			},
+		rl = append(rl, typesv1.RuleSpec{
+			Name: t,
+			Tags: []string{t},
 		})
 	}
 	return rl
 }
 
-func (r *RuleCreatorMock) CreateRuleByID(id string) typesv1.Rule {
-	return typesv1.Rule{
-		Spec: typesv1.RuleSpec{
-			ID: id,
-		},
+func (r *RuleCreatorMock) CreateRuleByID(id string) typesv1.RuleSpec {
+	return typesv1.RuleSpec{
+		ID: id,
 	}
 }
 
-func (r *RuleCreatorMock) CreateRuleByName(name string) typesv1.Rule {
-	return typesv1.Rule{
-		Spec: typesv1.RuleSpec{
-			Name: name,
-		},
+func (r *RuleCreatorMock) CreateRuleByName(name string) typesv1.RuleSpec {
+	return typesv1.RuleSpec{
+		Name: name,
 	}
 }
 
-func (r *RuleCreatorMock) RegisterRule(rule typesv1.Rule) {
-	r.Rules = append(r.Rules, rule)
+func (r *RuleCreatorMock) RegisterRule(rule typesv1.RuleSpec) {
 }
 
-func (r *RuleCreatorMock) CreateRulesByEventType(eventType utils.EventType) []typesv1.Rule {
-	return []typesv1.Rule{}
+func (r *RuleCreatorMock) CreateRulesByEventType(eventType utils.EventType) []typesv1.RuleSpec {
+	return []typesv1.RuleSpec{}
 }
 
-func (r *RuleCreatorMock) CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.Rule {
-	return []typesv1.Rule{}
+func (r *RuleCreatorMock) CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.RuleSpec {
+	return []typesv1.RuleSpec{}
 }
 
-func (r *RuleCreatorMock) CreateAllRules() []typesv1.Rule {
-	return r.Rules
+func (r *RuleCreatorMock) CreateAllRules() []typesv1.RuleSpec {
+	return []typesv1.RuleSpec{}
 }
 
 func (r *RuleCreatorMock) GetAllRuleIDs() []string {
 	var ids []string
 	for _, rule := range r.Rules {
-		ids = append(ids, rule.Spec.ID)
+		ids = append(ids, rule.ID)
 	}
 	return ids
 }
 
 // Dynamic rule management methods for CRD sync
-func (r *RuleCreatorMock) SyncRules(newRules []typesv1.Rule) {
+func (r *RuleCreatorMock) SyncRules(newRules []typesv1.RuleSpec) {
 	r.Rules = newRules
 }
 
 func (r *RuleCreatorMock) RemoveRuleByID(id string) bool {
 	for i, rule := range r.Rules {
-		if rule.Spec.ID == id {
+		if rule.ID == id {
 			r.Rules = append(r.Rules[:i], r.Rules[i+1:]...)
 			return true
 		}
@@ -79,9 +72,9 @@ func (r *RuleCreatorMock) RemoveRuleByID(id string) bool {
 	return false
 }
 
-func (r *RuleCreatorMock) UpdateRule(rule typesv1.Rule) bool {
+func (r *RuleCreatorMock) UpdateRule(rule typesv1.RuleSpec) bool {
 	for i, existingRule := range r.Rules {
-		if existingRule.Spec.ID == rule.Spec.ID {
+		if existingRule.ID == rule.ID {
 			r.Rules[i] = rule
 			return true
 		}
@@ -92,7 +85,7 @@ func (r *RuleCreatorMock) UpdateRule(rule typesv1.Rule) bool {
 
 func (r *RuleCreatorMock) HasRule(id string) bool {
 	for _, rule := range r.Rules {
-		if rule.Spec.ID == id {
+		if rule.ID == id {
 			return true
 		}
 	}
