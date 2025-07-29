@@ -29,6 +29,11 @@ type ProfileValidationResult struct {
 	Checks []ProfileValidationCheck
 }
 
+type EventWithChecks struct {
+	Event         utils.K8sEvent  `json:"event"`
+	ProfileChecks map[string]bool `json:"profile_checks"`
+}
+
 type ProfileValidationCheck struct {
 	Name   string `json:"name"`
 	Result bool   `json:"result"`

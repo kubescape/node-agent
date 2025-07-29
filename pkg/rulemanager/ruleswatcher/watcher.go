@@ -77,13 +77,16 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 	var enabledRules typesv1.Rules
 	for _, item := range unstructuredList.Items {
 		rule, err := unstructuredToRule(&item)
+		logger.L().Debug("RulesWatcher - rule", helpers.Interface("rule", rule))
 		if err != nil {
 			logger.L().Warning("RulesWatcher - failed to convert rule during sync", helpers.Error(err))
 			continue
 		}
 
-		if rule.Enabled {
-			enabledRules.Spec = append(enabledRules.Spec, *rule)
+		for _, rule := range rule.Spec {
+			if rule.Enabled {
+				enabledRules.Spec = append(enabledRules.Spec, rule)
+			}
 		}
 	}
 
@@ -98,8 +101,8 @@ func (w *RulesWatcherImpl) InitialSync(ctx context.Context) error {
 	return w.syncAllRulesFromCluster(ctx)
 }
 
-func unstructuredToRule(obj *unstructured.Unstructured) (*typesv1.RuleSpec, error) {
-	rule := &typesv1.RuleSpec{}
+func unstructuredToRule(obj *unstructured.Unstructured) (*typesv1.Rules, error) {
+	rule := &typesv1.Rules{}
 	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, rule); err != nil {
 		return nil, err
 	}
