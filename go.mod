@@ -22,6 +22,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/dutchcoders/go-clamd v0.0.0-20170520113014-b970184f4d9e
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
+	github.com/fatih/structs v1.1.0
 	github.com/go-openapi/strfmt v0.23.0
 	github.com/google/cel-go v0.23.2
 	github.com/google/go-containerregistry v0.20.3
