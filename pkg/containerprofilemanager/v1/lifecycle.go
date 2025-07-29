@@ -240,6 +240,9 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 			if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace,
 				container.K8s.PodName, container.K8s.ContainerName, containerID) == 0 {
 				entry.data.watchedContainerData.SetStatus(objectcache.WatchedContainerStatusCompleted)
+			} else {
+				// TODO return error code to storage instead of staying on learning
+				// so we can close the TS and move away - this will not reflect on the CP and AP/NN
 			}
 
 			// Send container termination signal (blocking send, safe because monitoring goroutine is always running)
