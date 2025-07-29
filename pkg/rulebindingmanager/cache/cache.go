@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"strings"
+	"sync"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -36,13 +37,14 @@ type RBCache struct {
 	ruleCreator    rulecreator.RuleCreator
 	watchResources []watcher.WatchResource
 	notifiers      []*chan rulebindingmanager.RuleBindingNotify
+	mutex          sync.RWMutex
 }
 
-func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *RBCache {
+func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface, ruleCreator rulecreator.RuleCreator) *RBCache {
 	return &RBCache{
 		nodeName:       nodeName,
 		k8sClient:      k8sClient,
-		ruleCreator:    rulecreator.NewRuleCreator(),
+		ruleCreator:    ruleCreator,
 		allPods:        mapset.NewSet[string](),
 		rbNameToRB:     maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding]{},
 		podToRBNames:   maps.SafeMap[string, mapset.Set[string]]{},
@@ -54,12 +56,17 @@ func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *RBCache 
 // ----------------- watcher.WatchResources methods -----------------
 
 func (c *RBCache) WatchResources() []watcher.WatchResource {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
 	return c.watchResources
 }
 
 // ------------------ rulebindingmanager.RuleBindingCache methods -----------------------
 
 func (c *RBCache) ListRulesForPod(namespace, name string) []rulemanagertypesv1.RuleSpec {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
 	var rulesSlice []rulemanagertypesv1.RuleSpec
 
 	podID := utils.CreateK8sPodID(namespace, name)
@@ -79,12 +86,17 @@ func (c *RBCache) ListRulesForPod(namespace, name string) []rulemanagertypesv1.R
 }
 
 func (c *RBCache) AddNotifier(n *chan rulebindingmanager.RuleBindingNotify) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	c.notifiers = append(c.notifiers, n)
 }
 
 // ------------------ watcher.Watcher methods -----------------------
 
 func (c *RBCache) AddHandler(ctx context.Context, obj runtime.Object) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	var rbs []rulebindingmanager.RuleBindingNotify
 
 	if pod, ok := obj.(*corev1.Pod); ok {
@@ -106,6 +118,9 @@ func (c *RBCache) AddHandler(ctx context.Context, obj runtime.Object) {
 }
 
 func (c *RBCache) ModifyHandler(ctx context.Context, obj runtime.Object) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	var rbs []rulebindingmanager.RuleBindingNotify
 
 	if pod, ok := obj.(*corev1.Pod); ok {
@@ -127,6 +142,9 @@ func (c *RBCache) ModifyHandler(ctx context.Context, obj runtime.Object) {
 }
 
 func (c *RBCache) DeleteHandler(_ context.Context, obj runtime.Object) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	var rbs []rulebindingmanager.RuleBindingNotify
 
 	if pod, ok := obj.(*corev1.Pod); ok {
@@ -141,6 +159,16 @@ func (c *RBCache) DeleteHandler(_ context.Context, obj runtime.Object) {
 			*c.notifiers[n] <- rbs[i]
 		}
 	}
+}
+
+func (c *RBCache) RefreshRuleBindingsRules() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	for _, rbName := range c.rbNameToRB.Keys() {
+		rb := c.rbNameToRB.Get(rbName)
+		c.rbNameToRules.Set(rbName, c.createRules(rb.Spec.Rules))
+	}
+	logger.L().Info("RBCache - refreshed rule bindings rules", helpers.Int("ruleBindings", len(c.rbNameToRB.Keys())))
 }
 
 // ----------------- RuleBinding manager methods -----------------
@@ -366,6 +394,8 @@ func (c *RBCache) createRule(r *typesv1.RuntimeAlertRuleBindingRule) []rulemanag
 
 // Expose the rule creator to be able to create rules from third party.
 func (c *RBCache) GetRuleCreator() rulecreator.RuleCreator {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
 	return c.ruleCreator
 }
 

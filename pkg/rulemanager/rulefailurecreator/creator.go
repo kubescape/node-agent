@@ -13,7 +13,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -29,10 +28,10 @@ type RuleFailureCreator struct {
 	setterByEventType map[utils.EventType]EventMetadataSetter
 	containerIdToPid  *maps.SafeMap[string, uint32]
 	dnsManager        dnsmanager.DNSResolver
-	enricher          ruleenginetypes.Enricher
+	enricher          types.Enricher
 }
 
-func NewRuleFailureCreator(enricher ruleenginetypes.Enricher, dnsManager dnsmanager.DNSResolver) *RuleFailureCreator {
+func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSResolver) *RuleFailureCreator {
 	return &RuleFailureCreator{
 		setterByEventType: make(map[utils.EventType]EventMetadataSetter),
 		dnsManager:        dnsManager,

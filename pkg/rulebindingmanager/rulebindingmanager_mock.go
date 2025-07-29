@@ -19,3 +19,6 @@ func (r *RuleBindingCacheMock) AddNotifier(_ *chan RuleBindingNotify) {
 func (r *RuleBindingCacheMock) GetRuleCreator() rulecreator.RuleCreator {
 	return nil
 }
+
+func (r *RuleBindingCacheMock) RefreshRuleBindingsRules() {
+}

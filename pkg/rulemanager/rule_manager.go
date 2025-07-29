@@ -21,11 +21,11 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
-	ruleenginetypes "github.com/kubescape/node-agent/pkg/ruleengine/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator/validators"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulefailurecreator"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 
@@ -53,7 +53,7 @@ type RuleManager struct {
 	clusterName             string
 	containerIdToShimPid    maps.SafeMap[string, uint32]
 	containerIdToPid        maps.SafeMap[string, uint32]
-	enricher                ruleenginetypes.Enricher
+	enricher                types.Enricher
 	processManager          processtree.ProcessTreeManager
 	ruleCooldown            *rulecooldown.RuleCooldown
 	CelEvaluator            cel.CELRuleEvaluator
@@ -64,7 +64,7 @@ type RuleManager struct {
 
 var _ RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processtree.ProcessTreeManager, dnsManager dnsmanager.DNSResolver, enricher ruleenginetypes.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processtree.ProcessTreeManager, dnsManager dnsmanager.DNSResolver, enricher types.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
 	profileValidatorFactory := profilevalidator.NewProfileValidatorFactory(objectCache)
 	registry := profilevalidator.NewProfileRegistry(objectCache)
 	ruleFailureCreator := rulefailurecreator.NewRuleFailureCreator(enricher, dnsManager)
@@ -124,8 +124,10 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
 	eventProfile := rm.getProfileChecks(enrichedEvent)
+	logger.L().Debug("RuleManager - event profile", helpers.Interface("eventProfile", eventProfile), helpers.Interface("event", enrichedEvent))
 
 	rules := rm.ruleBindingCache.ListRulesForPod(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
+	logger.L().Debug("RuleManager - rules", helpers.Interface("rules", rules))
 
 	for _, rule := range rules {
 		if rule.Enabled {
@@ -136,12 +138,16 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				}
 			}
 
+			logger.L().Debug("RuleManager - rule", helpers.Interface("rule", rule))
+
 			serializedEvent, err := rm.serializeEvent(enrichedEvent, eventProfile)
 			if err != nil {
 				continue
 			}
 
 			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent)
+
+			logger.L().Debug("RuleManager - ruleExpressions", helpers.Interface("ruleExpressions", ruleExpressions))
 
 			shouldAlert, err := rm.CelEvaluator.EvaluateRule(serializedEvent, ruleExpressions)
 			if err != nil {
@@ -150,6 +156,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 
 			if shouldAlert {
+				logger.L().Debug("RuleManager - shouldAlert", helpers.Interface("shouldAlert", shouldAlert))
 				rm.metrics.ReportRuleAlert(rule.Name)
 				message, uniqueID, err := rm.getUniqueIdAndMessage(serializedEvent, rule)
 				if err != nil {
@@ -216,14 +223,19 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 func (rm *RuleManager) getProfileChecks(enrichedEvent *events.EnrichedEvent) map[string]bool {
 	eventProfile := map[string]bool{}
 
-	ap, nn, ok := rm.registry.GetAvailableProfiles("enrichedEvent.ContainerName", enrichedEvent.ContainerID)
-	if ok {
-		profileValidator := rm.profileValidatorFactory.GetProfileValidator(enrichedEvent.EventType)
-		results, err := profileValidator.ValidateProfile(enrichedEvent.Event, ap, nn)
-		if err != nil {
-			logger.L().Error("RuleManager - failed to validate profile", helpers.Error(err))
+	sharedData := rm.objectCache.K8sObjectCache().GetSharedContainerData(enrichedEvent.ContainerID)
+	if sharedData != nil {
+		containerName := sharedData.ContainerInfos[objectcache.ContainerType(1)][0].Name
+
+		ap, nn, ok := rm.registry.GetAvailableProfiles(containerName, enrichedEvent.ContainerID)
+		if ok {
+			profileValidator := rm.profileValidatorFactory.GetProfileValidator(enrichedEvent.EventType)
+			results, err := profileValidator.ValidateProfile(enrichedEvent.Event, ap, nn)
+			if err != nil {
+				logger.L().Error("RuleManager - failed to validate profile", helpers.Error(err))
+			}
+			eventProfile = results.GetChecksAsMap()
 		}
-		eventProfile = results.GetChecksAsMap()
 	}
 
 	return eventProfile
@@ -231,9 +243,11 @@ func (rm *RuleManager) getProfileChecks(enrichedEvent *events.EnrichedEvent) map
 
 func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent, eventProfile map[string]bool) ([]byte, error) {
 	eventWithChecks := map[string]interface{}{
-		"event":  enrichedEvent.Event,
-		"checks": eventProfile,
+		"event":          enrichedEvent.Event,
+		"profile_checks": eventProfile,
 	}
+
+	// profile_checks.exec_path && event.FullPath == profile_checks.exec_path
 
 	serializedEvent, err := json.Marshal(eventWithChecks)
 	if err != nil {
