@@ -14,21 +14,14 @@ type EventWithChecks struct {
 	ProfileChecks profilevalidator.ProfileValidationResult `json:"profile_checks"`
 }
 
-func (e *EventWithChecks) CelEvaulationForm() map[string][]byte {
-	serializedEvent, err := json.Marshal(e.Event)
+func (e *EventWithChecks) CelEvaulationForm() (json.RawMessage, error) {
+	data, err := json.Marshal(map[string]any{
+		"event":          e.Event,
+		"profile_checks": e.ProfileChecks.GetChecksAsMap(),
+	})
 	if err != nil {
 		logger.L().Error("RuleManager - failed to marshal event", helpers.Error(err))
-		return nil
+		return nil, err
 	}
-
-	serializedProfileChecks, err := json.Marshal(e.ProfileChecks)
-	if err != nil {
-		logger.L().Error("RuleManager - failed to marshal profile checks", helpers.Error(err))
-		return nil
-	}
-
-	return map[string][]byte{
-		"event":          serializedEvent,
-		"profile_checks": serializedProfileChecks,
-	}
+	return json.RawMessage(data), nil
 }

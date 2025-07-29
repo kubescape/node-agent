@@ -2,6 +2,7 @@ package rulemanager
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -270,13 +271,18 @@ func (rm *RuleManager) getProfileChecks(enrichedEvent *events.EnrichedEvent) pro
 	return eventProfile
 }
 
-func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent, eventProfile profilevalidator.ProfileValidationResult) (map[string][]byte, error) {
+func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent, eventProfile profilevalidator.ProfileValidationResult) (json.RawMessage, error) {
 	eventWithChecks := types.EventWithChecks{
 		Event:         enrichedEvent.Event,
 		ProfileChecks: eventProfile,
 	}
 
-	return eventWithChecks.CelEvaulationForm(), nil
+	form, err := eventWithChecks.CelEvaulationForm()
+	if err != nil {
+		return nil, err
+	}
+
+	return form, nil
 }
 
 func (rm *RuleManager) getRuleExpressions(rule typesv1.RuleSpec, enrichedEvent *events.EnrichedEvent) []typesv1.RuleExpression {
@@ -289,7 +295,7 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.RuleSpec, enrichedEvent *
 	return ruleExpressions
 }
 
-func (rm *RuleManager) getUniqueIdAndMessage(serializedEvent map[string][]byte, rule typesv1.RuleSpec) (string, string, error) {
+func (rm *RuleManager) getUniqueIdAndMessage(serializedEvent json.RawMessage, rule typesv1.RuleSpec) (string, string, error) {
 	message, err := rm.CelEvaluator.EvaluateExpression(serializedEvent, rule.Expressions.Message)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
