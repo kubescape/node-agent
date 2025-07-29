@@ -15,10 +15,12 @@ type EventWithChecks struct {
 func (e *EventWithChecks) CelEvaluationMap() map[string]any {
 	eventMap := structs.Map(e.Event)
 
-	if eventMap["Extra"] != nil {
-		return map[string]any{
-			"event":          eventMap["Event"],
-			"profile_checks": e.ProfileChecks.GetChecksAsMap(),
+	if eventMap["Event"] != nil {
+		if event, ok := eventMap["Event"].(map[string]any); ok && event["Event"] != nil {
+			return map[string]any{
+				"event":          eventMap["Event"],
+				"profile_checks": e.ProfileChecks.GetChecksAsMap(),
+			}
 		}
 	}
 
