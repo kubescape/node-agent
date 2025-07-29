@@ -2,7 +2,6 @@ package rulemanager
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -138,16 +137,12 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 
 			logger.L().Debug("RuleManager - rule", helpers.Interface("rule", rule))
 
-			serializedEvent, err := rm.serializeEvent(enrichedEvent, eventProfile)
-			if err != nil {
-				continue
-			}
-
+			eventMap := rm.serializeEvent(enrichedEvent, eventProfile)
 			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent)
 
 			logger.L().Debug("RuleManager - ruleExpressions", helpers.Interface("ruleExpressions", ruleExpressions))
 
-			shouldAlert, err := rm.CelEvaluator.EvaluateRule(serializedEvent, ruleExpressions)
+			shouldAlert, err := rm.CelEvaluator.EvaluateRule(eventMap, ruleExpressions)
 			if err != nil {
 				logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
 				continue
@@ -156,7 +151,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			if shouldAlert {
 				logger.L().Debug("RuleManager - shouldAlert", helpers.Interface("shouldAlert", shouldAlert))
 				rm.metrics.ReportRuleAlert(rule.Name)
-				message, uniqueID, err := rm.getUniqueIdAndMessage(serializedEvent, rule)
+				message, uniqueID, err := rm.getUniqueIdAndMessage(eventMap, rule)
 				if err != nil {
 					logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
 					continue
@@ -271,18 +266,13 @@ func (rm *RuleManager) getProfileChecks(enrichedEvent *events.EnrichedEvent) pro
 	return eventProfile
 }
 
-func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent, eventProfile profilevalidator.ProfileValidationResult) (json.RawMessage, error) {
+func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent, eventProfile profilevalidator.ProfileValidationResult) map[string]any {
 	eventWithChecks := types.EventWithChecks{
 		Event:         enrichedEvent.Event,
 		ProfileChecks: eventProfile,
 	}
 
-	form, err := eventWithChecks.CelEvaulationForm()
-	if err != nil {
-		return nil, err
-	}
-
-	return form, nil
+	return eventWithChecks.CelEvaluationMap()
 }
 
 func (rm *RuleManager) getRuleExpressions(rule typesv1.RuleSpec, enrichedEvent *events.EnrichedEvent) []typesv1.RuleExpression {
@@ -295,12 +285,12 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.RuleSpec, enrichedEvent *
 	return ruleExpressions
 }
 
-func (rm *RuleManager) getUniqueIdAndMessage(serializedEvent json.RawMessage, rule typesv1.RuleSpec) (string, string, error) {
-	message, err := rm.CelEvaluator.EvaluateExpression(serializedEvent, rule.Expressions.Message)
+func (rm *RuleManager) getUniqueIdAndMessage(eventMap map[string]any, rule typesv1.RuleSpec) (string, string, error) {
+	message, err := rm.CelEvaluator.EvaluateExpression(eventMap, rule.Expressions.Message)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
 	}
-	uniqueID, err := rm.CelEvaluator.EvaluateExpression(serializedEvent, rule.Expressions.UniqueID)
+	uniqueID, err := rm.CelEvaluator.EvaluateExpression(eventMap, rule.Expressions.UniqueID)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
 	}

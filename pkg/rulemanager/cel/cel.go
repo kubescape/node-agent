@@ -1,7 +1,6 @@
 package cel
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -24,7 +23,7 @@ type CEL struct {
 
 func NewCEL(objectCache objectcache.ObjectCache) (*CEL, error) {
 	env, err := cel.NewEnv(
-		cel.Variable("event", cel.AnyType),
+		cel.Variable("data", cel.AnyType),
 		library.K8s(objectCache.K8sObjectCache()),
 	)
 	if err != nil {
@@ -79,20 +78,14 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 	return program, nil
 }
 
-func (c *CEL) EvaluateRule(event json.RawMessage, expressions []typesv1.RuleExpression) (bool, error) {
+func (c *CEL) EvaluateRule(event map[string]any, expressions []typesv1.RuleExpression) (bool, error) {
 	for _, expression := range expressions {
 		program, err := c.getOrCreateProgram(expression.Expression)
 		if err != nil {
 			return false, err
 		}
 
-		// Convert event to map[string]any
-		var eventMap map[string]any
-		if err := json.Unmarshal(event, &eventMap); err != nil {
-			return false, fmt.Errorf("failed to unmarshal event: %s", err)
-		}
-
-		out, _, err := program.Eval(map[string]any{"data": eventMap})
+		out, _, err := program.Eval(map[string]any{"data": event})
 		if err != nil {
 			logger.L().Error("evaluation error", helpers.Error(err))
 		}
@@ -107,19 +100,13 @@ func (c *CEL) EvaluateRule(event json.RawMessage, expressions []typesv1.RuleExpr
 	return true, nil
 }
 
-func (c *CEL) EvaluateExpression(event json.RawMessage, expression string) (string, error) {
+func (c *CEL) EvaluateExpression(event map[string]any, expression string) (string, error) {
 	program, err := c.getOrCreateProgram(expression)
 	if err != nil {
 		return "", err
 	}
 
-	// Convert event to map[string]any
-	var eventMap map[string]any
-	if err := json.Unmarshal(event, &eventMap); err != nil {
-		return "", fmt.Errorf("failed to unmarshal event: %s", err)
-	}
-
-	out, _, err := program.Eval(map[string]any{"data": eventMap})
+	out, _, err := program.Eval(map[string]any{"data": event})
 	if err != nil {
 		return "", fmt.Errorf("failed to evaluate expression: %s", err)
 	}
