@@ -85,9 +85,7 @@ func (c *CEL) EvaluateRule(event []byte, expressions []typesv1.RuleExpression) (
 			return false, err
 		}
 
-		out, _, err := program.Eval(map[string]any{
-			"event": event,
-		})
+		out, _, err := program.Eval(event)
 		if err != nil {
 			logger.L().Error("evaluation error", helpers.Error(err))
 		}
@@ -109,9 +107,7 @@ func (c *CEL) EvaluateExpression(event []byte, expression string) (string, error
 		return "", err
 	}
 
-	out, _, err := program.Eval(map[string]any{
-		"event": event,
-	})
+	out, _, err := program.Eval(event)
 	if err != nil {
 		return "", fmt.Errorf("failed to evaluate expression: %s", err)
 	}
