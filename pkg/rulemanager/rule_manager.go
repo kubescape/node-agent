@@ -124,8 +124,10 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
 	eventProfile := rm.getProfileChecks(enrichedEvent)
+	logger.L().Debug("RuleManager - event profile", helpers.Interface("eventProfile", eventProfile), helpers.Interface("event", enrichedEvent))
 
 	rules := rm.ruleBindingCache.ListRulesForPod(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
+	logger.L().Debug("RuleManager - rules", helpers.Interface("rules", rules))
 
 	for _, rule := range rules {
 		if rule.Enabled {
@@ -136,12 +138,16 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				}
 			}
 
+			logger.L().Debug("RuleManager - rule", helpers.Interface("rule", rule))
+
 			serializedEvent, err := rm.serializeEvent(enrichedEvent, eventProfile)
 			if err != nil {
 				continue
 			}
 
 			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent)
+
+			logger.L().Debug("RuleManager - ruleExpressions", helpers.Interface("ruleExpressions", ruleExpressions))
 
 			shouldAlert, err := rm.CelEvaluator.EvaluateRule(serializedEvent, ruleExpressions)
 			if err != nil {
@@ -150,6 +156,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 
 			if shouldAlert {
+				logger.L().Debug("RuleManager - shouldAlert", helpers.Interface("shouldAlert", shouldAlert))
 				rm.metrics.ReportRuleAlert(rule.Name)
 				message, uniqueID, err := rm.getUniqueIdAndMessage(serializedEvent, rule)
 				if err != nil {
@@ -216,14 +223,19 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 func (rm *RuleManager) getProfileChecks(enrichedEvent *events.EnrichedEvent) map[string]bool {
 	eventProfile := map[string]bool{}
 
-	ap, nn, ok := rm.registry.GetAvailableProfiles("enrichedEvent.ContainerName", enrichedEvent.ContainerID)
-	if ok {
-		profileValidator := rm.profileValidatorFactory.GetProfileValidator(enrichedEvent.EventType)
-		results, err := profileValidator.ValidateProfile(enrichedEvent.Event, ap, nn)
-		if err != nil {
-			logger.L().Error("RuleManager - failed to validate profile", helpers.Error(err))
+	sharedData := rm.objectCache.K8sObjectCache().GetSharedContainerData(enrichedEvent.ContainerID)
+	if sharedData != nil {
+		containerName := sharedData.ContainerInfos[objectcache.ContainerType(1)][0].Name
+
+		ap, nn, ok := rm.registry.GetAvailableProfiles(containerName, enrichedEvent.ContainerID)
+		if ok {
+			profileValidator := rm.profileValidatorFactory.GetProfileValidator(enrichedEvent.EventType)
+			results, err := profileValidator.ValidateProfile(enrichedEvent.Event, ap, nn)
+			if err != nil {
+				logger.L().Error("RuleManager - failed to validate profile", helpers.Error(err))
+			}
+			eventProfile = results.GetChecksAsMap()
 		}
-		eventProfile = results.GetChecksAsMap()
 	}
 
 	return eventProfile

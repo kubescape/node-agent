@@ -78,6 +78,15 @@ func (apc *ApplicationProfileCacheImpl) Start(ctx context.Context) {
 	go apc.periodicUpdate(ctx)
 }
 
+func (apc *ApplicationProfileCacheImpl) 
+	apc.containerIDToInfo.Range(func(containerID string, containerInfo *ContainerInfo) bool {
+		if containerID == containerID {
+			return false
+		}
+		return true
+	})
+}
+
 // periodicUpdate periodically fetches and updates application profiles from storage
 func (apc *ApplicationProfileCacheImpl) periodicUpdate(ctx context.Context) {
 	ticker := time.NewTicker(apc.updateInterval)

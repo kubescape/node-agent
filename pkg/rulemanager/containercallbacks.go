@@ -107,6 +107,7 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 
 				rm.ReportEnrichedEvent(&events.EnrichedEvent{
 					EventType:   utils.SyscallEventType,
+					Event:       &event,
 					ContainerID: container.Runtime.ContainerID,
 					ProcessTree: tree,
 				})
