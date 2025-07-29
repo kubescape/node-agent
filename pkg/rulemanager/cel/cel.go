@@ -94,8 +94,7 @@ func (c *CEL) EvaluateRule(event []byte, expressions []typesv1.RuleExpression) (
 			return false, nil
 		}
 
-		// TODO: remove this.
-		logger.L().Debug("evaluation result", helpers.Interface("result", out))
+		logger.L().Debug("evaluation result", helpers.Interface("result", out.Value().(bool)))
 	}
 
 	return true, nil
