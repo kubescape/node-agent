@@ -225,7 +225,15 @@ func (rm *RuleManager) getProfileChecks(enrichedEvent *events.EnrichedEvent) map
 
 	sharedData := rm.objectCache.K8sObjectCache().GetSharedContainerData(enrichedEvent.ContainerID)
 	if sharedData != nil {
-		containerName := sharedData.ContainerInfos[objectcache.ContainerType(1)][0].Name
+		containerInfos, exists := sharedData.ContainerInfos[objectcache.ContainerType(sharedData.ContainerType)]
+		if !exists || len(containerInfos) == 0 {
+			logger.L().Debug("RuleManager - no container info found for container type",
+				helpers.String("containerID", enrichedEvent.ContainerID),
+				helpers.Int("containerType", int(sharedData.ContainerType)))
+			return eventProfile
+		}
+
+		containerName := containerInfos[0].Name
 
 		ap, nn, ok := rm.registry.GetAvailableProfiles(containerName, enrichedEvent.ContainerID)
 		if ok {
