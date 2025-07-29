@@ -10,10 +10,10 @@ type Rules struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Rules []Rule `json:"rules"`
+	Spec []RuleSpec `json:"spec,omitempty"`
 }
 
-type Rule struct {
+type RuleSpec struct {
 	Enabled           bool                       `json:"enabled"`
 	ID                string                     `json:"id"`
 	Name              string                     `json:"name"`
