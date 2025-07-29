@@ -3,6 +3,7 @@ package ruleswatcher
 import (
 	"context"
 
+	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
@@ -74,7 +75,7 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 		return err
 	}
 
-	var enabledRules typesv1.Rules
+	var enabledRules []typesv1.RuleSpec
 	for _, item := range unstructuredList.Items {
 		rule, err := unstructuredToRule(&item)
 		logger.L().Debug("RulesWatcher - rule", helpers.Interface("rule", rule))
@@ -82,17 +83,14 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 			logger.L().Warning("RulesWatcher - failed to convert rule during sync", helpers.Error(err))
 			continue
 		}
-
-		for _, rule := range rule.Spec {
-			if rule.Enabled {
-				enabledRules.Spec = append(enabledRules.Spec, rule)
-			}
+		if rule.Spec.Enabled {
+			enabledRules = append(enabledRules, rule.Spec)
 		}
 	}
 
-	w.ruleCreator.SyncRules(enabledRules.Spec)
+	w.ruleCreator.SyncRules(enabledRules)
 
-	logger.L().Info("RulesWatcher - synced rules from cluster", helpers.Int("enabledRules", len(enabledRules.Spec)), helpers.Int("totalRules", len(unstructuredList.Items)))
+	logger.L().Info("RulesWatcher - synced rules from cluster", helpers.Int("enabledRules", len(enabledRules)), helpers.Int("totalRules", len(unstructuredList.Items)))
 	return nil
 }
 
@@ -101,10 +99,32 @@ func (w *RulesWatcherImpl) InitialSync(ctx context.Context) error {
 	return w.syncAllRulesFromCluster(ctx)
 }
 
-func unstructuredToRule(obj *unstructured.Unstructured) (*typesv1.Rules, error) {
-	rule := &typesv1.Rules{}
-	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, rule); err != nil {
+func unstructuredToRule(obj *unstructured.Unstructured) (*typesv1.Rule, error) {
+	rule := &typesv1.Rule{}
+	logger.L().Debug("RulesWatcher - Interface rule", helpers.Interface("rule", obj.Object))
+
+	// First convert to a temporary structure to handle the nested profile_dependency
+	tempRule := struct {
+		typesv1.Rule
+		Spec struct {
+			typesv1.RuleSpec
+			ProfileDependency struct {
+				Required int `json:"required"`
+			} `json:"profile_dependency"`
+		} `json:"spec"`
+	}{}
+
+	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &tempRule); err != nil {
 		return nil, err
 	}
+
+	// Copy the basic fields
+	rule.TypeMeta = tempRule.TypeMeta
+	rule.ObjectMeta = tempRule.ObjectMeta
+	rule.Spec = tempRule.Spec.RuleSpec
+
+	// Convert the profile_dependency field from nested structure to apitypes.ProfileDependency
+	rule.Spec.ProfileDependency = apitypes.ProfileDependency(tempRule.Spec.ProfileDependency.Required)
+
 	return rule, nil
 }

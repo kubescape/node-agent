@@ -78,7 +78,7 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 	return program, nil
 }
 
-func (c *CEL) EvaluateRule(event []byte, expressions []typesv1.RuleExpression) (bool, error) {
+func (c *CEL) EvaluateRule(event map[string][]byte, expressions []typesv1.RuleExpression) (bool, error) {
 	for _, expression := range expressions {
 		program, err := c.getOrCreateProgram(expression.Expression)
 		if err != nil {
@@ -100,7 +100,7 @@ func (c *CEL) EvaluateRule(event []byte, expressions []typesv1.RuleExpression) (
 	return true, nil
 }
 
-func (c *CEL) EvaluateExpression(event []byte, expression string) (string, error) {
+func (c *CEL) EvaluateExpression(event map[string][]byte, expression string) (string, error) {
 	program, err := c.getOrCreateProgram(expression)
 	if err != nil {
 		return "", err

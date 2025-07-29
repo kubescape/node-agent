@@ -13,6 +13,14 @@ type Rules struct {
 	Spec []RuleSpec `json:"spec,omitempty" yaml:"spec,omitempty"`
 }
 
+// Rule represents a single Rule CRD
+type Rule struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec RuleSpec `json:"spec,omitempty"`
+}
+
 type RuleSpec struct {
 	Enabled           bool                       `json:"enabled" yaml:"enabled"`
 	ID                string                     `json:"id" yaml:"id"`

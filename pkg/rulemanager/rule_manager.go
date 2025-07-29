@@ -2,7 +2,6 @@ package rulemanager
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -130,7 +129,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	for _, rule := range rules {
 		if rule.Enabled {
 			if rule.ProfileDependency == armotypes.Required {
-				if len(eventProfile) == 0 {
+				if len(eventProfile.Checks) == 0 {
 					logger.L().Debug("RuleManager - profile dependency not met", helpers.String("rule", rule.Name))
 					continue
 				}
@@ -218,8 +217,8 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	return results
 }
 
-func (rm *RuleManager) getProfileChecks(enrichedEvent *events.EnrichedEvent) map[string]bool {
-	eventProfile := map[string]bool{}
+func (rm *RuleManager) getProfileChecks(enrichedEvent *events.EnrichedEvent) profilevalidator.ProfileValidationResult {
+	eventProfile := profilevalidator.ProfileValidationResult{}
 
 	if enrichedEvent == nil {
 		logger.L().Debug("RuleManager - enriched event is nil")
@@ -264,26 +263,20 @@ func (rm *RuleManager) getProfileChecks(enrichedEvent *events.EnrichedEvent) map
 			if err != nil {
 				logger.L().Error("RuleManager - failed to validate profile", helpers.Error(err))
 			}
-			eventProfile = results.GetChecksAsMap()
+			eventProfile = results
 		}
 	}
 
 	return eventProfile
 }
 
-func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent, eventProfile map[string]bool) ([]byte, error) {
-	eventWithChecks := profilevalidator.EventWithChecks{
+func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent, eventProfile profilevalidator.ProfileValidationResult) (map[string][]byte, error) {
+	eventWithChecks := types.EventWithChecks{
 		Event:         enrichedEvent.Event,
 		ProfileChecks: eventProfile,
 	}
 
-	serializedEvent, err := json.Marshal(eventWithChecks)
-	if err != nil {
-		logger.L().Error("RuleManager - failed to marshal event", helpers.Error(err))
-		return nil, err
-	}
-
-	return serializedEvent, nil
+	return eventWithChecks.CelEvaulationForm(), nil
 }
 
 func (rm *RuleManager) getRuleExpressions(rule typesv1.RuleSpec, enrichedEvent *events.EnrichedEvent) []typesv1.RuleExpression {
@@ -296,7 +289,7 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.RuleSpec, enrichedEvent *
 	return ruleExpressions
 }
 
-func (rm *RuleManager) getUniqueIdAndMessage(serializedEvent []byte, rule typesv1.RuleSpec) (string, string, error) {
+func (rm *RuleManager) getUniqueIdAndMessage(serializedEvent map[string][]byte, rule typesv1.RuleSpec) (string, string, error) {
 	message, err := rm.CelEvaluator.EvaluateExpression(serializedEvent, rule.Expressions.Message)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
