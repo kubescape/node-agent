@@ -9,7 +9,7 @@ import (
 )
 
 type RuleFailureCreatorInterface interface {
-	CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure
+	CreateRuleFailure(rule typesv1.RuleSpec, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure
 	RegisterCreator(eventType utils.EventType, creator EventMetadataSetter)
 }
 

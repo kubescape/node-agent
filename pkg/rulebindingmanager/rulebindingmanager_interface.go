@@ -6,7 +6,7 @@ import (
 )
 
 type RuleBindingCache interface {
-	ListRulesForPod(namespace, name string) []typesv1.Rule
+	ListRulesForPod(namespace, name string) []typesv1.RuleSpec
 	AddNotifier(*chan RuleBindingNotify)
 	GetRuleCreator() rulecreator.RuleCreator
 }

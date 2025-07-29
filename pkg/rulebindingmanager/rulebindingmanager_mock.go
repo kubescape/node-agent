@@ -10,8 +10,8 @@ var _ RuleBindingCache = (*RuleBindingCacheMock)(nil)
 type RuleBindingCacheMock struct {
 }
 
-func (r *RuleBindingCacheMock) ListRulesForPod(_, _ string) []typesv1.Rule {
-	return []typesv1.Rule{}
+func (r *RuleBindingCacheMock) ListRulesForPod(_, _ string) []typesv1.RuleSpec {
+	return []typesv1.RuleSpec{}
 }
 func (r *RuleBindingCacheMock) AddNotifier(_ *chan RuleBindingNotify) {
 }

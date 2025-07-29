@@ -128,10 +128,10 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	rules := rm.ruleBindingCache.ListRulesForPod(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
 
 	for _, rule := range rules {
-		if rule.Spec.Enabled {
-			if rule.Spec.ProfileDependency == armotypes.Required {
+		if rule.Enabled {
+			if rule.ProfileDependency == armotypes.Required {
 				if len(eventProfile) == 0 {
-					logger.L().Debug("RuleManager - profile dependency not met", helpers.String("rule", rule.Spec.Name))
+					logger.L().Debug("RuleManager - profile dependency not met", helpers.String("rule", rule.Name))
 					continue
 				}
 			}
@@ -150,7 +150,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 
 			if shouldAlert {
-				rm.metrics.ReportRuleAlert(rule.Spec.Name)
+				rm.metrics.ReportRuleAlert(rule.Name)
 				message, uniqueID, err := rm.getUniqueIdAndMessage(serializedEvent, rule)
 				if err != nil {
 					logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
@@ -159,14 +159,14 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 
 				ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID)
 				if shouldCooldown, count := rm.ruleCooldown.ShouldCooldown(ruleFailure); shouldCooldown {
-					logger.L().Debug("RuleManager - rule cooldown", helpers.String("rule", rule.Spec.Name), helpers.Int("count", count))
+					logger.L().Debug("RuleManager - rule cooldown", helpers.String("rule", rule.Name), helpers.Int("count", count))
 					continue
 				}
 
 				rm.exporter.SendRuleAlert(ruleFailure)
 			}
 
-			rm.metrics.ReportRuleProcessed(rule.Spec.Name)
+			rm.metrics.ReportRuleProcessed(rule.Name)
 		}
 	}
 }
@@ -203,11 +203,11 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	rules := creator.CreateRulePolicyRulesByEventType(eventType)
 
 	for _, rule := range rules {
-		if !rule.Spec.SupportPolicy {
+		if !rule.SupportPolicy {
 			continue
 		}
 
-		results = append(results, rule.Spec.ID)
+		results = append(results, rule.ID)
 	}
 
 	return results
@@ -244,9 +244,9 @@ func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent, event
 	return serializedEvent, nil
 }
 
-func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent) []typesv1.RuleExpression {
+func (rm *RuleManager) getRuleExpressions(rule typesv1.RuleSpec, enrichedEvent *events.EnrichedEvent) []typesv1.RuleExpression {
 	var ruleExpressions []typesv1.RuleExpression
-	for _, expression := range rule.Spec.Expressions.RuleExpression {
+	for _, expression := range rule.Expressions.RuleExpression {
 		if expression.EventType == enrichedEvent.EventType {
 			ruleExpressions = append(ruleExpressions, expression)
 		}
@@ -254,12 +254,12 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, enrichedEvent *even
 	return ruleExpressions
 }
 
-func (rm *RuleManager) getUniqueIdAndMessage(serializedEvent []byte, rule typesv1.Rule) (string, string, error) {
-	message, err := rm.CelEvaluator.EvaluateExpression(serializedEvent, rule.Spec.Expressions.Message)
+func (rm *RuleManager) getUniqueIdAndMessage(serializedEvent []byte, rule typesv1.RuleSpec) (string, string, error) {
+	message, err := rm.CelEvaluator.EvaluateExpression(serializedEvent, rule.Expressions.Message)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
 	}
-	uniqueID, err := rm.CelEvaluator.EvaluateExpression(serializedEvent, rule.Spec.Expressions.UniqueID)
+	uniqueID, err := rm.CelEvaluator.EvaluateExpression(serializedEvent, rule.Expressions.UniqueID)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
 	}

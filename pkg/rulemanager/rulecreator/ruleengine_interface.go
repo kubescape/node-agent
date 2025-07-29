@@ -18,12 +18,12 @@ type ProfileRequirement struct {
 
 // RuleCreator is an interface for creating rules by tags, IDs, and names
 type RuleCreator interface {
-	CreateRulesByTags(tags []string) []typesv1.Rule
-	CreateRuleByID(id string) typesv1.Rule
-	CreateRuleByName(name string) typesv1.Rule
-	RegisterRule(rule typesv1.Rule)
-	CreateRulesByEventType(eventType utils.EventType) []typesv1.Rule
-	CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.Rule
-	CreateAllRules() []typesv1.Rule
+	CreateRulesByTags(tags []string) []typesv1.RuleSpec
+	CreateRuleByID(id string) typesv1.RuleSpec
+	CreateRuleByName(name string) typesv1.RuleSpec
+	RegisterRule(rule typesv1.RuleSpec)
+	CreateRulesByEventType(eventType utils.EventType) []typesv1.RuleSpec
+	CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.RuleSpec
+	CreateAllRules() []typesv1.RuleSpec
 	GetAllRuleIDs() []string
 }
