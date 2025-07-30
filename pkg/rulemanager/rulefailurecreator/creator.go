@@ -78,16 +78,18 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 		AlertPlatform: apitypes.AlertSourcePlatformK8s,
 	}
 
-	ruleFailure.SetRuntimeProcessDetails(apitypes.ProcessTree{
-		ProcessTree: enrichedEvent.ProcessTree,
-	})
-
 	eventSetter.SetFailureMetadata(ruleFailure, enrichedEvent)
 
 	r.setBaseRuntimeAlert(ruleFailure)
 	r.setRuntimeAlertK8sDetails(ruleFailure)
 	r.setCloudServices(ruleFailure)
 	r.enrichRuleFailure(ruleFailure)
+
+	if enrichedEvent.ProcessTree.PID != 0 {
+		ruleFailure.SetRuntimeProcessDetails(apitypes.ProcessTree{
+			ProcessTree: enrichedEvent.ProcessTree,
+		})
+	}
 
 	return ruleFailure
 }
