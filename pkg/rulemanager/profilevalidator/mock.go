@@ -21,7 +21,7 @@ type RuleObjectCacheMock struct {
 	podStatus               *corev1.PodStatus
 	nn                      *v1beta1.NetworkNeighborhood
 	dnsCache                map[string]string
-	containerIDToSharedData *maps.SafeMap[string, *objectcache.WatchedContainerData]
+	ContainerIDToSharedData *maps.SafeMap[string, *objectcache.WatchedContainerData]
 }
 
 func (r *RuleObjectCacheMock) GetApplicationProfile(string) *v1beta1.ApplicationProfile {
@@ -69,18 +69,18 @@ func (r *RuleObjectCacheMock) GetPods() []*corev1.Pod {
 }
 
 func (r *RuleObjectCacheMock) SetSharedContainerData(containerID string, data *objectcache.WatchedContainerData) {
-	r.containerIDToSharedData.Set(containerID, data)
+	r.ContainerIDToSharedData.Set(containerID, data)
 }
 
 func (r *RuleObjectCacheMock) GetSharedContainerData(containerID string) *objectcache.WatchedContainerData {
-	if data, ok := r.containerIDToSharedData.Load(containerID); ok {
+	if data, ok := r.ContainerIDToSharedData.Load(containerID); ok {
 		return data
 	}
 	return nil
 }
 
 func (r *RuleObjectCacheMock) DeleteSharedContainerData(containerID string) {
-	r.containerIDToSharedData.Delete(containerID)
+	r.ContainerIDToSharedData.Delete(containerID)
 }
 
 func (r *RuleObjectCacheMock) K8sObjectCache() objectcache.K8sObjectCache {

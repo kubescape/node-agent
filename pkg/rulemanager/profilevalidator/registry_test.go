@@ -21,7 +21,7 @@ func TestNewProfileRegistry(t *testing.T) {
 
 func TestGetAvailableProfiles_Success(t *testing.T) {
 	objCache := &RuleObjectCacheMock{
-		containerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
 	// Set up application profile
@@ -68,7 +68,7 @@ func TestGetAvailableProfiles_Success(t *testing.T) {
 
 func TestGetAvailableProfiles_NoApplicationProfile(t *testing.T) {
 	objCache := &RuleObjectCacheMock{
-		containerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
 	// Set up network neighborhood only
@@ -89,7 +89,7 @@ func TestGetAvailableProfiles_NoApplicationProfile(t *testing.T) {
 
 func TestGetAvailableProfiles_NoNetworkNeighborhood(t *testing.T) {
 	objCache := &RuleObjectCacheMock{
-		containerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
 	// Set up application profile only
@@ -110,7 +110,7 @@ func TestGetAvailableProfiles_NoNetworkNeighborhood(t *testing.T) {
 
 func TestGetAvailableProfiles_ContainerNotFoundInAppProfile(t *testing.T) {
 	objCache := &RuleObjectCacheMock{
-		containerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
 	// Set up application profile with different container name
@@ -138,7 +138,7 @@ func TestGetAvailableProfiles_ContainerNotFoundInAppProfile(t *testing.T) {
 
 func TestGetAvailableProfiles_ContainerNotFoundInNetworkNeighborhood(t *testing.T) {
 	objCache := &RuleObjectCacheMock{
-		containerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
 	// Set up application profile
@@ -166,7 +166,7 @@ func TestGetAvailableProfiles_ContainerNotFoundInNetworkNeighborhood(t *testing.
 
 func TestGetAvailableProfiles_EmptyProfiles(t *testing.T) {
 	objCache := &RuleObjectCacheMock{
-		containerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
 	// Set up empty application profile
@@ -188,7 +188,7 @@ func TestGetAvailableProfiles_EmptyProfiles(t *testing.T) {
 
 func TestGetAvailableProfiles_MultipleContainers(t *testing.T) {
 	objCache := &RuleObjectCacheMock{
-		containerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
 	// Set up application profile with multiple containers
@@ -244,7 +244,7 @@ func TestGetAvailableProfiles_MultipleContainers(t *testing.T) {
 
 func TestGetAvailableProfiles_ComplexData(t *testing.T) {
 	objCache := &RuleObjectCacheMock{
-		containerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
+		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
 	// Set up complex application profile

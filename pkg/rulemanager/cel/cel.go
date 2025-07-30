@@ -25,6 +25,7 @@ func NewCEL(objectCache objectcache.ObjectCache) (*CEL, error) {
 	env, err := cel.NewEnv(
 		cel.Variable("data", cel.AnyType),
 		library.K8s(objectCache.K8sObjectCache()),
+		library.AP(objectCache),
 	)
 	if err != nil {
 		return nil, err

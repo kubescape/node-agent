@@ -2,7 +2,7 @@ package profilevalidator
 
 import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator/profilehelper"
+	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 

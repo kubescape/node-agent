@@ -60,3 +60,18 @@ func GetContainerFromNetworkNeighborhood(nn *v1beta1.NetworkNeighborhood, contai
 	}
 	return v1beta1.NetworkNeighborhoodContainer{}, errors.New("container not found")
 }
+
+func GetContainerName(objectCache objectcache.ObjectCache, containerID string) string {
+	sharedData := objectCache.K8sObjectCache().GetSharedContainerData(containerID)
+	if sharedData == nil {
+
+		return ""
+	}
+
+	containerInfos, exists := sharedData.ContainerInfos[objectcache.ContainerType(sharedData.ContainerType)]
+	if !exists || len(containerInfos) == 0 {
+		return ""
+	}
+
+	return containerInfos[0].Name
+}
