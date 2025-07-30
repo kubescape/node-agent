@@ -69,6 +69,28 @@ func (l *apLibrary) declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
+		"ap.was_syscall_used": {
+			cel.Overload(
+				"ap_was_syscall_used", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 2 {
+						return types.NewErr("expected 2 arguments, got %d", len(values))
+					}
+					return l.wasSyscallUsed(values[0], values[1])
+				}),
+			),
+		},
+		"ap.was_capability_used": {
+			cel.Overload(
+				"ap_was_capability_used", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 2 {
+						return types.NewErr("expected 2 arguments, got %d", len(values))
+					}
+					return l.wasCapabilityUsed(values[0], values[1])
+				}),
+			),
+		},
 	}
 }
 
