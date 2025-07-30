@@ -47,6 +47,28 @@ func (l *apLibrary) declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
+		"ap.was_path_opened": {
+			cel.Overload(
+				"ap_was_path_opened", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 2 {
+						return types.NewErr("expected 2 arguments, got %d", len(values))
+					}
+					return l.wasPathOpened(values[0], values[1])
+				}),
+			),
+		},
+		"ap.was_path_opened_with_flags": {
+			cel.Overload(
+				"ap_was_path_opened_with_flags", []*cel.Type{cel.StringType, cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 3 {
+						return types.NewErr("expected 3 arguments, got %d", len(values))
+					}
+					return l.wasPathOpenedWithFlags(values[0], values[1], values[2])
+				}),
+			),
+		},
 	}
 }
 
