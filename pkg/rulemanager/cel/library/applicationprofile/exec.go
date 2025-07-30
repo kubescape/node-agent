@@ -6,6 +6,7 @@ import (
 	"github.com/google/cel-go/common/types"
 
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/celparse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 )
 
@@ -52,7 +53,7 @@ func (l *apLibrary) wasExecutedWithArgs(containerID, path, args ref.Val) ref.Val
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
-	celArgs, err := ParseList[string](args)
+	celArgs, err := celparse.ParseList[string](args)
 	if err != nil {
 		return types.NewErr("failed to parse args: %v", err)
 	}

@@ -3,6 +3,7 @@ package applicationprofile
 import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/celparse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
@@ -50,7 +51,7 @@ func (l *apLibrary) wasPathOpenedWithFlags(containerID, path, flags ref.Val) ref
 		return types.MaybeNoSuchOverloadErr(path)
 	}
 
-	celFlags, err := ParseList[string](flags)
+	celFlags, err := celparse.ParseList[string](flags)
 	if err != nil {
 		return types.NewErr("failed to parse flags: %v", err)
 	}
