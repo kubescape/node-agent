@@ -6,14 +6,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type Rules struct {
-	metav1.TypeMeta   `json:",inline" yaml:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty" yaml:"metadata,omitempty"`
-
-	Spec []RuleSpec `json:"spec,omitempty" yaml:"spec,omitempty"`
-}
-
-// Rule represents a single Rule CRD
 type Rule struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -22,6 +14,10 @@ type Rule struct {
 }
 
 type RuleSpec struct {
+	Rules []RuleDefinition `json:"rules" yaml:"rules"`
+}
+
+type RuleDefinition struct {
 	Enabled           bool                       `json:"enabled" yaml:"enabled"`
 	ID                string                     `json:"id" yaml:"id"`
 	Name              string                     `json:"name" yaml:"name"`
@@ -31,7 +27,7 @@ type RuleSpec struct {
 	Severity          int                        `json:"severity" yaml:"severity"`
 	SupportPolicy     bool                       `json:"support_policy" yaml:"support_policy"`
 	Tags              []string                   `json:"tags" yaml:"tags"`
-	State             map[string]any             `json:"state" yaml:"state"`
+	State             map[string]any             `json:"state,omitempty" yaml:"state,omitempty"`
 }
 
 type RuleExpressions struct {
