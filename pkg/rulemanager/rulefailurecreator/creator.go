@@ -47,7 +47,7 @@ func (r *RuleFailureCreator) RegisterCreator(eventType utils.EventType, creator 
 	r.setterByEventType[eventType] = creator
 }
 
-func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.RuleSpec, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure {
+func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure {
 	eventSetter, ok := r.setterByEventType[enrichedEvent.EventType]
 	if !ok {
 		return nil

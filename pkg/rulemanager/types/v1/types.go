@@ -6,18 +6,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type Rule struct {
+type Rules struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec RuleSpec `json:"spec,omitempty"`
+	Spec RulesSpec `json:"spec,omitempty"`
 }
 
-type RuleSpec struct {
-	Rules []RuleDefinition `json:"rules" yaml:"rules"`
+type RulesSpec struct {
+	Rules []Rule `json:"rules" yaml:"rules"`
 }
 
-type RuleDefinition struct {
+type Rule struct {
 	Enabled           bool                       `json:"enabled" yaml:"enabled"`
 	ID                string                     `json:"id" yaml:"id"`
 	Name              string                     `json:"name" yaml:"name"`

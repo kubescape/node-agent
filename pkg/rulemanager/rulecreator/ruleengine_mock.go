@@ -8,13 +8,13 @@ import (
 var _ RuleCreator = (*RuleCreatorMock)(nil)
 
 type RuleCreatorMock struct {
-	Rules []typesv1.RuleSpec
+	Rules []typesv1.Rule
 }
 
-func (r *RuleCreatorMock) CreateRulesByTags(tags []string) []typesv1.RuleSpec {
-	var rl []typesv1.RuleSpec
+func (r *RuleCreatorMock) CreateRulesByTags(tags []string) []typesv1.Rule {
+	var rl []typesv1.Rule
 	for _, t := range tags {
-		rl = append(rl, typesv1.RuleSpec{
+		rl = append(rl, typesv1.Rule{
 			Name: t,
 			Tags: []string{t},
 		})
@@ -22,31 +22,31 @@ func (r *RuleCreatorMock) CreateRulesByTags(tags []string) []typesv1.RuleSpec {
 	return rl
 }
 
-func (r *RuleCreatorMock) CreateRuleByID(id string) typesv1.RuleSpec {
-	return typesv1.RuleSpec{
+func (r *RuleCreatorMock) CreateRuleByID(id string) typesv1.Rule {
+	return typesv1.Rule{
 		ID: id,
 	}
 }
 
-func (r *RuleCreatorMock) CreateRuleByName(name string) typesv1.RuleSpec {
-	return typesv1.RuleSpec{
+func (r *RuleCreatorMock) CreateRuleByName(name string) typesv1.Rule {
+	return typesv1.Rule{
 		Name: name,
 	}
 }
 
-func (r *RuleCreatorMock) RegisterRule(rule typesv1.RuleSpec) {
+func (r *RuleCreatorMock) RegisterRule(rule typesv1.Rule) {
 }
 
-func (r *RuleCreatorMock) CreateRulesByEventType(eventType utils.EventType) []typesv1.RuleSpec {
-	return []typesv1.RuleSpec{}
+func (r *RuleCreatorMock) CreateRulesByEventType(eventType utils.EventType) []typesv1.Rule {
+	return []typesv1.Rule{}
 }
 
-func (r *RuleCreatorMock) CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.RuleSpec {
-	return []typesv1.RuleSpec{}
+func (r *RuleCreatorMock) CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.Rule {
+	return []typesv1.Rule{}
 }
 
-func (r *RuleCreatorMock) CreateAllRules() []typesv1.RuleSpec {
-	return []typesv1.RuleSpec{}
+func (r *RuleCreatorMock) CreateAllRules() []typesv1.Rule {
+	return []typesv1.Rule{}
 }
 
 func (r *RuleCreatorMock) GetAllRuleIDs() []string {
@@ -58,7 +58,7 @@ func (r *RuleCreatorMock) GetAllRuleIDs() []string {
 }
 
 // Dynamic rule management methods for CRD sync
-func (r *RuleCreatorMock) SyncRules(newRules []typesv1.RuleSpec) {
+func (r *RuleCreatorMock) SyncRules(newRules []typesv1.Rule) {
 	r.Rules = newRules
 }
 
@@ -72,7 +72,7 @@ func (r *RuleCreatorMock) RemoveRuleByID(id string) bool {
 	return false
 }
 
-func (r *RuleCreatorMock) UpdateRule(rule typesv1.RuleSpec) bool {
+func (r *RuleCreatorMock) UpdateRule(rule typesv1.Rule) bool {
 	for i, existingRule := range r.Rules {
 		if existingRule.ID == rule.ID {
 			r.Rules[i] = rule

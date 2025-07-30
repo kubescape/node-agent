@@ -4,6 +4,8 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -12,15 +14,15 @@ var _ RuleCreator = (*RuleCreatorImpl)(nil)
 
 type RuleCreatorImpl struct {
 	mutex sync.RWMutex
-	Rules []typesv1.RuleSpec
+	Rules []typesv1.Rule
 }
 
 func NewRuleCreator() *RuleCreatorImpl {
 	return &RuleCreatorImpl{}
 }
 
-func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []typesv1.RuleSpec {
-	var rules []typesv1.RuleSpec
+func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []typesv1.Rule {
+	var rules []typesv1.Rule
 	for _, rule := range r.Rules {
 		for _, tag := range tags {
 			if slices.Contains(rule.Tags, tag) {
@@ -32,30 +34,30 @@ func (r *RuleCreatorImpl) CreateRulesByTags(tags []string) []typesv1.RuleSpec {
 	return rules
 }
 
-func (r *RuleCreatorImpl) CreateRuleByID(id string) typesv1.RuleSpec {
+func (r *RuleCreatorImpl) CreateRuleByID(id string) typesv1.Rule {
 	for _, rule := range r.Rules {
 		if rule.ID == id {
 			return rule
 		}
 	}
-	return typesv1.RuleSpec{}
+	return typesv1.Rule{}
 }
 
-func (r *RuleCreatorImpl) CreateRuleByName(name string) typesv1.RuleSpec {
+func (r *RuleCreatorImpl) CreateRuleByName(name string) typesv1.Rule {
 	for _, rule := range r.Rules {
 		if rule.Name == name {
 			return rule
 		}
 	}
-	return typesv1.RuleSpec{}
+	return typesv1.Rule{}
 }
 
-func (r *RuleCreatorImpl) RegisterRule(rule typesv1.RuleSpec) {
+func (r *RuleCreatorImpl) RegisterRule(rule typesv1.Rule) {
 	r.Rules = append(r.Rules, rule)
 }
 
-func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []typesv1.RuleSpec {
-	var rules []typesv1.RuleSpec
+func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []typesv1.Rule {
+	var rules []typesv1.Rule
 	for _, rule := range r.Rules {
 		for _, expression := range rule.Expressions.RuleExpression {
 			if expression.EventType == eventType {
@@ -67,7 +69,7 @@ func (r *RuleCreatorImpl) CreateRulesByEventType(eventType utils.EventType) []ty
 	return rules
 }
 
-func (r *RuleCreatorImpl) CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.RuleSpec {
+func (r *RuleCreatorImpl) CreateRulePolicyRulesByEventType(eventType utils.EventType) []typesv1.Rule {
 	rules := r.CreateRulesByEventType(eventType)
 	for _, rule := range rules {
 		if rule.SupportPolicy {
@@ -89,8 +91,8 @@ func (r *RuleCreatorImpl) GetAllRuleIDs() []string {
 	return ruleIDs
 }
 
-func (r *RuleCreatorImpl) CreateAllRules() []typesv1.RuleSpec {
-	var rules []typesv1.RuleSpec
+func (r *RuleCreatorImpl) CreateAllRules() []typesv1.Rule {
+	var rules []typesv1.Rule
 	for _, rule := range r.Rules {
 		rules = append(rules, rule)
 	}
@@ -99,18 +101,20 @@ func (r *RuleCreatorImpl) CreateAllRules() []typesv1.RuleSpec {
 
 // SyncRules replaces the current rules with the new set of rules
 // It removes rules that are no longer present and adds/updates existing ones
-func (r *RuleCreatorImpl) SyncRules(newRules []typesv1.RuleSpec) {
+func (r *RuleCreatorImpl) SyncRules(newRules []typesv1.Rule) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
+	logger.L().Debug("SyncRules", helpers.Interface("newRules", newRules))
+
 	// Create a map of new rules by ID for quick lookup
-	newRuleMap := make(map[string]typesv1.RuleSpec)
+	newRuleMap := make(map[string]typesv1.Rule)
 	for _, rule := range newRules {
 		newRuleMap[rule.ID] = rule
 	}
 
 	// Remove rules that are no longer present
-	var updatedRules []typesv1.RuleSpec
+	var updatedRules []typesv1.Rule
 	for _, existingRule := range r.Rules {
 		if newRule, exists := newRuleMap[existingRule.ID]; exists {
 			// Rule still exists, use the new version
@@ -144,7 +148,7 @@ func (r *RuleCreatorImpl) RemoveRuleByID(id string) bool {
 }
 
 // UpdateRule updates an existing rule or adds it if it doesn't exist
-func (r *RuleCreatorImpl) UpdateRule(rule typesv1.RuleSpec) bool {
+func (r *RuleCreatorImpl) UpdateRule(rule typesv1.Rule) bool {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 

@@ -275,7 +275,7 @@ func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent, event
 	return eventWithChecks.CelEvaluationMap()
 }
 
-func (rm *RuleManager) getRuleExpressions(rule typesv1.RuleSpec, enrichedEvent *events.EnrichedEvent) []typesv1.RuleExpression {
+func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent) []typesv1.RuleExpression {
 	var ruleExpressions []typesv1.RuleExpression
 	for _, expression := range rule.Expressions.RuleExpression {
 		if expression.EventType == enrichedEvent.EventType {
@@ -285,7 +285,7 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.RuleSpec, enrichedEvent *
 	return ruleExpressions
 }
 
-func (rm *RuleManager) getUniqueIdAndMessage(eventMap map[string]any, rule typesv1.RuleSpec) (string, string, error) {
+func (rm *RuleManager) getUniqueIdAndMessage(eventMap map[string]any, rule typesv1.Rule) (string, string, error) {
 	message, err := rm.CelEvaluator.EvaluateExpression(eventMap, rule.Expressions.Message)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))

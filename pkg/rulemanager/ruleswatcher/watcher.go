@@ -3,7 +3,6 @@ package ruleswatcher
 import (
 	"context"
 
-	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
@@ -75,16 +74,18 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 		return err
 	}
 
-	var enabledRules []typesv1.RuleSpec
+	var enabledRules []typesv1.Rule
 	for _, item := range unstructuredList.Items {
-		rule, err := unstructuredToRule(&item)
-		logger.L().Debug("RulesWatcher - rule", helpers.Interface("rule", rule))
+		rules, err := unstructuredToRules(&item)
+		logger.L().Debug("RulesWatcher - rules", helpers.Interface("rules", rules))
 		if err != nil {
 			logger.L().Warning("RulesWatcher - failed to convert rule during sync", helpers.Error(err))
 			continue
 		}
-		if rule.Spec.Enabled {
-			enabledRules = append(enabledRules, rule.Spec)
+		for _, rule := range rules.Spec.Rules {
+			if rule.Enabled {
+				enabledRules = append(enabledRules, rule)
+			}
 		}
 	}
 
@@ -99,32 +100,15 @@ func (w *RulesWatcherImpl) InitialSync(ctx context.Context) error {
 	return w.syncAllRulesFromCluster(ctx)
 }
 
-func unstructuredToRule(obj *unstructured.Unstructured) (*typesv1.Rule, error) {
-	rule := &typesv1.Rule{}
+func unstructuredToRules(obj *unstructured.Unstructured) (*typesv1.Rules, error) {
+	rule := &typesv1.Rules{}
 	logger.L().Debug("RulesWatcher - Interface rule", helpers.Interface("rule", obj.Object))
 
 	// First convert to a temporary structure to handle the nested profile_dependency
-	tempRule := struct {
-		typesv1.Rule
-		Spec struct {
-			typesv1.RuleSpec
-			ProfileDependency struct {
-				Required int `json:"required"`
-			} `json:"profile_dependency"`
-		} `json:"spec"`
-	}{}
 
-	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &tempRule); err != nil {
+	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &rule); err != nil {
 		return nil, err
 	}
-
-	// Copy the basic fields
-	rule.TypeMeta = tempRule.TypeMeta
-	rule.ObjectMeta = tempRule.ObjectMeta
-	rule.Spec = tempRule.Spec.RuleSpec
-
-	// Convert the profile_dependency field from nested structure to apitypes.ProfileDependency
-	rule.Spec.ProfileDependency = apitypes.ProfileDependency(tempRule.Spec.ProfileDependency.Required)
 
 	return rule, nil
 }

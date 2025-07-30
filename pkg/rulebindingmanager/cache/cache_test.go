@@ -563,7 +563,7 @@ func TestDeleteRuleBinding(t *testing.T) {
 			for k, v := range tt.podToRBNames {
 				for _, s := range v {
 					c.rbNameToRB.Set(s, typesv1.RuntimeAlertRuleBinding{})
-					c.rbNameToRules.Set(s, []rulemanagertypesv1.RuleSpec{rulemanagertypesv1.RuleSpec{}})
+					c.rbNameToRules.Set(s, []rulemanagertypesv1.Rule{rulemanagertypesv1.Rule{}})
 
 					if !c.rbNameToPods.Has(s) {
 						c.rbNameToPods.Set(s, mapset.NewSet[string]())
