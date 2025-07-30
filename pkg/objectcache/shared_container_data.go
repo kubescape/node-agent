@@ -36,6 +36,7 @@ const (
 	WatchedContainerStatusInitializing WatchedContainerStatus = helpersv1.Initializing
 	WatchedContainerStatusReady        WatchedContainerStatus = helpersv1.Learning
 	WatchedContainerStatusCompleted    WatchedContainerStatus = helpersv1.Completed
+	WatchedContainerStatusFailed       WatchedContainerStatus = helpersv1.Failed
 
 	WatchedContainerStatusMissingRuntime WatchedContainerStatus = helpersv1.MissingRuntime
 	WatchedContainerStatusTooLarge       WatchedContainerStatus = helpersv1.TooLarge
