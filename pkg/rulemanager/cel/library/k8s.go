@@ -23,7 +23,7 @@ func (l *k8sLibrary) Types() []*cel.Type {
 	return []*cel.Type{}
 }
 
-func (l *k8sLibrary) declarations() map[string][]cel.FunctionOpt {
+func (l *k8sLibrary) Declarations() map[string][]cel.FunctionOpt {
 	return map[string][]cel.FunctionOpt{
 		"get_container_mount_paths": {
 			cel.Overload(
@@ -92,7 +92,7 @@ func (l *k8sLibrary) getContainerMountPaths(namespace, podName, containerName re
 
 func (l *k8sLibrary) CompileOptions() []cel.EnvOption {
 	options := []cel.EnvOption{}
-	for name, overloads := range l.declarations() {
+	for name, overloads := range l.Declarations() {
 		options = append(options, cel.Function(name, overloads...))
 	}
 	return options

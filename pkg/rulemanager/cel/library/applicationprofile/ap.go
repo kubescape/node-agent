@@ -5,6 +5,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
 )
 
 func AP(objectCache objectcache.ObjectCache) cel.EnvOption {
@@ -23,7 +24,7 @@ func (l *apLibrary) Types() []*cel.Type {
 	return []*cel.Type{}
 }
 
-func (l *apLibrary) declarations() map[string][]cel.FunctionOpt {
+func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 	return map[string][]cel.FunctionOpt{
 		"ap.was_executed": {
 			cel.Overload(
@@ -96,7 +97,7 @@ func (l *apLibrary) declarations() map[string][]cel.FunctionOpt {
 
 func (l *apLibrary) CompileOptions() []cel.EnvOption {
 	options := []cel.EnvOption{}
-	for name, overloads := range l.declarations() {
+	for name, overloads := range l.Declarations() {
 		options = append(options, cel.Function(name, overloads...))
 	}
 	return options
@@ -106,4 +107,4 @@ func (l *apLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
 
-// var _ Library = (*apLibrary)(nil)
+var _ library.Library = (*apLibrary)(nil)
