@@ -75,3 +75,22 @@ func GetContainerName(objectCache objectcache.ObjectCache, containerID string) s
 
 	return containerInfos[0].Name
 }
+
+func GetContainerApplicationProfile(objectCache objectcache.ObjectCache, containerID string) (v1beta1.ApplicationProfileContainer, error) {
+	ap, err := GetApplicationProfile(containerID, objectCache)
+	if err != nil {
+		return v1beta1.ApplicationProfileContainer{}, err
+	}
+
+	containerName := GetContainerName(objectCache, containerID)
+	if containerName == "" {
+		return v1beta1.ApplicationProfileContainer{}, errors.New("container name not found")
+	}
+
+	container, err := GetContainerFromApplicationProfile(ap, containerName)
+	if err != nil {
+		return v1beta1.ApplicationProfileContainer{}, err
+	}
+
+	return container, nil
+}

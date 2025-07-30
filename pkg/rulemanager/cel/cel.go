@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/applicationprofile"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 )
 
@@ -25,7 +26,7 @@ func NewCEL(objectCache objectcache.ObjectCache) (*CEL, error) {
 	env, err := cel.NewEnv(
 		cel.Variable("data", cel.AnyType),
 		library.K8s(objectCache.K8sObjectCache()),
-		library.AP(objectCache),
+		applicationprofile.AP(objectCache),
 	)
 	if err != nil {
 		return nil, err
