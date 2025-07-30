@@ -1,4 +1,4 @@
-package applicationprofile
+package celparse
 
 import (
 	"fmt"

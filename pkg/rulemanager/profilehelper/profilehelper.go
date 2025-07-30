@@ -94,3 +94,22 @@ func GetContainerApplicationProfile(objectCache objectcache.ObjectCache, contain
 
 	return container, nil
 }
+
+func GetContainerNetworkNeighborhood(objectCache objectcache.ObjectCache, containerID string) (v1beta1.NetworkNeighborhoodContainer, error) {
+	nn, err := GetNetworkNeighborhood(containerID, objectCache)
+	if err != nil {
+		return v1beta1.NetworkNeighborhoodContainer{}, err
+	}
+
+	containerName := GetContainerName(objectCache, containerID)
+	if containerName == "" {
+		return v1beta1.NetworkNeighborhoodContainer{}, errors.New("container name not found")
+	}
+
+	container, err := GetContainerFromNetworkNeighborhood(nn, containerName)
+	if err != nil {
+		return v1beta1.NetworkNeighborhoodContainer{}, err
+	}
+
+	return container, nil
+}

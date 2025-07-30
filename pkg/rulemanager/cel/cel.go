@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/applicationprofile"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/networkneighborhood"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 )
 
@@ -27,6 +28,7 @@ func NewCEL(objectCache objectcache.ObjectCache) (*CEL, error) {
 		cel.Variable("data", cel.AnyType),
 		library.K8s(objectCache.K8sObjectCache()),
 		applicationprofile.AP(objectCache),
+		networkneighborhood.NN(objectCache),
 	)
 	if err != nil {
 		return nil, err
