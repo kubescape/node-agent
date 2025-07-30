@@ -70,6 +70,12 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 
 	validators.RegisterAllValidators(profileValidatorFactory, objectCache)
 
+	// Create CEL evaluator
+	celEvaluator, err := cel.NewCEL(objectCache)
+	if err != nil {
+		return nil, err
+	}
+
 	r := &RuleManager{
 		cfg:                     cfg,
 		ctx:                     ctx,
@@ -84,6 +90,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		enricher:                enricher,
 		processManager:          processManager,
 		ruleCooldown:            ruleCooldown,
+		CelEvaluator:            celEvaluator,
 		profileValidatorFactory: profileValidatorFactory,
 		registry:                registry,
 		ruleFailureCreator:      ruleFailureCreator,
@@ -130,17 +137,15 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		if rule.Enabled {
 			if rule.ProfileDependency == armotypes.Required {
 				if len(eventProfile.Checks) == 0 {
-					logger.L().Debug("RuleManager - profile dependency not met", helpers.String("rule", rule.Name))
 					continue
 				}
 			}
 
-			logger.L().Debug("RuleManager - rule", helpers.Interface("rule", rule))
-
 			eventMap := rm.serializeEvent(enrichedEvent, eventProfile)
 			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent)
-
-			logger.L().Debug("RuleManager - ruleExpressions", helpers.Interface("ruleExpressions", ruleExpressions))
+			if len(ruleExpressions) == 0 {
+				continue
+			}
 
 			shouldAlert, err := rm.CelEvaluator.EvaluateRule(eventMap, ruleExpressions)
 			if err != nil {
@@ -149,7 +154,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 
 			if shouldAlert {
-				logger.L().Debug("RuleManager - shouldAlert", helpers.Interface("shouldAlert", shouldAlert))
 				rm.metrics.ReportRuleAlert(rule.Name)
 				message, uniqueID, err := rm.getUniqueIdAndMessage(eventMap, rule)
 				if err != nil {
@@ -158,6 +162,15 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				}
 
 				ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID)
+				if ruleFailure == nil {
+					logger.L().Error("RuleManager - failed to create rule failure", helpers.String("rule", rule.Name),
+						helpers.String("message", message),
+						helpers.String("uniqueID", uniqueID),
+						helpers.String("enrichedEvent.EventType", string(enrichedEvent.EventType)),
+					)
+					continue
+				}
+
 				if shouldCooldown, count := rm.ruleCooldown.ShouldCooldown(ruleFailure); shouldCooldown {
 					logger.L().Debug("RuleManager - rule cooldown", helpers.String("rule", rule.Name), helpers.Int("count", count))
 					continue
@@ -278,7 +291,7 @@ func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent, event
 func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent) []typesv1.RuleExpression {
 	var ruleExpressions []typesv1.RuleExpression
 	for _, expression := range rule.Expressions.RuleExpression {
-		if expression.EventType == enrichedEvent.EventType {
+		if string(expression.EventType) == string(enrichedEvent.EventType) {
 			ruleExpressions = append(ruleExpressions, expression)
 		}
 	}

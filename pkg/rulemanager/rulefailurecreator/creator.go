@@ -10,9 +10,12 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/dustin/go-humanize"
 	"github.com/goradd/maps"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulefailurecreator/setters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -32,11 +35,13 @@ type RuleFailureCreator struct {
 }
 
 func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSResolver) *RuleFailureCreator {
-	return &RuleFailureCreator{
+	r := &RuleFailureCreator{
 		setterByEventType: make(map[utils.EventType]EventMetadataSetter),
 		dnsManager:        dnsManager,
 		enricher:          enricher,
 	}
+	r.RegisterAllSetters()
+	return r
 }
 
 func (r *RuleFailureCreator) SetContainerIdToPid(containerIdToPid *maps.SafeMap[string, uint32]) {
@@ -50,6 +55,7 @@ func (r *RuleFailureCreator) RegisterCreator(eventType utils.EventType, creator 
 func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure {
 	eventSetter, ok := r.setterByEventType[enrichedEvent.EventType]
 	if !ok {
+		logger.L().Error("RuleFailureCreator - no creator registered for event type", helpers.String("eventType", string(enrichedEvent.EventType)))
 		return nil
 	}
 
@@ -61,6 +67,9 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 			Arguments: map[string]interface{}{
 				"message": message,
 			},
+			Timestamp:   enrichedEvent.Timestamp,
+			Nanoseconds: uint64(enrichedEvent.Timestamp.UnixNano()),
+			InfectedPID: enrichedEvent.ProcessTree.PID,
 		},
 		RuleAlert: apitypes.RuleAlert{
 			RuleDescription: message,
@@ -69,16 +78,16 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 		AlertPlatform: apitypes.AlertSourcePlatformK8s,
 	}
 
+	ruleFailure.SetRuntimeProcessDetails(apitypes.ProcessTree{
+		ProcessTree: enrichedEvent.ProcessTree,
+	})
+
 	eventSetter.SetFailureMetadata(ruleFailure, enrichedEvent)
 
 	r.setBaseRuntimeAlert(ruleFailure)
 	r.setRuntimeAlertK8sDetails(ruleFailure)
 	r.setCloudServices(ruleFailure)
 	r.enrichRuleFailure(ruleFailure)
-
-	ruleFailure.SetRuntimeProcessDetails(apitypes.ProcessTree{
-		ProcessTree: enrichedEvent.ProcessTree,
-	})
 
 	return ruleFailure
 }
@@ -188,4 +197,20 @@ func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.Generi
 	}
 
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
+}
+
+func (r *RuleFailureCreator) RegisterAllSetters() {
+	r.RegisterCreator(utils.ExecveEventType, setters.NewExecCreator())
+	r.RegisterCreator(utils.OpenEventType, setters.NewOpenCreator())
+	r.RegisterCreator(utils.CapabilitiesEventType, setters.NewCapabilitiesCreator())
+	r.RegisterCreator(utils.DnsEventType, setters.NewDnsCreator())
+	r.RegisterCreator(utils.NetworkEventType, setters.NewNetworkCreator())
+	r.RegisterCreator(utils.SyscallEventType, setters.NewSyscallCreator())
+	r.RegisterCreator(utils.SymlinkEventType, setters.NewSymlinkCreator())
+	r.RegisterCreator(utils.HardlinkEventType, setters.NewHardlinkCreator())
+	r.RegisterCreator(utils.SSHEventType, setters.NewSSHCreator())
+	r.RegisterCreator(utils.HTTPEventType, setters.NewHTTPCreator())
+	r.RegisterCreator(utils.PtraceEventType, setters.NewPtraceCreator())
+	r.RegisterCreator(utils.IoUringEventType, setters.NewIoUringCreator())
+	r.RegisterCreator(utils.RandomXEventType, setters.NewRandomXCreator())
 }

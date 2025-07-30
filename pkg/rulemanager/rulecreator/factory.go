@@ -4,8 +4,6 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -104,8 +102,6 @@ func (r *RuleCreatorImpl) CreateAllRules() []typesv1.Rule {
 func (r *RuleCreatorImpl) SyncRules(newRules []typesv1.Rule) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-
-	logger.L().Debug("SyncRules", helpers.Interface("newRules", newRules))
 
 	// Create a map of new rules by ID for quick lookup
 	newRuleMap := make(map[string]typesv1.Rule)

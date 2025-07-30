@@ -93,8 +93,6 @@ func (c *CEL) EvaluateRule(event map[string]any, expressions []typesv1.RuleExpre
 		if !out.Value().(bool) {
 			return false, nil
 		}
-
-		logger.L().Debug("evaluation result", helpers.Interface("result", out.Value().(bool)))
 	}
 
 	return true, nil
@@ -110,8 +108,6 @@ func (c *CEL) EvaluateExpression(event map[string]any, expression string) (strin
 	if err != nil {
 		return "", fmt.Errorf("failed to evaluate expression: %s", err)
 	}
-
-	logger.L().Debug("evaluation result", helpers.Interface("result", out))
 
 	return out.Value().(string), nil
 }

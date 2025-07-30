@@ -67,8 +67,6 @@ func (w *RulesWatcherImpl) syncAllRulesAndNotify(ctx context.Context) {
 }
 
 func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
-	logger.L().Debug("RulesWatcher - syncing all rules from cluster")
-
 	unstructuredList, err := w.k8sClient.GetDynamicClient().Resource(typesv1.RuleGvr).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return err
@@ -77,7 +75,6 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 	var enabledRules []typesv1.Rule
 	for _, item := range unstructuredList.Items {
 		rules, err := unstructuredToRules(&item)
-		logger.L().Debug("RulesWatcher - rules", helpers.Interface("rules", rules))
 		if err != nil {
 			logger.L().Warning("RulesWatcher - failed to convert rule during sync", helpers.Error(err))
 			continue
@@ -96,16 +93,11 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 }
 
 func (w *RulesWatcherImpl) InitialSync(ctx context.Context) error {
-	logger.L().Info("RulesWatcher - performing initial sync")
 	return w.syncAllRulesFromCluster(ctx)
 }
 
 func unstructuredToRules(obj *unstructured.Unstructured) (*typesv1.Rules, error) {
 	rule := &typesv1.Rules{}
-	logger.L().Debug("RulesWatcher - Interface rule", helpers.Interface("rule", obj.Object))
-
-	// First convert to a temporary structure to handle the nested profile_dependency
-
 	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &rule); err != nil {
 		return nil, err
 	}
