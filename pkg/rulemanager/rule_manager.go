@@ -116,6 +116,20 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
 	rules := rm.ruleBindingCache.ListRulesForPod(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
+	var isSupportedEventType bool
+
+	for _, rule := range rules {
+		for _, expression := range rule.Expressions.RuleExpression {
+			if expression.EventType == enrichedEvent.EventType {
+				isSupportedEventType = true
+				break
+			}
+		}
+	}
+
+	if !isSupportedEventType {
+		return
+	}
 
 	for _, rule := range rules {
 		if rule.Enabled {
@@ -125,7 +139,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				continue
 			}
 
-			shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, ruleExpressions)
+			shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, enrichedEvent.EventType, ruleExpressions)
 			if err != nil {
 				logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
 				continue
