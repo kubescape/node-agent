@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/fatih/structs"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
@@ -20,8 +20,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
-	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator"
-	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator/validators"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulefailurecreator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
@@ -33,42 +31,33 @@ import (
 )
 
 const (
-	maxFileSize   = 50 * 1024 * 1024 // 50MB
 	syscallPeriod = 5 * time.Second
 )
 
 type RuleManager struct {
-	cfg                     config.Config
-	ruleBindingCache        bindingcache.RuleBindingCache
-	trackedContainers       mapset.Set[string] // key is k8sContainerID
-	k8sClient               k8sclient.K8sClientInterface
-	ctx                     context.Context
-	objectCache             objectcache.ObjectCache
-	exporter                exporters.Exporter
-	metrics                 metricsmanager.MetricsManager
-	syscallPeekFunc         func(nsMountId uint64) ([]string, error)
-	podToWlid               maps.SafeMap[string, string] // key is namespace/podName
-	nodeName                string
-	clusterName             string
-	containerIdToShimPid    maps.SafeMap[string, uint32]
-	containerIdToPid        maps.SafeMap[string, uint32]
-	enricher                types.Enricher
-	processManager          processtree.ProcessTreeManager
-	ruleCooldown            *rulecooldown.RuleCooldown
-	CelEvaluator            cel.CELRuleEvaluator
-	profileValidatorFactory profilevalidator.ProfileValidatorFactory
-	registry                profilevalidator.ProfileRegistry
-	ruleFailureCreator      rulefailurecreator.RuleFailureCreatorInterface
+	cfg                  config.Config
+	ruleBindingCache     bindingcache.RuleBindingCache
+	trackedContainers    mapset.Set[string] // key is k8sContainerID
+	k8sClient            k8sclient.K8sClientInterface
+	ctx                  context.Context
+	objectCache          objectcache.ObjectCache
+	exporter             exporters.Exporter
+	metrics              metricsmanager.MetricsManager
+	syscallPeekFunc      func(nsMountId uint64) ([]string, error)
+	podToWlid            maps.SafeMap[string, string] // key is namespace/podName
+	containerIdToShimPid maps.SafeMap[string, uint32]
+	containerIdToPid     maps.SafeMap[string, uint32]
+	enricher             types.Enricher
+	processManager       processtree.ProcessTreeManager
+	ruleCooldown         *rulecooldown.RuleCooldown
+	celEvaluator         cel.CELRuleEvaluator
+	ruleFailureCreator   rulefailurecreator.RuleFailureCreatorInterface
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, nodeName string, clusterName string, processManager processtree.ProcessTreeManager, dnsManager dnsmanager.DNSResolver, enricher types.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
-	profileValidatorFactory := profilevalidator.NewProfileValidatorFactory(objectCache)
-	registry := profilevalidator.NewProfileRegistry(objectCache)
+func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, processManager processtree.ProcessTreeManager, dnsManager dnsmanager.DNSResolver, enricher types.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
 	ruleFailureCreator := rulefailurecreator.NewRuleFailureCreator(enricher, dnsManager)
-
-	validators.RegisterAllValidators(profileValidatorFactory, objectCache)
 
 	// Create CEL evaluator
 	celEvaluator, err := cel.NewCEL(objectCache)
@@ -77,23 +66,19 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 	}
 
 	r := &RuleManager{
-		cfg:                     cfg,
-		ctx:                     ctx,
-		k8sClient:               k8sClient,
-		trackedContainers:       mapset.NewSet[string](),
-		ruleBindingCache:        ruleBindingCache,
-		objectCache:             objectCache,
-		exporter:                exporter,
-		metrics:                 metrics,
-		nodeName:                nodeName,
-		clusterName:             clusterName,
-		enricher:                enricher,
-		processManager:          processManager,
-		ruleCooldown:            ruleCooldown,
-		CelEvaluator:            celEvaluator,
-		profileValidatorFactory: profileValidatorFactory,
-		registry:                registry,
-		ruleFailureCreator:      ruleFailureCreator,
+		cfg:                cfg,
+		ctx:                ctx,
+		k8sClient:          k8sClient,
+		trackedContainers:  mapset.NewSet[string](),
+		ruleBindingCache:   ruleBindingCache,
+		objectCache:        objectCache,
+		exporter:           exporter,
+		metrics:            metrics,
+		enricher:           enricher,
+		processManager:     processManager,
+		ruleCooldown:       ruleCooldown,
+		celEvaluator:       celEvaluator,
+		ruleFailureCreator: ruleFailureCreator,
 	}
 
 	ruleFailureCreator.SetContainerIdToPid(&r.containerIdToPid)
@@ -129,25 +114,17 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 }
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
-	eventProfile := rm.getProfileChecks(enrichedEvent)
-
 	rules := rm.ruleBindingCache.ListRulesForPod(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
 
 	for _, rule := range rules {
 		if rule.Enabled {
-			if rule.ProfileDependency == armotypes.Required {
-				if len(eventProfile.Checks) == 0 {
-					continue
-				}
-			}
-
-			eventMap := rm.serializeEvent(enrichedEvent, eventProfile)
+			eventMap := rm.serializeEvent(enrichedEvent)
 			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent)
 			if len(ruleExpressions) == 0 {
 				continue
 			}
 
-			shouldAlert, err := rm.CelEvaluator.EvaluateRule(eventMap, ruleExpressions)
+			shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, ruleExpressions)
 			if err != nil {
 				logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
 				continue
@@ -226,66 +203,20 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	return results
 }
 
-func (rm *RuleManager) getProfileChecks(enrichedEvent *events.EnrichedEvent) profilevalidator.ProfileValidationResult {
-	eventProfile := profilevalidator.ProfileValidationResult{}
+func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent) map[string]any {
+	eventMap := structs.Map(enrichedEvent.Event)
 
-	if enrichedEvent == nil {
-		logger.L().Debug("RuleManager - enriched event is nil")
-		return eventProfile
-	}
-
-	sharedData := rm.objectCache.K8sObjectCache().GetSharedContainerData(enrichedEvent.ContainerID)
-	if sharedData != nil {
-		containerInfos, exists := sharedData.ContainerInfos[objectcache.ContainerType(sharedData.ContainerType)]
-		if !exists || len(containerInfos) == 0 {
-			logger.L().Debug("RuleManager - no container info found for container type",
-				helpers.String("containerID", enrichedEvent.ContainerID),
-				helpers.Int("containerType", int(sharedData.ContainerType)))
-			return eventProfile
-		}
-
-		containerName := containerInfos[0].Name
-
-		ap, nn, ok := rm.registry.GetAvailableProfiles(containerName, enrichedEvent.ContainerID)
-		if ok {
-			profileValidator := rm.profileValidatorFactory.GetProfileValidator(enrichedEvent.EventType)
-			if profileValidator == nil {
-				return eventProfile
+	if eventMap["Event"] != nil {
+		if event, ok := eventMap["Event"].(map[string]any); ok && event["Event"] != nil {
+			return map[string]any{
+				"event": eventMap["Event"],
 			}
-
-			// Check for nil parameters that could cause panic in ValidateProfile
-			if enrichedEvent.Event == nil {
-				logger.L().Debug("RuleManager - enriched event is nil",
-					helpers.String("containerID", enrichedEvent.ContainerID))
-				return eventProfile
-			}
-
-			if ap == nil {
-				return eventProfile
-			}
-
-			if nn == nil {
-				return eventProfile
-			}
-
-			results, err := profileValidator.ValidateProfile(enrichedEvent.Event, ap, nn)
-			if err != nil {
-				logger.L().Error("RuleManager - failed to validate profile", helpers.Error(err))
-			}
-			eventProfile = results
 		}
 	}
 
-	return eventProfile
-}
-
-func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent, eventProfile profilevalidator.ProfileValidationResult) map[string]any {
-	eventWithChecks := types.EventWithChecks{
-		Event:         enrichedEvent.Event,
-		ProfileChecks: eventProfile,
+	return map[string]any{
+		"event": eventMap,
 	}
-
-	return eventWithChecks.CelEvaluationMap()
 }
 
 func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent) []typesv1.RuleExpression {
@@ -299,11 +230,11 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, enrichedEvent *even
 }
 
 func (rm *RuleManager) getUniqueIdAndMessage(eventMap map[string]any, rule typesv1.Rule) (string, string, error) {
-	message, err := rm.CelEvaluator.EvaluateExpression(eventMap, rule.Expressions.Message)
+	message, err := rm.celEvaluator.EvaluateExpression(eventMap, rule.Expressions.Message)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
 	}
-	uniqueID, err := rm.CelEvaluator.EvaluateExpression(eventMap, rule.Expressions.UniqueID)
+	uniqueID, err := rm.celEvaluator.EvaluateExpression(eventMap, rule.Expressions.UniqueID)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
 	}

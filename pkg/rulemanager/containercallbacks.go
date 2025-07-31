@@ -67,7 +67,7 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 								RuntimeName: container.Runtime.RuntimeName,
 							},
 							K8s: eventtypes.K8sMetadata{
-								Node: rm.nodeName,
+								Node: rm.cfg.NodeName,
 								BasicK8sMetadata: eventtypes.BasicK8sMetadata{
 									Namespace:     container.K8s.Namespace,
 									PodName:       container.K8s.PodName,
