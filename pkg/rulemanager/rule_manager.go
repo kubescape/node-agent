@@ -5,7 +5,6 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/fatih/structs"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
@@ -52,6 +51,7 @@ type RuleManager struct {
 	ruleCooldown         *rulecooldown.RuleCooldown
 	celEvaluator         cel.CELRuleEvaluator
 	ruleFailureCreator   rulefailurecreator.RuleFailureCreatorInterface
+	celSerializer        cel.CelSerializer
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
@@ -79,6 +79,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		ruleCooldown:       ruleCooldown,
 		celEvaluator:       celEvaluator,
 		ruleFailureCreator: ruleFailureCreator,
+		celSerializer:      &cel.CelEventSerializer{},
 	}
 
 	ruleFailureCreator.SetContainerIdToPid(&r.containerIdToPid)
@@ -118,7 +119,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 
 	for _, rule := range rules {
 		if rule.Enabled {
-			eventMap := rm.serializeEvent(enrichedEvent)
+			eventMap := rm.celSerializer.Serialize(enrichedEvent.Event)
 			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent)
 			if len(ruleExpressions) == 0 {
 				continue
@@ -201,22 +202,6 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	}
 
 	return results
-}
-
-func (rm *RuleManager) serializeEvent(enrichedEvent *events.EnrichedEvent) map[string]any {
-	eventMap := structs.Map(enrichedEvent.Event)
-
-	if eventMap["Event"] != nil {
-		if event, ok := eventMap["Event"].(map[string]any); ok && event["Event"] != nil {
-			return map[string]any{
-				"event": eventMap["Event"],
-			}
-		}
-	}
-
-	return map[string]any{
-		"event": eventMap,
-	}
 }
 
 func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent) []typesv1.RuleExpression {
