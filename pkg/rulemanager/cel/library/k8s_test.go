@@ -70,7 +70,7 @@ func TestK8sLibrary(t *testing.T) {
 		t.Fatalf("failed to create env: %v", err)
 	}
 
-	ast, issues := env.Compile("get_container_mount_paths('default', 'test-pod', 'test-container')")
+	ast, issues := env.Compile("k8s.get_container_mount_paths('default', 'test-pod', 'test-container')")
 	if issues != nil {
 		t.Fatalf("failed to compile expression: %v", issues.Err())
 	}

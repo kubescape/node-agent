@@ -25,7 +25,7 @@ func (l *k8sLibrary) Types() []*cel.Type {
 
 func (l *k8sLibrary) Declarations() map[string][]cel.FunctionOpt {
 	return map[string][]cel.FunctionOpt{
-		"get_container_mount_paths": {
+		"k8s.get_container_mount_paths": {
 			cel.Overload(
 				"k8s_get_container_mount_paths", []*cel.Type{cel.StringType, cel.StringType, cel.StringType}, cel.ListType(cel.StringType),
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
@@ -33,6 +33,17 @@ func (l *k8sLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
 					return l.getContainerMountPaths(values[0], values[1], values[2])
+				}),
+			),
+		},
+		"k8s.is_api_server_address": {
+			cel.Overload(
+				"k8s_is_api_server_address", []*cel.Type{cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 1 {
+						return types.NewErr("expected 1 argument, got %d", len(values))
+					}
+					return l.isApiServerAddress(values[0])
 				}),
 			),
 		},
@@ -88,6 +99,24 @@ func (l *k8sLibrary) getContainerMountPaths(namespace, podName, containerName re
 	}
 
 	return types.NewDynamicList(types.DefaultTypeAdapter, mountPaths)
+}
+
+func (l *k8sLibrary) isApiServerAddress(address ref.Val) ref.Val {
+	if l.k8sObjCache == nil {
+		return types.NewErr("k8sObjCache is nil")
+	}
+
+	addressStr, ok := address.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(address)
+	}
+
+	apiServerAddress := l.k8sObjCache.GetApiServerIpAddress()
+	if apiServerAddress == "" {
+		return types.Bool(false)
+	}
+
+	return types.Bool(addressStr == apiServerAddress)
 }
 
 func (l *k8sLibrary) CompileOptions() []cel.EnvOption {
