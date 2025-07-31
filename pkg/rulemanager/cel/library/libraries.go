@@ -10,6 +10,6 @@ type Library interface {
 	// Types provides all custom types introduced by the library.
 	Types() []*cel.Type
 
-	// declarations returns all function declarations provided by the library.
-	declarations() map[string][]cel.FunctionOpt
+	// Declarations returns all function Declarations provided by the library.
+	Declarations() map[string][]cel.FunctionOpt
 }

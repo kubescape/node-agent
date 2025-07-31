@@ -5,6 +5,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
 )
 
 func NN(objectCache objectcache.ObjectCache) cel.EnvOption {
@@ -23,7 +24,7 @@ func (l *nnLibrary) Types() []*cel.Type {
 	return []*cel.Type{}
 }
 
-func (l *nnLibrary) declarations() map[string][]cel.FunctionOpt {
+func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 	return map[string][]cel.FunctionOpt{
 		"nn.was_address_in_egress": {
 			cel.Overload(
@@ -74,7 +75,7 @@ func (l *nnLibrary) declarations() map[string][]cel.FunctionOpt {
 
 func (l *nnLibrary) CompileOptions() []cel.EnvOption {
 	options := []cel.EnvOption{}
-	for name, overloads := range l.declarations() {
+	for name, overloads := range l.Declarations() {
 		options = append(options, cel.Function(name, overloads...))
 	}
 	return options
@@ -83,3 +84,5 @@ func (l *nnLibrary) CompileOptions() []cel.EnvOption {
 func (l *nnLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
+
+var _ library.Library = (*nnLibrary)(nil)
