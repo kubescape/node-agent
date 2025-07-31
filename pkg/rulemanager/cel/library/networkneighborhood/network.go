@@ -84,7 +84,7 @@ func (l *nnLibrary) isDomainInEgress(containerID, domain ref.Val) ref.Val {
 	}
 
 	for _, egress := range container.Egress {
-		if slices.Contains(egress.DNSNames, domainStr) {
+		if slices.Contains(egress.DNSNames, domainStr) || egress.DNS == domainStr {
 			return types.Bool(true)
 		}
 	}
