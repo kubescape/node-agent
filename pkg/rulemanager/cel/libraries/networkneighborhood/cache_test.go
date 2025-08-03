@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/utils/ptr"
 )
 
 func TestNetworkNeighborhoodCaching(t *testing.T) {
@@ -36,16 +37,37 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 			{
 				IPAddress: "192.168.1.100",
 				DNSNames:  []string{"api.example.com"},
+				Ports: []v1beta1.NetworkPort{
+					{
+						Name:     "tcp-80",
+						Protocol: v1beta1.Protocol("TCP"),
+						Port:     ptr.To(int32(80)),
+					},
+				},
 			},
 			{
 				IPAddress: "10.0.0.50",
 				DNSNames:  []string{"database.internal"},
+				Ports: []v1beta1.NetworkPort{
+					{
+						Name:     "tcp-5432",
+						Protocol: v1beta1.Protocol("TCP"),
+						Port:     ptr.To(int32(5432)),
+					},
+				},
 			},
 		},
 		Ingress: []v1beta1.NetworkNeighbor{
 			{
 				IPAddress: "172.16.0.10",
 				DNSNames:  []string{"loadbalancer.example.com"},
+				Ports: []v1beta1.NetworkPort{
+					{
+						Name:     "tcp-8080",
+						Protocol: v1beta1.Protocol("TCP"),
+						Port:     ptr.To(int32(8080)),
+					},
+				},
 			},
 		},
 	})
@@ -61,6 +83,8 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("address", cel.StringType),
 		cel.Variable("domain", cel.StringType),
+		cel.Variable("port", cel.IntType),
+		cel.Variable("protocol", cel.StringType),
 		cel.Lib(lib),
 	)
 	assert.NoError(t, err)
@@ -104,6 +128,28 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 			vars: map[string]interface{}{
 				"containerID": "test-container-id",
 				"domain":      "loadbalancer.example.com",
+			},
+			expected: true,
+		},
+		{
+			name:       "was_address_port_protocol_in_egress caching",
+			expression: `nn.was_address_port_protocol_in_egress(containerID, address, port, protocol)`,
+			vars: map[string]interface{}{
+				"containerID": "test-container-id",
+				"address":     "192.168.1.100",
+				"port":        int64(80),
+				"protocol":    "TCP",
+			},
+			expected: true,
+		},
+		{
+			name:       "was_address_port_protocol_in_ingress caching",
+			expression: `nn.was_address_port_protocol_in_ingress(containerID, address, port, protocol)`,
+			vars: map[string]interface{}{
+				"containerID": "test-container-id",
+				"address":     "172.16.0.10",
+				"port":        int64(8080),
+				"protocol":    "TCP",
 			},
 			expected: true,
 		},

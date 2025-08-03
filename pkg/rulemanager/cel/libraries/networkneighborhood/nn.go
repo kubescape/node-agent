@@ -95,6 +95,36 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
+		"nn.was_address_port_protocol_in_egress": {
+			cel.Overload(
+				"nn_was_address_port_protocol_in_egress", []*cel.Type{cel.StringType, cel.StringType, cel.IntType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 4 {
+						return types.NewErr("expected 4 arguments, got %d", len(values))
+					}
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasAddressPortProtocolInEgress(args[0], args[1], args[2], args[3])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_port_protocol_in_egress")
+					return cachedFunc(values[0], values[1], values[2], values[3])
+				}),
+			),
+		},
+		"nn.was_address_port_protocol_in_ingress": {
+			cel.Overload(
+				"nn_was_address_port_protocol_in_ingress", []*cel.Type{cel.StringType, cel.StringType, cel.IntType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 4 {
+						return types.NewErr("expected 4 arguments, got %d", len(values))
+					}
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasAddressPortProtocolInIngress(args[0], args[1], args[2], args[3])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_port_protocol_in_ingress")
+					return cachedFunc(values[0], values[1], values[2], values[3])
+				}),
+			),
+		},
 	}
 }
 
