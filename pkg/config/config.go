@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/spf13/viper"
 )
@@ -56,6 +57,7 @@ type Config struct {
 	RuleCoolDown                   rulecooldown.RuleCooldownConfig `mapstructure:"ruleCooldown"`
 	EnablePartialProfileGeneration bool                            `mapstructure:"partialProfileGenerationEnabled"`
 	ProcfsScanInterval             time.Duration                   `mapstructure:"procfsScanInterval"`
+	CelConfigCache                 cache.FunctionCacheConfig       `mapstructure:"celConfigCache"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -91,6 +93,8 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("ruleCooldown.ruleCooldownMaxSize", 10000)
 	viper.SetDefault("partialProfileGenerationEnabled", true)
 	viper.SetDefault("procfsScanInterval", 5*time.Second)
+	viper.SetDefault("celConfigCache.maxSize", 1000)
+	viper.SetDefault("celConfigCache.ttl", 1*time.Minute)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()

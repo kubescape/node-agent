@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/goradd/maps"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -46,7 +47,7 @@ func TestOpenInProfile(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
-		AP(&objCache),
+		AP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -110,7 +111,7 @@ func TestOpenNoProfile(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
-		AP(&objCache),
+		AP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -178,7 +179,7 @@ func TestOpenWithFlagsInProfile(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("flags", cel.ListType(cel.StringType)),
-		AP(&objCache),
+		AP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -276,7 +277,7 @@ func TestOpenWithFlagsNoProfile(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("flags", cel.ListType(cel.StringType)),
-		AP(&objCache),
+		AP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -312,7 +313,7 @@ func TestOpenWithFlagsCompilation(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("flags", cel.ListType(cel.StringType)),
-		AP(&objCache),
+		AP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -337,7 +338,7 @@ func TestOpenCompilation(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
-		AP(&objCache),
+		AP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)

@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/goradd/maps"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -46,7 +47,7 @@ func TestExecInProfile(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
-		AP(&objCache),
+		AP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -110,7 +111,7 @@ func TestExecNoProfile(t *testing.T) {
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
-		AP(&objCache),
+		AP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -178,7 +179,7 @@ func TestExecWithArgsInProfile(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("args", cel.ListType(cel.StringType)),
-		AP(&objCache),
+		AP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -269,7 +270,7 @@ func TestExecWithArgsNoProfile(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("args", cel.ListType(cel.StringType)),
-		AP(&objCache),
+		AP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)
@@ -305,7 +306,7 @@ func TestExecWithArgsCompilation(t *testing.T) {
 		cel.Variable("containerID", cel.StringType),
 		cel.Variable("path", cel.StringType),
 		cel.Variable("args", cel.ListType(cel.StringType)),
-		AP(&objCache),
+		AP(&objCache, config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)

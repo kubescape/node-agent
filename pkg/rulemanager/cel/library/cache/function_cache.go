@@ -11,8 +11,8 @@ import (
 )
 
 type FunctionCacheConfig struct {
-	MaxSize int
-	TTL     time.Duration
+	MaxSize int           `mapstructure:"maxSize"`
+	TTL     time.Duration `mapstructure:"ttl"`
 }
 
 func DefaultFunctionCacheConfig() FunctionCacheConfig {

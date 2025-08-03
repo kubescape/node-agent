@@ -7,6 +7,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/applicationprofile"
@@ -24,12 +25,12 @@ type CEL struct {
 	cacheMutex   sync.RWMutex
 }
 
-func NewCEL(objectCache objectcache.ObjectCache) (*CEL, error) {
+func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
 	env, err := cel.NewEnv(
 		cel.Variable("data", cel.AnyType),
 		library.K8s(objectCache.K8sObjectCache()),
-		applicationprofile.AP(objectCache),
-		networkneighborhood.NN(objectCache),
+		applicationprofile.AP(objectCache, cfg),
+		networkneighborhood.NN(objectCache, cfg),
 	)
 	if err != nil {
 		return nil, err

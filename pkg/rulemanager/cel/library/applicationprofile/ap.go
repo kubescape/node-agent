@@ -4,15 +4,19 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/cache"
 )
 
-func AP(objectCache objectcache.ObjectCache) cel.EnvOption {
+func AP(objectCache objectcache.ObjectCache, config config.Config) cel.EnvOption {
 	return cel.Lib(&apLibrary{
-		objectCache:   objectCache,
-		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
+		objectCache: objectCache,
+		functionCache: cache.NewFunctionCache(cache.FunctionCacheConfig{
+			MaxSize: config.CelConfigCache.MaxSize,
+			TTL:     config.CelConfigCache.TTL,
+		}),
 	})
 }
 

@@ -62,7 +62,7 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 	ruleFailureCreator := rulefailurecreator.NewRuleFailureCreator(enricher, dnsManager)
 
 	// Create CEL evaluator
-	celEvaluator, err := cel.NewCEL(objectCache)
+	celEvaluator, err := cel.NewCEL(objectCache, cfg)
 	if err != nil {
 		return nil, err
 	}
