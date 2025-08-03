@@ -6,14 +6,19 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/cache"
 )
 
 func AP(objectCache objectcache.ObjectCache) cel.EnvOption {
-	return cel.Lib(&apLibrary{objectCache: objectCache})
+	return cel.Lib(&apLibrary{
+		objectCache:   objectCache,
+		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
+	})
 }
 
 type apLibrary struct {
-	objectCache objectcache.ObjectCache
+	objectCache   objectcache.ObjectCache
+	functionCache *cache.FunctionCache
 }
 
 func (l *apLibrary) LibraryName() string {
@@ -33,7 +38,11 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
-					return l.wasExecuted(values[0], values[1])
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasExecuted(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_executed")
+					return cachedFunc(values[0], values[1])
 				}),
 			),
 		},
@@ -44,7 +53,11 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 3 {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
-					return l.wasExecutedWithArgs(values[0], values[1], values[2])
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasExecutedWithArgs(args[0], args[1], args[2])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_executed_with_args")
+					return cachedFunc(values[0], values[1], values[2])
 				}),
 			),
 		},
@@ -55,7 +68,11 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
-					return l.wasPathOpened(values[0], values[1])
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasPathOpened(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened")
+					return cachedFunc(values[0], values[1])
 				}),
 			),
 		},
@@ -66,7 +83,11 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 3 {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
-					return l.wasPathOpenedWithFlags(values[0], values[1], values[2])
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasPathOpenedWithFlags(args[0], args[1], args[2])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_flags")
+					return cachedFunc(values[0], values[1], values[2])
 				}),
 			),
 		},
@@ -77,7 +98,11 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
-					return l.wasSyscallUsed(values[0], values[1])
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasSyscallUsed(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_syscall_used")
+					return cachedFunc(values[0], values[1])
 				}),
 			),
 		},
@@ -88,7 +113,11 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
-					return l.wasCapabilityUsed(values[0], values[1])
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasCapabilityUsed(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_capability_used")
+					return cachedFunc(values[0], values[1])
 				}),
 			),
 		},

@@ -6,14 +6,19 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/cache"
 )
 
 func NN(objectCache objectcache.ObjectCache) cel.EnvOption {
-	return cel.Lib(&nnLibrary{objectCache: objectCache})
+	return cel.Lib(&nnLibrary{
+		objectCache:   objectCache,
+		functionCache: cache.NewFunctionCache(cache.DefaultFunctionCacheConfig()),
+	})
 }
 
 type nnLibrary struct {
-	objectCache objectcache.ObjectCache
+	objectCache   objectcache.ObjectCache
+	functionCache *cache.FunctionCache
 }
 
 func (l *nnLibrary) LibraryName() string {
@@ -33,7 +38,11 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
-					return l.wasAddressInEgress(values[0], values[1])
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasAddressInEgress(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_in_egress")
+					return cachedFunc(values[0], values[1])
 				}),
 			),
 		},
@@ -44,7 +53,11 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
-					return l.wasAddressInIngress(values[0], values[1])
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasAddressInIngress(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.was_address_in_ingress")
+					return cachedFunc(values[0], values[1])
 				}),
 			),
 		},
@@ -55,7 +68,11 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
-					return l.isDomainInEgress(values[0], values[1])
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.isDomainInEgress(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.is_domain_in_egress")
+					return cachedFunc(values[0], values[1])
 				}),
 			),
 		},
@@ -66,7 +83,11 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
-					return l.isDomainInIngress(values[0], values[1])
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.isDomainInIngress(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.is_domain_in_ingress")
+					return cachedFunc(values[0], values[1])
 				}),
 			),
 		},
