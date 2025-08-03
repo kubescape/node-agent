@@ -54,6 +54,7 @@ type RuleManager struct {
 	celEvaluator         cel.CELRuleEvaluator
 	ruleFailureCreator   rulefailurecreator.RuleFailureCreatorInterface
 	celSerializer        cel.CelSerializer
+	rulePolicyValidator  *RulePolicyValidator
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
@@ -67,21 +68,24 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		return nil, err
 	}
 
+	rulePolicyValidator := NewRulePolicyValidator(objectCache)
+
 	r := &RuleManager{
-		cfg:                cfg,
-		ctx:                ctx,
-		k8sClient:          k8sClient,
-		trackedContainers:  mapset.NewSet[string](),
-		ruleBindingCache:   ruleBindingCache,
-		objectCache:        objectCache,
-		exporter:           exporter,
-		metrics:            metrics,
-		enricher:           enricher,
-		processManager:     processManager,
-		ruleCooldown:       ruleCooldown,
-		celEvaluator:       celEvaluator,
-		ruleFailureCreator: ruleFailureCreator,
-		celSerializer:      &cel.CelEventSerializer{},
+		cfg:                 cfg,
+		ctx:                 ctx,
+		k8sClient:           k8sClient,
+		trackedContainers:   mapset.NewSet[string](),
+		ruleBindingCache:    ruleBindingCache,
+		objectCache:         objectCache,
+		exporter:            exporter,
+		metrics:             metrics,
+		enricher:            enricher,
+		processManager:      processManager,
+		ruleCooldown:        ruleCooldown,
+		celEvaluator:        celEvaluator,
+		ruleFailureCreator:  ruleFailureCreator,
+		celSerializer:       &cel.CelEventSerializer{},
+		rulePolicyValidator: rulePolicyValidator,
 	}
 
 	ruleFailureCreator.SetContainerIdToPid(&r.containerIdToPid)
@@ -137,6 +141,13 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		if rule.Enabled {
 			if !profileExists && rule.ProfileDependency == armotypes.Required {
 				logger.L().Debug("RuleManager - no profile exists for container, skipping rule",
+					helpers.String("containerID", enrichedEvent.ContainerID),
+					helpers.String("rule", rule.Name))
+				continue
+			}
+
+			if rule.SupportPolicy && !rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
+				logger.L().Debug("RuleManager - rule policy not supported, skipping rule",
 					helpers.String("containerID", enrichedEvent.ContainerID),
 					helpers.String("rule", rule.Name))
 				continue
@@ -222,6 +233,11 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 			continue
 		}
 
+		logger.L().Debug("RuleManager - evaluating rule policy",
+			helpers.String("ruleID", rule.ID),
+			helpers.String("eventType", string(eventType)),
+			helpers.String("event", event.GetPod()))
+
 		eventMap := rm.celSerializer.Serialize(event)
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
 		if len(ruleExpressions) == 0 {
@@ -240,6 +256,21 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	}
 
 	return results
+}
+
+func (rm *RuleManager) validateRulePolicy(rule typesv1.Rule, event utils.K8sEvent, containerID string) bool {
+	ap, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, containerID)
+	if err != nil {
+		return false
+	}
+
+	allowed, err := rm.rulePolicyValidator.Validate(rule.ID, utils.GetCommFromEvent(event), &ap)
+	if err != nil {
+		logger.L().Error("RuleManager - failed to validate rule policy", helpers.Error(err))
+		return false
+	}
+
+	return allowed
 }
 
 func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, eventType utils.EventType) []typesv1.RuleExpression {
