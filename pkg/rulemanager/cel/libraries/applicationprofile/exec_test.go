@@ -7,13 +7,13 @@ import (
 	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator"
+	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestExecInProfile(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -106,7 +106,7 @@ func TestExecInProfile(t *testing.T) {
 }
 
 func TestExecNoProfile(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{}
+	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -140,7 +140,7 @@ func TestExecNoProfile(t *testing.T) {
 }
 
 func TestExecWithArgsInProfile(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -264,7 +264,7 @@ func TestExecWithArgsInProfile(t *testing.T) {
 }
 
 func TestExecWithArgsNoProfile(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{}
+	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -300,7 +300,7 @@ func TestExecWithArgsNoProfile(t *testing.T) {
 }
 
 func TestExecWithArgsCompilation(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{}
+	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),

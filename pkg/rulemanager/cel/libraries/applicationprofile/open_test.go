@@ -7,13 +7,13 @@ import (
 	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator"
+	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestOpenInProfile(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -106,7 +106,7 @@ func TestOpenInProfile(t *testing.T) {
 }
 
 func TestOpenNoProfile(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{}
+	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -140,7 +140,7 @@ func TestOpenNoProfile(t *testing.T) {
 }
 
 func TestOpenWithFlagsInProfile(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -271,7 +271,7 @@ func TestOpenWithFlagsInProfile(t *testing.T) {
 }
 
 func TestOpenWithFlagsNoProfile(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{}
+	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -307,7 +307,7 @@ func TestOpenWithFlagsNoProfile(t *testing.T) {
 }
 
 func TestOpenWithFlagsCompilation(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{}
+	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -333,7 +333,7 @@ func TestOpenWithFlagsCompilation(t *testing.T) {
 }
 
 func TestOpenCompilation(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{}
+	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -358,7 +358,7 @@ func TestOpenCompilation(t *testing.T) {
 }
 
 func TestOpenWithSuffixInProfile(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -483,7 +483,7 @@ func TestOpenWithSuffixInProfile(t *testing.T) {
 }
 
 func TestOpenWithSuffixNoProfile(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{}
+	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -517,7 +517,7 @@ func TestOpenWithSuffixNoProfile(t *testing.T) {
 }
 
 func TestOpenWithPrefixInProfile(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -654,7 +654,7 @@ func TestOpenWithPrefixInProfile(t *testing.T) {
 }
 
 func TestOpenWithPrefixNoProfile(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{}
+	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -688,7 +688,7 @@ func TestOpenWithPrefixNoProfile(t *testing.T) {
 }
 
 func TestOpenWithSuffixCompilation(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{}
+	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),
@@ -713,7 +713,7 @@ func TestOpenWithSuffixCompilation(t *testing.T) {
 }
 
 func TestOpenWithPrefixCompilation(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{}
+	objCache := objectcachev1.RuleObjectCacheMock{}
 
 	env, err := cel.NewEnv(
 		cel.Variable("containerID", cel.StringType),

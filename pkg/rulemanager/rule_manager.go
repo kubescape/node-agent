@@ -179,8 +179,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 					continue
 				}
 
-				if shouldCooldown, count := rm.ruleCooldown.ShouldCooldown(ruleFailure); shouldCooldown {
-					logger.L().Debug("RuleManager - rule cooldown", helpers.String("rule", rule.Name), helpers.Int("count", count))
+				if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(ruleFailure); shouldCooldown {
 					continue
 				}
 

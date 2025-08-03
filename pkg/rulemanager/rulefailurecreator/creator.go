@@ -91,6 +91,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 	if enrichedEvent.ProcessTree.PID != 0 {
 		ruleFailure.SetRuntimeProcessDetails(apitypes.ProcessTree{
 			ProcessTree: enrichedEvent.ProcessTree,
+			ContainerID: enrichedEvent.ContainerID,
 		})
 	}
 

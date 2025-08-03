@@ -5,6 +5,7 @@ import (
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 )
 
@@ -36,6 +37,12 @@ func NewRuleCooldown(config RuleCooldownConfig) *RuleCooldown {
 func (rc *RuleCooldown) ShouldCooldown(ruleFailures types.RuleFailure) (bool, int) {
 	alert := ruleFailures.GetBaseRuntimeAlert()
 	key := alert.UniqueID + ruleFailures.GetRuntimeProcessDetails().ContainerID + ruleFailures.GetRuleId()
+
+	logger.L().Debug("RuleCooldown - should cooldown",
+		helpers.String("key", key),
+		helpers.String("rule", alert.AlertName),
+		helpers.String("containerID", ruleFailures.GetRuntimeProcessDetails().ContainerID),
+		helpers.String("ruleID", ruleFailures.GetRuleId()))
 
 	// If we're not on profile failure, and the profile failed, don't cooldown
 	if !rc.cooldownConfig.OnProfileFailure && alert.ProfileMetadata.FailOnProfile {

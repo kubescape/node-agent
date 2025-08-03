@@ -7,15 +7,15 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/utils/ptr"
 )
 
 func TestNetworkNeighborhoodCaching(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -191,7 +191,7 @@ func TestNetworkNeighborhoodCaching(t *testing.T) {
 }
 
 func TestNetworkNeighborhoodCacheDifferentArguments(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -275,7 +275,7 @@ func TestNetworkNeighborhoodCacheDifferentArguments(t *testing.T) {
 }
 
 func TestNetworkNeighborhoodCacheExpiration(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -352,7 +352,7 @@ func TestNetworkNeighborhoodCacheExpiration(t *testing.T) {
 }
 
 func TestNetworkNeighborhoodCachePerformance(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -429,7 +429,7 @@ func TestNetworkNeighborhoodCachePerformance(t *testing.T) {
 }
 
 func TestNetworkNeighborhoodCacheMultipleFunctions(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -516,7 +516,7 @@ func TestNetworkNeighborhoodCacheMultipleFunctions(t *testing.T) {
 }
 
 func TestNetworkNeighborhoodCacheClearCache(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -590,7 +590,7 @@ func TestNetworkNeighborhoodCacheClearCache(t *testing.T) {
 }
 
 func TestNetworkNeighborhoodCacheKeyGeneration(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 

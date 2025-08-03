@@ -7,14 +7,14 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/profilevalidator"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestApplicationProfileCaching(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -155,7 +155,7 @@ func TestApplicationProfileCaching(t *testing.T) {
 }
 
 func TestApplicationProfileCacheDifferentArguments(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -239,7 +239,7 @@ func TestApplicationProfileCacheDifferentArguments(t *testing.T) {
 }
 
 func TestApplicationProfileCacheExpiration(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -316,7 +316,7 @@ func TestApplicationProfileCacheExpiration(t *testing.T) {
 }
 
 func TestApplicationProfileCachePerformance(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
@@ -393,7 +393,7 @@ func TestApplicationProfileCachePerformance(t *testing.T) {
 }
 
 func TestApplicationProfileCacheClearCache(t *testing.T) {
-	objCache := profilevalidator.RuleObjectCacheMock{
+	objCache := objectcachev1.RuleObjectCacheMock{
 		ContainerIDToSharedData: maps.NewSafeMap[string, *objectcache.WatchedContainerData](),
 	}
 
