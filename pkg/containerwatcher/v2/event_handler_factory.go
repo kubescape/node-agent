@@ -14,11 +14,9 @@ import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
-	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
@@ -120,24 +118,14 @@ func NewEventHandlerFactory(
 	})
 
 	rulePolicyAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
-		switch eventType {
-		case utils.ExecveEventType:
-			if execEvent, ok := event.(*events.ExecEvent); ok {
-				rulePolicyReporter.ReportEvent(eventType, event, execEvent.Runtime.ContainerID, execEvent.Comm)
-			}
-		case utils.SymlinkEventType:
-			if symlinkEvent, ok := event.(*tracersymlinktype.Event); ok {
-				rulePolicyReporter.ReportEvent(eventType, event, symlinkEvent.Runtime.ContainerID, symlinkEvent.Comm)
-			}
-		case utils.HardlinkEventType:
-			if hardlinkEvent, ok := event.(*tracerhardlinktype.Event); ok {
-				rulePolicyReporter.ReportEvent(eventType, event, hardlinkEvent.Runtime.ContainerID, hardlinkEvent.Comm)
-			}
+		// Use reflection to get Comm and ContainerID without type conversion
+		// TODO: Interface or struct
+		comm := utils.GetCommFromEvent(event)
+		containerID := utils.GetContainerIDFromEvent(event)
 
-		case utils.IoUringEventType:
-			if iouringEvent, ok := event.(*traceriouringtype.Event); ok {
-				rulePolicyReporter.ReportEvent(eventType, event, iouringEvent.Runtime.ContainerID, iouringEvent.Identifier)
-			}
+		// Only report if we have both Comm and ContainerID
+		if comm != "" && containerID != "" {
+			rulePolicyReporter.ReportEvent(eventType, event, containerID, comm)
 		}
 	})
 

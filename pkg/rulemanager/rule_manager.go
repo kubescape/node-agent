@@ -137,7 +137,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 
 			eventMap := rm.celSerializer.Serialize(enrichedEvent.Event)
-			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent)
+			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent.EventType)
 			if len(ruleExpressions) == 0 {
 				continue
 			}
@@ -215,16 +215,30 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 			continue
 		}
 
-		results = append(results, rule.ID)
+		eventMap := rm.celSerializer.Serialize(event)
+		ruleExpressions := rm.getRuleExpressions(rule, eventType)
+		if len(ruleExpressions) == 0 {
+			continue
+		}
+
+		shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, eventType, ruleExpressions)
+		if err != nil {
+			logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
+			continue
+		}
+
+		if shouldAlert {
+			results = append(results, rule.ID)
+		}
 	}
 
 	return results
 }
 
-func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent) []typesv1.RuleExpression {
+func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, eventType utils.EventType) []typesv1.RuleExpression {
 	var ruleExpressions []typesv1.RuleExpression
 	for _, expression := range rule.Expressions.RuleExpression {
-		if string(expression.EventType) == string(enrichedEvent.EventType) {
+		if string(expression.EventType) == string(eventType) {
 			ruleExpressions = append(ruleExpressions, expression)
 		}
 	}
