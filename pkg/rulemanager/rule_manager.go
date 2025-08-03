@@ -118,6 +118,12 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
 	var profileExists bool
+	podId := utils.CreateK8sPodID(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
+	details, ok := rm.podToWlid.Load(podId)
+	if !ok {
+		return
+	}
+
 	rules := rm.ruleBindingCache.ListRulesForPod(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
 
 	_, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
@@ -171,6 +177,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 					continue
 				}
 
+				ruleFailure.SetWorkloadDetails(details)
 				rm.exporter.SendRuleAlert(ruleFailure)
 			}
 
