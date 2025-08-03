@@ -6,8 +6,8 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/cache"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 )
 
 func AP(objectCache objectcache.ObjectCache, config config.Config) cel.EnvOption {
@@ -95,6 +95,36 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
+		"ap.was_path_opened_with_suffix": {
+			cel.Overload(
+				"ap_was_path_opened_with_suffix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 2 {
+						return types.NewErr("expected 2 arguments, got %d", len(values))
+					}
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasPathOpenedWithSuffix(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_suffix")
+					return cachedFunc(values[0], values[1])
+				}),
+			),
+		},
+		"ap.was_path_opened_with_prefix": {
+			cel.Overload(
+				"ap_was_path_opened_with_prefix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 2 {
+						return types.NewErr("expected 2 arguments, got %d", len(values))
+					}
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasPathOpenedWithPrefix(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_path_opened_with_prefix")
+					return cachedFunc(values[0], values[1])
+				}),
+			),
+		},
 		"ap.was_syscall_used": {
 			cel.Overload(
 				"ap_was_syscall_used", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
@@ -140,4 +170,4 @@ func (l *apLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
 
-var _ library.Library = (*apLibrary)(nil)
+var _ libraries.Library = (*apLibrary)(nil)

@@ -1,9 +1,11 @@
 package applicationprofile
 
 import (
+	"strings"
+
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/celparse"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/celparse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
@@ -66,6 +68,62 @@ func (l *apLibrary) wasPathOpenedWithFlags(containerID, path, flags ref.Val) ref
 			if compareOpenFlags(celFlags, open.Flags) {
 				return types.Bool(true)
 			}
+		}
+	}
+
+	return types.Bool(false)
+}
+
+func (l *apLibrary) wasPathOpenedWithSuffix(containerID, suffix ref.Val) ref.Val {
+	if l.objectCache == nil {
+		return types.NewErr("objectCache is nil")
+	}
+
+	containerIDStr, ok := containerID.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(containerID)
+	}
+	suffixStr, ok := suffix.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(suffix)
+	}
+
+	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	if err != nil {
+		return types.Bool(false)
+	}
+
+	for _, open := range container.Opens {
+		if strings.HasSuffix(open.Path, suffixStr) {
+			return types.Bool(true)
+		}
+	}
+
+	return types.Bool(false)
+}
+
+func (l *apLibrary) wasPathOpenedWithPrefix(containerID, prefix ref.Val) ref.Val {
+	if l.objectCache == nil {
+		return types.NewErr("objectCache is nil")
+	}
+
+	containerIDStr, ok := containerID.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(containerID)
+	}
+	prefixStr, ok := prefix.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(prefix)
+	}
+
+	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	if err != nil {
+		return types.Bool(false)
+	}
+
+	for _, open := range container.Opens {
+		if strings.HasPrefix(open.Path, prefixStr) {
+			return types.Bool(true)
 		}
 	}
 

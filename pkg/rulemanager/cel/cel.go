@@ -9,9 +9,9 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/applicationprofile"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/networkneighborhood"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/applicationprofile"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/k8s"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/networkneighborhood"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -28,7 +28,7 @@ type CEL struct {
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
 	env, err := cel.NewEnv(
 		cel.Variable("data", cel.AnyType),
-		library.K8s(objectCache.K8sObjectCache()),
+		k8s.K8s(objectCache.K8sObjectCache()),
 		applicationprofile.AP(objectCache, cfg),
 		networkneighborhood.NN(objectCache, cfg),
 	)

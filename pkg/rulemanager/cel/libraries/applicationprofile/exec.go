@@ -6,7 +6,7 @@ import (
 	"github.com/google/cel-go/common/types"
 
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/celparse"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/celparse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 )
 

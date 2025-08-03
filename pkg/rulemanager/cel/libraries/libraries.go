@@ -1,4 +1,4 @@
-package library
+package libraries
 
 import "github.com/google/cel-go/cel"
 

@@ -1,4 +1,4 @@
-package library_test
+package k8s
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	"github.com/kubescape/node-agent/pkg/objectcache/v1"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -64,7 +63,7 @@ func TestK8sLibrary(t *testing.T) {
 	objectCache := objectcache.NewObjectCache(k8sObjCache, nil, nil, nil)
 	env, err := cel.NewEnv(
 		cel.Variable("event", cel.AnyType),
-		library.K8s(objectCache.K8sObjectCache()),
+		K8s(objectCache.K8sObjectCache()),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)

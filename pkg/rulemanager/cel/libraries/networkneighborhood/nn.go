@@ -6,8 +6,8 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library"
-	"github.com/kubescape/node-agent/pkg/rulemanager/cel/library/cache"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 )
 
 func NN(objectCache objectcache.ObjectCache, config config.Config) cel.EnvOption {
@@ -110,4 +110,4 @@ func (l *nnLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
 
-var _ library.Library = (*nnLibrary)(nil)
+var _ libraries.Library = (*nnLibrary)(nil)

@@ -1,10 +1,11 @@
-package library
+package k8s
 
 import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/objectcache"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries"
 )
 
 func K8s(k8sObjCache objectcache.K8sObjectCache) cel.EnvOption {
@@ -131,4 +132,4 @@ func (l *k8sLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
 
-var _ Library = (*k8sLibrary)(nil)
+var _ libraries.Library = (*k8sLibrary)(nil)
