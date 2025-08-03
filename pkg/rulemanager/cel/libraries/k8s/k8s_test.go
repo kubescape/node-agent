@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	"github.com/kubescape/node-agent/pkg/objectcache/v1"
 	"github.com/stretchr/testify/assert"
@@ -63,7 +64,7 @@ func TestK8sLibrary(t *testing.T) {
 	objectCache := objectcache.NewObjectCache(k8sObjCache, nil, nil, nil)
 	env, err := cel.NewEnv(
 		cel.Variable("event", cel.AnyType),
-		K8s(objectCache.K8sObjectCache()),
+		K8s(objectCache.K8sObjectCache(), config.Config{}),
 	)
 	if err != nil {
 		t.Fatalf("failed to create env: %v", err)

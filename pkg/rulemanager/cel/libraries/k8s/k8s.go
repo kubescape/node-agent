@@ -4,16 +4,25 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 )
 
-func K8s(k8sObjCache objectcache.K8sObjectCache) cel.EnvOption {
-	return cel.Lib(&k8sLibrary{k8sObjCache: k8sObjCache})
+func K8s(k8sObjCache objectcache.K8sObjectCache, config config.Config) cel.EnvOption {
+	return cel.Lib(&k8sLibrary{
+		k8sObjCache: k8sObjCache,
+		functionCache: cache.NewFunctionCache(cache.FunctionCacheConfig{
+			MaxSize: config.CelConfigCache.MaxSize,
+			TTL:     config.CelConfigCache.TTL,
+		}),
+	})
 }
 
 type k8sLibrary struct {
-	k8sObjCache objectcache.K8sObjectCache
+	k8sObjCache   objectcache.K8sObjectCache
+	functionCache *cache.FunctionCache
 }
 
 func (l *k8sLibrary) LibraryName() string {
@@ -33,7 +42,11 @@ func (l *k8sLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 3 {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
-					return l.getContainerMountPaths(values[0], values[1], values[2])
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.getContainerMountPaths(args[0], args[1], args[2])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "k8s.get_container_mount_paths")
+					return cachedFunc(values[0], values[1], values[2])
 				}),
 			),
 		},

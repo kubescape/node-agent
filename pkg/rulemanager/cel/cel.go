@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/applicationprofile"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/k8s"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/networkneighborhood"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/parse"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -28,9 +29,10 @@ type CEL struct {
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
 	env, err := cel.NewEnv(
 		cel.Variable("data", cel.AnyType),
-		k8s.K8s(objectCache.K8sObjectCache()),
+		k8s.K8s(objectCache.K8sObjectCache(), cfg),
 		applicationprofile.AP(objectCache, cfg),
 		networkneighborhood.NN(objectCache, cfg),
+		parse.Parse(cfg),
 	)
 	if err != nil {
 		return nil, err
