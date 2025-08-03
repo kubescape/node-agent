@@ -2,6 +2,8 @@ package rulemanager
 
 import (
 	"context"
+	"crypto/md5"
+	"fmt"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -140,22 +142,16 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	for _, rule := range rules {
 		if rule.Enabled {
 			if !profileExists && rule.ProfileDependency == armotypes.Required {
-				logger.L().Debug("RuleManager - no profile exists for container, skipping rule",
-					helpers.String("containerID", enrichedEvent.ContainerID),
-					helpers.String("rule", rule.Name))
-				continue
-			}
-
-			if rule.SupportPolicy && !rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
-				logger.L().Debug("RuleManager - rule policy not supported, skipping rule",
-					helpers.String("containerID", enrichedEvent.ContainerID),
-					helpers.String("rule", rule.Name))
 				continue
 			}
 
 			eventMap := rm.celSerializer.Serialize(enrichedEvent.Event)
 			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent.EventType)
 			if len(ruleExpressions) == 0 {
+				continue
+			}
+
+			if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
 				continue
 			}
 
@@ -233,11 +229,6 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 			continue
 		}
 
-		logger.L().Debug("RuleManager - evaluating rule policy",
-			helpers.String("ruleID", rule.ID),
-			helpers.String("eventType", string(eventType)),
-			helpers.String("event", event.GetPod()))
-
 		eventMap := rm.celSerializer.Serialize(event)
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
 		if len(ruleExpressions) == 0 {
@@ -293,6 +284,8 @@ func (rm *RuleManager) getUniqueIdAndMessage(eventMap map[string]any, rule types
 		logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
 	}
 
+	uniqueID = hashStringToMD5(uniqueID)
+
 	return message, uniqueID, err
 }
 
@@ -305,4 +298,10 @@ func isSupportedEventType(rules []typesv1.Rule, enrichedEvent *events.EnrichedEv
 		}
 	}
 	return false
+}
+
+func hashStringToMD5(str string) string {
+	hash := md5.Sum([]byte(str))
+	hashString := fmt.Sprintf("%x", hash)
+	return hashString
 }

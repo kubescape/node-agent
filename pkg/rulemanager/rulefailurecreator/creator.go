@@ -1,8 +1,6 @@
 package rulefailurecreator
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -63,10 +61,9 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 		return nil
 	}
 
-	md5Hash := md5.Sum([]byte(uniqueID))
 	ruleFailure := &types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			UniqueID:  hex.EncodeToString(md5Hash[:]),
+			UniqueID:  uniqueID,
 			AlertName: rule.Name,
 			Severity:  rule.Severity,
 			Arguments: map[string]interface{}{
