@@ -42,11 +42,7 @@ func (l *k8sLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 3 {
 						return types.NewErr("expected 3 arguments, got %d", len(values))
 					}
-					wrapperFunc := func(args ...ref.Val) ref.Val {
-						return l.getContainerMountPaths(args[0], args[1], args[2])
-					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "k8s.get_container_mount_paths")
-					return cachedFunc(values[0], values[1], values[2])
+					return l.getContainerMountPaths(values[0], values[1], values[2])
 				}),
 			),
 		},

@@ -39,11 +39,7 @@ func (l *parseLibrary) Declarations() map[string][]cel.FunctionOpt {
 					if len(values) != 2 {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
-					wrapperFunc := func(args ...ref.Val) ref.Val {
-						return l.getExecPath(args[0], args[1])
-					}
-					cachedFunc := l.functionCache.WithCache(wrapperFunc, "parse.get_exec_path")
-					return cachedFunc(values[0], values[1])
+					return l.getExecPath(values[0], values[1])
 				}),
 			),
 		},
