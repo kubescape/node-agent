@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/applicationprofile"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/k8s"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/net"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/networkneighborhood"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/parse"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
@@ -33,6 +34,7 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		applicationprofile.AP(objectCache, cfg),
 		networkneighborhood.NN(objectCache, cfg),
 		parse.Parse(cfg),
+		net.Net(cfg),
 	)
 	if err != nil {
 		return nil, err
