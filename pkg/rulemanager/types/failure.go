@@ -6,6 +6,11 @@ import (
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
+const (
+	ApplicationProfile = "applicationprofile"
+	NetworkProfile     = "networkprofile"
+)
+
 type GenericRuleFailure struct {
 	BaseRuntimeAlert       apitypes.BaseRuntimeAlert
 	AlertType              apitypes.AlertType

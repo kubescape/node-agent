@@ -9,11 +9,13 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/dustin/go-humanize"
 	"github.com/goradd/maps"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
@@ -86,6 +88,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 	r.setBaseRuntimeAlert(ruleFailure)
 	r.setRuntimeAlertK8sDetails(ruleFailure)
 	r.setCloudServices(ruleFailure)
+	r.setProfileMetadata(rule, ruleFailure, objectCache)
 	r.enrichRuleFailure(ruleFailure)
 
 	if enrichedEvent.ProcessTree.PID != 0 {
@@ -106,6 +109,64 @@ func (r *RuleFailureCreator) enrichRuleFailure(ruleFailure *types.GenericRuleFai
 		}
 	}
 
+}
+
+func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *types.GenericRuleFailure, objectCache objectcache.ObjectCache) {
+	var profileType armotypes.ProfileType
+	baseRuntimeAlert := ruleFailure.GetBaseRuntimeAlert()
+	profileRequirment := rule.ProfileDependency
+	if !(profileRequirment == armotypes.Required || profileRequirment == armotypes.Optional) {
+		return
+	}
+
+	for _, tag := range rule.Tags {
+		switch tag {
+		case types.ApplicationProfile:
+			profileType = armotypes.ApplicationProfile
+		case types.NetworkProfile:
+			profileType = armotypes.NetworkProfile
+		}
+	}
+
+	switch profileType {
+	case armotypes.ApplicationProfile:
+		state := objectCache.ApplicationProfileCache().GetApplicationProfileState(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
+		if state != nil {
+			profileMetadata := &armotypes.ProfileMetadata{
+				Status:            state.Status,
+				Completion:        state.Completion,
+				Name:              state.Name,
+				FailOnProfile:     state.Status == helpersv1.Completed,
+				Type:              armotypes.ApplicationProfile,
+				ProfileDependency: profileRequirment,
+				Error:             state.Error,
+			}
+			baseRuntimeAlert.ProfileMetadata = profileMetadata
+		}
+
+	case armotypes.NetworkProfile:
+		state := objectCache.NetworkNeighborhoodCache().GetNetworkNeighborhoodState(ruleFailure.GetTriggerEvent().Runtime.ContainerID)
+		if state != nil {
+			profileMetadata := &armotypes.ProfileMetadata{
+				Status:            state.Status,
+				Completion:        state.Completion,
+				Name:              state.Name,
+				FailOnProfile:     state.Status == helpersv1.Completed,
+				Type:              armotypes.NetworkProfile,
+				ProfileDependency: profileRequirment,
+				Error:             state.Error,
+			}
+			baseRuntimeAlert.ProfileMetadata = profileMetadata
+		}
+	default:
+		profileMetadata := &armotypes.ProfileMetadata{
+			ProfileDependency: profileRequirment,
+			FailOnProfile:     false,
+			Error:             fmt.Errorf("profile type %d not supported", profileRequirment),
+		}
+		baseRuntimeAlert.ProfileMetadata = profileMetadata
+	}
+	ruleFailure.SetBaseRuntimeAlert(baseRuntimeAlert)
 }
 
 func (r *RuleFailureCreator) setCloudServices(ruleFailure *types.GenericRuleFailure) {

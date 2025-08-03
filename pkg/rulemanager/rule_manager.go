@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
@@ -19,6 +20,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulefailurecreator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
@@ -115,24 +117,25 @@ func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error
 }
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
+	var profileExists bool
 	rules := rm.ruleBindingCache.ListRulesForPod(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
-	var isSupportedEventType bool
 
-	for _, rule := range rules {
-		for _, expression := range rule.Expressions.RuleExpression {
-			if expression.EventType == enrichedEvent.EventType {
-				isSupportedEventType = true
-				break
-			}
-		}
-	}
+	_, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
+	profileExists = err == nil
 
-	if !isSupportedEventType {
+	if !isSupportedEventType(rules, enrichedEvent) {
 		return
 	}
 
 	for _, rule := range rules {
 		if rule.Enabled {
+			if !profileExists && rule.ProfileDependency == armotypes.Required {
+				logger.L().Debug("RuleManager - no profile exists for container, skipping rule",
+					helpers.String("containerID", enrichedEvent.ContainerID),
+					helpers.String("rule", rule.Name))
+				continue
+			}
+
 			eventMap := rm.celSerializer.Serialize(enrichedEvent.Event)
 			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent)
 			if len(ruleExpressions) == 0 {
@@ -239,4 +242,15 @@ func (rm *RuleManager) getUniqueIdAndMessage(eventMap map[string]any, rule types
 	}
 
 	return message, uniqueID, err
+}
+
+func isSupportedEventType(rules []typesv1.Rule, enrichedEvent *events.EnrichedEvent) bool {
+	for _, rule := range rules {
+		for _, expression := range rule.Expressions.RuleExpression {
+			if string(expression.EventType) == string(enrichedEvent.EventType) {
+				return true
+			}
+		}
+	}
+	return false
 }
