@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/ext"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -14,8 +15,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/net"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/networkneighborhood"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/parse"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/process"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
-	"github.com/google/cel-go/ext"
 
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -38,6 +39,7 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		parse.Parse(cfg),
 		net.Net(cfg),
 		ext.Strings(),
+		process.Process(cfg),
 	)
 	if err != nil {
 		return nil, err
