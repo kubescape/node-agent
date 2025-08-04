@@ -70,7 +70,6 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 				"message": message,
 			},
 			Timestamp:   enrichedEvent.Timestamp,
-			Nanoseconds: uint64(enrichedEvent.Timestamp.UnixNano()),
 			InfectedPID: enrichedEvent.ProcessTree.PID,
 		},
 		RuleAlert: apitypes.RuleAlert{

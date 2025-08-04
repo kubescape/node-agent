@@ -49,7 +49,7 @@ func (l *processLibrary) Declarations() map[string][]cel.FunctionOpt {
 		},
 		"process.get_ld_hook_var": {
 			cel.Overload(
-				"process_get_ld_hook_var", []*cel.Type{cel.IntType}, cel.StringType,
+				"process_get_ld_hook_var", []*cel.Type{cel.UintType}, cel.StringType,
 				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
 					if len(values) != 1 {
 						return types.NewErr("expected 1 argument, got %d", len(values))

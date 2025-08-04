@@ -33,7 +33,7 @@ func TestProcessLibrary(t *testing.T) {
 		},
 		{
 			name:     "get_ld_hook_var with current process PID",
-			expr:     fmt.Sprintf("process.get_ld_hook_var(%d)", currentPID),
+			expr:     fmt.Sprintf("process.get_ld_hook_var(%du)", currentPID),
 			expected: "", // This will be empty for PID 1, but the function should work
 		},
 	}

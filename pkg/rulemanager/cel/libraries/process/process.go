@@ -61,15 +61,15 @@ func (l *processLibrary) getProcessEnv(pid ref.Val) ref.Val {
 }
 
 func (l *processLibrary) getLdHookVar(pid ref.Val) ref.Val {
-	pidInt, ok := pid.Value().(int64)
+	pidUint, ok := pid.Value().(uint64)
 	if !ok {
 		return types.MaybeNoSuchOverloadErr(pid)
 	}
 
 	// Get process environment variables
-	envMap, err := GetProcessEnv(int(pidInt))
+	envMap, err := GetProcessEnv(int(pidUint))
 	if err != nil {
-		return types.NewErr("failed to get process environment: %v", err)
+		return types.String("")
 	}
 
 	// Check for LD hook variables
