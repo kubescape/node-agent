@@ -57,6 +57,17 @@ func (l *k8sLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
+		"k8s.get_container_by_name": {
+			cel.Overload(
+				"k8s_get_container_by_name", []*cel.Type{cel.StringType, cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 3 {
+						return types.NewErr("expected 3 arguments, got %d", len(values))
+					}
+					return l.getContainerByName(values[0], values[1], values[2])
+				}),
+			),
+		},
 	}
 }
 
@@ -127,6 +138,53 @@ func (l *k8sLibrary) isApiServerAddress(address ref.Val) ref.Val {
 	}
 
 	return types.Bool(addressStr == apiServerAddress)
+}
+
+func (l *k8sLibrary) getContainerByName(namespace, podName, containerName ref.Val) ref.Val {
+	if l.k8sObjCache == nil {
+		return types.NewErr("k8sObjCache is nil")
+	}
+
+	namespaceStr, ok := namespace.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(namespace)
+	}
+	podNameStr, ok := podName.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(podName)
+	}
+	containerNameStr, ok := containerName.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(containerName)
+	}
+
+	podSpec := l.k8sObjCache.GetPodSpec(namespaceStr, podNameStr)
+	if podSpec == nil {
+		return types.Bool(false)
+	}
+
+	// Check regular containers
+	for _, container := range podSpec.Containers {
+		if container.Name == containerNameStr {
+			return types.Bool(true)
+		}
+	}
+
+	// Check init containers
+	for _, container := range podSpec.InitContainers {
+		if container.Name == containerNameStr {
+			return types.Bool(true)
+		}
+	}
+
+	// Check ephemeral containers
+	for _, container := range podSpec.EphemeralContainers {
+		if container.Name == containerNameStr {
+			return types.Bool(true)
+		}
+	}
+
+	return types.Bool(false)
 }
 
 func (l *k8sLibrary) CompileOptions() []cel.EnvOption {
