@@ -73,7 +73,7 @@ func GetContainerName(objectCache objectcache.ObjectCache, containerID string) s
 		return ""
 	}
 
-	return containerInfos[0].Name
+	return containerInfos[sharedData.ContainerIndex].Name
 }
 
 func GetContainerApplicationProfile(objectCache objectcache.ObjectCache, containerID string) (v1beta1.ApplicationProfileContainer, error) {
