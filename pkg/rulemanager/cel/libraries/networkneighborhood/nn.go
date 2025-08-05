@@ -4,6 +4,8 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries"
@@ -73,10 +75,22 @@ func (l *nnLibrary) Declarations() map[string][]cel.FunctionOpt {
 						return types.NewErr("expected 2 arguments, got %d", len(values))
 					}
 					wrapperFunc := func(args ...ref.Val) ref.Val {
-						return l.isDomainInEgress(args[0], args[1])
+						result := l.isDomainInEgress(args[0], args[1])
+						logger.L().Debug("nn_is_domain_in_egress not cache isDomainInEgress",
+							helpers.String("containerID", args[0].Value().(string)),
+							helpers.String("domain", args[1].Value().(string)),
+							helpers.Interface("result", result),
+						)
+						return result
 					}
 					cachedFunc := l.functionCache.WithCache(wrapperFunc, "nn.is_domain_in_egress")
-					return cachedFunc(values[0], values[1])
+					result := cachedFunc(values[0], values[1])
+					logger.L().Debug("nn_is_domain_in_egress  cache",
+						helpers.String("containerID", values[0].Value().(string)),
+						helpers.String("domain", values[1].Value().(string)),
+						helpers.Interface("result", result.Value()),
+					)
+					return result
 				}),
 			),
 		},
