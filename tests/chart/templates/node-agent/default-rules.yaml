@@ -214,9 +214,7 @@ spec:
       unique_id: "data.event.Comm + '_' + data.event.ExePath + '_' + data.event.Pcomm"
       rule_expression:
         - event_type: "exec"
-          expression: >
-            (data.event.ExePath == '/dev/shm' || data.event.ExePath.startsWith('/dev/shm/')) || (data.event.Cwd == '/dev/shm' || data.event.Cwd.startsWith('/dev/shm/'))
-    
+          expression: "(data.event.ExePath == '/dev/shm' || data.event.ExePath.startsWith('/dev/shm/')) || (data.event.Cwd == '/dev/shm' || data.event.Cwd.startsWith('/dev/shm/') ||  (parse.get_exec_path(data.event.Args, data.event.Comm).startsWith('/dev/shm/'))) \n"
     profile_dependency: 2
     severity: 8
     support_policy: true
