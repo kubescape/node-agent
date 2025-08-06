@@ -388,7 +388,7 @@ func (cw *ContainerWatcher) UnregisterContainerReceiver(receiver containerwatche
 }
 
 func (cw *ContainerWatcher) eventProcessingLoop() {
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
@@ -396,10 +396,10 @@ func (cw *ContainerWatcher) eventProcessingLoop() {
 		case <-cw.ctx.Done():
 			return
 		case <-ticker.C:
-			cw.processQueueBatch()
+			cw.processQueue()
 		case <-cw.orderedEventQueue.GetFullQueueAlertChannel():
 			logger.L().Warning("ContainerWatcher - Processing events due to full queue alert")
-			cw.processQueueBatch()
+			cw.processQueue()
 		}
 	}
 }
@@ -415,18 +415,14 @@ func (cw *ContainerWatcher) workerPoolLoop() {
 	}
 }
 
-func (cw *ContainerWatcher) processQueueBatch() {
-	batchSize := cw.cfg.EventBatchSize
-	processedCount := 0
-	for !cw.orderedEventQueue.Empty() && processedCount < batchSize {
+func (cw *ContainerWatcher) processQueue() {
+	for !cw.orderedEventQueue.Empty() {
 		event, ok := cw.orderedEventQueue.PopEvent()
 		if !ok {
 			break
 		}
 		cw.enrichAndProcess(event)
-		processedCount++
 	}
-
 }
 
 func (cw *ContainerWatcher) enrichAndProcess(entry eventEntry) {
