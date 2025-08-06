@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
@@ -9,14 +9,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type DnsFailureSetter struct {
+type DnsAdapter struct {
 }
 
-func NewDnsCreator() *DnsFailureSetter {
-	return &DnsFailureSetter{}
+func NewDnsAdapter() *DnsAdapter {
+	return &DnsAdapter{}
 }
 
-func (c *DnsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	dnsEvent, ok := enrichedEvent.Event.(*tracerdnstype.Event)
 	if !ok {
 		return
@@ -71,4 +71,9 @@ func (c *DnsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enriche
 		PodLabels: dnsEvent.K8s.PodLabels,
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+func (c *DnsAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }

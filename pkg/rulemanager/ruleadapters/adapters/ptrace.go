@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	"path/filepath"
@@ -11,14 +11,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type PtraceFailureSetter struct {
+type PtraceAdapter struct {
 }
 
-func NewPtraceCreator() *PtraceFailureSetter {
-	return &PtraceFailureSetter{}
+func NewPtraceAdapter() *PtraceAdapter {
+	return &PtraceAdapter{}
 }
 
-func (c *PtraceFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *PtraceAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	ptraceEvent, ok := enrichedEvent.Event.(*tracerptracetype.Event)
 	if !ok {
 		return
@@ -57,4 +57,9 @@ func (c *PtraceFailureSetter) SetFailureMetadata(failure types.RuleFailure, enri
 		PodLabels: ptraceEvent.K8s.PodLabels,
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+func (c *PtraceAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }

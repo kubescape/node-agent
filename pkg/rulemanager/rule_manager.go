@@ -23,8 +23,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/processtree"
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
+	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
-	"github.com/kubescape/node-agent/pkg/rulemanager/rulefailurecreator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -54,7 +54,7 @@ type RuleManager struct {
 	processManager       processtree.ProcessTreeManager
 	ruleCooldown         *rulecooldown.RuleCooldown
 	celEvaluator         cel.CELRuleEvaluator
-	ruleFailureCreator   rulefailurecreator.RuleFailureCreatorInterface
+	ruleFailureCreator   ruleadapters.RuleFailureCreatorInterface
 	celSerializer        cel.CelSerializer
 	rulePolicyValidator  *RulePolicyValidator
 }
@@ -62,7 +62,7 @@ type RuleManager struct {
 var _ RuleManagerClient = (*RuleManager)(nil)
 
 func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, processManager processtree.ProcessTreeManager, dnsManager dnsmanager.DNSResolver, enricher types.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
-	ruleFailureCreator := rulefailurecreator.NewRuleFailureCreator(enricher, dnsManager)
+	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager)
 
 	// Create CEL evaluator
 	celEvaluator, err := cel.NewCEL(objectCache, cfg)
@@ -90,7 +90,6 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		rulePolicyValidator: rulePolicyValidator,
 	}
 
-	ruleFailureCreator.SetContainerIdToPid(&r.containerIdToPid)
 	return r, nil
 }
 

@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
@@ -9,14 +9,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type CapabilitiesFailureSetter struct {
+type CapabilitiesAdapter struct {
 }
 
-func NewCapabilitiesCreator() *CapabilitiesFailureSetter {
-	return &CapabilitiesFailureSetter{}
+func NewCapabilitiesAdapter() *CapabilitiesAdapter {
+	return &CapabilitiesAdapter{}
 }
 
-func (c *CapabilitiesFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *CapabilitiesAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	capEvent, ok := enrichedEvent.Event.(*tracercapabilitiestype.Event)
 	if !ok {
 		return
@@ -52,4 +52,9 @@ func (c *CapabilitiesFailureSetter) SetFailureMetadata(failure types.RuleFailure
 		PodName: capEvent.GetPod(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+func (c *CapabilitiesAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }

@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	"path/filepath"
@@ -10,14 +10,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type OpenFailureSetter struct {
+type OpenAdapter struct {
 }
 
-func NewOpenCreator() *OpenFailureSetter {
-	return &OpenFailureSetter{}
+func NewOpenAdapter() *OpenAdapter {
+	return &OpenAdapter{}
 }
 
-func (c *OpenFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	openEvent, ok := enrichedEvent.Event.(*events.OpenEvent)
 	if !ok {
 		return
@@ -59,4 +59,9 @@ func (c *OpenFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrich
 		PodName: openEventTyped.GetPod(),
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+func (c *OpenAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }

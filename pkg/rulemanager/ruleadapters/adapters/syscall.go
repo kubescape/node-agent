@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -8,14 +8,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type SyscallFailureSetter struct {
+type SyscallAdapter struct {
 }
 
-func NewSyscallCreator() *SyscallFailureSetter {
-	return &SyscallFailureSetter{}
+func NewSyscallAdapter() *SyscallAdapter {
+	return &SyscallAdapter{}
 }
 
-func (c *SyscallFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *SyscallAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	syscallEvent, ok := enrichedEvent.Event.(*types.SyscallEvent)
 	if !ok {
 		return
@@ -51,4 +51,9 @@ func (c *SyscallFailureSetter) SetFailureMetadata(failure types.RuleFailure, enr
 		PodLabels: syscallEvent.K8s.PodLabels,
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+func (c *SyscallAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }

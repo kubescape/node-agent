@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -9,14 +9,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type RandomXFailureSetter struct {
+type RandomXAdapter struct {
 }
 
-func NewRandomXCreator() *RandomXFailureSetter {
-	return &RandomXFailureSetter{}
+func NewRandomXAdapter() *RandomXAdapter {
+	return &RandomXAdapter{}
 }
 
-func (c *RandomXFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *RandomXAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	randomXEvent, ok := enrichedEvent.Event.(*tracerrandomxtype.Event)
 	if !ok {
 		return
@@ -52,4 +52,9 @@ func (c *RandomXFailureSetter) SetFailureMetadata(failure types.RuleFailure, enr
 		PodLabels: randomXEvent.K8s.PodLabels,
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+func (c *RandomXAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }

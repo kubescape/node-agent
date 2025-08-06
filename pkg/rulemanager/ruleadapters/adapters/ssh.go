@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -9,14 +9,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type SSHFailureSetter struct {
+type SSHAdapter struct {
 }
 
-func NewSSHCreator() *SSHFailureSetter {
-	return &SSHFailureSetter{}
+func NewSSHAdapter() *SSHAdapter {
+	return &SSHAdapter{}
 }
 
-func (c *SSHFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *SSHAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	sshEvent, ok := enrichedEvent.Event.(*tracersshtype.Event)
 	if !ok {
 		return
@@ -60,4 +60,9 @@ func (c *SSHFailureSetter) SetFailureMetadata(failure types.RuleFailure, enriche
 		PodLabels: sshEvent.K8s.PodLabels,
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+func (c *SSHAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }

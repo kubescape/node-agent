@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	"fmt"
@@ -13,14 +13,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type ExecFailureSetter struct {
+type ExecAdapter struct {
 }
 
-func NewExecCreator() *ExecFailureSetter {
-	return &ExecFailureSetter{}
+func NewExecAdapter() *ExecAdapter {
+	return &ExecAdapter{}
 }
 
-func (c *ExecFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	execEvent, ok := enrichedEvent.Event.(*events.ExecEvent)
 	if !ok {
 		return
@@ -89,4 +89,9 @@ func GetExecFullPathFromEvent(execEvent *events.ExecEvent) string {
 		return execEvent.ExePath
 	}
 	return GetExecPathFromEvent(execEvent)
+}
+
+func (c *ExecAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }

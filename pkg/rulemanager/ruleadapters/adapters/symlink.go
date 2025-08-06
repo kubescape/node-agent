@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	"path/filepath"
@@ -11,14 +11,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type SymlinkFailureSetter struct {
+type SymlinkAdapter struct {
 }
 
-func NewSymlinkCreator() *SymlinkFailureSetter {
-	return &SymlinkFailureSetter{}
+func NewSymlinkAdapter() *SymlinkAdapter {
+	return &SymlinkAdapter{}
 }
 
-func (c *SymlinkFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	symlinkEvent, ok := enrichedEvent.Event.(*tracersymlinktype.Event)
 	if !ok {
 		return
@@ -63,4 +63,9 @@ func (c *SymlinkFailureSetter) SetFailureMetadata(failure types.RuleFailure, enr
 		PodLabels: symlinkEvent.K8s.PodLabels,
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+func (c *SymlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }

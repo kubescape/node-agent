@@ -1,4 +1,4 @@
-package rulefailurecreator
+package ruleadapters
 
 import (
 	"errors"
@@ -17,7 +17,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
-	"github.com/kubescape/node-agent/pkg/rulemanager/rulefailurecreator/setters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -30,34 +29,24 @@ const (
 var ErrRuleShouldNotBeAlerted = errors.New("rule should not be alerted")
 
 type RuleFailureCreator struct {
-	setterByEventType map[utils.EventType]EventMetadataSetter
-	containerIdToPid  *maps.SafeMap[string, uint32]
-	dnsManager        dnsmanager.DNSResolver
-	enricher          types.Enricher
+	adapterFactory   *EventRuleAdapterFactory
+	containerIdToPid *maps.SafeMap[string, uint32]
+	dnsManager       dnsmanager.DNSResolver
+	enricher         types.Enricher
 }
 
 func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSResolver) *RuleFailureCreator {
-	r := &RuleFailureCreator{
-		setterByEventType: make(map[utils.EventType]EventMetadataSetter),
-		dnsManager:        dnsManager,
-		enricher:          enricher,
+	return &RuleFailureCreator{
+		adapterFactory: NewEventRuleAdapterFactory(),
+		dnsManager:     dnsManager,
+		enricher:       enricher,
 	}
-	r.RegisterAllSetters()
-	return r
-}
-
-func (r *RuleFailureCreator) SetContainerIdToPid(containerIdToPid *maps.SafeMap[string, uint32]) {
-	r.containerIdToPid = containerIdToPid
-}
-
-func (r *RuleFailureCreator) RegisterCreator(eventType utils.EventType, creator EventMetadataSetter) {
-	r.setterByEventType[eventType] = creator
 }
 
 func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure {
-	eventSetter, ok := r.setterByEventType[enrichedEvent.EventType]
+	eventAdapter, ok := r.adapterFactory.GetAdapter(enrichedEvent.EventType)
 	if !ok {
-		logger.L().Error("RuleFailureCreator - no creator registered for event type", helpers.String("eventType", string(enrichedEvent.EventType)))
+		logger.L().Error("RuleFailureCreator - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.EventType)))
 		return nil
 	}
 
@@ -79,7 +68,7 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 		AlertPlatform: apitypes.AlertSourcePlatformK8s,
 	}
 
-	eventSetter.SetFailureMetadata(ruleFailure, enrichedEvent)
+	eventAdapter.SetFailureMetadata(ruleFailure, enrichedEvent)
 
 	r.setBaseRuntimeAlert(ruleFailure)
 	r.setRuntimeAlertK8sDetails(ruleFailure)
@@ -262,18 +251,4 @@ func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.Generi
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
 }
 
-func (r *RuleFailureCreator) RegisterAllSetters() {
-	r.RegisterCreator(utils.ExecveEventType, setters.NewExecCreator())
-	r.RegisterCreator(utils.OpenEventType, setters.NewOpenCreator())
-	r.RegisterCreator(utils.CapabilitiesEventType, setters.NewCapabilitiesCreator())
-	r.RegisterCreator(utils.DnsEventType, setters.NewDnsCreator())
-	r.RegisterCreator(utils.NetworkEventType, setters.NewNetworkCreator())
-	r.RegisterCreator(utils.SyscallEventType, setters.NewSyscallCreator())
-	r.RegisterCreator(utils.SymlinkEventType, setters.NewSymlinkCreator())
-	r.RegisterCreator(utils.HardlinkEventType, setters.NewHardlinkCreator())
-	r.RegisterCreator(utils.SSHEventType, setters.NewSSHCreator())
-	r.RegisterCreator(utils.HTTPEventType, setters.NewHTTPCreator())
-	r.RegisterCreator(utils.PtraceEventType, setters.NewPtraceCreator())
-	r.RegisterCreator(utils.IoUringEventType, setters.NewIoUringCreator())
-	r.RegisterCreator(utils.RandomXEventType, setters.NewRandomXCreator())
-}
+// RegisterAllSetters is no longer needed as adapters are registered in the factory

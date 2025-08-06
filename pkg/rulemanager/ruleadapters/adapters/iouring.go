@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	iouringsyscall "github.com/iceber/iouring-go/syscall"
@@ -10,14 +10,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type IoUringFailureSetter struct {
+type IoUringAdapter struct {
 }
 
-func NewIoUringCreator() *IoUringFailureSetter {
-	return &IoUringFailureSetter{}
+func NewIoUringAdapter() *IoUringAdapter {
+	return &IoUringAdapter{}
 }
 
-func (c *IoUringFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *IoUringAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	iouringEvent, ok := enrichedEvent.Event.(*traceriouringtype.Event)
 	if !ok {
 		return
@@ -119,4 +119,9 @@ func GetOpcodeName(opcode uint8) (bool, string) {
 		return true, name
 	}
 	return false, "Unknown operation"
+}
+
+func (c *IoUringAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }

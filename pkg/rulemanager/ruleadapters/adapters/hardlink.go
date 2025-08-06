@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	"path/filepath"
@@ -11,14 +11,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type HardlinkFailureSetter struct {
+type HardlinkAdapter struct {
 }
 
-func NewHardlinkCreator() *HardlinkFailureSetter {
-	return &HardlinkFailureSetter{}
+func NewHardlinkAdapter() *HardlinkAdapter {
+	return &HardlinkAdapter{}
 }
 
-func (c *HardlinkFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *HardlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	hardlinkEvent, ok := enrichedEvent.Event.(*tracerhardlinktype.Event)
 	if !ok {
 		return
@@ -63,4 +63,9 @@ func (c *HardlinkFailureSetter) SetFailureMetadata(failure types.RuleFailure, en
 		PodLabels: hardlinkEvent.K8s.PodLabels,
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+func (c *HardlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }

@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
@@ -9,14 +9,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type HTTPFailureSetter struct {
+type HTTPAdapter struct {
 }
 
-func NewHTTPCreator() *HTTPFailureSetter {
-	return &HTTPFailureSetter{}
+func NewHTTPAdapter() *HTTPAdapter {
+	return &HTTPAdapter{}
 }
 
-func (c *HTTPFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *HTTPAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	httpEvent, ok := enrichedEvent.Event.(*tracerhttptype.Event)
 	if !ok {
 		return
@@ -59,4 +59,9 @@ func (c *HTTPFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrich
 		PodLabels: httpEvent.K8s.PodLabels,
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+func (c *HTTPAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }

@@ -1,4 +1,4 @@
-package setters
+package adapters
 
 import (
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
@@ -9,14 +9,14 @@ import (
 	"github.com/armosec/armoapi-go/armotypes/common"
 )
 
-type NetworkFailureSetter struct {
+type NetworkAdapter struct {
 }
 
-func NewNetworkCreator() *NetworkFailureSetter {
-	return &NetworkFailureSetter{}
+func NewNetworkAdapter() *NetworkAdapter {
+	return &NetworkAdapter{}
 }
 
-func (c *NetworkFailureSetter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
+func (c *NetworkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	networkEvent, ok := enrichedEvent.Event.(*tracernetworktype.Event)
 	if !ok {
 		return
@@ -59,4 +59,9 @@ func (c *NetworkFailureSetter) SetFailureMetadata(failure types.RuleFailure, enr
 		PodLabels: networkEvent.K8s.PodLabels,
 	}
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+}
+
+func (c *NetworkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
+	// TODO: Implement ToMap functionality
+	return nil
 }
