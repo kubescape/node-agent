@@ -12,6 +12,7 @@ func (pt *processTreeCreatorImpl) buildPathToRoot(targetProc *apitypes.Process) 
 
 	var path []*apitypes.Process
 	current := targetProc
+	ok := true
 
 	// Walk up the parent chain to the root
 	for current != nil {
@@ -19,7 +20,10 @@ func (pt *processTreeCreatorImpl) buildPathToRoot(targetProc *apitypes.Process) 
 		if current.PPID == 0 {
 			break // Reached root
 		}
-		current = pt.processMap.Get(current.PPID)
+		current, ok = pt.processMap.Load(current.PPID)
+		if !ok {
+			break
+		}
 	}
 
 	return path

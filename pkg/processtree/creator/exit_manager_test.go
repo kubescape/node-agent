@@ -56,10 +56,10 @@ func (m *mockReparentingLogic) GetStrategies() []reparenting.ReparentingStrategy
 // Helper function to create a test process tree creator
 func createTestProcessTreeCreator() *processTreeCreatorImpl {
 	return &processTreeCreatorImpl{
-		processMap:             maps.SafeMap[uint32, *apitypes.Process]{},
-		containerTree:          &mockContainerProcessTree{},
-		reparenting_strategies: &mockReparentingLogic{},
-		pendingExits:           make(map[uint32]*pendingExit),
+		processMap:            maps.SafeMap[uint32, *apitypes.Process]{},
+		containerTree:         &mockContainerProcessTree{},
+		reparentingStrategies: &mockReparentingLogic{},
+		pendingExits:          make(map[uint32]*pendingExit),
 	}
 }
 

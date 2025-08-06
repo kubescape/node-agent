@@ -112,7 +112,7 @@ func TestHandleForkEvent(t *testing.T) {
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	event := conversion.ProcessEvent{
 		Type:    conversion.ForkEvent,
@@ -150,7 +150,7 @@ func TestHandleProcfsEvent(t *testing.T) {
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	event := conversion.ProcessEvent{
 		Type:    conversion.ProcfsEvent,
@@ -185,7 +185,7 @@ func TestHandleExecEvent(t *testing.T) {
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.Anything).Return(false)
 	mockContainerTree.On("GetPidByContainerID", "test-container-123").Return(uint32(999), nil)
 
 	// First create a process with fork event
@@ -234,7 +234,7 @@ func TestHandleExecEventWithGetPidByContainerIDError(t *testing.T) {
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods - GetPidByContainerID returns an error
-	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.Anything).Return(false)
 	mockContainerTree.On("GetPidByContainerID", "test-container-123").Return(uint32(0), fmt.Errorf("container not found"))
 
 	// First create a process with fork event
@@ -283,7 +283,7 @@ func TestHandleExecEventProcessAlreadyUnderContainer(t *testing.T) {
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods - process is already under container subtree
-	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(true)
+	mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.Anything).Return(true)
 	// GetPidByContainerID should not be called since process is already under container
 
 	// First create a process with fork event
@@ -336,7 +336,7 @@ func TestHandleExitEvent(t *testing.T) {
 	defer creator.Stop()
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create parent process
 	parentEvent := conversion.ProcessEvent{
@@ -385,7 +385,7 @@ func TestGetRootTree(t *testing.T) {
 	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create process tree: init(1) -> bash(100) -> app(200)
 	events := []conversion.ProcessEvent{
@@ -411,7 +411,7 @@ func TestGetProcessMap(t *testing.T) {
 	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create some processes
 	events := []conversion.ProcessEvent{
@@ -445,7 +445,7 @@ func TestGetProcessNode(t *testing.T) {
 	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create a process
 	event := conversion.ProcessEvent{
@@ -480,7 +480,7 @@ func TestGetPidBranch(t *testing.T) {
 		Comm: "container-process",
 	}
 
-	mockContainerTree.On("GetPidBranch", "container-123", uint32(1234), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(expectedProcess, nil)
+	mockContainerTree.On("GetPidBranch", "container-123", uint32(1234), mock.Anything).Return(expectedProcess, nil)
 
 	// Create some processes
 	event := conversion.ProcessEvent{
@@ -521,7 +521,7 @@ func TestUpdatePPID(t *testing.T) {
 	newParent := impl.getOrCreateProcess(2000)
 
 	// Test case 1: New PPID is under container, should always update
-	mockContainerTree.On("IsProcessUnderContainer", uint32(2000), mock.AnythingOfType("string"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(true)
+	mockContainerTree.On("IsProcessUnderContainer", uint32(2000), mock.AnythingOfType("string"), mock.Anything).Return(true)
 
 	event := conversion.ProcessEvent{
 		PID:         1234,
@@ -656,7 +656,7 @@ func TestConcurrentAccess(t *testing.T) {
 	defer creator.Stop()
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Test concurrent access
 	var wg sync.WaitGroup
@@ -723,7 +723,7 @@ func TestEventHandlingWithEmptyFields(t *testing.T) {
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Test fork event with minimal fields
 	forkEvent := conversion.ProcessEvent{
@@ -765,7 +765,7 @@ func TestReparentingIntegration(t *testing.T) {
 	defer creator.Stop()
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create a process tree: parent(1000) -> child(1234) -> grandchild(5678)
 	events := []conversion.ProcessEvent{
@@ -847,7 +847,7 @@ func TestReparentingLogicDirect(t *testing.T) {
 
 		// Test reparenting logic directly
 		children := []*apitypes.Process{grandchild}
-		newParentPID, err := impl.reparenting_strategies.Reparent(1234, children, containerTree, &impl.processMap)
+		newParentPID, err := impl.reparentingStrategies.Reparent(1234, children, containerTree, &impl.processMap)
 
 		assert.NoError(t, err)
 		assert.Equal(t, uint32(1000), newParentPID, "Should use Default Strategy to reparent to parent's parent")
@@ -891,7 +891,7 @@ func TestReparentingLogicDirect(t *testing.T) {
 
 		// Test reparenting logic directly
 		children := []*apitypes.Process{child}
-		newParentPID, err := impl.reparenting_strategies.Reparent(1234, children, containerTree, &impl.processMap)
+		newParentPID, err := impl.reparentingStrategies.Reparent(1234, children, containerTree, &impl.processMap)
 
 		assert.NoError(t, err)
 		// The Default Strategy should be used first since the orphan has a PPID (999)
@@ -919,8 +919,8 @@ func TestReparentingLogicDirect(t *testing.T) {
 		impl := creator.(*processTreeCreatorImpl)
 
 		// Mock all container tree methods to avoid unexpected calls
-		mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
-		mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+		mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
+		mockContainerTree.On("IsProcessUnderContainer", mock.AnythingOfType("uint32"), mock.AnythingOfType("string"), mock.Anything).Return(false)
 		mockContainerTree.On("GetPidByContainerID", mock.AnythingOfType("string")).Return(uint32(0), nil)
 
 		// Create container process tree: containerd-shim(50) -> nginx(100) -> worker(200)
@@ -935,8 +935,8 @@ func TestReparentingLogicDirect(t *testing.T) {
 		}
 
 		// Now override the mock for the specific test case
-		mockContainerTree.On("IsProcessUnderAnyContainerSubtree", uint32(100), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(true)
-		mockContainerTree.On("GetShimPIDForProcess", uint32(100), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(uint32(50), true)
+		mockContainerTree.On("IsProcessUnderAnyContainerSubtree", uint32(100), mock.Anything).Return(true)
+		mockContainerTree.On("GetShimPIDForProcess", uint32(100), mock.Anything).Return(uint32(50), true)
 
 		// Verify initial structure
 		shim := impl.processMap.Get(50)
@@ -951,7 +951,7 @@ func TestReparentingLogicDirect(t *testing.T) {
 
 		// Test reparenting logic directly
 		children := []*apitypes.Process{worker}
-		newParentPID, err := impl.reparenting_strategies.Reparent(100, children, mockContainerTree, &impl.processMap)
+		newParentPID, err := impl.reparentingStrategies.Reparent(100, children, mockContainerTree, &impl.processMap)
 
 		assert.NoError(t, err)
 		assert.Equal(t, uint32(50), newParentPID, "Should use Container Strategy to reparent to shim")
@@ -976,7 +976,7 @@ func TestComplexProcessTree(t *testing.T) {
 	creator := NewProcessTreeCreator(mockContainerTree, config.Config{KubernetesMode: false})
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create a complex process tree
 	events := []conversion.ProcessEvent{
@@ -1035,7 +1035,7 @@ func TestCircularReferencePreventionDeep(t *testing.T) {
 	impl := creator.(*processTreeCreatorImpl)
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	// Create processes
 	p1 := impl.getOrCreateProcess(100)
@@ -1076,7 +1076,7 @@ func TestPerformanceWithManyProcesses(t *testing.T) {
 	// creator.Start() is not called to avoid background processing
 
 	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.AnythingOfType("*maps.SafeMap[uint32, *armotypes.Process]")).Return(false)
+	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
 
 	const numProcesses = 1000 // Reduced from 10000 to 1000 for faster test
 	start := time.Now()

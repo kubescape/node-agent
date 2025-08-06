@@ -13,10 +13,10 @@ func (defs *DefaultStrategy) Name() string {
 }
 
 func (defs *DefaultStrategy) IsApplicable(exitingPID uint32, containerTree containerprocesstree.ContainerProcessTree, processMap *maps.SafeMap[uint32, *apitypes.Process]) bool {
-	if exitingProcess := processMap.Get(exitingPID); exitingProcess != nil {
+	if exitingProcess, ok := processMap.Load(exitingPID); ok {
 		ppid := exitingProcess.PPID
 		if ppid > 0 {
-			if processMap.Get(ppid) != nil {
+			if _, ok := processMap.Load(ppid); ok {
 				return true
 			}
 		}
@@ -26,10 +26,10 @@ func (defs *DefaultStrategy) IsApplicable(exitingPID uint32, containerTree conta
 }
 
 func (defs *DefaultStrategy) GetNewParentPID(exitingPID uint32, children []*apitypes.Process, containerTree containerprocesstree.ContainerProcessTree, processMap *maps.SafeMap[uint32, *apitypes.Process]) uint32 {
-	if exitingProcess := processMap.Get(exitingPID); exitingProcess != nil {
+	if exitingProcess, ok := processMap.Load(exitingPID); ok {
 		ppid := exitingProcess.PPID
 		if ppid > 0 {
-			if processMap.Get(ppid) != nil {
+			if _, ok := processMap.Load(ppid); ok {
 				return ppid
 			}
 		}

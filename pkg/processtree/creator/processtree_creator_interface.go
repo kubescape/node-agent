@@ -13,7 +13,6 @@ type ProcessTreeCreator interface {
 	GetRootTree() ([]apitypes.Process, error)
 	// Get a host process branch from the given PID up to the root
 	GetHostProcessBranch(pid uint32) (apitypes.Process, error)
-	// Get the process map (thread-safe SafeMap - read operations are safe)
 	GetProcessMap() *maps.SafeMap[uint32, *apitypes.Process]
 	// Optionally: Query for a process node by PID
 	GetProcessNode(pid int) (*apitypes.Process, error)

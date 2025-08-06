@@ -68,14 +68,14 @@ func (c *containerProcessTreeImpl) GetPidBranch(containerID string, targetPID ui
 	}
 
 	// Find the process node for the shim PID
-	shimNode := fullTree.Get(shimPID)
-	if shimNode == nil {
+	shimNode, ok := fullTree.Load(shimPID)
+	if !ok {
 		return apitypes.Process{}, fmt.Errorf("shim process %d not found in process tree", shimPID)
 	}
 
 	// Find the target process node
-	targetNode := fullTree.Get(targetPID)
-	if targetNode == nil {
+	targetNode, ok := fullTree.Load(targetPID)
+	if !ok {
 		return apitypes.Process{}, fmt.Errorf("target process %d not found in process tree", targetPID)
 	}
 
@@ -102,13 +102,13 @@ func (c *containerProcessTreeImpl) GetShimPIDForProcess(pid uint32, fullTree *ma
 	c.mutex.RUnlock()
 
 	for _, shimPID := range shimPIDs {
-		shimNode := fullTree.Get(shimPID)
-		if shimNode == nil {
+		shimNode, ok := fullTree.Load(shimPID)
+		if !ok {
 			continue
 		}
 
-		targetNode := fullTree.Get(pid)
-		if targetNode == nil {
+		targetNode, ok := fullTree.Load(pid)
+		if !ok {
 			continue
 		}
 
@@ -156,13 +156,13 @@ func (c *containerProcessTreeImpl) IsProcessUnderContainer(pid uint32, container
 		return false
 	}
 
-	shimNode := fullTree.Get(shimPID)
-	if shimNode == nil {
+	shimNode, ok := fullTree.Load(shimPID)
+	if !ok {
 		return false
 	}
 
-	targetNode := fullTree.Get(pid)
-	if targetNode == nil {
+	targetNode, ok := fullTree.Load(pid)
+	if !ok {
 		return false
 	}
 
@@ -187,8 +187,8 @@ func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apit
 		if current.PPID == rootNode.PID {
 			return true
 		}
-		parent := fullTree.Get(current.PPID)
-		if parent == nil {
+		parent, ok := fullTree.Load(current.PPID)
+		if !ok {
 			break
 		}
 		current = parent
@@ -213,8 +213,8 @@ func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *apitypes.Proces
 	for current.PPID != 0 {
 		pathNodes = append(pathNodes, current)
 
-		parent := fullTree.Get(current.PPID)
-		if parent == nil {
+		parent, ok := fullTree.Load(current.PPID)
+		if !ok {
 			break
 		}
 
