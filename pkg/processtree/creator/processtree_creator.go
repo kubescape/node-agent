@@ -15,11 +15,11 @@ import (
 )
 
 type processTreeCreatorImpl struct {
-	processMap             maps.SafeMap[uint32, *apitypes.Process] // PID -> Process
-	containerTree          containerprocesstree.ContainerProcessTree
-	reparenting_strategies reparenting.ReparentingStrategies
-	mutex                  sync.RWMutex // Protects process tree modifications
-	config                 config.Config
+	processMap            maps.SafeMap[uint32, *apitypes.Process] // PID -> Process
+	containerTree         containerprocesstree.ContainerProcessTree
+	reparentingStrategies reparenting.ReparentingStrategies
+	mutex                 sync.RWMutex // Protects process tree modifications
+	config                config.Config
 
 	// Exit manager fields
 	pendingExits        map[uint32]*pendingExit // PID -> pending exit
@@ -35,11 +35,11 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 	}
 
 	creator := &processTreeCreatorImpl{
-		processMap:             maps.SafeMap[uint32, *apitypes.Process]{},
-		reparenting_strategies: reparentingLogic,
-		containerTree:          containerTree,
-		pendingExits:           make(map[uint32]*pendingExit),
-		config:                 config,
+		processMap:            maps.SafeMap[uint32, *apitypes.Process]{},
+		reparentingStrategies: reparentingLogic,
+		containerTree:         containerTree,
+		pendingExits:          make(map[uint32]*pendingExit),
+		config:                config,
 	}
 
 	return creator
@@ -75,31 +75,24 @@ func (pt *processTreeCreatorImpl) GetRootTree() ([]apitypes.Process, error) {
 	// Find root processes (those whose parent is not in the map or PPID==0)
 	roots := []apitypes.Process{}
 	for _, proc := range pt.processMap.Values() {
-		if proc.PPID == 0 || pt.processMap.Get(proc.PPID) == nil {
+		_, ok := pt.processMap.Load(proc.PPID)
+		if proc.PPID == 0 || !ok {
 			roots = append(roots, *proc)
 		}
 	}
 	return roots, nil
 }
 
-func (pt *processTreeCreatorImpl) GetProcessMap() map[uint32]*apitypes.Process {
-	pt.mutex.RLock()
-	defer pt.mutex.RUnlock()
-
-	processMap := make(map[uint32]*apitypes.Process)
-	pt.processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
-		processMap[pid] = proc
-		return true
-	})
-	return processMap
+func (pt *processTreeCreatorImpl) GetProcessMap() *maps.SafeMap[uint32, *apitypes.Process] {
+	return &pt.processMap
 }
 
 func (pt *processTreeCreatorImpl) GetProcessNode(pid int) (*apitypes.Process, error) {
 	pt.mutex.RLock()
 	defer pt.mutex.RUnlock()
 
-	proc := pt.processMap.Get(uint32(pid))
-	if proc == nil {
+	proc, ok := pt.processMap.Load(uint32(pid))
+	if !ok {
 		return nil, nil
 	}
 	return pt.shallowCopyProcess(proc), nil
@@ -116,10 +109,7 @@ func (pt *processTreeCreatorImpl) GetPidBranch(containerTree interface{}, contai
 		return apitypes.Process{}, fmt.Errorf("invalid container tree type")
 	}
 
-	processMap := pt.getProcessMapAsRegularMap()
-
-	// Perform the container branch operation
-	return ct.GetPidBranch(containerID, targetPID, processMap)
+	return ct.GetPidBranch(containerID, targetPID, &pt.processMap)
 }
 
 // GetHostProcessBranch builds a process tree branch from the given PID up to the root (init process)
@@ -128,8 +118,8 @@ func (pt *processTreeCreatorImpl) GetHostProcessBranch(pid uint32) (apitypes.Pro
 	defer pt.mutex.RUnlock()
 
 	// Find the target process
-	targetProc := pt.processMap.Get(pid)
-	if targetProc == nil {
+	targetProc, ok := pt.processMap.Load(pid)
+	if !ok {
 		return apitypes.Process{}, fmt.Errorf("process with PID %d not found", pid)
 	}
 
@@ -159,11 +149,11 @@ func (pt *processTreeCreatorImpl) UpdatePPID(proc *apitypes.Process, event conve
 		}
 
 		// First check if new PPID is under any container subtree
-		IsNewPPIDUnderContainer := pt.containerTree.IsProcessUnderContainer(event.PPID, event.ContainerID, pt.getProcessMapAsRegularMap())
+		IsNewPPIDUnderContainer := pt.containerTree.IsProcessUnderContainer(event.PPID, event.ContainerID, &pt.processMap)
 		if IsNewPPIDUnderContainer {
 			pt.updateProcessPPID(proc, event.PPID)
 		} else {
-			isCurrentUnderContainer := pt.containerTree.IsProcessUnderContainer(proc.PID, event.ContainerID, pt.getProcessMapAsRegularMap())
+			isCurrentUnderContainer := pt.containerTree.IsProcessUnderContainer(proc.PID, event.ContainerID, &pt.processMap)
 			if !isCurrentUnderContainer {
 				pt.updateProcessPPID(proc, event.PPID)
 			}
@@ -176,9 +166,8 @@ func (pt *processTreeCreatorImpl) handleForkEvent(event conversion.ProcessEvent)
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
-	proc := pt.processMap.Get(event.PID)
-
-	if proc == nil {
+	proc, ok := pt.processMap.Load(event.PID)
+	if !ok {
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
@@ -215,9 +204,8 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
-	proc := pt.processMap.Get(event.PID)
-
-	if proc == nil {
+	proc, ok := pt.processMap.Load(event.PID)
+	if !ok {
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
@@ -252,15 +240,15 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
-	proc := pt.processMap.Get(event.PID)
-	if proc == nil {
+	proc, ok := pt.processMap.Load(event.PID)
+	if !ok {
 		proc = pt.getOrCreateProcess(event.PID)
 	}
 
 	pt.UpdatePPID(proc, event)
 
 	if pt.config.KubernetesMode {
-		isCurrentUnderContainer := pt.containerTree.IsProcessUnderContainer(proc.PID, event.ContainerID, pt.getProcessMapAsRegularMap())
+		isCurrentUnderContainer := pt.containerTree.IsProcessUnderContainer(proc.PID, event.ContainerID, &pt.processMap)
 		if !isCurrentUnderContainer {
 			shimPid, err := pt.containerTree.GetPidByContainerID(event.ContainerID)
 			if err == nil {
@@ -300,8 +288,8 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event conversion.ProcessEvent)
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
-	proc := pt.processMap.Get(event.PID)
-	if proc == nil {
+	proc, ok := pt.processMap.Load(event.PID)
+	if !ok {
 		return
 	}
 
@@ -318,8 +306,8 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event conversion.ProcessEvent)
 }
 
 func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Process {
-	proc := pt.processMap.Get(pid)
-	if proc != nil {
+	proc, ok := pt.processMap.Load(pid)
+	if ok {
 		return proc
 	}
 	proc = &apitypes.Process{PID: pid, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
@@ -365,7 +353,7 @@ func (pt *processTreeCreatorImpl) updateProcessPPID(proc *apitypes.Process, newP
 
 	// Remove from old parent's children map
 	if proc.PPID != 0 {
-		if oldParent := pt.processMap.Get(proc.PPID); oldParent != nil && oldParent.ChildrenMap != nil {
+		if oldParent, ok := pt.processMap.Load(proc.PPID); ok && oldParent.ChildrenMap != nil {
 			key := apitypes.CommPID{Comm: proc.Comm, PID: proc.PID}
 			delete(oldParent.ChildrenMap, key)
 		}
@@ -384,8 +372,8 @@ func (pt *processTreeCreatorImpl) isDescendant(parentPID, targetPID uint32) bool
 		return true
 	}
 
-	target := pt.processMap.Get(targetPID)
-	if target == nil {
+	target, ok := pt.processMap.Load(targetPID)
+	if !ok {
 		return false
 	}
 
@@ -394,19 +382,13 @@ func (pt *processTreeCreatorImpl) isDescendant(parentPID, targetPID uint32) bool
 		if current.PPID == parentPID {
 			return true
 		}
-		current = pt.processMap.Get(current.PPID)
+		current, ok = pt.processMap.Load(current.PPID)
+		if !ok {
+			break
+		}
 	}
 
 	return false
-}
-
-func (pt *processTreeCreatorImpl) getProcessMapAsRegularMap() map[uint32]*apitypes.Process {
-	processMap := make(map[uint32]*apitypes.Process)
-	pt.processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
-		processMap[pid] = proc
-		return true
-	})
-	return processMap
 }
 
 func (pt *processTreeCreatorImpl) shallowCopyProcess(proc *apitypes.Process) *apitypes.Process {

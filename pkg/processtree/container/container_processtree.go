@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -57,7 +58,7 @@ func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.P
 	}
 }
 
-func (c *containerProcessTreeImpl) GetPidBranch(containerID string, targetPID uint32, fullTree map[uint32]*apitypes.Process) (apitypes.Process, error) {
+func (c *containerProcessTreeImpl) GetPidBranch(containerID string, targetPID uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) (apitypes.Process, error) {
 	c.mutex.RLock()
 	shimPID, ok := c.containerIdToShimPid[containerID]
 	c.mutex.RUnlock()
@@ -67,14 +68,14 @@ func (c *containerProcessTreeImpl) GetPidBranch(containerID string, targetPID ui
 	}
 
 	// Find the process node for the shim PID
-	shimNode := fullTree[shimPID]
-	if shimNode == nil {
+	shimNode, ok := fullTree.Load(shimPID)
+	if !ok {
 		return apitypes.Process{}, fmt.Errorf("shim process %d not found in process tree", shimPID)
 	}
 
 	// Find the target process node
-	targetNode := fullTree[targetPID]
-	if targetNode == nil {
+	targetNode, ok := fullTree.Load(targetPID)
+	if !ok {
 		return apitypes.Process{}, fmt.Errorf("target process %d not found in process tree", targetPID)
 	}
 
@@ -92,7 +93,7 @@ func (c *containerProcessTreeImpl) GetPidBranch(containerID string, targetPID ui
 	return *branch, nil
 }
 
-func (c *containerProcessTreeImpl) GetShimPIDForProcess(pid uint32, fullTree map[uint32]*apitypes.Process) (uint32, bool) {
+func (c *containerProcessTreeImpl) GetShimPIDForProcess(pid uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) (uint32, bool) {
 	c.mutex.RLock()
 	shimPIDs := make([]uint32, 0, len(c.containerIdToShimPid))
 	for _, shimPID := range c.containerIdToShimPid {
@@ -101,13 +102,13 @@ func (c *containerProcessTreeImpl) GetShimPIDForProcess(pid uint32, fullTree map
 	c.mutex.RUnlock()
 
 	for _, shimPID := range shimPIDs {
-		shimNode := fullTree[shimPID]
-		if shimNode == nil {
+		shimNode, ok := fullTree.Load(shimPID)
+		if !ok {
 			continue
 		}
 
-		targetNode := fullTree[pid]
-		if targetNode == nil {
+		targetNode, ok := fullTree.Load(pid)
+		if !ok {
 			continue
 		}
 
@@ -130,7 +131,7 @@ func (c *containerProcessTreeImpl) GetPidByContainerID(containerID string) (uint
 	return shimPID, nil
 }
 
-func (c *containerProcessTreeImpl) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree map[uint32]*apitypes.Process) bool {
+func (c *containerProcessTreeImpl) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) bool {
 	c.mutex.RLock()
 	containerIDs := make([]string, 0, len(c.containerIdToShimPid))
 	for containerID := range c.containerIdToShimPid {
@@ -146,7 +147,7 @@ func (c *containerProcessTreeImpl) IsProcessUnderAnyContainerSubtree(pid uint32,
 	return false
 }
 
-func (c *containerProcessTreeImpl) IsProcessUnderContainer(pid uint32, containerID string, fullTree map[uint32]*apitypes.Process) bool {
+func (c *containerProcessTreeImpl) IsProcessUnderContainer(pid uint32, containerID string, fullTree *maps.SafeMap[uint32, *apitypes.Process]) bool {
 	c.mutex.RLock()
 	shimPID, ok := c.containerIdToShimPid[containerID]
 	c.mutex.RUnlock()
@@ -155,13 +156,13 @@ func (c *containerProcessTreeImpl) IsProcessUnderContainer(pid uint32, container
 		return false
 	}
 
-	shimNode := fullTree[shimPID]
-	if shimNode == nil {
+	shimNode, ok := fullTree.Load(shimPID)
+	if !ok {
 		return false
 	}
 
-	targetNode := fullTree[pid]
-	if targetNode == nil {
+	targetNode, ok := fullTree.Load(pid)
+	if !ok {
 		return false
 	}
 
@@ -172,7 +173,7 @@ func (c *containerProcessTreeImpl) IsProcessUnderContainer(pid uint32, container
 	return false
 }
 
-func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apitypes.Process, fullTree map[uint32]*apitypes.Process) bool {
+func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apitypes.Process, fullTree *maps.SafeMap[uint32, *apitypes.Process]) bool {
 	if targetNode == nil || rootNode == nil {
 		return false
 	}
@@ -186,8 +187,8 @@ func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apit
 		if current.PPID == rootNode.PID {
 			return true
 		}
-		parent := fullTree[current.PPID]
-		if parent == nil {
+		parent, ok := fullTree.Load(current.PPID)
+		if !ok {
 			break
 		}
 		current = parent
@@ -198,7 +199,7 @@ func (c *containerProcessTreeImpl) isProcessInSubtree(targetNode, rootNode *apit
 
 // buildBranchToShim builds a process tree branch from targetNode up to (but not including) shimPID
 // This creates a new process tree containing only the nodes along the path from target to shim
-func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *apitypes.Process, shimPID uint32, fullTree map[uint32]*apitypes.Process) *apitypes.Process {
+func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *apitypes.Process, shimPID uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) *apitypes.Process {
 
 	// Create a map to store the branch nodes
 	branchNodes := make(map[uint32]*apitypes.Process)
@@ -212,8 +213,8 @@ func (c *containerProcessTreeImpl) buildBranchToShim(targetNode *apitypes.Proces
 	for current.PPID != 0 {
 		pathNodes = append(pathNodes, current)
 
-		parent := fullTree[current.PPID]
-		if parent == nil {
+		parent, ok := fullTree.Load(current.PPID)
+		if !ok {
 			break
 		}
 
