@@ -66,6 +66,28 @@ func (c *HardlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enriched
 }
 
 func (c *HardlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	// TODO: Implement ToMap functionality
-	return nil
+	hardlinkEvent, ok := enrichedEvent.Event.(*tracerhardlinktype.Event)
+	if !ok {
+		return nil
+	}
+
+	// Start with the base event using ConvertToMap
+	result := ConvertToMap(&hardlinkEvent.Event)
+
+	// Add hardlink-specific fields using JSON tags as keys
+	result["pid"] = hardlinkEvent.Pid
+	result["tid"] = hardlinkEvent.Tid
+	result["ppid"] = hardlinkEvent.PPid
+	result["uid"] = hardlinkEvent.Uid
+	result["gid"] = hardlinkEvent.Gid
+	result["upperlayer"] = hardlinkEvent.UpperLayer
+	result["comm"] = hardlinkEvent.Comm
+	result["exe_path"] = hardlinkEvent.ExePath
+	result["oldpath"] = hardlinkEvent.OldPath
+	result["newpath"] = hardlinkEvent.NewPath
+
+	// Add mount namespace ID
+	result["mountnsid"] = hardlinkEvent.MountNsID
+
+	return result
 }

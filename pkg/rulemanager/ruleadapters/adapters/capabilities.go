@@ -55,6 +55,32 @@ func (c *CapabilitiesAdapter) SetFailureMetadata(failure types.RuleFailure, enri
 }
 
 func (c *CapabilitiesAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	// TODO: Implement ToMap functionality
-	return nil
+	capEvent, ok := enrichedEvent.Event.(*tracercapabilitiestype.Event)
+	if !ok {
+		return nil
+	}
+
+	// Start with the base event using ConvertToMap
+	result := ConvertToMap(&capEvent.Event)
+
+	// Add capabilities-specific fields using JSON tags as keys
+	result["pid"] = capEvent.Pid
+	result["comm"] = capEvent.Comm
+	result["syscall"] = capEvent.Syscall
+	result["uid"] = capEvent.Uid
+	result["gid"] = capEvent.Gid
+	result["cap"] = capEvent.Cap
+	result["capName"] = capEvent.CapName
+	result["audit"] = capEvent.Audit
+	result["verdict"] = capEvent.Verdict
+	result["insetid"] = capEvent.InsetID
+	result["targetuserns"] = capEvent.TargetUserNs
+	result["currentuserns"] = capEvent.CurrentUserNs
+	result["caps"] = capEvent.Caps
+	result["capsNames"] = capEvent.CapsNames
+
+	// Add mount namespace ID
+	result["mountnsid"] = capEvent.MountNsID
+
+	return result
 }

@@ -92,6 +92,38 @@ func GetExecFullPathFromEvent(execEvent *events.ExecEvent) string {
 }
 
 func (c *ExecAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	// TODO: Implement ToMap functionality
-	return nil
+	execEvent, ok := enrichedEvent.Event.(*events.ExecEvent)
+	if !ok {
+		return nil
+	}
+
+	// Start with the base event using ConvertToMap
+	result := ConvertToMap(&execEvent.Event.Event)
+
+	// Add exec-specific fields directly to the result map using JSON tags as keys
+	// This allows CEL expressions to access fields like data.event.comm, data.event.pid, etc.
+	result["pid"] = execEvent.Pid
+	result["tid"] = execEvent.Tid
+	result["ppid"] = execEvent.Ppid
+	result["ptid"] = execEvent.Ptid
+	result["comm"] = execEvent.Comm
+	result["pcomm"] = execEvent.Pcomm
+	result["ret"] = execEvent.Retval
+	result["args"] = execEvent.Args
+	result["uid"] = execEvent.Uid
+	result["user"] = execEvent.Username
+	result["gid"] = execEvent.Gid
+	result["group"] = execEvent.Groupname
+	result["upperlayer"] = execEvent.UpperLayer
+	result["pupperlayer"] = execEvent.PupperLayer
+	result["loginuid"] = execEvent.LoginUid
+	result["sessionid"] = execEvent.SessionId
+	result["cwd"] = execEvent.Cwd
+	result["exepath"] = execEvent.ExePath
+	result["file"] = execEvent.File
+
+	// Add mount namespace ID
+	result["mountnsid"] = execEvent.MountNsID
+
+	return result
 }

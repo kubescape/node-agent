@@ -122,6 +122,27 @@ func GetOpcodeName(opcode uint8) (bool, string) {
 }
 
 func (c *IoUringAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	// TODO: Implement ToMap functionality
-	return nil
+	iouringEvent, ok := enrichedEvent.Event.(*traceriouringtype.Event)
+	if !ok {
+		return nil
+	}
+
+	// Start with the base event using ConvertToMap
+	result := ConvertToMap(&iouringEvent.Event)
+
+	// Add IoUring-specific fields using JSON tags as keys
+	result["opcode"] = iouringEvent.Opcode
+	result["pid"] = iouringEvent.Pid
+	result["tid"] = iouringEvent.Tid
+	result["uid"] = iouringEvent.Uid
+	result["gid"] = iouringEvent.Gid
+	result["comm"] = iouringEvent.Comm
+	result["flags"] = iouringEvent.Flags
+	result["user_data"] = iouringEvent.UserData
+	result["identifier"] = iouringEvent.Identifier
+
+	// Add mount namespace ID
+	result["mountnsid"] = iouringEvent.MountNsID
+
+	return result
 }

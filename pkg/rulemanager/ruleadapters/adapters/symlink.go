@@ -66,6 +66,28 @@ func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 }
 
 func (c *SymlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	// TODO: Implement ToMap functionality
-	return nil
+	symlinkEvent, ok := enrichedEvent.Event.(*tracersymlinktype.Event)
+	if !ok {
+		return nil
+	}
+
+	// Start with the base event using ConvertToMap
+	result := ConvertToMap(&symlinkEvent.Event)
+
+	// Add symlink-specific fields using JSON tags as keys
+	result["pid"] = symlinkEvent.Pid
+	result["tid"] = symlinkEvent.Tid
+	result["ppid"] = symlinkEvent.PPid
+	result["uid"] = symlinkEvent.Uid
+	result["gid"] = symlinkEvent.Gid
+	result["upperlayer"] = symlinkEvent.UpperLayer
+	result["comm"] = symlinkEvent.Comm
+	result["exe_path"] = symlinkEvent.ExePath
+	result["oldpath"] = symlinkEvent.OldPath
+	result["newpath"] = symlinkEvent.NewPath
+
+	// Add mount namespace ID
+	result["mountnsid"] = symlinkEvent.MountNsID
+
+	return result
 }

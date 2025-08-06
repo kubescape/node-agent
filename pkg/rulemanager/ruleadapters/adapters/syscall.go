@@ -54,6 +54,24 @@ func (c *SyscallAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 }
 
 func (c *SyscallAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	// TODO: Implement ToMap functionality
-	return nil
+	syscallEvent, ok := enrichedEvent.Event.(*types.SyscallEvent)
+	if !ok {
+		return nil
+	}
+
+	// Start with the base event using ConvertToMap
+	result := ConvertToMap(&syscallEvent.Event)
+
+	// Add syscall-specific fields directly to the result map using JSON tags as keys
+	// This allows CEL expressions to access fields like data.event.pid, data.event.comm, etc.
+	result["pid"] = syscallEvent.Pid
+	result["comm"] = syscallEvent.Comm
+	result["uid"] = syscallEvent.Uid
+	result["gid"] = syscallEvent.Gid
+	result["syscallName"] = syscallEvent.SyscallName
+
+	// Add mount namespace ID
+	result["mountnsid"] = syscallEvent.MountNsID
+
+	return result
 }

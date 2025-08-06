@@ -74,6 +74,42 @@ func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent
 }
 
 func (c *DnsAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	// TODO: Implement ToMap functionality
-	return nil
+	dnsEvent, ok := enrichedEvent.Event.(*tracerdnstype.Event)
+	if !ok {
+		return nil
+	}
+
+	// Start with the base event using ConvertToMap
+	result := ConvertToMap(&dnsEvent.Event)
+
+	// Add DNS-specific fields using JSON tags as keys
+	result["pid"] = dnsEvent.Pid
+	result["tid"] = dnsEvent.Tid
+	result["ppid"] = dnsEvent.Ppid
+	result["comm"] = dnsEvent.Comm
+	result["pcomm"] = dnsEvent.Pcomm
+	result["cwd"] = dnsEvent.Cwd
+	result["exepath"] = dnsEvent.Exepath
+	result["uid"] = dnsEvent.Uid
+	result["gid"] = dnsEvent.Gid
+	result["srcIP"] = dnsEvent.SrcIP
+	result["dstIP"] = dnsEvent.DstIP
+	result["srcPort"] = dnsEvent.SrcPort
+	result["dstPort"] = dnsEvent.DstPort
+	result["protocol"] = dnsEvent.Protocol
+	result["id"] = dnsEvent.ID
+	result["qr"] = dnsEvent.Qr
+	result["nameserver"] = dnsEvent.Nameserver
+	result["pktType"] = dnsEvent.PktType
+	result["qtype"] = dnsEvent.QType
+	result["name"] = dnsEvent.DNSName
+	result["rcode"] = dnsEvent.Rcode
+	result["latency"] = dnsEvent.Latency
+	result["numAnswers"] = dnsEvent.NumAnswers
+	result["addresses"] = dnsEvent.Addresses
+
+	// Add mount namespace ID
+	result["mountnsid"] = dnsEvent.MountNsID
+
+	return result
 }

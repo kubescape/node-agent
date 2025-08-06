@@ -62,6 +62,33 @@ func (c *HTTPAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 }
 
 func (c *HTTPAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	// TODO: Implement ToMap functionality
-	return nil
+	httpEvent, ok := enrichedEvent.Event.(*tracerhttptype.Event)
+	if !ok {
+		return nil
+	}
+
+	// Start with the base event using ConvertToMap
+	result := ConvertToMap(&httpEvent.Event)
+
+	// Add HTTP-specific fields using JSON tags as keys
+	result["pid"] = httpEvent.Pid
+	result["uid"] = httpEvent.Uid
+	result["gid"] = httpEvent.Gid
+	result["other_port"] = httpEvent.OtherPort
+	result["other_ip"] = httpEvent.OtherIp
+	result["internal"] = httpEvent.Internal
+	result["direction"] = httpEvent.Direction
+
+	// Add HTTP request/response data if available
+	if httpEvent.Request != nil {
+		result["request"] = httpEvent.Request
+	}
+	if httpEvent.Response != nil {
+		result["response"] = httpEvent.Response
+	}
+
+	// Add mount namespace ID
+	result["mountnsid"] = httpEvent.MountNsID
+
+	return result
 }

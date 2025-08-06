@@ -32,7 +32,7 @@ type CEL struct {
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
 	env, err := cel.NewEnv(
-		cel.Variable("data", cel.AnyType),
+		cel.Variable("event", cel.AnyType),
 		k8s.K8s(objectCache.K8sObjectCache(), cfg),
 		applicationprofile.AP(objectCache, cfg),
 		networkneighborhood.NN(objectCache, cfg),
@@ -104,7 +104,7 @@ func (c *CEL) EvaluateRule(event map[string]any, eventType utils.EventType, expr
 			return false, err
 		}
 
-		out, _, err := program.Eval(map[string]any{"data": event})
+		out, _, err := program.Eval(map[string]any{"event": event})
 		if err != nil {
 			logger.L().Error("evaluation error", helpers.Error(err))
 		}
@@ -123,7 +123,7 @@ func (c *CEL) EvaluateExpression(event map[string]any, expression string) (strin
 		return "", err
 	}
 
-	out, _, err := program.Eval(map[string]any{"data": event})
+	out, _, err := program.Eval(map[string]any{"event": event})
 	if err != nil {
 		return "", fmt.Errorf("failed to evaluate expression: %s", err)
 	}

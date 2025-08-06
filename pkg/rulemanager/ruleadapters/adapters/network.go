@@ -62,6 +62,40 @@ func (c *NetworkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 }
 
 func (c *NetworkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	// TODO: Implement ToMap functionality
-	return nil
+	networkEvent, ok := enrichedEvent.Event.(*tracernetworktype.Event)
+	if !ok {
+		return nil
+	}
+
+	// Start with the base event using ConvertToMap
+	result := ConvertToMap(&networkEvent.Event)
+
+	// Add network-specific fields using JSON tags as keys
+	result["pid"] = networkEvent.Pid
+	result["tid"] = networkEvent.Tid
+	result["comm"] = networkEvent.Comm
+	result["uid"] = networkEvent.Uid
+	result["gid"] = networkEvent.Gid
+	result["pktType"] = networkEvent.PktType
+	result["proto"] = networkEvent.Proto
+	result["port"] = networkEvent.Port
+	result["podHostIP"] = networkEvent.PodHostIP
+	result["podIP"] = networkEvent.PodIP
+	result["podOwner"] = networkEvent.PodOwner
+	result["podLabels"] = networkEvent.PodLabels
+
+	// Add destination endpoint as nested structure
+	dst := make(map[string]interface{})
+	dst["addr"] = networkEvent.DstEndpoint.Addr
+	dst["version"] = networkEvent.DstEndpoint.Version
+	dst["namespace"] = networkEvent.DstEndpoint.Namespace
+	dst["podname"] = networkEvent.DstEndpoint.Name
+	dst["kind"] = networkEvent.DstEndpoint.Kind
+	dst["podlabels"] = networkEvent.DstEndpoint.PodLabels
+	result["dst"] = dst
+
+	// Add mount namespace ID
+	result["mountnsid"] = networkEvent.MountNsID
+
+	return result
 }

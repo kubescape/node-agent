@@ -60,6 +60,26 @@ func (c *PtraceAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEv
 }
 
 func (c *PtraceAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	// TODO: Implement ToMap functionality
-	return nil
+	ptraceEvent, ok := enrichedEvent.Event.(*tracerptracetype.Event)
+	if !ok {
+		return nil
+	}
+
+	// Start with the base event using ConvertToMap
+	result := ConvertToMap(&ptraceEvent.Event)
+
+	// Add ptrace-specific fields directly to the result map using JSON tags as keys
+	// This allows CEL expressions to access fields like data.event.comm, data.event.pid, etc.
+	result["pid"] = ptraceEvent.Pid
+	result["ppid"] = ptraceEvent.PPid
+	result["uid"] = ptraceEvent.Uid
+	result["gid"] = ptraceEvent.Gid
+	result["request"] = ptraceEvent.Request
+	result["comm"] = ptraceEvent.Comm
+	result["exe_path"] = ptraceEvent.ExePath
+
+	// Add mount namespace ID
+	result["mountnsid"] = ptraceEvent.MountNsID
+
+	return result
 }

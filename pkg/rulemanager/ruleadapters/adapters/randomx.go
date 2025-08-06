@@ -55,6 +55,25 @@ func (c *RandomXAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 }
 
 func (c *RandomXAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {
-	// TODO: Implement ToMap functionality
-	return nil
+	randomXEvent, ok := enrichedEvent.Event.(*tracerrandomxtype.Event)
+	if !ok {
+		return nil
+	}
+
+	// Start with the base event using ConvertToMap
+	result := ConvertToMap(&randomXEvent.Event)
+
+	// Add RandomX-specific fields using JSON tags as keys
+	result["pid"] = randomXEvent.Pid
+	result["ppid"] = randomXEvent.PPid
+	result["uid"] = randomXEvent.Uid
+	result["gid"] = randomXEvent.Gid
+	result["upperlayer"] = randomXEvent.UpperLayer
+	result["comm"] = randomXEvent.Comm
+	result["exe_path"] = randomXEvent.ExePath
+
+	// Add mount namespace ID
+	result["mountnsid"] = randomXEvent.MountNsID
+
+	return result
 }
