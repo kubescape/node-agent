@@ -35,9 +35,9 @@ type RuleFailureCreator struct {
 	enricher         types.Enricher
 }
 
-func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSResolver) *RuleFailureCreator {
+func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSResolver, adapterFactory *EventRuleAdapterFactory) *RuleFailureCreator {
 	return &RuleFailureCreator{
-		adapterFactory: NewEventRuleAdapterFactory(),
+		adapterFactory: adapterFactory,
 		dnsManager:     dnsManager,
 		enricher:       enricher,
 	}

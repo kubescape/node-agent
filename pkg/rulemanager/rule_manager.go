@@ -52,17 +52,18 @@ type RuleManager struct {
 	containerIdToPid     maps.SafeMap[string, uint32]
 	enricher             types.Enricher
 	processManager       processtree.ProcessTreeManager
-	ruleCooldown         *rulecooldown.RuleCooldown
 	celEvaluator         cel.CELRuleEvaluator
+	ruleCooldown         *rulecooldown.RuleCooldown
+	adapterFactory       *ruleadapters.EventRuleAdapterFactory
 	ruleFailureCreator   ruleadapters.RuleFailureCreatorInterface
-	celSerializer        cel.CelSerializer
 	rulePolicyValidator  *RulePolicyValidator
 }
 
 var _ RuleManagerClient = (*RuleManager)(nil)
 
 func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, processManager processtree.ProcessTreeManager, dnsManager dnsmanager.DNSResolver, enricher types.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
-	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager)
+	adapterFactory := ruleadapters.NewEventRuleAdapterFactory()
+	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory)
 
 	// Create CEL evaluator
 	celEvaluator, err := cel.NewCEL(objectCache, cfg)
@@ -81,12 +82,12 @@ func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclie
 		objectCache:         objectCache,
 		exporter:            exporter,
 		metrics:             metrics,
+		adapterFactory:      adapterFactory,
 		enricher:            enricher,
 		processManager:      processManager,
 		ruleCooldown:        ruleCooldown,
 		celEvaluator:        celEvaluator,
 		ruleFailureCreator:  ruleFailureCreator,
-		celSerializer:       &cel.CelEventSerializer{},
 		rulePolicyValidator: rulePolicyValidator,
 	}
 
@@ -144,7 +145,13 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				continue
 			}
 
-			eventMap := rm.celSerializer.Serialize(enrichedEvent.Event)
+			eventAdapter, ok := rm.adapterFactory.GetAdapter(enrichedEvent.EventType)
+			if !ok {
+				logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.EventType)))
+				continue
+			}
+
+			eventMap := eventAdapter.ToMap(enrichedEvent)
 			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent.EventType)
 			if len(ruleExpressions) == 0 {
 				continue
@@ -227,7 +234,13 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 			continue
 		}
 
-		eventMap := rm.celSerializer.Serialize(event)
+		eventAdapter, ok := rm.adapterFactory.GetAdapter(eventType)
+		if !ok {
+			logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(eventType)))
+			continue
+		}
+
+		eventMap := eventAdapter.ToMap(&events.EnrichedEvent{Event: event})
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
 		if len(ruleExpressions) == 0 {
 			continue
