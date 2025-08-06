@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/goradd/maps"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/reparenting/strategies"
 )
@@ -31,7 +32,7 @@ func (rl *reparentingLogicImpl) addDefaultStrategies() {
 	rl.AddStrategy(&strategies.FallBackStrategy{})
 }
 
-func (rl *reparentingLogicImpl) Reparent(exitingPID uint32, children []*apitypes.Process, containerTree containerprocesstree.ContainerProcessTree, processMap map[uint32]*apitypes.Process) (uint32, error) {
+func (rl *reparentingLogicImpl) Reparent(exitingPID uint32, children []*apitypes.Process, containerTree containerprocesstree.ContainerProcessTree, processMap *maps.SafeMap[uint32, *apitypes.Process]) (uint32, error) {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
 
@@ -65,7 +66,7 @@ func (rl *reparentingLogicImpl) GetStrategies() []ReparentingStrategy {
 	return strategies
 }
 
-func (rl *reparentingLogicImpl) getSelectedStrategy(exitingPID uint32, containerTree containerprocesstree.ContainerProcessTree, processMap map[uint32]*apitypes.Process) ReparentingStrategy {
+func (rl *reparentingLogicImpl) getSelectedStrategy(exitingPID uint32, containerTree containerprocesstree.ContainerProcessTree, processMap *maps.SafeMap[uint32, *apitypes.Process]) ReparentingStrategy {
 	if rl.firstStrategy.IsApplicable(exitingPID, containerTree, processMap) {
 		return rl.firstStrategy
 	}

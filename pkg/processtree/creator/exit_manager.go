@@ -148,7 +148,7 @@ func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 	}
 
 	if len(pending.Children) > 0 {
-		newParentPID, err := pt.reparenting_strategies.Reparent(pid, pending.Children, pt.containerTree, pt.getProcessMapAsRegularMap())
+		newParentPID, err := pt.reparenting_strategies.Reparent(pid, pending.Children, pt.containerTree, &pt.processMap)
 		if err != nil {
 			logger.L().Warning("exitByPid: reparentingLogic.HandleProcessExit failed", helpers.String("pid", fmt.Sprintf("%d", pid)), helpers.Error(err))
 			return

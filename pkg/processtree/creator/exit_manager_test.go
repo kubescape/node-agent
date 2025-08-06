@@ -15,43 +15,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Mock container process tree for testing
+// Mock implementations for testing
 type mockContainerProcessTree struct{}
 
 func (m *mockContainerProcessTree) ContainerCallback(notif containercollection.PubSubEvent) {}
-func (m *mockContainerProcessTree) GetContainerTreeNodes(containerID string, fullTree map[uint32]*apitypes.Process) ([]apitypes.Process, error) {
-	return nil, nil
+func (m *mockContainerProcessTree) GetContainerTreeNodes(containerID string, fullTree *maps.SafeMap[uint32, *apitypes.Process]) ([]apitypes.Process, error) {
+	return []apitypes.Process{}, nil
 }
-func (m *mockContainerProcessTree) GetPidBranch(containerID string, targetPID uint32, fullTree map[uint32]*apitypes.Process) (apitypes.Process, error) {
+func (m *mockContainerProcessTree) GetPidBranch(containerID string, targetPID uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) (apitypes.Process, error) {
 	return apitypes.Process{}, nil
 }
 func (m *mockContainerProcessTree) ListContainers() []string {
-	return nil
+	return []string{}
 }
-func (m *mockContainerProcessTree) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree map[uint32]*apitypes.Process) bool {
+func (m *mockContainerProcessTree) IsProcessUnderAnyContainerSubtree(pid uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) bool {
 	return false
 }
-func (m *mockContainerProcessTree) IsProcessUnderContainer(pid uint32, containerID string, fullTree map[uint32]*apitypes.Process) bool {
+func (m *mockContainerProcessTree) IsProcessUnderContainer(pid uint32, containerID string, fullTree *maps.SafeMap[uint32, *apitypes.Process]) bool {
 	return false
 }
 
-func (m *mockContainerProcessTree) GetShimPIDForProcess(pid uint32, fullTree map[uint32]*apitypes.Process) (uint32, bool) {
+func (m *mockContainerProcessTree) GetShimPIDForProcess(pid uint32, fullTree *maps.SafeMap[uint32, *apitypes.Process]) (uint32, bool) {
 	return 0, false
 }
 func (m *mockContainerProcessTree) GetPidByContainerID(containerID string) (uint32, error) {
 	return 0, nil
 }
 
-// Mock reparenting logic for testing
+// Mock reparenting logic
 type mockReparentingLogic struct{}
 
-func (m *mockReparentingLogic) Reparent(exitingPID uint32, children []*apitypes.Process, containerTree containerprocesstree.ContainerProcessTree, processMap map[uint32]*apitypes.Process) (uint32, error) {
-	return 1, nil
+func (m *mockReparentingLogic) Reparent(exitingPID uint32, children []*apitypes.Process, containerTree containerprocesstree.ContainerProcessTree, processMap *maps.SafeMap[uint32, *apitypes.Process]) (uint32, error) {
+	return 1, nil // Always reparent to init
 }
-
 func (m *mockReparentingLogic) AddStrategy(strategy reparenting.ReparentingStrategy) {}
 func (m *mockReparentingLogic) GetStrategies() []reparenting.ReparentingStrategy {
-	return nil
+	return []reparenting.ReparentingStrategy{}
 }
 
 // Helper function to create a test process tree creator
