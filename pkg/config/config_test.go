@@ -63,7 +63,6 @@ func TestLoadConfig(t *testing.T) {
 					},
 				},
 				WorkerPoolSize:     2000,
-				EventBatchSize:     2500,
 				ProcfsScanInterval: 5 * time.Second,
 				RuleCoolDown: rulecooldown.RuleCooldownConfig{
 					CooldownDuration:   1 * time.Hour,

@@ -49,7 +49,6 @@ type Config struct {
 	KubernetesMode                 bool                            `mapstructure:"kubernetesMode"`
 	NetworkStreamingInterval       time.Duration                   `mapstructure:"networkStreamingInterval"`
 	WorkerPoolSize                 int                             `mapstructure:"workerPoolSize"`
-	EventBatchSize                 int                             `mapstructure:"eventBatchSize"`
 	TestMode                       bool                            `mapstructure:"testMode"`
 	ExcludeJsonPaths               []string                        `mapstructure:"excludeJsonPaths"`
 	ProfilesCacheRefreshRate       time.Duration                   `mapstructure:"profilesCacheRefreshRate"`
@@ -81,7 +80,6 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("kubernetesMode", true)
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
 	viper.SetDefault("workerPoolSize", 2000) // Increased from 50 to handle higher event volumes
-	viper.SetDefault("eventBatchSize", 2500)
 	viper.SetDefault("testMode", false)
 	viper.SetDefault("enableEmbeddedSBOMs", false)
 	viper.SetDefault("profilesCacheRefreshRate", 1*time.Minute)
