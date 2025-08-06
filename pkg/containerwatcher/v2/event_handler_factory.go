@@ -246,9 +246,11 @@ func (ehf *EventHandlerFactory) registerHandlers(
 
 // reportEventToThirdPartyTracers reports events to third-party tracers
 func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(eventType utils.EventType, event utils.K8sEvent) {
-	if ehf.thirdPartyEventReceivers != nil && ehf.thirdPartyEventReceivers.Has(eventType) {
-		for receiver := range ehf.thirdPartyEventReceivers.Get(eventType).Iter() {
-			receiver.ReportEvent(eventType, event)
+	if ehf.thirdPartyEventReceivers != nil {
+		if eventReceivers, ok := ehf.thirdPartyEventReceivers.Load(eventType); ok {
+			for receiver := range eventReceivers.Iter() {
+				receiver.ReportEvent(eventType, event)
+			}
 		}
 	}
 }

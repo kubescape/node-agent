@@ -240,6 +240,8 @@ func (cpm *ContainerProfileManager) deleteContainer(container *containercollecti
 			if objectcache.GetTerminationExitCode(cpm.k8sObjectCache, container.K8s.Namespace,
 				container.K8s.PodName, container.K8s.ContainerName, containerID) == 0 {
 				entry.data.watchedContainerData.SetStatus(objectcache.WatchedContainerStatusCompleted)
+			} else {
+				entry.data.watchedContainerData.SetStatus(objectcache.WatchedContainerStatusFailed)
 			}
 
 			// Send container termination signal (blocking send, safe because monitoring goroutine is always running)

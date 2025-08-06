@@ -34,7 +34,7 @@ require (
 	github.com/joncrlsn/dque v0.0.0-20241024143830-7723fd131a64
 	github.com/kubescape/backend v0.0.25
 	github.com/kubescape/go-logger v0.0.24
-	github.com/kubescape/k8s-interface v0.0.197
+	github.com/kubescape/k8s-interface v0.0.198
 	github.com/kubescape/storage v0.0.200
 	github.com/kubescape/workerpool v0.0.0-20250526074519-0e4a4e7f44cf
 	github.com/moby/sys/mountinfo v0.7.2
@@ -180,7 +180,7 @@ require (
 	github.com/go-openapi/validate v0.24.0 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/go-restruct/restruct v1.2.0-alpha // indirect
-	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
+	github.com/go-viper/mapstructure/v2 v2.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/gofrs/flock v0.12.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect

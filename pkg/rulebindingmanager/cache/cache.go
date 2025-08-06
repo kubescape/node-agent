@@ -77,8 +77,8 @@ func (c *RBCache) ListRulesForPod(namespace, name string) []rulemanagertypesv1.R
 	//append rules for pod
 	rbNames := c.podToRBNames.Get(podID)
 	for _, i := range rbNames.ToSlice() {
-		if c.rbNameToRules.Has(i) {
-			rulesSlice = append(rulesSlice, c.rbNameToRules.Get(i)...)
+		if rules, ok := c.rbNameToRules.Load(i); ok {
+			rulesSlice = append(rulesSlice, rules...)
 		}
 	}
 
@@ -226,11 +226,12 @@ func (c *RBCache) addRuleBinding(ruleBinding *typesv1.RuntimeAlertRuleBinding) [
 
 		for _, pod := range pods.Items {
 			podName := uniqueName(&pod)
-			if !c.podToRBNames.Has(podName) {
-				c.podToRBNames.Set(podName, mapset.NewSet[string]())
+			if rbNames, ok := c.podToRBNames.Load(podName); !ok {
+				c.podToRBNames.Set(podName, mapset.NewSet[string](rbName))
+			} else {
+				rbNames.Add(rbName)
 			}
 
-			c.podToRBNames.Get(podName).Add(rbName)
 			c.rbNameToPods.Get(rbName).Add(podName)
 
 			if len(c.notifiers) == 0 {
@@ -331,16 +332,16 @@ func (c *RBCache) addPod(ctx context.Context, pod *corev1.Pod) []rulebindingmana
 		}
 
 		// selectors match, add the rule binding to the pod
-		if !c.podToRBNames.Has(podName) {
+		if rbNames, ok := c.podToRBNames.Load(podName); !ok {
 			c.podToRBNames.Set(podName, mapset.NewSet[string](rbName))
 		} else {
-			c.podToRBNames.Get(podName).Add(rbName)
+			rbNames.Add(rbName)
 		}
 
-		if !c.rbNameToPods.Has(rbName) {
+		if pods, ok := c.rbNameToPods.Load(rbName); !ok {
 			c.rbNameToPods.Set(rbName, mapset.NewSet[string](podName))
 		} else {
-			c.rbNameToPods.Get(rbName).Add(podName)
+			pods.Add(podName)
 		}
 		logger.L().Debug("RBCache - adding pod to roleBinding", helpers.String("pod", podName), helpers.String("ruleBinding", rbName))
 
@@ -354,15 +355,13 @@ func (c *RBCache) deletePod(uniqueName string) {
 	c.allPods.Remove(uniqueName)
 
 	// selectors match, add the rule binding to the pod
-	var rbNames []string
-	if c.podToRBNames.Has(uniqueName) {
-		rbNames = c.podToRBNames.Get(uniqueName).ToSlice()
-	}
-
-	for i := range rbNames {
-		if c.rbNameToPods.Has(rbNames[i]) {
-			c.rbNameToPods.Get(rbNames[i]).Remove(uniqueName)
-		}
+	if rbNames, ok := c.podToRBNames.Load(uniqueName); ok {
+		rbNames.Each(func(name string) bool {
+			if pods, ok := c.rbNameToPods.Load(name); ok {
+				pods.Remove(uniqueName)
+			}
+			return false
+		})
 	}
 	c.podToRBNames.Delete(uniqueName)
 }

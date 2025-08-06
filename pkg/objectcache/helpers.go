@@ -3,6 +3,7 @@ package objectcache
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
@@ -72,10 +73,7 @@ func GetTerminationExitCode(k8sObjectsCache K8sObjectCache, namespace, podName, 
 			return 0, notFoundError
 		}
 
-		// check only container status
-		// in case the terminated container is an init or ephemeral container
-		// return -1 to avoid setting the status later to completed
-		for _, s := range podStatus.ContainerStatuses {
+		for _, s := range slices.Concat(podStatus.ContainerStatuses, podStatus.InitContainerStatuses, podStatus.EphemeralContainerStatuses) {
 			if s.Name != containerName {
 				continue
 			}

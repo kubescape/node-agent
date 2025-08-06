@@ -92,7 +92,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("ruleCooldown.ruleCooldownOnProfileFailure", true)
 	viper.SetDefault("ruleCooldown.ruleCooldownMaxSize", 10000)
 	viper.SetDefault("partialProfileGenerationEnabled", true)
-	viper.SetDefault("procfsScanInterval", 5*time.Second)
+	viper.SetDefault("procfsScanInterval", 30*time.Second)
 	viper.SetDefault("celConfigCache.maxSize", 1000)
 	viper.SetDefault("celConfigCache.ttl", 1*time.Second)
 	viper.AutomaticEnv()

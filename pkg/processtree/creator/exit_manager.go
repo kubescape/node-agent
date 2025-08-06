@@ -140,15 +140,15 @@ func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 		return
 	}
 
-	proc := pt.processMap.Get(pid)
-	if proc == nil {
+	proc, ok := pt.processMap.Load(pid)
+	if !ok {
 		logger.L().Warning("exitByPid: processMap[pid] does not exist", helpers.String("pid", fmt.Sprintf("%d", pid)))
 		delete(pt.pendingExits, pid)
 		return
 	}
 
 	if len(pending.Children) > 0 {
-		newParentPID, err := pt.reparenting_strategies.Reparent(pid, pending.Children, pt.containerTree, pt.getProcessMapAsRegularMap())
+		newParentPID, err := pt.reparentingStrategies.Reparent(pid, pending.Children, pt.containerTree, &pt.processMap)
 		if err != nil {
 			logger.L().Warning("exitByPid: reparentingLogic.HandleProcessExit failed", helpers.String("pid", fmt.Sprintf("%d", pid)), helpers.Error(err))
 			return
@@ -163,7 +163,7 @@ func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 	}
 
 	if proc.PPID != 0 {
-		if parent := pt.processMap.Get(proc.PPID); parent != nil {
+		if parent, ok := pt.processMap.Load(proc.PPID); ok {
 			delete(parent.ChildrenMap, apitypes.CommPID{Comm: proc.Comm, PID: pid})
 		}
 	}

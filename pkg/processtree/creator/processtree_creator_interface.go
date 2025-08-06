@@ -2,6 +2,7 @@ package processtreecreator
 
 import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/goradd/maps"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 )
 
@@ -12,8 +13,7 @@ type ProcessTreeCreator interface {
 	GetRootTree() ([]apitypes.Process, error)
 	// Get a host process branch from the given PID up to the root
 	GetHostProcessBranch(pid uint32) (apitypes.Process, error)
-	// Get the process map (read-only - do not modify the returned map)
-	GetProcessMap() map[uint32]*apitypes.Process
+	GetProcessMap() *maps.SafeMap[uint32, *apitypes.Process]
 	// Optionally: Query for a process node by PID
 	GetProcessNode(pid int) (*apitypes.Process, error)
 	// Start the process tree creator and begin background tasks
