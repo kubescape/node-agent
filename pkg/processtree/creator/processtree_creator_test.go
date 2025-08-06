@@ -996,7 +996,16 @@ func TestComplexProcessTree(t *testing.T) {
 
 	// Verify structure
 	processMap := creator.GetProcessMap()
-	assert.Len(t, processMap, 8)
+
+	// Count entries manually since SafeMap doesn't support len()
+	count := 0
+	processMap.Range(func(pid uint32, proc *apitypes.Process) bool {
+		if proc != nil {
+			count++
+		}
+		return true
+	})
+	assert.Equal(t, 8, count)
 
 	// Check root processes
 	roots, err := creator.GetRootTree()
