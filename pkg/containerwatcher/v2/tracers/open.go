@@ -115,6 +115,10 @@ func (ot *OpenTracer) openEventCallback(event *traceropentype.Event) {
 		event.Path = event.FullPath
 	}
 
+	if !ot.cfg.EnableFullPathTracing {
+		event.FullPath = event.Path
+	}
+
 	if event.K8s.ContainerName == "" {
 		return
 	}
