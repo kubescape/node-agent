@@ -60,10 +60,8 @@ func (c *CapabilitiesAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[str
 		return nil
 	}
 
-	// Start with the base event using ConvertToMap
 	result := ConvertToMap(&capEvent.Event)
 
-	// Add capabilities-specific fields using JSON tags as keys
 	result["pid"] = capEvent.Pid
 	result["comm"] = capEvent.Comm
 	result["syscall"] = capEvent.Syscall
@@ -79,7 +77,6 @@ func (c *CapabilitiesAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[str
 	result["caps"] = capEvent.Caps
 	result["capsNames"] = capEvent.CapsNames
 
-	// Add mount namespace ID
 	result["mountnsid"] = capEvent.MountNsID
 
 	return result

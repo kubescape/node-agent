@@ -67,11 +67,8 @@ func (c *OpenAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inte
 		return nil
 	}
 
-	// Start with the base event using ConvertToMap
 	result := ConvertToMap(&openEvent.Event.Event)
 
-	// Add open-specific fields directly to the result map using JSON tags as keys
-	// This allows CEL expressions to access fields like data.event.comm, data.event.pid, etc.
 	result["pid"] = openEvent.Pid
 	result["tid"] = openEvent.Tid
 	result["uid"] = openEvent.Uid
@@ -86,7 +83,6 @@ func (c *OpenAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inte
 	result["path"] = openEvent.Path
 	result["fullPath"] = openEvent.FullPath
 
-	// Add mount namespace ID
 	result["mountnsid"] = openEvent.MountNsID
 
 	return result

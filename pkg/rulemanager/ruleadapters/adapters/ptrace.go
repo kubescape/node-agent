@@ -65,11 +65,8 @@ func (c *PtraceAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]in
 		return nil
 	}
 
-	// Start with the base event using ConvertToMap
 	result := ConvertToMap(&ptraceEvent.Event)
 
-	// Add ptrace-specific fields directly to the result map using JSON tags as keys
-	// This allows CEL expressions to access fields like data.event.comm, data.event.pid, etc.
 	result["pid"] = ptraceEvent.Pid
 	result["ppid"] = ptraceEvent.PPid
 	result["uid"] = ptraceEvent.Uid
@@ -78,7 +75,6 @@ func (c *PtraceAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]in
 	result["comm"] = ptraceEvent.Comm
 	result["exe_path"] = ptraceEvent.ExePath
 
-	// Add mount namespace ID
 	result["mountnsid"] = ptraceEvent.MountNsID
 
 	return result

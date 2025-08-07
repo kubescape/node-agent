@@ -68,10 +68,8 @@ func (c *SSHAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inter
 		return nil
 	}
 
-	// Start with the base event using ConvertToMap
 	result := ConvertToMap(&sshEvent.Event)
 
-	// Add SSH-specific fields using JSON tags as keys
 	result["pid"] = sshEvent.Pid
 	result["uid"] = sshEvent.Uid
 	result["gid"] = sshEvent.Gid
@@ -81,7 +79,6 @@ func (c *SSHAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inter
 	result["src_ip"] = sshEvent.SrcIP
 	result["dst_ip"] = sshEvent.DstIP
 
-	// Add mount namespace ID
 	result["mountnsid"] = sshEvent.MountNsID
 
 	return result

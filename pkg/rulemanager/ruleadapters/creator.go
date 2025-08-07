@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	maxFileSize = 50 * 1024 * 1024 // 50MB
+	maxFileSize = 50 * 1024 * 1024
 )
 
 var ErrRuleShouldNotBeAlerted = errors.New("rule should not be alerted")
@@ -250,5 +250,3 @@ func (r *RuleFailureCreator) setRuntimeAlertK8sDetails(ruleFailure *types.Generi
 
 	ruleFailure.SetRuntimeAlertK8sDetails(runtimek8sdetails)
 }
-
-// RegisterAllSetters is no longer needed as adapters are registered in the factory

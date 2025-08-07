@@ -113,7 +113,6 @@ var OpcodeMap = map[uint8]string{
 	iouringsyscall.IORING_OP_SEND_ZC:         "Zero-copy send",
 }
 
-// GetOpcodeName returns the string description of an opcode
 func GetOpcodeName(opcode uint8) (bool, string) {
 	if name, ok := OpcodeMap[opcode]; ok {
 		return true, name
@@ -127,10 +126,8 @@ func (c *IoUringAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]i
 		return nil
 	}
 
-	// Start with the base event using ConvertToMap
 	result := ConvertToMap(&iouringEvent.Event)
 
-	// Add IoUring-specific fields using JSON tags as keys
 	result["opcode"] = iouringEvent.Opcode
 	result["pid"] = iouringEvent.Pid
 	result["tid"] = iouringEvent.Tid
@@ -141,7 +138,6 @@ func (c *IoUringAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]i
 	result["user_data"] = iouringEvent.UserData
 	result["identifier"] = iouringEvent.Identifier
 
-	// Add mount namespace ID
 	result["mountnsid"] = iouringEvent.MountNsID
 
 	return result

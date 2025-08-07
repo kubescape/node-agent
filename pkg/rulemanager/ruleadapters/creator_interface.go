@@ -11,7 +11,6 @@ type RuleFailureCreatorInterface interface {
 	CreateRuleFailure(rule typesv1.Rule, enrichedEvent *events.EnrichedEvent, objectCache objectcache.ObjectCache, message, uniqueID string) types.RuleFailure
 }
 
-// EventMetadataSetter is deprecated, use EventRuleAdapter instead
 type EventMetadataSetter interface {
 	SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent)
 }

@@ -79,10 +79,8 @@ func (c *DnsAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inter
 		return nil
 	}
 
-	// Start with the base event using ConvertToMap
 	result := ConvertToMap(&dnsEvent.Event)
 
-	// Add DNS-specific fields using JSON tags as keys
 	result["pid"] = dnsEvent.Pid
 	result["tid"] = dnsEvent.Tid
 	result["ppid"] = dnsEvent.Ppid
@@ -108,7 +106,6 @@ func (c *DnsAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inter
 	result["numAnswers"] = dnsEvent.NumAnswers
 	result["addresses"] = dnsEvent.Addresses
 
-	// Add mount namespace ID
 	result["mountnsid"] = dnsEvent.MountNsID
 
 	return result

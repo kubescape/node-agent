@@ -49,10 +49,6 @@ func (c *ProcfsFailureSetter) SetFailureMetadata(failure types.RuleFailure, enri
 	}
 	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	// ProcfsEvent doesn't have a TriggerEvent, so we'll use a minimal event
-	// This is a placeholder since procfs events are internal to the system
-	// Note: This would need to be properly implemented based on the actual event structure
-
 	ruleAlert := apitypes.RuleAlert{
 		RuleDescription: fmt.Sprintf("Procfs event detected for process %s (PID: %d)", procfsEvent.Comm, procfsEvent.PID),
 	}

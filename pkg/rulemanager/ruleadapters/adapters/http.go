@@ -32,7 +32,7 @@ func (c *HTTPAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
 		Process: &common.ProcessEntity{
-			Name: "http_process", // HTTP events don't have Comm field
+			Name: "http_process",
 		},
 		Network: &common.NetworkEntity{
 			DstIP:    httpEvent.OtherIp,
@@ -67,10 +67,8 @@ func (c *HTTPAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inte
 		return nil
 	}
 
-	// Start with the base event using ConvertToMap
 	result := ConvertToMap(&httpEvent.Event)
 
-	// Add HTTP-specific fields using JSON tags as keys
 	result["pid"] = httpEvent.Pid
 	result["uid"] = httpEvent.Uid
 	result["gid"] = httpEvent.Gid
@@ -79,7 +77,6 @@ func (c *HTTPAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inte
 	result["internal"] = httpEvent.Internal
 	result["direction"] = httpEvent.Direction
 
-	// Add HTTP request/response data if available
 	if httpEvent.Request != nil {
 		result["request"] = httpEvent.Request
 	}
@@ -87,7 +84,6 @@ func (c *HTTPAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inte
 		result["response"] = httpEvent.Response
 	}
 
-	// Add mount namespace ID
 	result["mountnsid"] = httpEvent.MountNsID
 
 	return result

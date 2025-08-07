@@ -76,7 +76,6 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-// Helper functions from the rule engine
 func GetExecPathFromEvent(execEvent *events.ExecEvent) string {
 	if len(execEvent.Args) > 0 {
 		return execEvent.Args[0]
@@ -97,11 +96,8 @@ func (c *ExecAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inte
 		return nil
 	}
 
-	// Start with the base event using ConvertToMap
 	result := ConvertToMap(&execEvent.Event.Event)
 
-	// Add exec-specific fields directly to the result map using JSON tags as keys
-	// This allows CEL expressions to access fields like data.event.comm, data.event.pid, etc.
 	result["pid"] = execEvent.Pid
 	result["tid"] = execEvent.Tid
 	result["ppid"] = execEvent.Ppid
@@ -122,7 +118,6 @@ func (c *ExecAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]inte
 	result["exepath"] = execEvent.ExePath
 	result["file"] = execEvent.File
 
-	// Add mount namespace ID
 	result["mountnsid"] = execEvent.MountNsID
 
 	return result

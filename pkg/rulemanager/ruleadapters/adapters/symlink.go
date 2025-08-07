@@ -71,10 +71,8 @@ func (c *SymlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]i
 		return nil
 	}
 
-	// Start with the base event using ConvertToMap
 	result := ConvertToMap(&symlinkEvent.Event)
 
-	// Add symlink-specific fields using JSON tags as keys
 	result["pid"] = symlinkEvent.Pid
 	result["tid"] = symlinkEvent.Tid
 	result["ppid"] = symlinkEvent.PPid
@@ -86,7 +84,6 @@ func (c *SymlinkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]i
 	result["oldpath"] = symlinkEvent.OldPath
 	result["newpath"] = symlinkEvent.NewPath
 
-	// Add mount namespace ID
 	result["mountnsid"] = symlinkEvent.MountNsID
 
 	return result

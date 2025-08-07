@@ -60,10 +60,8 @@ func (c *RandomXAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]i
 		return nil
 	}
 
-	// Start with the base event using ConvertToMap
 	result := ConvertToMap(&randomXEvent.Event)
 
-	// Add RandomX-specific fields using JSON tags as keys
 	result["pid"] = randomXEvent.Pid
 	result["ppid"] = randomXEvent.PPid
 	result["uid"] = randomXEvent.Uid
@@ -72,7 +70,6 @@ func (c *RandomXAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]i
 	result["comm"] = randomXEvent.Comm
 	result["exe_path"] = randomXEvent.ExePath
 
-	// Add mount namespace ID
 	result["mountnsid"] = randomXEvent.MountNsID
 
 	return result
