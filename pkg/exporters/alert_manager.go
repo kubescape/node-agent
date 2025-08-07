@@ -100,6 +100,7 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule types.RuleFailure) {
 				"pod_name":          failedRule.GetRuntimeAlertK8sDetails().PodName,
 				"host":              ame.Host,
 				"node_name":         ame.NodeName,
+				"severity":          "none",
 				"pid":               fmt.Sprintf("%d", process.PID),
 				"ppid":              fmt.Sprintf("%d", process.PPID),
 				"pcomm":             process.Pcomm,

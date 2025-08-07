@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,6 +71,10 @@ func TestLoadConfig(t *testing.T) {
 					CooldownAfterCount: 1,
 					OnProfileFailure:   true,
 					MaxSize:            10000,
+				},
+				CelConfigCache: cache.FunctionCacheConfig{
+					MaxSize: 1000,
+					TTL:     1 * time.Second,
 				},
 			},
 			wantErr: false,
