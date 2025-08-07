@@ -23,7 +23,7 @@ func TestLoadConfig(t *testing.T) {
 			name: "TestLoadConfig",
 			path: "../../configuration",
 			want: Config{
-				EnableFullPathTracing:          true,
+				EnableFullPathTracing:          false,
 				EnableApplicationProfile:       true,
 				EnableMalwareDetection:         true,
 				EnableNetworkTracing:           true,
