@@ -4,7 +4,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
 )
 
 func NewCacheMock(nodeName string) *RBCache {
@@ -12,7 +12,7 @@ func NewCacheMock(nodeName string) *RBCache {
 		nodeName:     nodeName,
 		allPods:      mapset.NewSet[string](),
 		k8sClient:    k8sinterface.NewKubernetesApiMock(),
-		ruleCreator:  &ruleengine.RuleCreatorMock{},
+		ruleCreator:  &rulecreator.RuleCreatorMock{},
 		podToRBNames: maps.SafeMap[string, mapset.Set[string]]{},
 		rbNameToPods: maps.SafeMap[string, mapset.Set[string]]{},
 	}

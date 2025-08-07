@@ -1,11 +1,13 @@
 package rulebindingmanager
 
 import (
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
+	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 )
 
 type RuleBindingCache interface {
-	ListRulesForPod(namespace, name string) []ruleengine.RuleEvaluator
+	ListRulesForPod(namespace, name string) []typesv1.Rule
 	AddNotifier(*chan RuleBindingNotify)
-	GetRuleCreator() ruleengine.RuleCreator
+	GetRuleCreator() rulecreator.RuleCreator
+	RefreshRuleBindingsRules()
 }

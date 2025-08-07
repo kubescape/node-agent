@@ -48,8 +48,9 @@ import (
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
-	rulemanagerv1 "github.com/kubescape/node-agent/pkg/rulemanager/v1"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
+	"github.com/kubescape/node-agent/pkg/rulemanager/ruleswatcher"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
@@ -189,7 +190,12 @@ func main() {
 
 	var ruleBindingCache *rulebindingcachev1.RBCache
 	if cfg.EnableRuntimeDetection {
-		ruleBindingCache = rulebindingcachev1.NewCache(cfg.NodeName, k8sClient)
+		ruleCreator := rulecreator.NewRuleCreator()
+		ruleBindingCache = rulebindingcachev1.NewCache(cfg.NodeName, k8sClient, ruleCreator)
+		rulesWatcher := ruleswatcher.NewRulesWatcher(k8sClient, ruleCreator, func() {
+			ruleBindingCache.RefreshRuleBindingsRules()
+		})
+		dWatcher.AddAdaptor(rulesWatcher)
 	}
 
 	// Create and DNS managers
@@ -269,13 +275,13 @@ func main() {
 		ruleCooldown := rulecooldown.NewRuleCooldown(cfg.RuleCoolDown)
 
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processTreeManager, dnsResolver, nil, ruleCooldown)
+		ruleManager, err = rulemanager.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, processTreeManager, dnsResolver, nil, ruleCooldown)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
 
 	} else {
-		ruleManager = rulemanager.CreateRuleManagerMock()
+		// ruleManager = rulemanager.CreateRuleManagerMock()
 		apc := &objectcache.ApplicationProfileCacheMock{}
 		nnc := &objectcache.NetworkNeighborhoodCacheMock{}
 		dc := &objectcache.DnsCacheMock{}

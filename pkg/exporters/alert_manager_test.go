@@ -12,7 +12,7 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
-	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -36,7 +36,7 @@ func TestSendAlert(t *testing.T) {
 	}
 	// Call SendAlert
 
-	exporter.SendRuleAlert(&ruleengine.GenericRuleFailure{
+	exporter.SendRuleAlert(&types.GenericRuleFailure{
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
 			AlertName: "testrule",
 		},
