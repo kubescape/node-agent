@@ -2,7 +2,10 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -95,7 +98,24 @@ func NewQueueData(ctx context.Context, creator ProfileCreator, config QueueConfi
 	// Create or open the queue
 	queue, err := dque.NewOrOpen(config.QueueName, config.QueueDir, config.ItemsPerSegment, QueuedContainerProfileBuilder)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create/open queue: %w", err)
+		var corruptedError dque.ErrCorruptedSegment
+		if errors.As(err, &corruptedError) {
+			logger.L().Info("queue corrupted, deleting and recreating", helpers.Error(err))
+
+			// Delete the specific queue's data directory.
+			queueDataPath := filepath.Join(config.QueueDir, config.QueueName)
+			if err := os.RemoveAll(queueDataPath); err != nil {
+				return nil, fmt.Errorf("failed to delete corrupted queue directory %s: %w", queueDataPath, err)
+			}
+
+			// Try to create the queue again.
+			queue, err = dque.NewOrOpen(config.QueueName, config.QueueDir, config.ItemsPerSegment, QueuedContainerProfileBuilder)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create queue after cleaning corruption: %w", err)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to create/open queue: %w", err)
+		}
 	}
 
 	qd := &QueueData{
