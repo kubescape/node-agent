@@ -52,6 +52,7 @@ import (
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleswatcher"
@@ -277,8 +278,10 @@ func main() {
 
 		ruleCooldown := rulecooldown.NewRuleCooldown(cfg.RuleCoolDown)
 
+		adapterFactory := ruleadapters.NewEventRuleAdapterFactory()
+
 		// create runtimeDetection managers
-		ruleManager, err = rulemanager.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, processTreeManager, dnsResolver, nil, ruleCooldown)
+		ruleManager, err = rulemanager.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, processTreeManager, dnsResolver, nil, ruleCooldown, adapterFactory)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
@@ -351,7 +354,7 @@ func main() {
 	thirdPartyTracers := containerwatcher.ThirdPartyTracers{
 		ThirdPartyTracersInitializers: mapset.NewSet[containerwatcher.CustomTracerInitializer](),
 		ThirdPartyEventReceivers:      maps.NewSafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]](),
-	}	
+	}
 
 	// Create the container handler
 	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, containerProfileManager, k8sClient,

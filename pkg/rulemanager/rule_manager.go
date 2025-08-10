@@ -61,8 +61,19 @@ type RuleManager struct {
 
 var _ RuleManagerClient = (*RuleManager)(nil)
 
-func CreateRuleManager(ctx context.Context, cfg config.Config, k8sClient k8sclient.K8sClientInterface, ruleBindingCache bindingcache.RuleBindingCache, objectCache objectcache.ObjectCache, exporter exporters.Exporter, metrics metricsmanager.MetricsManager, processManager processtree.ProcessTreeManager, dnsManager dnsmanager.DNSResolver, enricher types.Enricher, ruleCooldown *rulecooldown.RuleCooldown) (*RuleManager, error) {
-	adapterFactory := ruleadapters.NewEventRuleAdapterFactory()
+func CreateRuleManager(
+	ctx context.Context,
+	cfg config.Config,
+	k8sClient k8sclient.K8sClientInterface,
+	ruleBindingCache bindingcache.RuleBindingCache,
+	objectCache objectcache.ObjectCache,
+	exporter exporters.Exporter,
+	metrics metricsmanager.MetricsManager,
+	processManager processtree.ProcessTreeManager,
+	dnsManager dnsmanager.DNSResolver,
+	enricher types.Enricher,
+	ruleCooldown *rulecooldown.RuleCooldown,
+	adapterFactory *ruleadapters.EventRuleAdapterFactory) (*RuleManager, error) {
 	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory)
 
 	// Create CEL evaluator
