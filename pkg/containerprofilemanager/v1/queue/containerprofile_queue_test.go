@@ -679,3 +679,100 @@ func BenchmarkQueueProcessing(b *testing.B) {
 		time.Sleep(1 * time.Millisecond)
 	}
 }
+
+func TestQueueCorruptedSegmentHandling(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "queue-corrupted-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	mockCreator := &MockProfileCreator{}
+
+	config := QueueConfig{
+		QueueName:       "corrupted-test-queue",
+		QueueDir:        tempDir,
+		MaxQueueSize:    10,
+		RetryInterval:   100 * time.Millisecond,
+		ItemsPerSegment: 10,
+	}
+
+	// Create first queue and add some items
+	queueData1, err := NewQueueData(context.Background(), mockCreator, config)
+	if err != nil {
+		t.Fatalf("Failed to create first queue: %v", err)
+	}
+
+	// Add a profile to the queue
+	profile := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "corrupted-test-profile",
+			Namespace: "default",
+		},
+	}
+
+	err = queueData1.Enqueue(profile, "test-container-id")
+	if err != nil {
+		t.Fatalf("Failed to enqueue profile: %v", err)
+	}
+
+	// Close the first queue
+	queueData1.Close()
+
+	// Corrupt the queue by creating a malformed segment file
+	// This simulates what happens when the queue gets corrupted
+	segmentDir := tempDir + "/corrupted-test-queue"
+	if err := os.MkdirAll(segmentDir, 0755); err != nil {
+		t.Fatalf("Failed to create segment directory: %v", err)
+	}
+
+	// Create a corrupted segment file (similar to the dque test)
+	corruptedFile := segmentDir + "/0000000000000.dque"
+	f, err := os.Create(corruptedFile)
+	if err != nil {
+		t.Fatalf("Failed to create corrupted file: %v", err)
+	}
+
+	// Write malformed data - expect 8 bytes but only write 7
+	if _, err := f.Write([]byte{0, 0, 0, 8, 1, 2, 3, 4, 5, 6, 7}); err != nil {
+		t.Fatalf("Failed to write corrupted data: %v", err)
+	}
+	f.Close()
+
+	// Try to create a new queue with the same config - this should trigger the corrupted segment handling
+	// The queue should detect the corruption, delete the corrupted files, and recreate successfully
+	queueData2, err := NewQueueData(context.Background(), mockCreator, config)
+	if err != nil {
+		t.Fatalf("Failed to create second queue after corruption: %v", err)
+	}
+	defer queueData2.Close()
+
+	// The queue should have been recreated (corrupted files deleted)
+	// So it should be empty
+	if queueData2.GetQueueSize() != 0 {
+		t.Errorf("Expected queue size 0 after corruption recovery, got %d", queueData2.GetQueueSize())
+	}
+
+	// Verify that the corrupted files were cleaned up
+	// Note: The entire queue directory gets deleted and recreated, so the specific file won't exist
+	if _, err := os.Stat(segmentDir); err != nil {
+		t.Errorf("Expected segment directory to exist after recreation, but got error: %v", err)
+	}
+
+	// Test that the queue still works normally after recovery
+	newProfile := &v1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "recovery-test-profile",
+			Namespace: "default",
+		},
+	}
+
+	err = queueData2.Enqueue(newProfile, "test-container-id")
+	if err != nil {
+		t.Fatalf("Failed to enqueue profile after corruption recovery: %v", err)
+	}
+
+	if queueData2.GetQueueSize() != 1 {
+		t.Errorf("Expected queue size 1 after enqueueing new profile, got %d", queueData2.GetQueueSize())
+	}
+}
