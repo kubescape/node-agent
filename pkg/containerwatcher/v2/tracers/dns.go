@@ -27,7 +27,7 @@ type DNSTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *tracerdns.Tracer
 	socketEnricher      *socketenricher.SocketEnricher
 }
@@ -37,7 +37,7 @@ func NewDNSTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 	socketEnricher *socketenricher.SocketEnricher,
 ) *DNSTracer {
 	return &DNSTracer{

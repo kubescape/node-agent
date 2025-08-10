@@ -28,7 +28,7 @@ type CustomTracerInitializer interface {
 	NewTracer(containerCollection *containercollection.ContainerCollection,
 		tracerCollection *tracercollection.TracerCollection,
 		containerSelector containercollection.ContainerSelector,
-		eventCallback func(utils.K8sEvent, string, uint32),
+		eventCallback ResultCallback,
 		thirdPartyEnricher TaskBasedEnricher,
 	) (TracerInterface, error)
 }

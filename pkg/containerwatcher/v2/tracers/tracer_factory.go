@@ -231,7 +231,7 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 }
 
 // createEventCallback creates a simple callback that sends events directly to the ordered event queue
-func (tf *TracerFactory) createEventCallback(eventType utils.EventType) func(utils.K8sEvent, string, uint32) {
+func (tf *TracerFactory) createEventCallback(eventType utils.EventType) containerwatcher.ResultCallback {
 	return func(event utils.K8sEvent, containerID string, processID uint32) {
 		tf.orderedEventQueue.AddEventDirect(eventType, event, containerID, processID)
 	}
