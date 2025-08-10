@@ -16,7 +16,7 @@ type TracerManager struct {
 	cfg               config.Config
 	tracers           map[utils.EventType]containerwatcher.TracerInterface
 	tracerFactory     containerwatcher.TracerFactoryInterface
-	thirdPartyTracers []containerwatcher.CustomTracer
+	thirdPartyTracers []containerwatcher.TracerInterface
 }
 
 func NewTracerManager(cfg config.Config, tracerFactory containerwatcher.TracerFactoryInterface) *TracerManager {
@@ -24,7 +24,7 @@ func NewTracerManager(cfg config.Config, tracerFactory containerwatcher.TracerFa
 		cfg:               cfg,
 		tracers:           make(map[utils.EventType]containerwatcher.TracerInterface),
 		tracerFactory:     tracerFactory,
-		thirdPartyTracers: make([]containerwatcher.CustomTracer, 0),
+		thirdPartyTracers: make([]containerwatcher.TracerInterface, 0),
 	}
 }
 
@@ -55,11 +55,6 @@ func (tm *TracerManager) StartAllTracers(ctx context.Context) error {
 			}
 			logger.L().Info("Started tracer", helpers.String("tracer", tracer.GetName()))
 		}
-	}
-
-	tm.thirdPartyTracers = tm.tracerFactory.GetThirdPartyTracers()
-	if err := tm.startThirdPartyTracers(); err != nil {
-		return err
 	}
 
 	return nil
@@ -97,23 +92,11 @@ func (tm *TracerManager) startProcfsTracer(ctx context.Context) error {
 	return nil
 }
 
-// startThirdPartyTracers starts all registered third-party tracers
-func (tm *TracerManager) startThirdPartyTracers() error {
-	for _, tracer := range tm.thirdPartyTracers {
-		if err := tracer.Start(); err != nil {
-			logger.L().Error("error starting custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
-			return fmt.Errorf("starting custom tracer %s: %w", tracer.Name(), err)
-		}
-		logger.L().Info("started custom tracer", helpers.String("tracer", tracer.Name()))
-	}
-	return nil
-}
-
 // stopThirdPartyTracers stops all registered third-party tracers
 func (tm *TracerManager) stopThirdPartyTracers() {
 	for _, tracer := range tm.thirdPartyTracers {
 		if err := tracer.Stop(); err != nil {
-			logger.L().Error("error stopping custom tracer", helpers.String("tracer", tracer.Name()), helpers.Error(err))
+			logger.L().Error("error stopping custom tracer", helpers.String("tracer", tracer.GetName()), helpers.Error(err))
 		}
 	}
 }

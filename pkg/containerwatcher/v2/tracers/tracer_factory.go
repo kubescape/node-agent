@@ -5,6 +5,8 @@ import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
@@ -26,7 +28,7 @@ type TracerFactory struct {
 	socketEnricher          *socketenricher.SocketEnricher
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
 	ruleManager             rulemanager.RuleManagerClient
-	thirdPartyTracers       mapset.Set[containerwatcher.CustomTracer]
+	thirdPartyTracersInit   mapset.Set[containerwatcher.CustomTracerInitializer]
 	thirdPartyEnricher      containerwatcher.TaskBasedEnricher
 	cfg                     config.Config
 }
@@ -40,7 +42,7 @@ func NewTracerFactory(
 	socketEnricher *socketenricher.SocketEnricher,
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient,
 	ruleManager rulemanager.RuleManagerClient,
-	thirdPartyTracers mapset.Set[containerwatcher.CustomTracer],
+	thirdPartyTracers mapset.Set[containerwatcher.CustomTracerInitializer],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	cfg config.Config,
 ) *TracerFactory {
@@ -52,7 +54,7 @@ func NewTracerFactory(
 		socketEnricher:          socketEnricher,
 		containerProfileManager: containerProfileManager,
 		ruleManager:             ruleManager,
-		thirdPartyTracers:       thirdPartyTracers,
+		thirdPartyTracersInit:   thirdPartyTracers,
 		thirdPartyEnricher:      thirdPartyEnricher,
 		cfg:                     cfg,
 	}
@@ -215,15 +217,17 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.createEventCallback(utils.AllEventType),
 	)
 	manager.RegisterTracer(topTracer)
-}
 
-// GetThirdPartyTracers returns all registered third-party tracers
-func (tf *TracerFactory) GetThirdPartyTracers() []containerwatcher.CustomTracer {
-	tracers := make([]containerwatcher.CustomTracer, 0, tf.thirdPartyTracers.Cardinality())
-	for tracer := range tf.thirdPartyTracers.Iter() {
-		tracers = append(tracers, tracer)
+	// Create third-party tracers
+	for tracerInit := range tf.thirdPartyTracersInit.Iter() {
+		tracer, err := tracerInit.NewTracer(tf.containerCollection, tf.tracerCollection, tf.containerSelector, tf.createEventCallback(utils.AllEventType), tf.thirdPartyEnricher)
+		if err != nil {
+			logger.L().Error("error creating third-party tracer", helpers.Error(err))
+			continue
+		}
+		manager.RegisterTracer(tracer)
+		tf.thirdPartyTracersInit.Append(tracerInit)
 	}
-	return tracers
 }
 
 // createEventCallback creates a simple callback that sends events directly to the ordered event queue

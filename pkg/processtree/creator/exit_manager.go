@@ -14,7 +14,7 @@ import (
 const (
 	maxPendingExits = 1000             // Maximum number of pending exits before forcing cleanup
 	cleanupInterval = 1 * time.Minute  // Check every 1 minute
-	cleanupDelay    = 10 * time.Minute // Remove after 10 minutes
+		cleanupDelay    = 10 * time.Minute // Remove after 10 minutes
 )
 
 type pendingExit struct {

@@ -50,7 +50,7 @@ func (ma *ManagerAdapter) ReportEvent(eventType utils.EventType, event utils.K8s
 // EventHandlerFactory manages the mapping of event types to their managers
 type EventHandlerFactory struct {
 	handlers                 map[utils.EventType][]Manager
-	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]]
+	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]
 	thirdPartyEnricher       containerwatcher.TaskBasedEnricher
 	cfg                      config.Config
 	containerCollection      *containercollection.ContainerCollection
@@ -67,7 +67,7 @@ func NewEventHandlerFactory(
 	malwareManager malwaremanager.MalwareManagerClient,
 	networkStreamClient networkstream.NetworkStreamClient,
 	metrics metricsmanager.MetricsManager,
-	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
+	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	rulePolicyReporter *rulepolicy.RulePolicyReporter,
 ) *EventHandlerFactory {
@@ -191,7 +191,7 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	}
 
 	// Report to third-party event receivers
-	ehf.reportEventToThirdPartyTracers(enrichedEvent.EventType, enrichedEvent.Event)
+	ehf.reportEventToThirdPartyTracers(enrichedEvent)
 }
 
 // registerHandlers registers all handlers for different event types
@@ -245,11 +245,15 @@ func (ehf *EventHandlerFactory) registerHandlers(
 }
 
 // reportEventToThirdPartyTracers reports events to third-party tracers
-func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(eventType utils.EventType, event utils.K8sEvent) {
+func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(enrichedEvent *events.EnrichedEvent) {
 	if ehf.thirdPartyEventReceivers != nil {
-		if eventReceivers, ok := ehf.thirdPartyEventReceivers.Load(eventType); ok {
+		if eventReceivers, ok := ehf.thirdPartyEventReceivers.Load(enrichedEvent.EventType); ok {
 			for receiver := range eventReceivers.Iter() {
-				receiver.ReportEvent(eventType, event)
+				if enrichedHandler, ok := receiver.(containerwatcher.EnrichedEventReceiver); ok {
+					enrichedHandler.ReportEnrichedEvent(enrichedEvent)
+				} else if handler, ok := receiver.(containerwatcher.EventReceiver); ok {
+					handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
+				}
 			}
 		}
 	}

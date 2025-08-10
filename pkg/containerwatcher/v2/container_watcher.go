@@ -7,7 +7,6 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
@@ -31,7 +30,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
-	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/workerpool"
 	"github.com/panjf2000/ants/v2"
 )
@@ -76,9 +74,8 @@ type ContainerWatcher struct {
 	workerChan chan *events.EnrichedEvent // Channel for worker pool invocation
 
 	// Third party components
-	thirdPartyTracers            mapset.Set[containerwatcher.CustomTracer]
-	thirdPartyContainerReceivers mapset.Set[containerwatcher.ContainerReceiver]
-	thirdPartyEnricher           containerwatcher.TaskBasedEnricher
+	thirdPartyTracersInitializers mapset.Set[containerwatcher.CustomTracerInitializer]
+	thirdPartyEnricher            containerwatcher.TaskBasedEnricher
 
 	// Cache and state
 	objectCache          objectcache.ObjectCache
@@ -110,13 +107,13 @@ func CreateContainerWatcher(
 	sbomManager sbommanager.SbomManagerClient,
 	ruleBindingPodNotify *chan rulebindingmanager.RuleBindingNotify,
 	runtime *containerutilsTypes.RuntimeConfig,
-	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	processTreeManager processtree.ProcessTreeManager,
 	clusterName string,
 	objectCache objectcache.ObjectCache,
 	networkStreamClient networkstream.NetworkStreamClient,
 	containerProcessTree containerprocesstree.ContainerProcessTree,
+	thirdPartyTracers containerwatcher.ThirdPartyTracers,
 ) (*ContainerWatcher, error) {
 
 	// Create container collection
@@ -143,7 +140,7 @@ func CreateContainerWatcher(
 		malwareManager,
 		networkStreamClient,
 		metrics,
-		thirdPartyEventReceivers,
+		thirdPartyTracers.ThirdPartyEventReceivers,
 		thirdPartyEnricher,
 		rulePolicyReporter,
 	)
@@ -191,9 +188,8 @@ func CreateContainerWatcher(
 		workerChan:          make(chan *events.EnrichedEvent, cfg.WorkerPoolSize*4), // Buffer size 4x worker pool size
 
 		// Third party components
-		thirdPartyTracers:            mapset.NewSet[containerwatcher.CustomTracer](),
-		thirdPartyContainerReceivers: mapset.NewSet[containerwatcher.ContainerReceiver](),
-		thirdPartyEnricher:           thirdPartyEnricher,
+		thirdPartyTracersInitializers: thirdPartyTracers.ThirdPartyTracersInitializers,
+		thirdPartyEnricher:            thirdPartyEnricher,
 
 		// Cache and state
 		objectCache:          objectCache,
@@ -219,13 +215,13 @@ func CreateIGContainerWatcher(
 	sbomManager sbommanager.SbomManagerClient,
 	ruleBindingPodNotify *chan rulebindingmanager.RuleBindingNotify,
 	runtime *containerutilsTypes.RuntimeConfig,
-	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	processTreeManager processtree.ProcessTreeManager,
 	clusterName string,
 	objectCache objectcache.ObjectCache,
 	networkStreamClient networkstream.NetworkStreamClient,
 	containerProcessTree containerprocesstree.ContainerProcessTree,
+	thirdPartyTracers containerwatcher.ThirdPartyTracers,
 ) (containerwatcher.ContainerWatcher, error) {
 
 	return CreateContainerWatcher(
@@ -240,13 +236,13 @@ func CreateIGContainerWatcher(
 		sbomManager,
 		ruleBindingPodNotify,
 		runtime,
-		thirdPartyEventReceivers,
 		thirdPartyEnricher,
 		processTreeManager,
 		clusterName,
 		objectCache,
 		networkStreamClient,
 		containerProcessTree,
+		thirdPartyTracers,
 	)
 }
 
@@ -286,7 +282,7 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 		cw.socketEnricher,
 		cw.containerProfileManager,
 		cw.ruleManager,
-		cw.thirdPartyTracers,
+		cw.thirdPartyTracersInitializers,
 		cw.thirdPartyEnricher,
 		cw.cfg,
 	)
@@ -363,28 +359,6 @@ func (cw *ContainerWatcher) GetSocketEnricher() *socketenricher.SocketEnricher {
 // GetContainerSelector returns the container selector
 func (cw *ContainerWatcher) GetContainerSelector() *containercollection.ContainerSelector {
 	return &cw.containerSelector
-}
-
-// RegisterCustomTracer registers a custom tracer
-func (cw *ContainerWatcher) RegisterCustomTracer(tracer containerwatcher.CustomTracer) error {
-	cw.thirdPartyTracers.Add(tracer)
-	return nil
-}
-
-// UnregisterCustomTracer unregisters a custom tracer
-func (cw *ContainerWatcher) UnregisterCustomTracer(tracer containerwatcher.CustomTracer) error {
-	cw.thirdPartyTracers.Remove(tracer)
-	return nil
-}
-
-// RegisterContainerReceiver registers a container receiver
-func (cw *ContainerWatcher) RegisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
-	cw.thirdPartyContainerReceivers.Add(receiver)
-}
-
-// UnregisterContainerReceiver unregisters a container receiver
-func (cw *ContainerWatcher) UnregisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
-	cw.thirdPartyContainerReceivers.Remove(receiver)
 }
 
 func (cw *ContainerWatcher) eventProcessingLoop() {
