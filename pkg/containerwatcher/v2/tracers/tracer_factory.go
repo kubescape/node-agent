@@ -225,9 +225,10 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 			logger.L().Error("error creating third-party tracer", helpers.Error(err))
 			continue
 		}
+
 		manager.RegisterTracer(tracer)
-		tf.thirdPartyTracersInit.Append(tracerInit)
 	}
+
 }
 
 // createEventCallback creates a simple callback that sends events directly to the ordered event queue

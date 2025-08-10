@@ -53,6 +53,7 @@ func (tm *TracerManager) StartAllTracers(ctx context.Context) error {
 			if err := tracer.Start(ctx); err != nil {
 				return err
 			}
+
 			logger.L().Info("Started tracer", helpers.String("tracer", tracer.GetName()))
 		}
 	}
