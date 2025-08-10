@@ -351,7 +351,7 @@ func main() {
 	thirdPartyTracers := containerwatcher.ThirdPartyTracers{
 		ThirdPartyTracersInitializers: mapset.NewSet[containerwatcher.CustomTracerInitializer](),
 		ThirdPartyEventReceivers:      maps.NewSafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]](),
-	}
+	}	
 
 	// Create the container handler
 	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, containerProfileManager, k8sClient,

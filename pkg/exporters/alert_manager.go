@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -100,7 +101,7 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule types.RuleFailure) {
 				"pod_name":          failedRule.GetRuntimeAlertK8sDetails().PodName,
 				"host":              ame.Host,
 				"node_name":         ame.NodeName,
-				"severity":          string(failedRule.GetBaseRuntimeAlert().Severity),
+				"severity":          strconv.Itoa(failedRule.GetBaseRuntimeAlert().Severity),
 				"pid":               fmt.Sprintf("%d", process.PID),
 				"ppid":              fmt.Sprintf("%d", process.PPID),
 				"pcomm":             process.Pcomm,
