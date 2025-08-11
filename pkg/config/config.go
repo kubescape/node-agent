@@ -84,8 +84,8 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("networkStreamingEnabled", false)
 	viper.SetDefault("kubernetesMode", true)
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
-	viper.SetDefault("workerPoolSize", 2000) // Increased from 50 to handle higher event volumes
-	viper.SetDefault("eventBatchSize", 5000)
+	viper.SetDefault("workerPoolSize", 1000) // Increased from 50 to handle higher event volumes
+	viper.SetDefault("eventBatchSize", 15000)
 	viper.SetDefault("testMode", false)
 	viper.SetDefault("enableEmbeddedSBOMs", false)
 	viper.SetDefault("profilesCacheRefreshRate", 1*time.Minute)
@@ -95,8 +95,8 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("ruleCooldown.ruleCooldownMaxSize", 10000)
 	viper.SetDefault("partialProfileGenerationEnabled", true)
 	viper.SetDefault("procfsScanInterval", 30*time.Second)
-	viper.SetDefault("orderedEventQueue.size", 10000)
-	viper.SetDefault("orderedEventQueue.collectionDelay", 10*time.Millisecond)
+	viper.SetDefault("orderedEventQueue.size", 100000)
+	viper.SetDefault("orderedEventQueue.collectionDelay", 50*time.Millisecond)
 	viper.SetDefault("exitCleanup.maxPendingExits", 1000)
 	viper.SetDefault("exitCleanup.cleanupInterval", 30*time.Second)
 	viper.SetDefault("exitCleanup.cleanupDelay", 5*time.Minute)

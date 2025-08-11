@@ -64,8 +64,8 @@ func TestLoadConfig(t *testing.T) {
 						URL: "http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io",
 					},
 				},
-				WorkerPoolSize:     2000,
-				EventBatchSize:     2500,
+				WorkerPoolSize:     1000,
+				EventBatchSize:     15000,
 				ProcfsScanInterval: 30 * time.Second,
 				RuleCoolDown: rulecooldown.RuleCooldownConfig{
 					CooldownDuration:   1 * time.Hour,
@@ -74,8 +74,8 @@ func TestLoadConfig(t *testing.T) {
 					MaxSize:            10000,
 				},
 				OrderedEventQueue: containerwatcher.OrderedEventQueueConfig{
-					Size:            10000,
-					CollectionDelay: 10 * time.Millisecond,
+					Size:            100000,
+					CollectionDelay: 50 * time.Millisecond,
 				},
 				ExitCleanup: processtreecreator.ExitCleanupConfig{
 					MaxPendingExits: 1000,
