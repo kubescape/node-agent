@@ -11,12 +11,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 )
 
-const (
-	maxPendingExits = 1000             // Maximum number of pending exits before forcing cleanup
-	cleanupInterval = 1 * time.Minute  // Check every 1 minute
-	cleanupDelay    = 10 * time.Minute // Remove after 10 minutes
-)
-
 type pendingExit struct {
 	PID         uint32
 	StartTimeNs uint64
@@ -48,10 +42,10 @@ func (pt *processTreeCreatorImpl) stopExitManager() {
 }
 
 func (pt *processTreeCreatorImpl) addPendingExit(event conversion.ProcessEvent, children []*apitypes.Process) {
-	if len(pt.pendingExits) >= maxPendingExits {
+	if len(pt.pendingExits) >= pt.config.ExitCleanup.MaxPendingExits {
 		logger.L().Debug("Exit: Maximum pending exits reached, forcing cleanup",
 			helpers.String("pending_count", fmt.Sprintf("%d", len(pt.pendingExits))),
-			helpers.String("max_allowed", fmt.Sprintf("%d", maxPendingExits)))
+			helpers.String("max_allowed", fmt.Sprintf("%d", pt.config.ExitCleanup.MaxPendingExits)))
 		pt.forceCleanupOldest()
 	}
 
@@ -64,7 +58,7 @@ func (pt *processTreeCreatorImpl) addPendingExit(event conversion.ProcessEvent, 
 }
 
 func (pt *processTreeCreatorImpl) exitCleanupLoop() {
-	ticker := time.NewTicker(cleanupInterval)
+	ticker := time.NewTicker(pt.config.ExitCleanup.CleanupInterval)
 	defer ticker.Stop()
 
 	for {
@@ -84,7 +78,7 @@ func (pt *processTreeCreatorImpl) performExitCleanup() {
 	var toRemove []*pendingExit
 
 	for _, pending := range pt.pendingExits {
-		if now.Sub(pending.Timestamp) >= cleanupDelay {
+		if now.Sub(pending.Timestamp) >= pt.config.ExitCleanup.CleanupDelay {
 			toRemove = append(toRemove, pending)
 		}
 	}

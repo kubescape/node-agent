@@ -161,13 +161,8 @@ func (rm *RuleManager) monitorContainer(container *containercollection.Container
 
 					tree, err := rm.processManager.GetContainerProcessTree(container.Runtime.ContainerID, event.Pid, true)
 					if err != nil {
-						process := apitypes.Process{
+						tree = apitypes.Process{
 							PID: event.Pid,
-						}
-						tree, err = utils.CreateProcessTree(&process,
-							rm.containerIdToShimPid.Get(container.Runtime.ContainerID))
-						if err != nil {
-							logger.L().Error("RuleManager - failed to create process tree fallback", helpers.Error(err))
 						}
 					}
 
