@@ -73,15 +73,10 @@ func CreateRuleManager(
 	dnsManager dnsmanager.DNSResolver,
 	enricher types.Enricher,
 	ruleCooldown *rulecooldown.RuleCooldown,
-	adapterFactory *ruleadapters.EventRuleAdapterFactory) (*RuleManager, error) {
+	adapterFactory *ruleadapters.EventRuleAdapterFactory,
+	celEvaluator cel.CELRuleEvaluator,
+) (*RuleManager, error) {
 	ruleFailureCreator := ruleadapters.NewRuleFailureCreator(enricher, dnsManager, adapterFactory)
-
-	// Create CEL evaluator
-	celEvaluator, err := cel.NewCEL(objectCache, cfg)
-	if err != nil {
-		return nil, err
-	}
-
 	rulePolicyValidator := NewRulePolicyValidator(objectCache)
 
 	r := &RuleManager{
