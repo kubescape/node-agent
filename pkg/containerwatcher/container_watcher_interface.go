@@ -2,6 +2,7 @@ package containerwatcher
 
 import (
 	"context"
+	"time"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
@@ -46,4 +47,9 @@ type ContainerReceiver interface {
 
 type TaskBasedEnricher interface {
 	SubmitEnrichmentTask(event utils.EnrichEvent, syscalls []uint64, callback ResultCallback, containerID string, processID uint32)
+}
+
+type OrderedEventQueueConfig struct {
+	Size            int           `mapstructure:"size"`
+	CollectionDelay time.Duration `mapstructure:"collectionDelay"`
 }

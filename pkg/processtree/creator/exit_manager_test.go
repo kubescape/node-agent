@@ -8,6 +8,8 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/kubescape/node-agent/pkg/config"
+	processtreecreatorconfig "github.com/kubescape/node-agent/pkg/processtree/config"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/kubescape/node-agent/pkg/processtree/reparenting"
@@ -55,11 +57,21 @@ func (m *mockReparentingLogic) GetStrategies() []reparenting.ReparentingStrategy
 
 // Helper function to create a test process tree creator
 func createTestProcessTreeCreator() *processTreeCreatorImpl {
+	// Create a test config with exit cleanup settings
+	testConfig := config.Config{
+		ExitCleanup: processtreecreatorconfig.ExitCleanupConfig{
+			MaxPendingExits: 1000,
+			CleanupInterval: 30 * time.Second,
+			CleanupDelay:    1 * time.Minute,
+		},
+	}
+
 	return &processTreeCreatorImpl{
 		processMap:            maps.SafeMap[uint32, *apitypes.Process]{},
 		containerTree:         &mockContainerProcessTree{},
 		reparentingStrategies: &mockReparentingLogic{},
 		pendingExits:          make(map[uint32]*pendingExit),
+		config:                testConfig,
 	}
 }
 
@@ -133,10 +145,13 @@ func TestExitManager_AddPendingExit(t *testing.T) {
 func TestExitManager_MaxPendingExits(t *testing.T) {
 	pt := createTestProcessTreeCreator()
 
+	// Test with a smaller MaxPendingExits for easier testing
+	pt.config.ExitCleanup.MaxPendingExits = 10
+
 	pt.mutex.Lock()
 
-	// Fill up to 100 exits
-	for i := 0; i < 100; i++ {
+	// Fill up to the max limit
+	for i := 0; i < pt.config.ExitCleanup.MaxPendingExits; i++ {
 		pid := uint32(i + 1)
 		parent := createTestProcess(pid, 1, "parent")
 		pt.processMap.Set(pid, parent)
@@ -150,16 +165,14 @@ func TestExitManager_MaxPendingExits(t *testing.T) {
 		}
 	}
 
-	// Verify we have 100 pending exits
-	assert.Equal(t, 100, len(pt.pendingExits))
+	// Verify we have the max number of pending exits
+	assert.Equal(t, pt.config.ExitCleanup.MaxPendingExits, len(pt.pendingExits))
 
-	// Now test that forceCleanupOldest works
+	// Now test that forceCleanupOldest works when we reach the limit
 	pt.forceCleanupOldest()
 
-	// Should have cleaned up 25% (25 processes), leaving 75
-	// But our implementation removes at least 1000 or 25%, whichever is larger
-	// Since we have 100 processes, it removes at least 1000, but we only have 100
-	// So it removes all 100 processes
+	// Should have cleaned up some processes (at least 1000 or 25%, whichever is larger)
+	// Since we have 10 processes and minimum cleanup is 1000, it should remove all 10
 	assert.Equal(t, 0, len(pt.pendingExits), "All processes should be cleaned up due to minimum cleanup threshold")
 
 	pt.mutex.Unlock()
@@ -209,10 +222,11 @@ func TestExitManager_RemoveProcessFromPending(t *testing.T) {
 func TestExitManager_PerformExitCleanup(t *testing.T) {
 	pt := createTestProcessTreeCreator()
 
-	// Create processes with different timestamps
+	// Create processes with different timestamps based on config cleanup delay
 	now := time.Now()
-	oldTime := now.Add(-10 * time.Minute)   // Old enough to be cleaned up
-	recentTime := now.Add(-1 * time.Minute) // Too recent to be cleaned up
+	cleanupDelay := pt.config.ExitCleanup.CleanupDelay
+	oldTime := now.Add(-cleanupDelay - time.Minute)    // Old enough to be cleaned up (older than cleanup delay)
+	recentTime := now.Add(-cleanupDelay + time.Minute) // Too recent to be cleaned up (newer than cleanup delay)
 
 	// Create test processes
 	oldParent := createTestProcess(100, 1, "oldParent")
@@ -476,7 +490,7 @@ func TestExitManager_ReparentingDuringCleanup(t *testing.T) {
 func TestExitManager_CleanupLoop(t *testing.T) {
 	pt := createTestProcessTreeCreator()
 
-	// Create a process with old timestamp
+	// Create a process with old timestamp based on config cleanup delay
 	parent := createTestProcess(100, 1, "parent")
 	pt.processMap.Set(100, parent)
 
@@ -484,17 +498,18 @@ func TestExitManager_CleanupLoop(t *testing.T) {
 	pt.Start()
 	defer pt.Stop()
 
-	// Add a pending exit with old timestamp
+	// Add a pending exit with old timestamp based on config cleanup delay
+	cleanupDelay := pt.config.ExitCleanup.CleanupDelay
 	pt.mutex.Lock()
 	pt.pendingExits[100] = &pendingExit{
 		PID:         100,
 		StartTimeNs: 12345,
-		Timestamp:   time.Now().Add(-10 * time.Minute), // Old enough to be cleaned up
+		Timestamp:   time.Now().Add(-cleanupDelay - time.Minute), // Old enough to be cleaned up
 		Children:    []*apitypes.Process{},
 	}
 	pt.mutex.Unlock()
 
-	// Trigger cleanup manually (since we don't want to wait 5 minutes)
+	// Trigger cleanup manually (since we don't want to wait for the cleanup interval)
 	pt.performExitCleanup()
 
 	// Check that the process was cleaned up
