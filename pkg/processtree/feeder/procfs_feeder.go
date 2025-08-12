@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,7 +14,7 @@ import (
 	"github.com/prometheus/procfs"
 )
 
-// ProcfsFeeder implements ProcessEventFeeder by reading process information from /proc filesystem
+// ProcfsFeeder implements ProcessEventFeeder by reading process information from /proc filesystem.
 type ProcfsFeeder struct {
 	subscribers []chan<- conversion.ProcessEvent
 	mutex       sync.RWMutex
@@ -24,7 +25,13 @@ type ProcfsFeeder struct {
 	procfs      procfs.FS
 }
 
-// NewProcfsFeeder creates a new procfs feeder
+// procInfo is a helper struct to pass results from worker goroutines.
+type procInfo struct {
+	event conversion.ProcessEvent
+	err   error
+}
+
+// NewProcfsFeeder creates a new procfs feeder.
 func NewProcfsFeeder(interval time.Duration) *ProcfsFeeder {
 	return &ProcfsFeeder{
 		interval:   interval,
@@ -32,7 +39,7 @@ func NewProcfsFeeder(interval time.Duration) *ProcfsFeeder {
 	}
 }
 
-// Start begins the procfs feeder loop
+// Start begins the procfs feeder loop.
 func (pf *ProcfsFeeder) Start(ctx context.Context) error {
 	pf.mutex.Lock()
 	defer pf.mutex.Unlock()
@@ -44,7 +51,7 @@ func (pf *ProcfsFeeder) Start(ctx context.Context) error {
 	// Initialize procfs
 	fs, err := procfs.NewFS(pf.procfsPath)
 	if err != nil {
-		return fmt.Errorf("failed to initialize procfs: %v", err)
+		return fmt.Errorf("failed to initialize procfs: %w", err)
 	}
 	pf.procfs = fs
 
@@ -56,19 +63,21 @@ func (pf *ProcfsFeeder) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the procfs feeder
+// Stop stops the procfs feeder.
 func (pf *ProcfsFeeder) Stop() error {
 	pf.mutex.Lock()
 	defer pf.mutex.Unlock()
 
 	if pf.cancel != nil {
 		pf.cancel()
+		pf.ctx = nil
+		pf.cancel = nil
 	}
 
 	return nil
 }
 
-// Subscribe adds a channel to receive process events
+// Subscribe adds a channel to receive process events.
 func (pf *ProcfsFeeder) Subscribe(ch chan<- conversion.ProcessEvent) {
 	pf.mutex.Lock()
 	defer pf.mutex.Unlock()
@@ -76,9 +85,9 @@ func (pf *ProcfsFeeder) Subscribe(ch chan<- conversion.ProcessEvent) {
 	pf.subscribers = append(pf.subscribers, ch)
 }
 
-// feedLoop is the main loop that reads procfs and feeds events
+// feedLoop is the main loop that reads procfs and feeds events.
 func (pf *ProcfsFeeder) feedLoop() {
-	// Capture context locally to avoid race conditions
+	// Capture context locally to avoid race conditions on pf.ctx
 	ctx := pf.ctx
 
 	ticker := time.NewTicker(pf.interval)
@@ -97,71 +106,106 @@ func (pf *ProcfsFeeder) feedLoop() {
 	}
 }
 
-// scanProcfs scans the /proc directory for processes
+// scanProcfs scans the /proc directory for processes efficiently.
 func (pf *ProcfsFeeder) scanProcfs() {
+	// Step 1: Get a list of all potential PID directories.
 	entries, err := os.ReadDir(pf.procfsPath)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading procfs directory: %v\n", err)
 		return
 	}
 
+	pids := make([]uint32, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-
 		pid, err := strconv.ParseUint(entry.Name(), 10, 32)
 		if err != nil {
 			continue
 		}
+		pids = append(pids, uint32(pid))
+	}
 
-		pf.processProcfsEntry(uint32(pid))
+	// Step 2: Use a worker pool to process PIDs in parallel.
+	numWorkers := runtime.NumCPU() // Use number of CPUs as a heuristic for worker count
+	pidChan := make(chan uint32, len(pids))
+	resultsChan := make(chan procInfo, len(pids))
+	var wg sync.WaitGroup
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for pid := range pidChan {
+				// The actual work of reading files happens here, in parallel.
+				event, err := pf.readProcessInfo(pid)
+				resultsChan <- procInfo{event: event, err: err}
+			}
+		}()
+	}
+
+	// Feed the PIDs to the workers.
+	for _, pid := range pids {
+		pidChan <- pid
+	}
+	close(pidChan)
+
+	// Wait for all workers to finish reading proc files.
+	wg.Wait()
+	close(resultsChan)
+
+	// Step 3: Collect results and build a map for efficient parent lookup.
+	procMap := make(map[uint32]conversion.ProcessEvent, len(pids))
+	for res := range resultsChan {
+		if res.err == nil {
+			procMap[res.event.PID] = res.event
+		}
+	}
+
+	// Step 4: Link parent info and broadcast. This is fast as it's all in-memory.
+	for _, event := range procMap {
+		if parentProc, ok := procMap[event.PPID]; ok {
+			// Create a copy to avoid modifying the map entry directly, which could cause race conditions
+			// if the map was ever accessed concurrently (good practice).
+			eventWithPcomm := event
+			eventWithPcomm.Pcomm = parentProc.Comm
+			pf.broadcastEvent(eventWithPcomm)
+		} else {
+			pf.broadcastEvent(event) // Broadcast even if parent is not found
+		}
 	}
 }
 
-// processProcfsEntry processes a single procfs entry for a given PID
-func (pf *ProcfsFeeder) processProcfsEntry(pid uint32) {
-	event, err := pf.readProcessInfo(pid)
-	if err != nil {
-		return
-	}
-
-	pf.broadcastEvent(event)
-}
-
-// readProcessInfo reads process information from procfs for a given PID
+// readProcessInfo reads process information from procfs for a given PID.
+// This version is simplified because it no longer needs to look up the parent process.
 func (pf *ProcfsFeeder) readProcessInfo(pid uint32) (conversion.ProcessEvent, error) {
 	event := conversion.ProcessEvent{
 		Type:      conversion.ProcfsEvent,
-		Timestamp: time.Now(),
+		Timestamp: time.Now().UTC(),
 		PID:       pid,
 	}
 
-	// Get process using procfs
 	proc, err := pf.procfs.Proc(int(pid))
 	if err != nil {
 		return event, err
 	}
 
-	// Get process stat
 	stat, err := proc.Stat()
 	if err != nil {
 		return event, err
 	}
 
-	// Fill basic information from stat
 	event.PPID = uint32(stat.PPID)
 	event.Comm = stat.Comm
 
-	// Get process status for UID/GID
 	if status, err := proc.NewStatus(); err == nil {
-		// UIDs and GIDs have a fixed length of 4 elements
 		uid := uint32(status.UIDs[1]) // Effective UID
 		gid := uint32(status.GIDs[1]) // Effective GID
 		event.Uid = &uid
 		event.Gid = &gid
 	}
 
-	// Get command line
 	if cmdline, err := proc.CmdLine(); err == nil {
 		if len(cmdline) == 0 {
 			event.Cmdline = stat.Comm
@@ -170,43 +214,29 @@ func (pf *ProcfsFeeder) readProcessInfo(pid uint32) (conversion.ProcessEvent, er
 		}
 	}
 
-	// Get current working directory
 	if cwd, err := proc.Cwd(); err == nil {
 		event.Cwd = cwd
 	}
 
-	// Get executable path
 	if exe, err := proc.Executable(); err == nil {
 		event.Path = exe
-	}
-
-	// Get parent process name if available
-	if event.PPID > 0 {
-		parentComm, err := pf.getProcessComm(event.PPID)
-		if err == nil {
-			event.Pcomm = parentComm
-		}
 	}
 
 	return event, nil
 }
 
-// getProcessComm gets the command name for a given PID
+// getProcessComm gets the command name for a given PID.
+// This is now only used by the on-demand ProcessSpecificPID function.
 func (pf *ProcfsFeeder) getProcessComm(pid uint32) (string, error) {
 	proc, err := pf.procfs.Proc(int(pid))
 	if err != nil {
 		return "", err
 	}
-
-	comm, err := proc.Comm()
-	if err != nil {
-		return "", err
-	}
-
-	return comm, nil
+	// Comm is faster than reading the full stat file if that's all we need.
+	return proc.Comm()
 }
 
-// broadcastEvent sends an event to all subscribers
+// broadcastEvent sends an event to all subscribers.
 func (pf *ProcfsFeeder) broadcastEvent(event conversion.ProcessEvent) {
 	pf.mutex.RLock()
 	defer pf.mutex.RUnlock()
@@ -215,16 +245,24 @@ func (pf *ProcfsFeeder) broadcastEvent(event conversion.ProcessEvent) {
 		select {
 		case ch <- event:
 		default:
-			// Channel is full, skip this event
+			// Non-blocking send: if a subscriber's channel is full, drop the event for them.
 		}
 	}
 }
 
-// ProcessSpecificPID processes a specific PID and feeds it as an event
+// ProcessSpecificPID processes a specific PID and feeds it as an event.
+// This is an on-demand function and performs its own parent lookup.
 func (pf *ProcfsFeeder) ProcessSpecificPID(pid uint32) error {
 	event, err := pf.readProcessInfo(pid)
 	if err != nil {
 		return err
+	}
+
+	// For a single PID, we must still look up the parent info directly.
+	if event.PPID > 0 {
+		if parentComm, err := pf.getProcessComm(event.PPID); err == nil {
+			event.Pcomm = parentComm
+		}
 	}
 
 	pf.broadcastEvent(event)
