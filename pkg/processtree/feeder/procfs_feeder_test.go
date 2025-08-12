@@ -55,7 +55,8 @@ func TestProcfsFeeder_Stop(t *testing.T) {
 
 	err = feeder.Stop()
 	assert.NoError(t, err)
-	assert.Nil(t, feeder.ctx, "Context should be nil after stop")
+	// After stopping, cancel should be nil to allow a restart.
+	// The context itself is intentionally not nilled out to prevent a race condition.
 	assert.Nil(t, feeder.cancel, "Cancel func should be nil after stop")
 }
 
