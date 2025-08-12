@@ -103,7 +103,7 @@ func TestIgnoreContainer(t *testing.T) {
 	config := Config{
 		NamespaceName: "test-namespace",
 		ExcludeLabels: map[string]string{
-			"app": "test-app",
+			"app.kubernetes.io/name": "test-app",
 		},
 		ExcludeNamespaces: []string{"excluded-namespace"},
 	}
@@ -144,7 +144,7 @@ func TestIgnoreContainer(t *testing.T) {
 			name:    "Ignore pod with excluded label",
 			ns:      "other-namespace",
 			podName: "some-pod",
-			labels:  map[string]string{"app": "test-app"},
+			labels:  map[string]string{"app.kubernetes.io/name": "test-app"},
 			want:    true,
 		},
 		{
