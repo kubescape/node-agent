@@ -435,8 +435,9 @@ func (cw *ContainerWatcher) enrichAndProcess(entry eventEntry) {
 	select {
 	case cw.workerChan <- enrichedEvent:
 	default:
-		logger.L().Warning("ContainerWatcher - Worker channel full, dropping event",
+		logger.L().Warning("ContainerWatcher - Worker channel full, blocking until space available",
 			helpers.String("eventType", string(entry.EventType)),
 			helpers.String("containerID", entry.ContainerID))
+		cw.workerChan <- enrichedEvent
 	}
 }
