@@ -51,6 +51,7 @@ type Config struct {
 	KubernetesMode                 bool                                     `mapstructure:"kubernetesMode"`
 	NetworkStreamingInterval       time.Duration                            `mapstructure:"networkStreamingInterval"`
 	WorkerPoolSize                 int                                      `mapstructure:"workerPoolSize"`
+	WorkerChannelSize              int                                      `mapstructure:"workerChannelSize"`
 	EventBatchSize                 int                                      `mapstructure:"eventBatchSize"`
 	TestMode                       bool                                     `mapstructure:"testMode"`
 	ExcludeJsonPaths               []string                                 `mapstructure:"excludeJsonPaths"`
@@ -84,7 +85,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("networkStreamingEnabled", false)
 	viper.SetDefault("kubernetesMode", true)
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
-	viper.SetDefault("workerPoolSize", 1000) // Increased from 50 to handle higher event volumes
+	viper.SetDefault("workerPoolSize", 3000)
 	viper.SetDefault("eventBatchSize", 15000)
 	viper.SetDefault("testMode", false)
 	viper.SetDefault("enableEmbeddedSBOMs", false)
@@ -100,6 +101,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("exitCleanup.maxPendingExits", 1000)
 	viper.SetDefault("exitCleanup.cleanupInterval", 30*time.Second)
 	viper.SetDefault("exitCleanup.cleanupDelay", 5*time.Minute)
+	viper.SetDefault("workerChannelSize", 750000)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()
