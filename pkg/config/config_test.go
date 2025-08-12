@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/exporters"
+	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/stretchr/testify/assert"
@@ -63,14 +65,23 @@ func TestLoadConfig(t *testing.T) {
 						URL: "http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io",
 					},
 				},
-				WorkerPoolSize:     2000,
-				EventBatchSize:     2500,
+				WorkerPoolSize:     1000,
+				EventBatchSize:     15000,
 				ProcfsScanInterval: 30 * time.Second,
 				RuleCoolDown: rulecooldown.RuleCooldownConfig{
 					CooldownDuration:   1 * time.Hour,
 					CooldownAfterCount: 1,
 					OnProfileFailure:   true,
 					MaxSize:            10000,
+				},
+				OrderedEventQueue: containerwatcher.OrderedEventQueueConfig{
+					Size:            100000,
+					CollectionDelay: 50 * time.Millisecond,
+				},
+				ExitCleanup: processtreecreator.ExitCleanupConfig{
+					MaxPendingExits: 1000,
+					CleanupInterval: 30 * time.Second,
+					CleanupDelay:    5 * time.Minute,
 				},
 				CelConfigCache: cache.FunctionCacheConfig{
 					MaxSize: 1000,

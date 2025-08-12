@@ -2,6 +2,7 @@ package containerwatcher
 
 import (
 	"context"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -50,6 +51,11 @@ type ContainerReceiver interface {
 
 type TaskBasedEnricher interface {
 	SubmitEnrichmentTask(event utils.EnrichEvent, syscalls []uint64, callback ResultCallback, containerID string, processID uint32)
+}
+
+type OrderedEventQueueConfig struct {
+	Size            int           `mapstructure:"size"`
+	CollectionDelay time.Duration `mapstructure:"collectionDelay"`
 }
 
 type ThirdPartyTracers struct {
