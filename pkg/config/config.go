@@ -52,6 +52,7 @@ type Config struct {
 	NetworkStreamingInterval       time.Duration                            `mapstructure:"networkStreamingInterval"`
 	WorkerPoolSize                 int                                      `mapstructure:"workerPoolSize"`
 	WorkerChannelSize              int                                      `mapstructure:"workerChannelSize"`
+	BlockEvents                    bool                                     `mapstructure:"blockEvents"`
 	EventBatchSize                 int                                      `mapstructure:"eventBatchSize"`
 	TestMode                       bool                                     `mapstructure:"testMode"`
 	ExcludeJsonPaths               []string                                 `mapstructure:"excludeJsonPaths"`
@@ -102,6 +103,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("exitCleanup.cleanupInterval", 30*time.Second)
 	viper.SetDefault("exitCleanup.cleanupDelay", 5*time.Minute)
 	viper.SetDefault("workerChannelSize", 750000)
+	viper.SetDefault("blockEvents", false)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()
