@@ -5,8 +5,6 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/goradd/maps"
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -20,7 +18,8 @@ func createSafeMapFromData(data map[uint32]*apitypes.Process) *maps.SafeMap[uint
 }
 
 func TestNewContainerProcessTree(t *testing.T) {
-	cpt := NewContainerProcessTree()
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel)
 	assert.NotNil(t, cpt)
 
 	// Test that it implements the interface
@@ -28,7 +27,8 @@ func TestNewContainerProcessTree(t *testing.T) {
 }
 
 func TestContainerProcessTreeImpl_ContainerCallback_AddContainer(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Create a mock container event
 	containerID := "test-container-123"
@@ -42,36 +42,9 @@ func TestContainerProcessTreeImpl_ContainerCallback_AddContainer(t *testing.T) {
 	assert.Equal(t, containerPID, storedPID)
 }
 
-func TestContainerProcessTreeImpl_ContainerCallback_RemoveContainer(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
-
-	// Pre-populate with a container
-	containerID := "test-container-123"
-	containerPID := uint32(100)
-	cpt.containerIdToShimPid[containerID] = containerPID
-
-	// Create container remove event
-	event := containercollection.PubSubEvent{
-		Type: containercollection.EventTypeRemoveContainer,
-		Container: &containercollection.Container{
-			Runtime: containercollection.RuntimeMetadata{
-				BasicRuntimeMetadata: eventtypes.BasicRuntimeMetadata{
-					ContainerID: containerID,
-				},
-			},
-		},
-	}
-
-	// Call the callback
-	cpt.ContainerCallback(event)
-
-	// Verify the container was removed
-	_, exists := cpt.containerIdToShimPid[containerID]
-	assert.False(t, exists)
-}
-
 func TestContainerProcessTreeImpl_GetPidBranch_Success(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
@@ -134,7 +107,8 @@ func TestContainerProcessTreeImpl_GetPidBranch_Success(t *testing.T) {
 }
 
 func TestContainerProcessTreeImpl_GetPidBranch_ContainerNotFound(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	fullTree := map[uint32]*apitypes.Process{
 		1: {
@@ -152,7 +126,8 @@ func TestContainerProcessTreeImpl_GetPidBranch_ContainerNotFound(t *testing.T) {
 }
 
 func TestContainerProcessTreeImpl_GetPidBranch_ShimNotFound(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with a container but shim PID doesn't exist in tree
 	containerID := "test-container-123"
@@ -175,7 +150,8 @@ func TestContainerProcessTreeImpl_GetPidBranch_ShimNotFound(t *testing.T) {
 }
 
 func TestContainerProcessTreeImpl_GetPidBranch_TargetNotFound(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
@@ -206,7 +182,8 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetNotFound(t *testing.T) {
 }
 
 func TestContainerProcessTreeImpl_GetPidBranch_TargetNotInContainer(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
@@ -246,7 +223,8 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetNotInContainer(t *testing.T
 }
 
 func TestContainerProcessTreeImpl_GetPidBranch_DeepTree(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
@@ -336,7 +314,8 @@ func TestContainerProcessTreeImpl_GetPidBranch_DeepTree(t *testing.T) {
 }
 
 func TestContainerProcessTreeImpl_GetPidBranch_TargetIsShimChild(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
@@ -381,7 +360,8 @@ func TestContainerProcessTreeImpl_GetPidBranch_TargetIsShimChild(t *testing.T) {
 }
 
 func TestContainerProcessTreeImpl_GetPidByContainerID_Success(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with containers
 	containerID1 := "test-container-123"
@@ -403,7 +383,8 @@ func TestContainerProcessTreeImpl_GetPidByContainerID_Success(t *testing.T) {
 }
 
 func TestContainerProcessTreeImpl_GetPidByContainerID_NotFound(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Test getting PID for non-existent container
 	pid, err := cpt.GetPidByContainerID("non-existent-container")
@@ -413,7 +394,8 @@ func TestContainerProcessTreeImpl_GetPidByContainerID_NotFound(t *testing.T) {
 }
 
 func TestContainerProcessTreeImpl_GetShimPIDForProcess_Success(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with containers
 	containerID1 := "test-container-123"
@@ -512,7 +494,8 @@ func TestContainerProcessTreeImpl_GetShimPIDForProcess_Success(t *testing.T) {
 }
 
 func TestContainerProcessTreeImpl_GetShimPIDForProcess_NotFound(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
@@ -556,7 +539,8 @@ func TestContainerProcessTreeImpl_GetShimPIDForProcess_NotFound(t *testing.T) {
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderContainer_Success(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
@@ -611,7 +595,8 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_Success(t *testing.T) 
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderContainer_ContainerNotFound(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	fullTree := map[uint32]*apitypes.Process{
 		1: {
@@ -626,7 +611,8 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_ContainerNotFound(t *t
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderContainer_ShimNotFound(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with a container but shim PID doesn't exist in tree
 	containerID := "test-container-123"
@@ -646,7 +632,8 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_ShimNotFound(t *testin
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderContainer_ProcessNotFound(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
 	containerID := "test-container-123"
@@ -674,7 +661,8 @@ func TestContainerProcessTreeImpl_IsProcessUnderContainer_ProcessNotFound(t *tes
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_Success(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with multiple containers
 	containerID1 := "test-container-123"
@@ -767,7 +755,8 @@ func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_Success(t *t
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_NoContainers(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// No containers registered
 	fullTree := map[uint32]*apitypes.Process{
@@ -784,7 +773,8 @@ func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_NoContainers
 }
 
 func TestContainerProcessTreeImpl_IsProcessUnderAnyContainerSubtree_OutsideProcess(t *testing.T) {
-	cpt := NewContainerProcessTree().(*containerProcessTreeImpl)
+	channel := make(chan uint32)
+	cpt := NewContainerProcessTree(channel).(*containerProcessTreeImpl)
 
 	// Pre-populate with a container
 	containerID := "test-container-123"

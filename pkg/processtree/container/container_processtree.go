@@ -14,12 +14,14 @@ import (
 
 type containerProcessTreeImpl struct {
 	containerIdToShimPid map[string]uint32
+	channel              chan uint32
 	mutex                sync.RWMutex
 }
 
-func NewContainerProcessTree() ContainerProcessTree {
+func NewContainerProcessTree(channel chan uint32) ContainerProcessTree {
 	return &containerProcessTreeImpl{
 		containerIdToShimPid: make(map[string]uint32),
+		channel:              channel,
 	}
 }
 
@@ -52,6 +54,7 @@ func (c *containerProcessTreeImpl) ContainerCallback(notif containercollection.P
 		}
 	case containercollection.EventTypeRemoveContainer:
 		c.mutex.Lock()
+		c.channel <- c.containerIdToShimPid[containerID]
 		delete(c.containerIdToShimPid, containerID)
 		c.mutex.Unlock()
 		logger.L().Info("ContainerProcessTree.ContainerCallback - removed container", helpers.String("containerID", containerID))

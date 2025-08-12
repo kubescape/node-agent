@@ -12,7 +12,7 @@ import (
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/kubescape/node-agent/pkg/processtree/reparenting"
-)	
+)
 
 type processTreeCreatorImpl struct {
 	processMap            maps.SafeMap[uint32, *apitypes.Process] // PID -> Process
@@ -20,13 +20,14 @@ type processTreeCreatorImpl struct {
 	reparentingStrategies reparenting.ReparentingStrategies
 	mutex                 sync.RWMutex // Protects process tree modifications
 	config                config.Config
+	containerExitChan     chan uint32
 
 	// Exit manager fields
 	pendingExits        map[uint32]*pendingExit // PID -> pending exit
 	exitCleanupStopChan chan struct{}
 }
 
-func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree, config config.Config) ProcessTreeCreator {
+func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree, config config.Config, containerExitChan chan uint32) ProcessTreeCreator {
 	// Create reparenting logic
 	reparentingLogic, err := reparenting.NewReparentingLogic()
 	if err != nil {
@@ -40,6 +41,7 @@ func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTr
 		containerTree:         containerTree,
 		pendingExits:          make(map[uint32]*pendingExit),
 		config:                config,
+		containerExitChan:     containerExitChan,
 	}
 
 	return creator

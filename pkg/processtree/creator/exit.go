@@ -25,6 +25,7 @@ func (pt *processTreeCreatorImpl) startExitManager() {
 
 	pt.exitCleanupStopChan = make(chan struct{})
 	go pt.exitCleanupLoop()
+	go pt.exitByPidWithChannel()
 }
 
 func (pt *processTreeCreatorImpl) stopExitManager() {
@@ -130,13 +131,11 @@ func (pt *processTreeCreatorImpl) forceCleanupOldest() {
 func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 	pending := pt.pendingExits[pid]
 	if pending == nil {
-		logger.L().Warning("exitByPid: pendingExits[pid] is nil", helpers.String("pid", fmt.Sprintf("%d", pid)))
 		return
 	}
 
 	proc, ok := pt.processMap.Load(pid)
 	if !ok {
-		logger.L().Warning("exitByPid: processMap[pid] does not exist", helpers.String("pid", fmt.Sprintf("%d", pid)))
 		delete(pt.pendingExits, pid)
 		return
 	}
@@ -159,6 +158,68 @@ func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 	if proc.PPID != 0 {
 		if parent, ok := pt.processMap.Load(proc.PPID); ok {
 			delete(parent.ChildrenMap, apitypes.CommPID{Comm: proc.Comm, PID: pid})
+		}
+	}
+
+	pt.processMap.Delete(pid)
+	delete(pt.pendingExits, pid)
+}
+
+func (pt *processTreeCreatorImpl) exitByPidWithChannel() {
+	for {
+		select {
+		case pid := <-pt.containerExitChan:
+			pt.deleteAllTreeUnderPid(pid)
+		case <-pt.exitCleanupStopChan:
+			return
+		}
+	}
+}
+
+func (pt *processTreeCreatorImpl) deleteAllTreeUnderPid(pid uint32) {
+	pt.mutex.Lock()
+	defer pt.mutex.Unlock()
+
+	proc, ok := pt.processMap.Load(pid)
+	if !ok {
+		logger.L().Debug("deleteAllTreeUnderPid: process not found",
+			helpers.String("pid", fmt.Sprintf("%d", pid)))
+		return
+	}
+
+	if proc.ChildrenMap != nil {
+		for _, child := range proc.ChildrenMap {
+			if child != nil {
+				pt.deleteAllTreeUnderPidRecursive(child.PID)
+			}
+		}
+	}
+
+	if proc.PPID != 0 {
+		if parent, ok := pt.processMap.Load(proc.PPID); ok && parent.ChildrenMap != nil {
+			key := apitypes.CommPID{Comm: proc.Comm, PID: pid}
+			delete(parent.ChildrenMap, key)
+		}
+	}
+
+	pt.processMap.Delete(pid)
+	delete(pt.pendingExits, pid)
+
+	logger.L().Debug("deleteAllTreeUnderPid: deleted process and all children",
+		helpers.String("pid", fmt.Sprintf("%d", pid)))
+}
+
+func (pt *processTreeCreatorImpl) deleteAllTreeUnderPidRecursive(pid uint32) {
+	proc, ok := pt.processMap.Load(pid)
+	if !ok {
+		return
+	}
+
+	if proc.ChildrenMap != nil {
+		for _, child := range proc.ChildrenMap {
+			if child != nil {
+				pt.deleteAllTreeUnderPidRecursive(child.PID)
+			}
 		}
 	}
 

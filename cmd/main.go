@@ -235,11 +235,13 @@ func main() {
 	var ruleBindingNotify chan rulebinding.RuleBindingNotify
 	var cloudMetadata *apitypes.CloudMetadata
 
+	containerExitChan := make(chan uint32, 10)
+
 	// Create the container process tree
-	containerProcessTree := containerprocesstree.NewContainerProcessTree()
+	containerProcessTree := containerprocesstree.NewContainerProcessTree(containerExitChan)
 
 	// Create the process tree creator
-	processTreeCreator := processtreecreator.NewProcessTreeCreator(containerProcessTree, cfg)
+	processTreeCreator := processtreecreator.NewProcessTreeCreator(containerProcessTree, cfg, containerExitChan)
 
 	// Create the process tree manager
 	processTreeManager = processtree.NewProcessTreeManager(

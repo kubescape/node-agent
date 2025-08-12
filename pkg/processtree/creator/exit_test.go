@@ -18,9 +18,27 @@ import (
 )
 
 // Mock implementations for testing
-type mockContainerProcessTree struct{}
+type mockContainerProcessTree struct {
+	channel chan uint32
+}
+
+func newMockContainerProcessTree(channel chan uint32) *mockContainerProcessTree {
+	return &mockContainerProcessTree{
+		channel: channel,
+	}
+}
 
 func (m *mockContainerProcessTree) ContainerCallback(notif containercollection.PubSubEvent) {}
+
+// TriggerContainerExit simulates a container exit by sending a PID to the exit channel
+func (m *mockContainerProcessTree) TriggerContainerExit(pid uint32) {
+	select {
+	case m.channel <- pid:
+	default:
+		// Channel might be full or not being read, just skip
+	}
+}
+
 func (m *mockContainerProcessTree) GetContainerTreeNodes(containerID string, fullTree *maps.SafeMap[uint32, *apitypes.Process]) ([]apitypes.Process, error) {
 	return []apitypes.Process{}, nil
 }
@@ -66,12 +84,14 @@ func createTestProcessTreeCreator() *processTreeCreatorImpl {
 		},
 	}
 
+	exitChan := make(chan uint32, 10)
 	return &processTreeCreatorImpl{
 		processMap:            maps.SafeMap[uint32, *apitypes.Process]{},
-		containerTree:         &mockContainerProcessTree{},
+		containerTree:         newMockContainerProcessTree(exitChan),
 		reparentingStrategies: &mockReparentingLogic{},
 		pendingExits:          make(map[uint32]*pendingExit),
 		config:                testConfig,
+		containerExitChan:     exitChan,
 	}
 }
 
@@ -517,4 +537,285 @@ func TestExitManager_CleanupLoop(t *testing.T) {
 	assert.Equal(t, 0, len(pt.pendingExits), "Process should be cleaned up")
 	assert.Nil(t, pt.processMap.Get(100), "Process should be removed from map")
 	pt.mutex.RUnlock()
+}
+
+func TestDeleteAllTreeUnderPid(t *testing.T) {
+	// Create process tree creator
+	containerTree := &mockContainerProcessTree{}
+	exitChan := make(chan uint32, 10)
+	cfg := config.Config{
+		ExitCleanup: processtreecreatorconfig.ExitCleanupConfig{
+			MaxPendingExits: 1000,
+			CleanupDelay:    5 * time.Minute,
+			CleanupInterval: 30 * time.Second,
+		},
+	}
+
+	pt := NewProcessTreeCreator(containerTree, cfg, exitChan).(*processTreeCreatorImpl)
+
+	// Create a process tree structure:
+	// Root (PID 1)
+	//   ├── Parent (PID 100)
+	//       ├── Child1 (PID 200)
+	//       │   └── Grandchild1 (PID 300)
+	//       └── Child2 (PID 201)
+	//           └── Grandchild2 (PID 301)
+
+	// Create root process
+	root := &apitypes.Process{
+		PID:         1,
+		PPID:        0,
+		Comm:        "init",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	pt.processMap.Set(1, root)
+
+	// Create parent process
+	parent := &apitypes.Process{
+		PID:         100,
+		PPID:        1,
+		Comm:        "parent",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	pt.processMap.Set(100, parent)
+	root.ChildrenMap[apitypes.CommPID{Comm: "parent", PID: 100}] = parent
+
+	// Create child1
+	child1 := &apitypes.Process{
+		PID:         200,
+		PPID:        100,
+		Comm:        "child1",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	pt.processMap.Set(200, child1)
+	parent.ChildrenMap[apitypes.CommPID{Comm: "child1", PID: 200}] = child1
+
+	// Create grandchild1
+	grandchild1 := &apitypes.Process{
+		PID:         300,
+		PPID:        200,
+		Comm:        "grandchild1",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	pt.processMap.Set(300, grandchild1)
+	child1.ChildrenMap[apitypes.CommPID{Comm: "grandchild1", PID: 300}] = grandchild1
+
+	// Create child2
+	child2 := &apitypes.Process{
+		PID:         201,
+		PPID:        100,
+		Comm:        "child2",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	pt.processMap.Set(201, child2)
+	parent.ChildrenMap[apitypes.CommPID{Comm: "child2", PID: 201}] = child2
+
+	// Create grandchild2
+	grandchild2 := &apitypes.Process{
+		PID:         301,
+		PPID:        201,
+		Comm:        "grandchild2",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	pt.processMap.Set(301, grandchild2)
+	child2.ChildrenMap[apitypes.CommPID{Comm: "grandchild2", PID: 301}] = grandchild2
+
+	// Add some pending exits
+	pt.pendingExits[100] = &pendingExit{PID: 100, StartTimeNs: 1000, Timestamp: time.Now()}
+	pt.pendingExits[200] = &pendingExit{PID: 200, StartTimeNs: 2000, Timestamp: time.Now()}
+	pt.pendingExits[300] = &pendingExit{PID: 300, StartTimeNs: 3000, Timestamp: time.Now()}
+
+	// Verify initial state
+	assert.NotNil(t, pt.processMap.Get(1), "Root should exist")
+	assert.NotNil(t, pt.processMap.Get(100), "Parent should exist")
+	assert.NotNil(t, pt.processMap.Get(200), "Child1 should exist")
+	assert.NotNil(t, pt.processMap.Get(201), "Child2 should exist")
+	assert.NotNil(t, pt.processMap.Get(300), "Grandchild1 should exist")
+	assert.NotNil(t, pt.processMap.Get(301), "Grandchild2 should exist")
+	assert.Len(t, root.ChildrenMap, 1, "Root should have 1 child")
+	assert.Len(t, parent.ChildrenMap, 2, "Parent should have 2 children")
+	assert.Len(t, pt.pendingExits, 3, "Should have 3 pending exits")
+
+	// Delete the entire subtree under parent (PID 100)
+	pt.deleteAllTreeUnderPid(100)
+
+	// Verify that all processes in the subtree are deleted
+	assert.NotNil(t, pt.processMap.Get(1), "Root should still exist")
+	assert.Nil(t, pt.processMap.Get(100), "Parent should be deleted")
+	assert.Nil(t, pt.processMap.Get(200), "Child1 should be deleted")
+	assert.Nil(t, pt.processMap.Get(201), "Child2 should be deleted")
+	assert.Nil(t, pt.processMap.Get(300), "Grandchild1 should be deleted")
+	assert.Nil(t, pt.processMap.Get(301), "Grandchild2 should be deleted")
+
+	// Verify that root's children map is updated
+	assert.Len(t, root.ChildrenMap, 0, "Root should have no children after deletion")
+
+	// Verify that pending exits are cleaned up
+	assert.Len(t, pt.pendingExits, 0, "All pending exits should be cleaned up")
+}
+
+func TestDeleteAllTreeUnderPid_NonExistentProcess(t *testing.T) {
+	// Create process tree creator
+	containerTree := &mockContainerProcessTree{}
+	exitChan := make(chan uint32, 10)
+	cfg := config.Config{
+		ExitCleanup: processtreecreatorconfig.ExitCleanupConfig{
+			MaxPendingExits: 1000,
+			CleanupDelay:    5 * time.Minute,
+			CleanupInterval: 30 * time.Second,
+		},
+	}
+
+	pt := NewProcessTreeCreator(containerTree, cfg, exitChan).(*processTreeCreatorImpl)
+
+	// Try to delete a non-existent process
+	pt.deleteAllTreeUnderPid(999)
+
+	// Should not panic or cause any issues
+	assert.Equal(t, 0, pt.processMap.Len(), "Process map should be empty")
+}
+
+func TestContainerExitFlow(t *testing.T) {
+	// Create process tree creator
+	exitChan := make(chan uint32, 10)
+	containerTree := newMockContainerProcessTree(exitChan)
+	cfg := config.Config{
+		ExitCleanup: processtreecreatorconfig.ExitCleanupConfig{
+			MaxPendingExits: 1000,
+			CleanupDelay:    5 * time.Minute,
+			CleanupInterval: 30 * time.Second,
+		},
+	}
+
+	pt := NewProcessTreeCreator(containerTree, cfg, exitChan).(*processTreeCreatorImpl)
+
+	// Create a process tree structure:
+	// Shim (PID 100) - this is the container shim
+	//   ├── Container Process (PID 200)
+	//       └── App Process (PID 300)
+
+	// Create shim process
+	shim := &apitypes.Process{
+		PID:         100,
+		PPID:        1,
+		Comm:        "containerd-shim",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	pt.processMap.Set(100, shim)
+
+	// Create container process
+	containerProc := &apitypes.Process{
+		PID:         200,
+		PPID:        100,
+		Comm:        "container-main",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	pt.processMap.Set(200, containerProc)
+	shim.ChildrenMap[apitypes.CommPID{Comm: "container-main", PID: 200}] = containerProc
+
+	// Create app process
+	app := &apitypes.Process{
+		PID:         300,
+		PPID:        200,
+		Comm:        "app",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	pt.processMap.Set(300, app)
+	containerProc.ChildrenMap[apitypes.CommPID{Comm: "app", PID: 300}] = app
+
+	// Verify initial state
+	assert.NotNil(t, pt.processMap.Get(100), "Shim should exist")
+	assert.NotNil(t, pt.processMap.Get(200), "Container process should exist")
+	assert.NotNil(t, pt.processMap.Get(300), "App process should exist")
+	assert.Len(t, shim.ChildrenMap, 1, "Shim should have 1 child")
+	assert.Len(t, containerProc.ChildrenMap, 1, "Container process should have 1 child")
+
+	// Start the exit manager to handle channel events
+	pt.startExitManager()
+	defer pt.stopExitManager()
+
+	// Simulate container exit by triggering the mock
+	containerTree.TriggerContainerExit(100) // Send shim PID
+
+	// Give some time for the goroutine to process the channel event
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify that the entire tree under the shim is deleted
+	assert.Nil(t, pt.processMap.Get(100), "Shim should be deleted")
+	assert.Nil(t, pt.processMap.Get(200), "Container process should be deleted")
+	assert.Nil(t, pt.processMap.Get(300), "App process should be deleted")
+}
+
+func TestExitByPidWithChannelFlow(t *testing.T) {
+	// Create process tree creator
+	exitChan := make(chan uint32, 10)
+	containerTree := newMockContainerProcessTree(exitChan)
+	cfg := config.Config{
+		ExitCleanup: processtreecreatorconfig.ExitCleanupConfig{
+			MaxPendingExits: 1000,
+			CleanupDelay:    5 * time.Minute,
+			CleanupInterval: 30 * time.Second,
+		},
+	}
+
+	pt := NewProcessTreeCreator(containerTree, cfg, exitChan).(*processTreeCreatorImpl)
+
+	// Create a simple process
+	proc := &apitypes.Process{
+		PID:         100,
+		PPID:        1,
+		Comm:        "test-process",
+		ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process),
+	}
+	pt.processMap.Set(100, proc)
+
+	// Verify initial state
+	assert.NotNil(t, pt.processMap.Get(100), "Process should exist initially")
+
+	// Start the exit manager to handle channel events
+	pt.startExitManager()
+	defer pt.stopExitManager()
+
+	// Send PID to channel
+	exitChan <- 100
+
+	// Give some time for the goroutine to process the channel event
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify that the process was deleted
+	assert.Nil(t, pt.processMap.Get(100), "Process should be deleted after channel processing")
+}
+
+func TestExitByPidWithChannelStopSignal(t *testing.T) {
+	// Create process tree creator
+	exitChan := make(chan uint32, 10)
+	containerTree := newMockContainerProcessTree(exitChan)
+	cfg := config.Config{
+		ExitCleanup: processtreecreatorconfig.ExitCleanupConfig{
+			MaxPendingExits: 1000,
+			CleanupDelay:    5 * time.Minute,
+			CleanupInterval: 30 * time.Second,
+		},
+	}
+
+	pt := NewProcessTreeCreator(containerTree, cfg, exitChan).(*processTreeCreatorImpl)
+	pt.exitCleanupStopChan = make(chan struct{})
+
+	// Test that exitByPidWithChannel returns when stop signal is sent
+	stopped := make(chan bool, 1)
+	go func() {
+		pt.exitByPidWithChannel()
+		stopped <- true
+	}()
+
+	// Send stop signal
+	close(pt.exitCleanupStopChan)
+
+	// Verify that the function returned
+	select {
+	case <-stopped:
+		// Good, function returned
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("exitByPidWithChannel should have returned after stop signal")
+	}
 }
