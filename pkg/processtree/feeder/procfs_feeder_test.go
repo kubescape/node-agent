@@ -2,6 +2,7 @@ package feeder
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -50,10 +51,13 @@ func TestProcfsFeeder_Stop(t *testing.T) {
 
 	// Test stop after start
 	err = feeder.Start(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	err = feeder.Stop()
 	assert.NoError(t, err)
+	// After stopping, cancel should be nil to allow a restart.
+	// The context itself is intentionally not nilled out to prevent a race condition.
+	assert.Nil(t, feeder.cancel, "Cancel func should be nil after stop")
 }
 
 func TestProcfsFeeder_Subscribe(t *testing.T) {
@@ -61,30 +65,37 @@ func TestProcfsFeeder_Subscribe(t *testing.T) {
 	ch := make(chan conversion.ProcessEvent, 1)
 
 	feeder.Subscribe(ch)
-	assert.Len(t, feeder.subscribers, 1)
+	require.Len(t, feeder.subscribers, 1)
+	// Cast the bidirectional channel `ch` to the send-only type to match
+	// the type in the slice, allowing `assert.Equal` to work correctly.
+	assert.Equal(t, (chan<- conversion.ProcessEvent)(ch), feeder.subscribers[0])
 
 	// Test multiple subscribers
 	ch2 := make(chan conversion.ProcessEvent, 1)
 	feeder.Subscribe(ch2)
-	assert.Len(t, feeder.subscribers, 2)
+	require.Len(t, feeder.subscribers, 2)
+	assert.Equal(t, (chan<- conversion.ProcessEvent)(ch2), feeder.subscribers[1])
 }
 
 func TestProcfsFeeder_ReadProcessInfo(t *testing.T) {
 	feeder := NewProcfsFeeder(100 * time.Millisecond)
 	ctx := context.Background()
 
-	// Start the feeder to initialize procfs
 	err := feeder.Start(ctx)
-	require.NoError(t, err)
+	require.NoError(t, err, "Feeder should start without error")
 	defer feeder.Stop()
 
-	// Test reading info for PID 1 (init process)
-	event, err := feeder.readProcessInfo(1)
+	// Test reading info for PID 1 (init/systemd process)
+	// This process is guaranteed to exist on any Linux system.
+	pid1_event, err := feeder.readProcessInfo(1)
 	assert.NoError(t, err)
-	assert.Equal(t, conversion.ProcfsEvent, event.Type)
-	assert.Equal(t, uint32(1), event.PID)
-	assert.NotEmpty(t, event.Comm)
-	assert.Zero(t, event.PPID) // init should have PPID 0
+	assert.Equal(t, conversion.ProcfsEvent, pid1_event.Type)
+	assert.Equal(t, uint32(1), pid1_event.PID)
+	assert.NotEmpty(t, pid1_event.Comm, "Comm for PID 1 should not be empty")
+	// On modern systems, PPID for PID 1 is 0.
+	assert.Zero(t, pid1_event.PPID, "PPID for PID 1 should be 0")
+	// Note: readProcessInfo does NOT populate Pcomm. This is handled by scanProcfs.
+	assert.Empty(t, pid1_event.Pcomm, "Pcomm should be empty from readProcessInfo")
 
 	// Test reading info for a non-existent PID
 	_, err = feeder.readProcessInfo(999999)
@@ -95,9 +106,8 @@ func TestProcfsFeeder_GetProcessComm(t *testing.T) {
 	feeder := NewProcfsFeeder(100 * time.Millisecond)
 	ctx := context.Background()
 
-	// Start the feeder to initialize procfs
 	err := feeder.Start(ctx)
-	require.NoError(t, err)
+	require.NoError(t, err, "Feeder should start without error")
 	defer feeder.Stop()
 
 	// Test getting comm for PID 1
@@ -110,24 +120,6 @@ func TestProcfsFeeder_GetProcessComm(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestProcfsFeeder_ProcessSpecificPID(t *testing.T) {
-	feeder := NewProcfsFeeder(100 * time.Millisecond)
-	ctx := context.Background()
-
-	// Start the feeder to initialize procfs
-	err := feeder.Start(ctx)
-	require.NoError(t, err)
-	defer feeder.Stop()
-
-	// Test processing a specific PID
-	err = feeder.ProcessSpecificPID(1)
-	assert.NoError(t, err)
-
-	// Test processing a non-existent PID
-	err = feeder.ProcessSpecificPID(999999)
-	assert.Error(t, err)
-}
-
 func TestProcfsFeeder_BroadcastEvent(t *testing.T) {
 	feeder := NewProcfsFeeder(100 * time.Millisecond)
 	ch1 := make(chan conversion.ProcessEvent, 1)
@@ -136,63 +128,95 @@ func TestProcfsFeeder_BroadcastEvent(t *testing.T) {
 	feeder.Subscribe(ch1)
 	feeder.Subscribe(ch2)
 
-	event := conversion.ProcessEvent{
-		Type:      conversion.ProcfsEvent,
-		Timestamp: time.Now(),
-		PID:       123,
-		Comm:      "test-process",
-	}
-
+	event := conversion.ProcessEvent{PID: 123, Comm: "test-process"}
 	feeder.broadcastEvent(event)
 
 	// Check that both subscribers received the event
-	select {
-	case receivedEvent := <-ch1:
-		assert.Equal(t, event.PID, receivedEvent.PID)
-		assert.Equal(t, event.Comm, receivedEvent.Comm)
-	default:
-		t.Error("Expected event on ch1")
-	}
-
-	select {
-	case receivedEvent := <-ch2:
-		assert.Equal(t, event.PID, receivedEvent.PID)
-		assert.Equal(t, event.Comm, receivedEvent.Comm)
-	default:
-		t.Error("Expected event on ch2")
+	timeout := time.After(100 * time.Millisecond)
+	for i := 0; i < 2; i++ {
+		select {
+		case receivedEvent := <-ch1:
+			assert.Equal(t, event, receivedEvent)
+		case receivedEvent := <-ch2:
+			assert.Equal(t, event, receivedEvent)
+		case <-timeout:
+			t.Fatal("timed out waiting for event")
+		}
 	}
 }
 
 func TestProcfsFeeder_ScanProcfs(t *testing.T) {
 	feeder := NewProcfsFeeder(100 * time.Millisecond)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Start the feeder to initialize procfs
 	err := feeder.Start(ctx)
 	require.NoError(t, err)
 	defer feeder.Stop()
 
-	// Test scanning procfs (should not panic and should process some processes)
+	ch := make(chan conversion.ProcessEvent, 256) // Buffer to hold events
+	feeder.Subscribe(ch)
+
+	// Run the scan
 	feeder.scanProcfs()
-	// This test mainly ensures the method doesn't panic
-	// In a real environment, it would process actual processes
-	time.Sleep(100 * time.Millisecond)
+
+	// Check that we received events. We expect at least one (for PID 1).
+	// We read in a non-blocking way with a timeout.
+	var receivedEvents []conversion.ProcessEvent
+	timeout := time.After(500 * time.Millisecond)
+ReceiveLoop:
+	for {
+		select {
+		case event := <-ch:
+			receivedEvents = append(receivedEvents, event)
+		case <-timeout:
+			break ReceiveLoop
+		}
+	}
+
+	assert.NotEmpty(t, receivedEvents, "should have received at least one process event")
+
+	// Validate that the parent lookup logic worked.
+	// Find our own process and check if its parent's comm is populated.
+	ownPid := uint32(os.Getpid())
+	var ownProcessEvent *conversion.ProcessEvent
+	for i := range receivedEvents {
+		if receivedEvents[i].PID == ownPid {
+			ownProcessEvent = &receivedEvents[i]
+			break
+		}
+	}
+
+	require.NotNil(t, ownProcessEvent, "The test's own process should be found in the scan")
+	assert.NotEmpty(t, ownProcessEvent.Pcomm, "Parent comm for the test process should be populated")
+	assert.Equal(t, uint32(os.Getppid()), ownProcessEvent.PPID, "PPID of test process should match os.Getppid()")
 }
 
-func TestProcfsFeeder_ProcessProcfsEntry(t *testing.T) {
+func TestProcfsFeeder_ProcessSpecificPID(t *testing.T) {
 	feeder := NewProcfsFeeder(100 * time.Millisecond)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Start the feeder to initialize procfs
 	err := feeder.Start(ctx)
 	require.NoError(t, err)
 	defer feeder.Stop()
 
-	// Test processing a valid PID
-	feeder.processProcfsEntry(1)
-	// This test mainly ensures the method doesn't panic
+	ch := make(chan conversion.ProcessEvent, 1)
+	feeder.Subscribe(ch)
 
-	// Test processing an invalid PID
-	feeder.processProcfsEntry(999999)
-	// This should handle the error gracefully
+	// Test processing PID 1
+	err = feeder.ProcessSpecificPID(1)
+	assert.NoError(t, err)
+
+	// Check that an event was broadcasted
+	select {
+	case event := <-ch:
+		assert.Equal(t, uint32(1), event.PID)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out waiting for event from ProcessSpecificPID")
+	}
+
+	// Test processing a non-existent PID
+	err = feeder.ProcessSpecificPID(999999)
+	assert.Error(t, err)
 }
