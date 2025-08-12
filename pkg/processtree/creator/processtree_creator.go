@@ -112,28 +112,6 @@ func (pt *processTreeCreatorImpl) GetPidBranch(containerTree interface{}, contai
 	return ct.GetPidBranch(containerID, targetPID, &pt.processMap)
 }
 
-// GetHostProcessBranch builds a process tree branch from the given PID up to the root (init process)
-func (pt *processTreeCreatorImpl) GetHostProcessBranch(pid uint32) (apitypes.Process, error) {
-	pt.mutex.RLock()
-	defer pt.mutex.RUnlock()
-
-	// Find the target process
-	targetProc, ok := pt.processMap.Load(pid)
-	if !ok {
-		return apitypes.Process{}, fmt.Errorf("process with PID %d not found", pid)
-	}
-
-	// 1. Extract pid node from full tree - already have it as targetProc
-	// 2. Traverse back to the first node (root) by PPID to build the path
-	pathToRoot := pt.buildPathToRoot(targetProc)
-	if len(pathToRoot) == 0 {
-		return apitypes.Process{}, fmt.Errorf("failed to build path to root for PID %d", pid)
-	}
-
-	// 3. Return branch node - build the branch from root down to target
-	return pt.buildBranchFromPath(pathToRoot), nil
-}
-
 // UpdatePPID handles PPID updates using the new reparenting strategy
 func (pt *processTreeCreatorImpl) UpdatePPID(proc *apitypes.Process, event conversion.ProcessEvent) {
 	if event.PPID != proc.PPID && event.PPID != 0 {
@@ -330,7 +308,7 @@ func (pt *processTreeCreatorImpl) linkProcessToParent(proc *apitypes.Process) {
 	if parent.ChildrenMap == nil {
 		parent.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
 	}
-	key := apitypes.CommPID{Comm: proc.Comm, PID: proc.PID}
+	key := apitypes.CommPID{PID: proc.PID}
 	parent.ChildrenMap[key] = proc
 }
 
@@ -354,8 +332,12 @@ func (pt *processTreeCreatorImpl) updateProcessPPID(proc *apitypes.Process, newP
 	// Remove from old parent's children map
 	if proc.PPID != 0 {
 		if oldParent, ok := pt.processMap.Load(proc.PPID); ok && oldParent.ChildrenMap != nil {
-			key := apitypes.CommPID{Comm: proc.Comm, PID: proc.PID}
-			delete(oldParent.ChildrenMap, key)
+			key := apitypes.CommPID{PID: proc.PID}
+			if _, ok := oldParent.ChildrenMap[key]; ok {
+				delete(oldParent.ChildrenMap, key)
+			} else {
+				logger.L().Warning("updateProcessPPID: process not found in old parent's children map", helpers.String("pid", fmt.Sprintf("%d", proc.PID)))
+			}
 		}
 	}
 
