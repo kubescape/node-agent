@@ -201,7 +201,7 @@ func CreateContainerWatcher(
 		metrics:              metrics,
 		ruleBindingPodNotify: ruleBindingPodNotify,
 		runtime:              runtime,
-		pool:                 workerpool.NewWithMaxRunningTime(cfg.WorkerPoolSize, 1*time.Second),
+		pool:                 workerpool.NewWithMaxRunningTime(cfg.WorkerPoolSize, 5*time.Second),
 	}, nil
 }
 
