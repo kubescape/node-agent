@@ -131,7 +131,7 @@ func convertExitEvent(exitEvent *tracerexittype.Event) ProcessEvent {
 func convertProcfsEvent(procfsEvent *events.ProcfsEvent) ProcessEvent {
 	event := ProcessEvent{
 		Type:        ProcfsEvent,
-		Timestamp:   procfsEvent.Timestamp,
+		Timestamp:   time.Unix(0, int64(procfsEvent.Timestamp)),
 		PID:         procfsEvent.PID,
 		PPID:        procfsEvent.PPID,
 		Comm:        procfsEvent.Comm,

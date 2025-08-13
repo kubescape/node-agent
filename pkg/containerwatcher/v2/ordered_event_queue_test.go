@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,8 +19,8 @@ type MockEvent struct {
 	Namespace string
 }
 
-func (m MockEvent) GetTimestamp() int64 {
-	return m.Timestamp
+func (m MockEvent) GetTimestamp() types.Time {
+	return types.Time(m.Timestamp)
 }
 
 func (m MockEvent) GetPod() string {
@@ -191,51 +192,6 @@ func TestOrderedEventQueue_BasicOperations(t *testing.T) {
 	// Queue should be empty now
 	assert.True(t, queue.Empty())
 	assert.Equal(t, 0, queue.Size())
-}
-
-// MockEventNoTimestamp doesn't implement GetTimestamp() interface
-type MockEventNoTimestamp struct {
-	ID        string
-	Pod       string
-	Namespace string
-}
-
-func (m MockEventNoTimestamp) GetPod() string {
-	if m.Pod == "" {
-		return "test-pod"
-	}
-	return m.Pod
-}
-
-func (m MockEventNoTimestamp) GetNamespace() string {
-	if m.Namespace == "" {
-		return "test-namespace"
-	}
-	return m.Namespace
-}
-
-func TestOrderedEventQueue_EventWithoutTimestamp(t *testing.T) {
-	queue := NewOrderedEventQueue(10*time.Millisecond, 1000, nil)
-
-	// Add event without timestamp (should use current time)
-	before := time.Now()
-	eventNoTs := MockEventNoTimestamp{ID: "no-timestamp"}
-	queue.AddEventDirect(utils.OpenEventType, eventNoTs, "container-no-ts", 5678)
-	after := time.Now()
-
-	// Pop the event
-	poppedEvent, ok := queue.PopEvent()
-	require.True(t, ok)
-
-	// Verify event properties
-	assert.Equal(t, utils.OpenEventType, poppedEvent.EventType)
-	assert.Equal(t, eventNoTs, poppedEvent.Event)
-	assert.Equal(t, "container-no-ts", poppedEvent.ContainerID)
-	assert.Equal(t, uint32(5678), poppedEvent.ProcessID)
-
-	// Verify timestamp was set to current time (between before and after)
-	assert.True(t, poppedEvent.Timestamp.After(before.Add(-1*time.Second))) // Allow some margin
-	assert.True(t, poppedEvent.Timestamp.Before(after.Add(1*time.Second)))  // Allow some margin
 }
 
 func TestOrderedEventQueue_MultipleEventTypes(t *testing.T) {

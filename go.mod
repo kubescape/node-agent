@@ -374,4 +374,4 @@ replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5
 
 replace github.com/mholt/archiver/v3 v3.5.1 => github.com/anchore/archiver/v3 v3.5.2
 
-replace github.com/inspektor-gadget/inspektor-gadget => github.com/amirmalka/inspektor-gadget v0.40.1-0.20250813112504-1bfe2d9ed5c9
+replace github.com/inspektor-gadget/inspektor-gadget => github.com/amirmalka/inspektor-gadget v0.40.1-0.20250813125507-f2e7de21c1b5
