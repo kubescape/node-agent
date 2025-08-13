@@ -188,7 +188,7 @@ func CreateContainerWatcher(
 		processTreeManager:  processTreeManager,
 		eventEnricher:       eventEnricher,
 		workerPool:          workerPool,
-		workerChan:          make(chan *events.EnrichedEvent, cfg.WorkerPoolSize*4), // Buffer size 4x worker pool size
+		workerChan:          make(chan *events.EnrichedEvent, cfg.WorkerChannelSize),
 
 		// Third party components
 		thirdPartyTracers:            mapset.NewSet[containerwatcher.CustomTracer](),
@@ -201,7 +201,7 @@ func CreateContainerWatcher(
 		metrics:              metrics,
 		ruleBindingPodNotify: ruleBindingPodNotify,
 		runtime:              runtime,
-		pool:                 workerpool.NewWithMaxRunningTime(cfg.WorkerPoolSize, 30*time.Second),
+		pool:                 workerpool.NewWithMaxRunningTime(cfg.WorkerPoolSize, 1*time.Second),
 	}, nil
 }
 
@@ -435,8 +435,15 @@ func (cw *ContainerWatcher) enrichAndProcess(entry eventEntry) {
 	select {
 	case cw.workerChan <- enrichedEvent:
 	default:
-		logger.L().Warning("ContainerWatcher - Worker channel full, dropping event",
-			helpers.String("eventType", string(entry.EventType)),
-			helpers.String("containerID", entry.ContainerID))
+		if cw.cfg.BlockEvents {
+			logger.L().Warning("ContainerWatcher - Worker channel full, blocking until space available",
+				helpers.String("eventType", string(entry.EventType)),
+				helpers.String("containerID", entry.ContainerID))
+			cw.workerChan <- enrichedEvent
+		} else {
+			logger.L().Warning("ContainerWatcher - Worker channel full, dropping event",
+				helpers.String("eventType", string(entry.EventType)),
+				helpers.String("containerID", entry.ContainerID))
+		}
 	}
 }
