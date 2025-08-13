@@ -64,12 +64,6 @@ func (ptm *ProcessTreeManagerImpl) ReportEvent(eventType utils.EventType, event 
 	return nil
 }
 
-func (ptm *ProcessTreeManagerImpl) GetHostProcessTree(pid uint32) (apitypes.Process, error) {
-	ptm.mutex.RLock()
-	defer ptm.mutex.RUnlock()
-	return ptm.creator.GetHostProcessBranch(pid)
-}
-
 func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, pid uint32, useCache bool) (apitypes.Process, error) {
 	cacheKey := fmt.Sprintf("%s:%d", containerID, pid)
 	if cached, exists := ptm.containerProcessTreeCache.Get(cacheKey); exists && useCache {

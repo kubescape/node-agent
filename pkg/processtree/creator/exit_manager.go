@@ -158,7 +158,11 @@ func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 
 	if proc.PPID != 0 {
 		if parent, ok := pt.processMap.Load(proc.PPID); ok {
-			delete(parent.ChildrenMap, apitypes.CommPID{Comm: proc.Comm, PID: pid})
+			if _, ok := parent.ChildrenMap[apitypes.CommPID{PID: pid}]; ok {
+				delete(parent.ChildrenMap, apitypes.CommPID{PID: pid})
+			} else {
+				logger.L().Warning("exitByPid: process not found in parent's children map", helpers.String("pid", fmt.Sprintf("%d", pid)))
+			}
 		}
 	}
 
