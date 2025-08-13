@@ -52,6 +52,8 @@ type Config struct {
 	KubernetesMode                 bool                                     `mapstructure:"kubernetesMode"`
 	NetworkStreamingInterval       time.Duration                            `mapstructure:"networkStreamingInterval"`
 	WorkerPoolSize                 int                                      `mapstructure:"workerPoolSize"`
+	WorkerChannelSize              int                                      `mapstructure:"workerChannelSize"`
+	BlockEvents                    bool                                     `mapstructure:"blockEvents"`
 	EventBatchSize                 int                                      `mapstructure:"eventBatchSize"`
 	TestMode                       bool                                     `mapstructure:"testMode"`
 	ExcludeJsonPaths               []string                                 `mapstructure:"excludeJsonPaths"`
@@ -61,7 +63,7 @@ type Config struct {
 	ProcfsScanInterval             time.Duration                            `mapstructure:"procfsScanInterval"`
 	OrderedEventQueue              containerwatcher.OrderedEventQueueConfig `mapstructure:"orderedEventQueue"`
 	ExitCleanup                    processtreecreator.ExitCleanupConfig     `mapstructure:"exitCleanup"`
-	CelConfigCache                 cache.FunctionCacheConfig       `mapstructure:"celConfigCache"`
+	CelConfigCache                 cache.FunctionCacheConfig                `mapstructure:"celConfigCache"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -69,6 +71,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.AddConfigPath(path)
 	viper.SetConfigName("config")
 	viper.SetConfigType("json")
+	viper.SetOptions(viper.KeyDelimiter("::"))
 
 	viper.SetDefault("fullPathTracingEnabled", true)
 	viper.SetDefault("initialDelay", 2*time.Minute)
@@ -86,24 +89,27 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("networkStreamingEnabled", false)
 	viper.SetDefault("kubernetesMode", true)
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
-	viper.SetDefault("workerPoolSize", 1000) // Increased from 50 to handle higher event volumes
+	viper.SetDefault("workerPoolSize", 3000)
 	viper.SetDefault("eventBatchSize", 15000)
 	viper.SetDefault("testMode", false)
 	viper.SetDefault("enableEmbeddedSBOMs", false)
 	viper.SetDefault("profilesCacheRefreshRate", 1*time.Minute)
-	viper.SetDefault("ruleCooldown.ruleCooldownDuration", 1*time.Hour)
-	viper.SetDefault("ruleCooldown.ruleCooldownAfterCount", 1)
-	viper.SetDefault("ruleCooldown.ruleCooldownOnProfileFailure", true)
-	viper.SetDefault("ruleCooldown.ruleCooldownMaxSize", 10000)
+	viper.SetDefault("ruleCooldown::ruleCooldownDuration", 1*time.Hour)
+	viper.SetDefault("ruleCooldown::ruleCooldownAfterCount", 1)
+	viper.SetDefault("ruleCooldown::ruleCooldownOnProfileFailure", true)
+	viper.SetDefault("ruleCooldown::ruleCooldownMaxSize", 10000)
 	viper.SetDefault("partialProfileGenerationEnabled", true)
 	viper.SetDefault("procfsScanInterval", 30*time.Second)
-	viper.SetDefault("orderedEventQueue.size", 100000)
-	viper.SetDefault("orderedEventQueue.collectionDelay", 50*time.Millisecond)
-	viper.SetDefault("exitCleanup.maxPendingExits", 1000)
-	viper.SetDefault("exitCleanup.cleanupInterval", 30*time.Second)
-	viper.SetDefault("exitCleanup.cleanupDelay", 5*time.Minute)
-	viper.SetDefault("celConfigCache.maxSize", 1000)
-	viper.SetDefault("celConfigCache.ttl", 1*time.Second)
+	viper.SetDefault("orderedEventQueue::size", 100000)
+	viper.SetDefault("orderedEventQueue::collectionDelay", 50*time.Millisecond)
+	viper.SetDefault("exitCleanup::maxPendingExits", 1000)
+	viper.SetDefault("exitCleanup::cleanupInterval", 30*time.Second)
+	viper.SetDefault("exitCleanup::cleanupDelay", 5*time.Minute)
+	viper.SetDefault("workerChannelSize", 750000)
+	viper.SetDefault("blockEvents", false)
+	viper.SetDefault("celConfigCache::maxSize", 1000)
+	viper.SetDefault("celConfigCache::ttl", 1*time.Second)
+
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()

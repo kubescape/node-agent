@@ -65,8 +65,10 @@ func TestLoadConfig(t *testing.T) {
 						URL: "http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io",
 					},
 				},
-				WorkerPoolSize:     1000,
+				WorkerPoolSize:     3000,
 				EventBatchSize:     15000,
+				WorkerChannelSize:  750000,
+				BlockEvents:        false,
 				ProcfsScanInterval: 30 * time.Second,
 				RuleCoolDown: rulecooldown.RuleCooldownConfig{
 					CooldownDuration:   1 * time.Hour,
@@ -108,7 +110,7 @@ func TestIgnoreContainer(t *testing.T) {
 	config := Config{
 		NamespaceName: "test-namespace",
 		ExcludeLabels: map[string]string{
-			"app": "test-app",
+			"app.kubernetes.io/name": "test-app",
 		},
 		ExcludeNamespaces: []string{"excluded-namespace"},
 	}
@@ -149,7 +151,7 @@ func TestIgnoreContainer(t *testing.T) {
 			name:    "Ignore pod with excluded label",
 			ns:      "other-namespace",
 			podName: "some-pod",
-			labels:  map[string]string{"app": "test-app"},
+			labels:  map[string]string{"app.kubernetes.io/name": "test-app"},
 			want:    true,
 		},
 		{

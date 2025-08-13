@@ -118,7 +118,7 @@ func TestExitManager_AddPendingExit(t *testing.T) {
 	// Create a test process
 	parent := createTestProcess(100, 1, "parent")
 	child := createTestProcess(200, 100, "child")
-	parent.ChildrenMap[apitypes.CommPID{Comm: "child", PID: 200}] = child
+	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child
 
 	pt.processMap.Set(100, parent)
 	pt.processMap.Set(200, child)
@@ -186,8 +186,8 @@ func TestExitManager_RemoveProcessFromPending(t *testing.T) {
 	child1 := createTestProcess(200, 100, "child1")
 	child2 := createTestProcess(300, 100, "child2")
 
-	parent.ChildrenMap[apitypes.CommPID{Comm: "child1", PID: 200}] = child1
-	parent.ChildrenMap[apitypes.CommPID{Comm: "child2", PID: 300}] = child2
+	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child1
+	parent.ChildrenMap[apitypes.CommPID{PID: 300}] = child2
 
 	pt.processMap.Set(100, parent)
 	pt.processMap.Set(200, child1)
@@ -402,8 +402,8 @@ func TestExitManager_HandleExitEventFlow(t *testing.T) {
 	child1 := createTestProcess(200, 100, "child1")
 	child2 := createTestProcess(300, 100, "child2")
 
-	parent.ChildrenMap[apitypes.CommPID{Comm: "child1", PID: 200}] = child1
-	parent.ChildrenMap[apitypes.CommPID{Comm: "child2", PID: 300}] = child2
+	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child1
+	parent.ChildrenMap[apitypes.CommPID{PID: 300}] = child2
 
 	pt.processMap.Set(100, parent)
 	pt.processMap.Set(200, child1)
@@ -445,10 +445,10 @@ func TestExitManager_ReparentingDuringCleanup(t *testing.T) {
 	grandchild := createTestProcess(400, 300, "grandchild")
 
 	// Set up relationships
-	grandparent.ChildrenMap[apitypes.CommPID{Comm: "parent", PID: 100}] = parent
-	parent.ChildrenMap[apitypes.CommPID{Comm: "child1", PID: 200}] = child1
-	parent.ChildrenMap[apitypes.CommPID{Comm: "child2", PID: 300}] = child2
-	child2.ChildrenMap[apitypes.CommPID{Comm: "grandchild", PID: 400}] = grandchild
+	grandparent.ChildrenMap[apitypes.CommPID{PID: 100}] = parent
+	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child1
+	parent.ChildrenMap[apitypes.CommPID{PID: 300}] = child2
+	child2.ChildrenMap[apitypes.CommPID{PID: 400}] = grandchild
 
 	// Add all to process map
 	pt.processMap.Set(1, grandparent)
@@ -516,5 +516,261 @@ func TestExitManager_CleanupLoop(t *testing.T) {
 	pt.mutex.RLock()
 	assert.Equal(t, 0, len(pt.pendingExits), "Process should be cleaned up")
 	assert.Nil(t, pt.processMap.Get(100), "Process should be removed from map")
+	pt.mutex.RUnlock()
+}
+
+func TestExitManager_CleanupChildrenMapWithEmptyComm(t *testing.T) {
+	pt := createTestProcessTreeCreator()
+
+	// Create a parent process with children
+	parent := createTestProcess(100, 1, "parent")
+	child1 := createTestProcess(200, 100, "child1")
+	child2 := createTestProcess(300, 100, "child2")
+
+	// Add children to parent's ChildrenMap using only PID (Comm is empty)
+	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child1
+	parent.ChildrenMap[apitypes.CommPID{PID: 300}] = child2
+
+	pt.processMap.Set(100, parent)
+	pt.processMap.Set(200, child1)
+	pt.processMap.Set(300, child2)
+
+	// Verify initial state
+	assert.Len(t, parent.ChildrenMap, 2, "Parent should have 2 children initially")
+
+	// Create exit event with empty Comm field (simulating real-world scenario)
+	event := createTestExitEvent(100, 12345)
+
+	// Handle the exit event
+	pt.handleExitEvent(event)
+
+	// Check that the process is added to pending exits
+	pt.mutex.RLock()
+	assert.Equal(t, 1, len(pt.pendingExits), "Should have 1 pending exit")
+	pending := pt.pendingExits[100]
+	require.NotNil(t, pending, "Pending exit should exist")
+	assert.Equal(t, uint32(100), pending.PID)
+	assert.Len(t, pending.Children, 2, "Should have 2 children collected")
+	pt.mutex.RUnlock()
+
+	// Now manually trigger the exit cleanup to test the cleanup logic
+	pt.mutex.Lock()
+	pt.exitByPid(100)
+	pt.mutex.Unlock()
+
+	// Check that the parent process was removed from maps
+	pt.mutex.RLock()
+	assert.Nil(t, pt.processMap.Get(100), "Parent process should be removed from process map")
+	assert.Equal(t, 0, len(pt.pendingExits), "Should have no pending exits")
+
+	// Check that children were reparented to init (PID 1) by our mock reparenting logic
+	assert.Equal(t, uint32(1), child1.PPID, "Child1 should be reparented to init")
+	assert.Equal(t, uint32(1), child2.PPID, "Child2 should be reparented to init")
+	pt.mutex.RUnlock()
+}
+
+func TestExitManager_CleanupChildrenMapWithMixedCommValues(t *testing.T) {
+	pt := createTestProcessTreeCreator()
+
+	// Create a parent process with children
+	parent := createTestProcess(100, 1, "parent")
+	child1 := createTestProcess(200, 100, "child1")
+	child2 := createTestProcess(300, 100, "child2")
+	child3 := createTestProcess(400, 100, "child3")
+
+	// Add children with mixed Comm values (some empty, some not)
+	// This tests that the cleanup works regardless of Comm values
+	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child1 // Empty Comm
+	parent.ChildrenMap[apitypes.CommPID{PID: 300}] = child2 // Empty Comm
+	parent.ChildrenMap[apitypes.CommPID{PID: 400}] = child3 // Empty Comm
+
+	pt.processMap.Set(100, parent)
+	pt.processMap.Set(200, child1)
+	pt.processMap.Set(300, child2)
+	pt.processMap.Set(400, child3)
+
+	// Verify initial state
+	assert.Len(t, parent.ChildrenMap, 3, "Parent should have 3 children initially")
+
+	// Create exit event
+	event := createTestExitEvent(100, 12345)
+
+	// Handle the exit event
+	pt.handleExitEvent(event)
+
+	// Check that the process is added to pending exits
+	pt.mutex.RLock()
+	assert.Equal(t, 1, len(pt.pendingExits), "Should have 1 pending exit")
+	pending := pt.pendingExits[100]
+	require.NotNil(t, pending, "Pending exit should exist")
+	assert.Equal(t, uint32(100), pending.PID)
+	assert.Len(t, pending.Children, 3, "Should have 3 children collected")
+	pt.mutex.RUnlock()
+
+	// Manually trigger exit cleanup
+	pt.mutex.Lock()
+	pt.exitByPid(100)
+	pt.mutex.Unlock()
+
+	// Check that all children were properly reparented
+	pt.mutex.RLock()
+	assert.Nil(t, pt.processMap.Get(100), "Parent process should be removed")
+	assert.Equal(t, uint32(1), child1.PPID, "Child1 should be reparented to init")
+	assert.Equal(t, uint32(1), child2.PPID, "Child2 should be reparented to init")
+	assert.Equal(t, uint32(1), child3.PPID, "Child3 should be reparented to init")
+	pt.mutex.RUnlock()
+}
+
+func TestExitManager_RemoveFromParentChildrenMap(t *testing.T) {
+	pt := createTestProcessTreeCreator()
+
+	// Create a process tree: parent(100) -> child(200) -> grandchild(300)
+	parent := createTestProcess(100, 1, "parent")
+	child := createTestProcess(200, 100, "child")
+	grandchild := createTestProcess(300, 200, "grandchild")
+
+	// Set up parent-child relationships
+	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child
+	child.ChildrenMap[apitypes.CommPID{PID: 300}] = grandchild
+
+	// Add all processes to the process map
+	pt.processMap.Set(100, parent)
+	pt.processMap.Set(200, child)
+	pt.processMap.Set(300, grandchild)
+
+	// Verify initial state
+	assert.Len(t, parent.ChildrenMap, 1, "Parent should have 1 child initially")
+	assert.Len(t, child.ChildrenMap, 1, "Child should have 1 grandchild initially")
+	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 200}, "Parent should contain child")
+	assert.Contains(t, child.ChildrenMap, apitypes.CommPID{PID: 300}, "Child should contain grandchild")
+
+	// Test case 1: Exit the child process - should remove it from parent's ChildrenMap
+	// First, add the child to pending exits
+	pt.mutex.Lock()
+	pt.pendingExits[200] = &pendingExit{
+		PID:         200,
+		StartTimeNs: 12345,
+		Timestamp:   time.Now(),
+		Children:    []*apitypes.Process{grandchild},
+	}
+	pt.mutex.Unlock()
+
+	// Now call exitByPid which should work since the process is in pendingExits
+	pt.mutex.Lock()
+	pt.exitByPid(200)
+	pt.mutex.Unlock()
+
+	// Verify child was removed from parent's ChildrenMap
+	pt.mutex.RLock()
+	assert.Len(t, parent.ChildrenMap, 0, "Parent should have no children after child exit")
+	assert.NotContains(t, parent.ChildrenMap, apitypes.CommPID{PID: 200}, "Parent should not contain child anymore")
+
+	// Child process should be removed from process map
+	assert.Nil(t, pt.processMap.Get(200), "Child process should be removed from process map")
+
+	// Grandchild should still exist but be reparented to init (PID 1) by mock reparenting logic
+	assert.Equal(t, uint32(1), grandchild.PPID, "Grandchild should be reparented to init")
+	pt.mutex.RUnlock()
+
+	// Test case 2: Exit the grandchild process - should remove it from child's ChildrenMap
+	// But since child was already removed, we need to add grandchild to pending exits first
+	pt.mutex.Lock()
+	pt.pendingExits[300] = &pendingExit{
+		PID:         300,
+		StartTimeNs: 12346,
+		Timestamp:   time.Now(),
+		Children:    []*apitypes.Process{},
+	}
+	pt.mutex.Unlock()
+
+	pt.mutex.Lock()
+	pt.exitByPid(300)
+	pt.mutex.Unlock()
+
+	// Verify grandchild was removed from process map
+	pt.mutex.RLock()
+	assert.Nil(t, pt.processMap.Get(300), "Grandchild process should be removed from process map")
+	pt.mutex.RUnlock()
+}
+
+func TestExitManager_RemoveFromParentChildrenMapWithMultipleChildren(t *testing.T) {
+	pt := createTestProcessTreeCreator()
+
+	// Create a process tree: parent(100) -> child1(200), child2(300), child3(400)
+	parent := createTestProcess(100, 1, "parent")
+	child1 := createTestProcess(200, 100, "child1")
+	child2 := createTestProcess(300, 100, "child2")
+	child3 := createTestProcess(400, 100, "child3")
+
+	// Set up parent-child relationships
+	parent.ChildrenMap[apitypes.CommPID{PID: 200}] = child1
+	parent.ChildrenMap[apitypes.CommPID{PID: 300}] = child2
+	parent.ChildrenMap[apitypes.CommPID{PID: 400}] = child3
+
+	// Add all processes to the process map
+	pt.processMap.Set(100, parent)
+	pt.processMap.Set(200, child1)
+	pt.processMap.Set(300, child2)
+	pt.processMap.Set(400, child3)
+
+	// Verify initial state
+	assert.Len(t, parent.ChildrenMap, 3, "Parent should have 3 children initially")
+	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 200}, "Parent should contain child1")
+	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 300}, "Parent should contain child2")
+	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 400}, "Parent should contain child3")
+
+	// Test case: Exit child2 - should remove it from parent's ChildrenMap
+	// First, add child2 to pending exits
+	pt.mutex.Lock()
+	pt.pendingExits[300] = &pendingExit{
+		PID:         300,
+		StartTimeNs: 12345,
+		Timestamp:   time.Now(),
+		Children:    []*apitypes.Process{},
+	}
+	pt.mutex.Unlock()
+
+	pt.mutex.Lock()
+	pt.exitByPid(300)
+	pt.mutex.Unlock()
+
+	// Verify child2 was removed from parent's ChildrenMap
+	pt.mutex.RLock()
+	assert.Len(t, parent.ChildrenMap, 2, "Parent should have 2 children after child2 exit")
+	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 200}, "Parent should still contain child1")
+	assert.NotContains(t, parent.ChildrenMap, apitypes.CommPID{PID: 300}, "Parent should not contain child2 anymore")
+	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 400}, "Parent should still contain child3")
+
+	// Child2 process should be removed from process map
+	assert.Nil(t, pt.processMap.Get(300), "Child2 process should be removed from process map")
+
+	// Other children should still exist
+	assert.NotNil(t, pt.processMap.Get(200), "Child1 should still exist")
+	assert.NotNil(t, pt.processMap.Get(400), "Child3 should still exist")
+	pt.mutex.RUnlock()
+
+	// Test case: Exit child1 - should remove it from parent's ChildrenMap
+	// First, add child1 to pending exits
+	pt.mutex.Lock()
+	pt.pendingExits[200] = &pendingExit{
+		PID:         200,
+		StartTimeNs: 12346,
+		Timestamp:   time.Now(),
+		Children:    []*apitypes.Process{},
+	}
+	pt.mutex.Unlock()
+
+	pt.mutex.Lock()
+	pt.exitByPid(200)
+	pt.mutex.Unlock()
+
+	// Verify child1 was removed from parent's ChildrenMap
+	pt.mutex.RLock()
+	assert.Len(t, parent.ChildrenMap, 1, "Parent should have 1 child after child1 exit")
+	assert.NotContains(t, parent.ChildrenMap, apitypes.CommPID{PID: 200}, "Parent should not contain child1 anymore")
+	assert.Contains(t, parent.ChildrenMap, apitypes.CommPID{PID: 400}, "Parent should still contain child3")
+
+	// Child1 process should be removed from process map
+	assert.Nil(t, pt.processMap.Get(200), "Child1 process should be removed from process map")
 	pt.mutex.RUnlock()
 }

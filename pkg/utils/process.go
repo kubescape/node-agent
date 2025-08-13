@@ -168,7 +168,7 @@ func buildProcessTree(proc procfs.Proc, procfs *procfs.FS, shimPid uint32, proce
 		if currentProcess.ChildrenMap == nil {
 			currentProcess.ChildrenMap = make(map[apitypes.CommPID]*apitypes.Process)
 		}
-		currentProcess.ChildrenMap[apitypes.CommPID{Comm: processTree.Comm, PID: processTree.PID}] = processTree
+		currentProcess.ChildrenMap[apitypes.CommPID{PID: processTree.PID}] = processTree
 	}
 
 	return buildProcessTree(parent, procfs, shimPid, &currentProcess)

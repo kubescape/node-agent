@@ -2,6 +2,7 @@ package metricsmanager
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top"
 	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
@@ -43,6 +44,11 @@ type PrometheusMetric struct {
 	programMapCountGauge      *prometheus.GaugeVec
 	programCpuUsageGauge      *prometheus.GaugeVec
 	programPerCpuUsageGauge   *prometheus.GaugeVec
+
+	// Cache to avoid allocating Labels maps on every call
+	ruleCounterCache  map[string]prometheus.Counter
+	alertCounterCache map[string]prometheus.Counter
+	counterCacheMutex sync.RWMutex
 }
 
 func NewPrometheusMetric() *PrometheusMetric {
@@ -128,6 +134,10 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Name: "node_agent_program_per_cpu_usage",
 			Help: "Per-CPU usage of programs by program ID",
 		}, []string{programTypeLabel, programNameLabel}),
+
+		// Initialize counter caches
+		ruleCounterCache:  make(map[string]prometheus.Counter),
+		alertCounterCache: make(map[string]prometheus.Counter),
 	}
 }
 
@@ -186,12 +196,60 @@ func (p *PrometheusMetric) ReportFailedEvent() {
 	p.ebpfFailedCounter.Inc()
 }
 
+// getCachedRuleCounter returns a cached counter for the given rule ID to avoid map allocations
+func (p *PrometheusMetric) getCachedRuleCounter(ruleID string) prometheus.Counter {
+	p.counterCacheMutex.RLock()
+	counter, exists := p.ruleCounterCache[ruleID]
+	p.counterCacheMutex.RUnlock()
+
+	if exists {
+		return counter
+	}
+
+	p.counterCacheMutex.Lock()
+	defer p.counterCacheMutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if counter, exists := p.ruleCounterCache[ruleID]; exists {
+		return counter
+	}
+
+	// Create new counter and cache it
+	counter = p.ruleCounter.With(prometheus.Labels{prometheusRuleIdLabel: ruleID})
+	p.ruleCounterCache[ruleID] = counter
+	return counter
+}
+
+// getCachedAlertCounter returns a cached counter for the given rule ID to avoid map allocations
+func (p *PrometheusMetric) getCachedAlertCounter(ruleID string) prometheus.Counter {
+	p.counterCacheMutex.RLock()
+	counter, exists := p.alertCounterCache[ruleID]
+	p.counterCacheMutex.RUnlock()
+
+	if exists {
+		return counter
+	}
+
+	p.counterCacheMutex.Lock()
+	defer p.counterCacheMutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if counter, exists := p.alertCounterCache[ruleID]; exists {
+		return counter
+	}
+
+	// Create new counter and cache it
+	counter = p.alertCounter.With(prometheus.Labels{prometheusRuleIdLabel: ruleID})
+	p.alertCounterCache[ruleID] = counter
+	return counter
+}
+
 func (p *PrometheusMetric) ReportRuleProcessed(ruleID string) {
-	p.ruleCounter.With(prometheus.Labels{prometheusRuleIdLabel: ruleID}).Inc()
+	p.getCachedRuleCounter(ruleID).Inc()
 }
 
 func (p *PrometheusMetric) ReportRuleAlert(ruleID string) {
-	p.alertCounter.With(prometheus.Labels{prometheusRuleIdLabel: ruleID}).Inc()
+	p.getCachedAlertCounter(ruleID).Inc()
 }
 
 func (p *PrometheusMetric) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
