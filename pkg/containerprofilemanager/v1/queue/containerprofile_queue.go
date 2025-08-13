@@ -117,6 +117,9 @@ func NewQueueData(ctx context.Context, creator ProfileCreator, config QueueConfi
 			return nil, fmt.Errorf("failed to create/open queue: %w", err)
 		}
 	}
+	if err := queue.TurboOn(); err != nil {
+		logger.L().Error("failed to enable turbo mode", helpers.Error(err))
+	}
 
 	qd := &QueueData{
 		queue:         queue,
