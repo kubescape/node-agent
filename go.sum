@@ -109,8 +109,8 @@ github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc/go.mod h1:LOuy
 github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751/go.mod h1:LOuyumcjzFXgccqObfd/Ljyb9UuFJ6TxHnclSeseNhc=
 github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
 github.com/alecthomas/units v0.0.0-20190717042225-c3de453c63f4/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
-github.com/amirmalka/inspektor-gadget v0.40.1-0.20250812134619-3ddfa72a47ef h1:PAUaeI7fqjxJ3/gOKUrzHF/De4MvR+5N2fbUk5Jb2+U=
-github.com/amirmalka/inspektor-gadget v0.40.1-0.20250812134619-3ddfa72a47ef/go.mod h1:W6tNNRa3QDFdrknnOnavk+HD8FI/XUGY6tY6PSonhAk=
+github.com/amirmalka/inspektor-gadget v0.40.1-0.20250813112504-1bfe2d9ed5c9 h1:9qsm2rmVLar3anpSe45NaTe0CvJWqroqTpSVetlbHuM=
+github.com/amirmalka/inspektor-gadget v0.40.1-0.20250813112504-1bfe2d9ed5c9/go.mod h1:W6tNNRa3QDFdrknnOnavk+HD8FI/XUGY6tY6PSonhAk=
 github.com/anchore/archiver/v3 v3.5.3-0.20241210171143-5b1d8d1c7c51 h1:yhk+P8lF3ZiROjmaVRao9WGTRo4b/wYjoKEiAHWrKwc=
 github.com/anchore/archiver/v3 v3.5.3-0.20241210171143-5b1d8d1c7c51/go.mod h1:nwuGSd7aZp0rtYt79YggCGafz1RYsclE7pi3fhLwvuw=
 github.com/anchore/clio v0.0.0-20241115144204-29e89f9fa837 h1:bIG3WsfosZsJ5LMC7PB9J/ekFM3a0j0ZEDvN3ID6GTI=
