@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sync"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
@@ -36,6 +37,9 @@ type Tracer struct {
 	symlinkLink   link.Link
 	symlinkatLink link.Link
 	reader        *perf.Reader
+
+	// recordPool will pool perf.Record objects to avoid allocations.
+	recordPool sync.Pool
 }
 
 func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
@@ -45,6 +49,10 @@ func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 		config:        config,
 		enricher:      enricher,
 		eventCallback: eventCallback,
+	}
+
+	t.recordPool.New = func() any {
+		return new(perf.Record)
 	}
 
 	if err := t.install(); err != nil {
@@ -109,8 +117,10 @@ func (t *Tracer) install() error {
 
 func (t *Tracer) run() {
 	for {
-		record, err := t.reader.Read()
+		record := t.recordPool.Get().(*perf.Record)
+		err := t.reader.ReadInto(record)
 		if err != nil {
+			t.recordPool.Put(record)
 			if errors.Is(err, perf.ErrClosed) {
 				// nothing to do, we're done
 				return
@@ -124,6 +134,7 @@ func (t *Tracer) run() {
 		if record.LostSamples > 0 {
 			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
 			t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			t.recordPool.Put(record)
 			continue
 		}
 
@@ -153,6 +164,7 @@ func (t *Tracer) run() {
 		}
 
 		t.eventCallback(&event)
+		t.recordPool.Put(record)
 	}
 }
 
