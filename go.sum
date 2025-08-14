@@ -882,6 +882,8 @@ github.com/peterbourgon/diskv v2.0.1+incompatible/go.mod h1:uqqh8zWWbv1HBMNONnaR
 github.com/petermattis/goid v0.0.0-20240813172612-4fcff4a6cae7/go.mod h1:pxMtw7cyUw6B2bRH0ZBANSPg+AoSud1I1iyJHI69jH4=
 github.com/petermattis/goid v0.0.0-20241211131331-93ee7e083c43 h1:ah1dvbqPMN5+ocrg/ZSgZ6k8bOk+kcZQ7fnyx6UvOm4=
 github.com/petermattis/goid v0.0.0-20241211131331-93ee7e083c43/go.mod h1:pxMtw7cyUw6B2bRH0ZBANSPg+AoSud1I1iyJHI69jH4=
+github.com/picatz/xcel v0.0.0-20250816143731-885b5f678a12 h1:RS7RxrC+OtnYpgI0li0NwvpE0cqYewsZGXUb6wAe0oQ=
+github.com/picatz/xcel v0.0.0-20250816143731-885b5f678a12/go.mod h1:jxNaYyVlWe+WPV3G45KzlMLvplS3PQdHLUsFePIcaEg=
 github.com/pierrec/lz4/v4 v4.1.22 h1:cKFw6uJDK+/gfw5BcDL0JL5aBsAFdsIT18eRtLj7VIU=
 github.com/pierrec/lz4/v4 v4.1.22/go.mod h1:gZWDp/Ze/IJXGXf23ltt2EXimqmTUXEy0GFuRQyBid4=
 github.com/pjbgf/sha1cd v0.3.0 h1:4D5XXmUUBUl/xQ6IjCkEAbqXskkq/4O7LmGn0AqMDs4=

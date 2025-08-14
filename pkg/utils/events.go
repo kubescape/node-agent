@@ -29,23 +29,23 @@ type EnrichEvent interface {
 type EventType string
 
 const (
-	ExecveEventType       EventType = "exec"
-	OpenEventType         EventType = "open"
+	AllEventType          EventType = "all"
 	CapabilitiesEventType EventType = "capabilities"
 	DnsEventType          EventType = "dns"
-	NetworkEventType      EventType = "network"
-	SyscallEventType      EventType = "syscall"
-	RandomXEventType      EventType = "randomx"
-	SymlinkEventType      EventType = "symlink"
-	HardlinkEventType     EventType = "hardlink"
-	SSHEventType          EventType = "ssh"
-	HTTPEventType         EventType = "http"
-	PtraceEventType       EventType = "ptrace"
-	IoUringEventType      EventType = "iouring"
-	ForkEventType         EventType = "fork"
+	ExecveEventType       EventType = "exec"
 	ExitEventType         EventType = "exit"
+	ForkEventType         EventType = "fork"
+	HTTPEventType         EventType = "http"
+	HardlinkEventType     EventType = "hardlink"
+	IoUringEventType      EventType = "iouring"
+	NetworkEventType      EventType = "network"
+	OpenEventType         EventType = "open"
 	ProcfsEventType       EventType = "procfs"
-	AllEventType          EventType = "all"
+	PtraceEventType       EventType = "ptrace"
+	RandomXEventType      EventType = "randomx"
+	SSHEventType          EventType = "ssh"
+	SymlinkEventType      EventType = "symlink"
+	SyscallEventType      EventType = "syscall"
 )
 
 // Get the path of the file on the node.
