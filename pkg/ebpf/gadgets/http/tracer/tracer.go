@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -20,7 +21,7 @@ import (
 	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go  -strip /usr/bin/llvm-strip-18  -cc /usr/bin/clang -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type packet_buffer -type httpevent http_sniffer bpf/http-sniffer.c -- -I./bpf/
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -strip /usr/bin/llvm-strip-18 -cc /usr/bin/clang -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall" -type packet_buffer -type httpevent http_sniffer bpf/http-sniffer.c -- -I./bpf/
 
 type Config struct {
 	MountnsMap *ebpf.Map
@@ -33,11 +34,18 @@ type Tracer struct {
 
 	objs http_snifferObjects
 
-	httplinks       []link.Link
-	reader          *perf.Reader
-	eventsMap       *lru.Cache[string, *types.Event] // Use golang-lru cache
+	httplinks []link.Link
+	reader    *perf.Reader
+
+	// eventsMap is used to correlate requests and responses.
+	eventsMap *lru.Cache[string, *types.Event] // Use golang-lru cache
+
+	// timeoutDuration is the duration to wait for a response before sending a request event.
 	timeoutDuration time.Duration
 	timeoutTicker   *time.Ticker
+
+	// recordPool will pool perf.Record objects to avoid allocations.
+	recordPool sync.Pool
 }
 
 func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
@@ -55,6 +63,11 @@ func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 		eventCallback:   eventCallback,
 		eventsMap:       cache,
 		timeoutDuration: 5 * time.Second,
+	}
+
+	// Initialize the sync.Pool to create new perf.Record objects when the pool is empty.
+	t.recordPool.New = func() any {
+		return new(perf.Record)
 	}
 
 	if err := t.install(); err != nil {
@@ -120,8 +133,14 @@ func (t *Tracer) install() error {
 
 func (t *Tracer) run() {
 	for {
-		record, err := t.reader.Read()
+		// Get a reusable record from the pool.
+		record := t.recordPool.Get().(*perf.Record)
+
+		// Read into the existing record to avoid allocating a new one.
+		err := t.reader.ReadInto(record)
 		if err != nil {
+			// Return record to the pool before we exit or continue the loop.
+			t.recordPool.Put(record)
 			if errors.Is(err, perf.ErrClosed) {
 				return
 			}
@@ -134,6 +153,14 @@ func (t *Tracer) run() {
 		if record.LostSamples > 0 {
 			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
 			t.eventCallback(types.Base(eventtypes.Warn(msg)))
+			// Return record to the pool before continuing.
+			t.recordPool.Put(record)
+			continue
+		}
+
+		if len(record.RawSample) == 0 {
+			// Empty record, just return it to the pool.
+			t.recordPool.Put(record)
 			continue
 		}
 
@@ -145,6 +172,9 @@ func (t *Tracer) run() {
 			}
 			t.eventCallback(grouped)
 		}
+
+		// Return the record to the pool after processing.
+		t.recordPool.Put(record)
 	}
 }
 

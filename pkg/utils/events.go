@@ -12,6 +12,7 @@ import (
 type K8sEvent interface {
 	GetPod() string
 	GetNamespace() string
+	GetTimestamp() types.Time
 }
 
 type EnrichEvent interface {
@@ -21,6 +22,7 @@ type EnrichEvent interface {
 	GetExtra() interface{}
 	GetPod() string
 	GetNamespace() string
+	GetTimestamp() types.Time
 }
 
 type EventType string
