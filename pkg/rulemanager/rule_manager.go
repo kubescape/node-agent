@@ -151,13 +151,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				continue
 			}
 
-			eventAdapter, ok := rm.adapterFactory.GetAdapter(enrichedEvent.EventType)
-			if !ok {
-				logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.EventType)))
-				continue
-			}
-
-			eventMap := eventAdapter.ToMap(enrichedEvent)
 			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent.EventType)
 			if len(ruleExpressions) == 0 {
 				continue
@@ -167,7 +160,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				continue
 			}
 
-			shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, enrichedEvent.EventType, ruleExpressions)
+			shouldAlert, err := rm.celEvaluator.EvaluateRule(enrichedEvent, enrichedEvent.EventType, ruleExpressions)
 			if err != nil {
 				logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
 				continue
@@ -175,7 +168,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 
 			if shouldAlert {
 				rm.metrics.ReportRuleAlert(rule.Name)
-				message, uniqueID, err := rm.getUniqueIdAndMessage(eventMap, rule)
+				message, uniqueID, err := rm.getUniqueIdAndMessage(enrichedEvent, rule)
 				if err != nil {
 					logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
 					continue
@@ -240,19 +233,13 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 			continue
 		}
 
-		eventAdapter, ok := rm.adapterFactory.GetAdapter(eventType)
-		if !ok {
-			logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(eventType)))
-			continue
-		}
-
-		eventMap := eventAdapter.ToMap(&events.EnrichedEvent{Event: event})
+		enrichedEvent := &events.EnrichedEvent{Event: event}
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
 		if len(ruleExpressions) == 0 {
 			continue
 		}
 
-		shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, eventType, ruleExpressions)
+		shouldAlert, err := rm.celEvaluator.EvaluateRule(enrichedEvent, eventType, ruleExpressions)
 		if err != nil {
 			logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
 			continue
@@ -291,12 +278,12 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, eventType utils.Eve
 	return ruleExpressions
 }
 
-func (rm *RuleManager) getUniqueIdAndMessage(eventMap map[string]any, rule typesv1.Rule) (string, string, error) {
-	message, err := rm.celEvaluator.EvaluateExpression(eventMap, rule.Expressions.Message)
+func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent, rule typesv1.Rule) (string, string, error) {
+	message, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.Message)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
 	}
-	uniqueID, err := rm.celEvaluator.EvaluateExpression(eventMap, rule.Expressions.UniqueID)
+	uniqueID, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.UniqueID)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
 	}
