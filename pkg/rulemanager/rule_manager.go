@@ -24,7 +24,6 @@ import (
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
-	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters/adapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
@@ -153,15 +152,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	_, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
 	profileExists = err == nil
 
-	eventAdapter, ok := rm.adapterFactory.GetAdapter(enrichedEvent.EventType)
-	if !ok {
-		logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.EventType)))
-		return
-	}
-
-	eventMap := eventAdapter.ToMap(enrichedEvent)
-	defer adapters.ReleaseEventMap(eventMap)
-
 	for _, rule := range rules {
 		if !rule.Enabled {
 			continue
@@ -180,7 +170,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 
 		startTime := time.Now()
-		shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, enrichedEvent.EventType, ruleExpressions)
+		shouldAlert, err := rm.celEvaluator.EvaluateRule(enrichedEvent, ruleExpressions)
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.Name, enrichedEvent.EventType, evaluationTime)
 
@@ -191,7 +181,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 
 		if shouldAlert {
 			rm.metrics.ReportRuleAlert(rule.Name)
-			message, uniqueID, err := rm.getUniqueIdAndMessage(eventMap, rule)
+			message, uniqueID, err := rm.getUniqueIdAndMessage(enrichedEvent, rule)
 			if err != nil {
 				logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
 				continue
@@ -249,28 +239,19 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	creator := rm.ruleBindingCache.GetRuleCreator()
 	rules := creator.CreateRulePolicyRulesByEventType(eventType)
 
-	// Create one event map for all policy rules of this event
-	eventAdapter, ok := rm.adapterFactory.GetAdapter(eventType)
-	if !ok {
-		logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(eventType)))
-		return results
-	}
-
-	eventMap := eventAdapter.ToMap(&events.EnrichedEvent{Event: event})
-	defer adapters.ReleaseEventMap(eventMap)
-
 	for _, rule := range rules {
 		if !rule.SupportPolicy {
 			continue
 		}
 
+		enrichedEvent := &events.EnrichedEvent{Event: event}
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
 		if len(ruleExpressions) == 0 {
 			continue
 		}
 
 		startTime := time.Now()
-		shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, eventType, ruleExpressions)
+		shouldAlert, err := rm.celEvaluator.EvaluateRule(enrichedEvent, ruleExpressions)
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.ID, eventType, evaluationTime)
 
@@ -312,12 +293,12 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, eventType utils.Eve
 	return ruleExpressions
 }
 
-func (rm *RuleManager) getUniqueIdAndMessage(eventMap map[string]any, rule typesv1.Rule) (string, string, error) {
-	message, err := rm.celEvaluator.EvaluateExpression(eventMap, rule.Expressions.Message)
+func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent, rule typesv1.Rule) (string, string, error) {
+	message, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.Message)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
 	}
-	uniqueID, err := rm.celEvaluator.EvaluateExpression(eventMap, rule.Expressions.UniqueID)
+	uniqueID, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.UniqueID)
 	if err != nil {
 		logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
 	}

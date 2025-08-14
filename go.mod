@@ -42,6 +42,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/panjf2000/ants/v2 v2.11.3
+	github.com/picatz/xcel v0.0.0-00010101000000-000000000000
 	github.com/prometheus/alertmanager v0.27.0
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/procfs v0.16.1
@@ -379,3 +380,5 @@ replace github.com/vishvananda/netns => github.com/inspektor-gadget/netns v0.0.5
 replace github.com/mholt/archiver/v3 v3.5.1 => github.com/anchore/archiver/v3 v3.5.2
 
 replace github.com/inspektor-gadget/inspektor-gadget => github.com/amirmalka/inspektor-gadget v0.40.1-0.20250814111737-3a58864c8d86
+
+replace github.com/picatz/xcel => github.com/matthyx/xcel v0.0.0-20250820140400-f8fabef4e2af
