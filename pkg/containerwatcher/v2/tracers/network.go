@@ -15,7 +15,6 @@ import (
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -138,7 +137,6 @@ func (nt *NetworkTracer) networkEventCallback(event *tracernetworktypes.Event) {
 	}
 
 	if event.PktType != "OUTGOING" && event.PktType != "HOST" {
-		logger.L().Info("Skipping network event", helpers.String("pktType", event.PktType))
 		return
 	}
 
