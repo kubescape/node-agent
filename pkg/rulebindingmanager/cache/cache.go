@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"strings"
+	"sync"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
@@ -11,8 +12,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
-	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
+	rulemanagertypesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/watcher"
 	corev1 "k8s.io/api/core/v1"
@@ -31,18 +32,19 @@ type RBCache struct {
 	allPods        mapset.Set[string]                                    // set of all pods (also pods without rules)
 	podToRBNames   maps.SafeMap[string, mapset.Set[string]]              // podID -> []rule binding names
 	rbNameToRB     maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding] // rule binding name -> rule binding
-	rbNameToRules  maps.SafeMap[string, []ruleengine.RuleEvaluator]      // rule binding name -> []created rules
+	rbNameToRules  maps.SafeMap[string, []rulemanagertypesv1.Rule]       // rule binding name -> []created rules
 	rbNameToPods   maps.SafeMap[string, mapset.Set[string]]              // rule binding name -> podIDs
-	ruleCreator    ruleengine.RuleCreator
+	ruleCreator    rulecreator.RuleCreator
 	watchResources []watcher.WatchResource
 	notifiers      []*chan rulebindingmanager.RuleBindingNotify
+	mutex          sync.RWMutex
 }
 
-func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *RBCache {
+func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface, ruleCreator rulecreator.RuleCreator) *RBCache {
 	return &RBCache{
 		nodeName:       nodeName,
 		k8sClient:      k8sClient,
-		ruleCreator:    ruleenginev1.NewRuleCreator(),
+		ruleCreator:    ruleCreator,
 		allPods:        mapset.NewSet[string](),
 		rbNameToRB:     maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding]{},
 		podToRBNames:   maps.SafeMap[string, mapset.Set[string]]{},
@@ -54,13 +56,18 @@ func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface) *RBCache 
 // ----------------- watcher.WatchResources methods -----------------
 
 func (c *RBCache) WatchResources() []watcher.WatchResource {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
 	return c.watchResources
 }
 
 // ------------------ rulebindingmanager.RuleBindingCache methods -----------------------
 
-func (c *RBCache) ListRulesForPod(namespace, name string) []ruleengine.RuleEvaluator {
-	var rulesSlice []ruleengine.RuleEvaluator
+func (c *RBCache) ListRulesForPod(namespace, name string) []rulemanagertypesv1.Rule {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	var rulesSlice []rulemanagertypesv1.Rule
 
 	podID := utils.CreateK8sPodID(namespace, name)
 	if !c.podToRBNames.Has(podID) {
@@ -79,12 +86,17 @@ func (c *RBCache) ListRulesForPod(namespace, name string) []ruleengine.RuleEvalu
 }
 
 func (c *RBCache) AddNotifier(n *chan rulebindingmanager.RuleBindingNotify) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	c.notifiers = append(c.notifiers, n)
 }
 
 // ------------------ watcher.Watcher methods -----------------------
 
 func (c *RBCache) AddHandler(ctx context.Context, obj runtime.Object) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	var rbs []rulebindingmanager.RuleBindingNotify
 
 	if pod, ok := obj.(*corev1.Pod); ok {
@@ -106,6 +118,9 @@ func (c *RBCache) AddHandler(ctx context.Context, obj runtime.Object) {
 }
 
 func (c *RBCache) ModifyHandler(ctx context.Context, obj runtime.Object) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	var rbs []rulebindingmanager.RuleBindingNotify
 
 	if pod, ok := obj.(*corev1.Pod); ok {
@@ -127,6 +142,9 @@ func (c *RBCache) ModifyHandler(ctx context.Context, obj runtime.Object) {
 }
 
 func (c *RBCache) DeleteHandler(_ context.Context, obj runtime.Object) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	var rbs []rulebindingmanager.RuleBindingNotify
 
 	if pod, ok := obj.(*corev1.Pod); ok {
@@ -141,6 +159,16 @@ func (c *RBCache) DeleteHandler(_ context.Context, obj runtime.Object) {
 			*c.notifiers[n] <- rbs[i]
 		}
 	}
+}
+
+func (c *RBCache) RefreshRuleBindingsRules() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	for _, rbName := range c.rbNameToRB.Keys() {
+		rb := c.rbNameToRB.Get(rbName)
+		c.rbNameToRules.Set(rbName, c.createRules(rb.Spec.Rules))
+	}
+	logger.L().Info("RBCache - refreshed rule bindings rules", helpers.Int("ruleBindings", len(c.rbNameToRB.Keys())))
 }
 
 // ----------------- RuleBinding manager methods -----------------
@@ -338,47 +366,35 @@ func (c *RBCache) deletePod(uniqueName string) {
 	c.podToRBNames.Delete(uniqueName)
 }
 
-func (c *RBCache) createRules(rulesForPod []typesv1.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {
-	var rules []ruleengine.RuleEvaluator
+func (c *RBCache) createRules(rulesForPod []typesv1.RuntimeAlertRuleBindingRule) []rulemanagertypesv1.Rule {
+	var rules []rulemanagertypesv1.Rule
 	// Get the rules that are bound to the container
 	for _, ruleParams := range rulesForPod {
 		rules = append(rules, c.createRule(&ruleParams)...)
 	}
 	return rules
 }
-func (c *RBCache) createRule(r *typesv1.RuntimeAlertRuleBindingRule) []ruleengine.RuleEvaluator {
-
+func (c *RBCache) createRule(r *typesv1.RuntimeAlertRuleBindingRule) []rulemanagertypesv1.Rule {
 	if r.RuleID != "" {
-		if ruleDesc := c.ruleCreator.CreateRuleByID(r.RuleID); ruleDesc != nil {
-			if r.Parameters != nil {
-				ruleDesc.SetParameters(r.Parameters)
-			}
-			return []ruleengine.RuleEvaluator{ruleDesc}
-		}
+		rule := c.ruleCreator.CreateRuleByID(r.RuleID)
+		return []rulemanagertypesv1.Rule{rule}
 	}
 	if r.RuleName != "" {
-		if ruleDesc := c.ruleCreator.CreateRuleByName(r.RuleName); ruleDesc != nil {
-			if r.Parameters != nil {
-				ruleDesc.SetParameters(r.Parameters)
-			}
-			return []ruleengine.RuleEvaluator{ruleDesc}
-		}
+		rule := c.ruleCreator.CreateRuleByName(r.RuleName)
+		return []rulemanagertypesv1.Rule{rule}
 	}
 	if len(r.RuleTags) > 0 {
-		if ruleTagsDescs := c.ruleCreator.CreateRulesByTags(r.RuleTags); ruleTagsDescs != nil {
-			for _, ruleDesc := range ruleTagsDescs {
-				if r.Parameters != nil {
-					ruleDesc.SetParameters(r.Parameters)
-				}
-			}
-			return ruleTagsDescs
-		}
+		rules := c.ruleCreator.CreateRulesByTags(r.RuleTags)
+		return rules
 	}
-	return []ruleengine.RuleEvaluator{}
+
+	return []rulemanagertypesv1.Rule{}
 }
 
 // Expose the rule creator to be able to create rules from third party.
-func (c *RBCache) GetRuleCreator() ruleengine.RuleCreator {
+func (c *RBCache) GetRuleCreator() rulecreator.RuleCreator {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
 	return c.ruleCreator
 }
 

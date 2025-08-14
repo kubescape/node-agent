@@ -27,7 +27,7 @@ type SSHTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *tracerssh.Tracer
 	socketEnricher      *socketenricher.SocketEnricher
 }
@@ -37,7 +37,7 @@ func NewSSHTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 	socketEnricher *socketenricher.SocketEnricher,
 ) *SSHTracer {
 	return &SSHTracer{

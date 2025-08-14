@@ -25,7 +25,7 @@ type IoUringTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *traceriouring.Tracer
 }
 
@@ -34,7 +34,7 @@ func NewIoUringTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 ) *IoUringTracer {
 	return &IoUringTracer{
 		containerCollection: containerCollection,

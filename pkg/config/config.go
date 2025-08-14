@@ -9,7 +9,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/spf13/viper"
 )
 
@@ -62,6 +63,7 @@ type Config struct {
 	ProcfsScanInterval             time.Duration                            `mapstructure:"procfsScanInterval"`
 	OrderedEventQueue              containerwatcher.OrderedEventQueueConfig `mapstructure:"orderedEventQueue"`
 	ExitCleanup                    processtreecreator.ExitCleanupConfig     `mapstructure:"exitCleanup"`
+	CelConfigCache                 cache.FunctionCacheConfig                `mapstructure:"celConfigCache"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -105,6 +107,9 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("exitCleanup::cleanupDelay", 5*time.Minute)
 	viper.SetDefault("workerChannelSize", 750000)
 	viper.SetDefault("blockEvents", false)
+	viper.SetDefault("celConfigCache::maxSize", 1000)
+	viper.SetDefault("celConfigCache::ttl", 1*time.Second)
+
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()
