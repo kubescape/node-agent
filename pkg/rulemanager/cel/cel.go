@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/applicationprofile"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/k8s"
@@ -17,8 +18,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/parse"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/process"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
-
 	"github.com/kubescape/node-agent/pkg/utils"
+	"github.com/picatz/xcel"
 )
 
 var _ CELRuleEvaluator = (*CEL)(nil)
@@ -31,8 +32,14 @@ type CEL struct {
 }
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
+	ta, tp := xcel.NewTypeAdapter(), xcel.NewTypeProvider()
+	obj, typ := xcel.NewObject(&events.EnrichedEvent{Event: &events.ExecEvent{}})
+	xcel.RegisterObject(ta, tp, obj, typ, xcel.NewFields(obj))
 	env, err := cel.NewEnv(
-		cel.Variable("event", cel.AnyType),
+		cel.Types(typ),
+		cel.Variable("event", typ),
+		cel.CustomTypeAdapter(ta),
+		cel.CustomTypeProvider(tp),
 		k8s.K8s(objectCache.K8sObjectCache(), cfg),
 		applicationprofile.AP(objectCache, cfg),
 		networkneighborhood.NN(objectCache, cfg),
@@ -93,7 +100,7 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 	return program, nil
 }
 
-func (c *CEL) EvaluateRule(event map[string]any, eventType utils.EventType, expressions []typesv1.RuleExpression) (bool, error) {
+func (c *CEL) EvaluateRule(event *events.EnrichedEvent, eventType utils.EventType, expressions []typesv1.RuleExpression) (bool, error) {
 	for _, expression := range expressions {
 		if expression.EventType != eventType {
 			continue
@@ -104,7 +111,8 @@ func (c *CEL) EvaluateRule(event map[string]any, eventType utils.EventType, expr
 			return false, err
 		}
 
-		out, _, err := program.Eval(map[string]any{"event": event})
+		obj, _ := xcel.NewObject(event)
+		out, _, err := program.Eval(map[string]any{"event": obj})
 		if err != nil {
 			logger.L().Error("evaluation error", helpers.Error(err))
 		}
@@ -117,13 +125,14 @@ func (c *CEL) EvaluateRule(event map[string]any, eventType utils.EventType, expr
 	return true, nil
 }
 
-func (c *CEL) EvaluateExpression(event map[string]any, expression string) (string, error) {
+func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error) {
 	program, err := c.getOrCreateProgram(expression)
 	if err != nil {
 		return "", err
 	}
 
-	out, _, err := program.Eval(map[string]any{"event": event})
+	obj, _ := xcel.NewObject(event)
+	out, _, err := program.Eval(map[string]any{"event": obj})
 	if err != nil {
 		return "", fmt.Errorf("failed to evaluate expression: %s", err)
 	}
