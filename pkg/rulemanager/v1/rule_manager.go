@@ -184,6 +184,11 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 		return
 	}
 
+	// check for user defined profile
+	if sharedData.UserDefinedProfile != "" {
+		// TODO override the container profile with the user defined profile
+	}
+
 	podID := utils.CreateK8sPodID(container.K8s.Namespace, container.K8s.PodName)
 	if !rm.podToWlid.Has(podID) {
 		w := sharedData.Wlid
