@@ -55,7 +55,7 @@ func (ct *CapabilitiesTracer) Start(ctx context.Context) error {
 	}
 
 	tracerCapabilities, err := tracercapabilities.NewTracer(
-		&tracercapabilities.Config{MountnsMap: capabilitiesMountnsmap},
+		&tracercapabilities.Config{MountnsMap: capabilitiesMountnsmap, Unique: true},
 		ct.containerCollection,
 		ct.capabilitiesEventCallback,
 	)

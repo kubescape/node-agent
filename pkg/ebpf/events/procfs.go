@@ -1,15 +1,13 @@
 package events
 
 import (
-	"time"
-
 	types "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 // ProcfsEvent represents a procfs event that can be processed by the ordered event queue
 type ProcfsEvent struct {
 	Type        types.EventType `json:"type"`
-	Timestamp   time.Time       `json:"timestamp"`
+	Timestamp   types.Time      `json:"timestamp"`
 	PID         uint32          `json:"pid"`
 	PPID        uint32          `json:"ppid"`
 	Comm        string          `json:"comm"`
@@ -31,7 +29,7 @@ func (pe *ProcfsEvent) GetType() types.EventType {
 }
 
 // GetTimestamp returns the event timestamp
-func (pe *ProcfsEvent) GetTimestamp() time.Time {
+func (pe *ProcfsEvent) GetTimestamp() types.Time {
 	return pe.Timestamp
 }
 

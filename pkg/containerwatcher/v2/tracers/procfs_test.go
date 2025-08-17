@@ -98,7 +98,7 @@ func TestProcfsTracer_StartStop(t *testing.T) {
 func TestProcfsEvent_InterfaceMethods(t *testing.T) {
 	event := &events.ProcfsEvent{
 		Type:      types.NORMAL,
-		Timestamp: time.Now(),
+		Timestamp: types.Time(time.Now().UnixNano()),
 		PID:       123,
 		Comm:      "test-process",
 	}

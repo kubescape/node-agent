@@ -127,7 +127,7 @@ func (pt *ProcfsTracer) handleProcfsEvent(event conversion.ProcessEvent) {
 	// Use current time as event timestamp, not the process timestamp
 	procfsEvent := &events.ProcfsEvent{
 		Type:        types.NORMAL,
-		Timestamp:   time.Now(),
+		Timestamp:   types.Time(time.Now().UnixNano()),
 		PID:         event.PID,
 		PPID:        event.PPID,
 		Comm:        event.Comm,

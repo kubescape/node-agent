@@ -5,6 +5,7 @@ import (
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 )
@@ -17,8 +18,8 @@ type MockEvent struct {
 	Namespace string
 }
 
-func (m MockEvent) GetTimestamp() int64 {
-	return m.Timestamp
+func (m MockEvent) GetTimestamp() igtypes.Time {
+	return igtypes.Time(m.Timestamp)
 }
 
 func (m MockEvent) GetPod() string {
