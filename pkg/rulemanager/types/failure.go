@@ -65,6 +65,8 @@ type RuleFailure interface {
 	SetCloudServices(cloudServices []string)
 	// Set Alert Platform
 	SetAlertPlatform(alertPlatform apitypes.AlertSourcePlatform)
+	// Set Http Rule Alert
+	SetHttpRuleAlert(httpRuleAlert apitypes.HttpRuleAlert)
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {
@@ -148,4 +150,8 @@ func (rule *GenericRuleFailure) SetWorkloadDetails(workloadDetails string) {
 
 func (rule *GenericRuleFailure) SetAlertPlatform(alertPlatform apitypes.AlertSourcePlatform) {
 	rule.AlertPlatform = alertPlatform
+}
+
+func (rule *GenericRuleFailure) SetHttpRuleAlert(httpRuleAlert apitypes.HttpRuleAlert) {
+	rule.HttpRuleAlert = httpRuleAlert
 }
