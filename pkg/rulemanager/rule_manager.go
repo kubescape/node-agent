@@ -24,6 +24,7 @@ import (
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
+	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters/adapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
@@ -160,16 +161,19 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			eventMap := eventAdapter.ToMap(enrichedEvent)
 			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent.EventType)
 			if len(ruleExpressions) == 0 {
+				adapters.ReleaseEventMap(eventMap)
 				continue
 			}
 
 			if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
+				adapters.ReleaseEventMap(eventMap)
 				continue
 			}
 
 			shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, enrichedEvent.EventType, ruleExpressions)
 			if err != nil {
 				logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
+				adapters.ReleaseEventMap(eventMap)
 				continue
 			}
 
@@ -178,6 +182,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				message, uniqueID, err := rm.getUniqueIdAndMessage(eventMap, rule)
 				if err != nil {
 					logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
+					adapters.ReleaseEventMap(eventMap)
 					continue
 				}
 
@@ -188,10 +193,12 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 						helpers.String("uniqueID", uniqueID),
 						helpers.String("enrichedEvent.EventType", string(enrichedEvent.EventType)),
 					)
+					adapters.ReleaseEventMap(eventMap)
 					continue
 				}
 
 				if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(ruleFailure); shouldCooldown {
+					adapters.ReleaseEventMap(eventMap)
 					continue
 				}
 
@@ -200,6 +207,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			}
 
 			rm.metrics.ReportRuleProcessed(rule.Name)
+			adapters.ReleaseEventMap(eventMap)
 		}
 	}
 }
@@ -249,18 +257,21 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 		eventMap := eventAdapter.ToMap(&events.EnrichedEvent{Event: event})
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
 		if len(ruleExpressions) == 0 {
+			adapters.ReleaseEventMap(eventMap)
 			continue
 		}
 
 		shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, eventType, ruleExpressions)
 		if err != nil {
 			logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
+			adapters.ReleaseEventMap(eventMap)
 			continue
 		}
 
 		if shouldAlert {
 			results = append(results, rule.ID)
 		}
+		adapters.ReleaseEventMap(eventMap)
 	}
 
 	return results

@@ -82,7 +82,7 @@ func (c *NetworkAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]i
 	result["podOwner"] = networkEvent.PodOwner
 	result["podLabels"] = networkEvent.PodLabels
 
-	dst := make(map[string]interface{})
+	dst := AcquireMap()
 	dst["addr"] = networkEvent.DstEndpoint.Addr
 	dst["version"] = networkEvent.DstEndpoint.Version
 	dst["namespace"] = networkEvent.DstEndpoint.Namespace
