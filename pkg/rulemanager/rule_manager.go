@@ -138,6 +138,9 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 	}
 
 	rules := rm.ruleBindingCache.ListRulesForPod(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
+	if len(rules) == 0 {
+		return
+	}
 
 	_, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
 	profileExists = err == nil

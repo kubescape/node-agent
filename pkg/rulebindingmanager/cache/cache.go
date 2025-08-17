@@ -67,20 +67,25 @@ func (c *RBCache) ListRulesForPod(namespace, name string) []rulemanagertypesv1.R
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
-	var rulesSlice []rulemanagertypesv1.Rule
-
 	podID := utils.CreateK8sPodID(namespace, name)
 	if !c.podToRBNames.Has(podID) {
-		return rulesSlice
+		return nil
 	}
 
-	//append rules for pod
+	// Get rule binding names for this pod
 	rbNames := c.podToRBNames.Get(podID)
-	for _, i := range rbNames.ToSlice() {
-		if rules, ok := c.rbNameToRules.Load(i); ok {
+
+	// Estimate capacity based on number of rule bindings (assuming average of 1-2 rules per binding)
+	estimatedCapacity := rbNames.Cardinality() * 2
+	rulesSlice := make([]rulemanagertypesv1.Rule, 0, estimatedCapacity)
+
+	// Single pass: collect all rules
+	rbNames.Each(func(rbName string) bool {
+		if rules, ok := c.rbNameToRules.Load(rbName); ok {
 			rulesSlice = append(rulesSlice, rules...)
 		}
-	}
+		return true
+	})
 
 	return rulesSlice
 }

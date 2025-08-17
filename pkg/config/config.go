@@ -2,7 +2,6 @@ package config
 
 import (
 	"os"
-	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -90,7 +89,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("networkStreamingEnabled", false)
 	viper.SetDefault("kubernetesMode", true)
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
-	viper.SetDefault("workerPoolSize", runtime.NumCPU())
+	viper.SetDefault("workerPoolSize", 3000)
 	viper.SetDefault("eventBatchSize", 15000)
 	viper.SetDefault("testMode", false)
 	viper.SetDefault("enableEmbeddedSBOMs", false)
