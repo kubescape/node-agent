@@ -62,6 +62,7 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 			helpers.String("k8s workload", k8sContainerID),
 			helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
+		cw.metrics.ReportContainerStart()
 		// Check if Pod has a label of max sniffing time
 		sniffingTime := utils.AddJitter(cw.cfg.MaxSniffingTime, cw.cfg.MaxJitterPercentage)
 		if podLabelMaxSniffingTime, ok := notif.Container.K8s.PodLabels[MaxSniffingTimeLabel]; ok {
@@ -89,6 +90,7 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 			helpers.String("k8s workload", k8sContainerID),
 			helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
+		cw.metrics.ReportContainerStop()
 		cw.objectCache.K8sObjectCache().DeleteSharedContainerData(notif.Container.Runtime.ContainerID)
 	}
 }

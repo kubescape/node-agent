@@ -15,4 +15,6 @@ type MetricsManager interface {
 	ReportRuleProcessed(ruleID string)
 	ReportRuleAlert(ruleID string)
 	ReportEbpfStats(stats *top.Event[toptypes.Stats])
+	ReportContainerStart()
+	ReportContainerStop()
 }

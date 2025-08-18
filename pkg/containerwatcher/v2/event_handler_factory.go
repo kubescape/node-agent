@@ -245,10 +245,10 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	ehf.handlers[utils.HTTPEventType] = []Manager{containerProfileManager, ruleManager, metrics}
 
 	// Ptrace events
-	ehf.handlers[utils.PtraceEventType] = []Manager{ruleManager}
+	ehf.handlers[utils.PtraceEventType] = []Manager{ruleManager, metrics}
 
 	// IoUring events
-	ehf.handlers[utils.IoUringEventType] = []Manager{ruleManager, rulePolicy}
+	ehf.handlers[utils.IoUringEventType] = []Manager{ruleManager, metrics, rulePolicy}
 
 	// Note: SyscallEventType is not registered here because the syscall tracer
 	// doesn't generate events - it only provides a peek function for other components
