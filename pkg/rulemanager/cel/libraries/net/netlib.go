@@ -2,6 +2,7 @@ package net
 
 import (
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/checker"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -9,13 +10,17 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 )
 
-func Net(config config.Config) cel.EnvOption {
-	return cel.Lib(&netLibrary{
+func New(config config.Config) libraries.Library {
+	return &netLibrary{
 		functionCache: cache.NewFunctionCache(cache.FunctionCacheConfig{
 			MaxSize: config.CelConfigCache.MaxSize,
 			TTL:     config.CelConfigCache.TTL,
 		}),
-	})
+	}
+}
+
+func Net(config config.Config) cel.EnvOption {
+	return cel.Lib(New(config))
 }
 
 type netLibrary struct {
@@ -62,4 +67,27 @@ func (l *netLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
 
+func (l *netLibrary) CostEstimator() checker.CostEstimator {
+	return &netCostEstimator{}
+}
+
+// netCostEstimator implements the checker.CostEstimator for the 'net' library.
+type netCostEstimator struct{}
+
+func (e *netCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	cost := int64(0)
+	switch function {
+	case "net.is_private_ip":
+		// IP parsing O(1) + byte comparison across 6 IP ranges O(6) = O(1)
+		cost = 8
+	}
+	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
+}
+
+func (e *netCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
+	return nil // Not providing size estimates for now.
+}
+
+// Ensure the implementation satisfies the interface
+var _ checker.CostEstimator = (*netCostEstimator)(nil)
 var _ libraries.Library = (*netLibrary)(nil)

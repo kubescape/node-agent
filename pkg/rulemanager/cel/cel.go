@@ -31,16 +31,18 @@ type CEL struct {
 }
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
-	env, err := cel.NewEnv(
+	envOptions := []cel.EnvOption{
 		cel.Variable("event", cel.AnyType),
+		ext.Strings(),
 		k8s.K8s(objectCache.K8sObjectCache(), cfg),
 		applicationprofile.AP(objectCache, cfg),
 		networkneighborhood.NN(objectCache, cfg),
 		parse.Parse(cfg),
 		net.Net(cfg),
-		ext.Strings(),
 		process.Process(cfg),
-	)
+	}
+
+	env, err := cel.NewEnv(envOptions...)
 	if err != nil {
 		return nil, err
 	}
