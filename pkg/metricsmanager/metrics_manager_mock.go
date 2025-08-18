@@ -53,3 +53,7 @@ func (m *MetricsMock) ReportRuleAlert(ruleID string) {
 
 func (m *MetricsMock) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
 }
+
+func (m *MetricsMock) ReportContainerStart() {}
+
+func (m *MetricsMock) ReportContainerStop() {}

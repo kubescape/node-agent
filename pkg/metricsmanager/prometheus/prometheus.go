@@ -51,6 +51,10 @@ type PrometheusMetric struct {
 	programCpuUsageGauge      *prometheus.GaugeVec
 	programPerCpuUsageGauge   *prometheus.GaugeVec
 
+	// Container metrics
+	containerStartCounter prometheus.Counter
+	containerStopCounter  prometheus.Counter
+
 	// Cache to avoid allocating Labels maps on every call
 	ruleCounterCache  map[string]prometheus.Counter
 	alertCounterCache map[string]prometheus.Counter
@@ -165,6 +169,16 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Help: "Per-CPU usage of programs by program ID",
 		}, []string{programTypeLabel, programNameLabel}),
 
+		// Container metrics
+		containerStartCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_container_start_counter",
+			Help: "The total number of container start events",
+		}),
+		containerStopCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_container_stop_counter",
+			Help: "The total number of container stop events",
+		}),
+
 		// Initialize counter caches
 		ruleCounterCache:  make(map[string]prometheus.Counter),
 		alertCounterCache: make(map[string]prometheus.Counter),
@@ -197,6 +211,8 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.ebpfHTTPCounter)
 	prometheus.Unregister(p.ebpfPtraceCounter)
 	prometheus.Unregister(p.ebpfIoUringCounter)
+	prometheus.Unregister(p.containerStartCounter)
+	prometheus.Unregister(p.containerStopCounter)
 	// Unregister program ID metrics
 	prometheus.Unregister(p.programRuntimeGauge)
 	prometheus.Unregister(p.programRunCountGauge)
@@ -317,4 +333,12 @@ func (p *PrometheusMetric) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
 		p.programCpuUsageGauge.With(labels).Set(stat.TotalCpuUsage)
 		p.programPerCpuUsageGauge.With(labels).Set(stat.PerCpuUsage)
 	}
+}
+
+func (p *PrometheusMetric) ReportContainerStart() {
+	p.containerStartCounter.Inc()
+}
+
+func (p *PrometheusMetric) ReportContainerStop() {
+	p.containerStopCounter.Inc()
 }
