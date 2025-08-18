@@ -32,6 +32,12 @@ type PrometheusMetric struct {
 	ebpfCapabilityCounter prometheus.Counter
 	ebpfRandomXCounter    prometheus.Counter
 	ebpfFailedCounter     prometheus.Counter
+	ebpfSymlinkCounter    prometheus.Counter
+	ebpfHardlinkCounter   prometheus.Counter
+	ebpfSSHCounter        prometheus.Counter
+	ebpfHTTPCounter       prometheus.Counter
+	ebpfPtraceCounter     prometheus.Counter
+	ebpfIoUringCounter    prometheus.Counter
 	ruleCounter           *prometheus.CounterVec
 	alertCounter          *prometheus.CounterVec
 
@@ -84,6 +90,30 @@ func NewPrometheusMetric() *PrometheusMetric {
 		ebpfFailedCounter: promauto.NewCounter(prometheus.CounterOpts{
 			Name: "node_agent_ebpf_event_failure_counter",
 			Help: "The total number of failed events received from the eBPF probe",
+		}),
+		ebpfSymlinkCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_symlink_counter",
+			Help: "The total number of symlink events received from the eBPF probe",
+		}),
+		ebpfHardlinkCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_hardlink_counter",
+			Help: "The total number of hardlink events received from the eBPF probe",
+		}),
+		ebpfSSHCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_ssh_counter",
+			Help: "The total number of SSH events received from the eBPF probe",
+		}),
+		ebpfHTTPCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_http_counter",
+			Help: "The total number of HTTP events received from the eBPF probe",
+		}),
+		ebpfPtraceCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_ptrace_counter",
+			Help: "The total number of ptrace events received from the eBPF probe",
+		}),
+		ebpfIoUringCounter: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "node_agent_iouring_counter",
+			Help: "The total number of io_uring events received from the eBPF probe",
 		}),
 		ruleCounter: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "node_agent_rule_counter",
@@ -161,7 +191,12 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.ebpfFailedCounter)
 	prometheus.Unregister(p.ruleCounter)
 	prometheus.Unregister(p.alertCounter)
-
+	prometheus.Unregister(p.ebpfSymlinkCounter)
+	prometheus.Unregister(p.ebpfHardlinkCounter)
+	prometheus.Unregister(p.ebpfSSHCounter)
+	prometheus.Unregister(p.ebpfHTTPCounter)
+	prometheus.Unregister(p.ebpfPtraceCounter)
+	prometheus.Unregister(p.ebpfIoUringCounter)
 	// Unregister program ID metrics
 	prometheus.Unregister(p.programRuntimeGauge)
 	prometheus.Unregister(p.programRunCountGauge)
@@ -175,6 +210,8 @@ func (p *PrometheusMetric) Destroy() {
 
 func (p *PrometheusMetric) ReportEvent(eventType utils.EventType) {
 	switch eventType {
+	case utils.CapabilitiesEventType:
+		p.ebpfCapabilityCounter.Inc()
 	case utils.ExecveEventType:
 		p.ebpfExecCounter.Inc()
 	case utils.OpenEventType:
@@ -183,12 +220,22 @@ func (p *PrometheusMetric) ReportEvent(eventType utils.EventType) {
 		p.ebpfNetworkCounter.Inc()
 	case utils.DnsEventType:
 		p.ebpfDNSCounter.Inc()
-	case utils.SyscallEventType:
-		p.ebpfSyscallCounter.Inc()
-	case utils.CapabilitiesEventType:
-		p.ebpfCapabilityCounter.Inc()
 	case utils.RandomXEventType:
 		p.ebpfRandomXCounter.Inc()
+	case utils.SymlinkEventType:
+		p.ebpfSymlinkCounter.Inc()
+	case utils.HardlinkEventType:
+		p.ebpfHardlinkCounter.Inc()
+	case utils.SSHEventType:
+		p.ebpfSSHCounter.Inc()
+	case utils.HTTPEventType:
+		p.ebpfHTTPCounter.Inc()
+	case utils.PtraceEventType:
+		p.ebpfPtraceCounter.Inc()
+	case utils.IoUringEventType:
+		p.ebpfIoUringCounter.Inc()
+	case utils.SyscallEventType:
+		p.ebpfSyscallCounter.Inc()
 	}
 }
 
