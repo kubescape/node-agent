@@ -5,13 +5,13 @@ import (
 )
 
 func ConvertToMap(e *types.Event) map[string]interface{} {
-	result := make(map[string]interface{})
+	result := AcquireMap()
 
 	result["timestamp"] = e.Timestamp
 	result["type"] = e.Type
 	result["message"] = e.Message
 
-	runtime := make(map[string]interface{})
+	runtime := AcquireMap()
 	runtime["runtimeName"] = e.Runtime.RuntimeName
 	runtime["containerId"] = e.Runtime.ContainerID
 	runtime["containerName"] = e.Runtime.ContainerName
@@ -21,7 +21,7 @@ func ConvertToMap(e *types.Event) map[string]interface{} {
 	runtime["containerStartedAt"] = e.Runtime.ContainerStartedAt
 	result["runtime"] = runtime
 
-	k8s := make(map[string]interface{})
+	k8s := AcquireMap()
 	k8s["node"] = e.K8s.Node
 	k8s["namespace"] = e.K8s.Namespace
 	k8s["podName"] = e.K8s.PodName
@@ -29,7 +29,7 @@ func ConvertToMap(e *types.Event) map[string]interface{} {
 	k8s["containerName"] = e.K8s.ContainerName
 	k8s["hostNetwork"] = e.K8s.HostNetwork
 
-	owner := make(map[string]interface{})
+	owner := AcquireMap()
 	owner["kind"] = e.K8s.Owner.Kind
 	owner["name"] = e.K8s.Owner.Name
 	k8s["owner"] = owner

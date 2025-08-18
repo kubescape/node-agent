@@ -4,9 +4,11 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
@@ -38,6 +40,7 @@ type RBCache struct {
 	watchResources []watcher.WatchResource
 	notifiers      []*chan rulebindingmanager.RuleBindingNotify
 	mutex          sync.RWMutex
+	rulesForPod    *expirable.LRU[string, []rulemanagertypesv1.Rule]
 }
 
 func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface, ruleCreator rulecreator.RuleCreator) *RBCache {
@@ -50,6 +53,7 @@ func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface, ruleCreat
 		podToRBNames:   maps.SafeMap[string, mapset.Set[string]]{},
 		rbNameToPods:   maps.SafeMap[string, mapset.Set[string]]{},
 		watchResources: resourcesToWatch(nodeName),
+		rulesForPod:    expirable.NewLRU[string, []rulemanagertypesv1.Rule](1000, nil, 5*time.Second),
 	}
 }
 
@@ -64,14 +68,17 @@ func (c *RBCache) WatchResources() []watcher.WatchResource {
 // ------------------ rulebindingmanager.RuleBindingCache methods -----------------------
 
 func (c *RBCache) ListRulesForPod(namespace, name string) []rulemanagertypesv1.Rule {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
+	podID := utils.CreateK8sPodID(namespace, name)
 
 	var rulesSlice []rulemanagertypesv1.Rule
 
-	podID := utils.CreateK8sPodID(namespace, name)
-	if !c.podToRBNames.Has(podID) {
+	rulesSlice, ok := c.rulesForPod.Get(podID)
+	if ok {
 		return rulesSlice
+	}
+
+	if !c.podToRBNames.Has(podID) {
+		return nil
 	}
 
 	//append rules for pod
@@ -81,6 +88,8 @@ func (c *RBCache) ListRulesForPod(namespace, name string) []rulemanagertypesv1.R
 			rulesSlice = append(rulesSlice, rules...)
 		}
 	}
+
+	c.rulesForPod.Add(podID, rulesSlice)
 
 	return rulesSlice
 }
