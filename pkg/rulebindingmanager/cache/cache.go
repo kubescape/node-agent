@@ -4,9 +4,11 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
@@ -38,6 +40,7 @@ type RBCache struct {
 	watchResources []watcher.WatchResource
 	notifiers      []*chan rulebindingmanager.RuleBindingNotify
 	mutex          sync.RWMutex
+	rulesForPod    *expirable.LRU[string, []rulemanagertypesv1.Rule]
 }
 
 func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface, ruleCreator rulecreator.RuleCreator) *RBCache {
@@ -50,6 +53,7 @@ func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface, ruleCreat
 		podToRBNames:   maps.SafeMap[string, mapset.Set[string]]{},
 		rbNameToPods:   maps.SafeMap[string, mapset.Set[string]]{},
 		watchResources: resourcesToWatch(nodeName),
+		rulesForPod:    expirable.NewLRU[string, []rulemanagertypesv1.Rule](1000, nil, 5*time.Second),
 	}
 }
 
@@ -64,28 +68,28 @@ func (c *RBCache) WatchResources() []watcher.WatchResource {
 // ------------------ rulebindingmanager.RuleBindingCache methods -----------------------
 
 func (c *RBCache) ListRulesForPod(namespace, name string) []rulemanagertypesv1.Rule {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-
 	podID := utils.CreateK8sPodID(namespace, name)
+
+	var rulesSlice []rulemanagertypesv1.Rule
+
+	rulesSlice, ok := c.rulesForPod.Get(podID)
+	if ok {
+		return rulesSlice
+	}
+
 	if !c.podToRBNames.Has(podID) {
 		return nil
 	}
 
-	// Get rule binding names for this pod
+	//append rules for pod
 	rbNames := c.podToRBNames.Get(podID)
-
-	// Estimate capacity based on number of rule bindings (assuming average of 1-2 rules per binding)
-	estimatedCapacity := rbNames.Cardinality() * 2
-	rulesSlice := make([]rulemanagertypesv1.Rule, 0, estimatedCapacity)
-
-	// Single pass: collect all rules
-	rbNames.Each(func(rbName string) bool {
-		if rules, ok := c.rbNameToRules.Load(rbName); ok {
+	for _, i := range rbNames.ToSlice() {
+		if rules, ok := c.rbNameToRules.Load(i); ok {
 			rulesSlice = append(rulesSlice, rules...)
 		}
-		return true
-	})
+	}
+
+	c.rulesForPod.Add(podID, rulesSlice)
 
 	return rulesSlice
 }

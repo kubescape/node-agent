@@ -104,7 +104,8 @@ func (c *CEL) EvaluateRule(event map[string]any, eventType utils.EventType, expr
 			return false, err
 		}
 
-		out, _, err := program.Eval(map[string]any{"event": event})
+		activation := map[string]any{"event": event}
+		out, _, err := program.Eval(activation)
 		if err != nil {
 			logger.L().Error("evaluation error", helpers.Error(err))
 		}
@@ -123,7 +124,8 @@ func (c *CEL) EvaluateExpression(event map[string]any, expression string) (strin
 		return "", err
 	}
 
-	out, _, err := program.Eval(map[string]any{"event": event})
+	activation := map[string]any{"event": event}
+	out, _, err := program.Eval(activation)
 	if err != nil {
 		return "", fmt.Errorf("failed to evaluate expression: %s", err)
 	}

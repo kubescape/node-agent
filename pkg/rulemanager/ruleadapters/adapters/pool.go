@@ -19,9 +19,7 @@ func AcquireMap() map[string]interface{} {
 // ReleaseMap returns a map to the pool after clearing it for reuse.
 func ReleaseMap(m map[string]interface{}) {
 	// Clear all keys from the map to prevent old data from leaking.
-	for k := range m {
-		delete(m, k)
-	}
+	clear(m)
 	mapPool.Put(m)
 }
 
