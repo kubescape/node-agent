@@ -24,6 +24,7 @@ import (
 	bindingcache "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	"github.com/kubescape/node-agent/pkg/rulemanager/profilehelper"
 	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
+	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters/adapters"
 	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
@@ -136,7 +137,14 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		return
 	}
 
+	if enrichedEvent.Event.GetPod() == "" || enrichedEvent.Event.GetNamespace() == "" {
+		return
+	}
+
 	rules := rm.ruleBindingCache.ListRulesForPod(enrichedEvent.Event.GetNamespace(), enrichedEvent.Event.GetPod())
+	if len(rules) == 0 {
+		return
+	}
 
 	_, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
 	profileExists = err == nil
@@ -145,62 +153,66 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		return
 	}
 
+	// Build a single event map per event to reduce allocations
+	eventAdapter, ok := rm.adapterFactory.GetAdapter(enrichedEvent.EventType)
+	if !ok {
+		logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.EventType)))
+		return
+	}
+
+	eventMap := eventAdapter.ToMap(enrichedEvent)
+	defer adapters.ReleaseEventMap(eventMap)
+
 	for _, rule := range rules {
-		if rule.Enabled {
-			if !profileExists && rule.ProfileDependency == armotypes.Required {
-				continue
-			}
-
-			eventAdapter, ok := rm.adapterFactory.GetAdapter(enrichedEvent.EventType)
-			if !ok {
-				logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.EventType)))
-				continue
-			}
-
-			eventMap := eventAdapter.ToMap(enrichedEvent)
-			ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent.EventType)
-			if len(ruleExpressions) == 0 {
-				continue
-			}
-
-			if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
-				continue
-			}
-
-			shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, enrichedEvent.EventType, ruleExpressions)
-			if err != nil {
-				logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
-				continue
-			}
-
-			if shouldAlert {
-				rm.metrics.ReportRuleAlert(rule.Name)
-				message, uniqueID, err := rm.getUniqueIdAndMessage(eventMap, rule)
-				if err != nil {
-					logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
-					continue
-				}
-
-				ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID)
-				if ruleFailure == nil {
-					logger.L().Error("RuleManager - failed to create rule failure", helpers.String("rule", rule.Name),
-						helpers.String("message", message),
-						helpers.String("uniqueID", uniqueID),
-						helpers.String("enrichedEvent.EventType", string(enrichedEvent.EventType)),
-					)
-					continue
-				}
-
-				if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(ruleFailure); shouldCooldown {
-					continue
-				}
-
-				ruleFailure.SetWorkloadDetails(details)
-				rm.exporter.SendRuleAlert(ruleFailure)
-			}
-
-			rm.metrics.ReportRuleProcessed(rule.Name)
+		if !rule.Enabled {
+			continue
 		}
+		if !profileExists && rule.ProfileDependency == armotypes.Required {
+			continue
+		}
+
+		ruleExpressions := rm.getRuleExpressions(rule, enrichedEvent.EventType)
+		if len(ruleExpressions) == 0 {
+			continue
+		}
+
+		if rule.SupportPolicy && rm.validateRulePolicy(rule, enrichedEvent.Event, enrichedEvent.ContainerID) {
+			continue
+		}
+
+		shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, enrichedEvent.EventType, ruleExpressions)
+		if err != nil {
+			logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
+			continue
+		}
+
+		if shouldAlert {
+			rm.metrics.ReportRuleAlert(rule.Name)
+			message, uniqueID, err := rm.getUniqueIdAndMessage(eventMap, rule)
+			if err != nil {
+				logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
+				continue
+			}
+
+			ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID)
+			if ruleFailure == nil {
+				logger.L().Error("RuleManager - failed to create rule failure", helpers.String("rule", rule.Name),
+					helpers.String("message", message),
+					helpers.String("uniqueID", uniqueID),
+					helpers.String("enrichedEvent.EventType", string(enrichedEvent.EventType)),
+				)
+				continue
+			}
+
+			if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(ruleFailure); shouldCooldown {
+				continue
+			}
+
+			ruleFailure.SetWorkloadDetails(details)
+			rm.exporter.SendRuleAlert(ruleFailure)
+		}
+
+		rm.metrics.ReportRuleProcessed(rule.Name)
 	}
 }
 
@@ -235,18 +247,21 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	creator := rm.ruleBindingCache.GetRuleCreator()
 	rules := creator.CreateRulePolicyRulesByEventType(eventType)
 
+	// Create one event map for all policy rules of this event
+	eventAdapter, ok := rm.adapterFactory.GetAdapter(eventType)
+	if !ok {
+		logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(eventType)))
+		return results
+	}
+
+	eventMap := eventAdapter.ToMap(&events.EnrichedEvent{Event: event})
+	defer adapters.ReleaseEventMap(eventMap)
+
 	for _, rule := range rules {
 		if !rule.SupportPolicy {
 			continue
 		}
 
-		eventAdapter, ok := rm.adapterFactory.GetAdapter(eventType)
-		if !ok {
-			logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(eventType)))
-			continue
-		}
-
-		eventMap := eventAdapter.ToMap(&events.EnrichedEvent{Event: event})
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
 		if len(ruleExpressions) == 0 {
 			continue
