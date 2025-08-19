@@ -2,6 +2,7 @@ package applicationprofile
 
 import (
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/checker"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -10,14 +11,18 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 )
 
-func AP(objectCache objectcache.ObjectCache, config config.Config) cel.EnvOption {
-	return cel.Lib(&apLibrary{
+func New(objectCache objectcache.ObjectCache, config config.Config) libraries.Library {
+	return &apLibrary{
 		objectCache: objectCache,
 		functionCache: cache.NewFunctionCache(cache.FunctionCacheConfig{
 			MaxSize: config.CelConfigCache.MaxSize,
 			TTL:     config.CelConfigCache.TTL,
 		}),
-	})
+	}
+}
+
+func AP(objectCache objectcache.ObjectCache, config config.Config) cel.EnvOption {
+	return cel.Lib(New(objectCache, config))
 }
 
 type apLibrary struct {
@@ -170,4 +175,51 @@ func (l *apLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
 
+func (l *apLibrary) CostEstimator() checker.CostEstimator {
+	return &apCostEstimator{}
+}
+
+// apCostEstimator implements the checker.CostEstimator for the 'ap' library.
+type apCostEstimator struct{}
+
+func (e *apCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	cost := int64(0)
+	switch function {
+	case "ap.was_executed":
+		// Cache lookup + O(n) linear search through execs list
+		cost = 15
+	case "ap.was_executed_with_args":
+		// Cache lookup + O(n) linear search + O(m) slice comparison for args
+		cost = 30
+	case "ap.was_path_opened":
+		// Cache lookup + O(n) linear search + dynamic path comparison
+		cost = 25
+	case "ap.was_path_opened_with_flags":
+		// Cache lookup + O(n) search + dynamic path comparison + O(f*p) flag comparison
+		cost = 40
+	case "ap.was_path_opened_with_suffix":
+		// Cache lookup + O(n) linear search + O(n*len(suffix)) string suffix checks
+		cost = 20
+	case "ap.was_path_opened_with_prefix":
+		// Cache lookup + O(n) linear search + O(n*len(prefix)) string prefix checks
+		cost = 20
+	case "ap.was_syscall_used":
+		// Cache lookup + O(n) slice.Contains search through syscalls
+		cost = 12
+	case "ap.was_capability_used":
+		// Cache lookup + O(n) slice.Contains search through capabilities
+		cost = 12
+	default:
+		// This estimator doesn't know about other functions.
+		return nil
+	}
+	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
+}
+
+func (e *apCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
+	return nil // Not providing size estimates for now.
+}
+
+// Ensure the implementation satisfies the interface
+var _ checker.CostEstimator = (*apCostEstimator)(nil)
 var _ libraries.Library = (*apLibrary)(nil)

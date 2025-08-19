@@ -107,8 +107,8 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("exitCleanup::cleanupDelay", 5*time.Minute)
 	viper.SetDefault("workerChannelSize", 750000)
 	viper.SetDefault("blockEvents", false)
-	viper.SetDefault("celConfigCache::maxSize", 1000)
-	viper.SetDefault("celConfigCache::ttl", 1*time.Second)
+	viper.SetDefault("celConfigCache::maxSize", 100000)
+	viper.SetDefault("celConfigCache::ttl", 1*time.Minute)
 
 	viper.AutomaticEnv()
 

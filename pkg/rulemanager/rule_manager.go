@@ -146,14 +146,13 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		return
 	}
 
-	_, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
-	profileExists = err == nil
-
 	if !isSupportedEventType(rules, enrichedEvent) {
 		return
 	}
 
-	// Build a single event map per event to reduce allocations
+	_, err := profilehelper.GetContainerApplicationProfile(rm.objectCache, enrichedEvent.ContainerID)
+	profileExists = err == nil
+
 	eventAdapter, ok := rm.adapterFactory.GetAdapter(enrichedEvent.EventType)
 	if !ok {
 		logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.EventType)))
@@ -211,7 +210,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			ruleFailure.SetWorkloadDetails(details)
 			rm.exporter.SendRuleAlert(ruleFailure)
 		}
-
 		rm.metrics.ReportRuleProcessed(rule.Name)
 	}
 }

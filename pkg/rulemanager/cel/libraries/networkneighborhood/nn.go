@@ -2,6 +2,7 @@ package networkneighborhood
 
 import (
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/checker"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -10,14 +11,18 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 )
 
-func NN(objectCache objectcache.ObjectCache, config config.Config) cel.EnvOption {
-	return cel.Lib(&nnLibrary{
+func New(objectCache objectcache.ObjectCache, config config.Config) libraries.Library {
+	return &nnLibrary{
 		objectCache: objectCache,
 		functionCache: cache.NewFunctionCache(cache.FunctionCacheConfig{
 			MaxSize: config.CelConfigCache.MaxSize,
 			TTL:     config.CelConfigCache.TTL,
 		}),
-	})
+	}
+}
+
+func NN(objectCache objectcache.ObjectCache, config config.Config) cel.EnvOption {
+	return cel.Lib(New(objectCache, config))
 }
 
 type nnLibrary struct {
@@ -142,4 +147,33 @@ func (l *nnLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
 
+func (l *nnLibrary) CostEstimator() checker.CostEstimator {
+	return &nnCostEstimator{}
+}
+
+// nnCostEstimator implements the checker.CostEstimator for the 'nn' library.
+type nnCostEstimator struct{}
+
+func (e *nnCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	cost := int64(0)
+	switch function {
+	case "nn.was_address_in_egress", "nn.was_address_in_ingress":
+		// Cache lookup + O(n) linear search through egress/ingress list
+		cost = 20
+	case "nn.is_domain_in_egress", "nn.is_domain_in_ingress":
+		// Cache lookup + O(n) list iteration + O(m) slice.Contains on DNS names per entry
+		cost = 35
+	case "nn.was_address_port_protocol_in_egress", "nn.was_address_port_protocol_in_ingress":
+		// Cache lookup + O(n) address search + O(p) nested port/protocol matching
+		cost = 45
+	}
+	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
+}
+
+func (e *nnCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
+	return nil // Not providing size estimates for now.
+}
+
+// Ensure the implementation satisfies the interface
+var _ checker.CostEstimator = (*nnCostEstimator)(nil)
 var _ libraries.Library = (*nnLibrary)(nil)

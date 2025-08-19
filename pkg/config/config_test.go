@@ -86,8 +86,8 @@ func TestLoadConfig(t *testing.T) {
 					CleanupDelay:    5 * time.Minute,
 				},
 				CelConfigCache: cache.FunctionCacheConfig{
-					MaxSize: 1000,
-					TTL:     1 * time.Second,
+					MaxSize: 100000,
+					TTL:     1 * time.Minute,
 				},
 			},
 			wantErr: false,

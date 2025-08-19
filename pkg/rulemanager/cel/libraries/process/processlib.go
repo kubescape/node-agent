@@ -2,6 +2,7 @@ package process
 
 import (
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/checker"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -9,13 +10,17 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 )
 
-func Process(config config.Config) cel.EnvOption {
-	return cel.Lib(&processLibrary{
+func New(config config.Config) libraries.Library {
+	return &processLibrary{
 		functionCache: cache.NewFunctionCache(cache.FunctionCacheConfig{
 			MaxSize: config.CelConfigCache.MaxSize,
 			TTL:     config.CelConfigCache.TTL,
 		}),
-	})
+	}
+}
+
+func Process(config config.Config) cel.EnvOption {
+	return cel.Lib(New(config))
 }
 
 type processLibrary struct {
@@ -77,4 +82,30 @@ func (l *processLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
 
+func (l *processLibrary) CostEstimator() checker.CostEstimator {
+	return &processCostEstimator{}
+}
+
+// processCostEstimator implements the checker.CostEstimator for the 'process' library.
+type processCostEstimator struct{}
+
+func (e *processCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	cost := int64(0)
+	switch function {
+	case "process.get_process_env":
+		// File I/O to read /proc/{pid}/environ + O(n) parsing of environment variables
+		cost = 50
+	case "process.get_ld_hook_var":
+		// File I/O + O(n) environment parsing + O(m) LD_PRELOAD array search (m=41 constants)
+		cost = 60
+	}
+	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
+}
+
+func (e *processCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
+	return nil // Not providing size estimates for now.
+}
+
+// Ensure the implementation satisfies the interface
+var _ checker.CostEstimator = (*processCostEstimator)(nil)
 var _ libraries.Library = (*processLibrary)(nil)

@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/checker"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/kubescape/node-agent/pkg/config"
@@ -10,14 +11,18 @@ import (
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
 )
 
-func K8s(k8sObjCache objectcache.K8sObjectCache, config config.Config) cel.EnvOption {
-	return cel.Lib(&k8sLibrary{
+func New(k8sObjCache objectcache.K8sObjectCache, config config.Config) libraries.Library {
+	return &k8sLibrary{
 		k8sObjCache: k8sObjCache,
 		functionCache: cache.NewFunctionCache(cache.FunctionCacheConfig{
 			MaxSize: config.CelConfigCache.MaxSize,
 			TTL:     config.CelConfigCache.TTL,
 		}),
-	})
+	}
+}
+
+func K8s(k8sObjCache objectcache.K8sObjectCache, config config.Config) cel.EnvOption {
+	return cel.Lib(New(k8sObjCache, config))
 }
 
 type k8sLibrary struct {
@@ -199,4 +204,33 @@ func (l *k8sLibrary) ProgramOptions() []cel.ProgramOption {
 	return []cel.ProgramOption{}
 }
 
+func (l *k8sLibrary) CostEstimator() checker.CostEstimator {
+	return &k8sCostEstimator{}
+}
+
+// k8sCostEstimator implements the checker.CostEstimator for the 'k8s' library.
+type k8sCostEstimator struct{}
+
+func (e *k8sCostEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	cost := int64(0)
+	switch function {
+	case "k8s.get_container_mount_paths":
+		// Cache lookup + O(n) search through 3 container types + O(m) volume mount iteration
+		cost = 25
+	case "k8s.is_api_server_address":
+		// Cache lookup + simple string comparison - O(1)
+		cost = 5
+	case "k8s.get_container_by_name":
+		// Cache lookup + O(n) search through 3 container types by name
+		cost = 15
+	}
+	return &checker.CallEstimate{CostEstimate: checker.CostEstimate{Min: uint64(cost), Max: uint64(cost)}}
+}
+
+func (e *k8sCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
+	return nil // Not providing size estimates for now.
+}
+
+// Ensure the implementation satisfies the interface
+var _ checker.CostEstimator = (*k8sCostEstimator)(nil)
 var _ libraries.Library = (*k8sLibrary)(nil)
