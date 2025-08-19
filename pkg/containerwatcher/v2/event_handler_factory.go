@@ -120,6 +120,7 @@ func NewEventHandlerFactory(
 
 	rulePolicyAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
 		switch eventType {
+		// Won't work for 3rd party tracers, we need to extract comm and containerID from the event by interface
 		case utils.ExecveEventType:
 			if execEvent, ok := event.(*events.ExecEvent); ok {
 				rulePolicyReporter.ReportEvent(eventType, event, execEvent.Runtime.ContainerID, execEvent.Comm)
