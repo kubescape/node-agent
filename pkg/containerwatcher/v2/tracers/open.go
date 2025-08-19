@@ -28,6 +28,7 @@ type OpenTracer struct {
 	eventCallback       func(utils.K8sEvent, string, uint32)
 	tracer              *traceropen.Tracer
 	cfg                 config.Config
+	pathResolver        *PathResolver
 	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
 }
 
@@ -39,12 +40,14 @@ func NewOpenTracer(
 	eventCallback func(utils.K8sEvent, string, uint32),
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *OpenTracer {
+	pathResolver := NewPathResolver()
 	return &OpenTracer{
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,
 		containerSelector:   containerSelector,
 		eventCallback:       eventCallback,
 		thirdPartyEnricher:  thirdPartyEnricher,
+		pathResolver:        pathResolver,
 	}
 }
 
@@ -113,6 +116,16 @@ func (ot *OpenTracer) openEventCallback(event *traceropentype.Event) {
 
 	if ot.cfg.EnableFullPathTracing {
 		event.Path = event.FullPath
+	}
+
+	if !ot.cfg.EnableFullPathTracing {
+		fullPath, err := ot.pathResolver.ResolvePath(event.Pid, event.Path)
+		if err != nil {
+			event.FullPath = event.Path
+		} else {
+			event.FullPath = fullPath
+			event.Path = fullPath
+		}
 	}
 
 	if event.K8s.ContainerName == "" {

@@ -71,7 +71,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetConfigType("json")
 	viper.SetOptions(viper.KeyDelimiter("::"))
 
-	viper.SetDefault("fullPathTracingEnabled", true)
+	viper.SetDefault("fullPathTracingEnabled", false)
 	viper.SetDefault("initialDelay", 2*time.Minute)
 	viper.SetDefault("nodeProfileInterval", 10*time.Minute)
 	viper.SetDefault("maxDelaySeconds", 30)
