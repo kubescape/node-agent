@@ -11,6 +11,7 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/dustin/go-humanize"
 	"github.com/goradd/maps"
+	expirable "github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -23,23 +24,33 @@ import (
 )
 
 const (
-	maxFileSize = 50 * 1024 * 1024
+	maxFileSize      = 50 * 1024 * 1024 // 50MB
+	hashCacheTTL     = 1 * time.Minute
+	hashCacheMaxSize = 50000
 )
 
 var ErrRuleShouldNotBeAlerted = errors.New("rule should not be alerted")
+
+type FileHashCache struct {
+	SHA1Hash string
+	MD5Hash  string
+}
 
 type RuleFailureCreator struct {
 	adapterFactory   *EventRuleAdapterFactory
 	containerIdToPid *maps.SafeMap[string, uint32]
 	dnsManager       dnsmanager.DNSResolver
 	enricher         types.Enricher
+	hashCache        *expirable.LRU[string, *FileHashCache]
 }
 
 func NewRuleFailureCreator(enricher types.Enricher, dnsManager dnsmanager.DNSResolver, adapterFactory *EventRuleAdapterFactory) *RuleFailureCreator {
+	hashCache := expirable.NewLRU[string, *FileHashCache](hashCacheMaxSize, nil, hashCacheTTL)
 	return &RuleFailureCreator{
 		adapterFactory: adapterFactory,
 		dnsManager:     dnsManager,
 		enricher:       enricher,
+		hashCache:      hashCache,
 	}
 }
 
@@ -94,7 +105,6 @@ func (r *RuleFailureCreator) enrichRuleFailure(ruleFailure *types.GenericRuleFai
 			}
 		}
 	}
-
 }
 
 func (r *RuleFailureCreator) setProfileMetadata(rule typesv1.Rule, ruleFailure *types.GenericRuleFailure, objectCache objectcache.ObjectCache) {
@@ -201,10 +211,19 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 
 	if size != 0 && size < maxFileSize && hostPath != "" {
 		if baseRuntimeAlert.MD5Hash == "" || baseRuntimeAlert.SHA1Hash == "" {
-			sha1hash, md5hash, err := utils.CalculateFileHashes(hostPath)
-			if err == nil {
-				baseRuntimeAlert.MD5Hash = md5hash
-				baseRuntimeAlert.SHA1Hash = sha1hash
+			if cached, found := r.hashCache.Get(hostPath); found {
+				baseRuntimeAlert.MD5Hash = cached.MD5Hash
+				baseRuntimeAlert.SHA1Hash = cached.SHA1Hash
+			} else {
+				sha1hash, md5hash, err := utils.CalculateFileHashes(hostPath)
+				if err == nil {
+					baseRuntimeAlert.MD5Hash = md5hash
+					baseRuntimeAlert.SHA1Hash = sha1hash
+					r.hashCache.Add(hostPath, &FileHashCache{
+						SHA1Hash: sha1hash,
+						MD5Hash:  md5hash,
+					})
+				}
 			}
 		}
 	}

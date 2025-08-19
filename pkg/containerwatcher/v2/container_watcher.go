@@ -265,7 +265,6 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	})
 
 	// Start ordered event queue BEFORE tracers
-	// No need to start queue anymore - it's just a data structure
 
 	// Start event processing loop
 	go cw.eventProcessingLoop()
@@ -317,8 +316,6 @@ func (cw *ContainerWatcher) Stop() {
 	if cw.tracerManagerV2 != nil {
 		cw.tracerManagerV2.StopAllTracers()
 	}
-
-	// No need to stop queue - it's just a data structure
 
 	// Close worker channel to signal worker goroutine to stop
 	if cw.workerChan != nil {

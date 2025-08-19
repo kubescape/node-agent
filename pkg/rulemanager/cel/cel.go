@@ -24,10 +24,11 @@ import (
 var _ CELRuleEvaluator = (*CEL)(nil)
 
 type CEL struct {
-	env          *cel.Env
-	objectCache  objectcache.ObjectCache
-	programCache map[string]cel.Program
-	cacheMutex   sync.RWMutex
+	env             *cel.Env
+	objectCache     objectcache.ObjectCache
+	programCache    map[string]cel.Program
+	cacheMutex      sync.RWMutex
+	evalContextPool sync.Pool
 }
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
@@ -46,11 +47,18 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	if err != nil {
 		return nil, err
 	}
-	return &CEL{
+	cel := &CEL{
 		env:          env,
 		objectCache:  objectCache,
 		programCache: make(map[string]cel.Program),
-	}, nil
+	}
+
+	// Initialize evaluation context pool to reduce map allocations
+	cel.evalContextPool.New = func() interface{} {
+		return make(map[string]any, 1)
+	}
+
+	return cel, nil
 }
 
 func (c *CEL) registerExpression(expression string) error {
@@ -96,6 +104,16 @@ func (c *CEL) getOrCreateProgram(expression string) (cel.Program, error) {
 }
 
 func (c *CEL) EvaluateRule(event map[string]any, eventType utils.EventType, expressions []typesv1.RuleExpression) (bool, error) {
+	// Get evaluation context map from pool to reduce allocations
+	evalContext := c.evalContextPool.Get().(map[string]any)
+	defer func() {
+		// Clear and return to pool
+		clear(evalContext)
+		c.evalContextPool.Put(evalContext)
+	}()
+
+	evalContext["event"] = event
+
 	for _, expression := range expressions {
 		if expression.EventType != eventType {
 			continue
@@ -106,8 +124,7 @@ func (c *CEL) EvaluateRule(event map[string]any, eventType utils.EventType, expr
 			return false, err
 		}
 
-		activation := map[string]any{"event": event}
-		out, _, err := program.Eval(activation)
+		out, _, err := program.Eval(evalContext)
 		if err != nil {
 			logger.L().Error("evaluation error", helpers.Error(err))
 		}
@@ -126,8 +143,16 @@ func (c *CEL) EvaluateExpression(event map[string]any, expression string) (strin
 		return "", err
 	}
 
-	activation := map[string]any{"event": event}
-	out, _, err := program.Eval(activation)
+	// Get evaluation context map from pool to reduce allocations
+	evalContext := c.evalContextPool.Get().(map[string]any)
+	defer func() {
+		// Clear and return to pool
+		clear(evalContext)
+		c.evalContextPool.Put(evalContext)
+	}()
+
+	evalContext["event"] = event
+	out, _, err := program.Eval(evalContext)
 	if err != nil {
 		return "", fmt.Errorf("failed to evaluate expression: %s", err)
 	}
