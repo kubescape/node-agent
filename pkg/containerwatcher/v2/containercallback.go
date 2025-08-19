@@ -15,10 +15,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
-const (
-	MaxSniffingTimeLabel = "kubescape.io/max-sniffing-time"
-)
-
 // containerCallback handles container events synchronously
 func (cw *ContainerWatcher) containerCallback(notif containercollection.PubSubEvent) {
 	logger.L().Info("ContainerWatcher.containerCallback - received container event", helpers.String("event", fmt.Sprintf("%+v", notif)), helpers.String("container", fmt.Sprintf("%+v", notif.Container)))
@@ -63,27 +59,9 @@ func (cw *ContainerWatcher) containerCallbackAsync(notif containercollection.Pub
 			helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
 			helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
 		cw.metrics.ReportContainerStart()
-		// Check if Pod has a label of max sniffing time
-		sniffingTime := utils.AddJitter(cw.cfg.MaxSniffingTime, cw.cfg.MaxJitterPercentage)
-		if podLabelMaxSniffingTime, ok := notif.Container.K8s.PodLabels[MaxSniffingTimeLabel]; ok {
-			if duration, err := time.ParseDuration(podLabelMaxSniffingTime); err == nil {
-				sniffingTime = duration
-			} else {
-				logger.L().Debug("ContainerWatcher.containerCallback - parsing sniffing time in label", helpers.Error(err), helpers.String("podLabelMaxSniffingTime", podLabelMaxSniffingTime))
-			}
-		}
 
 		// Set shared watched container data
 		go cw.setSharedWatchedContainerData(notif.Container)
-
-		time.AfterFunc(sniffingTime, func() {
-			logger.L().Debug("ContainerWatcher.containerCallback - monitoring time ended",
-				helpers.String("container ID", notif.Container.Runtime.ContainerID),
-				helpers.String("k8s workload", k8sContainerID),
-				helpers.String("ContainerImageDigest", notif.Container.Runtime.ContainerImageDigest),
-				helpers.String("ContainerImageName", notif.Container.Runtime.ContainerImageName))
-			cw.unregisterContainer(notif.Container)
-		})
 	case containercollection.EventTypeRemoveContainer:
 		logger.L().Debug("ContainerWatcher.containerCallback - remove container event received",
 			helpers.String("container ID", notif.Container.Runtime.ContainerID),
