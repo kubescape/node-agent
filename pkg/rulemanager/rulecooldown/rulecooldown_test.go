@@ -150,7 +150,7 @@ func TestShouldCooldown(t *testing.T) {
 				if i > 0 && tt.waitBetweenCalls > 0 {
 					time.Sleep(tt.waitBetweenCalls)
 				}
-				lastCooldown, lastCount = rc.ShouldCooldown(tt.ruleFailure)
+				lastCooldown, lastCount = rc.ShouldCooldown(tt.ruleFailure.BaseRuntimeAlert.UniqueID, tt.ruleFailure.RuntimeProcessDetails.ContainerID, tt.ruleFailure.GetRuleId())
 			}
 
 			assert.Equal(t, tt.expectedCooldown, lastCooldown)
@@ -177,12 +177,12 @@ func TestShouldCooldownImmediate(t *testing.T) {
 	}
 
 	// First call should trigger cooldown immediately
-	cooldown, count := rc.ShouldCooldown(ruleFailure)
+	cooldown, count := rc.ShouldCooldown(ruleFailure.BaseRuntimeAlert.UniqueID, ruleFailure.RuntimeProcessDetails.ContainerID, ruleFailure.GetRuleId())
 	assert.False(t, cooldown)
 	assert.Equal(t, 1, count)
 
 	// Second call should still be in cooldown
-	cooldown, count = rc.ShouldCooldown(ruleFailure)
+	cooldown, count = rc.ShouldCooldown(ruleFailure.BaseRuntimeAlert.UniqueID, ruleFailure.RuntimeProcessDetails.ContainerID, ruleFailure.GetRuleId())
 	assert.True(t, cooldown)
 	assert.Equal(t, 2, count)
 }
@@ -208,17 +208,17 @@ func TestShouldCooldownOnProfileFailure(t *testing.T) {
 	}
 
 	// First call should not cooldown
-	cooldown, count := rc.ShouldCooldown(ruleFailure)
+	cooldown, count := rc.ShouldCooldown(ruleFailure.BaseRuntimeAlert.UniqueID, ruleFailure.RuntimeProcessDetails.ContainerID, ruleFailure.GetRuleId())
 	assert.False(t, cooldown)
 	assert.Equal(t, 1, count)
 
 	// Second call should not cooldown
-	cooldown, count = rc.ShouldCooldown(ruleFailure)
+	cooldown, count = rc.ShouldCooldown(ruleFailure.BaseRuntimeAlert.UniqueID, ruleFailure.RuntimeProcessDetails.ContainerID, ruleFailure.GetRuleId())
 	assert.False(t, cooldown)
 	assert.Equal(t, 2, count)
 
 	// Third call should cooldown
-	cooldown, count = rc.ShouldCooldown(ruleFailure)
+	cooldown, count = rc.ShouldCooldown(ruleFailure.BaseRuntimeAlert.UniqueID, ruleFailure.RuntimeProcessDetails.ContainerID, ruleFailure.GetRuleId())
 	assert.True(t, cooldown)
 	assert.Equal(t, 3, count)
 }
@@ -252,22 +252,22 @@ func TestShouldCooldownDifferentKeys(t *testing.T) {
 	}
 
 	// First failure - first call
-	cooldown, count := rc.ShouldCooldown(ruleFailure1)
+	cooldown, count := rc.ShouldCooldown(ruleFailure1.BaseRuntimeAlert.UniqueID, ruleFailure1.RuntimeProcessDetails.ContainerID, ruleFailure1.GetRuleId())
 	assert.False(t, cooldown)
 	assert.Equal(t, 1, count)
 
 	// Second failure - first call
-	cooldown, count = rc.ShouldCooldown(ruleFailure2)
+	cooldown, count = rc.ShouldCooldown(ruleFailure2.BaseRuntimeAlert.UniqueID, ruleFailure2.RuntimeProcessDetails.ContainerID, ruleFailure2.GetRuleId())
 	assert.False(t, cooldown)
 	assert.Equal(t, 1, count)
 
 	// First failure - second call
-	cooldown, count = rc.ShouldCooldown(ruleFailure1)
+	cooldown, count = rc.ShouldCooldown(ruleFailure1.BaseRuntimeAlert.UniqueID, ruleFailure1.RuntimeProcessDetails.ContainerID, ruleFailure1.GetRuleId())
 	assert.False(t, cooldown)
 	assert.Equal(t, 2, count)
 
 	// Second failure - second call
-	cooldown, count = rc.ShouldCooldown(ruleFailure2)
+	cooldown, count = rc.ShouldCooldown(ruleFailure2.BaseRuntimeAlert.UniqueID, ruleFailure2.RuntimeProcessDetails.ContainerID, ruleFailure2.GetRuleId())
 	assert.False(t, cooldown)
 	assert.Equal(t, 2, count)
 }
@@ -291,7 +291,7 @@ func TestShouldCooldownMaxSize(t *testing.T) {
 				ContainerID: fmt.Sprintf("test-container-%d", i),
 			},
 		}
-		rc.ShouldCooldown(failure)
+		rc.ShouldCooldown(failure.BaseRuntimeAlert.UniqueID, failure.RuntimeProcessDetails.ContainerID, failure.GetRuleId())
 	}
 
 	// Add one more to trigger eviction
@@ -305,7 +305,7 @@ func TestShouldCooldownMaxSize(t *testing.T) {
 	}
 
 	// Should not be in cooldown since it's a new entry
-	cooldown, count := rc.ShouldCooldown(newFailure)
+	cooldown, count := rc.ShouldCooldown(newFailure.BaseRuntimeAlert.UniqueID, newFailure.RuntimeProcessDetails.ContainerID, newFailure.GetRuleId())
 	assert.False(t, cooldown)
 	assert.Equal(t, 1, count)
 
@@ -320,7 +320,7 @@ func TestShouldCooldownMaxSize(t *testing.T) {
 	}
 
 	// Should not be in cooldown since it was evicted
-	cooldown, count = rc.ShouldCooldown(oldFailure)
+	cooldown, count = rc.ShouldCooldown(oldFailure.BaseRuntimeAlert.UniqueID, oldFailure.RuntimeProcessDetails.ContainerID, oldFailure.GetRuleId())
 	assert.False(t, cooldown)
 	assert.Equal(t, 1, count)
 }

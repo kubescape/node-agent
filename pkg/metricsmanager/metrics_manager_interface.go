@@ -1,6 +1,8 @@
 package metricsmanager
 
 import (
+	"time"
+
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top"
 	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -14,5 +16,6 @@ type MetricsManager interface {
 	ReportFailedEvent()
 	ReportRuleProcessed(ruleID string)
 	ReportRuleAlert(ruleID string)
+	ReportRuleEvaluationTime(ruleID string, eventType utils.EventType, duration time.Duration)
 	ReportEbpfStats(stats *top.Event[toptypes.Stats])
 }

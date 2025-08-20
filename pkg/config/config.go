@@ -96,7 +96,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("profilesCacheRefreshRate", 1*time.Minute)
 	viper.SetDefault("ruleCooldown::ruleCooldownDuration", 1*time.Hour)
 	viper.SetDefault("ruleCooldown::ruleCooldownAfterCount", 1)
-	viper.SetDefault("ruleCooldown::ruleCooldownOnProfileFailure", true)
+	viper.SetDefault("ruleCooldown::ruleCooldownOnProfileFailure", true) // NOTE: this is deprecated.
 	viper.SetDefault("ruleCooldown::ruleCooldownMaxSize", 10000)
 	viper.SetDefault("partialProfileGenerationEnabled", true)
 	viper.SetDefault("procfsScanInterval", 30*time.Second)
