@@ -179,17 +179,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			continue
 		}
 
-		// Check cooldown before rule evaluation to avoid unnecessary processing
-		message, uniqueID, err := rm.getUniqueIdAndMessage(eventMap, rule)
-		if err != nil {
-			logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
-			continue
-		}
-
-		if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(uniqueID, enrichedEvent.ContainerID, rule.ID); shouldCooldown {
-			continue
-		}
-
 		startTime := time.Now()
 		shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, enrichedEvent.EventType, ruleExpressions)
 		evaluationTime := time.Since(startTime)
@@ -202,6 +191,15 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 
 		if shouldAlert {
 			rm.metrics.ReportRuleAlert(rule.Name)
+			message, uniqueID, err := rm.getUniqueIdAndMessage(eventMap, rule)
+			if err != nil {
+				logger.L().Error("RuleManager - failed to get unique ID and message", helpers.Error(err))
+				continue
+			}
+
+			if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(uniqueID, enrichedEvent.ContainerID, rule.ID); shouldCooldown {
+				continue
+			}
 
 			ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID)
 			if ruleFailure == nil {
