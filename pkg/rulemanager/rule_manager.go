@@ -179,7 +179,11 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 			continue
 		}
 
+		startTime := time.Now()
 		shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, enrichedEvent.EventType, ruleExpressions)
+		evaluationTime := time.Since(startTime)
+		rm.metrics.ReportRuleEvaluationTime(rule.Name, enrichedEvent.EventType, evaluationTime)
+
 		if err != nil {
 			logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
 			continue
@@ -193,6 +197,10 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				continue
 			}
 
+			if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(uniqueID, enrichedEvent.ContainerID, rule.ID); shouldCooldown {
+				continue
+			}
+
 			ruleFailure := rm.ruleFailureCreator.CreateRuleFailure(rule, enrichedEvent, rm.objectCache, message, uniqueID)
 			if ruleFailure == nil {
 				logger.L().Error("RuleManager - failed to create rule failure", helpers.String("rule", rule.Name),
@@ -200,10 +208,6 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 					helpers.String("uniqueID", uniqueID),
 					helpers.String("enrichedEvent.EventType", string(enrichedEvent.EventType)),
 				)
-				continue
-			}
-
-			if shouldCooldown, _ := rm.ruleCooldown.ShouldCooldown(ruleFailure); shouldCooldown {
 				continue
 			}
 
@@ -265,7 +269,11 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 			continue
 		}
 
+		startTime := time.Now()
 		shouldAlert, err := rm.celEvaluator.EvaluateRule(eventMap, eventType, ruleExpressions)
+		evaluationTime := time.Since(startTime)
+		rm.metrics.ReportRuleEvaluationTime(rule.ID, eventType, evaluationTime)
+
 		if err != nil {
 			logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
 			continue
