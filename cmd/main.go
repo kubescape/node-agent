@@ -196,7 +196,7 @@ func main() {
 	var ruleBindingCache *rulebindingcachev1.RBCache
 	if cfg.EnableRuntimeDetection {
 		ruleCreator := rulecreator.NewRuleCreator()
-		ruleBindingCache = rulebindingcachev1.NewCache(cfg.NodeName, k8sClient, ruleCreator)
+		ruleBindingCache = rulebindingcachev1.NewCache(cfg, k8sClient, ruleCreator)
 		rulesWatcher := ruleswatcher.NewRulesWatcher(k8sClient, ruleCreator, func() {
 			ruleBindingCache.RefreshRuleBindingsRules()
 		})

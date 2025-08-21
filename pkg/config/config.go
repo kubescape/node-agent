@@ -64,6 +64,7 @@ type Config struct {
 	OrderedEventQueue              containerwatcher.OrderedEventQueueConfig `mapstructure:"orderedEventQueue"`
 	ExitCleanup                    processtreecreator.ExitCleanupConfig     `mapstructure:"exitCleanup"`
 	CelConfigCache                 cache.FunctionCacheConfig                `mapstructure:"celConfigCache"`
+	IgnoreRuleBindings             bool                                     `mapstructure:"ignoreRuleBindings"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -109,7 +110,8 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("blockEvents", false)
 	viper.SetDefault("celConfigCache::maxSize", 100000)
 	viper.SetDefault("celConfigCache::ttl", 1*time.Minute)
-
+	viper.SetDefault("ignoreRuleBindings", false)
+	
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()
