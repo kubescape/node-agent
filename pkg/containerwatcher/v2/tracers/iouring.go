@@ -45,7 +45,7 @@ func NewIoUringTracer(
 }
 
 // Start initializes and starts the io_uring tracer
-func (it *IoUringTracer) Start(ctx context.Context) error {
+func (it *IoUringTracer) Start(_ context.Context) error {
 	if err := it.tracerCollection.AddTracer(iouringTraceName, it.containerSelector); err != nil {
 		return fmt.Errorf("adding io_uring tracer: %w", err)
 	}
@@ -62,7 +62,8 @@ func (it *IoUringTracer) Start(ctx context.Context) error {
 		it.iouringEventCallback,
 	)
 	if err != nil {
-		return fmt.Errorf("creating io_uring tracer: %w", err)
+		logger.L().Warning("Failed to create io_uring tracer", helpers.Error(err))
+		return nil
 	}
 
 	it.tracer = tracerIouring
@@ -94,8 +95,8 @@ func (it *IoUringTracer) GetEventType() utils.EventType {
 
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (it *IoUringTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return config.EnableRuntimeDetection
+	if conf, ok := cfg.(config.Config); ok {
+		return conf.EnableRuntimeDetection
 	}
 	return false
 }

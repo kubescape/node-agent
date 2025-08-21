@@ -86,7 +86,8 @@ type ContainerWatcher struct {
 	pool                 *workerpool.WorkerPool
 
 	// Lifecycle
-	mutex sync.RWMutex
+	mutex                           sync.RWMutex
+	containerEolNotificationChannel chan *containercollection.Container
 
 	// Container callbacks
 	callbacks []containercollection.FuncNotify
@@ -198,6 +199,9 @@ func CreateContainerWatcher(
 		ruleBindingPodNotify: ruleBindingPodNotify,
 		runtime:              runtime,
 		pool:                 workerpool.NewWithMaxRunningTime(cfg.WorkerPoolSize, 5*time.Second),
+
+		// Lifecycle
+		containerEolNotificationChannel: make(chan *containercollection.Container),
 	}, nil
 }
 
@@ -256,6 +260,24 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	}
 
 	cw.ctx = ctx
+
+	go func() {
+		// Read from the container EOL notification channel and call unregisterContainer
+		for {
+			select {
+			case container := <-cw.containerEolNotificationChannel:
+				if container != nil {
+					logger.L().Debug("Container EOL notification received", helpers.String("containerID", container.Runtime.ContainerID))
+					cw.unregisterContainer(container)
+				}
+			case <-ctx.Done():
+				logger.L().Ctx(ctx).Info("Stopping container EOL notification handler")
+				return
+			}
+		}
+	}()
+
+	cw.containerProfileManager.RegisterForContainerEndOfLife(cw.containerEolNotificationChannel)
 
 	// Start container collection (similar to v1 startContainerCollection)
 	logger.L().TimedWrapper("StartContainerCollection", 5*time.Second, func() {
