@@ -18,16 +18,17 @@ type RulesSpec struct {
 }
 
 type Rule struct {
-	Enabled           bool                       `json:"enabled" yaml:"enabled"`
-	ID                string                     `json:"id" yaml:"id"`
-	Name              string                     `json:"name" yaml:"name"`
-	Description       string                     `json:"description" yaml:"description"`
-	Expressions       RuleExpressions            `json:"expressions" yaml:"expressions"`
-	ProfileDependency apitypes.ProfileDependency `json:"profile_dependency" yaml:"profile_dependency"`
-	Severity          int                        `json:"severity" yaml:"severity"`
-	SupportPolicy     bool                       `json:"support_policy" yaml:"support_policy"`
-	Tags              []string                   `json:"tags" yaml:"tags"`
-	State             map[string]any             `json:"state,omitempty" yaml:"state,omitempty"`
+	Enabled                 bool                       `json:"enabled" yaml:"enabled"`
+	ID                      string                     `json:"id" yaml:"id"`
+	Name                    string                     `json:"name" yaml:"name"`
+	Description             string                     `json:"description" yaml:"description"`
+	Expressions             RuleExpressions            `json:"expressions" yaml:"expressions"`
+	ProfileDependency       apitypes.ProfileDependency `json:"profile_dependency" yaml:"profile_dependency"`
+	Severity                int                        `json:"severity" yaml:"severity"`
+	SupportPolicy           bool                       `json:"support_policy" yaml:"support_policy"`
+	Tags                    []string                   `json:"tags" yaml:"tags"`
+	State                   map[string]any             `json:"state,omitempty" yaml:"state,omitempty"`
+	AgentVersionRequirement string                     `json:"agent_version_requirement" yaml:"agent_version_requirement"`
 }
 
 type RuleExpressions struct {
