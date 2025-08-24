@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
 	"github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	typesv1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/types/v1"
@@ -29,6 +30,7 @@ var _ rulebindingmanager.RuleBindingCache = (*RBCache)(nil)
 var _ watcher.Adaptor = (*RBCache)(nil)
 
 type RBCache struct {
+	config         config.Config
 	nodeName       string
 	k8sClient      k8sclient.K8sClientInterface
 	allPods        mapset.Set[string]                                    // set of all pods (also pods without rules)
@@ -43,16 +45,17 @@ type RBCache struct {
 	rulesForPod    *expirable.LRU[string, []rulemanagertypesv1.Rule]
 }
 
-func NewCache(nodeName string, k8sClient k8sclient.K8sClientInterface, ruleCreator rulecreator.RuleCreator) *RBCache {
+func NewCache(config config.Config, k8sClient k8sclient.K8sClientInterface, ruleCreator rulecreator.RuleCreator) *RBCache {
 	return &RBCache{
-		nodeName:       nodeName,
+		config:         config,
+		nodeName:       config.NodeName,
 		k8sClient:      k8sClient,
 		ruleCreator:    ruleCreator,
 		allPods:        mapset.NewSet[string](),
 		rbNameToRB:     maps.SafeMap[string, typesv1.RuntimeAlertRuleBinding]{},
 		podToRBNames:   maps.SafeMap[string, mapset.Set[string]]{},
 		rbNameToPods:   maps.SafeMap[string, mapset.Set[string]]{},
-		watchResources: resourcesToWatch(nodeName),
+		watchResources: resourcesToWatch(config.NodeName),
 		rulesForPod:    expirable.NewLRU[string, []rulemanagertypesv1.Rule](1000, nil, 5*time.Second),
 	}
 }
@@ -68,6 +71,17 @@ func (c *RBCache) WatchResources() []watcher.WatchResource {
 // ------------------ rulebindingmanager.RuleBindingCache methods -----------------------
 
 func (c *RBCache) ListRulesForPod(namespace, name string) []rulemanagertypesv1.Rule {
+	if c.config.IgnoreRuleBindings {
+		podID := utils.CreateK8sPodID(namespace, name)
+		rules, ok := c.rulesForPod.Get(podID)
+		if ok {
+			return rules
+		}
+		rules = c.getRules()
+		c.rulesForPod.Add(podID, rules)
+		return rules
+	}
+
 	podID := utils.CreateK8sPodID(namespace, name)
 
 	var rulesSlice []rulemanagertypesv1.Rule
@@ -429,4 +443,8 @@ func diff(a, b []rulebindingmanager.RuleBindingNotify) []rulebindingmanager.Rule
 	}
 
 	return diff
+}
+
+func (c *RBCache) getRules() []rulemanagertypesv1.Rule {
+	return c.ruleCreator.CreateAllRules()
 }
