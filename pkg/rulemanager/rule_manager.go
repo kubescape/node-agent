@@ -171,7 +171,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 		}
 
 		startTime := time.Now()
-		shouldAlert, err := evaluateRule(rm, enrichedEvent, enrichedEvent.EventType, rule)
+		shouldAlert, err := rm.evaluateRule(enrichedEvent, enrichedEvent.EventType, rule)
 		evaluationTime := time.Since(startTime)
 		rm.metrics.ReportRuleEvaluationTime(rule.Name, enrichedEvent.EventType, evaluationTime)
 
@@ -269,7 +269,7 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 	return results
 }
 
-func evaluateRule(rm *RuleManager, enrichedEvent *events.EnrichedEvent, eventType utils.EventType, rule typesv1.Rule) (bool, error) {
+func (rm *RuleManager) evaluateRule(enrichedEvent *events.EnrichedEvent, eventType utils.EventType, rule typesv1.Rule) (bool, error) {
 	// Special event types are evaluated by map because we're doing parsing optimizations
 	// TODO: Manage special event types in a better way
 	if eventType == utils.HTTPEventType {
@@ -282,7 +282,7 @@ func evaluateRule(rm *RuleManager, enrichedEvent *events.EnrichedEvent, eventTyp
 		eventMap := eventAdapter.ToMap(enrichedEvent)
 		defer adapters.ReleaseEventMap(eventMap)
 
-		shouldAlert, err := rm.celEvaluator.EvaluateRuleByMap(eventMap, eventType, "http", rule.Expressions.RuleExpression)
+		shouldAlert, err := rm.celEvaluator.EvaluateRuleByMap(eventMap, eventType, rule.Expressions.RuleExpression)
 		if err != nil {
 			logger.L().Error("RuleManager - failed to evaluate rule", helpers.Error(err))
 			return false, err
