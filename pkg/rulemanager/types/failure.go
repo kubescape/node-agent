@@ -67,6 +67,8 @@ type RuleFailure interface {
 	SetAlertPlatform(alertPlatform apitypes.AlertSourcePlatform)
 	// Set Http Rule Alert
 	SetHttpRuleAlert(httpRuleAlert apitypes.HttpRuleAlert)
+	// Set Extra
+	SetExtra(extra interface{})
 }
 
 func (rule *GenericRuleFailure) GetBaseRuntimeAlert() apitypes.BaseRuntimeAlert {
@@ -154,4 +156,8 @@ func (rule *GenericRuleFailure) SetAlertPlatform(alertPlatform apitypes.AlertSou
 
 func (rule *GenericRuleFailure) SetHttpRuleAlert(httpRuleAlert apitypes.HttpRuleAlert) {
 	rule.HttpRuleAlert = httpRuleAlert
+}
+
+func (rule *GenericRuleFailure) SetExtra(extra interface{}) {
+	rule.Extra = extra
 }

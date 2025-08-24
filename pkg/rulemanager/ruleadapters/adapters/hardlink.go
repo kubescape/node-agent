@@ -24,6 +24,8 @@ func (c *HardlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enriched
 		return
 	}
 
+	failure.SetExtra(hardlinkEvent.GetExtra())
+
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = hardlinkEvent.Pid
 	baseRuntimeAlert.Arguments = map[string]interface{}{

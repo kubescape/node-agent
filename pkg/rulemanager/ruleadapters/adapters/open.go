@@ -23,6 +23,8 @@ func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 		return
 	}
 
+	failure.SetExtra(openEvent.GetExtra())
+
 	openEventTyped := openEvent.Event
 
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()

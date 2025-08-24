@@ -26,6 +26,8 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 		return
 	}
 
+	failure.SetExtra(execEvent.GetExtra())
+
 	execPath := GetExecPathFromEvent(execEvent)
 	execFullPath := GetExecFullPathFromEvent(execEvent)
 	upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
