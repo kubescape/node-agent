@@ -10,8 +10,6 @@ import (
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
@@ -216,7 +214,7 @@ func (c *CEL) EvaluateRuleByMap(event map[string]any, eventType utils.EventType,
 
 		out, _, err := program.Eval(evalContext)
 		if err != nil {
-			logger.L().Error("evaluation error", helpers.Error(err))
+			return false, err
 		}
 
 		if !out.Value().(bool) {
