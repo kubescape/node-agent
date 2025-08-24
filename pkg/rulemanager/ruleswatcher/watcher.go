@@ -2,7 +2,9 @@ package ruleswatcher
 
 import (
 	"context"
+	"os"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/k8sclient"
@@ -66,6 +68,10 @@ func (w *RulesWatcherImpl) syncAllRulesAndNotify(ctx context.Context) {
 	}
 }
 
+// syncAllRulesFromCluster fetches all rules from the cluster and syncs them with the rule creator.
+// Rules are filtered by:
+// 1. Enabled status - only enabled rules are considered
+// 2. Agent version compatibility - rules with AgentVersionRequirement are checked against AGENT_VERSION env var using semver
 func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 	unstructuredList, err := w.k8sClient.GetDynamicClient().Resource(typesv1.RuleGvr).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -73,6 +79,7 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 	}
 
 	var enabledRules []typesv1.Rule
+	var skippedVersionCount int
 	for _, item := range unstructuredList.Items {
 		rules, err := unstructuredToRules(&item)
 		if err != nil {
@@ -81,6 +88,17 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 		}
 		for _, rule := range rules.Spec.Rules {
 			if rule.Enabled {
+				// Check agent version requirement if specified
+				if rule.AgentVersionRequirement != "" {
+					if !isAgentVersionCompatible(rule.AgentVersionRequirement) {
+						logger.L().Debug("RulesWatcher - skipping rule due to agent version requirement",
+							helpers.String("ruleID", rule.ID),
+							helpers.String("requirement", rule.AgentVersionRequirement),
+							helpers.String("agentVersion", os.Getenv("AGENT_VERSION")))
+						skippedVersionCount++
+						continue
+					}
+				}
 				enabledRules = append(enabledRules, rule)
 			}
 		}
@@ -88,7 +106,10 @@ func (w *RulesWatcherImpl) syncAllRulesFromCluster(ctx context.Context) error {
 
 	w.ruleCreator.SyncRules(enabledRules)
 
-	logger.L().Info("RulesWatcher - synced rules from cluster", helpers.Int("enabledRules", len(enabledRules)), helpers.Int("totalRules", len(unstructuredList.Items)))
+	logger.L().Info("RulesWatcher - synced rules from cluster",
+		helpers.Int("enabledRules", len(enabledRules)),
+		helpers.Int("totalRules", len(unstructuredList.Items)),
+		helpers.Int("skippedByVersion", skippedVersionCount))
 	return nil
 }
 
@@ -103,4 +124,43 @@ func unstructuredToRules(obj *unstructured.Unstructured) (*typesv1.Rules, error)
 	}
 
 	return rule, nil
+}
+
+// isAgentVersionCompatible checks if the current agent version satisfies the given requirement
+// using semantic versioning constraints. Returns true if compatible, false otherwise.
+func isAgentVersionCompatible(requirement string) bool {
+	agentVersion := os.Getenv("AGENT_VERSION")
+	if agentVersion == "" {
+		// If AGENT_VERSION is not set, log a warning and allow all rules for backward compatibility
+		logger.L().Warning("RulesWatcher - AGENT_VERSION environment variable not set, allowing all rules")
+		return true
+	}
+
+	// Parse the agent version
+	currentVersion, err := semver.NewVersion(agentVersion)
+	if err != nil {
+		logger.L().Warning("RulesWatcher - invalid agent version format",
+			helpers.String("agentVersion", agentVersion),
+			helpers.Error(err))
+		return true // Allow rule if we can't parse current version
+	}
+
+	// Parse the requirement constraint
+	constraint, err := semver.NewConstraint(requirement)
+	if err != nil {
+		logger.L().Warning("RulesWatcher - invalid version constraint in rule",
+			helpers.String("constraint", requirement),
+			helpers.Error(err))
+		return true // Allow rule if we can't parse the constraint
+	}
+
+	// Check if current version satisfies the constraint
+	compatible := constraint.Check(currentVersion)
+
+	logger.L().Debug("RulesWatcher - version compatibility check",
+		helpers.String("agentVersion", agentVersion),
+		helpers.String("requirement", requirement),
+		helpers.Interface("compatible", compatible))
+
+	return compatible
 }
