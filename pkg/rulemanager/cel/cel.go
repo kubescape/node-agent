@@ -38,11 +38,10 @@ import (
 var _ CELRuleEvaluator = (*CEL)(nil)
 
 type CEL struct {
-	env             *cel.Env
-	objectCache     objectcache.ObjectCache
-	programCache    map[string]cel.Program
-	cacheMutex      sync.RWMutex
-	evalContextPool sync.Pool
+	env          *cel.Env
+	objectCache  objectcache.ObjectCache
+	programCache map[string]cel.Program
+	cacheMutex   sync.RWMutex
 }
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
@@ -116,11 +115,6 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		env:          env,
 		objectCache:  objectCache,
 		programCache: make(map[string]cel.Program),
-	}
-
-	// Initialize evaluation context pool to reduce map allocations
-	cel.evalContextPool.New = func() interface{} {
-		return make(map[string]any, 1)
 	}
 
 	return cel, nil
