@@ -24,6 +24,8 @@ func (c *SymlinkAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedE
 		return
 	}
 
+	failure.SetExtra(symlinkEvent.GetExtra())
+
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
 	baseRuntimeAlert.InfectedPID = symlinkEvent.Pid
 	baseRuntimeAlert.Arguments = map[string]interface{}{
