@@ -10,8 +10,6 @@ import (
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
 	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
@@ -176,7 +174,7 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 		obj, _ := xcel.NewObject(event.Event)
 		out, _, err := program.Eval(map[string]any{string(event.EventType): obj, "event_type": string(event.EventType)})
 		if err != nil {
-			logger.L().Error("evaluation error", helpers.Error(err))
+			return false, err
 		}
 
 		if !out.Value().(bool) {
@@ -196,7 +194,7 @@ func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string)
 	obj, _ := xcel.NewObject(event.Event)
 	out, _, err := program.Eval(map[string]any{string(event.EventType): obj, "event_type": string(event.EventType)})
 	if err != nil {
-		logger.L().Error("evaluation error", helpers.Error(err))
+		return "", err
 	}
 
 	return out.Value().(string), nil
