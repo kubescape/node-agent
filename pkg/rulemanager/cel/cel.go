@@ -41,6 +41,7 @@ type CEL struct {
 	programCache    map[string]cel.Program
 	cacheMutex      sync.RWMutex
 	evalContextPool sync.Pool
+	typeMutex       sync.RWMutex
 }
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
@@ -246,5 +247,39 @@ func (c *CEL) RegisterHelper(function cel.EnvOption) error {
 		return err
 	}
 	c.env = extendedEnv
+	return nil
+}
+
+func (c *CEL) RegisterCustomType(eventType utils.EventType, obj interface{}) error {
+	c.typeMutex.Lock()
+	defer c.typeMutex.Unlock()
+
+	// Create new object and type using xcel
+	xcelObj, xcelTyp := xcel.NewObject(obj)
+
+	// Create new type adapter and provider
+	ta := xcel.NewTypeAdapter()
+	tp := xcel.NewTypeProvider()
+
+	// Register the new object
+	xcel.RegisterObject(ta, tp, xcelObj, xcelTyp, xcel.NewFields(xcelObj))
+
+	// Extend the environment with the new type and custom type adapter/provider
+	extendedEnv, err := c.env.Extend(
+		cel.Variable(string(eventType), xcelTyp),
+		cel.CustomTypeAdapter(ta),
+		cel.CustomTypeProvider(tp),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to extend environment with custom type: %w", err)
+	}
+
+	c.env = extendedEnv
+
+	// Clear program cache since environment has changed
+	c.cacheMutex.Lock()
+	c.programCache = make(map[string]cel.Program)
+	c.cacheMutex.Unlock()
+
 	return nil
 }

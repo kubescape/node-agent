@@ -6,6 +6,7 @@ toolchain go1.24.3
 
 require (
 	github.com/DmitriyVTitov/size v1.5.0
+	github.com/Masterminds/semver/v3 v3.3.1
 	github.com/anchore/syft v1.18.1
 	github.com/aquilax/truncate v1.0.0
 	github.com/armosec/armoapi-go v0.0.605
@@ -79,7 +80,6 @@ require (
 	github.com/DataDog/zstd v1.5.5 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver v1.5.0 // indirect
-	github.com/Masterminds/semver/v3 v3.3.1 // indirect
 	github.com/Masterminds/sprig/v3 v3.3.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/Microsoft/hcsshim v0.12.9 // indirect
