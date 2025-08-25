@@ -36,10 +36,11 @@ import (
 var _ CELRuleEvaluator = (*CEL)(nil)
 
 type CEL struct {
-	env          *cel.Env
-	objectCache  objectcache.ObjectCache
-	programCache map[string]cel.Program
-	cacheMutex   sync.RWMutex
+	env             *cel.Env
+	objectCache     objectcache.ObjectCache
+	programCache    map[string]cel.Program
+	cacheMutex      sync.RWMutex
+	evalContextPool sync.Pool
 }
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
@@ -115,6 +116,10 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		programCache: make(map[string]cel.Program),
 	}
 
+	cel.evalContextPool.New = func() interface{} {
+		return make(map[string]any, 1)
+	}
+
 	return cel, nil
 }
 
@@ -173,6 +178,41 @@ func (c *CEL) EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.Ru
 
 		obj, _ := xcel.NewObject(event.Event)
 		out, _, err := program.Eval(map[string]any{string(event.EventType): obj, "event_type": string(event.EventType)})
+		if err != nil {
+			return false, err
+		}
+
+		if !out.Value().(bool) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+func (c *CEL) EvaluateRuleByMap(event map[string]any, eventType utils.EventType, expressions []typesv1.RuleExpression) (bool, error) {
+	// Get evaluation context map from pool to reduce allocations
+	evalContext := c.evalContextPool.Get().(map[string]any)
+	defer func() {
+		// Clear and return to pool
+		clear(evalContext)
+		c.evalContextPool.Put(evalContext)
+	}()
+
+	evalContext[string(eventType)] = event
+	evalContext["event_type"] = string(eventType)
+
+	for _, expression := range expressions {
+		if expression.EventType != eventType {
+			continue
+		}
+
+		program, err := c.getOrCreateProgram(expression.Expression)
+		if err != nil {
+			return false, err
+		}
+
+		out, _, err := program.Eval(evalContext)
 		if err != nil {
 			return false, err
 		}
