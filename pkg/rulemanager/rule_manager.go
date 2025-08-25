@@ -245,7 +245,7 @@ func (rm *RuleManager) EvaluatePolicyRulesForEvent(eventType utils.EventType, ev
 			continue
 		}
 
-		enrichedEvent := &events.EnrichedEvent{Event: event}
+		enrichedEvent := &events.EnrichedEvent{Event: event, EventType: eventType}
 		ruleExpressions := rm.getRuleExpressions(rule, eventType)
 		if len(ruleExpressions) == 0 {
 			continue
