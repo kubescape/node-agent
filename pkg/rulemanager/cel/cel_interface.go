@@ -10,6 +10,7 @@ import (
 type CELRuleEvaluator interface {
 	EvaluateRule(event *events.EnrichedEvent, expressions []typesv1.RuleExpression) (bool, error)
 	EvaluateRuleByMap(event map[string]any, eventType utils.EventType, expressions []typesv1.RuleExpression) (bool, error)
+	EvaluateExpressionByMap(event map[string]any, expression string, eventType utils.EventType) (string, error)
 	EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error)
 	RegisterHelper(function cel.EnvOption) error
 }

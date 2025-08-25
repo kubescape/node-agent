@@ -14,7 +14,6 @@ import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
-	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	traceriouringtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
 	tracerptracetype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/ptrace/tracer/types"
 	tracerrandomxtype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/randomx/types"
@@ -55,8 +54,6 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	xcel.RegisterObject(ta, tp, exitObj, exitTyp, xcel.NewFields(exitObj))
 	forkObj, forkTyp := xcel.NewObject(&tracerforktype.Event{})
 	xcel.RegisterObject(ta, tp, forkObj, forkTyp, xcel.NewFields(forkObj))
-	httpObj, httpTyp := xcel.NewObject(&tracerhttptype.Event{})
-	xcel.RegisterObject(ta, tp, httpObj, httpTyp, xcel.NewFields(httpObj))
 	hardlinkObj, hardlinkTyp := xcel.NewObject(&tracerhardlinktype.Event{})
 	xcel.RegisterObject(ta, tp, hardlinkObj, hardlinkTyp, xcel.NewFields(hardlinkObj))
 	iouringObj, iouringTyp := xcel.NewObject(&traceriouringtype.Event{})
@@ -84,7 +81,6 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		cel.Variable(string(utils.ExecveEventType), execTyp),
 		cel.Variable(string(utils.ExitEventType), exitTyp),
 		cel.Variable(string(utils.ForkEventType), forkTyp),
-		cel.Variable(string(utils.HTTPEventType), httpTyp),
 		cel.Variable(string(utils.HardlinkEventType), hardlinkTyp),
 		cel.Variable(string(utils.IoUringEventType), iouringTyp),
 		cel.Variable(string(utils.NetworkEventType), netTyp),
@@ -95,6 +91,7 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		cel.Variable(string(utils.SSHEventType), sshTyp),
 		cel.Variable(string(utils.SymlinkEventType), symlinkTyp),
 		cel.Variable(string(utils.SyscallEventType), syscallTyp),
+		cel.Variable(string(utils.HTTPEventType), cel.AnyType),
 		cel.CustomTypeAdapter(ta),
 		cel.CustomTypeProvider(tp),
 		ext.Strings(),
@@ -223,6 +220,31 @@ func (c *CEL) EvaluateRuleByMap(event map[string]any, eventType utils.EventType,
 	}
 
 	return true, nil
+}
+
+func (c *CEL) EvaluateExpressionByMap(event map[string]any, expression string, eventType utils.EventType) (string, error) {
+	program, err := c.getOrCreateProgram(expression)
+	if err != nil {
+		return "", err
+	}
+
+	// Get evaluation context map from pool to reduce allocations
+	evalContext := c.evalContextPool.Get().(map[string]any)
+	defer func() {
+		// Clear and return to pool
+		clear(evalContext)
+		c.evalContextPool.Put(evalContext)
+	}()
+
+	evalContext[string(eventType)] = event
+	evalContext["event_type"] = string(eventType)
+
+	out, _, err := program.Eval(evalContext)
+	if err != nil {
+		return "", fmt.Errorf("failed to evaluate expression: %s", err)
+	}
+
+	return out.Value().(string), nil
 }
 
 func (c *CEL) EvaluateExpression(event *events.EnrichedEvent, expression string) (string, error) {
