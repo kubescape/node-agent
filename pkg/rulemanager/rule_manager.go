@@ -324,18 +324,41 @@ func (rm *RuleManager) getRuleExpressions(rule typesv1.Rule, eventType utils.Eve
 }
 
 func (rm *RuleManager) getUniqueIdAndMessage(enrichedEvent *events.EnrichedEvent, rule typesv1.Rule) (string, string, error) {
-	message, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.Message)
-	if err != nil {
-		logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
-	}
-	uniqueID, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.UniqueID)
-	if err != nil {
-		logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
-	}
+	// Special event types are evaluated by map because we're doing parsing optimizations
+	// TODO: Manage special event types in a better way
+	if enrichedEvent.EventType == utils.HTTPEventType {
+		eventAdapter, ok := rm.adapterFactory.GetAdapter(enrichedEvent.EventType)
+		if !ok {
+			logger.L().Error("RuleManager - no adapter registered for event type", helpers.String("eventType", string(enrichedEvent.EventType)))
+			return "", "", nil
+		}
+		eventMap := eventAdapter.ToMap(enrichedEvent)
+		defer adapters.ReleaseEventMap(eventMap)
 
-	uniqueID = hashStringToMD5(uniqueID)
+		message, err := rm.celEvaluator.EvaluateExpressionByMap(eventMap, rule.Expressions.Message, enrichedEvent.EventType)
+		if err != nil {
+			logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
+		}
+		uniqueID, err := rm.celEvaluator.EvaluateExpressionByMap(eventMap, rule.Expressions.UniqueID, enrichedEvent.EventType)
+		if err != nil {
+			logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
+		}
+		uniqueID = hashStringToMD5(uniqueID)
+		return message, uniqueID, err
+	} else {
+		message, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.Message)
+		if err != nil {
+			logger.L().Error("RuleManager - failed to evaluate message", helpers.Error(err))
+		}
+		uniqueID, err := rm.celEvaluator.EvaluateExpression(enrichedEvent, rule.Expressions.UniqueID)
+		if err != nil {
+			logger.L().Error("RuleManager - failed to evaluate unique ID", helpers.Error(err))
+		}
 
-	return message, uniqueID, err
+		uniqueID = hashStringToMD5(uniqueID)
+
+		return message, uniqueID, err
+	}
 }
 
 func isSupportedEventType(rules []typesv1.Rule, enrichedEvent *events.EnrichedEvent) bool {
