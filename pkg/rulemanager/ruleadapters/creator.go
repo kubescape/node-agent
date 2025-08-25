@@ -103,6 +103,15 @@ func (r *RuleFailureCreator) enrichRuleFailure(ruleFailure *types.GenericRuleFai
 			if errors.Is(err, ErrRuleShouldNotBeAlerted) {
 				return
 			}
+			logger.L().Error("RuleFailureCreator - failed to enrich rule failure", helpers.Error(err),
+				helpers.String("ruleFailure", ruleFailure.GetBaseRuntimeAlert().UniqueID),
+				helpers.String("ruleID", ruleFailure.GetRuleId()),
+				helpers.String("ruleName", ruleFailure.GetBaseRuntimeAlert().AlertName),
+				helpers.String("ruleDescription", ruleFailure.GetRuleAlert().RuleDescription),
+				helpers.String("command", ruleFailure.GetRuntimeProcessDetails().ProcessTree.Comm),
+				helpers.String("ruleTimestamp", ruleFailure.GetBaseRuntimeAlert().Timestamp.Format(time.RFC3339)),
+				helpers.String("ruleInfectedPID", fmt.Sprintf("%d", ruleFailure.GetBaseRuntimeAlert().InfectedPID)),
+			)
 		}
 	}
 }
