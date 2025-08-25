@@ -430,8 +430,8 @@ spec:
         unique_id: "symlink.comm + '_' + symlink.old_path"
         rule_expression:
           - event_type: "symlink"
-            expression: "(symlink.old_path.startsWith('/etc/shadow') || symlink.old_path.startsWith('/etc/sudoers')) && !ap.was_path_opened(symlink.runtime.container_id, symlink.old_path)"
-      profile_dependency: 0
+            expression: "(symlink.old_path.startsWith('/etc/shadow')) && !ap.was_path_opened(symlink.runtime.container_id, symlink.old_path)"
+      profile_dependency: 1
       severity: 5
       support_policy: true
       tags:
@@ -466,7 +466,7 @@ spec:
         unique_id: "hardlink.comm + '_' + hardlink.old_path"
         rule_expression:
           - event_type: "hardlink"
-            expression: "(hardlink.old_path.startsWith('/etc/shadow') || hardlink.old_path.startsWith('/etc/sudoers')) && !ap.was_path_opened(hardlink.runtime.container_id, hardlink.old_path)"
+            expression: "(hardlink.old_path.startsWith('/etc/shadow')) && !ap.was_path_opened(hardlink.runtime.container_id, hardlink.old_path)"
       profile_dependency: 1
       severity: 5
       support_policy: true
