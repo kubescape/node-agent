@@ -18,7 +18,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/node-agent/pkg/ruleengine/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/tests/testutils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -1034,39 +1033,47 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	ns := testutils.NewRandomNamespace()
 
 	endpointTraffic, err := testutils.NewTestWorkload(ns.Name, path.Join(utils.CurrentDir(), "resources/endpoint-traffic.yaml"))
-	require.NoError(t, err, "Error creating workload")
+	if err != nil {
+		t.Errorf("Error creating workload: %v", err)
+	}
 	err = endpointTraffic.WaitForReady(80)
-	require.NoError(t, err, "Error waiting for workload to be ready")
+	if err != nil {
+		t.Errorf("Error waiting for workload to be ready: %v", err)
+	}
 
 	// Wait for application profile to be ready
-	require.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
+	assert.NoError(t, endpointTraffic.WaitForApplicationProfile(80, "ready"))
 	time.Sleep(10 * time.Second)
 
 	// Add to rule policy symlink
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "-s", "/etc/shadow", "/tmp/a"}, "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Not add to rule policy
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "/bin/sh", "/tmp/a"}, "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	err = endpointTraffic.WaitForApplicationProfileCompletion(80)
-	require.NoError(t, err, "Error waiting for application profile to be completed")
+	if err != nil {
+		t.Errorf("Error waiting for application profile to be completed: %v", err)
+	}
 
 	applicationProfile, err := endpointTraffic.GetApplicationProfile()
-	require.NoError(t, err, "Error getting application profile")
+	if err != nil {
+		t.Errorf("Error getting application profile: %v", err)
+	}
 
-	symlinkPolicy := applicationProfile.Spec.Containers[0].PolicyByRuleId[ruleengine.R1010ID]
-	require.Equal(t, []string{"ln"}, symlinkPolicy.AllowedProcesses)
+	symlinkPolicy := applicationProfile.Spec.Containers[0].PolicyByRuleId["R1010"]
+	assert.Equal(t, []string{"ln"}, symlinkPolicy.AllowedProcesses)
 
-	hardlinkPolicy := applicationProfile.Spec.Containers[0].PolicyByRuleId[ruleengine.R1012ID]
-	require.Len(t, hardlinkPolicy.AllowedProcesses, 0)
+	hardlinkPolicy := applicationProfile.Spec.Containers[0].PolicyByRuleId["R1012"]
+	assert.Len(t, hardlinkPolicy.AllowedProcesses, 0)
 
 	fmt.Println("After completed....")
 
@@ -1076,18 +1083,20 @@ func Test_14_RulePoliciesTest(t *testing.T) {
 	// generate hardlink alert
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "/etc/shadow", "/tmp/a"}, "")
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// not generate alert
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"ln", "-s", "/etc/shadow", "/tmp/a"}, "")
 	_, _, err = endpointTraffic.ExecIntoPod([]string{"rm", "/tmp/a"}, "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Wait for the alert to be signaled
 	time.Sleep(30 * time.Second)
 
 	alerts, err := testutils.GetAlerts(endpointTraffic.Namespace)
-	require.NoError(t, err, "Error getting alerts")
+	if err != nil {
+		t.Errorf("Error getting alerts: %v", err)
+	}
 
 	testutils.AssertContains(t, alerts, "Hardlink Created Over Sensitive File", "ln", "endpoint-traffic", []bool{true})
 	testutils.AssertNotContains(t, alerts, "Symlink Created Over Sensitive File", "ln", "endpoint-traffic", []bool{true})

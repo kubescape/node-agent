@@ -57,10 +57,6 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 		cw.networkStreamClient.ContainerCallback,
 	}
 
-	for receiver := range cw.thirdPartyContainerReceivers.Iter() {
-		cw.callbacks = append(cw.callbacks, receiver.ContainerCallback)
-	}
-
 	// Define the different options for the container collection instance
 	opts := []containercollection.ContainerCollectionOption{
 		// Get Notifications from the container collection

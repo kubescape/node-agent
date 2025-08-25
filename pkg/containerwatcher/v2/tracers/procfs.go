@@ -29,7 +29,7 @@ type ProcfsTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	procfsFeeder        *feeder.ProcfsFeeder
 	started             bool
 }
@@ -39,7 +39,7 @@ func NewProcfsTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 	cfg config.Config,
 ) *ProcfsTracer {
 	return &ProcfsTracer{

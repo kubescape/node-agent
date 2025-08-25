@@ -20,11 +20,11 @@ func (c ContainerWatcherMock) Start(_ context.Context) error {
 
 func (c ContainerWatcherMock) Stop() {}
 
-func (c ContainerWatcherMock) RegisterCustomTracer(_ CustomTracer) error {
+func (c ContainerWatcherMock) RegisterCustomTracer(_ TracerInterface) error {
 	return nil
 }
 
-func (c ContainerWatcherMock) UnregisterCustomTracer(_ CustomTracer) error {
+func (c ContainerWatcherMock) UnregisterCustomTracer(_ TracerInterface) error {
 	return nil
 }
 
@@ -63,5 +63,3 @@ func (c CustomTracerMock) Stop() error {
 func (c CustomTracerMock) Name() string {
 	return ""
 }
-
-var _ CustomTracer = (*CustomTracerMock)(nil)

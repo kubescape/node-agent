@@ -13,7 +13,10 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	utilsmetadata "github.com/armosec/utils-k8s-go/armometadata"
 	"github.com/cilium/ebpf/rlimit"
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goradd/maps"
 	"github.com/grafana/pyroscope-go"
+
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	beUtils "github.com/kubescape/backend/pkg/utils"
@@ -24,6 +27,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	containerprofilemanagerv1 "github.com/kubescape/node-agent/pkg/containerprofilemanager/v1"
+	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	containerwatcherv2 "github.com/kubescape/node-agent/pkg/containerwatcher/v2"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
@@ -48,8 +52,11 @@ import (
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
 	rulebindingcachev1 "github.com/kubescape/node-agent/pkg/rulebindingmanager/cache"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
-	rulemanagerv1 "github.com/kubescape/node-agent/pkg/rulemanager/v1"
-	"github.com/kubescape/node-agent/pkg/rulemanager/v1/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel"
+	"github.com/kubescape/node-agent/pkg/rulemanager/ruleadapters"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecooldown"
+	"github.com/kubescape/node-agent/pkg/rulemanager/rulecreator"
+	"github.com/kubescape/node-agent/pkg/rulemanager/ruleswatcher"
 	"github.com/kubescape/node-agent/pkg/sbommanager"
 	sbommanagerv1 "github.com/kubescape/node-agent/pkg/sbommanager/v1"
 	"github.com/kubescape/node-agent/pkg/seccompmanager"
@@ -167,7 +174,6 @@ func main() {
 
 	// Create watchers
 	dWatcher := dynamicwatcher.NewWatchHandler(k8sClient, storageClient.StorageClient, cfg.SkipNamespace)
-	// create k8sObject cache
 	k8sObjectCache, err := k8scache.NewK8sObjectCache(cfg.NodeName, k8sClient)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating K8sObjectCache", helpers.Error(err))
@@ -189,7 +195,12 @@ func main() {
 
 	var ruleBindingCache *rulebindingcachev1.RBCache
 	if cfg.EnableRuntimeDetection {
-		ruleBindingCache = rulebindingcachev1.NewCache(cfg.NodeName, k8sClient)
+		ruleCreator := rulecreator.NewRuleCreator()
+		ruleBindingCache = rulebindingcachev1.NewCache(cfg, k8sClient, ruleCreator)
+		rulesWatcher := ruleswatcher.NewRulesWatcher(k8sClient, ruleCreator, func() {
+			ruleBindingCache.RefreshRuleBindingsRules()
+		})
+		dWatcher.AddAdaptor(rulesWatcher)
 	}
 
 	// Create and DNS managers
@@ -268,14 +279,21 @@ func main() {
 
 		ruleCooldown := rulecooldown.NewRuleCooldown(cfg.RuleCoolDown)
 
+		adapterFactory := ruleadapters.NewEventRuleAdapterFactory()
+
+		celEvaluator, err := cel.NewCEL(objCache, cfg)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating CEL evaluator", helpers.Error(err))
+		}
+
 		// create runtimeDetection managers
-		ruleManager, err = rulemanagerv1.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, cfg.NodeName, clusterData.ClusterName, processTreeManager, dnsResolver, nil, ruleCooldown)
+		ruleManager, err = rulemanager.CreateRuleManager(ctx, cfg, k8sClient, ruleBindingCache, objCache, exporter, prometheusExporter, processTreeManager, dnsResolver, nil, ruleCooldown, adapterFactory, celEvaluator)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating RuleManager", helpers.Error(err))
 		}
 
 	} else {
-		ruleManager = rulemanager.CreateRuleManagerMock()
+		// ruleManager = rulemanager.CreateRuleManagerMock() TODO: add mock
 		apc := &objectcache.ApplicationProfileCacheMock{}
 		nnc := &objectcache.NetworkNeighborhoodCacheMock{}
 		dc := &objectcache.DnsCacheMock{}
@@ -339,11 +357,16 @@ func main() {
 		sbomManager = sbommanager.CreateSbomManagerMock()
 	}
 
+	thirdPartyTracers := containerwatcher.ThirdPartyTracers{
+		ThirdPartyTracersInitializers: mapset.NewSet[containerwatcher.CustomTracerInitializer](),
+		ThirdPartyEventReceivers:      maps.NewSafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]](),
+	}
+
 	// Create the container handler
 	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, containerProfileManager, k8sClient,
 		igK8sClient, dnsManagerClient, prometheusExporter, ruleManager,
-		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil, nil,
-		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree)
+		malwareManager, sbomManager, &ruleBindingNotify, igK8sClient.RuntimeConfig, nil,
+		processTreeManager, clusterData.ClusterName, objCache, networkStreamClient, containerProcessTree, thirdPartyTracers)
 	if err != nil {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}

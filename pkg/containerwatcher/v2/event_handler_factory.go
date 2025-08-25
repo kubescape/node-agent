@@ -18,7 +18,6 @@ import (
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
 	"github.com/kubescape/node-agent/pkg/eventreporters/rulepolicy"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-
 	"github.com/kubescape/node-agent/pkg/metricsmanager"
 	"github.com/kubescape/node-agent/pkg/networkstream"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
@@ -27,7 +26,9 @@ import (
 
 // Manager represents a component that can receive events
 type Manager interface {
-	ReportEvent(eventType utils.EventType, event utils.K8sEvent)
+	// TODO: Find a better way to handle this
+	// containerwatcher.EventReceiver
+	// containerwatcher.EnrichedEventReceiver
 }
 
 // ManagerAdapter adapts different manager interfaces to the common Manager interface
@@ -50,7 +51,7 @@ func (ma *ManagerAdapter) ReportEvent(eventType utils.EventType, event utils.K8s
 // EventHandlerFactory manages the mapping of event types to their managers
 type EventHandlerFactory struct {
 	handlers                 map[utils.EventType][]Manager
-	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]]
+	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]]
 	thirdPartyEnricher       containerwatcher.TaskBasedEnricher
 	cfg                      config.Config
 	containerCollection      *containercollection.ContainerCollection
@@ -67,7 +68,7 @@ func NewEventHandlerFactory(
 	malwareManager malwaremanager.MalwareManagerClient,
 	networkStreamClient networkstream.NetworkStreamClient,
 	metrics metricsmanager.MetricsManager,
-	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.EventReceiver]],
+	thirdPartyEventReceivers *maps.SafeMap[utils.EventType, mapset.Set[containerwatcher.GenericEventReceiver]],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	rulePolicyReporter *rulepolicy.RulePolicyReporter,
 ) *EventHandlerFactory {
@@ -119,6 +120,7 @@ func NewEventHandlerFactory(
 
 	rulePolicyAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
 		switch eventType {
+		// Won't work for 3rd party tracers, we need to extract comm and containerID from the event by interface
 		case utils.ExecveEventType:
 			if execEvent, ok := event.(*events.ExecEvent); ok {
 				rulePolicyReporter.ReportEvent(eventType, event, execEvent.Runtime.ContainerID, execEvent.Comm)
@@ -195,13 +197,13 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	for _, handler := range handlers {
 		if enrichedHandler, ok := handler.(containerwatcher.EnrichedEventReceiver); ok {
 			enrichedHandler.ReportEnrichedEvent(enrichedEvent)
-		} else {
+		} else if handler, ok := handler.(containerwatcher.EventReceiver); ok {
 			handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
 		}
 	}
 
 	// Report to third-party event receivers
-	ehf.reportEventToThirdPartyTracers(enrichedEvent.EventType, enrichedEvent.Event)
+	ehf.reportEventToThirdPartyTracers(enrichedEvent)
 }
 
 // registerHandlers registers all handlers for different event types
@@ -255,11 +257,15 @@ func (ehf *EventHandlerFactory) registerHandlers(
 }
 
 // reportEventToThirdPartyTracers reports events to third-party tracers
-func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(eventType utils.EventType, event utils.K8sEvent) {
+func (ehf *EventHandlerFactory) reportEventToThirdPartyTracers(enrichedEvent *events.EnrichedEvent) {
 	if ehf.thirdPartyEventReceivers != nil {
-		if eventReceivers, ok := ehf.thirdPartyEventReceivers.Load(eventType); ok {
+		if eventReceivers, ok := ehf.thirdPartyEventReceivers.Load(enrichedEvent.EventType); ok {
 			for receiver := range eventReceivers.Iter() {
-				receiver.ReportEvent(eventType, event)
+				if enrichedHandler, ok := receiver.(containerwatcher.EnrichedEventReceiver); ok {
+					enrichedHandler.ReportEnrichedEvent(enrichedEvent)
+				} else if handler, ok := receiver.(containerwatcher.EventReceiver); ok {
+					handler.ReportEvent(enrichedEvent.EventType, enrichedEvent.Event)
+				}
 			}
 		}
 	}

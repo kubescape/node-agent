@@ -13,8 +13,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
-	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -131,7 +130,7 @@ func (config *HTTPExporterConfig) Validate() error {
 }
 
 // SendRuleAlert implements the Exporter interface
-func (e *HTTPExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+func (e *HTTPExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.config.TimeoutSeconds)*time.Second)
 	defer cancel()
 
@@ -151,7 +150,7 @@ func (e *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResu
 }
 
 // Internal methods with context support
-func (e *HTTPExporter) sendRuleAlertWithContext(ctx context.Context, failedRule ruleengine.RuleFailure) error {
+func (e *HTTPExporter) sendRuleAlertWithContext(ctx context.Context, failedRule types.RuleFailure) error {
 	if e.shouldSendLimitAlert() {
 		return e.sendAlertLimitReached(ctx)
 	}
@@ -169,7 +168,7 @@ func (e *HTTPExporter) sendMalwareAlertWithContext(ctx context.Context, result m
 	return e.sendAlert(ctx, alert, result.GetRuntimeProcessDetails(), nil)
 }
 
-func (e *HTTPExporter) createRuleAlert(failedRule ruleengine.RuleFailure) apitypes.RuntimeAlert {
+func (e *HTTPExporter) createRuleAlert(failedRule types.RuleFailure) apitypes.RuntimeAlert {
 	k8sDetails := failedRule.GetRuntimeAlertK8sDetails()
 	k8sDetails.NodeName = e.nodeName
 	k8sDetails.ClusterName = e.clusterName
@@ -332,8 +331,8 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		HostName:  e.host,
 		AlertType: apitypes.AlertTypeRule,
 		BaseRuntimeAlert: apitypes.BaseRuntimeAlert{
-			AlertName:      string(AlertTypeLimitReached),
-			Severity:       ruleenginev1.RulePrioritySystemIssue,
+			AlertName: string(AlertTypeLimitReached),
+			// Severity:       ruleengine.RulePrioritySystemIssue,
 			FixSuggestions: "Check logs for more information",
 		},
 		RuntimeAlertK8sDetails: apitypes.RuntimeAlertK8sDetails{
