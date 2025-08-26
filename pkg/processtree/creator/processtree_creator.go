@@ -184,7 +184,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
-		proc = pt.getOrCreateProcess(event.PID)
+		return
 	}
 
 	if event.Comm != "" {
