@@ -93,7 +93,7 @@ func (et *ExitTracer) GetEventType() utils.EventType {
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (et *ExitTracer) IsEnabled(cfg interface{}) bool {
 	if config, ok := cfg.(config.Config); ok {
-		return config.EnableRuntimeDetection
+		return config.EnableRuntimeDetection || config.EnableApplicationProfile
 	}
 	return false
 }
