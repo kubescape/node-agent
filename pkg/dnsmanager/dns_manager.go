@@ -7,14 +7,17 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
+	lru "github.com/hashicorp/golang-lru/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"istio.io/pkg/cache"
 )
 
 // DNSManager is used to manage DNS events and save IP resolutions.
 type DNSManager struct {
-	addressToDomainMap       maps.SafeMap[string, string]
+	addressToDomainMap       *lru.Cache[string, string]
 	lookupCache              cache.ExpiringCache                                             // Cache for DNS lookups
 	failureCache             cache.ExpiringCache                                             // Cache for failed lookups
 	containerToCloudServices maps.SafeMap[string, *maps.SafeMap[uint32, mapset.Set[string]]] // key: containerId, value: map of pid to cloud services
@@ -33,11 +36,17 @@ const (
 var _ DNSManagerClient = (*DNSManager)(nil)
 var _ DNSResolver = (*DNSManager)(nil)
 
-func CreateDNSManager() *DNSManager {
+func CreateDNSManager(size int) *DNSManager {
+	addressToDomainMap, err := lru.New[string, string](size)
+	if err != nil {
+		logger.L().Fatal("creating lru cache", helpers.Error(err))
+		return nil
+	}
+
 	return &DNSManager{
-		// Create TTL caches with their respective expiration times
-		lookupCache:  cache.NewTTL(defaultPositiveTTL, defaultPositiveTTL),
-		failureCache: cache.NewTTL(defaultNegativeTTL, defaultNegativeTTL),
+		addressToDomainMap: addressToDomainMap,
+		lookupCache:        cache.NewTTL(defaultPositiveTTL, defaultPositiveTTL),
+		failureCache:       cache.NewTTL(defaultNegativeTTL, defaultNegativeTTL),
 	}
 }
 
@@ -69,7 +78,7 @@ func (dm *DNSManager) ReportEvent(dnsEvent tracerdnstype.Event) {
 
 	if len(dnsEvent.Addresses) > 0 {
 		for _, address := range dnsEvent.Addresses {
-			dm.addressToDomainMap.Set(address, dnsEvent.DNSName)
+			dm.addressToDomainMap.Add(address, dnsEvent.DNSName)
 		}
 
 		// Update the cache with these known good addresses
@@ -89,7 +98,7 @@ func (dm *DNSManager) ReportEvent(dnsEvent tracerdnstype.Event) {
 		entry := cached.(cacheEntry)
 		// Use cached addresses
 		for _, addr := range entry.addresses {
-			dm.addressToDomainMap.Set(addr, dnsEvent.DNSName)
+			dm.addressToDomainMap.Add(addr, dnsEvent.DNSName)
 		}
 		return
 	}
@@ -107,7 +116,7 @@ func (dm *DNSManager) ReportEvent(dnsEvent tracerdnstype.Event) {
 	for _, addr := range addresses {
 		addrStr := addr.String()
 		addrStrings = append(addrStrings, addrStr)
-		dm.addressToDomainMap.Set(addrStr, dnsEvent.DNSName)
+		dm.addressToDomainMap.Add(addrStr, dnsEvent.DNSName)
 	}
 
 	// Cache the successful lookup
@@ -117,8 +126,8 @@ func (dm *DNSManager) ReportEvent(dnsEvent tracerdnstype.Event) {
 }
 
 func (dm *DNSManager) ResolveIPAddress(ipAddr string) (string, bool) {
-	domain := dm.addressToDomainMap.Get(ipAddr)
-	return domain, domain != ""
+	domain, found := dm.addressToDomainMap.Get(ipAddr)
+	return domain, found
 }
 
 func (dm *DNSManager) ResolveContainerProcessToCloudServices(containerId string, pid uint32) mapset.Set[string] {

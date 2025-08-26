@@ -13,3 +13,6 @@ docker-build:
 
 docker-push:
 	docker push $(IMAGE):$(TAG)
+
+kind-load: docker-build
+	kind load docker-image $(IMAGE):$(TAG)

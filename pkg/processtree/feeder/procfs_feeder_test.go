@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,7 +14,8 @@ import (
 
 func TestNewProcfsFeeder(t *testing.T) {
 	interval := 100 * time.Millisecond
-	feeder := NewProcfsFeeder(interval)
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(interval, 10*time.Millisecond, mockManager)
 
 	assert.NotNil(t, feeder)
 	assert.Equal(t, interval, feeder.interval)
@@ -23,7 +25,8 @@ func TestNewProcfsFeeder(t *testing.T) {
 }
 
 func TestProcfsFeeder_Start(t *testing.T) {
-	feeder := NewProcfsFeeder(100 * time.Millisecond)
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ctx := context.Background()
 
 	// Test successful start
@@ -42,7 +45,8 @@ func TestProcfsFeeder_Start(t *testing.T) {
 }
 
 func TestProcfsFeeder_Stop(t *testing.T) {
-	feeder := NewProcfsFeeder(100 * time.Millisecond)
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ctx := context.Background()
 
 	// Test stop without start
@@ -61,7 +65,8 @@ func TestProcfsFeeder_Stop(t *testing.T) {
 }
 
 func TestProcfsFeeder_Subscribe(t *testing.T) {
-	feeder := NewProcfsFeeder(100 * time.Millisecond)
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ch := make(chan conversion.ProcessEvent, 1)
 
 	feeder.Subscribe(ch)
@@ -78,7 +83,8 @@ func TestProcfsFeeder_Subscribe(t *testing.T) {
 }
 
 func TestProcfsFeeder_ReadProcessInfo(t *testing.T) {
-	feeder := NewProcfsFeeder(100 * time.Millisecond)
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ctx := context.Background()
 
 	err := feeder.Start(ctx)
@@ -103,7 +109,8 @@ func TestProcfsFeeder_ReadProcessInfo(t *testing.T) {
 }
 
 func TestProcfsFeeder_GetProcessComm(t *testing.T) {
-	feeder := NewProcfsFeeder(100 * time.Millisecond)
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ctx := context.Background()
 
 	err := feeder.Start(ctx)
@@ -121,7 +128,8 @@ func TestProcfsFeeder_GetProcessComm(t *testing.T) {
 }
 
 func TestProcfsFeeder_BroadcastEvent(t *testing.T) {
-	feeder := NewProcfsFeeder(100 * time.Millisecond)
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ch1 := make(chan conversion.ProcessEvent, 1)
 	ch2 := make(chan conversion.ProcessEvent, 1)
 
@@ -146,7 +154,8 @@ func TestProcfsFeeder_BroadcastEvent(t *testing.T) {
 }
 
 func TestProcfsFeeder_ScanProcfs(t *testing.T) {
-	feeder := NewProcfsFeeder(100 * time.Millisecond)
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -193,7 +202,8 @@ ReceiveLoop:
 }
 
 func TestProcfsFeeder_ProcessSpecificPID(t *testing.T) {
-	feeder := NewProcfsFeeder(100 * time.Millisecond)
+	mockManager := processtree.NewProcessTreeManagerMock()
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

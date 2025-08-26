@@ -5,6 +5,7 @@ import (
 	"os"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -63,4 +64,26 @@ func (exporter *StdoutExporter) SendMalwareAlert(malwareResult malwaremanager.Ma
 		"CloudMetadata":         exporter.cloudmetadata,
 		"processtree_depth":     fmt.Sprintf("%d", utils.CalculateProcessTreeDepth(&processTree)),
 	}).Error(malwareResult.GetBasicRuntimeAlert().AlertName)
+}
+
+func (exporter *StdoutExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
+	for _, event := range fimEvents {
+		exporter.logger.WithFields(log.Fields{
+			"event":       event.GetEventType(),
+			"path":        event.GetPath(),
+			"fileSize":    event.GetFileSize(),
+			"fileInode":   event.GetFileInode(),
+			"fileDevice":  event.GetFileDevice(),
+			"fileMtime":   event.GetFileMtime(),
+			"fileCtime":   event.GetFileCtime(),
+			"uid":         event.GetUid(),
+			"gid":         event.GetGid(),
+			"mode":        event.GetMode(),
+			"processPid":  event.GetProcessPid(),
+			"processName": event.GetProcessName(),
+			"processArgs": event.GetProcessArgs(),
+			"hostName":    event.GetHostName(),
+			"agentId":     event.GetAgentId(),
+		}).Info("FIM event")
+	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
 	"github.com/kubescape/node-agent/pkg/rulemanager/v1/rulecooldown"
 	"github.com/spf13/viper"
@@ -38,6 +39,7 @@ type Config struct {
 	EnableNodeProfile              bool                                     `mapstructure:"nodeProfileServiceEnabled"`
 	EnableHostMalwareSensor        bool                                     `mapstructure:"hostMalwareSensorEnabled"`
 	EnableHostNetworkSensor        bool                                     `mapstructure:"hostNetworkSensorEnabled"`
+	EnableFIM                      bool                                     `mapstructure:"fimEnabled"`
 	NodeProfileInterval            time.Duration                            `mapstructure:"nodeProfileInterval"`
 	EnableSeccomp                  bool                                     `mapstructure:"seccompServiceEnabled"`
 	ExcludeLabels                  map[string]string                        `mapstructure:"excludeLabels"`
@@ -60,8 +62,57 @@ type Config struct {
 	RuleCoolDown                   rulecooldown.RuleCooldownConfig          `mapstructure:"ruleCooldown"`
 	EnablePartialProfileGeneration bool                                     `mapstructure:"partialProfileGenerationEnabled"`
 	ProcfsScanInterval             time.Duration                            `mapstructure:"procfsScanInterval"`
+	ProcfsPidScanInterval          time.Duration                            `mapstructure:"procfsPidScanInterval"`
 	OrderedEventQueue              containerwatcher.OrderedEventQueueConfig `mapstructure:"orderedEventQueue"`
 	ExitCleanup                    processtreecreator.ExitCleanupConfig     `mapstructure:"exitCleanup"`
+	DNSCacheSize                   int                                      `mapstructure:"dnsCacheSize"`
+	DCapSys                        bool                                     `mapstructure:"dCapSys"`
+	DDns                           bool                                     `mapstructure:"dDns"`
+	DExec                          bool                                     `mapstructure:"dExec"`
+	DExit                          bool                                     `mapstructure:"dExit"`
+	DFork                          bool                                     `mapstructure:"dFork"`
+	DHardlink                      bool                                     `mapstructure:"dHardlink"`
+	DHttp                          bool                                     `mapstructure:"dHttp"`
+	DIouring                       bool                                     `mapstructure:"dIouring"`
+	DNetwork                       bool                                     `mapstructure:"dNetwork"`
+	DOpen                          bool                                     `mapstructure:"dOpen"`
+	DPtrace                        bool                                     `mapstructure:"dPtrace"`
+	DRandomx                       bool                                     `mapstructure:"dRandomx"`
+	DSeccomp                       bool                                     `mapstructure:"dSeccomp"`
+	DSsh                           bool                                     `mapstructure:"dSsh"`
+	DSymlink                       bool                                     `mapstructure:"dSymlink"`
+	DTop                           bool                                     `mapstructure:"dTop"`
+	FIM                            FIMConfig                                `mapstructure:"fim"`
+	EnableContainerFanotifyEbpf    bool                                     `mapstructure:"enableContainerFanotifyEbpf"`
+}
+
+// FIMConfig defines the configuration for File Integrity Monitoring
+type FIMConfig struct {
+	Directories    []FIMDirectoryConfig                 `mapstructure:"directories"`
+	BackendConfig  hostfimsensor.HostFimBackendConfig   `mapstructure:"backendConfig"`
+	BatchConfig    hostfimsensor.HostFimBatchConfig     `mapstructure:"batchConfig"`
+	DedupConfig    hostfimsensor.HostFimDedupConfig     `mapstructure:"dedupConfig"`
+	PeriodicConfig *hostfimsensor.HostFimPeriodicConfig `mapstructure:"periodicConfig"`
+	Exporters      FIMExportersConfig                   `mapstructure:"exporters"`
+}
+
+// FIMDirectoryConfig defines configuration for a directory to monitor
+type FIMDirectoryConfig struct {
+	Path     string `mapstructure:"path"`
+	OnCreate bool   `mapstructure:"onCreate"`
+	OnChange bool   `mapstructure:"onChange"`
+	OnRemove bool   `mapstructure:"onRemove"`
+	OnRename bool   `mapstructure:"onRename"`
+	OnChmod  bool   `mapstructure:"onChmod"`
+	OnMove   bool   `mapstructure:"onMove"`
+}
+
+// FIMExportersConfig defines which exporters to use for FIM events
+type FIMExportersConfig struct {
+	StdoutExporter           *bool                         `mapstructure:"stdoutExporter"`
+	HTTPExporterConfig       *exporters.HTTPExporterConfig `mapstructure:"httpExporterConfig"`
+	SyslogExporter           string                        `mapstructure:"syslogExporterURL"`
+	AlertManagerExporterUrls []string                      `mapstructure:"alertManagerExporterUrls"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -84,6 +135,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("podName", os.Getenv(PodNameEnvVar))
 	viper.SetDefault("hostMalwareSensorEnabled", false)
 	viper.SetDefault("hostNetworkSensorEnabled", false)
+	viper.SetDefault("fimEnabled", false)
 	viper.SetDefault("networkStreamingEnabled", false)
 	viper.SetDefault("kubernetesMode", true)
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
@@ -98,6 +150,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("ruleCooldown::ruleCooldownMaxSize", 10000)
 	viper.SetDefault("partialProfileGenerationEnabled", true)
 	viper.SetDefault("procfsScanInterval", 30*time.Second)
+	viper.SetDefault("procfsPidScanInterval", 5*time.Second)
 	viper.SetDefault("orderedEventQueue::size", 100000)
 	viper.SetDefault("orderedEventQueue::collectionDelay", 50*time.Millisecond)
 	viper.SetDefault("exitCleanup::maxPendingExits", 1000)
@@ -105,6 +158,24 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("exitCleanup::cleanupDelay", 5*time.Minute)
 	viper.SetDefault("workerChannelSize", 750000)
 	viper.SetDefault("blockEvents", false)
+	viper.SetDefault("dnsCacheSize", 50000)
+	viper.SetDefault("enableContainerFanotifyEbpf", false)
+
+	// FIM defaults
+	viper.SetDefault("fim::backendConfig::backendType", "fanotify") // This will be parsed as a string and converted to FimBackendType
+	viper.SetDefault("fim::batchConfig::maxBatchSize", 1000)
+	viper.SetDefault("fim::batchConfig::batchTimeout", "1m")
+	viper.SetDefault("fim::dedupConfig::dedupEnabled", true)
+	viper.SetDefault("fim::dedupConfig::dedupTimeWindow", "5m")
+	viper.SetDefault("fim::dedupConfig::maxCacheSize", 1000)
+	viper.SetDefault("fim::periodicConfig::scanInterval", 5*time.Minute)
+	viper.SetDefault("fim::periodicConfig::maxScanDepth", 10)
+	viper.SetDefault("fim::periodicConfig::maxSnapshotNodes", 100000)
+	viper.SetDefault("fim::periodicConfig::includeHidden", false)
+	viper.SetDefault("fim::periodicConfig::maxFileSize", int64(100*1024*1024))
+	viper.SetDefault("fim::periodicConfig::followSymlinks", false)
+	viper.SetDefault("fim::exporters::stdoutExporter", false)
+
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()
@@ -156,4 +227,34 @@ func (c *Config) SkipNamespace(ns string) bool {
 		}
 	}
 	return false
+}
+
+// GetFIMPathConfigs converts FIMDirectoryConfig to HostFimPathConfig
+func (c *FIMConfig) GetFIMPathConfigs() []hostfimsensor.HostFimPathConfig {
+	var pathConfigs []hostfimsensor.HostFimPathConfig
+
+	for _, dirConfig := range c.Directories {
+		pathConfig := hostfimsensor.HostFimPathConfig{
+			Path:     dirConfig.Path,
+			OnCreate: dirConfig.OnCreate,
+			OnChange: dirConfig.OnChange,
+			OnRemove: dirConfig.OnRemove,
+			OnRename: dirConfig.OnRename,
+			OnChmod:  dirConfig.OnChmod,
+			OnMove:   dirConfig.OnMove,
+		}
+		pathConfigs = append(pathConfigs, pathConfig)
+	}
+
+	return pathConfigs
+}
+
+// GetFIMExportersConfig returns the exporters configuration for FIM
+func (c *FIMConfig) GetFIMExportersConfig() exporters.ExportersConfig {
+	return exporters.ExportersConfig{
+		StdoutExporter:           c.Exporters.StdoutExporter,
+		HTTPExporterConfig:       c.Exporters.HTTPExporterConfig,
+		SyslogExporter:           c.Exporters.SyslogExporter,
+		AlertManagerExporterUrls: c.Exporters.AlertManagerExporterUrls,
+	}
 }

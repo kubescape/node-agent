@@ -28,46 +28,6 @@ struct {
 // we need this to make sure the compiler doesn't remove our struct.
 const struct event *unusedevent __attribute__((unused));
 
-const volatile uid_t targ_uid = INVALID_UID;
-
-static __always_inline bool valid_uid(uid_t uid)
-{
-    return uid != INVALID_UID;
-}
-
-// Helper functions to get task information
-static __always_inline u64 get_task_start_time(struct task_struct *task)
-{
-    if (!task) {
-        return 0;
-    }
-    return BPF_CORE_READ(task, start_time);
-}
-
-static __always_inline int get_task_host_tgid(struct task_struct *task)
-{
-    if (!task) {
-        return 0;
-    }
-    return BPF_CORE_READ(task, tgid);
-}
-
-static __always_inline int get_task_host_pid(struct task_struct *task)
-{
-    if (!task) {
-        return 0;
-    }
-    return BPF_CORE_READ(task, pid);
-}
-
-static __always_inline struct task_struct *get_parent_task(struct task_struct *task)
-{
-    if (!task) {
-        return NULL;
-    }
-    return BPF_CORE_READ(task, real_parent);
-}
-
 static __always_inline u64 get_current_time_in_ns()
 {
     return bpf_ktime_get_boot_ns();
@@ -99,9 +59,6 @@ int tracepoint__sched_exit(struct bpf_raw_tracepoint_args *ctx)
     u64 uid_gid = bpf_get_current_uid_gid();
     u32 uid = (u32)uid_gid;
 
-    if (valid_uid(targ_uid) && targ_uid != uid) {
-        return 0;
-    }
 
     // The event timestamp, so process tree info can be changelog'ed.
     u64 timestamp = get_current_time_in_ns();

@@ -27,6 +27,7 @@ import (
 	containerwatcherv2 "github.com/kubescape/node-agent/pkg/containerwatcher/v2"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
+	"github.com/kubescape/node-agent/pkg/fimmanager"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	malwaremanagerv1 "github.com/kubescape/node-agent/pkg/malwaremanager/v1"
@@ -196,7 +197,7 @@ func main() {
 	var dnsManagerClient dnsmanager.DNSManagerClient
 	var dnsResolver dnsmanager.DNSResolver
 	if cfg.EnableNetworkTracing || cfg.EnableRuntimeDetection {
-		dnsManager := dnsmanager.CreateDNSManager()
+		dnsManager := dnsmanager.CreateDNSManager(cfg.DNSCacheSize)
 		dnsManagerClient = dnsManager
 		// NOTE: dnsResolver is set for threat detection.
 		dnsResolver = dnsManager
@@ -339,6 +340,15 @@ func main() {
 		sbomManager = sbommanager.CreateSbomManagerMock()
 	}
 
+	// Create the FIM manager
+	var fimManager *fimmanager.FIMManager
+	if cfg.EnableFIM {
+		fimManager, err = fimmanager.NewFIMManager(cfg, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating FIMManager", helpers.Error(err))
+		}
+	}
+
 	// Create the container handler
 	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, containerProfileManager, k8sClient,
 		igK8sClient, dnsManagerClient, prometheusExporter, ruleManager,
@@ -357,6 +367,15 @@ func main() {
 
 	// Start the prometheusExporter
 	prometheusExporter.Start()
+
+	// Start the FIM manager
+	if fimManager != nil {
+		err = fimManager.Start(ctx)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error starting FIM manager", helpers.Error(err))
+		}
+		defer fimManager.Stop()
+	}
 
 	// Start the container handler
 	err = mainHandler.Start(ctx)

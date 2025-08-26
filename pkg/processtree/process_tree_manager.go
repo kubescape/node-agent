@@ -105,3 +105,9 @@ func (ptm *ProcessTreeManagerImpl) GetContainerProcessTree(containerID string, p
 
 	return containerSubtree, nil
 }
+
+func (ptm *ProcessTreeManagerImpl) GetPidList() []uint32 {
+	ptm.mutex.RLock()
+	defer ptm.mutex.RUnlock()
+	return ptm.creator.GetProcessMap().Keys()
+}

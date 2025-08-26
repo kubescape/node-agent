@@ -97,6 +97,9 @@ func (et *ExecTracer) GetEventType() utils.EventType {
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (et *ExecTracer) IsEnabled(cfg interface{}) bool {
 	if config, ok := cfg.(config.Config); ok {
+		if config.DExec {
+			return false
+		}
 		return config.EnableApplicationProfile || config.EnableRuntimeDetection
 	}
 	return false

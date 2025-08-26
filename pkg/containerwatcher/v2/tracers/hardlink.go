@@ -99,7 +99,7 @@ func (ht *HardlinkTracer) GetEventType() utils.EventType {
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (ht *HardlinkTracer) IsEnabled(cfg interface{}) bool {
 	if config, ok := cfg.(config.Config); ok {
-		return config.EnableRuntimeDetection
+		return !config.DHardlink && config.EnableRuntimeDetection
 	}
 	return false
 }
