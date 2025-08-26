@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	ruleenginev1 "github.com/kubescape/node-agent/pkg/ruleengine/v1"
@@ -148,6 +149,12 @@ func (e *HTTPExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResu
 	if err := e.sendMalwareAlertWithContext(ctx, malwareResult); err != nil {
 		logger.L().Warning("HTTPExporter.SendRuleAlert - failed to send malware alert", helpers.Error(err))
 	}
+}
+
+// SendFimAlerts implements the Exporter interface
+func (e *HTTPExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
+	// TODO: Implement FIM alerts sending logic
+	logger.L().Debug("HTTPExporter.SendFimAlerts - stub implementation", helpers.Int("events", len(fimEvents)))
 }
 
 // Internal methods with context support

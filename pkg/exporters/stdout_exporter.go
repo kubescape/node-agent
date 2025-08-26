@@ -5,6 +5,7 @@ import (
 	"os"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -63,4 +64,12 @@ func (exporter *StdoutExporter) SendMalwareAlert(malwareResult malwaremanager.Ma
 		"CloudMetadata":         exporter.cloudmetadata,
 		"processtree_depth":     fmt.Sprintf("%d", utils.CalculateProcessTreeDepth(&processTree)),
 	}).Error(malwareResult.GetBasicRuntimeAlert().AlertName)
+}
+
+func (exporter *StdoutExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
+	// TODO: Implement FIM alerts sending logic
+	exporter.logger.WithFields(log.Fields{
+		"event_count": len(fimEvents),
+		"message":     "FIM alerts stub implementation",
+	}).Info("SendFimAlerts called")
 }
