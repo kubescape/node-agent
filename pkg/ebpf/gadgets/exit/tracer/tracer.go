@@ -117,16 +117,12 @@ func (t *Tracer) run() {
 				return
 			}
 
-			logger.L().Error("AFEK - Error reading perf ring buffer", helpers.Error(err))
-
 			msg := fmt.Sprintf("Error reading perf ring buffer: %s", err)
 			t.eventCallback(types.Base(eventtypes.Err(msg)))
 			return
 		}
 
 		if record.LostSamples > 0 {
-			logger.L().Error("AFEK - Lost samples", helpers.Int("lostSamples", int(record.LostSamples)))
-
 			msg := fmt.Sprintf("lost %d samples", record.LostSamples)
 			t.eventCallback(types.Base(eventtypes.Warn(msg)))
 			t.recordPool.Put(record)

@@ -24,7 +24,6 @@ type processTreeCreatorImpl struct {
 	// Exit manager fields
 	pendingExits        map[uint32]*pendingExit // PID -> pending exit
 	exitCleanupStopChan chan struct{}
-	maxProcesses        int
 }
 
 func NewProcessTreeCreator(containerTree containerprocesstree.ContainerProcessTree, config config.Config) ProcessTreeCreator {
@@ -221,7 +220,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
-		proc = pt.getOrCreateProcess(event.PID)
+		return
 	}
 
 	pt.UpdatePPID(proc, event)
@@ -277,10 +276,6 @@ func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Proce
 	}
 	proc = &apitypes.Process{PID: pid, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
 	pt.processMap.Set(pid, proc)
-	if pt.processMap.Len() > pt.maxProcesses {
-		pt.maxProcesses = pt.processMap.Len()
-		logger.L().Info("AFEK - maxProcesses 1", helpers.Int("maxProcesses", pt.maxProcesses))
-	}
 	return proc
 }
 
