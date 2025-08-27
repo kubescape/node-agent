@@ -663,11 +663,7 @@ func TestHostFimSensor_Deduplication(t *testing.T) {
 
 func TestDedupCache_Logic(t *testing.T) {
 	// Test the de-duplication cache logic directly
-	dedupCache := &dedupCache{
-		cache:      make(map[string]time.Time),
-		maxSize:    100,
-		timeWindow: 500 * time.Millisecond,
-	}
+	dedupCache := newDedupCache(500*time.Millisecond, 100)
 
 	path := "/test/file.txt"
 	operation := fimtypes.FimEventTypeCreate
