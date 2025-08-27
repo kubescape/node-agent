@@ -19,6 +19,7 @@ type batchCollector struct {
 	batchTimeout time.Duration
 	timer        *time.Timer
 	stopChan     chan struct{}
+	stopOnce     sync.Once
 	wg           sync.WaitGroup
 }
 
@@ -41,7 +42,9 @@ func (bc *batchCollector) start() {
 
 // stop stops the batch collector and waits for it to finish
 func (bc *batchCollector) stop() {
-	close(bc.stopChan)
+	bc.stopOnce.Do(func() {
+		close(bc.stopChan)
+	})
 	bc.wg.Wait()
 }
 

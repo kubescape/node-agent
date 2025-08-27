@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -27,6 +28,7 @@ type HostFimSensorFanotify struct {
 	batchCollector *batchCollector
 	dedupCache     *dedupCache
 	stopChan       chan struct{}
+	stopOnce       sync.Once
 }
 
 // NewHostFimSensorFanotify creates a new fanotify-based FIM sensor
@@ -341,7 +343,11 @@ func (h *HostFimSensorFanotify) Stop() {
 	}
 
 	h.running = false
-	close(h.stopChan)
+
+	// Use sync.Once to ensure the channel is only closed once
+	h.stopOnce.Do(func() {
+		close(h.stopChan)
+	})
 
 	h.cleanupListeners()
 
