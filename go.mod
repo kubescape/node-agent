@@ -247,6 +247,8 @@ require (
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/olvrng/ujson v1.1.0 // indirect
+	github.com/opcoder0/capabilities v0.0.0-20221222060822-17fd73bffd2a // indirect
+	github.com/opcoder0/fanotify v0.4.2 // indirect
 	github.com/opencontainers/runtime-spec v1.2.1 // indirect
 	github.com/opencontainers/selinux v1.12.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.1-0.20220228012449-10b1cf09e00b // indirect

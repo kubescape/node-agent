@@ -85,6 +85,64 @@ func TestHostFimSensor_CreateFileTriggersExporter(t *testing.T) {
 	}
 }
 
+func TestHostFimSensor_CreateNestedFileTriggersExporter(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.Mkdir(filepath.Join(tmpDir, "testdir"), 0755)
+	testFile := filepath.Join(tmpDir, "testdir", "testfile.txt")
+
+	mockExp := &mockExporter{}
+	pathConfigs := []HostFimPathConfig{
+		{
+			Path:     "testdir", // Use relative path since hostPath will be the tmpDir
+			OnCreate: true,
+			OnChange: true,
+			OnRemove: true,
+			OnRename: true,
+			OnChmod:  true,
+			OnMove:   true,
+		},
+	}
+
+	// Use custom batch config for testing with small batch size and timeout
+	batchConfig := HostFimBatchConfig{
+		MaxBatchSize: 1,                      // Send immediately when batch size is 1
+		BatchTimeout: 100 * time.Millisecond, // Short timeout for testing
+	}
+
+	sensor := NewHostFimSensorWithBatching(tmpDir, pathConfigs, mockExp, batchConfig)
+	if err := sensor.Start(); err != nil {
+		t.Fatalf("failed to start HostFimSensor: %v", err)
+	}
+	defer sensor.Stop()
+
+	// Create a file to trigger the event
+	f, err := os.Create(testFile)
+	if err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+	f.Close()
+
+	// Wait for the event to be picked up (fsnotify is async)
+	found := false
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		mockExp.mu.Lock()
+		for _, evt := range mockExp.fimEvents {
+			if evt.GetPath() == testFile && evt.GetEventType() == fimtypes.FimEventTypeCreate {
+				found = true
+				break
+			}
+		}
+		mockExp.mu.Unlock()
+		if found {
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected FIM event for file creation, but none was received")
+	}
+}
+
 func TestHostFimSensor_ConvertFsnotifyEventToFimEvent(t *testing.T) {
 	tmpDir := t.TempDir()
 	mockExp := &mockExporter{}

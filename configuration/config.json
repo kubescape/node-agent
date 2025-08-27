@@ -21,5 +21,34 @@
     "CsvRuleExporterPath": "/rules",
     "CsvMalwareExporterPath": "/malware",
     "httpExporterConfig": {"url":"http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io"}
+  },
+  "fim": {
+    "enabled": true,
+    "directories": [
+      {
+        "path": "/etc",
+        "onCreate": true,
+        "onChange": true,
+        "onRemove": true,
+        "onRename": true,
+        "onChmod": true,
+        "onMove": true
+      }
+    ],
+    "batchConfig": {
+      "maxBatchSize": 1000,
+      "batchTimeout": "1m"
+    },
+    "dedupConfig": {
+      "dedupEnabled": true,
+      "dedupTimeWindow": "5m",
+      "maxCacheSize": 1000
+    },
+    "exporters": {
+      "stdoutExporter": true,
+      "syslogExporterURL": "http://syslog.kubescape.svc.cluster.local:514",
+      "alertManagerExporterUrls": ["http://alertmanager.kubescape.svc.cluster.local:9093"],
+      "httpExporterConfig": {"url":"http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io/fim"}
+    }
   }
 }

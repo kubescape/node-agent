@@ -51,21 +51,39 @@ type HostFimSensorImpl struct {
 }
 
 func NewHostFimSensor(hostPath string, pathConfigs []HostFimPathConfig, exporter exporters.Exporter) HostFimSensor {
-	return NewHostFimSensorWithBatching(hostPath, pathConfigs, exporter, HostFimBatchConfig{
+	// Try fanotify first for better subdirectory support
+	fanotifySensor := NewHostFimSensorFanotify(hostPath, pathConfigs, exporter)
+
+	// Test if fanotify works by trying to start it
+	if err := fanotifySensor.Start(); err != nil {
+		logger.L().Warning("Fanotify failed, falling back to fsnotify", helpers.Error(err))
+		fanotifySensor.Stop()
+		return NewHostFimSensorFsnotify(hostPath, pathConfigs, exporter)
+	}
+
+	fanotifySensor.Stop()
+	return fanotifySensor
+}
+
+// NewHostFimSensorFsnotify creates a new fsnotify-based FIM sensor (fallback implementation)
+func NewHostFimSensorFsnotify(hostPath string, pathConfigs []HostFimPathConfig, exporter exporters.Exporter) HostFimSensor {
+	return NewHostFimSensorFsnotifyWithBatching(hostPath, pathConfigs, exporter, HostFimBatchConfig{
 		MaxBatchSize: 1000,
 		BatchTimeout: time.Minute,
 	})
 }
 
-func NewHostFimSensorWithBatching(hostPath string, pathConfigs []HostFimPathConfig, exporter exporters.Exporter, batchConfig HostFimBatchConfig) HostFimSensor {
-	return NewHostFimSensorWithConfig(hostPath, pathConfigs, exporter, batchConfig, HostFimDedupConfig{
+// NewHostFimSensorFsnotifyWithBatching creates a new fsnotify-based FIM sensor with batching
+func NewHostFimSensorFsnotifyWithBatching(hostPath string, pathConfigs []HostFimPathConfig, exporter exporters.Exporter, batchConfig HostFimBatchConfig) HostFimSensor {
+	return NewHostFimSensorFsnotifyWithConfig(hostPath, pathConfigs, exporter, batchConfig, HostFimDedupConfig{
 		DedupEnabled:    true,
 		DedupTimeWindow: 5 * time.Minute,
 		MaxCacheSize:    1000,
 	})
 }
 
-func NewHostFimSensorWithConfig(hostPath string, pathConfigs []HostFimPathConfig, exporter exporters.Exporter, batchConfig HostFimBatchConfig, dedupConfig HostFimDedupConfig) HostFimSensor {
+// NewHostFimSensorFsnotifyWithConfig creates a new fsnotify-based FIM sensor with full configuration
+func NewHostFimSensorFsnotifyWithConfig(hostPath string, pathConfigs []HostFimPathConfig, exporter exporters.Exporter, batchConfig HostFimBatchConfig, dedupConfig HostFimDedupConfig) HostFimSensor {
 	return &HostFimSensorImpl{
 		hostPath:    hostPath,
 		running:     false,
@@ -74,6 +92,36 @@ func NewHostFimSensorWithConfig(hostPath string, pathConfigs []HostFimPathConfig
 		dedupConfig: dedupConfig,
 		exporter:    exporter,
 	}
+}
+
+func NewHostFimSensorWithBatching(hostPath string, pathConfigs []HostFimPathConfig, exporter exporters.Exporter, batchConfig HostFimBatchConfig) HostFimSensor {
+	// Try fanotify first for better subdirectory support
+	fanotifySensor := NewHostFimSensorFanotifyWithBatching(hostPath, pathConfigs, exporter, batchConfig)
+
+	// Test if fanotify works by trying to start it
+	if err := fanotifySensor.Start(); err != nil {
+		logger.L().Warning("Fanotify failed, falling back to fsnotify", helpers.Error(err))
+		fanotifySensor.Stop()
+		return NewHostFimSensorFsnotifyWithBatching(hostPath, pathConfigs, exporter, batchConfig)
+	}
+
+	fanotifySensor.Stop()
+	return fanotifySensor
+}
+
+func NewHostFimSensorWithConfig(hostPath string, pathConfigs []HostFimPathConfig, exporter exporters.Exporter, batchConfig HostFimBatchConfig, dedupConfig HostFimDedupConfig) HostFimSensor {
+	// Try fanotify first for better subdirectory support
+	fanotifySensor := NewHostFimSensorFanotifyWithConfig(hostPath, pathConfigs, exporter, batchConfig, dedupConfig)
+
+	// Test if fanotify works by trying to start it
+	if err := fanotifySensor.Start(); err != nil {
+		logger.L().Warning("Fanotify failed, falling back to fsnotify", helpers.Error(err))
+		fanotifySensor.Stop()
+		return NewHostFimSensorFsnotifyWithConfig(hostPath, pathConfigs, exporter, batchConfig, dedupConfig)
+	}
+
+	fanotifySensor.Stop()
+	return fanotifySensor
 }
 
 func (h *HostFimSensorImpl) Start() error {
