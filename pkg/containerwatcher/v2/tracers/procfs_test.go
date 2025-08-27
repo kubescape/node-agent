@@ -75,7 +75,7 @@ func TestProcfsTracer_StartStop(t *testing.T) {
 		containercollection.ContainerSelector{},
 		nil,
 		nil,
-		config.Config{ProcfsScanInterval: 5 * time.Second},
+		config.Config{ProcfsScanInterval: 5 * time.Second, ProcfsPidScanInterval: 5 * time.Second},
 		nil,
 	)
 
