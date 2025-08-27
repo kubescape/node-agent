@@ -128,7 +128,7 @@ func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan conv
 			case conversion.ProcfsEvent:
 				pt.handleProcfsEvent(event)
 			default:
-				logger.L().Error("unknown event type", helpers.String("eventType", string(event.Type)))
+				logger.L().Error("unknown event type", helpers.Int("eventType", int(event.Type)))
 			}
 		}
 	}
@@ -138,7 +138,7 @@ func (pt *ProcfsTracer) handleExitEvent(event conversion.ProcessEvent) {
 	exitEvent := &tracerexittype.Event{
 		Pid:  event.PID,
 		PPid: event.PPID,
-		Comm: "afek-exit",
+		Comm: "exit",
 	}
 
 	exitEvent.Event.Timestamp = types.Time(event.Timestamp.UnixNano())

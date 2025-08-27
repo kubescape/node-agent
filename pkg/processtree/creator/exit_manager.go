@@ -49,10 +49,6 @@ func (pt *processTreeCreatorImpl) addPendingExit(event conversion.ProcessEvent) 
 		pt.forceCleanupOldest()
 	}
 
-	if event.Comm == "afek-exit" {
-		logger.L().Debug("AFEK - exit event", helpers.String("pid", fmt.Sprintf("%d", event.PID)))
-	}
-
 	pt.pendingExits[event.PID] = &pendingExit{
 		PID:         event.PID,
 		StartTimeNs: event.StartTimeNs,
@@ -119,13 +115,13 @@ func (pt *processTreeCreatorImpl) forceCleanupOldest() {
 	}
 
 	logger.L().Debug("Exit: Force cleanup completed",
-		helpers.String("remaining_pending", fmt.Sprintf("%d", len(pt.pendingExits))))
+		helpers.String("remaining_pending", fmt.Sprintf("%d", len(pt.pendingExits))),
+		helpers.Int("pids number", int(pt.processMap.Len())))
 }
 
 func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
 	proc, ok := pt.processMap.Load(pid)
 	if !ok {
-		logger.L().Warning("exitByPid: processMap[pid] does not exist", helpers.String("pid", fmt.Sprintf("%d", pid)))
 		delete(pt.pendingExits, pid)
 		return
 	}
