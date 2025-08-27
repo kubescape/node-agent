@@ -46,6 +46,35 @@ The implementation supports the following FIM event types:
 - `FimEventTypeChmod`: File permission/attribute change events
 - `FimEventTypeMove`: File move events
 
+#### Enhanced Event Data
+
+Each FIM event now includes rich metadata similar to Elastic Filebeat:
+
+**File Information:**
+- `Path`: File path (with /host prefix removed)
+- `FileSize`: File size in bytes
+- `FileInode`: File inode number
+- `FileDevice`: Device number
+- `FileMtime`: Last modification time
+- `FileCtime`: Last status change time
+- `Uid`: File owner user ID
+- `Gid`: File owner group ID
+- `Mode`: File permissions and type
+
+**Process Information:**
+- `ProcessPid`: Process ID that triggered the event
+- `ProcessName`: Process name
+- `ProcessArgs`: Process command line arguments
+
+**Host Information:**
+- `HostName`: Hostname of the system
+- `AgentId`: Agent identifier
+
+**Event Information:**
+- `EventType`: Type of file system event
+- `Timestamp`: Event timestamp
+- `FileHash`: File hash (if available)
+
 ### Usage
 
 #### Basic Usage
@@ -153,6 +182,31 @@ Enable debug logging to troubleshoot issues:
 // The implementation uses kubescape/go-logger for logging
 // Set log level to debug to see detailed information
 ```
+
+### Enhanced Capabilities
+
+#### Rich Event Context
+
+The enhanced FIM implementation now provides context-rich events that enable:
+
+1. **Process Attribution**: Link file changes to the specific process that made them
+2. **File Integrity**: Track file size, timestamps, and metadata changes
+3. **Host Context**: Include hostname and agent information for correlation
+4. **Security Analysis**: Enhanced data for threat detection and incident response
+
+#### Comparison with Industry Standards
+
+The enhanced events now provide similar richness to Elastic Filebeat FIM events:
+
+| Feature | Enhanced FIM | Filebeat FIM |
+|---------|-------------|--------------|
+| File Path | ✅ | ✅ |
+| File Size | ✅ | ✅ |
+| File Timestamps | ✅ | ✅ |
+| File Permissions | ✅ | ✅ |
+| Process Information | ✅ | ✅ |
+| Host Information | ✅ | ✅ |
+| Event Categorization | ✅ | ✅ |
 
 ### Migration Notes
 

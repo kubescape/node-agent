@@ -193,6 +193,18 @@ type FimEvent struct {
 	Uid       uint32                     `json:"uid"`
 	Gid       uint32                     `json:"gid"`
 	Mode      uint32                     `json:"mode"`
+
+	// Enhanced fields for richer event context
+	FileSize    int64     `json:"fileSize"`
+	FileInode   uint64    `json:"fileInode"`
+	FileDevice  uint64    `json:"fileDevice"`
+	FileMtime   time.Time `json:"fileMtime"`
+	FileCtime   time.Time `json:"fileCtime"`
+	ProcessPid  uint32    `json:"processPid"`
+	ProcessName string    `json:"processName"`
+	ProcessArgs []string  `json:"processArgs"`
+	HostName    string    `json:"hostName"`
+	AgentId     string    `json:"agentId"`
 }
 
 type FimEventReport struct {
@@ -215,13 +227,23 @@ func (e *HTTPExporter) createFimAlertPayload(fimEvents []hostfimsensor.FimEvent)
 	}
 	for _, event := range fimEvents {
 		report.Events = append(report.Events, FimEvent{
-			EventType: event.GetEventType(),
-			Path:      event.GetPath(),
-			FileHash:  event.GetFileHash(),
-			Timestamp: event.GetTimestamp(),
-			Uid:       event.GetUid(),
-			Gid:       event.GetGid(),
-			Mode:      event.GetMode(),
+			EventType:   event.GetEventType(),
+			Path:        event.GetPath(),
+			FileHash:    event.GetFileHash(),
+			Timestamp:   event.GetTimestamp(),
+			Uid:         event.GetUid(),
+			Gid:         event.GetGid(),
+			Mode:        event.GetMode(),
+			FileSize:    event.GetFileSize(),
+			FileInode:   event.GetFileInode(),
+			FileDevice:  event.GetFileDevice(),
+			FileMtime:   event.GetFileMtime(),
+			FileCtime:   event.GetFileCtime(),
+			ProcessPid:  event.GetProcessPid(),
+			ProcessName: event.GetProcessName(),
+			ProcessArgs: event.GetProcessArgs(),
+			HostName:    event.GetHostName(),
+			AgentId:     event.GetAgentId(),
 		})
 	}
 

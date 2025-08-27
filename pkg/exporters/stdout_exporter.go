@@ -69,8 +69,21 @@ func (exporter *StdoutExporter) SendMalwareAlert(malwareResult malwaremanager.Ma
 func (exporter *StdoutExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 	for _, event := range fimEvents {
 		exporter.logger.WithFields(log.Fields{
-			"event": event.GetEventType(),
-			"path":  event.GetPath(),
+			"event":       event.GetEventType(),
+			"path":        event.GetPath(),
+			"fileSize":    event.GetFileSize(),
+			"fileInode":   event.GetFileInode(),
+			"fileDevice":  event.GetFileDevice(),
+			"fileMtime":   event.GetFileMtime(),
+			"fileCtime":   event.GetFileCtime(),
+			"uid":         event.GetUid(),
+			"gid":         event.GetGid(),
+			"mode":        event.GetMode(),
+			"processPid":  event.GetProcessPid(),
+			"processName": event.GetProcessName(),
+			"processArgs": event.GetProcessArgs(),
+			"hostName":    event.GetHostName(),
+			"agentId":     event.GetAgentId(),
 		}).Info("FIM event")
 	}
 }

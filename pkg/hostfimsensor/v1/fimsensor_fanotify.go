@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -160,6 +161,61 @@ func (h *HostFimSensorFanotify) stripHostPath(fullPath string) string {
 	return fullPath
 }
 
+// getFileMetadata retrieves detailed file metadata
+func (h *HostFimSensorFanotify) getFileMetadata(filePath string) (size int64, inode uint64, device uint64, mtime, ctime time.Time, uid, gid uint32, mode uint32) {
+	// Get the full path including host prefix
+	fullPath := filepath.Join(h.hostPath, filePath)
+
+	// Get file info
+	if info, err := os.Stat(fullPath); err == nil {
+		size = info.Size()
+		mtime = info.ModTime()
+
+		// Get detailed stat info for inode, device, etc.
+		if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+			inode = stat.Ino
+			device = uint64(stat.Dev)
+			uid = stat.Uid
+			gid = stat.Gid
+			mode = uint32(stat.Mode)
+			ctime = time.Unix(stat.Ctim.Sec, stat.Ctim.Nsec)
+		}
+	}
+
+	return
+}
+
+// getProcessInfo retrieves information about the current process
+func (h *HostFimSensorFanotify) getProcessInfo() (pid uint32, name string, args []string) {
+	pid = uint32(os.Getpid())
+
+	// Get process name from /proc/self/comm
+	if comm, err := os.ReadFile("/proc/self/comm"); err == nil {
+		name = strings.TrimSpace(string(comm))
+	} else {
+		name = "unknown"
+	}
+
+	// Get process args from /proc/self/cmdline
+	if cmdline, err := os.ReadFile("/proc/self/cmdline"); err == nil {
+		args = strings.Split(strings.Trim(string(cmdline), "\x00"), "\x00")
+	} else {
+		args = []string{name}
+	}
+
+	return
+}
+
+// getHostInfo retrieves basic host information
+func (h *HostFimSensorFanotify) getHostInfo() (hostname string) {
+	if name, err := os.Hostname(); err == nil {
+		hostname = name
+	} else {
+		hostname = "unknown"
+	}
+	return
+}
+
 // convertFanotifyEventToFimEvent converts a fanotify event to a FIM event
 func (h *HostFimSensorFanotify) convertFanotifyEventToFimEvent(event fanotify.Event) *fimtypes.FimEventImpl {
 	fimEvent := &fimtypes.FimEventImpl{
@@ -175,7 +231,29 @@ func (h *HostFimSensorFanotify) convertFanotifyEventToFimEvent(event fanotify.Ev
 	}
 
 	// Strip the host path prefix to get the actual host path
-	fimEvent.Path = h.stripHostPath(fullPath)
+	hostPath := h.stripHostPath(fullPath)
+	fimEvent.Path = hostPath
+
+	// Get enhanced file metadata
+	fileSize, fileInode, fileDevice, fileMtime, fileCtime, uid, gid, mode := h.getFileMetadata(hostPath)
+	fimEvent.FileSize = fileSize
+	fimEvent.FileInode = fileInode
+	fimEvent.FileDevice = fileDevice
+	fimEvent.FileMtime = fileMtime
+	fimEvent.FileCtime = fileCtime
+	fimEvent.Uid = uid
+	fimEvent.Gid = gid
+	fimEvent.Mode = mode
+
+	// Get process information
+	processPid, processName, processArgs := h.getProcessInfo()
+	fimEvent.ProcessPid = processPid
+	fimEvent.ProcessName = processName
+	fimEvent.ProcessArgs = processArgs
+
+	// Get host information
+	fimEvent.HostName = h.getHostInfo()
+	fimEvent.AgentId = "kubescape-node-agent" // TODO: Make this configurable
 
 	// Convert fanotify event types to FIM event type
 	switch {
