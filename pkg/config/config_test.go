@@ -100,22 +100,31 @@ func TestLoadConfig(t *testing.T) {
 							OnMove:   true,
 						},
 						{
-							Path:     "/var/log",
+							Path:     "/usr/bin",
 							OnCreate: true,
 							OnChange: true,
 							OnRemove: true,
-							OnRename: false,
-							OnChmod:  false,
-							OnMove:   false,
+							OnRename: true,
+							OnChmod:  true,
+							OnMove:   true,
 						},
 						{
-							Path:     "/tmp",
+							Path:     "/usr/sbin",
 							OnCreate: true,
-							OnChange: false,
+							OnChange: true,
 							OnRemove: true,
-							OnRename: false,
-							OnChmod:  false,
-							OnMove:   false,
+							OnRename: true,
+							OnChmod:  true,
+							OnMove:   true,
+						},
+						{
+							Path:     "/boot",
+							OnCreate: true,
+							OnChange: true,
+							OnRemove: true,
+							OnRename: true,
+							OnChmod:  true,
+							OnMove:   true,
 						},
 					},
 					BatchConfig: hostfimsensor.HostFimBatchConfig{
@@ -125,17 +134,10 @@ func TestLoadConfig(t *testing.T) {
 					DedupConfig: hostfimsensor.HostFimDedupConfig{
 						DedupEnabled:    true,
 						DedupTimeWindow: 5 * time.Minute,
-						MaxCacheSize:    1000,
+						MaxCacheSize:    10000,
 					},
 					Exporters: FIMExportersConfig{
 						StdoutExporter: &fimStdout,
-						HTTPExporterConfig: &exporters.HTTPExporterConfig{
-							URL: "http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io/fim",
-						},
-						SyslogExporter: "http://syslog.kubescape.svc.cluster.local:514",
-						AlertManagerExporterUrls: []string{
-							"http://alertmanager.kubescape.svc.cluster.local:9093",
-						},
 					},
 				},
 			},
@@ -286,8 +288,8 @@ func TestFIMConfig(t *testing.T) {
 	configPath := tempDir + "/config.json"
 
 	configContent := `{
+		"fimEnabled": true,
 		"fim": {
-			"enabled": true,
 			"directories": [
 				{
 					"path": "/etc",
@@ -395,8 +397,8 @@ func TestFIMConfigDefaults(t *testing.T) {
 	configPath := tempDir + "/config.json"
 
 	configContent := `{
+		"fimEnabled": true,
 		"fim": {
-			"enabled": true,
 			"directories": [
 				{
 					"path": "/etc",
