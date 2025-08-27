@@ -10,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/prometheus/procfs"
@@ -182,12 +180,10 @@ func (pf *ProcfsFeeder) scanProcfs() {
 }
 
 func (pf *ProcfsFeeder) sendExitEvents(procMap map[uint32]conversion.ProcessEvent) {
-	logger.L().Debug("AFEK - sendExitEvents")
 	currentPids := pf.processTreeManager.GetPidList()
 	for _, pid := range currentPids {
 		if _, ok := procMap[pid]; !ok {
 			// send exit event
-			logger.L().Debug("AFEK - sendExitEvents", helpers.String("pid", fmt.Sprintf("%d", pid)))
 			exitEvent := conversion.ProcessEvent{
 				Type:      conversion.ExitEvent,
 				Timestamp: time.Now().UTC(),

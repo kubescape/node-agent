@@ -220,7 +220,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
-		proc = pt.getOrCreateProcess(event.PID)
+		return
 	}
 
 	pt.UpdatePPID(proc, event)
@@ -276,6 +276,7 @@ func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Proce
 	}
 	proc = &apitypes.Process{PID: pid, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
 	pt.processMap.Set(pid, proc)
+
 	return proc
 }
 
