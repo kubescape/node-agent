@@ -75,6 +75,9 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 		// Enrich events with Linux namespaces information, it is needed for per container filtering
 		containercollection.WithLinuxNamespaceEnrichment(),
 
+		// Get containers created with ebpf (works also if hostPid=false)
+		containercollection.WithContainerFanotifyEbpf(),
+
 		// Get containers created with container runtimes
 		containercollection.WithContainerRuntimeEnrichment(cw.runtime),
 
@@ -83,12 +86,6 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 
 		// WithProcEnrichment enables the enrichment of events with process information
 		containercollection.WithProcEnrichment(),
-	}
-
-	// Conditionally add container fanotify eBPF option based on configuration
-	if cw.cfg.EnableContainerFanotifyEbpf {
-		// Get containers created with ebpf (works also if hostPid=false)
-		opts = append(opts, containercollection.WithContainerFanotifyEbpf())
 	}
 
 	// Initialize the container collection
