@@ -100,18 +100,9 @@ func (r *RuleFailureCreator) CreateRuleFailure(rule typesv1.Rule, enrichedEvent 
 func (r *RuleFailureCreator) enrichRuleFailure(ruleFailure *types.GenericRuleFailure) {
 	if r.enricher != nil && !reflect.ValueOf(r.enricher).IsNil() {
 		if err := r.enricher.EnrichRuleFailure(ruleFailure); err != nil {
-			if errors.Is(err, ErrRuleShouldNotBeAlerted) {
+			if errors.Is(err, ErrRuleShouldNotBeAlerted) { // TODO: @amitschendel - I think this check doesn't work.
 				return
 			}
-			logger.L().Error("RuleFailureCreator - failed to enrich rule failure", helpers.Error(err),
-				helpers.String("ruleFailure", ruleFailure.GetBaseRuntimeAlert().UniqueID),
-				helpers.String("ruleID", ruleFailure.GetRuleId()),
-				helpers.String("ruleName", ruleFailure.GetBaseRuntimeAlert().AlertName),
-				helpers.String("ruleDescription", ruleFailure.GetRuleAlert().RuleDescription),
-				helpers.String("command", ruleFailure.GetRuntimeProcessDetails().ProcessTree.Comm),
-				helpers.String("ruleTimestamp", ruleFailure.GetBaseRuntimeAlert().Timestamp.Format(time.RFC3339)),
-				helpers.String("ruleInfectedPID", fmt.Sprintf("%d", ruleFailure.GetBaseRuntimeAlert().InfectedPID)),
-			)
 		}
 	}
 }
