@@ -29,7 +29,9 @@ func TestNewProcfsTracer(t *testing.T) {
 		tracerCollection,
 		containercollection.ContainerSelector{},
 		eventCallback,
+		nil,
 		config.Config{ProcfsScanInterval: 5 * time.Second},
+		nil,
 	)
 
 	assert.NotNil(t, tracer)
@@ -48,7 +50,9 @@ func TestProcfsTracer_IsEnabled(t *testing.T) {
 		tracerCollection,
 		containercollection.ContainerSelector{},
 		nil,
+		nil,
 		config.Config{ProcfsScanInterval: 5 * time.Second},
+		nil,
 	)
 
 	// Test with runtime detection enabled
@@ -70,7 +74,9 @@ func TestProcfsTracer_StartStop(t *testing.T) {
 		tracerCollection,
 		containercollection.ContainerSelector{},
 		nil,
+		nil,
 		config.Config{ProcfsScanInterval: 5 * time.Second},
+		nil,
 	)
 
 	ctx := context.Background()

@@ -49,6 +49,10 @@ func (pt *processTreeCreatorImpl) addPendingExit(event conversion.ProcessEvent) 
 		pt.forceCleanupOldest()
 	}
 
+	if event.Comm == "afek-exit" {
+		logger.L().Debug("AFEK - exit event", helpers.String("pid", fmt.Sprintf("%d", event.PID)))
+	}
+
 	pt.pendingExits[event.PID] = &pendingExit{
 		PID:         event.PID,
 		StartTimeNs: event.StartTimeNs,

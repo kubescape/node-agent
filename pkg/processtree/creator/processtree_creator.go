@@ -220,7 +220,7 @@ func (pt *processTreeCreatorImpl) handleExecEvent(event conversion.ProcessEvent)
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
-		return
+		proc = pt.getOrCreateProcess(event.PID)
 	}
 
 	pt.UpdatePPID(proc, event)

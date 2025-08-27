@@ -10,19 +10,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/prometheus/procfs"
 )
 
 // ProcfsFeeder implements ProcessEventFeeder by reading process information from /proc filesystem.
 type ProcfsFeeder struct {
-	subscribers []chan<- conversion.ProcessEvent
-	mutex       sync.RWMutex
-	ctx         context.Context
-	cancel      context.CancelFunc
-	interval    time.Duration
-	procfsPath  string
-	procfs      procfs.FS
+	subscribers        []chan<- conversion.ProcessEvent
+	mutex              sync.RWMutex
+	ctx                context.Context
+	cancel             context.CancelFunc
+	interval           time.Duration
+	procfsPath         string
+	procfs             procfs.FS
+	processTreeManager processtree.ProcessTreeManager
 }
 
 // procInfo is a helper struct to pass results from worker goroutines.
@@ -32,10 +36,11 @@ type procInfo struct {
 }
 
 // NewProcfsFeeder creates a new procfs feeder.
-func NewProcfsFeeder(interval time.Duration) *ProcfsFeeder {
+func NewProcfsFeeder(interval time.Duration, processTreeManager processtree.ProcessTreeManager) *ProcfsFeeder {
 	return &ProcfsFeeder{
-		interval:   interval,
-		procfsPath: "/proc",
+		interval:           interval,
+		procfsPath:         "/proc",
+		processTreeManager: processTreeManager,
 	}
 }
 
@@ -110,9 +115,7 @@ func (pf *ProcfsFeeder) feedLoop() {
 	}
 }
 
-// scanProcfs scans the /proc directory for processes efficiently.
 func (pf *ProcfsFeeder) scanProcfs() {
-	// Step 1: Get a list of all potential PID directories.
 	entries, err := os.ReadDir(pf.procfsPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading procfs directory: %v\n", err)
@@ -131,7 +134,6 @@ func (pf *ProcfsFeeder) scanProcfs() {
 		pids = append(pids, uint32(pid))
 	}
 
-	// Step 2: Use a worker pool to process PIDs in parallel.
 	numWorkers := runtime.NumCPU()
 	pidChan := make(chan uint32, len(pids))
 	resultsChan := make(chan procInfo, len(pids))
@@ -164,7 +166,10 @@ func (pf *ProcfsFeeder) scanProcfs() {
 		}
 	}
 
-	// Step 4: Link parent info and broadcast. This is fast as it's all in-memory.
+	// Step 4: Send exit events for processes that are no longer in /proc.
+	pf.sendExitEvents(procMap)
+
+	// Step 5: Link parent info and broadcast. This is fast as it's all in-memory.
 	for _, event := range procMap {
 		if parentProc, ok := procMap[event.PPID]; ok {
 			eventWithPcomm := event
@@ -172,6 +177,23 @@ func (pf *ProcfsFeeder) scanProcfs() {
 			pf.broadcastEvent(eventWithPcomm)
 		} else {
 			pf.broadcastEvent(event)
+		}
+	}
+}
+
+func (pf *ProcfsFeeder) sendExitEvents(procMap map[uint32]conversion.ProcessEvent) {
+	logger.L().Debug("AFEK - sendExitEvents")
+	currentPids := pf.processTreeManager.GetPidList()
+	for _, pid := range currentPids {
+		if _, ok := procMap[pid]; !ok {
+			// send exit event
+			logger.L().Debug("AFEK - sendExitEvents", helpers.String("pid", fmt.Sprintf("%d", pid)))
+			exitEvent := conversion.ProcessEvent{
+				Type:      conversion.ExitEvent,
+				Timestamp: time.Now().UTC(),
+				PID:       pid,
+			}
+			pf.broadcastEvent(exitEvent)
 		}
 	}
 }

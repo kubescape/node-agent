@@ -13,6 +13,8 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	tracerexittype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/types"
+	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/kubescape/node-agent/pkg/processtree/feeder"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -29,7 +31,8 @@ type ProcfsTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	procfsEventCallback func(utils.K8sEvent, string, uint32)
+	exitEventCallback   func(utils.K8sEvent, string, uint32)
 	procfsFeeder        *feeder.ProcfsFeeder
 	started             bool
 }
@@ -39,15 +42,18 @@ func NewProcfsTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	procfsEventCallback func(utils.K8sEvent, string, uint32),
+	exitEventCallback func(utils.K8sEvent, string, uint32),
 	cfg config.Config,
+	processTreeManager processtree.ProcessTreeManager,
 ) *ProcfsTracer {
 	return &ProcfsTracer{
 		containerCollection: containerCollection,
 		tracerCollection:    tracerCollection,
 		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
-		procfsFeeder:        feeder.NewProcfsFeeder(cfg.ProcfsScanInterval),
+		procfsEventCallback: procfsEventCallback,
+		exitEventCallback:   exitEventCallback,
+		procfsFeeder:        feeder.NewProcfsFeeder(cfg.ProcfsScanInterval, processTreeManager),
 	}
 }
 
@@ -116,9 +122,28 @@ func (pt *ProcfsTracer) processEvents(ctx context.Context, eventChan <-chan conv
 		case <-ctx.Done():
 			return
 		case event := <-eventChan:
-			pt.handleProcfsEvent(event)
+			switch event.Type {
+			case conversion.ExitEvent:
+				pt.handleExitEvent(event)
+			case conversion.ProcfsEvent:
+				pt.handleProcfsEvent(event)
+			default:
+				logger.L().Error("unknown event type", helpers.String("eventType", string(event.Type)))
+			}
 		}
 	}
+}
+
+func (pt *ProcfsTracer) handleExitEvent(event conversion.ProcessEvent) {
+	exitEvent := &tracerexittype.Event{
+		Pid:  event.PID,
+		PPid: event.PPID,
+		Comm: "afek-exit",
+	}
+
+	exitEvent.Event.Timestamp = types.Time(event.Timestamp.UnixNano())
+
+	pt.exitEventCallback(exitEvent, event.ContainerID, event.PID)
 }
 
 // handleProcfsEvent handles a single procfs event
@@ -152,7 +177,7 @@ func (pt *ProcfsTracer) handleProcfsEvent(event conversion.ProcessEvent) {
 	processID := event.PID
 
 	// Send to the ordered event queue
-	if pt.eventCallback != nil {
-		pt.eventCallback(procfsEvent, containerID, processID)
+	if pt.procfsEventCallback != nil {
+		pt.procfsEventCallback(procfsEvent, containerID, processID)
 	}
 }
