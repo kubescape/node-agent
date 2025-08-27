@@ -3,6 +3,7 @@ package hostfimsensor
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -166,34 +167,51 @@ func (h *HostFimSensorImpl) Start() error {
 	return nil
 }
 
+// stripHostPath removes the host path prefix from a file path
+func (h *HostFimSensorImpl) stripHostPath(fullPath string) string {
+	// Remove the host path prefix to get the actual host path
+	if strings.HasPrefix(fullPath, h.hostPath) {
+		relativePath := strings.TrimPrefix(fullPath, h.hostPath)
+		// Ensure the path starts with "/" for absolute paths
+		if !strings.HasPrefix(relativePath, "/") {
+			relativePath = "/" + relativePath
+		}
+		return relativePath
+	}
+	return fullPath
+}
+
 // convertFsnotifyEventToFimEvent converts a fsnotify event to a FIM event
 func (h *HostFimSensorImpl) convertFsnotifyEventToFimEvent(event fsnotify.Event) *fimtypes.FimEventImpl {
 	fimEvent := &fimtypes.FimEventImpl{
 		Timestamp: time.Now(),
 	}
 
+	// Strip the host path prefix to get the actual host path
+	hostPath := h.stripHostPath(event.Name)
+
 	if event.Op&fsnotify.Create == fsnotify.Create {
-		fimEvent.Path = event.Name
+		fimEvent.Path = hostPath
 		fimEvent.EventType = fimtypes.FimEventTypeCreate
 	}
 
 	if event.Op&fsnotify.Write == fsnotify.Write {
-		fimEvent.Path = event.Name
+		fimEvent.Path = hostPath
 		fimEvent.EventType = fimtypes.FimEventTypeChange
 	}
 
 	if event.Op&fsnotify.Remove == fsnotify.Remove {
-		fimEvent.Path = event.Name
+		fimEvent.Path = hostPath
 		fimEvent.EventType = fimtypes.FimEventTypeRemove
 	}
 
 	if event.Op&fsnotify.Rename == fsnotify.Rename {
-		fimEvent.Path = event.Name
+		fimEvent.Path = hostPath
 		fimEvent.EventType = fimtypes.FimEventTypeRename
 	}
 
 	if event.Op&fsnotify.Chmod == fsnotify.Chmod {
-		fimEvent.Path = event.Name
+		fimEvent.Path = hostPath
 		fimEvent.EventType = fimtypes.FimEventTypeChmod
 	}
 

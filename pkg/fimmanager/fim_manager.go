@@ -3,6 +3,7 @@ package fimmanager
 import (
 	"context"
 	"fmt"
+	"os"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
@@ -25,7 +26,7 @@ type FIMManager struct {
 
 // NewFIMManager creates a new FIM manager
 func NewFIMManager(cfg config.Config, clusterName, nodeName string, cloudMetadata *apitypes.CloudMetadata) (*FIMManager, error) {
-	if !cfg.FIM.Enabled {
+	if !cfg.EnableFIM {
 		logger.L().Info("FIM is disabled in configuration")
 		return &FIMManager{
 			cfg:         cfg,
@@ -45,12 +46,18 @@ func NewFIMManager(cfg config.Config, clusterName, nodeName string, cloudMetadat
 		return nil, fmt.Errorf("no directories configured for FIM monitoring")
 	}
 
+	// Get host root path from environment variable
+	hostRoot, exists := os.LookupEnv("HOST_ROOT")
+	if !exists {
+		hostRoot = "/host"
+	}
+
 	// Create FIM sensor with custom configuration
 	var sensor hostfimsensor.HostFimSensor
 	if cfg.FIM.BatchConfig.MaxBatchSize > 0 || cfg.FIM.DedupConfig.DedupEnabled {
 		// Use custom configuration
 		sensor = hostfimsensor.NewHostFimSensorWithConfig(
-			"/", // host root path
+			hostRoot, // host root path mount
 			pathConfigs,
 			exporter,
 			cfg.FIM.BatchConfig,
@@ -59,7 +66,7 @@ func NewFIMManager(cfg config.Config, clusterName, nodeName string, cloudMetadat
 	} else {
 		// Use default configuration
 		sensor = hostfimsensor.NewHostFimSensor(
-			"/", // host root path
+			hostRoot, // host root path mount
 			pathConfigs,
 			exporter,
 		)
@@ -78,7 +85,7 @@ func NewFIMManager(cfg config.Config, clusterName, nodeName string, cloudMetadat
 
 // Start starts the FIM monitoring
 func (fm *FIMManager) Start(ctx context.Context) error {
-	if !fm.cfg.FIM.Enabled {
+	if !fm.cfg.EnableFIM {
 		logger.L().Info("FIM is disabled, skipping start")
 		return nil
 	}
@@ -123,12 +130,12 @@ func (fm *FIMManager) IsRunning() bool {
 // GetStatus returns the current status of the FIM manager
 func (fm *FIMManager) GetStatus() map[string]interface{} {
 	status := map[string]interface{}{
-		"enabled":     fm.cfg.FIM.Enabled,
+		"enabled":     fm.cfg.EnableFIM,
 		"running":     fm.running,
 		"directories": len(fm.cfg.FIM.Directories),
 	}
 
-	if fm.cfg.FIM.Enabled {
+	if fm.cfg.EnableFIM {
 		status["batchConfig"] = fm.cfg.FIM.BatchConfig
 		status["dedupConfig"] = fm.cfg.FIM.DedupConfig
 	}

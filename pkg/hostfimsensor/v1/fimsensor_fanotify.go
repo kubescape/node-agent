@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -145,6 +146,20 @@ func (h *HostFimSensorFanotify) getFanotifyEventTypes(config HostFimPathConfig) 
 	return eventTypes
 }
 
+// stripHostPath removes the host path prefix from a file path
+func (h *HostFimSensorFanotify) stripHostPath(fullPath string) string {
+	// Remove the host path prefix to get the actual host path
+	if strings.HasPrefix(fullPath, h.hostPath) {
+		relativePath := strings.TrimPrefix(fullPath, h.hostPath)
+		// Ensure the path starts with "/" for absolute paths
+		if !strings.HasPrefix(relativePath, "/") {
+			relativePath = "/" + relativePath
+		}
+		return relativePath
+	}
+	return fullPath
+}
+
 // convertFanotifyEventToFimEvent converts a fanotify event to a FIM event
 func (h *HostFimSensorFanotify) convertFanotifyEventToFimEvent(event fanotify.Event) *fimtypes.FimEventImpl {
 	fimEvent := &fimtypes.FimEventImpl{
@@ -152,11 +167,15 @@ func (h *HostFimSensorFanotify) convertFanotifyEventToFimEvent(event fanotify.Ev
 	}
 
 	// Build the full path
+	var fullPath string
 	if event.FileName != "" {
-		fimEvent.Path = filepath.Join(event.Path, event.FileName)
+		fullPath = filepath.Join(event.Path, event.FileName)
 	} else {
-		fimEvent.Path = event.Path
+		fullPath = event.Path
 	}
+
+	// Strip the host path prefix to get the actual host path
+	fimEvent.Path = h.stripHostPath(fullPath)
 
 	// Convert fanotify event types to FIM event type
 	switch {

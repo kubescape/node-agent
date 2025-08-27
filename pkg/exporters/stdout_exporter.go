@@ -67,9 +67,10 @@ func (exporter *StdoutExporter) SendMalwareAlert(malwareResult malwaremanager.Ma
 }
 
 func (exporter *StdoutExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
-	// TODO: Implement FIM alerts sending logic
-	exporter.logger.WithFields(log.Fields{
-		"event_count": len(fimEvents),
-		"message":     "FIM alerts stub implementation",
-	}).Info("SendFimAlerts called")
+	for _, event := range fimEvents {
+		exporter.logger.WithFields(log.Fields{
+			"event": event.GetEventType(),
+			"path":  event.GetPath(),
+		}).Info("FIM event")
+	}
 }

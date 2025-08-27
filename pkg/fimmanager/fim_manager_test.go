@@ -12,19 +12,18 @@ import (
 func TestNewFIMManager(t *testing.T) {
 	// Test with FIM disabled
 	cfg := config.Config{
-		FIM: config.FIMConfig{
-			Enabled: false,
-		},
+		EnableFIM: false,
+		FIM:       config.FIMConfig{},
 	}
 
 	manager, err := NewFIMManager(cfg, "test-cluster", "test-node", nil)
 	require.NoError(t, err)
 	assert.NotNil(t, manager)
 	assert.False(t, manager.IsRunning())
-	assert.False(t, manager.cfg.FIM.Enabled)
+	assert.False(t, manager.cfg.EnableFIM)
 
 	// Test with FIM enabled but no directories
-	cfg.FIM.Enabled = true
+	cfg.EnableFIM = true
 	cfg.FIM.Directories = []config.FIMDirectoryConfig{}
 
 	manager, err = NewFIMManager(cfg, "test-cluster", "test-node", nil)
@@ -44,14 +43,14 @@ func TestNewFIMManager(t *testing.T) {
 	manager, err = NewFIMManager(cfg, "test-cluster", "test-node", nil)
 	require.NoError(t, err)
 	assert.NotNil(t, manager)
-	assert.True(t, manager.cfg.FIM.Enabled)
+	assert.True(t, manager.cfg.EnableFIM)
 	assert.Len(t, manager.cfg.FIM.Directories, 1)
 }
 
 func TestFIMManagerStartStop(t *testing.T) {
 	cfg := config.Config{
+		EnableFIM: true,
 		FIM: config.FIMConfig{
-			Enabled: true,
 			Directories: []config.FIMDirectoryConfig{
 				{
 					Path:     "/etc",
@@ -84,8 +83,8 @@ func TestFIMManagerStartStop(t *testing.T) {
 
 func TestFIMManagerGetStatus(t *testing.T) {
 	cfg := config.Config{
+		EnableFIM: true,
 		FIM: config.FIMConfig{
-			Enabled: true,
 			Directories: []config.FIMDirectoryConfig{
 				{
 					Path:     "/etc",

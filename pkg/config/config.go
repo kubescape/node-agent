@@ -39,6 +39,7 @@ type Config struct {
 	EnableNodeProfile              bool                                     `mapstructure:"nodeProfileServiceEnabled"`
 	EnableHostMalwareSensor        bool                                     `mapstructure:"hostMalwareSensorEnabled"`
 	EnableHostNetworkSensor        bool                                     `mapstructure:"hostNetworkSensorEnabled"`
+	EnableFIM                      bool                                     `mapstructure:"fimEnabled"`
 	NodeProfileInterval            time.Duration                            `mapstructure:"nodeProfileInterval"`
 	EnableSeccomp                  bool                                     `mapstructure:"seccompServiceEnabled"`
 	ExcludeLabels                  map[string]string                        `mapstructure:"excludeLabels"`
@@ -64,11 +65,11 @@ type Config struct {
 	OrderedEventQueue              containerwatcher.OrderedEventQueueConfig `mapstructure:"orderedEventQueue"`
 	ExitCleanup                    processtreecreator.ExitCleanupConfig     `mapstructure:"exitCleanup"`
 	FIM                            FIMConfig                                `mapstructure:"fim"`
+	EnableContainerFanotifyEbpf    bool                                     `mapstructure:"enableContainerFanotifyEbpf"`
 }
 
 // FIMConfig defines the configuration for File Integrity Monitoring
 type FIMConfig struct {
-	Enabled     bool                             `mapstructure:"enabled"`
 	Directories []FIMDirectoryConfig             `mapstructure:"directories"`
 	BatchConfig hostfimsensor.HostFimBatchConfig `mapstructure:"batchConfig"`
 	DedupConfig hostfimsensor.HostFimDedupConfig `mapstructure:"dedupConfig"`
@@ -114,6 +115,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("podName", os.Getenv(PodNameEnvVar))
 	viper.SetDefault("hostMalwareSensorEnabled", false)
 	viper.SetDefault("hostNetworkSensorEnabled", false)
+	viper.SetDefault("fimEnabled", false)
 	viper.SetDefault("networkStreamingEnabled", false)
 	viper.SetDefault("kubernetesMode", true)
 	viper.SetDefault("networkStreamingInterval", 2*time.Minute)
@@ -135,9 +137,9 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("exitCleanup::cleanupDelay", 5*time.Minute)
 	viper.SetDefault("workerChannelSize", 750000)
 	viper.SetDefault("blockEvents", false)
+	viper.SetDefault("enableContainerFanotifyEbpf", false)
 
 	// FIM defaults
-	viper.SetDefault("fim::enabled", false)
 	viper.SetDefault("fim::batchConfig::maxBatchSize", 1000)
 	viper.SetDefault("fim::batchConfig::batchTimeout", "1m")
 	viper.SetDefault("fim::dedupConfig::dedupEnabled", true)

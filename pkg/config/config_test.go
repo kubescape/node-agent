@@ -36,6 +36,7 @@ func TestLoadConfig(t *testing.T) {
 				EnableHttpDetection:            true,
 				EnableHostMalwareSensor:        false,
 				EnableHostNetworkSensor:        false,
+				EnableFIM:                      true,
 				EnableNetworkStreaming:         false,
 				EnableEmbeddedSboms:            false,
 				KubernetesMode:                 true,
@@ -88,7 +89,6 @@ func TestLoadConfig(t *testing.T) {
 					CleanupDelay:    5 * time.Minute,
 				},
 				FIM: FIMConfig{
-					Enabled: true,
 					Directories: []FIMDirectoryConfig{
 						{
 							Path:     "/etc",
@@ -351,7 +351,7 @@ func TestFIMConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test FIM configuration
-	assert.True(t, cfg.FIM.Enabled)
+	assert.True(t, cfg.EnableFIM)
 	assert.Len(t, cfg.FIM.Directories, 2)
 
 	// Test first directory
@@ -435,7 +435,7 @@ func TestFIMConfigDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test default values
-	assert.True(t, cfg.FIM.Enabled)
+	assert.True(t, cfg.EnableFIM)
 	assert.Len(t, cfg.FIM.Directories, 1)
 
 	// Test default batch configuration
@@ -489,7 +489,7 @@ func TestFIMConfigDisabled(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test that FIM is disabled
-	assert.False(t, cfg.FIM.Enabled)
+	assert.False(t, cfg.EnableFIM)
 }
 
 func TestGetFIMPathConfigs(t *testing.T) {

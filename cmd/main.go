@@ -342,7 +342,7 @@ func main() {
 
 	// Create the FIM manager
 	var fimManager *fimmanager.FIMManager
-	if cfg.FIM.Enabled {
+	if cfg.EnableFIM {
 		fimManager, err = fimmanager.NewFIMManager(cfg, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating FIMManager", helpers.Error(err))
