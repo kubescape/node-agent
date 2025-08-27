@@ -53,7 +53,7 @@ func NewProcfsTracer(
 		containerSelector:   containerSelector,
 		procfsEventCallback: procfsEventCallback,
 		exitEventCallback:   exitEventCallback,
-		procfsFeeder:        feeder.NewProcfsFeeder(cfg.ProcfsScanInterval, processTreeManager),
+		procfsFeeder:        feeder.NewProcfsFeeder(cfg.ProcfsScanInterval, cfg.ProcfsPidScanInterval, processTreeManager),
 	}
 }
 

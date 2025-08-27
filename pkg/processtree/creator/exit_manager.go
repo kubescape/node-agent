@@ -14,6 +14,7 @@ import (
 type pendingExit struct {
 	PID         uint32
 	StartTimeNs uint64
+	Comm        string
 	Timestamp   time.Time
 	Children    []*apitypes.Process
 }
@@ -52,6 +53,7 @@ func (pt *processTreeCreatorImpl) addPendingExit(event conversion.ProcessEvent) 
 	pt.pendingExits[event.PID] = &pendingExit{
 		PID:         event.PID,
 		StartTimeNs: event.StartTimeNs,
+		Comm:        event.Comm,
 		Timestamp:   time.Now(),
 	}
 }
@@ -93,7 +95,6 @@ func (pt *processTreeCreatorImpl) performExitCleanup() {
 	for _, pending := range toRemove {
 		pt.exitByPid(pending.PID)
 	}
-
 }
 
 func (pt *processTreeCreatorImpl) forceCleanupOldest() {
@@ -109,6 +110,10 @@ func (pt *processTreeCreatorImpl) forceCleanupOldest() {
 	sort.Slice(toRemove, func(i, j int) bool {
 		return toRemove[i].Timestamp.Before(toRemove[j].Timestamp)
 	})
+
+	for _, pending := range toRemove {
+		pt.exitByPid(pending.PID)
+	}
 
 	for i := 0; i < len(toRemove); i++ {
 		pt.exitByPid(toRemove[i].PID)

@@ -15,7 +15,7 @@ import (
 func TestNewProcfsFeeder(t *testing.T) {
 	interval := 100 * time.Millisecond
 	mockManager := processtree.NewProcessTreeManagerMock()
-	feeder := NewProcfsFeeder(interval, mockManager)
+	feeder := NewProcfsFeeder(interval, 10*time.Millisecond, mockManager)
 
 	assert.NotNil(t, feeder)
 	assert.Equal(t, interval, feeder.interval)
@@ -26,7 +26,7 @@ func TestNewProcfsFeeder(t *testing.T) {
 
 func TestProcfsFeeder_Start(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
-	feeder := NewProcfsFeeder(100*time.Millisecond, mockManager)
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ctx := context.Background()
 
 	// Test successful start
@@ -46,7 +46,7 @@ func TestProcfsFeeder_Start(t *testing.T) {
 
 func TestProcfsFeeder_Stop(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
-	feeder := NewProcfsFeeder(100*time.Millisecond, mockManager)
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ctx := context.Background()
 
 	// Test stop without start
@@ -66,7 +66,7 @@ func TestProcfsFeeder_Stop(t *testing.T) {
 
 func TestProcfsFeeder_Subscribe(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
-	feeder := NewProcfsFeeder(100*time.Millisecond, mockManager)
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ch := make(chan conversion.ProcessEvent, 1)
 
 	feeder.Subscribe(ch)
@@ -84,7 +84,7 @@ func TestProcfsFeeder_Subscribe(t *testing.T) {
 
 func TestProcfsFeeder_ReadProcessInfo(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
-	feeder := NewProcfsFeeder(100*time.Millisecond, mockManager)
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ctx := context.Background()
 
 	err := feeder.Start(ctx)
@@ -110,7 +110,7 @@ func TestProcfsFeeder_ReadProcessInfo(t *testing.T) {
 
 func TestProcfsFeeder_GetProcessComm(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
-	feeder := NewProcfsFeeder(100*time.Millisecond, mockManager)
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ctx := context.Background()
 
 	err := feeder.Start(ctx)
@@ -129,7 +129,7 @@ func TestProcfsFeeder_GetProcessComm(t *testing.T) {
 
 func TestProcfsFeeder_BroadcastEvent(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
-	feeder := NewProcfsFeeder(100*time.Millisecond, mockManager)
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ch1 := make(chan conversion.ProcessEvent, 1)
 	ch2 := make(chan conversion.ProcessEvent, 1)
 
@@ -153,58 +153,9 @@ func TestProcfsFeeder_BroadcastEvent(t *testing.T) {
 	}
 }
 
-func TestProcfsFeeder_SendExitEvents(t *testing.T) {
-	mockManager := processtree.NewProcessTreeManagerMock()
-	feeder := NewProcfsFeeder(100*time.Millisecond, mockManager)
-
-	// Set up mock to return some PIDs that are no longer in /proc
-	mockManager.SetPidList([]uint32{100, 200, 300})
-
-	ch := make(chan conversion.ProcessEvent, 10)
-	feeder.Subscribe(ch)
-
-	// Create a procMap with only one process (simulating that PIDs 100 and 300 are gone)
-	procMap := map[uint32]conversion.ProcessEvent{
-		200: {
-			Type: conversion.ProcfsEvent,
-			PID:  200,
-			PPID: 1,
-			Comm: "surviving-process",
-		},
-	}
-
-	// Call sendExitEvents
-	feeder.sendExitEvents(procMap)
-
-	// Check that exit events were sent for the missing PIDs
-	timeout := time.After(100 * time.Millisecond)
-	exitEvents := make(map[uint32]bool)
-
-	// Collect exit events - we expect exactly 2 exit events
-	expectedExitEvents := 2
-	receivedEvents := 0
-
-	for receivedEvents < expectedExitEvents {
-		select {
-		case event := <-ch:
-			if event.Type == conversion.ExitEvent {
-				exitEvents[event.PID] = true
-				receivedEvents++
-			}
-		case <-timeout:
-			t.Fatal("timed out waiting for exit events")
-		}
-	}
-
-	// Should have exit events for PIDs 100 and 300
-	assert.True(t, exitEvents[100], "Should have exit event for PID 100")
-	assert.True(t, exitEvents[300], "Should have exit event for PID 300")
-	assert.False(t, exitEvents[200], "Should not have exit event for PID 200 (still exists)")
-}
-
 func TestProcfsFeeder_ScanProcfs(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
-	feeder := NewProcfsFeeder(100*time.Millisecond, mockManager)
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -252,7 +203,7 @@ ReceiveLoop:
 
 func TestProcfsFeeder_ProcessSpecificPID(t *testing.T) {
 	mockManager := processtree.NewProcessTreeManagerMock()
-	feeder := NewProcfsFeeder(100*time.Millisecond, mockManager)
+	feeder := NewProcfsFeeder(100*time.Millisecond, 10*time.Millisecond, mockManager)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

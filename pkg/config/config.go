@@ -60,6 +60,7 @@ type Config struct {
 	RuleCoolDown                   rulecooldown.RuleCooldownConfig          `mapstructure:"ruleCooldown"`
 	EnablePartialProfileGeneration bool                                     `mapstructure:"partialProfileGenerationEnabled"`
 	ProcfsScanInterval             time.Duration                            `mapstructure:"procfsScanInterval"`
+	ProcfsPidScanInterval          time.Duration                            `mapstructure:"procfsPidScanInterval"`
 	OrderedEventQueue              containerwatcher.OrderedEventQueueConfig `mapstructure:"orderedEventQueue"`
 	ExitCleanup                    processtreecreator.ExitCleanupConfig     `mapstructure:"exitCleanup"`
 }
@@ -98,6 +99,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("ruleCooldown::ruleCooldownMaxSize", 10000)
 	viper.SetDefault("partialProfileGenerationEnabled", true)
 	viper.SetDefault("procfsScanInterval", 30*time.Second)
+	viper.SetDefault("procfsPidScanInterval", 5*time.Second)
 	viper.SetDefault("orderedEventQueue::size", 100000)
 	viper.SetDefault("orderedEventQueue::collectionDelay", 50*time.Millisecond)
 	viper.SetDefault("exitCleanup::maxPendingExits", 1000)

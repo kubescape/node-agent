@@ -22,6 +22,7 @@ type ProcfsFeeder struct {
 	ctx                context.Context
 	cancel             context.CancelFunc
 	interval           time.Duration
+	pidScanInterval    time.Duration
 	procfsPath         string
 	procfs             procfs.FS
 	processTreeManager processtree.ProcessTreeManager
@@ -34,9 +35,10 @@ type procInfo struct {
 }
 
 // NewProcfsFeeder creates a new procfs feeder.
-func NewProcfsFeeder(interval time.Duration, processTreeManager processtree.ProcessTreeManager) *ProcfsFeeder {
+func NewProcfsFeeder(fullScanInterval time.Duration, pidScanInterval time.Duration, processTreeManager processtree.ProcessTreeManager) *ProcfsFeeder {
 	return &ProcfsFeeder{
-		interval:           interval,
+		interval:           fullScanInterval,
+		pidScanInterval:    pidScanInterval,
 		procfsPath:         "/proc",
 		processTreeManager: processTreeManager,
 	}
@@ -98,7 +100,9 @@ func (pf *ProcfsFeeder) feedLoop() {
 	ctx := pf.ctx
 
 	ticker := time.NewTicker(pf.interval)
+	exitTicker := time.NewTicker(pf.pidScanInterval)
 	defer ticker.Stop()
+	defer exitTicker.Stop()
 
 	// Initial scan
 	pf.scanProcfs()
@@ -109,27 +113,17 @@ func (pf *ProcfsFeeder) feedLoop() {
 			return
 		case <-ticker.C:
 			pf.scanProcfs()
+		case <-exitTicker.C:
+			pids := pf.getPids()
+			go pf.sendExitEvents(pids)
 		}
 	}
 }
 
 func (pf *ProcfsFeeder) scanProcfs() {
-	entries, err := os.ReadDir(pf.procfsPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading procfs directory: %v\n", err)
+	pids := pf.getPids()
+	if len(pids) == 0 {
 		return
-	}
-
-	pids := make([]uint32, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		pid, err := strconv.ParseUint(entry.Name(), 10, 32)
-		if err != nil {
-			continue
-		}
-		pids = append(pids, uint32(pid))
 	}
 
 	numWorkers := runtime.NumCPU()
@@ -164,10 +158,7 @@ func (pf *ProcfsFeeder) scanProcfs() {
 		}
 	}
 
-	// Step 4: Send exit events for processes that are no longer in /proc.
-	pf.sendExitEvents(procMap)
-
-	// Step 5: Link parent info and broadcast. This is fast as it's all in-memory.
+	// Step 4: Link parent info and broadcast. This is fast as it's all in-memory.
 	for _, event := range procMap {
 		if parentProc, ok := procMap[event.PPID]; ok {
 			eventWithPcomm := event
@@ -179,22 +170,49 @@ func (pf *ProcfsFeeder) scanProcfs() {
 	}
 }
 
-func (pf *ProcfsFeeder) sendExitEvents(procMap map[uint32]conversion.ProcessEvent) {
+func (pf *ProcfsFeeder) sendExitEvents(pids []uint32) {
+	now := time.Now().UTC()
+	pidSet := make(map[uint32]struct{}, len(pids))
+	for _, pid := range pids {
+		pidSet[pid] = struct{}{}
+	}
 	currentPids := pf.processTreeManager.GetPidList()
 	for _, pid := range currentPids {
-		if _, ok := procMap[pid]; !ok {
+		if _, ok := pidSet[pid]; !ok {
 			// send exit event
 			exitEvent := conversion.ProcessEvent{
 				Type:      conversion.ExitEvent,
-				Timestamp: time.Now().UTC(),
+				Timestamp: now,
 				PID:       pid,
+				Comm:      "exit",
 			}
 			pf.broadcastEvent(exitEvent)
 		}
 	}
 }
 
-// readProcessInfo reads process information from procfs for a given PID.
+func (pf *ProcfsFeeder) getPids() []uint32 {
+	entries, err := os.ReadDir(pf.procfsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading procfs directory: %v\n", err)
+		return nil
+	}
+
+	pids := make([]uint32, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		// Names that are purely numeric are PIDs
+		pid, err := strconv.ParseUint(entry.Name(), 10, 32)
+		if err != nil {
+			continue
+		}
+		pids = append(pids, uint32(pid))
+	}
+	return pids
+}
+
 func (pf *ProcfsFeeder) readProcessInfo(pid uint32) (conversion.ProcessEvent, error) {
 	event := conversion.ProcessEvent{
 		Type:      conversion.ProcfsEvent,
