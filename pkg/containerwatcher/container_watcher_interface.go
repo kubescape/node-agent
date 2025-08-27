@@ -23,6 +23,8 @@ type ContainerWatcher interface {
 	GetContainerCollection() *containercollection.ContainerCollection
 	GetSocketEnricher() *socketenricher.SocketEnricher
 	GetContainerSelector() *containercollection.ContainerSelector
+	RegisterContainerReceiver(receiver ContainerReceiver)
+	UnregisterContainerReceiver(receiver ContainerReceiver)
 }
 
 type CustomTracerInitializer interface {

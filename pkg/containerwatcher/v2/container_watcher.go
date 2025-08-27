@@ -76,6 +76,7 @@ type ContainerWatcher struct {
 	// Third party components
 	thirdPartyTracersInitializers mapset.Set[containerwatcher.CustomTracerInitializer]
 	thirdPartyEnricher            containerwatcher.TaskBasedEnricher
+	thirdPartyContainerReceivers  mapset.Set[containerwatcher.ContainerReceiver]
 
 	// Cache and state
 	objectCache          objectcache.ObjectCache
@@ -191,6 +192,7 @@ func CreateContainerWatcher(
 		// Third party components
 		thirdPartyTracersInitializers: thirdPartyTracers.ThirdPartyTracersInitializers,
 		thirdPartyEnricher:            thirdPartyEnricher,
+		thirdPartyContainerReceivers:  mapset.NewSet[containerwatcher.ContainerReceiver](),
 
 		// Cache and state
 		objectCache:          objectCache,
@@ -378,6 +380,15 @@ func (cw *ContainerWatcher) GetSocketEnricher() *socketenricher.SocketEnricher {
 // GetContainerSelector returns the container selector
 func (cw *ContainerWatcher) GetContainerSelector() *containercollection.ContainerSelector {
 	return &cw.containerSelector
+}
+
+func (cw *ContainerWatcher) RegisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
+	cw.thirdPartyContainerReceivers.Add(receiver)
+}
+
+// UnregisterContainerReceiver unregisters a container receiver
+func (cw *ContainerWatcher) UnregisterContainerReceiver(receiver containerwatcher.ContainerReceiver) {
+	cw.thirdPartyContainerReceivers.Remove(receiver)
 }
 
 func (cw *ContainerWatcher) eventProcessingLoop() {
