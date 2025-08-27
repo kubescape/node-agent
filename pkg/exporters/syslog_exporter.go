@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -46,7 +46,7 @@ func InitSyslogExporter(syslogHost string) *SyslogExporter {
 }
 
 // SendRuleAlert sends an alert to syslog (RFC 5424) - https://tools.ietf.org/html/rfc5424
-func (se *SyslogExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+func (se *SyslogExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	message := rfc5424.Message{
 		Priority:  rfc5424.Error,
 		Timestamp: failedRule.GetBaseRuntimeAlert().Timestamp,
