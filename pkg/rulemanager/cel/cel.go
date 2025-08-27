@@ -41,6 +41,8 @@ type CEL struct {
 	cacheMutex      sync.RWMutex
 	typeMutex       sync.RWMutex
 	evalContextPool sync.Pool
+	ta              xcel.TypeAdapter
+	tp              *xcel.TypeProvider
 }
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
@@ -112,6 +114,8 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		env:          env,
 		objectCache:  objectCache,
 		programCache: make(map[string]cel.Program),
+		ta:           ta,
+		tp:           tp,
 	}
 
 	cel.evalContextPool.New = func() interface{} {
@@ -279,18 +283,13 @@ func (c *CEL) RegisterCustomType(eventType utils.EventType, obj interface{}) err
 	// Create new object and type using xcel
 	xcelObj, xcelTyp := xcel.NewObject(obj)
 
-	// Create new type adapter and provider
-	ta := xcel.NewTypeAdapter()
-	tp := xcel.NewTypeProvider()
+	// Register the new object with the existing type adapter/provider
+	xcel.RegisterObject(c.ta, c.tp, xcelObj, xcelTyp, xcel.NewFields(xcelObj))
 
-	// Register the new object
-	xcel.RegisterObject(ta, tp, xcelObj, xcelTyp, xcel.NewFields(xcelObj))
-
-	// Extend the environment with the new type and custom type adapter/provider
+	// Extend the environment with the new variable
+	// This preserves all existing types while adding the new one
 	extendedEnv, err := c.env.Extend(
 		cel.Variable(string(eventType), xcelTyp),
-		cel.CustomTypeAdapter(ta),
-		cel.CustomTypeProvider(tp),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to extend environment with custom type: %w", err)
