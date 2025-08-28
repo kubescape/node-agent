@@ -63,6 +63,22 @@ type Config struct {
 	ProcfsPidScanInterval          time.Duration                            `mapstructure:"procfsPidScanInterval"`
 	OrderedEventQueue              containerwatcher.OrderedEventQueueConfig `mapstructure:"orderedEventQueue"`
 	ExitCleanup                    processtreecreator.ExitCleanupConfig     `mapstructure:"exitCleanup"`
+	DCapSys                        bool                                     `mapstructure:"dCapSys"`
+	DDns                           bool                                     `mapstructure:"dDns"`
+	DExec                          bool                                     `mapstructure:"dExec"`
+	DExit                          bool                                     `mapstructure:"dExit"`
+	DFork                          bool                                     `mapstructure:"dFork"`
+	DHardlink                      bool                                     `mapstructure:"dHardlink"`
+	DHttp                          bool                                     `mapstructure:"dHttp"`
+	DIouring                       bool                                     `mapstructure:"dIouring"`
+	DNetwork                       bool                                     `mapstructure:"dNetwork"`
+	DOpen                          bool                                     `mapstructure:"dOpen"`
+	DPtrace                        bool                                     `mapstructure:"dPtrace"`
+	DRandomx                       bool                                     `mapstructure:"dRandomx"`
+	DSeccomp                       bool                                     `mapstructure:"dSeccomp"`
+	DSsh                           bool                                     `mapstructure:"dSsh"`
+	DSymlink                       bool                                     `mapstructure:"dSymlink"`
+	DTop                           bool                                     `mapstructure:"dTop"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
