@@ -125,6 +125,9 @@ func (nt *NetworkTracer) GetEventType() utils.EventType {
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (nt *NetworkTracer) IsEnabled(cfg interface{}) bool {
 	if config, ok := cfg.(config.Config); ok {
+		if config.DNetwork {
+			return false
+		}
 		return config.EnableNetworkTracing || config.EnableRuntimeDetection
 	}
 	return false

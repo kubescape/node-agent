@@ -10,19 +10,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/processtree/conversion"
 	"github.com/prometheus/procfs"
 )
 
 // ProcfsFeeder implements ProcessEventFeeder by reading process information from /proc filesystem.
 type ProcfsFeeder struct {
-	subscribers []chan<- conversion.ProcessEvent
-	mutex       sync.RWMutex
-	ctx         context.Context
-	cancel      context.CancelFunc
-	interval    time.Duration
-	procfsPath  string
-	procfs      procfs.FS
+	subscribers        []chan<- conversion.ProcessEvent
+	mutex              sync.RWMutex
+	ctx                context.Context
+	cancel             context.CancelFunc
+	interval           time.Duration
+	pidScanInterval    time.Duration
+	procfsPath         string
+	procfs             procfs.FS
+	processTreeManager processtree.ProcessTreeManager
 }
 
 // procInfo is a helper struct to pass results from worker goroutines.
@@ -32,10 +35,12 @@ type procInfo struct {
 }
 
 // NewProcfsFeeder creates a new procfs feeder.
-func NewProcfsFeeder(interval time.Duration) *ProcfsFeeder {
+func NewProcfsFeeder(fullScanInterval time.Duration, pidScanInterval time.Duration, processTreeManager processtree.ProcessTreeManager) *ProcfsFeeder {
 	return &ProcfsFeeder{
-		interval:   interval,
-		procfsPath: "/proc",
+		interval:           fullScanInterval,
+		pidScanInterval:    pidScanInterval,
+		procfsPath:         "/proc",
+		processTreeManager: processTreeManager,
 	}
 }
 
@@ -95,7 +100,9 @@ func (pf *ProcfsFeeder) feedLoop() {
 	ctx := pf.ctx
 
 	ticker := time.NewTicker(pf.interval)
+	exitTicker := time.NewTicker(pf.pidScanInterval)
 	defer ticker.Stop()
+	defer exitTicker.Stop()
 
 	// Initial scan
 	pf.scanProcfs()
@@ -106,32 +113,19 @@ func (pf *ProcfsFeeder) feedLoop() {
 			return
 		case <-ticker.C:
 			pf.scanProcfs()
+		case <-exitTicker.C:
+			pids := pf.getPids()
+			go pf.sendExitEvents(pids)
 		}
 	}
 }
 
-// scanProcfs scans the /proc directory for processes efficiently.
 func (pf *ProcfsFeeder) scanProcfs() {
-	// Step 1: Get a list of all potential PID directories.
-	entries, err := os.ReadDir(pf.procfsPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading procfs directory: %v\n", err)
+	pids := pf.getPids()
+	if len(pids) == 0 {
 		return
 	}
 
-	pids := make([]uint32, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		pid, err := strconv.ParseUint(entry.Name(), 10, 32)
-		if err != nil {
-			continue
-		}
-		pids = append(pids, uint32(pid))
-	}
-
-	// Step 2: Use a worker pool to process PIDs in parallel.
 	numWorkers := runtime.NumCPU()
 	pidChan := make(chan uint32, len(pids))
 	resultsChan := make(chan procInfo, len(pids))
@@ -176,7 +170,49 @@ func (pf *ProcfsFeeder) scanProcfs() {
 	}
 }
 
-// readProcessInfo reads process information from procfs for a given PID.
+func (pf *ProcfsFeeder) sendExitEvents(pids []uint32) {
+	now := time.Now().UTC()
+	pidSet := make(map[uint32]struct{}, len(pids))
+	for _, pid := range pids {
+		pidSet[pid] = struct{}{}
+	}
+	currentPids := pf.processTreeManager.GetPidList()
+	for _, pid := range currentPids {
+		if _, ok := pidSet[pid]; !ok {
+			// send exit event
+			exitEvent := conversion.ProcessEvent{
+				Type:      conversion.ExitEvent,
+				Timestamp: now,
+				PID:       pid,
+				Comm:      "exit",
+			}
+			pf.broadcastEvent(exitEvent)
+		}
+	}
+}
+
+func (pf *ProcfsFeeder) getPids() []uint32 {
+	entries, err := os.ReadDir(pf.procfsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading procfs directory: %v\n", err)
+		return nil
+	}
+
+	pids := make([]uint32, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		// Names that are purely numeric are PIDs
+		pid, err := strconv.ParseUint(entry.Name(), 10, 32)
+		if err != nil {
+			continue
+		}
+		pids = append(pids, uint32(pid))
+	}
+	return pids
+}
+
 func (pf *ProcfsFeeder) readProcessInfo(pid uint32) (conversion.ProcessEvent, error) {
 	event := conversion.ProcessEvent{
 		Type:      conversion.ProcfsEvent,

@@ -311,6 +311,7 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 		cw.thirdPartyTracers,
 		cw.thirdPartyEnricher,
 		cw.cfg,
+		cw.processTreeManager,
 	)
 
 	// Initialize tracer manager

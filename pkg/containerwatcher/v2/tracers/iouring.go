@@ -96,7 +96,7 @@ func (it *IoUringTracer) GetEventType() utils.EventType {
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (it *IoUringTracer) IsEnabled(cfg interface{}) bool {
 	if conf, ok := cfg.(config.Config); ok {
-		return conf.EnableRuntimeDetection
+		return !conf.DIouring && conf.EnableRuntimeDetection
 	}
 	return false
 }

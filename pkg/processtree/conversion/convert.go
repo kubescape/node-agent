@@ -106,6 +106,7 @@ func convertExitEvent(exitEvent *tracerexittype.Event) ProcessEvent {
 		Timestamp:   time.Now(),
 		PID:         exitEvent.Pid,
 		PPID:        exitEvent.PPid,
+		Comm:        exitEvent.Comm,
 		StartTimeNs: uint64(exitEvent.Timestamp), // Use event timestamp for consistency
 	}
 
