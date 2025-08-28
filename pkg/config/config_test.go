@@ -85,6 +85,7 @@ func TestLoadConfig(t *testing.T) {
 					CleanupInterval: 30 * time.Second,
 					CleanupDelay:    5 * time.Minute,
 				},
+				DNSCacheSize: 50000,
 			},
 			wantErr: false,
 		},
