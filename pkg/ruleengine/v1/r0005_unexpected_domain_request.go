@@ -42,7 +42,7 @@ type R0005UnexpectedDomainRequest struct {
 }
 
 func CreateRuleR0005UnexpectedDomainRequest() *R0005UnexpectedDomainRequest {
-	alertedDomains, err := lru.New[string, bool](10000)
+	alertedDomains, err := lru.New[string, bool](500)
 	if err != nil {
 		logger.L().Fatal("creating lru cache", helpers.Error(err))
 		return nil
