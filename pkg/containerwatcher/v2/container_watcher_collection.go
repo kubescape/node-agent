@@ -75,11 +75,11 @@ func (cw *ContainerWatcher) StartContainerCollection(ctx context.Context) error 
 		// Enrich events with Linux namespaces information, it is needed for per container filtering
 		containercollection.WithLinuxNamespaceEnrichment(),
 
-		// Get containers created with container runtimes
-		containercollection.WithContainerRuntimeEnrichment(cw.runtime),
-
 		// Get containers created with ebpf (works also if hostPid=false)
 		containercollection.WithContainerFanotifyEbpf(),
+
+		// Get containers created with container runtimes
+		containercollection.WithContainerRuntimeEnrichment(cw.runtime),
 
 		// WithTracerCollection enables the interation between the TracerCollection and ContainerCollection packages.
 		containercollection.WithTracerCollection(cw.tracerCollection),
