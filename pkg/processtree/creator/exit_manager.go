@@ -14,6 +14,7 @@ import (
 type pendingExit struct {
 	PID         uint32
 	StartTimeNs uint64
+	Comm        string
 	Timestamp   time.Time
 	Children    []*apitypes.Process
 }
@@ -41,7 +42,7 @@ func (pt *processTreeCreatorImpl) stopExitManager() {
 	}
 }
 
-func (pt *processTreeCreatorImpl) addPendingExit(event conversion.ProcessEvent, children []*apitypes.Process) {
+func (pt *processTreeCreatorImpl) addPendingExit(event conversion.ProcessEvent) {
 	if len(pt.pendingExits) >= pt.config.ExitCleanup.MaxPendingExits {
 		logger.L().Debug("Exit: Maximum pending exits reached, forcing cleanup",
 			helpers.String("pending_count", fmt.Sprintf("%d", len(pt.pendingExits))),
@@ -52,8 +53,8 @@ func (pt *processTreeCreatorImpl) addPendingExit(event conversion.ProcessEvent, 
 	pt.pendingExits[event.PID] = &pendingExit{
 		PID:         event.PID,
 		StartTimeNs: event.StartTimeNs,
+		Comm:        event.Comm,
 		Timestamp:   time.Now(),
-		Children:    children,
 	}
 }
 
@@ -94,7 +95,6 @@ func (pt *processTreeCreatorImpl) performExitCleanup() {
 	for _, pending := range toRemove {
 		pt.exitByPid(pending.PID)
 	}
-
 }
 
 func (pt *processTreeCreatorImpl) forceCleanupOldest() {
@@ -111,35 +111,41 @@ func (pt *processTreeCreatorImpl) forceCleanupOldest() {
 		return toRemove[i].Timestamp.Before(toRemove[j].Timestamp)
 	})
 
-	removeCount := len(toRemove) / 4
-	if removeCount < 1000 {
-		removeCount = 1000
-	}
-	if removeCount > len(toRemove) {
-		removeCount = len(toRemove)
+	for _, pending := range toRemove {
+		pt.exitByPid(pending.PID)
 	}
 
-	for i := 0; i < removeCount; i++ {
+	for i := 0; i < len(toRemove); i++ {
 		pt.exitByPid(toRemove[i].PID)
 	}
 
 	logger.L().Debug("Exit: Force cleanup completed",
-		helpers.String("remaining_pending", fmt.Sprintf("%d", len(pt.pendingExits))))
+		helpers.String("remaining_pending", fmt.Sprintf("%d", len(pt.pendingExits))),
+		helpers.Int("pids number", int(pt.processMap.Len())))
 }
 
 func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
+	proc, ok := pt.processMap.Load(pid)
+	if !ok {
+		delete(pt.pendingExits, pid)
+		return
+	}
+
+	// Collect children for reparenting
+	children := make([]*apitypes.Process, 0, len(proc.ChildrenMap))
+	for _, child := range proc.ChildrenMap {
+		if child != nil {
+			children = append(children, child)
+		}
+	}
+
 	pending := pt.pendingExits[pid]
 	if pending == nil {
 		logger.L().Warning("exitByPid: pendingExits[pid] is nil", helpers.String("pid", fmt.Sprintf("%d", pid)))
 		return
 	}
 
-	proc, ok := pt.processMap.Load(pid)
-	if !ok {
-		logger.L().Warning("exitByPid: processMap[pid] does not exist", helpers.String("pid", fmt.Sprintf("%d", pid)))
-		delete(pt.pendingExits, pid)
-		return
-	}
+	pending.Children = children
 
 	if len(pending.Children) > 0 {
 		newParentPID, err := pt.reparentingStrategies.Reparent(pid, pending.Children, pt.containerTree, &pt.processMap)

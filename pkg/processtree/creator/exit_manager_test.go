@@ -126,8 +126,7 @@ func TestExitManager_AddPendingExit(t *testing.T) {
 	// Test adding a pending exit
 	pt.mutex.Lock()
 	event := createTestExitEvent(100, 12345)
-	children := []*apitypes.Process{child}
-	pt.addPendingExit(event, children)
+	pt.addPendingExit(event)
 	pt.mutex.Unlock()
 
 	// Check that the exit was added
@@ -137,8 +136,7 @@ func TestExitManager_AddPendingExit(t *testing.T) {
 	require.NotNil(t, pending, "Pending exit should exist")
 	assert.Equal(t, uint32(100), pending.PID)
 	assert.Equal(t, uint64(12345), pending.StartTimeNs)
-	assert.Len(t, pending.Children, 1)
-	assert.Equal(t, uint32(200), pending.Children[0].PID)
+	assert.Len(t, pending.Children, 0, "Children should be empty initially, populated during exitByPid")
 	pt.mutex.RUnlock()
 }
 
@@ -356,7 +354,7 @@ func TestExitManager_ThreadSafety(t *testing.T) {
 			pid := uint32(i + 1)
 			pt.mutex.Lock()
 			event := createTestExitEvent(pid, uint64(i))
-			pt.addPendingExit(event, []*apitypes.Process{})
+			pt.addPendingExit(event)
 			pt.mutex.Unlock()
 			time.Sleep(1 * time.Millisecond)
 		}
@@ -421,7 +419,7 @@ func TestExitManager_HandleExitEventFlow(t *testing.T) {
 	pending := pt.pendingExits[100]
 	require.NotNil(t, pending, "Pending exit should exist")
 	assert.Equal(t, uint32(100), pending.PID)
-	assert.Len(t, pending.Children, 2, "Should have 2 children")
+	assert.Len(t, pending.Children, 0, "Children should be empty initially, populated during exitByPid")
 
 	// Process should still be in the map (not removed yet)
 	assert.NotNil(t, pt.processMap.Get(100), "Process should still be in map")
@@ -550,7 +548,7 @@ func TestExitManager_CleanupChildrenMapWithEmptyComm(t *testing.T) {
 	pending := pt.pendingExits[100]
 	require.NotNil(t, pending, "Pending exit should exist")
 	assert.Equal(t, uint32(100), pending.PID)
-	assert.Len(t, pending.Children, 2, "Should have 2 children collected")
+	assert.Len(t, pending.Children, 0, "Children should be empty initially, populated during exitByPid")
 	pt.mutex.RUnlock()
 
 	// Now manually trigger the exit cleanup to test the cleanup logic
@@ -604,7 +602,7 @@ func TestExitManager_CleanupChildrenMapWithMixedCommValues(t *testing.T) {
 	pending := pt.pendingExits[100]
 	require.NotNil(t, pending, "Pending exit should exist")
 	assert.Equal(t, uint32(100), pending.PID)
-	assert.Len(t, pending.Children, 3, "Should have 3 children collected")
+	assert.Len(t, pending.Children, 0, "Children should be empty initially, populated during exitByPid")
 	pt.mutex.RUnlock()
 
 	// Manually trigger exit cleanup

@@ -47,6 +47,7 @@ func TestLoadConfig(t *testing.T) {
 				MaxSBOMSize:                    20971520,
 				MaxTsProfileSize:               2 * 1024 * 1024,
 				ProfilesCacheRefreshRate:       1 * time.Minute,
+				ProcfsPidScanInterval:          5 * time.Second,
 				EnablePrometheusExporter:       true,
 				EnableRuntimeDetection:         true,
 				EnableSeccomp:                  true,

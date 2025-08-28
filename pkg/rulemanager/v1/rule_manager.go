@@ -306,6 +306,7 @@ func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) 
 				enrichedEvent.ProcessTree = tree
 			} else {
 				logger.L().Error("RuleManager - failed to create process tree fallback", helpers.Error(err))
+				enrichedEvent.ProcessTree = process
 			}
 		}
 		runtimeProcessDetails := failure.GetRuntimeProcessDetails()

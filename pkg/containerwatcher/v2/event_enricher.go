@@ -56,8 +56,8 @@ func (ee *EventEnricher) EnrichEvents(entry eventEntry) *ebpfevents.EnrichedEven
 
 // isProcessTreeEvent checks if an event type is related to process tree
 func isProcessTreeEvent(eventType utils.EventType) bool {
-	return eventType == utils.ExecveEventType ||
-		eventType == utils.ExitEventType ||
+	return eventType == utils.ExitEventType ||
 		eventType == utils.ForkEventType ||
-		eventType == utils.ProcfsEventType
+		eventType == utils.ProcfsEventType ||
+		eventType == utils.ExecveEventType
 }
