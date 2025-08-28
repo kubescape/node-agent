@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	fimtypes "github.com/kubescape/node-agent/pkg/hostfimsensor"
+	"github.com/opcoder0/fanotify"
 )
 
 type HostFimSensor interface {
@@ -54,18 +55,31 @@ type HostFimSensorImpl struct {
 }
 
 func NewHostFimSensor(hostPath string, pathConfigs []HostFimPathConfig, exporter exporters.Exporter) HostFimSensor {
-	// Try fanotify first for better subdirectory support
-	fanotifySensor := NewHostFimSensorFanotify(hostPath, pathConfigs, exporter)
-
-	// Test if fanotify works by trying to start it
-	if err := fanotifySensor.Start(); err != nil {
-		logger.L().Warning("Fanotify failed, falling back to fsnotify", helpers.Error(err))
-		fanotifySensor.Stop()
-		return NewHostFimSensorFsnotify(hostPath, pathConfigs, exporter)
+	// Check if fanotify is available by trying to create a listener without starting it
+	// This is a more reliable way to check capability without actually starting the sensor
+	if canUseFanotify() {
+		return NewHostFimSensorFanotify(hostPath, pathConfigs, exporter)
 	}
 
-	fanotifySensor.Stop()
-	return fanotifySensor
+	logger.L().Warning("Fanotify not available, using fsnotify fallback")
+	return NewHostFimSensorFsnotify(hostPath, pathConfigs, exporter)
+}
+
+// canUseFanotify checks if fanotify is available without actually starting a sensor
+func canUseFanotify() bool {
+	// Try to create a temporary fanotify listener to test capability
+	// Use a temporary directory that we know exists
+	tempDir := "/tmp"
+
+	// Try to create a fanotify listener
+	listener, err := fanotify.NewListener(tempDir, true, fanotify.PermissionNone)
+	if err != nil {
+		return false
+	}
+
+	// If we can create it, we can use fanotify
+	listener.Stop()
+	return true
 }
 
 // NewHostFimSensorFsnotify creates a new fsnotify-based FIM sensor (fallback implementation)
@@ -98,33 +112,21 @@ func NewHostFimSensorFsnotifyWithConfig(hostPath string, pathConfigs []HostFimPa
 }
 
 func NewHostFimSensorWithBatching(hostPath string, pathConfigs []HostFimPathConfig, exporter exporters.Exporter, batchConfig HostFimBatchConfig) HostFimSensor {
-	// Try fanotify first for better subdirectory support
-	fanotifySensor := NewHostFimSensorFanotifyWithBatching(hostPath, pathConfigs, exporter, batchConfig)
-
-	// Test if fanotify works by trying to start it
-	if err := fanotifySensor.Start(); err != nil {
-		logger.L().Warning("Fanotify failed, falling back to fsnotify", helpers.Error(err))
-		fanotifySensor.Stop()
-		return NewHostFimSensorFsnotifyWithBatching(hostPath, pathConfigs, exporter, batchConfig)
+	if canUseFanotify() {
+		return NewHostFimSensorFanotifyWithBatching(hostPath, pathConfigs, exporter, batchConfig)
 	}
 
-	fanotifySensor.Stop()
-	return fanotifySensor
+	logger.L().Warning("Fanotify not available, using fsnotify fallback")
+	return NewHostFimSensorFsnotifyWithBatching(hostPath, pathConfigs, exporter, batchConfig)
 }
 
 func NewHostFimSensorWithConfig(hostPath string, pathConfigs []HostFimPathConfig, exporter exporters.Exporter, batchConfig HostFimBatchConfig, dedupConfig HostFimDedupConfig) HostFimSensor {
-	// Try fanotify first for better subdirectory support
-	fanotifySensor := NewHostFimSensorFanotifyWithConfig(hostPath, pathConfigs, exporter, batchConfig, dedupConfig)
-
-	// Test if fanotify works by trying to start it
-	if err := fanotifySensor.Start(); err != nil {
-		logger.L().Warning("Fanotify failed, falling back to fsnotify", helpers.Error(err))
-		fanotifySensor.Stop()
-		return NewHostFimSensorFsnotifyWithConfig(hostPath, pathConfigs, exporter, batchConfig, dedupConfig)
+	if canUseFanotify() {
+		return NewHostFimSensorFanotifyWithConfig(hostPath, pathConfigs, exporter, batchConfig, dedupConfig)
 	}
 
-	fanotifySensor.Stop()
-	return fanotifySensor
+	logger.L().Warning("Fanotify not available, using fsnotify fallback")
+	return NewHostFimSensorFsnotifyWithConfig(hostPath, pathConfigs, exporter, batchConfig, dedupConfig)
 }
 
 func (h *HostFimSensorImpl) Start() error {
@@ -268,23 +270,16 @@ func (h *HostFimSensorImpl) convertFsnotifyEventToFimEvent(event fsnotify.Event)
 	fimEvent.HostName = h.getHostInfo()
 	fimEvent.AgentId = "kubescape-node-agent" // TODO: Make this configurable
 
+	// Use priority order for event types: Create > Remove > Rename > Write > Chmod
 	if event.Op&fsnotify.Create == fsnotify.Create {
 		fimEvent.EventType = fimtypes.FimEventTypeCreate
-	}
-
-	if event.Op&fsnotify.Write == fsnotify.Write {
-		fimEvent.EventType = fimtypes.FimEventTypeChange
-	}
-
-	if event.Op&fsnotify.Remove == fsnotify.Remove {
+	} else if event.Op&fsnotify.Remove == fsnotify.Remove {
 		fimEvent.EventType = fimtypes.FimEventTypeRemove
-	}
-
-	if event.Op&fsnotify.Rename == fsnotify.Rename {
+	} else if event.Op&fsnotify.Rename == fsnotify.Rename {
 		fimEvent.EventType = fimtypes.FimEventTypeRename
-	}
-
-	if event.Op&fsnotify.Chmod == fsnotify.Chmod {
+	} else if event.Op&fsnotify.Write == fsnotify.Write {
+		fimEvent.EventType = fimtypes.FimEventTypeChange
+	} else if event.Op&fsnotify.Chmod == fsnotify.Chmod {
 		fimEvent.EventType = fimtypes.FimEventTypeChmod
 	}
 

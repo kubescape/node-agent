@@ -70,7 +70,9 @@ func TestHostFimSensor_CreateFileTriggersExporter(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		mockExp.mu.Lock()
 		for _, evt := range mockExp.fimEvents {
-			if evt.GetPath() == testFile && evt.GetEventType() == fimtypes.FimEventTypeCreate {
+			// The FIM event path is relative to the host path, so we need to compare accordingly
+			expectedRelativePath := "/testfile.txt" // Since pathConfig.Path is ".", the relative path is just the filename
+			if evt.GetPath() == expectedRelativePath && evt.GetEventType() == fimtypes.FimEventTypeCreate {
 				found = true
 				break
 			}
@@ -128,7 +130,9 @@ func TestHostFimSensor_CreateNestedFileTriggersExporter(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		mockExp.mu.Lock()
 		for _, evt := range mockExp.fimEvents {
-			if evt.GetPath() == testFile && evt.GetEventType() == fimtypes.FimEventTypeCreate {
+			// The FIM event path is relative to the host path, so we need to compare accordingly
+			expectedRelativePath := "/testdir/testfile.txt" // Since pathConfig.Path is "testdir", the relative path includes the subdirectory
+			if evt.GetPath() == expectedRelativePath && evt.GetEventType() == fimtypes.FimEventTypeCreate {
 				found = true
 				break
 			}
@@ -421,10 +425,6 @@ func TestHostFimSensor_Deduplication(t *testing.T) {
 
 		mockExp.mu.Lock()
 		eventCount := len(mockExp.fimEvents)
-		// Debug: print event details
-		for i, evt := range mockExp.fimEvents {
-			t.Logf("Event %d: Path=%s, Type=%s", i, evt.GetPath(), evt.GetEventType())
-		}
 		mockExp.mu.Unlock()
 
 		// We expect 2 events: 1 create + 1 change (the second change should be duplicate)
