@@ -93,7 +93,7 @@ func (ct *CapabilitiesTracer) GetEventType() utils.EventType {
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (ct *CapabilitiesTracer) IsEnabled(cfg interface{}) bool {
 	if config, ok := cfg.(config.Config); ok {
-		return config.EnableRuntimeDetection
+		return !config.DCapSys && config.EnableRuntimeDetection
 	}
 	return false
 }
