@@ -63,6 +63,7 @@ type Config struct {
 	ProcfsPidScanInterval          time.Duration                            `mapstructure:"procfsPidScanInterval"`
 	OrderedEventQueue              containerwatcher.OrderedEventQueueConfig `mapstructure:"orderedEventQueue"`
 	ExitCleanup                    processtreecreator.ExitCleanupConfig     `mapstructure:"exitCleanup"`
+	DNSCacheSize                   int                                      `mapstructure:"dnsCacheSize"`
 	DCapSys                        bool                                     `mapstructure:"dCapSys"`
 	DDns                           bool                                     `mapstructure:"dDns"`
 	DExec                          bool                                     `mapstructure:"dExec"`
@@ -123,6 +124,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("exitCleanup::cleanupDelay", 5*time.Minute)
 	viper.SetDefault("workerChannelSize", 750000)
 	viper.SetDefault("blockEvents", false)
+	viper.SetDefault("dnsCacheSize", 50000)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()
