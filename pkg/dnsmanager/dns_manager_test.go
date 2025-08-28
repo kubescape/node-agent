@@ -65,7 +65,7 @@ func TestResolveIPAddress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dm := CreateDNSManager()
+			dm := CreateDNSManager(1000)
 
 			dm.ReportEvent(tt.dnsEvent)
 			got, ok := dm.ResolveIPAddress(tt.ipAddr)
@@ -101,7 +101,7 @@ func TestResolveIPAddressFallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dm := CreateDNSManager()
+			dm := CreateDNSManager(1000)
 
 			// Perform the actual DNS lookup
 			addresses, err := net.LookupIP(tt.dnsEvent.DNSName)
@@ -124,7 +124,7 @@ func TestResolveIPAddressFallback(t *testing.T) {
 }
 
 func TestCacheFallbackBehavior(t *testing.T) {
-	dm := CreateDNSManager()
+	dm := CreateDNSManager(1000)
 
 	// Test successful DNS lookup caching
 	event := tracerdnstype.Event{
@@ -177,7 +177,7 @@ func TestCacheFallbackBehavior(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	dm := CreateDNSManager()
+	dm := CreateDNSManager(1000)
 	const numGoroutines = 100
 	const numOperations = 1000
 
@@ -313,7 +313,7 @@ func BenchmarkIsCloudService(b *testing.B) {
 func TestContainerCloudServices(t *testing.T) {
 	t.Run("full container lifecycle with cloud services", func(t *testing.T) {
 		// SETUP
-		dm := CreateDNSManager()
+		dm := CreateDNSManager(1000)
 		containerId := "test-container-123"
 		testPid := uint32(1234)
 
@@ -402,7 +402,7 @@ func TestContainerCloudServices(t *testing.T) {
 	})
 
 	t.Run("max service cache size", func(t *testing.T) {
-		dm := CreateDNSManager()
+		dm := CreateDNSManager(1000)
 		containerId := "test-container-456"
 		testPid := uint32(5678)
 
@@ -453,7 +453,7 @@ func TestContainerCloudServices(t *testing.T) {
 }
 
 func TestCloudServiceCacheLimit(t *testing.T) {
-	dm := CreateDNSManager()
+	dm := CreateDNSManager(1000)
 	containerId := "test-container-456"
 	testPid := uint32(5678)
 

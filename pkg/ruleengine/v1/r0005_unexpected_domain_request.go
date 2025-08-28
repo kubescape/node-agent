@@ -7,8 +7,10 @@ import (
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/armotypes/common"
-	"github.com/goradd/maps"
+	lru "github.com/hashicorp/golang-lru/v2"
 	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/objectcache"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -36,11 +38,16 @@ var _ ruleengine.RuleEvaluator = (*R0005UnexpectedDomainRequest)(nil)
 
 type R0005UnexpectedDomainRequest struct {
 	BaseRule
-	alertedDomains maps.SafeMap[string, bool]
+	alertedDomains *lru.Cache[string, bool]
 }
 
 func CreateRuleR0005UnexpectedDomainRequest() *R0005UnexpectedDomainRequest {
-	return &R0005UnexpectedDomainRequest{}
+	alertedDomains, err := lru.New[string, bool](10000)
+	if err != nil {
+		logger.L().Fatal("creating lru cache", helpers.Error(err))
+		return nil
+	}
+	return &R0005UnexpectedDomainRequest{alertedDomains: alertedDomains}
 }
 
 func (rule *R0005UnexpectedDomainRequest) Name() string {
@@ -64,7 +71,7 @@ func (rule *R0005UnexpectedDomainRequest) EvaluateRule(eventType utils.EventType
 		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
-	if rule.alertedDomains.Has(domainEvent.DNSName) {
+	if rule.alertedDomains.Contains(domainEvent.DNSName) {
 		return ruleengine.DetectionResult{IsFailure: false, Payload: nil}
 	}
 
@@ -106,7 +113,7 @@ func (rule *R0005UnexpectedDomainRequest) EvaluateRuleWithProfile(eventType util
 
 func (rule *R0005UnexpectedDomainRequest) CreateRuleFailure(eventType utils.EventType, event utils.K8sEvent, objCache objectcache.ObjectCache, payload ruleengine.DetectionResult) ruleengine.RuleFailure {
 	domainEvent, _ := event.(*tracerdnstype.Event)
-	rule.alertedDomains.Set(domainEvent.DNSName, true)
+	rule.alertedDomains.Add(domainEvent.DNSName, true)
 
 	dstIP := ""
 	if len(domainEvent.Addresses) > 0 {
