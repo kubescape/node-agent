@@ -157,41 +157,6 @@ func TestHandleForkEvent(t *testing.T) {
 	assert.NotNil(t, proc.ChildrenMap)
 }
 
-func TestHandleProcfsEvent(t *testing.T) {
-	mockContainerTree := &MockContainerProcessTree{}
-	creator := NewProcessTreeCreator(mockContainerTree, createTestConfig(false))
-	impl := creator.(*processTreeCreatorImpl)
-
-	// Mock container tree methods
-	mockContainerTree.On("IsProcessUnderAnyContainerSubtree", mock.AnythingOfType("uint32"), mock.Anything).Return(false)
-
-	event := conversion.ProcessEvent{
-		Type:    conversion.ProcfsEvent,
-		PID:     1234,
-		PPID:    1000,
-		Comm:    "test-process",
-		Cmdline: "test-process --arg",
-		Uid:     &[]uint32{1000}[0],
-		Gid:     &[]uint32{1000}[0],
-		Cwd:     "/home/user",
-		Path:    "/usr/bin/test-process",
-	}
-
-	creator.FeedEvent(event)
-
-	// Verify process was created and populated
-	proc := impl.processMap.Get(1234)
-	assert.NotNil(t, proc)
-	assert.Equal(t, uint32(1234), proc.PID)
-	assert.Equal(t, uint32(0), proc.PPID) // PPID is not set in handleProcfsEvent
-	assert.Equal(t, "test-process", proc.Comm)
-	assert.Equal(t, "test-process --arg", proc.Cmdline)
-	assert.Equal(t, uint32(1000), *proc.Uid)
-	assert.Equal(t, uint32(1000), *proc.Gid)
-	assert.Equal(t, "/home/user", proc.Cwd)
-	assert.Equal(t, "/usr/bin/test-process", proc.Path)
-}
-
 func TestHandleExecEvent(t *testing.T) {
 	mockContainerTree := &MockContainerProcessTree{}
 	creator := NewProcessTreeCreator(mockContainerTree, createTestConfig(true))
@@ -819,8 +784,6 @@ func TestReparentingIntegration(t *testing.T) {
 	// Verify children are collected for reparenting
 	pendingExit := impl.pendingExits[1234]
 	assert.NotNil(t, pendingExit)
-	assert.Len(t, pendingExit.Children, 1)
-	assert.Equal(t, uint32(5678), pendingExit.Children[0].PID)
 	impl.mutex.Unlock()
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -31,6 +32,7 @@ type TracerFactory struct {
 	thirdPartyTracersInit   mapset.Set[containerwatcher.CustomTracerInitializer]
 	thirdPartyEnricher      containerwatcher.TaskBasedEnricher
 	cfg                     config.Config
+	processTreeManager      processtree.ProcessTreeManager
 }
 
 // NewTracerFactory creates a new tracer factory
@@ -45,6 +47,7 @@ func NewTracerFactory(
 	thirdPartyTracers mapset.Set[containerwatcher.CustomTracerInitializer],
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	cfg config.Config,
+	processTreeManager processtree.ProcessTreeManager,
 ) *TracerFactory {
 	return &TracerFactory{
 		containerCollection:     containerCollection,
@@ -57,6 +60,7 @@ func NewTracerFactory(
 		thirdPartyTracersInit:   thirdPartyTracers,
 		thirdPartyEnricher:      thirdPartyEnricher,
 		cfg:                     cfg,
+		processTreeManager:      processTreeManager,
 	}
 }
 
@@ -68,7 +72,9 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 		tf.tracerCollection,
 		tf.containerSelector,
 		tf.createEventCallback(utils.ProcfsEventType),
+		tf.createEventCallback(utils.ExitEventType),
 		tf.cfg,
+		tf.processTreeManager,
 	)
 	manager.RegisterTracer(procfsTracer)
 

@@ -99,7 +99,7 @@ func (ht *HTTPTracer) GetEventType() utils.EventType {
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (ht *HTTPTracer) IsEnabled(cfg interface{}) bool {
 	if config, ok := cfg.(config.Config); ok {
-		return config.EnableHttpDetection
+		return !config.DHttp && config.EnableHttpDetection
 	}
 	return false
 }

@@ -184,7 +184,7 @@ func (pt *processTreeCreatorImpl) handleProcfsEvent(event conversion.ProcessEven
 
 	proc, ok := pt.processMap.Load(event.PID)
 	if !ok {
-		proc = pt.getOrCreateProcess(event.PID)
+		return
 	}
 
 	if event.Comm != "" {
@@ -266,21 +266,7 @@ func (pt *processTreeCreatorImpl) handleExitEvent(event conversion.ProcessEvent)
 	pt.mutex.Lock()
 	defer pt.mutex.Unlock()
 
-	proc, ok := pt.processMap.Load(event.PID)
-	if !ok {
-		return
-	}
-
-	// Collect children for reparenting
-	children := make([]*apitypes.Process, 0, len(proc.ChildrenMap))
-	for _, child := range proc.ChildrenMap {
-		if child != nil {
-			children = append(children, child)
-		}
-	}
-
-	// Add to pending exits for delayed cleanup
-	pt.addPendingExit(event, children)
+	pt.addPendingExit(event)
 }
 
 func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Process {
@@ -290,6 +276,7 @@ func (pt *processTreeCreatorImpl) getOrCreateProcess(pid uint32) *apitypes.Proce
 	}
 	proc = &apitypes.Process{PID: pid, ChildrenMap: make(map[apitypes.CommPID]*apitypes.Process)}
 	pt.processMap.Set(pid, proc)
+
 	return proc
 }
 

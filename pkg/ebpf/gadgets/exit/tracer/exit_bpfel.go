@@ -87,7 +87,6 @@ type exitMapSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type exitVariableSpecs struct {
 	GadgetFilterByMntns *ebpf.VariableSpec `ebpf:"gadget_filter_by_mntns"`
-	TargUid             *ebpf.VariableSpec `ebpf:"targ_uid"`
 	Unusedevent         *ebpf.VariableSpec `ebpf:"unusedevent"`
 }
 
@@ -133,7 +132,6 @@ func (m *exitMaps) Close() error {
 // It can be passed to loadExitObjects or ebpf.CollectionSpec.LoadAndAssign.
 type exitVariables struct {
 	GadgetFilterByMntns *ebpf.Variable `ebpf:"gadget_filter_by_mntns"`
-	TargUid             *ebpf.Variable `ebpf:"targ_uid"`
 	Unusedevent         *ebpf.Variable `ebpf:"unusedevent"`
 }
 

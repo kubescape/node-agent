@@ -116,6 +116,9 @@ func (dt *DNSTracer) GetEventType() utils.EventType {
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (dt *DNSTracer) IsEnabled(cfg interface{}) bool {
 	if config, ok := cfg.(config.Config); ok {
+		if config.DDns {
+			return false
+		}
 		return config.EnableNetworkTracing || config.EnableRuntimeDetection
 	}
 	return false

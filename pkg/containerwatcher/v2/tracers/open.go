@@ -100,6 +100,9 @@ func (ot *OpenTracer) GetEventType() utils.EventType {
 func (ot *OpenTracer) IsEnabled(cfg interface{}) bool {
 	if config, ok := cfg.(config.Config); ok {
 		ot.cfg = config
+		if config.DOpen {
+			return false
+		}
 		return config.EnableApplicationProfile || config.EnableRuntimeDetection
 	}
 	return false
