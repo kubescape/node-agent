@@ -292,7 +292,7 @@ require (
 	github.com/therootcompany/xz v1.0.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
-	github.com/ulikunitz/xz v0.5.12 // indirect
+	github.com/ulikunitz/xz v0.5.14 // indirect
 	github.com/uptrace/opentelemetry-go-extra/otelutil v0.3.2 // indirect
 	github.com/uptrace/opentelemetry-go-extra/otelzap v0.3.2 // indirect
 	github.com/uptrace/uptrace-go v1.35.1 // indirect
