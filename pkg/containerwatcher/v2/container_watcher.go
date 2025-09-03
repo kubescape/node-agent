@@ -9,6 +9,8 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/go-logger"
@@ -87,6 +89,7 @@ type ContainerWatcher struct {
 	pool                 *workerpool.WorkerPool
 
 	// Lifecycle
+	gadgetRuntime                   runtime.Runtime
 	mutex                           sync.RWMutex
 	containerEolNotificationChannel chan *containercollection.Container
 
@@ -296,6 +299,11 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	// Start worker pool goroutine
 	go cw.workerPoolLoop()
 
+	cw.gadgetRuntime = local.New()
+	if err := cw.gadgetRuntime.Init(nil); err != nil {
+		logger.L().Fatal("runtime init", helpers.Error(err))
+	}
+
 	// Create tracer factory
 	tracerFactory := tracers.NewTracerFactory(
 		cw.containerCollection,
@@ -309,6 +317,7 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 		cw.thirdPartyEnricher,
 		cw.cfg,
 		cw.processTreeManager,
+		cw.gadgetRuntime,
 	)
 
 	// Initialize tracer manager
@@ -341,6 +350,8 @@ func (cw *ContainerWatcher) Stop() {
 	if cw.tracerManagerV2 != nil {
 		cw.tracerManagerV2.StopAllTracers()
 	}
+
+	cw.gadgetRuntime.Close()
 
 	// Close worker channel to signal worker goroutine to stop
 	if cw.workerChan != nil {

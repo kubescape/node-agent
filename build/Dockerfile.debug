@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS builder
 
 ENV GO111MODULE=on CGO_ENABLED=0
 WORKDIR /work
@@ -9,13 +9,21 @@ RUN --mount=target=. \
     --mount=type=cache,target=/go/pkg \
     GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/node-agent ./cmd/main.go
 
+FROM --platform=$BUILDPLATFORM ghcr.io/inspektor-gadget/ig:v0.40.0 AS ig
+
+RUN ["ig", "image", "pull", "trace_exec:v0.40.0"]
+RUN ["ig", "image", "pull", "trace_open:v0.40.0"]
+RUN ["ig", "image", "export", "trace_exec:v0.40.0", "trace_open:v0.40.0", "/tmp/tracers.tar"]
+
 FROM gcr.io/distroless/static-debian12:debug
 
 COPY --from=builder /go/bin/dlv /usr/bin/dlv
 COPY --from=builder /out/node-agent /usr/bin/node-agent
+COPY --from=ig /tmp/tracers.tar /root/tracers.tar
 COPY configuration/ig-config.yaml /root/.ig/config.yaml
 
 ARG image_version
 ENV RELEASE=$image_version
 
+WORKDIR /root
 ENTRYPOINT ["/usr/bin/dlv", "--listen=:40000", "--headless=true","--accept-multiclient", "--api-version=2", "--log", "exec", "/usr/bin/node-agent"]

@@ -2,18 +2,24 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	igjson "github.com/inspektor-gadget/inspektor-gadget/pkg/datasource/formatters/json"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-
-	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
 const openTraceName = "trace_open"
@@ -22,73 +28,69 @@ var _ containerwatcher.TracerInterface = (*OpenTracer)(nil)
 
 // OpenTracer implements TracerInterface for open events
 type OpenTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       containerwatcher.ResultCallback
-	tracer              *traceropen.Tracer
-	cfg                 config.Config
-	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
+	cfg                config.Config
+	containerSelector  containercollection.ContainerSelector
+	eventCallback      containerwatcher.ResultCallback
+	gadgetCtx          *gadgetcontext.GadgetContext
+	ociStore           *orasoci.ReadOnlyStore
+	orderedEventQueue  EventQueueInterface
+	runtime            runtime.Runtime
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 }
 
 // NewOpenTracer creates a new open tracer
 func NewOpenTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
 	containerSelector containercollection.ContainerSelector,
 	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *OpenTracer {
 	return &OpenTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
-		thirdPartyEnricher:  thirdPartyEnricher,
+		containerSelector:  containerSelector,
+		eventCallback:      eventCallback,
+		ociStore:           ociStore,
+		runtime:            runtime,
+		thirdPartyEnricher: thirdPartyEnricher,
 	}
 }
 
 // Start initializes and starts the open tracer
 func (ot *OpenTracer) Start(ctx context.Context) error {
-	if err := ot.tracerCollection.AddTracer(openTraceName, ot.containerSelector); err != nil {
-		return fmt.Errorf("adding open tracer: %w", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	openMountnsmap, err := ot.tracerCollection.TracerMountNsMap(openTraceName)
-	if err != nil {
-		return fmt.Errorf("getting open mountnsmap: %w", err)
-	}
-
-	tracerOpen, err := traceropen.NewTracer(
-		&traceropen.Config{MountnsMap: openMountnsmap, FullPath: true},
-		ot.containerCollection,
-		ot.openEventCallback,
+	ot.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		"ghcr.io/inspektor-gadget/gadget/trace_open:v0.40.0",
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			KubeManager,
+			//KubeNameResolver,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			ot.openEventOperator(),
+		),
+		gadgetcontext.WithName(openTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(ot.ociStore),
 	)
-	if err != nil {
-		return fmt.Errorf("creating open tracer: %w", err)
-	}
-
-	ot.tracer = tracerOpen
+	go func() {
+		err := ot.runtime.RunGadget(ot.gadgetCtx, nil, nil)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", ot.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
 // Stop gracefully stops the open tracer
 func (ot *OpenTracer) Stop() error {
-	if ot.tracer != nil {
-		ot.tracer.Stop()
+	if ot.gadgetCtx != nil {
+		ot.gadgetCtx.Cancel()
 	}
-
-	if err := ot.tracerCollection.RemoveTracer(openTraceName); err != nil {
-		return fmt.Errorf("removing open tracer: %w", err)
-	}
-
 	return nil
 }
 
 // GetName returns the unique name of the tracer
 func (ot *OpenTracer) GetName() string {
-	return "open_tracer"
+	return openTraceName
 }
 
 // GetEventType returns the event type this tracer produces
@@ -103,6 +105,42 @@ func (ot *OpenTracer) IsEnabled(cfg config.Config) bool {
 		return false
 	}
 	return cfg.EnableApplicationProfile || cfg.EnableRuntimeDetection
+}
+
+func (ot *OpenTracer) openEventOperator() operators.DataOperator {
+	return simple.New(string(utils.OpenEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				jsonFormatter, _ := igjson.New(d,
+					// Show all fields
+					igjson.WithShowAll(true),
+					// Print json in a pretty format
+					igjson.WithPretty(true, "  "),
+				)
+				pidF := d.GetField("proc.pid")
+				commF := d.GetField("proc.comm")
+				fnameF := d.GetField("fname")
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					// TODO add more fields
+					processID, _ := pidF.Uint32(data)
+					comm, _ := commF.String(data)
+					fname, _ := fnameF.String(data)
+					event := &traceropentype.Event{
+						Pid:      processID,
+						Comm:     comm,
+						FullPath: fname,
+					}
+					logger.L().Info("Matthias - event received", helpers.String("data", string(jsonFormatter.Marshal(data))))
+					ot.openEventCallback(event)
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
+	)
 }
 
 // openEventCallback handles open events from the tracer

@@ -1,8 +1,14 @@
 package tracers
 
 import (
+	"context"
+
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	_ "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubemanager"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubenameresolver"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/go-logger"
@@ -13,6 +19,14 @@ import (
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
+)
+
+const opPriority = 50000
+
+var (
+	KubeManager      = &kubemanager.KubeManager{}
+	KubeNameResolver = &kubenameresolver.KubeNameResolver{}
 )
 
 // EventQueueInterface defines the interface for adding events to the queue
@@ -22,17 +36,19 @@ type EventQueueInterface interface {
 
 // TracerFactory manages the creation and configuration of all tracers
 type TracerFactory struct {
-	containerCollection     *containercollection.ContainerCollection
-	tracerCollection        *tracercollection.TracerCollection
-	containerSelector       containercollection.ContainerSelector
-	orderedEventQueue       EventQueueInterface
-	socketEnricher          *socketenricher.SocketEnricher
-	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
-	ruleManager             rulemanager.RuleManagerClient
-	thirdPartyTracersInit   mapset.Set[containerwatcher.CustomTracerInitializer]
-	thirdPartyEnricher      containerwatcher.TaskBasedEnricher
 	cfg                     config.Config
+	containerCollection     *containercollection.ContainerCollection
+	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
+	containerSelector       containercollection.ContainerSelector
+	ociStore                *orasoci.ReadOnlyStore
+	orderedEventQueue       EventQueueInterface
 	processTreeManager      processtree.ProcessTreeManager
+	ruleManager             rulemanager.RuleManagerClient
+	runtime                 runtime.Runtime
+	socketEnricher          *socketenricher.SocketEnricher
+	thirdPartyEnricher      containerwatcher.TaskBasedEnricher
+	thirdPartyTracersInit   mapset.Set[containerwatcher.CustomTracerInitializer]
+	tracerCollection        *tracercollection.TracerCollection
 }
 
 // NewTracerFactory creates a new tracer factory
@@ -48,19 +64,26 @@ func NewTracerFactory(
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 	cfg config.Config,
 	processTreeManager processtree.ProcessTreeManager,
+	runtime runtime.Runtime,
 ) *TracerFactory {
+	ociStore, err := orasoci.NewFromTar(context.Background(), "tracers.tar")
+	if err != nil {
+		logger.L().Fatal("getting oci store from tarball", helpers.Error(err))
+	}
 	return &TracerFactory{
-		containerCollection:     containerCollection,
-		tracerCollection:        tracerCollection,
-		containerSelector:       containerSelector,
-		orderedEventQueue:       orderedEventQueue,
-		socketEnricher:          socketEnricher,
-		containerProfileManager: containerProfileManager,
-		ruleManager:             ruleManager,
-		thirdPartyTracersInit:   thirdPartyTracers,
-		thirdPartyEnricher:      thirdPartyEnricher,
 		cfg:                     cfg,
+		containerCollection:     containerCollection,
+		containerProfileManager: containerProfileManager,
+		containerSelector:       containerSelector,
+		ociStore:                ociStore,
+		orderedEventQueue:       orderedEventQueue,
 		processTreeManager:      processTreeManager,
+		ruleManager:             ruleManager,
+		runtime:                 runtime,
+		socketEnricher:          socketEnricher,
+		thirdPartyEnricher:      thirdPartyEnricher,
+		thirdPartyTracersInit:   thirdPartyTracers,
+		tracerCollection:        tracerCollection,
 	}
 }
 
@@ -112,8 +135,8 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 
 	// Create open tracer
 	openTracer := NewOpenTracer(
-		tf.containerCollection,
-		tf.tracerCollection,
+		tf.runtime,
+		tf.ociStore,
 		tf.containerSelector,
 		tf.createEventCallback(utils.OpenEventType),
 		tf.thirdPartyEnricher,

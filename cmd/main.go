@@ -16,9 +16,9 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
 	"github.com/grafana/pyroscope-go"
-
 	igconfig "github.com/inspektor-gadget/inspektor-gadget/pkg/config"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgettracermanager"
 	beUtils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -29,6 +29,7 @@ import (
 	containerprofilemanagerv1 "github.com/kubescape/node-agent/pkg/containerprofilemanager/v1"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	containerwatcherv2 "github.com/kubescape/node-agent/pkg/containerwatcher/v2"
+	"github.com/kubescape/node-agent/pkg/containerwatcher/v2/tracers"
 	"github.com/kubescape/node-agent/pkg/dnsmanager"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/healthmanager"
@@ -46,7 +47,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/objectcache/k8scache"
 	"github.com/kubescape/node-agent/pkg/objectcache/networkneighborhoodcache"
 	objectcachev1 "github.com/kubescape/node-agent/pkg/objectcache/v1"
-	processtree "github.com/kubescape/node-agent/pkg/processtree"
+	"github.com/kubescape/node-agent/pkg/processtree"
 	containerprocesstree "github.com/kubescape/node-agent/pkg/processtree/container"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/creator"
 	rulebinding "github.com/kubescape/node-agent/pkg/rulebindingmanager"
@@ -371,6 +372,16 @@ func main() {
 		logger.L().Ctx(ctx).Fatal("error creating the container watcher", helpers.Error(err))
 	}
 	healthManager.SetContainerWatcher(mainHandler)
+
+	tracerManager, err := gadgettracermanager.NewServer(&gadgettracermanager.Conf{
+		NodeName:            "node",
+		HookMode:            "hookMode",
+		FallbackPodInformer: false,
+	})
+	if err != nil {
+		logger.L().Fatal("failed to create Gadget Tracer Manager server", helpers.Error(err))
+	}
+	tracers.KubeManager.SetGadgetTracerMgr(tracerManager)
 
 	// Start the profileManager
 	profileManager.Start(ctx)
