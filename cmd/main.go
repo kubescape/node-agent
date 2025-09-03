@@ -293,7 +293,7 @@ func main() {
 		}
 
 	} else {
-		// ruleManager = rulemanager.CreateRuleManagerMock() TODO: add mock
+		ruleManager = rulemanager.CreateRuleManagerMock()
 		apc := &objectcache.ApplicationProfileCacheMock{}
 		nnc := &objectcache.NetworkNeighborhoodCacheMock{}
 		dc := &objectcache.DnsCacheMock{}
