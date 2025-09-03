@@ -31,13 +31,16 @@ func (c *HTTPAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 		"direction":  httpEvent.Direction,
 	}
 	baseRuntimeAlert.Identifiers = &common.Identifiers{
-		Process: &common.ProcessEntity{
-			Name: "http_process",
-		},
 		Network: &common.NetworkEntity{
 			DstIP:    httpEvent.OtherIp,
 			DstPort:  int(httpEvent.OtherPort),
 			Protocol: "http",
+		},
+		Http: &common.HttpEntity{
+			Method:    httpEvent.Request.Method,
+			Domain:    httpEvent.Request.Host,
+			UserAgent: httpEvent.Request.UserAgent(),
+			Endpoint:  httpEvent.Request.URL.Path,
 		},
 	}
 	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
