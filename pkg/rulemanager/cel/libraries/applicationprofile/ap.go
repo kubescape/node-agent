@@ -160,6 +160,81 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
+		"ap.was_endpoint_accessed": {
+			cel.Overload(
+				"ap_was_endpoint_accessed", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 2 {
+						return types.NewErr("expected 2 arguments, got %d", len(values))
+					}
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasEndpointAccessed(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed")
+					return cachedFunc(values[0], values[1])
+				}),
+			),
+		},
+		"ap.was_endpoint_accessed_with_method": {
+			cel.Overload(
+				"ap_was_endpoint_accessed_with_method", []*cel.Type{cel.StringType, cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 3 {
+						return types.NewErr("expected 3 arguments, got %d", len(values))
+					}
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasEndpointAccessedWithMethod(args[0], args[1], args[2])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_method")
+					return cachedFunc(values[0], values[1], values[2])
+				}),
+			),
+		},
+		"ap.was_endpoint_accessed_with_methods": {
+			cel.Overload(
+				"ap_was_endpoint_accessed_with_methods", []*cel.Type{cel.StringType, cel.StringType, cel.ListType(cel.StringType)}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 3 {
+						return types.NewErr("expected 3 arguments, got %d", len(values))
+					}
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasEndpointAccessedWithMethods(args[0], args[1], args[2])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_methods")
+					return cachedFunc(values[0], values[1], values[2])
+				}),
+			),
+		},
+		"ap.was_endpoint_accessed_with_prefix": {
+			cel.Overload(
+				"ap_was_endpoint_accessed_with_prefix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 2 {
+						return types.NewErr("expected 2 arguments, got %d", len(values))
+					}
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasEndpointAccessedWithPrefix(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_prefix")
+					return cachedFunc(values[0], values[1])
+				}),
+			),
+		},
+		"ap.was_endpoint_accessed_with_suffix": {
+			cel.Overload(
+				"ap_was_endpoint_accessed_with_suffix", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 2 {
+						return types.NewErr("expected 2 arguments, got %d", len(values))
+					}
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasEndpointAccessedWithSuffix(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_endpoint_accessed_with_suffix")
+					return cachedFunc(values[0], values[1])
+				}),
+			),
+		},
 	}
 }
 
@@ -209,6 +284,36 @@ func (e *apCostEstimator) EstimateCallCost(function, overloadID string, target *
 	case "ap.was_capability_used":
 		// Cache lookup + O(n) slice.Contains search through capabilities
 		cost = 12
+	case "ap.was_endpoint_accessed":
+		// Cache lookup + O(n) linear search through endpoints + dynamic path comparison
+		cost = 25
+	case "ap.was_endpoint_accessed_with_method":
+		// Cache lookup + O(n) search + dynamic path comparison + O(m) method check
+		cost = 30
+	case "ap.was_endpoint_accessed_with_methods":
+		// Cache lookup + O(n) search + dynamic path comparison + O(m*k) method comparison
+		cost = 35
+	case "ap.was_endpoint_accessed_with_prefix":
+		// Cache lookup + O(n) linear search + O(n*len(prefix)) string prefix checks
+		cost = 20
+	case "ap.was_endpoint_accessed_with_suffix":
+		// Cache lookup + O(n) linear search + O(n*len(suffix)) string suffix checks
+		cost = 20
+	case "ap.was_internal_endpoint_accessed":
+		// Cache lookup + O(n) linear search through endpoints checking internal flag
+		cost = 15
+	case "ap.was_external_endpoint_accessed":
+		// Cache lookup + O(n) linear search through endpoints checking internal flag
+		cost = 15
+	case "ap.was_endpoint_accessed_with_direction":
+		// Cache lookup + O(n) linear search through endpoints + string comparison
+		cost = 18
+	case "ap.was_endpoint_accessed_with_header":
+		// Cache lookup + O(n) search + JSON unmarshal + header map lookup
+		cost = 40
+	case "ap.was_endpoint_accessed_with_header_value":
+		// Cache lookup + O(n) search + JSON unmarshal + header map lookup + slice.Contains
+		cost = 45
 	default:
 		// This estimator doesn't know about other functions.
 		return nil

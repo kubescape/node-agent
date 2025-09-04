@@ -172,12 +172,3 @@ func (r *RuleCreatorImpl) HasRule(id string) bool {
 	}
 	return false
 }
-
-func containsEventType(eventTypes []utils.EventType, eventType utils.EventType) bool {
-	for _, et := range eventTypes {
-		if et == eventType {
-			return true
-		}
-	}
-	return false
-}
