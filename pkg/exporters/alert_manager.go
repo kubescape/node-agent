@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
@@ -15,7 +16,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
-	"github.com/kubescape/node-agent/pkg/ruleengine"
+	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/prometheus/alertmanager/api/v2/client"
 	"github.com/prometheus/alertmanager/api/v2/client/alert"
@@ -46,7 +47,7 @@ func InitAlertManagerExporter(alertManagerURL string) *AlertManagerExporter {
 	}
 }
 
-func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure) {
+func (ame *AlertManagerExporter) SendRuleAlert(failedRule types.RuleFailure) {
 	profileMetadata := failedRule.GetBaseRuntimeAlert().ProfileMetadata
 	failOnProfile := false
 	completedStatus := ""
@@ -98,9 +99,9 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule ruleengine.RuleFailure
 				"container_name":    failedRule.GetRuntimeAlertK8sDetails().ContainerName,
 				"namespace":         failedRule.GetRuntimeAlertK8sDetails().Namespace,
 				"pod_name":          failedRule.GetRuntimeAlertK8sDetails().PodName,
-				"severity":          PriorityToStatus(failedRule.GetBaseRuntimeAlert().Severity),
 				"host":              ame.Host,
 				"node_name":         ame.NodeName,
+				"severity":          strconv.Itoa(failedRule.GetBaseRuntimeAlert().Severity),
 				"pid":               fmt.Sprintf("%d", process.PID),
 				"ppid":              fmt.Sprintf("%d", process.PPID),
 				"pcomm":             process.Pcomm,

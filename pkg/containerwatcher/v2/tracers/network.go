@@ -29,7 +29,7 @@ type NetworkTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *tracernetwork.Tracer
 	socketEnricher      *socketenricher.SocketEnricher
 	kubeIPInstance      operators.OperatorInstance
@@ -41,7 +41,7 @@ func NewNetworkTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 	socketEnricher *socketenricher.SocketEnricher,
 ) *NetworkTracer {
 	return &NetworkTracer{

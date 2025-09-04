@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goradd/maps"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
@@ -21,16 +23,20 @@ type ContainerWatcher interface {
 	GetContainerCollection() *containercollection.ContainerCollection
 	GetSocketEnricher() *socketenricher.SocketEnricher
 	GetContainerSelector() *containercollection.ContainerSelector
-	RegisterCustomTracer(tracer CustomTracer) error
-	UnregisterCustomTracer(tracer CustomTracer) error
 	RegisterContainerReceiver(receiver ContainerReceiver)
 	UnregisterContainerReceiver(receiver ContainerReceiver)
 }
 
-type CustomTracer interface {
-	Start() error
-	Stop() error
-	Name() string
+type CustomTracerInitializer interface {
+	NewTracer(containerCollection *containercollection.ContainerCollection,
+		tracerCollection *tracercollection.TracerCollection,
+		containerSelector containercollection.ContainerSelector,
+		eventCallback ResultCallback,
+		thirdPartyEnricher TaskBasedEnricher,
+	) (TracerInterface, error)
+}
+
+type GenericEventReceiver interface { // TODO: either EventReceiver or EnrichedEventReceiver
 }
 
 type EventReceiver interface {
@@ -52,4 +58,9 @@ type TaskBasedEnricher interface {
 type OrderedEventQueueConfig struct {
 	Size            int           `mapstructure:"size"`
 	CollectionDelay time.Duration `mapstructure:"collectionDelay"`
+}
+
+type ThirdPartyTracers struct {
+	ThirdPartyTracersInitializers mapset.Set[CustomTracerInitializer]
+	ThirdPartyEventReceivers      *maps.SafeMap[utils.EventType, mapset.Set[GenericEventReceiver]] // TODO: either EventReceiver or EnrichedEventReceiver
 }

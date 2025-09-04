@@ -23,7 +23,7 @@ type CapabilitiesTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *tracercapabilities.Tracer
 }
 
@@ -32,7 +32,7 @@ func NewCapabilitiesTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 ) *CapabilitiesTracer {
 	return &CapabilitiesTracer{
 		containerCollection: containerCollection,
