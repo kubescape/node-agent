@@ -1,6 +1,7 @@
 package applicationprofile
 
 import (
+	"net/url"
 	"slices"
 	"strings"
 
@@ -168,5 +169,39 @@ func (l *apLibrary) wasEndpointAccessedWithSuffix(containerID, suffix ref.Val) r
 		}
 	}
 
+	return types.Bool(false)
+}
+
+// wasHostAccessed checks if a specific host was accessed via HTTP endpoints or network connections
+func (l *apLibrary) wasHostAccessed(containerID, host ref.Val) ref.Val {
+	if l.objectCache == nil {
+		return types.NewErr("objectCache is nil")
+	}
+
+	containerIDStr, ok := containerID.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(containerID)
+	}
+	hostStr, ok := host.Value().(string)
+	if !ok {
+		return types.MaybeNoSuchOverloadErr(host)
+	}
+
+	// Check HTTP endpoints for host access
+	container, err := profilehelper.GetContainerApplicationProfile(l.objectCache, containerIDStr)
+	if err == nil {
+		for _, ep := range container.Endpoints {
+			// Parse the endpoint URL to extract host
+			if parsedURL, err := url.Parse(ep.Endpoint); err == nil && parsedURL.Host != "" {
+				if parsedURL.Host == hostStr || parsedURL.Hostname() == hostStr {
+					return types.Bool(true)
+				}
+			}
+			// Also check if the endpoint contains the host as a substring (for cases where it's not a full URL)
+			if strings.Contains(ep.Endpoint, hostStr) {
+				return types.Bool(true)
+			}
+		}
+	}
 	return types.Bool(false)
 }

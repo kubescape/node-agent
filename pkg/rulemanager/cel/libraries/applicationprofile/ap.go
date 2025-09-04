@@ -235,6 +235,21 @@ func (l *apLibrary) Declarations() map[string][]cel.FunctionOpt {
 				}),
 			),
 		},
+		"ap.was_host_accessed": {
+			cel.Overload(
+				"ap_was_host_accessed", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					if len(values) != 2 {
+						return types.NewErr("expected 2 arguments, got %d", len(values))
+					}
+					wrapperFunc := func(args ...ref.Val) ref.Val {
+						return l.wasHostAccessed(args[0], args[1])
+					}
+					cachedFunc := l.functionCache.WithCache(wrapperFunc, "ap.was_host_accessed")
+					return cachedFunc(values[0], values[1])
+				}),
+			),
+		},
 	}
 }
 
@@ -299,6 +314,9 @@ func (e *apCostEstimator) EstimateCallCost(function, overloadID string, target *
 	case "ap.was_endpoint_accessed_with_suffix":
 		// Cache lookup + O(n) linear search + O(n*len(suffix)) string suffix checks
 		cost = 20
+	case "ap.was_host_accessed":
+		// Cache lookup + O(n) endpoint search + URL parsing + O(m) network neighbor search
+		cost = 35
 	case "ap.was_internal_endpoint_accessed":
 		// Cache lookup + O(n) linear search through endpoints checking internal flag
 		cost = 15
