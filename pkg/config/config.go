@@ -83,7 +83,6 @@ type Config struct {
 	DSymlink                       bool                                     `mapstructure:"dSymlink"`
 	DTop                           bool                                     `mapstructure:"dTop"`
 	FIM                            FIMConfig                                `mapstructure:"fim"`
-	EnableContainerFanotifyEbpf    bool                                     `mapstructure:"enableContainerFanotifyEbpf"`
 }
 
 // FIMConfig defines the configuration for File Integrity Monitoring
@@ -159,8 +158,6 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("workerChannelSize", 750000)
 	viper.SetDefault("blockEvents", false)
 	viper.SetDefault("dnsCacheSize", 50000)
-	viper.SetDefault("enableContainerFanotifyEbpf", false)
-
 	// FIM defaults
 	viper.SetDefault("fim::backendConfig::backendType", "fanotify") // This will be parsed as a string and converted to FimBackendType
 	viper.SetDefault("fim::batchConfig::maxBatchSize", 1000)
@@ -176,7 +173,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("fim::periodicConfig::followSymlinks", false)
 	viper.SetDefault("fim::exporters::stdoutExporter", false)
 
-	viper.AutomaticEnv()
+  viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()
 	if err != nil {

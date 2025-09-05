@@ -100,7 +100,6 @@ func TestLoadConfig(t *testing.T) {
 							OnRename: true,
 							OnChmod:  true,
 							OnMove:   true,
-						},
 						{
 							Path:     "/usr/bin",
 							OnCreate: true,

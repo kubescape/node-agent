@@ -162,8 +162,11 @@ func toLayers(ds []imagedigest.Digest, ms []string) ([]source.LayerMetadata, int
 	layers := make([]source.LayerMetadata, len(ds))
 	msLen := len(ms)
 	for i, d := range ds {
-		s := diskUsage(ms[msLen-i-1])
-		totalSize += s
+		var s int64
+		if msLen > i {
+			s = diskUsage(ms[msLen-i-1])
+			totalSize += s
+		}
 		layers[i] = source.LayerMetadata{
 			MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
 			Digest:    d.String(),
