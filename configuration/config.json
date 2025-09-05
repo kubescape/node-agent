@@ -1,25 +1,99 @@
-{
-  "applicationProfileServiceEnabled": true,
-  "malwareDetectionEnabled": true,
-  "fullPathTracingEnabled": true,
-  "networkServiceEnabled": true,
-  "relevantCVEServiceEnabled": true,
-  "maxSniffingTimePerContainer": "6h",
-  "updateDataPeriod": "1m",
-  "initialDelay": "2m",
-  "prometheusExporterEnabled": "true",
-  "runtimeDetectionEnabled": "true",
-  "nodeProfileServiceEnabled": "true",
-  "httpDetectionEnabled": "true",
-  "nodeProfileInterval": "1m",
-  "seccompServiceEnabled": "true",
-  "enableEmbeddedSBOMs": "false",
-  "exporters": {
-    "syslogExporterURL": "http://syslog.kubescape.svc.cluster.local:514",
-    "stdoutExporter": "false",
-    "alertManagerExporterUrls": ["http://alertmanager.kubescape.svc.cluster.local:9093", "http://alertmanager.kubescape.svc.cluster.local:9095"],
-    "CsvRuleExporterPath": "/rules",
-    "CsvMalwareExporterPath": "/malware",
-    "httpExporterConfig": {"url":"http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io"}
-  }
-}
+    {
+      "applicationProfileServiceEnabled": true,
+      "malwareDetectionEnabled": false,
+      "fullPathTracingEnabled": false,
+      "networkServiceEnabled": false,
+      "relevantCVEServiceEnabled": false,
+      "maxSniffingTimePerContainer": "6h",
+      "updateDataPeriod": "1m",
+      "initialDelay": "2m",
+      "prometheusExporterEnabled": "false",
+      "runtimeDetectionEnabled": "false",
+      "nodeProfileServiceEnabled": "false",
+      "httpDetectionEnabled": "false",
+      "nodeProfileInterval": "1m",
+      "seccompServiceEnabled": "false",
+      "enableEmbeddedSBOMs": "false",
+      "fimEnabled": true,
+      "exporters": {
+        "syslogExporterURL": "http://syslog.kubescape.svc.cluster.local:514",
+        "stdoutExporter": "false",
+        "alertManagerExporterUrls": [
+          "http://alertmanager.kubescape.svc.cluster.local:9093",
+          "http://alertmanager.kubescape.svc.cluster.local:9095"
+        ],
+        "CsvRuleExporterPath": "/rules",
+        "CsvMalwareExporterPath": "/malware",
+        "httpExporterConfig": {
+          "url": "http://synchronizer.kubescape.svc.cluster.local:8089/apis/v1/kubescape.io"
+        }
+      },
+      "fim": {
+        "backendConfig": {
+          "backendType": "periodic"
+        },
+        "periodicConfig": {
+          "scanInterval": "30s",
+          "maxSnapshotNodes": 100000,
+          "excludePatterns": [
+            "*.tmp",
+            "*.log",
+            "*.cache",
+            "/proc/*",
+            "/sys/*",
+            "/dev/*",
+            "/run/*"
+          ]
+        },
+        "directories": [
+          {
+            "path": "/etc",
+            "onCreate": true,
+            "onChange": true,
+            "onRemove": true,
+            "onRename": true,
+            "onChmod": true,
+            "onMove": true
+          },
+          {
+            "path": "/usr/bin",
+            "onCreate": true,
+            "onChange": true,
+            "onRemove": true,
+            "onRename": true,
+            "onChmod": true,
+            "onMove": true
+          },
+          {
+            "path": "/usr/sbin",
+            "onCreate": true,
+            "onChange": true,
+            "onRemove": true,
+            "onRename": true,
+            "onChmod": true,
+            "onMove": true
+          },
+          {
+            "path": "/boot",
+            "onCreate": true,
+            "onChange": true,
+            "onRemove": true,
+            "onRename": true,
+            "onChmod": true,
+            "onMove": true
+          }
+        ],
+        "batchConfig": {
+          "maxBatchSize": 1000,
+          "batchTimeout": "1m"
+        },
+        "dedupConfig": {
+          "dedupEnabled": true,
+          "dedupTimeWindow": "5m",
+          "maxCacheSize": 10000
+        },
+        "exporters": {
+          "stdoutExporter": true
+        }
+      }
+    }
