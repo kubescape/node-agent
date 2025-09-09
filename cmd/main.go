@@ -380,8 +380,18 @@ func main() {
 	// Wait for shutdown signal
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
-	<-shutdown
+	sig := <-shutdown
 
 	// Exit with success
-	os.Exit(utils.ExitCodeSuccess)
+	switch sig {
+	case os.Interrupt:
+		logger.L().Info("Received interrupt signal")
+		os.Exit(utils.ExitCodeSuccess)
+	case syscall.SIGTERM:
+		logger.L().Info("Received SIGTERM signal")
+		os.Exit(utils.ExitCodeSuccess)
+	default:
+		logger.L().Info("Received unknown signal")
+		os.Exit(utils.ExitCodeError)
+	}
 }
