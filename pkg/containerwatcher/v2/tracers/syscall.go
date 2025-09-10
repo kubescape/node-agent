@@ -66,14 +66,11 @@ func (st *SyscallTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (st *SyscallTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		if config.DSeccomp {
-			return false
-		}
-		return config.EnableRuntimeDetection || config.EnableSeccomp
+func (st *SyscallTracer) IsEnabled(cfg config.Config) bool {
+	if cfg.DSeccomp {
+		return false
 	}
-	return false
+	return cfg.EnableRuntimeDetection || cfg.EnableSeccomp
 }
 
 // Peek provides the peek function for other components

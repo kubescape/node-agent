@@ -91,14 +91,11 @@ func (ft *ForkTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (ft *ForkTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		if config.DFork {
-			return false
-		}
-		return config.EnableApplicationProfile || config.EnableRuntimeDetection
+func (ft *ForkTracer) IsEnabled(cfg config.Config) bool {
+	if cfg.DFork {
+		return false
 	}
-	return false
+	return cfg.EnableApplicationProfile || cfg.EnableRuntimeDetection
 }
 
 // forkEventCallback handles fork events from the tracer

@@ -91,11 +91,8 @@ func (pt *PtraceTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (pt *PtraceTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return !config.DPtrace && config.EnableRuntimeDetection
-	}
-	return false
+func (pt *PtraceTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DPtrace && cfg.EnableRuntimeDetection
 }
 
 // ptraceEventCallback handles ptrace events from the tracer

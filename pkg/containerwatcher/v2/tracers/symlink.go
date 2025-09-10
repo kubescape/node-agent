@@ -97,11 +97,8 @@ func (st *SymlinkTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (st *SymlinkTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return !config.DSymlink && config.EnableRuntimeDetection
-	}
-	return false
+func (st *SymlinkTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DSymlink && cfg.EnableRuntimeDetection
 }
 
 // symlinkEventCallback handles symlink events from the tracer

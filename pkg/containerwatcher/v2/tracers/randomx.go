@@ -100,11 +100,8 @@ func (rt *RandomXTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (rt *RandomXTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return !config.DRandomx && config.EnableRuntimeDetection && runtime.GOARCH == "amd64"
-	}
-	return false
+func (rt *RandomXTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DRandomx && cfg.EnableRuntimeDetection && runtime.GOARCH == "amd64"
 }
 
 // randomxEventCallback handles RandomX events from the tracer
