@@ -97,15 +97,12 @@ func (ot *OpenTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (ot *OpenTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		ot.cfg = config
-		if config.DOpen {
-			return false
-		}
-		return config.EnableApplicationProfile || config.EnableRuntimeDetection
+func (ot *OpenTracer) IsEnabled(cfg config.Config) bool {
+	ot.cfg = cfg
+	if cfg.DOpen {
+		return false
 	}
-	return false
+	return cfg.EnableApplicationProfile || cfg.EnableRuntimeDetection
 }
 
 // openEventCallback handles open events from the tracer

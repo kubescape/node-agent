@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/exporters"
 	processtreecreator "github.com/kubescape/node-agent/pkg/processtree/config"
 	"github.com/kubescape/node-agent/pkg/rulemanager/cel/libraries/cache"
@@ -77,7 +76,7 @@ func TestLoadConfig(t *testing.T) {
 					OnProfileFailure:   true,
 					MaxSize:            10000,
 				},
-				OrderedEventQueue: containerwatcher.OrderedEventQueueConfig{
+				OrderedEventQueue: OrderedEventQueueConfig{
 					Size:            100000,
 					CollectionDelay: 50 * time.Millisecond,
 				},

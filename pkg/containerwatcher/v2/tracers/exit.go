@@ -91,14 +91,11 @@ func (et *ExitTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (et *ExitTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		if config.DExit {
-			return false
-		}
-		return config.EnableRuntimeDetection || config.EnableApplicationProfile
+func (et *ExitTracer) IsEnabled(cfg config.Config) bool {
+	if cfg.DExit {
+		return false
 	}
-	return false
+	return cfg.EnableRuntimeDetection || cfg.EnableApplicationProfile
 }
 
 // exitEventCallback handles exit events from the tracer

@@ -114,11 +114,8 @@ func (st *SSHTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (st *SSHTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return !config.DSsh && config.EnableRuntimeDetection
-	}
-	return false
+func (st *SSHTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DSsh && cfg.EnableRuntimeDetection
 }
 
 // sshEventCallback handles SSH events from the tracer

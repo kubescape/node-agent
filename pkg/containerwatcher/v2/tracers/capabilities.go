@@ -91,11 +91,8 @@ func (ct *CapabilitiesTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (ct *CapabilitiesTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return !config.DCapSys && config.EnableRuntimeDetection
-	}
-	return false
+func (ct *CapabilitiesTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DCapSys && cfg.EnableRuntimeDetection
 }
 
 // capabilitiesEventCallback handles capabilities events from the tracer

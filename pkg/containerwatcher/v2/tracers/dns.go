@@ -114,14 +114,11 @@ func (dt *DNSTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (dt *DNSTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		if config.DDns {
-			return false
-		}
-		return config.EnableNetworkTracing || config.EnableRuntimeDetection
+func (dt *DNSTracer) IsEnabled(cfg config.Config) bool {
+	if cfg.DDns {
+		return false
 	}
-	return false
+	return cfg.EnableNetworkTracing || cfg.EnableRuntimeDetection
 }
 
 // dnsEventCallback handles DNS events from the tracer

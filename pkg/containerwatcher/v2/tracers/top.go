@@ -89,11 +89,8 @@ func (tt *TopTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (tt *TopTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return !config.DTop && config.EnablePrometheusExporter
-	}
-	return false
+func (tt *TopTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DTop && cfg.EnablePrometheusExporter
 }
 
 // topEventCallback handles top events from the tracer
