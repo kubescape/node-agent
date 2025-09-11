@@ -3,6 +3,7 @@ package metricsmanager
 import (
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top"
 	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
@@ -19,6 +20,7 @@ const (
 	prometheusRuleIdLabel = "rule_id"
 	programTypeLabel      = "program_type"
 	programNameLabel      = "program_name"
+	eventTypeLabel        = "event_type"
 )
 
 var _ metricsmanager.MetricsManager = (*PrometheusMetric)(nil)
@@ -40,6 +42,7 @@ type PrometheusMetric struct {
 	ebpfIoUringCounter    prometheus.Counter
 	ruleCounter           *prometheus.CounterVec
 	alertCounter          *prometheus.CounterVec
+	ruleEvaluationTime    *prometheus.HistogramVec
 
 	// Program ID metrics
 	programRuntimeGauge       *prometheus.GaugeVec
@@ -127,6 +130,11 @@ func NewPrometheusMetric() *PrometheusMetric {
 			Name: "node_agent_alert_counter",
 			Help: "The total number of alerts sent by the engine",
 		}, []string{prometheusRuleIdLabel}),
+		ruleEvaluationTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "node_agent_rule_evaluation_time_seconds",
+			Help:    "Time taken to evaluate a rule by rule ID and event type",
+			Buckets: prometheus.ExponentialBuckets(0.001, 2, 10), // 1ms to 1024s
+		}, []string{prometheusRuleIdLabel, eventTypeLabel}),
 
 		// Program ID metrics
 		programRuntimeGauge: promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -205,6 +213,7 @@ func (p *PrometheusMetric) Destroy() {
 	prometheus.Unregister(p.ebpfFailedCounter)
 	prometheus.Unregister(p.ruleCounter)
 	prometheus.Unregister(p.alertCounter)
+	prometheus.Unregister(p.ruleEvaluationTime)
 	prometheus.Unregister(p.ebpfSymlinkCounter)
 	prometheus.Unregister(p.ebpfHardlinkCounter)
 	prometheus.Unregister(p.ebpfSSHCounter)
@@ -313,6 +322,14 @@ func (p *PrometheusMetric) ReportRuleProcessed(ruleID string) {
 
 func (p *PrometheusMetric) ReportRuleAlert(ruleID string) {
 	p.getCachedAlertCounter(ruleID).Inc()
+}
+
+func (p *PrometheusMetric) ReportRuleEvaluationTime(ruleID string, eventType utils.EventType, duration time.Duration) {
+	labels := prometheus.Labels{
+		prometheusRuleIdLabel: ruleID,
+		eventTypeLabel:        string(eventType),
+	}
+	p.ruleEvaluationTime.With(labels).Observe(duration.Seconds())
 }
 
 func (p *PrometheusMetric) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {

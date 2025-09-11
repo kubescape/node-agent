@@ -23,7 +23,7 @@ type CapabilitiesTracer struct {
 	containerCollection *containercollection.ContainerCollection
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
-	eventCallback       func(utils.K8sEvent, string, uint32)
+	eventCallback       containerwatcher.ResultCallback
 	tracer              *tracercapabilities.Tracer
 }
 
@@ -32,7 +32,7 @@ func NewCapabilitiesTracer(
 	containerCollection *containercollection.ContainerCollection,
 	tracerCollection *tracercollection.TracerCollection,
 	containerSelector containercollection.ContainerSelector,
-	eventCallback func(utils.K8sEvent, string, uint32),
+	eventCallback containerwatcher.ResultCallback,
 ) *CapabilitiesTracer {
 	return &CapabilitiesTracer{
 		containerCollection: containerCollection,
@@ -91,11 +91,8 @@ func (ct *CapabilitiesTracer) GetEventType() utils.EventType {
 }
 
 // IsEnabled checks if this tracer should be enabled based on configuration
-func (ct *CapabilitiesTracer) IsEnabled(cfg interface{}) bool {
-	if config, ok := cfg.(config.Config); ok {
-		return !config.DCapSys && config.EnableRuntimeDetection
-	}
-	return false
+func (ct *CapabilitiesTracer) IsEnabled(cfg config.Config) bool {
+	return !cfg.DCapSys && cfg.EnableRuntimeDetection
 }
 
 // capabilitiesEventCallback handles capabilities events from the tracer
