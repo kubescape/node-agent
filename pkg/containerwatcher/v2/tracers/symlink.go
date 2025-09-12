@@ -6,9 +6,6 @@ import (
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 
@@ -103,26 +100,26 @@ func (st *SymlinkTracer) IsEnabled(cfg config.Config) bool {
 
 // symlinkEventCallback handles symlink events from the tracer
 func (st *SymlinkTracer) symlinkEventCallback(event *tracersymlinktype.Event) {
-	if event.Type == types.DEBUG {
-		return
-	}
-
-	if isDroppedEvent(event.Type, event.Message) {
-		logger.L().Warning("symlink tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-		return
-	}
-
-	// Handle the event with syscall enrichment
-	st.handleEvent(event, []uint64{SYS_SYMLINK, SYS_SYMLINKAT})
+	//if event.Type == types.DEBUG {
+	//	return
+	//}
+	//
+	//if isDroppedEvent(event.Type, event.Message) {
+	//	logger.L().Warning("symlink tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
+	//	return
+	//}
+	//
+	//// Handle the event with syscall enrichment
+	//st.handleEvent(event, []uint64{SYS_SYMLINK, SYS_SYMLINKAT})
 }
 
 // handleEvent processes the event with syscall enrichment
 func (st *SymlinkTracer) handleEvent(event *tracersymlinktype.Event, syscalls []uint64) {
-	if st.eventCallback != nil {
-		// Extract container ID and process ID from the symlink event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
-
-		EnrichEvent(st.thirdPartyEnricher, event, syscalls, st.eventCallback, containerID, processID)
-	}
+	//if st.eventCallback != nil {
+	//	// Extract container ID and process ID from the symlink event
+	//	containerID := event.Runtime.ContainerID
+	//	processID := event.Pid
+	//
+	//	EnrichEvent(st.thirdPartyEnricher, event, syscalls, st.eventCallback, containerID, processID)
+	//}
 }
