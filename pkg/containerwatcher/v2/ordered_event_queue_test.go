@@ -99,7 +99,7 @@ func TestOrderedEventQueue_RealTimestampOrdering(t *testing.T) {
 	queue.AddEventDirect(utils.ExecveEventType, event2, "container3", 300) // second chronologically
 
 	// Pop all events and verify they come out in chronological order
-	var poppedEvents []eventEntry
+	var poppedEvents []EventEntry
 	for !queue.Empty() {
 		event, ok := queue.PopEvent()
 		require.True(t, ok)

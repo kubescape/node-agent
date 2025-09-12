@@ -374,5 +374,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.7.0 // indirect
 	zombiezen.com/go/sqlite v1.4.0 // indirect
 )
-
-replace github.com/mholt/archiver/v3 v3.5.1 => github.com/anchore/archiver/v3 v3.5.2

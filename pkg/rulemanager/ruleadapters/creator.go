@@ -11,7 +11,7 @@ import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/dustin/go-humanize"
 	"github.com/goradd/maps"
-	expirable "github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -185,7 +185,7 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 		hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", ruleFailure.GetRuntimeProcessDetails().ProcessTree.PID, path))
 	}
 
-	if err != nil {
+	if err != nil { // FIXME WTF it's always nil here
 		if ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path != "" {
 			hostPath = filepath.Join("/proc", fmt.Sprintf("/%d/root/%s", r.containerIdToPid.Get(ruleFailure.GetTriggerEvent().Runtime.ContainerID),
 				ruleFailure.GetRuntimeProcessDetails().ProcessTree.Path))
@@ -209,7 +209,7 @@ func (r *RuleFailureCreator) setBaseRuntimeAlert(ruleFailure *types.GenericRuleF
 		baseRuntimeAlert.Size = humanize.Bytes(uint64(size))
 	}
 
-	if size != 0 && size < maxFileSize && hostPath != "" {
+	if size != 0 && size < maxFileSize { //&& hostPath != "" {
 		if baseRuntimeAlert.MD5Hash == "" || baseRuntimeAlert.SHA1Hash == "" {
 			if cached, found := r.hashCache.Get(hostPath); found {
 				baseRuntimeAlert.MD5Hash = cached.MD5Hash

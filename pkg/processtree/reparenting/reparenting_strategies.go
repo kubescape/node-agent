@@ -60,10 +60,10 @@ func (rl *reparentingLogicImpl) GetStrategies() []ReparentingStrategy {
 	rl.mutex.RLock()
 	defer rl.mutex.RUnlock()
 
-	strategies := make([]ReparentingStrategy, len(rl.strategies))
-	copy(strategies, rl.strategies)
-	strategies = append(strategies, rl.firstStrategy)
-	return strategies
+	reparentingStrategies := make([]ReparentingStrategy, len(rl.strategies))
+	copy(reparentingStrategies, rl.strategies)
+	reparentingStrategies = append(reparentingStrategies, rl.firstStrategy)
+	return reparentingStrategies
 }
 
 func (rl *reparentingLogicImpl) getSelectedStrategy(exitingPID uint32, containerTree containerprocesstree.ContainerProcessTree, processMap *maps.SafeMap[uint32, *apitypes.Process]) ReparentingStrategy {

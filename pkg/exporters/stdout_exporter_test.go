@@ -96,7 +96,7 @@ func (m *MockFileHashResult) GetTriggerEvent() igtypes.Event {
 			},
 		},
 		Timestamp: igtypes.Time(time.Now().UnixNano()),
-		Type:      igtypes.EventType("testevent"),
+		Type:      "testevent",
 		Message:   "testmessage",
 	}
 }

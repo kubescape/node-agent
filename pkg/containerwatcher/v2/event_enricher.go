@@ -25,7 +25,7 @@ func NewEventEnricher(
 	}
 }
 
-func (ee *EventEnricher) EnrichEvents(entry eventEntry) *ebpfevents.EnrichedEvent {
+func (ee *EventEnricher) EnrichEvents(entry EventEntry) *ebpfevents.EnrichedEvent {
 	var processTree apitypes.Process
 
 	eventType := entry.EventType

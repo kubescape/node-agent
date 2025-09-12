@@ -25,6 +25,6 @@ func (e SyscallEvent) GetNamespace() string {
 }
 
 // GetTimestamp returns the event timestamp
-func (pe SyscallEvent) GetTimestamp() eventtypes.Time {
-	return pe.Timestamp
+func (e SyscallEvent) GetTimestamp() eventtypes.Time {
+	return e.Timestamp
 }

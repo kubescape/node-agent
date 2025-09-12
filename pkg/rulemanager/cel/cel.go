@@ -106,7 +106,7 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	if err != nil {
 		return nil, err
 	}
-	cel := &CEL{
+	c := &CEL{
 		env:          env,
 		objectCache:  objectCache,
 		programCache: make(map[string]cel.Program),
@@ -114,11 +114,11 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 		tp:           tp,
 	}
 
-	cel.evalContextPool.New = func() interface{} {
+	c.evalContextPool.New = func() interface{} {
 		return make(map[string]any, 1)
 	}
 
-	return cel, nil
+	return c, nil
 }
 
 func (c *CEL) registerExpression(expression string) error {

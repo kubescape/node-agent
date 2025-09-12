@@ -434,7 +434,7 @@ func (cw *ContainerWatcher) processQueueBatch() {
 
 }
 
-func (cw *ContainerWatcher) enrichAndProcess(entry eventEntry) {
+func (cw *ContainerWatcher) enrichAndProcess(entry EventEntry) {
 	enrichedEvent := cw.eventEnricher.EnrichEvents(entry)
 
 	select {

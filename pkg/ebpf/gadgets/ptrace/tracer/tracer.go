@@ -21,13 +21,6 @@ import (
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -strip /usr/bin/llvm-strip-18 -no-global-types -target bpfel -cc clang -cflags "-g -O2 -Wall -D __TARGET_ARCH_x86" -type event ptrace bpf/ptrace_detector.c -- -I./bpf/
-const (
-	EVENT_TYPE_CONNECT = iota
-	EVENT_TYPE_ACCEPT
-	EVENT_TYPE_REQUEST
-	EVENT_TYPE_RESPONSE
-	EVENT_TYPE_CLOSE
-)
 
 type Config struct {
 	MountnsMap *ebpf.Map

@@ -41,12 +41,12 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 				Ports: []v1beta1.NetworkPort{
 					{
 						Name:     "tcp-80",
-						Protocol: v1beta1.Protocol("TCP"),
+						Protocol: "TCP",
 						Port:     ptr.To(int32(80)),
 					},
 					{
 						Name:     "tcp-443",
-						Protocol: v1beta1.Protocol("TCP"),
+						Protocol: "TCP",
 						Port:     ptr.To(int32(443)),
 					},
 				},
@@ -57,7 +57,7 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 				Ports: []v1beta1.NetworkPort{
 					{
 						Name:     "tcp-5432",
-						Protocol: v1beta1.Protocol("TCP"),
+						Protocol: "TCP",
 						Port:     ptr.To(int32(5432)),
 					},
 				},
@@ -68,7 +68,7 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 				Ports: []v1beta1.NetworkPort{
 					{
 						Name:     "udp-53",
-						Protocol: v1beta1.Protocol("UDP"),
+						Protocol: "UDP",
 						Port:     ptr.To(int32(53)),
 					},
 				},
@@ -81,12 +81,12 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 				Ports: []v1beta1.NetworkPort{
 					{
 						Name:     "tcp-8080",
-						Protocol: v1beta1.Protocol("TCP"),
+						Protocol: "TCP",
 						Port:     ptr.To(int32(8080)),
 					},
 					{
 						Name:     "tcp-9090",
-						Protocol: v1beta1.Protocol("TCP"),
+						Protocol: "TCP",
 						Port:     ptr.To(int32(9090)),
 					},
 				},
@@ -97,7 +97,7 @@ func TestIntegrationWithAllNetworkFunctions(t *testing.T) {
 				Ports: []v1beta1.NetworkPort{
 					{
 						Name:     "tcp-3000",
-						Protocol: v1beta1.Protocol("TCP"),
+						Protocol: "TCP",
 						Port:     ptr.To(int32(3000)),
 					},
 				},

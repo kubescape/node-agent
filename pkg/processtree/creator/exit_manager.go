@@ -121,7 +121,7 @@ func (pt *processTreeCreatorImpl) forceCleanupOldest() {
 
 	logger.L().Debug("Exit: Force cleanup completed",
 		helpers.String("remaining_pending", fmt.Sprintf("%d", len(pt.pendingExits))),
-		helpers.Int("pids number", int(pt.processMap.Len())))
+		helpers.Int("pids number", pt.processMap.Len()))
 }
 
 func (pt *processTreeCreatorImpl) exitByPid(pid uint32) {
