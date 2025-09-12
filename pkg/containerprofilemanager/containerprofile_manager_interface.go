@@ -3,7 +3,6 @@ package containerprofilemanager
 import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
-	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
@@ -15,8 +14,8 @@ type ContainerProfileManagerClient interface {
 	ContainerCallback(notif containercollection.PubSubEvent)
 	RegisterPeekFunc(peek func(mntns uint64) ([]string, error))
 	ReportCapability(containerID, capability string)
-	ReportFileExec(containerID string, event events.ExecEvent)
-	ReportFileOpen(containerID string, event events.OpenEvent)
+	ReportFileExec(containerID string, event *utils.EnrichEvent)
+	ReportFileOpen(containerID string, event *utils.EnrichEvent)
 	ReportHTTPEvent(containerID string, event *tracerhttptype.Event)
 	ReportRulePolicy(containerID, ruleId, allowedProcess string, allowedContainer bool)
 	ReportIdentifiedCallStack(containerID string, callStack *v1beta1.IdentifiedCallStack)
@@ -29,5 +28,5 @@ type ContainerProfileManagerClient interface {
 }
 
 type Enricher interface {
-	EnrichEvent(containerID string, event utils.EnrichEvent, callID string)
+	EnrichEvent(containerID string, event *utils.EnrichEvent, callID string)
 }

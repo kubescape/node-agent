@@ -117,9 +117,9 @@ func (rt *RandomXTracer) randomxEventCallback(event *tracerandomxtype.Event) {
 
 	if rt.eventCallback != nil {
 		// Extract container ID and process ID from the RandomX event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
-
-		rt.eventCallback(event, containerID, processID)
+		//containerID := event.Runtime.ContainerID
+		//processID := event.Pid
+		//
+		//rt.eventCallback(event, containerID, processID)
 	}
 }

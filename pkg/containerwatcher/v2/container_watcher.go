@@ -9,6 +9,10 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
+	apihelpers "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api-helpers"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubemanager"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
 	"github.com/kubescape/go-logger"
@@ -87,6 +91,7 @@ type ContainerWatcher struct {
 	pool                 *workerpool.WorkerPool
 
 	// Lifecycle
+	gadgetRuntime                   runtime.Runtime
 	mutex                           sync.RWMutex
 	containerEolNotificationChannel chan *containercollection.Container
 
@@ -296,6 +301,19 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	// Start worker pool goroutine
 	go cw.workerPoolLoop()
 
+	cw.gadgetRuntime = local.New()
+	if err := cw.gadgetRuntime.Init(nil); err != nil {
+		logger.L().Fatal("runtime init", helpers.Error(err))
+	}
+
+	param := apihelpers.ToParamDescs(kubemanager.KubeManagerOperator.GlobalParams()).ToParams()
+	if err := param.Set(kubemanager.ParamHookMode, "fanotify+ebpf"); err != nil {
+		return fmt.Errorf("setting kube-manager hook mode: %w", err)
+	}
+	if err := kubemanager.KubeManagerOperator.Init(param); err != nil {
+		return fmt.Errorf("initializing kube-manager operator: %w", err)
+	}
+
 	// Create tracer factory
 	tracerFactory := tracers.NewTracerFactory(
 		cw.containerCollection,
@@ -309,6 +327,7 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 		cw.thirdPartyEnricher,
 		cw.cfg,
 		cw.processTreeManager,
+		cw.gadgetRuntime,
 	)
 
 	// Initialize tracer manager
@@ -341,6 +360,8 @@ func (cw *ContainerWatcher) Stop() {
 	if cw.tracerManagerV2 != nil {
 		cw.tracerManagerV2.StopAllTracers()
 	}
+
+	cw.gadgetRuntime.Close()
 
 	// Close worker channel to signal worker goroutine to stop
 	if cw.workerChan != nil {

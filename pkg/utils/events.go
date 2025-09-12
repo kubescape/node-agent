@@ -5,23 +5,114 @@ import (
 	"reflect"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 type K8sEvent interface {
-	GetPod() string
+	GetContainer() string
+	GetContainerID() string
+	GetContainerImage() string
+	GetContainerImageDigest() string
+	GetHostNetwork() bool
 	GetNamespace() string
+	GetPod() string
 	GetTimestamp() types.Time
 }
 
-type EnrichEvent interface {
-	GetBaseEvent() *types.Event
-	GetPID() uint64
-	SetExtra(extra interface{})
-	GetExtra() interface{}
-	GetPod() string
-	GetNamespace() string
-	GetTimestamp() types.Time
+type EnrichEvent struct {
+	Data       datasource.Data
+	Datasource datasource.DataSource
+	EventType  EventType
+	extra      interface{}
+}
+
+var _ K8sEvent = (*EnrichEvent)(nil)
+
+func (e *EnrichEvent) GetExtra() interface{} {
+	return e.extra
+}
+
+// TODO maybe cache FieldAccessors?
+
+func (e *EnrichEvent) GetComm() string {
+	comm, _ := e.Datasource.GetField("proc.comm").String(e.Data)
+	return comm
+}
+
+func (e *EnrichEvent) GetContainer() string {
+	containerName, _ := e.Datasource.GetField("k8s.containerName").String(e.Data)
+	return containerName
+}
+
+func (e *EnrichEvent) GetContainerID() string {
+	containerId, _ := e.Datasource.GetField("runtime.containerId").String(e.Data)
+	return containerId
+}
+
+func (e *EnrichEvent) GetContainerImage() string {
+	containerImageName, _ := e.Datasource.GetField("runtime.containerImageName").String(e.Data)
+	return containerImageName
+}
+
+func (e *EnrichEvent) GetContainerImageDigest() string {
+	containerImageDigest, _ := e.Datasource.GetField("runtime.containerImageDigest").String(e.Data)
+	return containerImageDigest
+}
+
+func (e *EnrichEvent) GetError() int64 {
+	err, _ := e.Datasource.GetField("error_raw").Int64(e.Data)
+	return err
+}
+
+// GetFlags decodes the open flags from the event, returns nil if not an open event
+func (e *EnrichEvent) GetFlags() []string {
+	if e.EventType != OpenEventType {
+		return nil
+	}
+	flags, _ := e.Datasource.GetField("flags_raw").Int32(e.Data)
+	return decodeFlags(flags)
+}
+
+func (e *EnrichEvent) GetGid() *uint32 {
+	gid, _ := e.Datasource.GetField("proc.gid").Uint32(e.Data)
+	return &gid
+}
+
+func (e *EnrichEvent) GetHostNetwork() bool {
+	hostnetwork, _ := e.Datasource.GetField("k8s.hostNetwork").Bool(e.Data)
+	return hostnetwork
+}
+
+func (e *EnrichEvent) GetNamespace() string {
+	namespace, _ := e.Datasource.GetField("k8s.namespace").String(e.Data)
+	return namespace
+}
+
+func (e *EnrichEvent) GetPath() string {
+	path, _ := e.Datasource.GetField("fname").String(e.Data)
+	return path
+}
+
+func (e *EnrichEvent) GetPid() uint32 {
+	pid, _ := e.Datasource.GetField("proc.pid").Uint32(e.Data)
+	return pid
+}
+
+func (e *EnrichEvent) GetPod() string {
+	podName, _ := e.Datasource.GetField("k8s.podName").String(e.Data)
+	return podName
+}
+
+func (e *EnrichEvent) GetTimestamp() types.Time {
+	timeStampRaw, _ := e.Datasource.GetField("timestamp_raw").Uint64(e.Data)
+	timeStamp := gadgets.WallTimeFromBootTime(timeStampRaw)
+	return timeStamp
+}
+
+func (e *EnrichEvent) GetUid() *uint32 {
+	uid, _ := e.Datasource.GetField("proc.uid").Uint32(e.Data)
+	return &uid
 }
 
 type EventType string

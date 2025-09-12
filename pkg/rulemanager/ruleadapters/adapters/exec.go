@@ -3,6 +3,7 @@ package adapters
 import (
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type ExecAdapter struct {
@@ -70,7 +71,7 @@ func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 	//failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func GetExecPathFromEvent(execEvent *events.ExecEvent) string {
+func GetExecPathFromEvent(execEvent *utils.EnrichEvent) string {
 	//if len(execEvent.Args) > 0 {
 	//	return execEvent.Args[0]
 	//}
@@ -78,7 +79,7 @@ func GetExecPathFromEvent(execEvent *events.ExecEvent) string {
 	return ""
 }
 
-func GetExecFullPathFromEvent(execEvent *events.ExecEvent) string {
+func GetExecFullPathFromEvent(execEvent *utils.EnrichEvent) string {
 	//if execEvent.ExePath != "" {
 	//	return execEvent.ExePath
 	//}

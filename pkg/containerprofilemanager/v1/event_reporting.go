@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -12,11 +13,12 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
 
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
@@ -37,7 +39,7 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 }
 
 // ReportFileExec reports a file execution event for a container
-func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event events.ExecEvent) {
+func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event *utils.EnrichEvent) {
 	//err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 	//	if data.execs == nil {
 	//		data.execs = &maps.SafeMap[string, []string]{}
@@ -62,40 +64,41 @@ func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event eve
 }
 
 // ReportFileOpen reports a file open event for a container
-func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event events.OpenEvent) {
-	//err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
-	//	if data.opens == nil {
-	//		data.opens = &maps.SafeMap[string, mapset.Set[string]]{}
-	//	}
+func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event *utils.EnrichEvent) {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+		if data.opens == nil {
+			data.opens = &maps.SafeMap[string, mapset.Set[string]]{}
+		}
 
-	// Deduplicate /proc/1234/* into /proc/.../*
-	//	path := event.Path
-	//	if strings.HasPrefix(path, "/proc/") {
-	//		path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
-	//	}
+		// Deduplicate /proc/1234/* into /proc/.../*
+		path := event.GetPath()
+		if strings.HasPrefix(path, "/proc/") {
+			path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
+		}
 
-	//	isSensitive := utils.IsSensitivePath(path, []string{})
-	//	if cpm.enricher != nil && isSensitive {
-	//		openIdentifier := utils.CalculateSHA256FileOpenHash(path)
-	//		go cpm.enricher.EnrichEvent(containerID, &event, openIdentifier)
-	//	}
+		isSensitive := utils.IsSensitivePath(path, []string{})
+		if cpm.enricher != nil && isSensitive {
+			openIdentifier := utils.CalculateSHA256FileOpenHash(path)
+			go cpm.enricher.EnrichEvent(containerID, event, openIdentifier)
+		}
 
-	// Check if we already have this open with these flags
-	//	if opens, ok := data.opens.Load(path); ok && opens.Contains(event.Flags...) {
-	//		return 0, nil
-	//	}
+		// Check if we already have this open with these flags
+		flags := event.GetFlags()
+		if opens, ok := data.opens.Load(path); ok && opens.Contains(flags...) {
+			return 0, nil
+		}
 
-	// Add to open map
-	//	if opens, ok := data.opens.Load(path); ok {
-	//		opens.Append(event.Flags...)
-	//	} else {
-	//		data.opens.Set(path, mapset.NewSet(event.Flags...))
-	//	}
+		// Add to open map
+		if opens, ok := data.opens.Load(path); ok {
+			opens.Append(flags...)
+		} else {
+			data.opens.Set(path, mapset.NewSet(flags...))
+		}
 
-	//	return size.Of(path) + size.Of(event.Flags), nil
-	//})
+		return size.Of(path) + size.Of(flags), nil
+	})
 
-	//cpm.logEventError(err, "file open", containerID)
+	cpm.logEventError(err, "file open", containerID)
 }
 
 // ReportSymlinkEvent reports a symlink creation event for a container

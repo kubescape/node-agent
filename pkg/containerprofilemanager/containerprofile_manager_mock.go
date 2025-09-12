@@ -3,10 +3,10 @@ package containerprofilemanager
 import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
-	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -31,11 +31,11 @@ func (a ContainerProfileManagerMock) ReportCapability(_, _ string) {
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportFileExec(_ string, _ events.ExecEvent) {
+func (a ContainerProfileManagerMock) ReportFileExec(containerID string, event *utils.EnrichEvent) {
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportFileOpen(_ string, _ events.OpenEvent) {
+func (a ContainerProfileManagerMock) ReportFileOpen(containerID string, event *utils.EnrichEvent) {
 	// noop
 }
 

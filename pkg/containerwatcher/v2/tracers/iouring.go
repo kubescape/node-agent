@@ -113,9 +113,9 @@ func (it *IoUringTracer) iouringEventCallback(event *traceriouringtype.Event) {
 
 	if it.eventCallback != nil {
 		// Extract container ID and process ID from the IoUring event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
-
-		it.eventCallback(event, containerID, processID)
+		//containerID := event.Runtime.ContainerID
+		//processID := event.Pid
+		//
+		//it.eventCallback(event, containerID, processID)
 	}
 }

@@ -130,7 +130,8 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule types.RuleFailure) {
 }
 
 func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
-	summary := fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s'", malwareResult.GetBasicRuntimeAlert().AlertName, malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(), malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(), malwareResult.GetMalwareRuntimeAlert().MalwareDescription)
+	malwareResult.GetTriggerEvent()
+	summary := fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s'", malwareResult.GetBasicRuntimeAlert().AlertName, malwareResult.GetTriggerEvent().GetNamespace(), malwareResult.GetTriggerEvent().GetPod(), malwareResult.GetMalwareRuntimeAlert().MalwareDescription)
 	myAlert := models.PostableAlert{
 		StartsAt: strfmt.DateTime(time.Now()),
 		EndsAt:   strfmt.DateTime(time.Now().Add(time.Hour)),
@@ -146,16 +147,16 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 			Labels: map[string]string{
 				"alertname":              "KubescapeMalwareDetected",
 				"malware_name":           malwareResult.GetBasicRuntimeAlert().AlertName,
-				"container_id":           malwareResult.GetTriggerEvent().Runtime.ContainerID,
-				"container_name":         malwareResult.GetTriggerEvent().GetBaseEvent().GetContainer(),
-				"namespace":              malwareResult.GetTriggerEvent().GetBaseEvent().GetNamespace(),
-				"pod_name":               malwareResult.GetTriggerEvent().GetBaseEvent().GetPod(),
+				"container_id":           malwareResult.GetTriggerEvent().GetContainerID(),
+				"container_name":         malwareResult.GetTriggerEvent().GetContainer(),
+				"namespace":              malwareResult.GetTriggerEvent().GetNamespace(),
+				"pod_name":               malwareResult.GetTriggerEvent().GetPod(),
 				"size":                   malwareResult.GetBasicRuntimeAlert().Size,
 				"md5hash":                malwareResult.GetBasicRuntimeAlert().MD5Hash,
 				"sha256hash":             malwareResult.GetBasicRuntimeAlert().SHA256Hash,
 				"sha1hash":               malwareResult.GetBasicRuntimeAlert().SHA1Hash,
-				"container_image":        malwareResult.GetTriggerEvent().Runtime.ContainerImageName,
-				"container_image_digest": malwareResult.GetTriggerEvent().Runtime.ContainerImageDigest,
+				"container_image":        malwareResult.GetTriggerEvent().GetContainerImage(),
+				"container_image_digest": malwareResult.GetTriggerEvent().GetContainerImageDigest(),
 				"severity":               "critical",
 				"host":                   ame.Host,
 				"node_name":              ame.NodeName,

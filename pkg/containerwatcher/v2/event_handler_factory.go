@@ -76,7 +76,7 @@ func NewEventHandlerFactory(
 
 	// Create adapters for managers that don't implement the Manager interface directly
 	containerProfileAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
-		//switch eventType {
+		switch eventType {
 		//case utils.CapabilitiesEventType:
 		//	if capEvent, ok := event.(*tracercapabilitiestype.Event); ok {
 		//		containerProfileManager.ReportCapability(capEvent.Runtime.ContainerID, capEvent.CapName)
@@ -85,30 +85,30 @@ func NewEventHandlerFactory(
 		//	if execEvent, ok := event.(*events.ExecEvent); ok {
 		//		containerProfileManager.ReportFileExec(execEvent.Runtime.ContainerID, *execEvent)
 		//	}
-		//case utils.OpenEventType:
-		//	if openEvent, ok := event.(*events.OpenEvent); ok {
-		//		containerProfileManager.ReportFileOpen(openEvent.Runtime.ContainerID, *openEvent)
-		//	}
-		//case utils.HTTPEventType:
-		//	if httpEvent, ok := event.(*tracerhttptype.Event); ok {
-		//		containerProfileManager.ReportHTTPEvent(httpEvent.Runtime.ContainerID, httpEvent)
-		//	}
-		//case utils.SymlinkEventType:
-		//	if symlinkEvent, ok := event.(*tracersymlinktype.Event); ok {
-		//		containerProfileManager.ReportSymlinkEvent(symlinkEvent.Runtime.ContainerID, symlinkEvent)
-		//	}
-		//case utils.HardlinkEventType:
-		//	if hardlinkEvent, ok := event.(*tracerhardlinktype.Event); ok {
-		//		containerProfileManager.ReportHardlinkEvent(hardlinkEvent.Runtime.ContainerID, hardlinkEvent)
-		//	}
-		//case utils.NetworkEventType:
-		//	if networkEvent, ok := event.(*tracernetworktype.Event); ok {
-		//		containerProfileManager.ReportNetworkEvent(networkEvent.Runtime.ContainerID, networkEvent)
-		//	}
-		//default:
-		// For event types that don't have specific handling, we might need to add them
-		// or handle them generically
-		//}
+		case utils.OpenEventType:
+			if openEvent, ok := event.(*utils.EnrichEvent); ok {
+				containerProfileManager.ReportFileOpen(openEvent.GetContainerID(), openEvent)
+			}
+			//case utils.HTTPEventType:
+			//	if httpEvent, ok := event.(*tracerhttptype.Event); ok {
+			//		containerProfileManager.ReportHTTPEvent(httpEvent.Runtime.ContainerID, httpEvent)
+			//	}
+			//case utils.SymlinkEventType:
+			//	if symlinkEvent, ok := event.(*tracersymlinktype.Event); ok {
+			//		containerProfileManager.ReportSymlinkEvent(symlinkEvent.Runtime.ContainerID, symlinkEvent)
+			//	}
+			//case utils.HardlinkEventType:
+			//	if hardlinkEvent, ok := event.(*tracerhardlinktype.Event); ok {
+			//		containerProfileManager.ReportHardlinkEvent(hardlinkEvent.Runtime.ContainerID, hardlinkEvent)
+			//	}
+			//case utils.NetworkEventType:
+			//	if networkEvent, ok := event.(*tracernetworktype.Event); ok {
+			//		containerProfileManager.ReportNetworkEvent(networkEvent.Runtime.ContainerID, networkEvent)
+			//	}
+			//default:
+			// For event types that don't have specific handling, we might need to add them
+			// or handle them generically
+		}
 	})
 
 	rulePolicyAdapter := NewManagerAdapter(func(eventType utils.EventType, event utils.K8sEvent) {
@@ -172,7 +172,6 @@ func (ehf *EventHandlerFactory) ProcessEvent(enrichedEvent *events.EnrichedEvent
 	// Get container information to check if it should be ignored
 	container, err := ehf.getContainerInfo(enrichedEvent.ContainerID)
 	if err != nil || container == nil {
-
 		return
 	}
 

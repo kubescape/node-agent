@@ -140,10 +140,10 @@ func (t *Tracer) run() {
 
 		// Check if we have seen enough events for this mntns
 		event := types.Event{
-			Event: eventtypes.Event{
-				Type:      eventtypes.NORMAL,
-				Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
-			},
+			//Event: eventtypes.Event{
+			//	Type:      eventtypes.NORMAL,
+			//	Timestamp: gadgets.WallTimeFromBootTime(bpfEvent.Timestamp),
+			//},
 			WithMountNsID: eventtypes.WithMountNsID{MountNsID: bpfEvent.MntnsId},
 			Pid:           bpfEvent.Pid,
 			Tid:           bpfEvent.Tid,

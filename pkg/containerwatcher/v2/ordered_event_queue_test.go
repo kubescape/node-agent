@@ -19,6 +19,33 @@ type MockEvent struct {
 	Namespace string
 }
 
+var _ utils.K8sEvent = (*MockEvent)(nil)
+
+func (m MockEvent) GetContainer() string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m MockEvent) GetContainerID() string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m MockEvent) GetContainerImage() string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m MockEvent) GetContainerImageDigest() string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m MockEvent) GetHostNetwork() bool {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (m MockEvent) GetTimestamp() types.Time {
 	return types.Time(m.Timestamp)
 }

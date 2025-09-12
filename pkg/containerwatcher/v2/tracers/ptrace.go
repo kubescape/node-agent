@@ -103,9 +103,9 @@ func (pt *PtraceTracer) ptraceEventCallback(event *tracerptracetype.Event) {
 
 	if pt.eventCallback != nil {
 		// Extract container ID and process ID from the ptrace event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
-
-		pt.eventCallback(event, containerID, processID)
+		//containerID := event.Runtime.ContainerID
+		//processID := event.Pid
+		//
+		//pt.eventCallback(event, containerID, processID)
 	}
 }

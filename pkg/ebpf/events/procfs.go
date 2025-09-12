@@ -2,6 +2,7 @@ package events
 
 import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 // ProcfsEvent represents a procfs event that can be processed by the ordered event queue
@@ -21,6 +22,28 @@ type ProcfsEvent struct {
 	ContainerID string          `json:"container_id"`
 	HostPID     int             `json:"host_pid"`
 	HostPPID    int             `json:"host_ppid"`
+}
+
+var _ utils.K8sEvent = (*ProcfsEvent)(nil)
+
+func (pe *ProcfsEvent) GetContainer() string {
+	return ""
+}
+
+func (pe *ProcfsEvent) GetContainerID() string {
+	return pe.ContainerID
+}
+
+func (pe *ProcfsEvent) GetContainerImage() string {
+	return ""
+}
+
+func (pe *ProcfsEvent) GetContainerImageDigest() string {
+	return ""
+}
+
+func (pe *ProcfsEvent) GetHostNetwork() bool {
+	return false
 }
 
 // GetType returns the event type

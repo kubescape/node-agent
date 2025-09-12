@@ -3,6 +3,7 @@ package types
 import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/columns"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type Event struct {
@@ -20,6 +21,28 @@ type Event struct {
 	ExitCode   uint32 `json:"exit_code,omitempty" column:"exit_code,template:exit_code"`
 	ExitSignal uint32 `json:"exit_signal,omitempty" column:"exit_signal,template:exit_signal"`
 	extra      interface{}
+}
+
+var _ utils.K8sEvent = (*Event)(nil)
+
+func (event *Event) GetContainerID() string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (event *Event) GetContainerImage() string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (event *Event) GetContainerImageDigest() string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (event *Event) GetHostNetwork() bool {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (event *Event) SetExtra(extra interface{}) {

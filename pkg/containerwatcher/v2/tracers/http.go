@@ -120,9 +120,9 @@ func (ht *HTTPTracer) httpEventCallback(event *tracerhttptype.Event) {
 
 	if ht.eventCallback != nil {
 		// Extract container ID and process ID from the HTTP event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
-
-		ht.eventCallback(event, containerID, processID)
+		//containerID := event.Runtime.ContainerID
+		//processID := event.Pid
+		//
+		//ht.eventCallback(event, containerID, processID)
 	}
 }

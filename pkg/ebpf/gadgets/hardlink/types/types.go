@@ -2,11 +2,13 @@ package types
 
 import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/columns"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 type Event struct {
-	eventtypes.Event
+	//eventtypes.Event
+	datasource.Data
 	eventtypes.WithMountNsID
 
 	Pid        uint32 `json:"pid,omitempty" column:"pid,template:pid"`
@@ -30,7 +32,7 @@ func GetColumns() *columns.Columns[Event] {
 
 func Base(ev eventtypes.Event) *Event {
 	return &Event{
-		Event: ev,
+		//Event: ev,
 	}
 }
 
@@ -48,5 +50,6 @@ func (event *Event) GetPID() uint64 {
 
 // GetTimestamp returns the event timestamp
 func (event *Event) GetTimestamp() eventtypes.Time {
-	return event.Timestamp
+	//return event.Timestamp
+	return 0
 }
