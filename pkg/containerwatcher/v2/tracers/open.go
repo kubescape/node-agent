@@ -2,17 +2,12 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	traceropen "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/tracer"
-	traceropentype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/open/types"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 
-	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
 
@@ -26,9 +21,9 @@ type OpenTracer struct {
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
 	eventCallback       containerwatcher.ResultCallback
-	tracer              *traceropen.Tracer
-	cfg                 config.Config
-	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
+	//tracer              *traceropen.Tracer
+	cfg                config.Config
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 }
 
 // NewOpenTracer creates a new open tracer
@@ -50,38 +45,38 @@ func NewOpenTracer(
 
 // Start initializes and starts the open tracer
 func (ot *OpenTracer) Start(ctx context.Context) error {
-	if err := ot.tracerCollection.AddTracer(openTraceName, ot.containerSelector); err != nil {
-		return fmt.Errorf("adding open tracer: %w", err)
-	}
+	//if err := ot.tracerCollection.AddTracer(openTraceName, ot.containerSelector); err != nil {
+	//	return fmt.Errorf("adding open tracer: %w", err)
+	//}
 
 	// Get mount namespace map to filter by containers
-	openMountnsmap, err := ot.tracerCollection.TracerMountNsMap(openTraceName)
-	if err != nil {
-		return fmt.Errorf("getting open mountnsmap: %w", err)
-	}
+	//openMountnsmap, err := ot.tracerCollection.TracerMountNsMap(openTraceName)
+	//if err != nil {
+	//	return fmt.Errorf("getting open mountnsmap: %w", err)
+	//}
 
-	tracerOpen, err := traceropen.NewTracer(
-		&traceropen.Config{MountnsMap: openMountnsmap, FullPath: true},
-		ot.containerCollection,
-		ot.openEventCallback,
-	)
-	if err != nil {
-		return fmt.Errorf("creating open tracer: %w", err)
-	}
+	//tracerOpen, err := traceropen.NewTracer(
+	//	&traceropen.Config{MountnsMap: openMountnsmap, FullPath: true},
+	//	ot.containerCollection,
+	//	ot.openEventCallback,
+	//)
+	//if err != nil {
+	//	return fmt.Errorf("creating open tracer: %w", err)
+	//}
 
-	ot.tracer = tracerOpen
+	//ot.tracer = tracerOpen
 	return nil
 }
 
 // Stop gracefully stops the open tracer
 func (ot *OpenTracer) Stop() error {
-	if ot.tracer != nil {
-		ot.tracer.Stop()
-	}
+	//if ot.tracer != nil {
+	//	ot.tracer.Stop()
+	//}
 
-	if err := ot.tracerCollection.RemoveTracer(openTraceName); err != nil {
-		return fmt.Errorf("removing open tracer: %w", err)
-	}
+	//if err := ot.tracerCollection.RemoveTracer(openTraceName); err != nil {
+	//	return fmt.Errorf("removing open tracer: %w", err)
+	//}
 
 	return nil
 }
@@ -106,36 +101,36 @@ func (ot *OpenTracer) IsEnabled(cfg config.Config) bool {
 }
 
 // openEventCallback handles open events from the tracer
-func (ot *OpenTracer) openEventCallback(event *traceropentype.Event) {
-	if event.Type == types.DEBUG {
-		return
-	}
+//func (ot *OpenTracer) openEventCallback(event *traceropentype.Event) {
+//	if event.Type == types.DEBUG {
+//		return
+//	}
 
-	if ot.cfg.EnableFullPathTracing {
-		event.Path = event.FullPath
-	}
+//	if ot.cfg.EnableFullPathTracing {
+//		event.Path = event.FullPath
+//	}
 
-	if event.K8s.ContainerName == "" {
-		return
-	}
+//	if event.K8s.ContainerName == "" {
+//		return
+//	}
 
-	if isDroppedEvent(event.Type, event.Message) {
-		return
-	}
+//	if isDroppedEvent(event.Type, event.Message) {
+//		return
+//	}
 
-	if event.Err > -1 && event.FullPath != "" {
-		openEvent := &events.OpenEvent{Event: *event}
-		// Handle the event with syscall enrichment
-		ot.handleEvent(openEvent, []uint64{SYS_OPEN, SYS_OPENAT})
-	}
-}
+//	if event.Err > -1 && event.FullPath != "" {
+//		openEvent := &events.OpenEvent{Event: *event}
+// Handle the event with syscall enrichment
+//		ot.handleEvent(openEvent, []uint64{SYS_OPEN, SYS_OPENAT})
+//	}
+//}
 
 // handleEvent processes the event with syscall enrichment
-func (ot *OpenTracer) handleEvent(event *events.OpenEvent, syscalls []uint64) {
-	if ot.eventCallback != nil {
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
+//func (ot *OpenTracer) handleEvent(event *events.OpenEvent, syscalls []uint64) {
+//	if ot.eventCallback != nil {
+//		containerID := event.Runtime.ContainerID
+//		processID := event.Pid
 
-		EnrichEvent(ot.thirdPartyEnricher, event, syscalls, ot.eventCallback, containerID, processID)
-	}
-}
+//		EnrichEvent(ot.thirdPartyEnricher, event, syscalls, ot.eventCallback, containerID, processID)
+//	}
+//}

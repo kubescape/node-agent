@@ -6,10 +6,6 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/ext"
-	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
@@ -47,22 +43,22 @@ type CEL struct {
 
 func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error) {
 	ta, tp := xcel.NewTypeAdapter(), xcel.NewTypeProvider()
-	capaObj, capaTyp := xcel.NewObject(&tracercapabilitiestype.Event{})
-	xcel.RegisterObject(ta, tp, capaObj, capaTyp, xcel.NewFields(capaObj))
-	dnsObj, dnsTyp := xcel.NewObject(&tracerdnstype.Event{})
-	xcel.RegisterObject(ta, tp, dnsObj, dnsTyp, xcel.NewFields(dnsObj))
+	//capaObj, capaTyp := xcel.NewObject(&tracercapabilitiestype.Event{})
+	//xcel.RegisterObject(ta, tp, capaObj, capaTyp, xcel.NewFields(capaObj))
+	//dnsObj, dnsTyp := xcel.NewObject(&events.IGDnsEvent{})
+	//xcel.RegisterObject(ta, tp, dnsObj, dnsTyp, xcel.NewFields(dnsObj))
 	execObj, execTyp := xcel.NewObject(&events.ExecEvent{})
 	xcel.RegisterObject(ta, tp, execObj, execTyp, xcel.NewFields(execObj))
-	exitObj, exitTyp := xcel.NewObject(&tracerexectype.Event{})
-	xcel.RegisterObject(ta, tp, exitObj, exitTyp, xcel.NewFields(exitObj))
+	//exitObj, exitTyp := xcel.NewObject(&tracerexectype.Event{})
+	//xcel.RegisterObject(ta, tp, exitObj, exitTyp, xcel.NewFields(exitObj))
 	forkObj, forkTyp := xcel.NewObject(&tracerforktype.Event{})
 	xcel.RegisterObject(ta, tp, forkObj, forkTyp, xcel.NewFields(forkObj))
 	hardlinkObj, hardlinkTyp := xcel.NewObject(&tracerhardlinktype.Event{})
 	xcel.RegisterObject(ta, tp, hardlinkObj, hardlinkTyp, xcel.NewFields(hardlinkObj))
 	iouringObj, iouringTyp := xcel.NewObject(&traceriouringtype.Event{})
 	xcel.RegisterObject(ta, tp, iouringObj, iouringTyp, xcel.NewFields(iouringObj))
-	netObj, netTyp := xcel.NewObject(&tracernetworktype.Event{})
-	xcel.RegisterObject(ta, tp, netObj, netTyp, xcel.NewFields(netObj))
+	//netObj, netTyp := xcel.NewObject(&datasource.Data{})
+	//xcel.RegisterObject(ta, tp, netObj, netTyp, xcel.NewFields(netObj))
 	openObj, openTyp := xcel.NewObject(&events.OpenEvent{})
 	xcel.RegisterObject(ta, tp, openObj, openTyp, xcel.NewFields(openObj))
 	procObj, procTyp := xcel.NewObject(&events.ProcfsEvent{})
@@ -79,14 +75,14 @@ func NewCEL(objectCache objectcache.ObjectCache, cfg config.Config) (*CEL, error
 	xcel.RegisterObject(ta, tp, syscallObj, syscallTyp, xcel.NewFields(syscallObj))
 	envOptions := []cel.EnvOption{
 		cel.Variable("event_type", cel.StringType),
-		cel.Variable(string(utils.CapabilitiesEventType), capaTyp),
-		cel.Variable(string(utils.DnsEventType), dnsTyp),
+		//cel.Variable(string(utils.CapabilitiesEventType), capaTyp),
+		//cel.Variable(string(utils.DnsEventType), dnsTyp),
 		cel.Variable(string(utils.ExecveEventType), execTyp),
-		cel.Variable(string(utils.ExitEventType), exitTyp),
+		//cel.Variable(string(utils.ExitEventType), exitTyp),
 		cel.Variable(string(utils.ForkEventType), forkTyp),
 		cel.Variable(string(utils.HardlinkEventType), hardlinkTyp),
 		cel.Variable(string(utils.IoUringEventType), iouringTyp),
-		cel.Variable(string(utils.NetworkEventType), netTyp),
+		//cel.Variable(string(utils.NetworkEventType), netTyp),
 		cel.Variable(string(utils.OpenEventType), openTyp),
 		cel.Variable(string(utils.ProcfsEventType), procTyp),
 		cel.Variable(string(utils.PtraceEventType), ptraceTyp),

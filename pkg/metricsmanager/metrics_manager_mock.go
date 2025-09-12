@@ -4,8 +4,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top"
-	toptypes "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/top/ebpf/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 
 	"github.com/goradd/maps"
@@ -59,8 +57,8 @@ func (m *MetricsMock) ReportRuleEvaluationTime(ruleID string, eventType utils.Ev
 	m.RuleEvaluationTime.Set(key, duration)
 }
 
-func (m *MetricsMock) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
-}
+//func (m *MetricsMock) ReportEbpfStats(stats *top.Event[toptypes.Stats]) {
+//}
 
 func (m *MetricsMock) ReportContainerStart() {}
 

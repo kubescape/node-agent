@@ -65,7 +65,7 @@ func (rt *RandomXTracer) Start(ctx context.Context) error {
 
 	tracerRandomx, err := tracerandomx.NewTracer(
 		&tracerandomx.Config{MountnsMap: randomxMountnsmap},
-		rt.containerCollection,
+		//rt.containerCollection,
 		rt.randomxEventCallback,
 	)
 	if err != nil {

@@ -54,3 +54,8 @@ type Event struct {
 	Request   *http.Request
 	Response  *http.Response
 }
+
+// GetTimestamp returns the event timestamp
+func (event *Event) GetTimestamp() eventtypes.Time {
+	return event.Timestamp
+}

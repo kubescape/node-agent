@@ -56,7 +56,7 @@ func (et *ExitTracer) Start(ctx context.Context) error {
 
 	tracerExit, err := tracerexit.NewTracer(
 		&tracerexit.Config{MountnsMap: exitMountnsmap},
-		et.containerCollection,
+		//et.containerCollection,
 		et.exitEventCallback,
 	)
 	if err != nil {

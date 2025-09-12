@@ -23,3 +23,8 @@ type Enricher interface {
 func (e SyscallEvent) GetNamespace() string {
 	return e.Event.K8s.Namespace
 }
+
+// GetTimestamp returns the event timestamp
+func (pe SyscallEvent) GetTimestamp() eventtypes.Time {
+	return pe.Timestamp
+}

@@ -338,7 +338,7 @@ func main() {
 	if err := igconfig.Config.ReadInConfig(); err != nil {
 		logger.L().Warning("reading IG config", helpers.Error(err))
 	}
-	igK8sClient, err := containercollection.NewK8sClient(cfg.NodeName)
+	igK8sClient, err := containercollection.NewK8sClient(cfg.NodeName, "", "")
 	if err != nil {
 		logger.L().Fatal("error creating IG Kubernetes client", helpers.Error(err))
 	}

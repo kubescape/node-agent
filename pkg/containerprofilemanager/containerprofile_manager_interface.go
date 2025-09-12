@@ -2,7 +2,7 @@ package containerprofilemanager
 
 import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
@@ -22,7 +22,7 @@ type ContainerProfileManagerClient interface {
 	ReportIdentifiedCallStack(containerID string, callStack *v1beta1.IdentifiedCallStack)
 	ReportSymlinkEvent(containerID string, event *tracersymlinktype.Event)
 	ReportHardlinkEvent(containerID string, event *tracerhardlinktype.Event)
-	ReportNetworkEvent(containerID string, event *tracernetworktype.Event)
+	ReportNetworkEvent(containerID string, event *datasource.Data)
 	ReportDroppedEvent(containerID string)
 	RegisterForContainerEndOfLife(notificationChannel chan *containercollection.Container)
 	OnQueueError(profile *v1beta1.ContainerProfile, containerID string, err error)

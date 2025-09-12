@@ -1,7 +1,6 @@
 package dnsmanager
 
 import (
-	"net"
 	"strings"
 	"time"
 
@@ -9,9 +8,9 @@ import (
 	"github.com/goradd/maps"
 	lru "github.com/hashicorp/golang-lru/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracerdnstype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/dns/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"istio.io/pkg/cache"
 )
 
@@ -59,70 +58,70 @@ func (dm *DNSManager) ContainerCallback(notif containercollection.PubSubEvent) {
 	}
 }
 
-func (dm *DNSManager) ReportEvent(dnsEvent tracerdnstype.Event) {
-	if isCloudService(dnsEvent.DNSName) {
-		if pidToServices, found := dm.containerToCloudServices.Load(dnsEvent.Runtime.ContainerID); found {
-			// Guard against cache size getting too large by checking the cardinality per container and pid
-			if services, found := pidToServices.Load(dnsEvent.Pid); found {
-				if services.Cardinality() < maxServiceCacheSize {
-					services.Add(dnsEvent.DNSName)
-				}
-			} else {
-				// Create a new set for this pid
-				servicesSet := mapset.NewSet[string]()
-				servicesSet.Add(dnsEvent.DNSName)
-				pidToServices.Set(dnsEvent.Pid, servicesSet)
-			}
-		}
-	}
+func (dm *DNSManager) ReportEvent(dnsEvent utils.K8sEvent) {
+	//if isCloudService(dnsEvent.DNSName) {
+	//	if pidToServices, found := dm.containerToCloudServices.Load(dnsEvent.Runtime.ContainerID); found {
+	// Guard against cache size getting too large by checking the cardinality per container and pid
+	//		if services, found := pidToServices.Load(dnsEvent.Pid); found {
+	//			if services.Cardinality() < maxServiceCacheSize {
+	//				services.Add(dnsEvent.DNSName)
+	//			}
+	//		} else {
+	// Create a new set for this pid
+	//			servicesSet := mapset.NewSet[string]()
+	//			servicesSet.Add(dnsEvent.DNSName)
+	//			pidToServices.Set(dnsEvent.Pid, servicesSet)
+	//		}
+	//	}
+	//}
 
-	if len(dnsEvent.Addresses) > 0 {
-		for _, address := range dnsEvent.Addresses {
-			dm.addressToDomainMap.Add(address, dnsEvent.DNSName)
-		}
+	//if len(dnsEvent.Addresses) > 0 {
+	//	for _, address := range dnsEvent.Addresses {
+	//		dm.addressToDomainMap.Add(address, dnsEvent.DNSName)
+	//	}
 
-		// Update the cache with these known good addresses
-		dm.lookupCache.Set(dnsEvent.DNSName, cacheEntry{
-			addresses: dnsEvent.Addresses,
-		})
-		return
-	}
+	// Update the cache with these known good addresses
+	//	dm.lookupCache.Set(dnsEvent.DNSName, cacheEntry{
+	//		addresses: dnsEvent.Addresses,
+	//	})
+	//	return
+	//}
 
 	// Check if we've recently failed to look up this domain
-	if _, found := dm.failureCache.Get(dnsEvent.DNSName); found {
-		return
-	}
+	//if _, found := dm.failureCache.Get(dnsEvent.DNSName); found {
+	//	return
+	//}
 
 	// Check if we have a cached result
-	if cached, found := dm.lookupCache.Get(dnsEvent.DNSName); found {
-		entry := cached.(cacheEntry)
-		// Use cached addresses
-		for _, addr := range entry.addresses {
-			dm.addressToDomainMap.Add(addr, dnsEvent.DNSName)
-		}
-		return
-	}
+	//if cached, found := dm.lookupCache.Get(dnsEvent.DNSName); found {
+	//	entry := cached.(cacheEntry)
+	// Use cached addresses
+	//	for _, addr := range entry.addresses {
+	//		dm.addressToDomainMap.Add(addr, dnsEvent.DNSName)
+	//	}
+	//	return
+	//}
 
-	// Only perform lookup if we don't have cached results
-	addresses, err := net.LookupIP(dnsEvent.DNSName)
-	if err != nil {
-		// Cache the failure - we just need to store something, using empty struct
-		dm.failureCache.Set(dnsEvent.DNSName, struct{}{})
-		return
-	}
+	//// Only perform lookup if we don't have cached results
+	//addresses, err := net.LookupIP(dnsEvent.DNSName)
+	//if err != nil {
+	// Cache the failure - we just need to store something, using empty struct
+	//	dm.failureCache.Set(dnsEvent.DNSName, struct{}{})
+	//	return
+	//}
 
 	// Convert addresses to strings and store them
-	addrStrings := make([]string, 0, len(addresses))
-	for _, addr := range addresses {
-		addrStr := addr.String()
-		addrStrings = append(addrStrings, addrStr)
-		dm.addressToDomainMap.Add(addrStr, dnsEvent.DNSName)
-	}
+	//addrStrings := make([]string, 0, len(addresses))
+	//for _, addr := range addresses {
+	//	addrStr := addr.String()
+	//	addrStrings = append(addrStrings, addrStr)
+	//	dm.addressToDomainMap.Add(addrStr, dnsEvent.DNSName)
+	//}
 
 	// Cache the successful lookup
-	dm.lookupCache.Set(dnsEvent.DNSName, cacheEntry{
-		addresses: addrStrings,
-	})
+	//dm.lookupCache.Set(dnsEvent.DNSName, cacheEntry{
+	//	addresses: addrStrings,
+	//})
 }
 
 func (dm *DNSManager) ResolveIPAddress(ipAddr string) (string, bool) {

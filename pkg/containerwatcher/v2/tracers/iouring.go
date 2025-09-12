@@ -58,7 +58,7 @@ func (it *IoUringTracer) Start(_ context.Context) error {
 
 	tracerIouring, err := traceriouring.NewTracer(
 		&traceriouring.Config{MountnsMap: iouringMountnsmap},
-		it.containerCollection,
+		//it.containerCollection,
 		it.iouringEventCallback,
 	)
 	if err != nil {

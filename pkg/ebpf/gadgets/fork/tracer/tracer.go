@@ -17,6 +17,7 @@ import (
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	gadgets2 "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
 )
 
@@ -27,8 +28,8 @@ type Config struct {
 }
 
 type Tracer struct {
-	config        *Config
-	enricher      gadgets.DataEnricherByMntNs
+	config *Config
+	//enricher      gadgets.DataEnricherByMntNs
 	eventCallback func(*types.Event)
 
 	objs forkObjects
@@ -40,12 +41,12 @@ type Tracer struct {
 	recordPool sync.Pool
 }
 
-func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
+func NewTracer(config *Config, //enricher gadgets.DataEnricherByMntNs,
 	eventCallback func(*types.Event),
 ) (*Tracer, error) {
 	t := &Tracer{
-		config:        config,
-		enricher:      enricher,
+		config: config,
+		//enricher:      enricher,
 		eventCallback: eventCallback,
 	}
 
@@ -81,14 +82,14 @@ func (t *Tracer) close() {
 
 func (t *Tracer) install() error {
 	var err error
-	spec, err := loadFork()
-	if err != nil {
-		return fmt.Errorf("loading ebpf program: %w", err)
-	}
+	//spec, err := loadFork()
+	//if err != nil {
+	//	return fmt.Errorf("loading ebpf program: %w", err)
+	//}
 
-	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
-		return fmt.Errorf("loading ebpf spec: %w", err)
-	}
+	//if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
+	//	return fmt.Errorf("loading ebpf spec: %w", err)
+	//}
 
 	t.forkLink, err = link.AttachRawTracepoint(link.RawTracepointOptions{
 		Name:    "sched_process_fork",
@@ -154,9 +155,9 @@ func (t *Tracer) run() {
 			ChildTid:      bpfEvent.ChildTid,
 		}
 
-		if t.enricher != nil {
-			t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
-		}
+		//if t.enricher != nil {
+		//	t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
+		//}
 
 		t.eventCallback(&event)
 		t.recordPool.Put(record)
@@ -191,7 +192,7 @@ func (t *Tracer) SetEventHandler(handler any) {
 
 type GadgetDesc struct{}
 
-func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
+func (g *GadgetDesc) NewInstance() (gadgets2.Gadget, error) {
 	tracer := &Tracer{
 		config: &Config{},
 	}

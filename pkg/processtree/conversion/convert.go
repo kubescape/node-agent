@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	events "github.com/kubescape/node-agent/pkg/ebpf/events"
+	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerexittype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/types"
 	tracerforktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/types"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -12,12 +12,12 @@ import (
 
 func ConvertEvent(eventType utils.EventType, event utils.K8sEvent) (ProcessEvent, error) {
 	switch eventType {
-	case utils.ExecveEventType:
-		return convertExecEvent(event.(*events.ExecEvent)), nil
-	case utils.ForkEventType:
-		return convertForkEvent(event.(*tracerforktype.Event)), nil
-	case utils.ExitEventType:
-		return convertExitEvent(event.(*tracerexittype.Event)), nil
+	//case utils.ExecveEventType:
+	//	return convertExecEvent(event.(*events.ExecEvent)), nil
+	//case utils.ForkEventType:
+	//	return convertForkEvent(event.(*tracerforktype.Event)), nil
+	//case utils.ExitEventType:
+	//	return convertExitEvent(event.(*tracerexittype.Event)), nil
 	case utils.ProcfsEventType:
 		return convertProcfsEvent(event.(*events.ProcfsEvent)), nil
 	default:
@@ -26,48 +26,48 @@ func ConvertEvent(eventType utils.EventType, event utils.K8sEvent) (ProcessEvent
 }
 
 // convertExecEvent converts an ExecEvent to ProcessEvent
-func convertExecEvent(execEvent *events.ExecEvent) ProcessEvent {
-	event := ProcessEvent{
-		Type:        ExecEvent,
-		Timestamp:   time.Now(),
-		PID:         execEvent.Pid,
-		PPID:        execEvent.Ppid,
-		Comm:        execEvent.Comm,
-		Path:        execEvent.ExePath,
-		Pcomm:       execEvent.Pcomm,
-		StartTimeNs: uint64(execEvent.Timestamp), // Use event timestamp for consistency
-	}
-
-	// Convert command line arguments to string
-	if len(execEvent.Args) > 0 {
-		// Join all arguments with spaces
-		cmdline := ""
-		for i, arg := range execEvent.Args {
-			if i > 0 {
-				cmdline += " "
-			}
-			cmdline += arg
-		}
-		event.Cmdline = cmdline
-	}
-
-	// Set UID and GID if available
-	if execEvent.Uid != 0 {
-		uid := execEvent.Uid
-		event.Uid = &uid
-	}
-	if execEvent.Gid != 0 {
-		gid := execEvent.Gid
-		event.Gid = &gid
-	}
-
-	// Set container context if available
-	if execEvent.Runtime.ContainerID != "" {
-		event.ContainerID = execEvent.Runtime.ContainerID
-	}
-
-	return event
-}
+//func convertExecEvent(execEvent *events.ExecEvent) ProcessEvent {
+//	event := ProcessEvent{
+//		Type:        ExecEvent,
+//		Timestamp:   time.Now(),
+//		PID:         execEvent.Pid,
+//		PPID:        execEvent.Ppid,
+//		Comm:        execEvent.Comm,
+//		Path:        execEvent.ExePath,
+//		Pcomm:       execEvent.Pcomm,
+//		StartTimeNs: uint64(execEvent.Timestamp), // Use event timestamp for consistency
+//	}
+//
+// Convert command line arguments to string
+//	if len(execEvent.Args) > 0 {
+//		// Join all arguments with spaces
+//		cmdline := ""
+//		for i, arg := range execEvent.Args {
+//			if i > 0 {
+//				cmdline += " "
+//			}
+//			cmdline += arg
+//		}
+//		event.Cmdline = cmdline
+//	}
+//
+// Set UID and GID if available
+//	if execEvent.Uid != 0 {
+//		uid := execEvent.Uid
+//		event.Uid = &uid
+//	}
+//	if execEvent.Gid != 0 {
+//		gid := execEvent.Gid
+//		event.Gid = &gid
+//	}
+//
+// Set container context if available
+//	if execEvent.Runtime.ContainerID != "" {
+//		event.ContainerID = execEvent.Runtime.ContainerID
+//	}
+//
+//	return event
+//}
 
 // convertForkEvent converts a ForkEvent to ProcessEvent
 func convertForkEvent(forkEvent *tracerforktype.Event) ProcessEvent {

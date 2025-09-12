@@ -5,21 +5,18 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
-	"strings"
 
 	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
-	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"github.com/kubescape/storage/pkg/registry/file/dynamicpathdetector"
 )
 
 var procRegex = regexp.MustCompile(`^/proc/\d+`)
@@ -41,90 +38,90 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 
 // ReportFileExec reports a file execution event for a container
 func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event events.ExecEvent) {
-	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
-		if data.execs == nil {
-			data.execs = &maps.SafeMap[string, []string]{}
-		}
-		path := event.Comm
-		if len(event.Args) > 0 {
-			path = event.Args[0]
-		}
+	//err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+	//	if data.execs == nil {
+	//		data.execs = &maps.SafeMap[string, []string]{}
+	//	}
+	//	path := event.Comm
+	//	if len(event.Args) > 0 {
+	//		path = event.Args[0]
+	//	}
 
-		// Use SHA256 hash of the exec to identify it uniquely
-		execIdentifier := utils.CalculateSHA256FileExecHash(path, event.Args)
-		if cpm.enricher != nil {
-			go cpm.enricher.EnrichEvent(containerID, &event, execIdentifier)
-		}
+	// Use SHA256 hash of the exec to identify it uniquely
+	//	execIdentifier := utils.CalculateSHA256FileExecHash(path, event.Args)
+	//	if cpm.enricher != nil {
+	//		go cpm.enricher.EnrichEvent(containerID, &event, execIdentifier)
+	//	}
 
-		exec := append([]string{path}, event.Args...)
-		data.execs.Set(execIdentifier, exec)
-		return size.Of(exec), nil
-	})
+	//	exec := append([]string{path}, event.Args...)
+	//	data.execs.Set(execIdentifier, exec)
+	//	return size.Of(exec), nil
+	//})
 
-	cpm.logEventError(err, "file exec", containerID)
+	//cpm.logEventError(err, "file exec", containerID)
 }
 
 // ReportFileOpen reports a file open event for a container
 func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event events.OpenEvent) {
-	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
-		if data.opens == nil {
-			data.opens = &maps.SafeMap[string, mapset.Set[string]]{}
-		}
+	//err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+	//	if data.opens == nil {
+	//		data.opens = &maps.SafeMap[string, mapset.Set[string]]{}
+	//	}
 
-		// Deduplicate /proc/1234/* into /proc/.../*
-		path := event.Path
-		if strings.HasPrefix(path, "/proc/") {
-			path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
-		}
+	// Deduplicate /proc/1234/* into /proc/.../*
+	//	path := event.Path
+	//	if strings.HasPrefix(path, "/proc/") {
+	//		path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
+	//	}
 
-		isSensitive := utils.IsSensitivePath(path, []string{})
-		if cpm.enricher != nil && isSensitive {
-			openIdentifier := utils.CalculateSHA256FileOpenHash(path)
-			go cpm.enricher.EnrichEvent(containerID, &event, openIdentifier)
-		}
+	//	isSensitive := utils.IsSensitivePath(path, []string{})
+	//	if cpm.enricher != nil && isSensitive {
+	//		openIdentifier := utils.CalculateSHA256FileOpenHash(path)
+	//		go cpm.enricher.EnrichEvent(containerID, &event, openIdentifier)
+	//	}
 
-		// Check if we already have this open with these flags
-		if opens, ok := data.opens.Load(path); ok && opens.Contains(event.Flags...) {
-			return 0, nil
-		}
+	// Check if we already have this open with these flags
+	//	if opens, ok := data.opens.Load(path); ok && opens.Contains(event.Flags...) {
+	//		return 0, nil
+	//	}
 
-		// Add to open map
-		if opens, ok := data.opens.Load(path); ok {
-			opens.Append(event.Flags...)
-		} else {
-			data.opens.Set(path, mapset.NewSet(event.Flags...))
-		}
+	// Add to open map
+	//	if opens, ok := data.opens.Load(path); ok {
+	//		opens.Append(event.Flags...)
+	//	} else {
+	//		data.opens.Set(path, mapset.NewSet(event.Flags...))
+	//	}
 
-		return size.Of(path) + size.Of(event.Flags), nil
-	})
+	//	return size.Of(path) + size.Of(event.Flags), nil
+	//})
 
-	cpm.logEventError(err, "file open", containerID)
+	//cpm.logEventError(err, "file open", containerID)
 }
 
 // ReportSymlinkEvent reports a symlink creation event for a container
 func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event *tracersymlinktype.Event) {
-	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
-		if cpm.enricher != nil {
-			symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
-			go cpm.enricher.EnrichEvent(containerID, event, symlinkIdentifier)
-		}
-		return nil
-	})
+	//err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
+	//	if cpm.enricher != nil {
+	//		symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
+	//		go cpm.enricher.EnrichEvent(containerID, event, symlinkIdentifier)
+	//	}
+	//	return nil
+	//})
 
-	cpm.logEventError(err, "symlink", containerID)
+	//cpm.logEventError(err, "symlink", containerID)
 }
 
 // ReportHardlinkEvent reports a hardlink creation event for a container
 func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, event *tracerhardlinktype.Event) {
-	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
-		if cpm.enricher != nil {
-			hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
-			go cpm.enricher.EnrichEvent(containerID, event, hardlinkIdentifier)
-		}
-		return nil
-	})
+	//err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
+	//	if cpm.enricher != nil {
+	//		hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
+	//		go cpm.enricher.EnrichEvent(containerID, event, hardlinkIdentifier)
+	//	}
+	//	return nil
+	//})
 
-	cpm.logEventError(err, "hardlink", containerID)
+	//cpm.logEventError(err, "hardlink", containerID)
 }
 
 // ReportHTTPEvent reports an HTTP event for a container
@@ -231,40 +228,40 @@ func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string
 }
 
 // ReportNetworkEvent reports a network event for a container
-func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event *tracernetworktype.Event) {
-	if !cpm.isValidNetworkEvent(event) {
-		return
-	}
+func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event *datasource.Data) {
+	//if !cpm.isValidNetworkEvent(event) {
+	//	return
+	//}
 
-	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
-		if data.networks == nil {
-			data.networks = mapset.NewSet[NetworkEvent]()
-		}
+	//err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+	//	if data.networks == nil {
+	//		data.networks = mapset.NewSet[NetworkEvent]()
+	//	}
 
-		networkEvent := NetworkEvent{
-			Port:     event.Port,
-			Protocol: event.Proto,
-			PktType:  event.PktType,
-			Destination: Destination{
-				Namespace: event.DstEndpoint.Namespace,
-				Name:      event.DstEndpoint.Name,
-				Kind:      EndpointKind(event.DstEndpoint.Kind),
-				IPAddress: event.DstEndpoint.Addr,
-			},
-		}
-		networkEvent.SetPodLabels(event.PodLabels)
-		networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
+	//	networkEvent := NetworkEvent{
+	//		Port:     event.Port,
+	//		Protocol: event.Proto,
+	//		PktType:  event.PktType,
+	//		Destination: Destination{
+	//			Namespace: event.DstEndpoint.Namespace,
+	//			Name:      event.DstEndpoint.Name,
+	//			Kind:      EndpointKind(event.DstEndpoint.Kind),
+	//			IPAddress: event.DstEndpoint.Addr,
+	//		},
+	//	}
+	//	networkEvent.SetPodLabels(event.PodLabels)
+	//	networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
 
-		// Skip if we already saved this event
-		if data.networks.Contains(networkEvent) {
-			return 0, nil
-		}
+	// Skip if we already saved this event
+	//	if data.networks.Contains(networkEvent) {
+	//		return 0, nil
+	//	}
 
-		data.networks.Add(networkEvent)
-		return size.Of(networkEvent), nil
-	})
+	//	data.networks.Add(networkEvent)
+	//	return size.Of(networkEvent), nil
+	//})
 
-	cpm.logEventError(err, "network", containerID)
+	//cpm.logEventError(err, "network", containerID)
 }
 
 // ReportDroppedEvent reports a dropped event (currently just logs)
@@ -312,25 +309,25 @@ func (cpm *ContainerProfileManager) PeekSyscalls(data *containerData) ([]string,
 }
 
 // isValidNetworkEvent checks if the network event is valid for processing
-func (cpm *ContainerProfileManager) isValidNetworkEvent(event *tracernetworktype.Event) bool {
-	// Unknown type, shouldn't happen
-	if event.PktType != HostPktType && event.PktType != OutgoingPktType {
-		logger.L().Debug("pktType is not HOST or OUTGOING", helpers.Interface("event", event))
-		return false
-	}
+//func (cpm *ContainerProfileManager) isValidNetworkEvent(event *datasource.Data) bool {
+// Unknown type, shouldn't happen
+//	if event.PktType != HostPktType && event.PktType != OutgoingPktType {
+//		logger.L().Debug("pktType is not HOST or OUTGOING", helpers.Interface("event", event))
+//		return false
+//	}
 
-	// Ignore localhost
-	if event.PktType == HostPktType && event.PodHostIP == event.DstEndpoint.Addr {
-		return false
-	}
+// Ignore localhost
+//	if event.PktType == HostPktType && event.PodHostIP == event.DstEndpoint.Addr {
+//		return false
+//	}
 
-	// Ignore host netns
-	if event.K8s.HostNetwork {
-		return false
-	}
+// Ignore host netns
+//	if event.K8s.HostNetwork {
+//		return false
+//	}
 
-	return true
-}
+//	return true
+//}
 
 // getRulePolicies returns a map of rule policies based on the rule cache
 func (cpm *ContainerProfileManager) getRulePolicies() map[string]v1beta1.RulePolicy {

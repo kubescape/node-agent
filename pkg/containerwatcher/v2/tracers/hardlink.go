@@ -62,7 +62,7 @@ func (ht *HardlinkTracer) Start(ctx context.Context) error {
 
 	tracerHardlink, err := tracerhardlink.NewTracer(
 		&tracerhardlink.Config{MountnsMap: hardlinkMountnsmap},
-		ht.containerCollection,
+		//ht.containerCollection,
 		ht.hardlinkEventCallback,
 	)
 	if err != nil {

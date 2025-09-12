@@ -2,7 +2,7 @@ package containerprofilemanager
 
 import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
@@ -67,7 +67,7 @@ func (a ContainerProfileManagerMock) RegisterForContainerEndOfLife(_ chan *conta
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportNetworkEvent(_ string, _ *tracernetworktype.Event) {
+func (a ContainerProfileManagerMock) ReportNetworkEvent(_ string, _ *datasource.Data) {
 	// noop
 }
 

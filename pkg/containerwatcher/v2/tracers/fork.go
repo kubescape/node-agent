@@ -56,7 +56,7 @@ func (ft *ForkTracer) Start(ctx context.Context) error {
 
 	tracerFork, err := tracerfork.NewTracer(
 		&tracerfork.Config{MountnsMap: forkMountnsmap},
-		ft.containerCollection,
+		//ft.containerCollection,
 		ft.forkEventCallback,
 	)
 	if err != nil {

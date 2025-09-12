@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	tracerseccomp "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/advise/seccomp/tracer"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
@@ -18,7 +17,7 @@ var _ containerwatcher.TracerInterface = (*SyscallTracer)(nil)
 
 // SyscallTracer implements TracerInterface for syscall/seccomp events
 type SyscallTracer struct {
-	tracer                  *tracerseccomp.Tracer
+	//tracer                  *tracerseccomp.Tracer
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
 	ruleManager             rulemanager.RuleManagerClient
 }
@@ -34,24 +33,24 @@ func NewSyscallTracer(containerProfileManager containerprofilemanager.ContainerP
 // Start initializes and starts the syscall tracer
 func (st *SyscallTracer) Start(ctx context.Context) error {
 	// Create seccomp tracer
-	syscallTracer, err := tracerseccomp.NewTracer()
-	if err != nil {
-		return fmt.Errorf("creating syscall tracer: %w", err)
-	}
+	//syscallTracer, err := tracerseccomp.NewTracer()
+	//if err != nil {
+	//	return fmt.Errorf("creating syscall tracer: %w", err)
+	//}
 
-	st.tracer = syscallTracer
+	//st.tracer = syscallTracer
 
 	// Register peek function with managers
-	st.registerPeekFunction()
+	//st.registerPeekFunction()
 
 	return nil
 }
 
 // Stop gracefully stops the syscall tracer
 func (st *SyscallTracer) Stop() error {
-	if st.tracer != nil {
-		st.tracer.Close()
-	}
+	//if st.tracer != nil {
+	//	st.tracer.Close()
+	//}
 	return nil
 }
 
@@ -75,9 +74,9 @@ func (st *SyscallTracer) IsEnabled(cfg config.Config) bool {
 
 // Peek provides the peek function for other components
 func (st *SyscallTracer) Peek(mntns uint64) ([]string, error) {
-	if st.tracer != nil {
-		return st.tracer.Peek(mntns)
-	}
+	//if st.tracer != nil {
+	//	return st.tracer.Peek(mntns)
+	//}
 	return nil, fmt.Errorf("syscall tracer not started")
 }
 

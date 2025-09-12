@@ -45,3 +45,8 @@ func (event *Event) GetExtra() interface{} {
 func (event *Event) GetPID() uint64 {
 	return (uint64(event.Pid) << 32) | uint64(event.Tid)
 }
+
+// GetTimestamp returns the event timestamp
+func (event *Event) GetTimestamp() eventtypes.Time {
+	return event.Timestamp
+}

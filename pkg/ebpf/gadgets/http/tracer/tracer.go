@@ -17,6 +17,7 @@ import (
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	gadgets2 "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
 )
@@ -28,8 +29,8 @@ type Config struct {
 }
 
 type Tracer struct {
-	config        *Config
-	enricher      gadgets.DataEnricherByMntNs
+	config *Config
+	//enricher      gadgets.DataEnricherByMntNs
 	eventCallback func(*types.Event)
 
 	objs http_snifferObjects
@@ -48,7 +49,7 @@ type Tracer struct {
 	recordPool sync.Pool
 }
 
-func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
+func NewTracer(config *Config, //enricher gadgets.DataEnricherByMntNs,
 	eventCallback func(*types.Event),
 ) (*Tracer, error) {
 	// Create a new LRU cache with a specified size
@@ -58,8 +59,8 @@ func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
 	}
 
 	t := &Tracer{
-		config:          config,
-		enricher:        enricher,
+		config: config,
+		//enricher:        enricher,
 		eventCallback:   eventCallback,
 		eventsMap:       cache,
 		timeoutDuration: 5 * time.Second,
@@ -102,14 +103,14 @@ func (t *Tracer) Close() {
 
 func (t *Tracer) install() error {
 	var err error
-	spec, err := loadHttp_sniffer()
-	if err != nil {
-		return fmt.Errorf("loading ebpf program: %w", err)
-	}
+	//spec, err := loadHttp_sniffer()
+	//if err != nil {
+	//	return fmt.Errorf("loading ebpf program: %w", err)
+	//}
 
-	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
-		return fmt.Errorf("loading ebpf spec: %w", err)
-	}
+	//if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
+	//	return fmt.Errorf("loading ebpf spec: %w", err)
+	//}
 
 	tracepoints := GetTracepointDefinitions(&t.objs.http_snifferPrograms)
 	var links []link.Link
@@ -167,9 +168,9 @@ func (t *Tracer) run() {
 		bpfEvent := (*http_snifferHttpevent)(unsafe.Pointer(&record.RawSample[0]))
 		if grouped := t.GroupEvents(bpfEvent); grouped != nil {
 			// We'll only enrich by request properties
-			if t.enricher != nil {
-				t.enricher.EnrichByMntNs(&grouped.CommonData, grouped.MountNsID)
-			}
+			//if t.enricher != nil {
+			//	t.enricher.EnrichByMntNs(&grouped.CommonData, grouped.MountNsID)
+			//}
 			t.eventCallback(grouped)
 		}
 
@@ -223,9 +224,9 @@ func (t *Tracer) transmitOrphenRequests() {
 		for _, key := range keys {
 			if event, ok := t.eventsMap.Peek(key); ok {
 				if time.Since(ToTime(event.Timestamp)) > t.timeoutDuration {
-					if t.enricher != nil {
-						t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
-					}
+					//if t.enricher != nil {
+					//	t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
+					//}
 					t.eventCallback(event)
 					t.eventsMap.Remove(key)
 				}
@@ -248,7 +249,7 @@ func (t *Tracer) SetEventHandler(handler any) {
 
 type GadgetDesc struct{}
 
-func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
+func (g *GadgetDesc) NewInstance() (gadgets2.Gadget, error) {
 	tracer := &Tracer{
 		config: &Config{},
 	}

@@ -28,8 +28,8 @@ type Config struct {
 }
 
 type Tracer struct {
-	config        *Config
-	enricher      gadgets.DataEnricherByMntNs
+	config *Config
+	//enricher      gadgets.DataEnricherByMntNs
 	eventCallback func(*types.Event)
 
 	objs symlinkObjects
@@ -42,12 +42,12 @@ type Tracer struct {
 	recordPool sync.Pool
 }
 
-func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
+func NewTracer(config *Config, //enricher gadgets.DataEnricherByMntNs,
 	eventCallback func(*types.Event),
 ) (*Tracer, error) {
 	t := &Tracer{
-		config:        config,
-		enricher:      enricher,
+		config: config,
+		//enricher:      enricher,
 		eventCallback: eventCallback,
 	}
 
@@ -86,14 +86,14 @@ func (t *Tracer) close() {
 
 func (t *Tracer) install() error {
 	var err error
-	spec, err := loadSymlink()
-	if err != nil {
-		return fmt.Errorf("loading ebpf program: %w", err)
-	}
+	//spec, err := loadSymlink()
+	//if err != nil {
+	//	return fmt.Errorf("loading ebpf program: %w", err)
+	//}
 
-	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
-		return fmt.Errorf("loading ebpf spec: %w", err)
-	}
+	//if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
+	//	return fmt.Errorf("loading ebpf spec: %w", err)
+	//}
 
 	if runtime.GOARCH != "arm64" {
 		t.symlinkLink, err = link.Tracepoint("syscalls", "sys_enter_symlink", t.objs.TracepointSysSymlink, nil)
@@ -159,9 +159,9 @@ func (t *Tracer) run() {
 			NewPath:       gadgets.FromCString(bpfEvent.Newpath[:]),
 		}
 
-		if t.enricher != nil {
-			t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
-		}
+		//if t.enricher != nil {
+		//	t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
+		//}
 
 		t.eventCallback(&event)
 		t.recordPool.Put(record)
@@ -192,11 +192,4 @@ func (t *Tracer) SetEventHandler(handler any) {
 		logger.L().Fatal("symlink Tracer.SetEventHandler - invalid event handler", helpers.Interface("handler", handler))
 	}
 	t.eventCallback = nh
-}
-
-func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
-	tracer := &Tracer{
-		config: &Config{},
-	}
-	return tracer, nil
 }

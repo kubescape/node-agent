@@ -2,13 +2,9 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracercapabilities "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/tracer"
-	tracercapabilitiestype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/capabilities/types"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -24,7 +20,7 @@ type CapabilitiesTracer struct {
 	tracerCollection    *tracercollection.TracerCollection
 	containerSelector   containercollection.ContainerSelector
 	eventCallback       containerwatcher.ResultCallback
-	tracer              *tracercapabilities.Tracer
+	//tracer              *tracercapabilities.Tracer
 }
 
 // NewCapabilitiesTracer creates a new capabilities tracer
@@ -44,38 +40,38 @@ func NewCapabilitiesTracer(
 
 // Start initializes and starts the capabilities tracer
 func (ct *CapabilitiesTracer) Start(ctx context.Context) error {
-	if err := ct.tracerCollection.AddTracer(capabilitiesTraceName, ct.containerSelector); err != nil {
-		return fmt.Errorf("adding capabilities tracer: %w", err)
-	}
+	//if err := ct.tracerCollection.AddTracer(capabilitiesTraceName, ct.containerSelector); err != nil {
+	//	return fmt.Errorf("adding capabilities tracer: %w", err)
+	//}
 
 	// Get mount namespace map to filter by containers
-	capabilitiesMountnsmap, err := ct.tracerCollection.TracerMountNsMap(capabilitiesTraceName)
-	if err != nil {
-		return fmt.Errorf("getting capabilities mountnsmap: %w", err)
-	}
+	//capabilitiesMountnsmap, err := ct.tracerCollection.TracerMountNsMap(capabilitiesTraceName)
+	//if err != nil {
+	//	return fmt.Errorf("getting capabilities mountnsmap: %w", err)
+	//}
 
-	tracerCapabilities, err := tracercapabilities.NewTracer(
-		&tracercapabilities.Config{MountnsMap: capabilitiesMountnsmap, Unique: true},
-		ct.containerCollection,
-		ct.capabilitiesEventCallback,
-	)
-	if err != nil {
-		return fmt.Errorf("creating capabilities tracer: %w", err)
-	}
+	//tracerCapabilities, err := tracercapabilities.NewTracer(
+	//	&tracercapabilities.Config{MountnsMap: capabilitiesMountnsmap, Unique: true},
+	//	ct.containerCollection,
+	//	ct.capabilitiesEventCallback,
+	//)
+	//if err != nil {
+	//	return fmt.Errorf("creating capabilities tracer: %w", err)
+	//}
 
-	ct.tracer = tracerCapabilities
+	//ct.tracer = tracerCapabilities
 	return nil
 }
 
 // Stop gracefully stops the capabilities tracer
 func (ct *CapabilitiesTracer) Stop() error {
-	if ct.tracer != nil {
-		ct.tracer.Stop()
-	}
+	//if ct.tracer != nil {
+	//	ct.tracer.Stop()
+	//}
 
-	if err := ct.tracerCollection.RemoveTracer(capabilitiesTraceName); err != nil {
-		return fmt.Errorf("removing capabilities tracer: %w", err)
-	}
+	//if err := ct.tracerCollection.RemoveTracer(capabilitiesTraceName); err != nil {
+	//	return fmt.Errorf("removing capabilities tracer: %w", err)
+	//}
 
 	return nil
 }
@@ -96,21 +92,21 @@ func (ct *CapabilitiesTracer) IsEnabled(cfg config.Config) bool {
 }
 
 // capabilitiesEventCallback handles capabilities events from the tracer
-func (ct *CapabilitiesTracer) capabilitiesEventCallback(event *tracercapabilitiestype.Event) {
-	if event.Type == types.DEBUG {
-		return
-	}
+//func (ct *CapabilitiesTracer) capabilitiesEventCallback(event *tracercapabilitiestype.Event) {
+//	if event.Type == types.DEBUG {
+//		return
+//	}
 
-	if isDroppedEvent(event.Type, event.Message) {
-		// Log dropped events but don't process them
-		return
-	}
+//	if isDroppedEvent(event.Type, event.Message) {
+// Log dropped events but don't process them
+//		return
+//	}
 
-	if ct.eventCallback != nil {
-		// Extract container ID and process ID from the capabilities event
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
+//	if ct.eventCallback != nil {
+// Extract container ID and process ID from the capabilities event
+//		containerID := event.Runtime.ContainerID
+//		processID := event.Pid
 
-		ct.eventCallback(event, containerID, processID)
-	}
-}
+//		ct.eventCallback(event, containerID, processID)
+//	}
+//}

@@ -38,8 +38,8 @@ type Config struct {
 }
 
 type Tracer struct {
-	config        *Config
-	enricher      gadgets.DataEnricherByMntNs
+	config *Config
+	//enricher      gadgets.DataEnricherByMntNs
 	eventCallback func(*types.Event)
 
 	objs                  randomxObjects
@@ -51,12 +51,12 @@ type Tracer struct {
 	recordPool sync.Pool
 }
 
-func NewTracer(config *Config, enricher gadgets.DataEnricherByMntNs,
+func NewTracer(config *Config, //enricher gadgets.DataEnricherByMntNs,
 	eventCallback func(*types.Event),
 ) (*Tracer, error) {
 	t := &Tracer{
-		config:            config,
-		enricher:          enricher,
+		config: config,
+		//enricher:          enricher,
 		eventCallback:     eventCallback,
 		mntnsToEventCount: make(map[uint64]randomxEventCache),
 	}
@@ -93,14 +93,14 @@ func (t *Tracer) close() {
 
 func (t *Tracer) install() error {
 	var err error
-	spec, err := loadRandomx()
-	if err != nil {
-		return fmt.Errorf("loading ebpf program: %w", err)
-	}
+	//spec, err := loadRandomx()
+	//if err != nil {
+	//	return fmt.Errorf("loading ebpf program: %w", err)
+	//}
 
-	if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
-		return fmt.Errorf("loading ebpf spec: %w", err)
-	}
+	//if err := gadgets.LoadeBPFSpec(t.config.MountnsMap, spec, nil, &t.objs); err != nil {
+	//	return fmt.Errorf("loading ebpf spec: %w", err)
+	//}
 
 	t.randomxDeactivateLink, err = link.Tracepoint("x86_fpu", "x86_fpu_regs_deactivated", t.objs.TracepointX86FpuRegsDeactivated, nil)
 	if err != nil {
@@ -190,9 +190,9 @@ func (t *Tracer) run() {
 				ExePath:       gadgets.FromCString(bpfEvent.Exepath[:]),
 			}
 
-			if t.enricher != nil {
-				t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
-			}
+			//if t.enricher != nil {
+			//	t.enricher.EnrichByMntNs(&event.CommonData, event.MountNsID)
+			//}
 
 			t.eventCallback(&event)
 
@@ -233,11 +233,4 @@ func (t *Tracer) SetEventHandler(handler any) {
 		logger.L().Fatal("randomx Tracer.SetEventHandler - invalid event handler", helpers.Interface("handler", handler))
 	}
 	t.eventCallback = nh
-}
-
-func (g *GadgetDesc) NewInstance() (gadgets.Gadget, error) {
-	tracer := &Tracer{
-		config: &Config{},
-	}
-	return tracer, nil
 }

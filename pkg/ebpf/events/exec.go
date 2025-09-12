@@ -1,11 +1,11 @@
 package events
 
 import (
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 )
 
 type ExecEvent struct {
-	tracerexectype.Event
+	datasource.Data
 	extra interface{}
 }
 
@@ -18,5 +18,8 @@ func (event *ExecEvent) GetExtra() interface{} {
 }
 
 func (event *ExecEvent) GetPID() uint64 {
-	return (uint64(event.Ppid) << 32) | uint64(event.Ptid)
+	d, _ := datasource.New(datasource.TypeSingle, "event") // FIXME this won't work
+	pidF := d.GetField("proc.pid")
+	pid, _ := pidF.Uint32(event.Data)
+	return uint64(pid)
 }

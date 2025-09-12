@@ -45,3 +45,8 @@ func Base(ev eventtypes.Event) *Event {
 		Event: ev,
 	}
 }
+
+// GetTimestamp returns the event timestamp
+func (event *Event) GetTimestamp() eventtypes.Time {
+	return event.Timestamp
+}

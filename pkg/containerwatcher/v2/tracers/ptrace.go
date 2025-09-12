@@ -56,7 +56,7 @@ func (pt *PtraceTracer) Start(ctx context.Context) error {
 
 	tracerPtrace, err := tracerptrace.NewTracer(
 		&tracerptrace.Config{MountnsMap: ptraceMountnsmap},
-		pt.containerCollection,
+		//pt.containerCollection,
 		pt.ptraceEventCallback,
 	)
 	if err != nil {

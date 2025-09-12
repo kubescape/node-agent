@@ -62,7 +62,7 @@ func (ht *HTTPTracer) Start(ctx context.Context) error {
 
 	tracerHttp, err := tracerhttp.NewTracer(
 		&tracerhttp.Config{MountnsMap: httpMountnsmap},
-		ht.containerCollection,
+		//ht.containerCollection,
 		ht.httpEventCallback,
 	)
 	if err != nil {

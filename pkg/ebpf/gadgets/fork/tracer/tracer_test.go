@@ -14,7 +14,7 @@ func TestForkTracer_NewTracer(t *testing.T) {
 		// This will be called when events are received
 	}
 
-	tracer, err := NewTracer(config, nil, eventCallback)
+	tracer, err := NewTracer(config, eventCallback)
 	if err != nil {
 		// This is expected if we don't have root privileges
 		t.Logf("Expected error when not running as root: %v", err)

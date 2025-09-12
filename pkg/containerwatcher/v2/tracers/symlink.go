@@ -62,7 +62,7 @@ func (st *SymlinkTracer) Start(ctx context.Context) error {
 
 	tracerSymlink, err := tracersymlink.NewTracer(
 		&tracersymlink.Config{MountnsMap: symlinkMountnsmap},
-		st.containerCollection,
+		//st.containerCollection,
 		st.symlinkEventCallback,
 	)
 	if err != nil {
