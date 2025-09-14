@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kubescape/node-agent/pkg/config"
+	"github.com/kubescape/node-agent/pkg/exporters"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,10 +16,12 @@ func TestNewFIMManager(t *testing.T) {
 	// Test with FIM disabled
 	cfg := config.Config{
 		EnableFIM: false,
+		NodeName:  "test-node",
 		FIM:       config.FIMConfig{},
 	}
+	mockExporter := &exporters.ExporterMock{}
 
-	manager, err := NewFIMManager(cfg, "test-cluster", "test-node", nil)
+	manager, err := NewFIMManager(cfg, "test-cluster", mockExporter, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, manager)
 	assert.False(t, manager.IsRunning())
@@ -28,7 +31,7 @@ func TestNewFIMManager(t *testing.T) {
 	cfg.EnableFIM = true
 	cfg.FIM.Directories = []config.FIMDirectoryConfig{}
 
-	manager, err = NewFIMManager(cfg, "test-cluster", "test-node", nil)
+	manager, err = NewFIMManager(cfg, "test-cluster", mockExporter, nil)
 	assert.Error(t, err)
 	assert.Nil(t, manager)
 
@@ -48,7 +51,7 @@ func TestNewFIMManager(t *testing.T) {
 		ScanInterval: 100 * time.Millisecond,
 	}
 
-	manager, err = NewFIMManager(cfg, "test-cluster", "test-node", nil)
+	manager, err = NewFIMManager(cfg, "test-cluster", mockExporter, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, manager)
 	assert.True(t, manager.cfg.EnableFIM)
@@ -58,6 +61,7 @@ func TestNewFIMManager(t *testing.T) {
 func TestFIMManagerStartStop(t *testing.T) {
 	cfg := config.Config{
 		EnableFIM: true,
+		NodeName:  "test-node",
 		FIM: config.FIMConfig{
 			Directories: []config.FIMDirectoryConfig{
 				{
@@ -75,8 +79,9 @@ func TestFIMManagerStartStop(t *testing.T) {
 			},
 		},
 	}
+	mockExporter := &exporters.ExporterMock{}
 
-	manager, err := NewFIMManager(cfg, "test-cluster", "test-node", nil)
+	manager, err := NewFIMManager(cfg, "test-cluster", mockExporter, nil)
 	require.NoError(t, err)
 
 	// Test start
@@ -98,6 +103,7 @@ func TestFIMManagerStartStop(t *testing.T) {
 func TestFIMManagerGetStatus(t *testing.T) {
 	cfg := config.Config{
 		EnableFIM: true,
+		NodeName:  "test-node",
 		FIM: config.FIMConfig{
 			Directories: []config.FIMDirectoryConfig{
 				{
@@ -121,8 +127,9 @@ func TestFIMManagerGetStatus(t *testing.T) {
 			},
 		},
 	}
+	mockExporter := &exporters.ExporterMock{}
 
-	manager, err := NewFIMManager(cfg, "test-cluster", "test-node", nil)
+	manager, err := NewFIMManager(cfg, "test-cluster", mockExporter, nil)
 	require.NoError(t, err)
 
 	status := manager.GetStatus()

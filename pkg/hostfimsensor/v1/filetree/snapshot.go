@@ -38,7 +38,6 @@ func NewSnapshotManager(maxNodes int, config SnapshotConfig) *SnapshotManager {
 
 // CreateSnapshot creates a new snapshot from the given root path
 func (sm *SnapshotManager) CreateSnapshot(rootPath string) (*FileTree, error) {
-	logger.L().Debug("Creating new snapshot", helpers.String("root", rootPath))
 
 	tree := NewFileTree()
 
@@ -64,10 +63,6 @@ func (sm *SnapshotManager) CreateSnapshot(rootPath string) (*FileTree, error) {
 		return nil, fmt.Errorf("snapshot node count %d exceeds limit %d", tree.GetNodeCount(), sm.maxNodes)
 	}
 
-	logger.L().Debug("Snapshot created successfully",
-		helpers.Int("nodes", tree.GetNodeCount()),
-		helpers.String("root", rootPath))
-
 	// Rotate snapshots
 	sm.previousSnapshot = sm.currentSnapshot
 	sm.currentSnapshot = tree
@@ -91,9 +86,6 @@ func (sm *SnapshotManager) buildTreeRecursive(path string, tree *FileTree, depth
 	info, err := os.Lstat(path)
 	if err != nil {
 		// Log but continue - some files might be inaccessible
-		logger.L().Debug("Could not stat file, skipping",
-			helpers.String("path", path),
-			helpers.Error(err))
 		return nil
 	}
 
@@ -105,9 +97,6 @@ func (sm *SnapshotManager) buildTreeRecursive(path string, tree *FileTree, depth
 		// Follow symlink
 		target, err := os.Readlink(path)
 		if err != nil {
-			logger.L().Debug("Could not read symlink, skipping",
-				helpers.String("path", path),
-				helpers.Error(err))
 			return nil
 		}
 		// Resolve relative symlinks
@@ -116,20 +105,12 @@ func (sm *SnapshotManager) buildTreeRecursive(path string, tree *FileTree, depth
 		}
 		info, err = os.Stat(target)
 		if err != nil {
-			logger.L().Debug("Could not stat symlink target, skipping",
-				helpers.String("path", path),
-				helpers.String("target", target),
-				helpers.Error(err))
 			return nil
 		}
 	}
 
 	// Check file size limit
 	if !info.IsDir() && info.Size() > sm.config.MaxFileSize {
-		logger.L().Debug("File too large, skipping",
-			helpers.String("path", path),
-			helpers.Int("size", int(info.Size())),
-			helpers.Int("limit", int(sm.config.MaxFileSize)))
 		return nil
 	}
 
@@ -162,9 +143,6 @@ func (sm *SnapshotManager) buildTreeRecursive(path string, tree *FileTree, depth
 	if info.IsDir() {
 		entries, err := os.ReadDir(path)
 		if err != nil {
-			logger.L().Debug("Could not read directory, skipping",
-				helpers.String("path", path),
-				helpers.Error(err))
 			return nil
 		}
 

@@ -35,13 +35,11 @@ func newDedupCache(timeWindow time.Duration, maxSize int) *dedupCache {
 }
 
 // start begins the de-duplication cache cleanup routine
-// Note: With expirable.LRU, cleanup is automatic, so this is a no-op
 func (dc *dedupCache) start() {
 	// No-op: expirable.LRU handles cleanup automatically
 }
 
 // stop stops the de-duplication cache and waits for it to finish
-// Note: With expirable.LRU, cleanup is automatic, so this is a no-op
 func (dc *dedupCache) stop() {
 	// No-op: expirable.LRU handles cleanup automatically
 }
@@ -68,10 +66,6 @@ func (dc *dedupCache) isDuplicate(path string, operation fimtypes.FimEventType) 
 
 	// Add the event to cache (expirable.LRU will handle expiration and eviction)
 	dc.cache.Add(key, now)
-	logger.L().Debug("FIM event added to cache",
-		helpers.String("path", path),
-		helpers.String("operation", string(operation)),
-		helpers.Int("cacheSize", dc.cache.Len()))
 
 	return false
 }

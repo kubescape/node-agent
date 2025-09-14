@@ -178,7 +178,6 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 
 func (ame *AlertManagerExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 	// TODO: Implement FIM alerts sending logic
-	logger.L().Debug("AlertManagerExporter.SendFimAlerts - stub implementation", helpers.Int("events", len(fimEvents)))
 }
 
 func traceToString(t apitypes.Trace) (string, error) {

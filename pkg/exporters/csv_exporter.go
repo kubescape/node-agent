@@ -164,5 +164,4 @@ func writeMalwareHeaders(csvPath string) {
 
 func (ce *CsvExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 	// TODO: Implement FIM alerts sending logic
-	logrus.Debugf("CsvExporter.SendFimAlerts - stub implementation with %d events", len(fimEvents))
 }

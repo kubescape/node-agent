@@ -343,7 +343,11 @@ func main() {
 	// Create the FIM manager
 	var fimManager *fimmanager.FIMManager
 	if cfg.EnableFIM {
-		fimManager, err = fimmanager.NewFIMManager(cfg, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
+		// Initialize FIM-specific exporters
+		fimExportersConfig := cfg.FIM.GetFIMExportersConfig()
+		fimExporter := exporters.InitExporters(fimExportersConfig, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
+
+		fimManager, err = fimmanager.NewFIMManager(cfg, clusterData.ClusterName, fimExporter, cloudMetadata)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating FIMManager", helpers.Error(err))
 		}

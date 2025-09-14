@@ -51,10 +51,6 @@ func (tc *TreeComparator) CompareSnapshots(oldTree, newTree *FileTree) []*FileCh
 		return nil
 	}
 
-	logger.L().Debug("Comparing snapshots",
-		helpers.Int("old_nodes", oldTree.GetNodeCount()),
-		helpers.Int("new_nodes", newTree.GetNodeCount()))
-
 	var changes []*FileChange
 
 	// Phase 1: Collect all basic changes (CREATE, DELETE, MODIFY, CHMOD)
@@ -62,9 +58,6 @@ func (tc *TreeComparator) CompareSnapshots(oldTree, newTree *FileTree) []*FileCh
 
 	// Phase 2: Analyze changes to detect MOVE and RENAME operations
 	changes = tc.detectMoveAndRenameOperations(changes)
-
-	logger.L().Debug("Snapshot comparison completed",
-		helpers.Int("changes_detected", len(changes)))
 
 	return changes
 }

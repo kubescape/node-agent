@@ -233,11 +233,6 @@ func (h *HostFimSensorPeriodic) performScan() error {
 		if snapshotManager.HasPreviousSnapshot() {
 			oldSnapshot := snapshotManager.GetPreviousSnapshot()
 
-			logger.L().Debug("Comparing snapshots for directory",
-				helpers.String("directory", dirPath),
-				helpers.Int("old_nodes", oldSnapshot.GetNodeCount()),
-				helpers.Int("new_nodes", newSnapshot.GetNodeCount()))
-
 			// Detect changes for this directory
 			changes := h.comparator.CompareSnapshots(oldSnapshot, newSnapshot)
 

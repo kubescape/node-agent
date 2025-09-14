@@ -25,20 +25,17 @@ type FIMManager struct {
 }
 
 // NewFIMManager creates a new FIM manager
-func NewFIMManager(cfg config.Config, clusterName, nodeName string, cloudMetadata *apitypes.CloudMetadata) (*FIMManager, error) {
+func NewFIMManager(cfg config.Config, clusterName string, exporter exporters.Exporter, cloudMetadata *apitypes.CloudMetadata) (*FIMManager, error) {
 	if !cfg.EnableFIM {
 		logger.L().Info("FIM is disabled in configuration")
 		return &FIMManager{
 			cfg:         cfg,
 			clusterName: clusterName,
-			nodeName:    nodeName,
+			nodeName:    cfg.NodeName,
+			exporter:    exporter,
 			running:     false,
 		}, nil
 	}
-
-	// Initialize FIM-specific exporters
-	fimExportersConfig := cfg.FIM.GetFIMExportersConfig()
-	exporter := exporters.InitExporters(fimExportersConfig, clusterName, nodeName, cloudMetadata)
 
 	// Get path configurations
 	pathConfigs := cfg.FIM.GetFIMPathConfigs()
@@ -75,7 +72,7 @@ func NewFIMManager(cfg config.Config, clusterName, nodeName string, cloudMetadat
 		sensor:        sensor,
 		exporter:      exporter,
 		clusterName:   clusterName,
-		nodeName:      nodeName,
+		nodeName:      cfg.NodeName,
 		cloudMetadata: cloudMetadata,
 		running:       false,
 	}, nil
