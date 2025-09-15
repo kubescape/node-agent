@@ -250,6 +250,9 @@ func (ehf *EventHandlerFactory) registerHandlers(
 	// IoUring events
 	ehf.handlers[utils.IoUringEventType] = []Manager{ruleManager, metrics, rulePolicy}
 
+	// Audit events - route to rule manager and metrics for POC
+	ehf.handlers[utils.AuditEventType] = []Manager{ruleManager, metrics}
+
 	// Note: SyscallEventType is not registered here because the syscall tracer
 	// doesn't generate events - it only provides a peek function for other components
 }

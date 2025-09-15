@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/node-agent/pkg/auditmanager"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -87,5 +88,11 @@ func (e *ExporterBus) SendMalwareAlert(malwareResult malwaremanager.MalwareResul
 func (e *ExporterBus) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 	for _, exporter := range e.exporters {
 		exporter.SendFimAlerts(fimEvents)
+	}
+}
+
+func (e *ExporterBus) SendAuditAlert(auditResult auditmanager.AuditResult) {
+	for _, exporter := range e.exporters {
+		exporter.SendAuditAlert(auditResult)
 	}
 }

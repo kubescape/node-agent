@@ -83,6 +83,9 @@ type Config struct {
 	DSymlink                       bool                                     `mapstructure:"dSymlink"`
 	DTop                           bool                                     `mapstructure:"dTop"`
 	FIM                            FIMConfig                                `mapstructure:"fim"`
+	// Audit subsystem configuration
+	EnableAuditDetection bool                      `mapstructure:"auditDetectionEnabled"`
+	AuditExporters       exporters.ExportersConfig `mapstructure:"auditExporters"`
 }
 
 // FIMConfig defines the configuration for File Integrity Monitoring
@@ -158,6 +161,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("workerChannelSize", 750000)
 	viper.SetDefault("blockEvents", false)
 	viper.SetDefault("dnsCacheSize", 50000)
+	viper.SetDefault("auditDetectionEnabled", false)
 	// FIM defaults
 	viper.SetDefault("fim::backendConfig::backendType", "fanotify") // This will be parsed as a string and converted to FimBackendType
 	viper.SetDefault("fim::batchConfig::maxBatchSize", 1000)
@@ -172,7 +176,6 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("fim::periodicConfig::maxFileSize", int64(100*1024*1024))
 	viper.SetDefault("fim::periodicConfig::followSymlinks", false)
 	viper.SetDefault("fim::exporters::stdoutExporter", false)
-
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()

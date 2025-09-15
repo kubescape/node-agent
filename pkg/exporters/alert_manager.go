@@ -14,6 +14,7 @@ import (
 	"github.com/go-openapi/strfmt"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/node-agent/pkg/auditmanager"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -172,6 +173,54 @@ func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.M
 	}
 	if isOK == nil {
 		logger.L().Warning("AlertManagerExporter.SendMalwareAlert - alert was not sent successfully")
+		return
+	}
+}
+
+func (ame *AlertManagerExporter) SendAuditAlert(auditResult auditmanager.AuditResult) {
+	auditEvent := auditResult.GetAuditEvent()
+	summary := fmt.Sprintf("Audit event '%s' detected in namespace '%s' pod '%s'", auditEvent.Key, auditEvent.Namespace, auditEvent.Pod)
+
+	myAlert := models.PostableAlert{
+		StartsAt: strfmt.DateTime(time.Now()),
+		EndsAt:   strfmt.DateTime(time.Now().Add(time.Hour)),
+		Annotations: map[string]string{
+			"title":       fmt.Sprintf("Audit Event: %s", auditEvent.Key),
+			"summary":     summary,
+			"message":     fmt.Sprintf("Audit rule '%s' triggered", auditEvent.Key),
+			"description": fmt.Sprintf("Audit event of type '%s' detected", auditEvent.MessageType),
+		},
+		Alert: models.Alert{
+			GeneratorURL: strfmt.URI("https://armosec.github.io/kubecop/alertviewer/"),
+			Labels: map[string]string{
+				"alertname":    "KubescapeAuditEvent",
+				"audit_key":    auditEvent.Key,
+				"message_type": auditEvent.MessageType,
+				"rule_type":    auditEvent.RuleType,
+				"container_id": auditEvent.ContainerID,
+				"namespace":    auditEvent.Namespace,
+				"pod_name":     auditEvent.Pod,
+				"severity":     "medium",
+				"host":         ame.Host,
+				"node_name":    ame.NodeName,
+				"pid":          fmt.Sprintf("%d", auditEvent.PID),
+				"uid":          fmt.Sprintf("%d", auditEvent.UID),
+				"comm":         auditEvent.Comm,
+				"path":         auditEvent.Path,
+				"syscall":      auditEvent.Syscall,
+			},
+		},
+	}
+
+	// Send the alert
+	params := alert.NewPostAlertsParams().WithContext(context.Background()).WithAlerts(models.PostableAlerts{&myAlert})
+	isOK, err := ame.client.Alert.PostAlerts(params)
+	if err != nil {
+		logger.L().Warning("AlertManagerExporter.SendAuditAlert - error sending alert", helpers.Error(err))
+		return
+	}
+	if isOK == nil {
+		logger.L().Warning("AlertManagerExporter.SendAuditAlert - alert was not sent successfully")
 		return
 	}
 }

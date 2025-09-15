@@ -5,6 +5,7 @@ import (
 	"os"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/node-agent/pkg/auditmanager"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -86,4 +87,27 @@ func (exporter *StdoutExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent
 			"agentId":     event.GetAgentId(),
 		}).Info("FIM event")
 	}
+}
+
+func (exporter *StdoutExporter) SendAuditAlert(auditResult auditmanager.AuditResult) {
+	auditEvent := auditResult.GetAuditEvent()
+
+	exporter.logger.WithFields(log.Fields{
+		"message":       fmt.Sprintf("Audit event: %s", auditEvent.Key),
+		"audit_id":      auditEvent.AuditID,
+		"message_type":  auditEvent.MessageType,
+		"rule_type":     auditEvent.RuleType,
+		"key":           auditEvent.Key,
+		"pid":           auditEvent.PID,
+		"uid":           auditEvent.UID,
+		"comm":          auditEvent.Comm,
+		"exe":           auditEvent.Exe,
+		"path":          auditEvent.Path,
+		"syscall":       auditEvent.Syscall,
+		"container_id":  auditEvent.ContainerID,
+		"pod":           auditEvent.Pod,
+		"namespace":     auditEvent.Namespace,
+		"raw_message":   auditEvent.RawMessage,
+		"CloudMetadata": exporter.cloudmetadata,
+	}).Info(fmt.Sprintf("Audit Event: %s", auditEvent.Key))
 }

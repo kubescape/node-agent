@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"net/url"
@@ -20,6 +21,8 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/node-agent/pkg/auditmanager"
+	auditmanagerv1 "github.com/kubescape/node-agent/pkg/auditmanager/v1"
 	"github.com/kubescape/node-agent/pkg/cloudmetadata"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
@@ -353,6 +356,25 @@ func main() {
 		}
 	}
 
+	// Create the audit manager with independent configuration
+	var auditManager auditmanager.AuditManagerClient
+	if cfg.EnableAuditDetection {
+		// Create dedicated exporter for audit events with separate configuration
+		auditExporter := exporters.InitExporters(cfg.AuditExporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
+
+		auditManager, err = auditmanagerv1.NewAuditManagerV1(auditExporter)
+		if err != nil {
+			logger.L().Ctx(ctx).Fatal("error creating AuditManager", helpers.Error(err))
+		}
+
+		logger.L().Info("audit manager created with dedicated exporters",
+			helpers.String("stdoutEnabled", fmt.Sprintf("%v", cfg.AuditExporters.StdoutExporter != nil && *cfg.AuditExporters.StdoutExporter)),
+			helpers.Int("alertManagerUrls", len(cfg.AuditExporters.AlertManagerExporterUrls)))
+	} else {
+		auditManager = auditmanager.NewAuditManagerMock()
+		logger.L().Info("audit detection disabled, using mock audit manager")
+	}
+
 	// Create the container handler
 	mainHandler, err := containerwatcherv2.CreateIGContainerWatcher(cfg, containerProfileManager, k8sClient,
 		igK8sClient, dnsManagerClient, prometheusExporter, ruleManager,
@@ -381,6 +403,13 @@ func main() {
 		defer fimManager.Stop()
 	}
 
+	// Start the audit manager (POC)
+	err = auditManager.Start(ctx)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("error starting the audit manager", helpers.Error(err))
+		// For POC, we'll continue even if audit manager fails to start
+	}
+
 	// Start the container handler
 	err = mainHandler.Start(ctx)
 	if err != nil {
@@ -395,6 +424,7 @@ func main() {
 		}
 	}
 	defer mainHandler.Stop()
+	defer auditManager.Stop()
 
 	// start watching
 	dWatcher.Start(ctx)

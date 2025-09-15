@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/auditmanager"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -428,4 +429,16 @@ func (e *HTTPExporter) sendAlertLimitReached(ctx context.Context) error {
 		helpers.String("since", e.alertMetrics.startTime.Format(time.RFC3339)))
 
 	return e.sendAlert(ctx, alert, apitypes.ProcessTree{}, nil)
+}
+
+func (e *HTTPExporter) SendAuditAlert(auditResult auditmanager.AuditResult) {
+	// For now, just log audit events since HTTP export for audit events needs more design
+	auditEvent := auditResult.GetAuditEvent()
+	logger.L().Info("Audit event received (HTTP export not fully implemented)",
+		helpers.String("audit_key", auditEvent.Key),
+		helpers.String("message_type", auditEvent.MessageType),
+		helpers.String("rule_type", auditEvent.RuleType),
+		helpers.Int("pid", int(auditEvent.PID)),
+		helpers.String("comm", auditEvent.Comm),
+		helpers.String("path", auditEvent.Path))
 }

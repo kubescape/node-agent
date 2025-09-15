@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kubescape/node-agent/pkg/auditmanager"
 	"github.com/kubescape/node-agent/pkg/hostfimsensor"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
@@ -164,4 +165,17 @@ func writeMalwareHeaders(csvPath string) {
 
 func (ce *CsvExporter) SendFimAlerts(fimEvents []hostfimsensor.FimEvent) {
 	// TODO: Implement FIM alerts sending logic
+}
+
+func (csvExporter *CsvExporter) SendAuditAlert(auditResult auditmanager.AuditResult) {
+	// For now, just log audit events to stdout since CSV export for audit events needs more design
+	auditEvent := auditResult.GetAuditEvent()
+	logrus.WithFields(logrus.Fields{
+		"audit_key":    auditEvent.Key,
+		"message_type": auditEvent.MessageType,
+		"rule_type":    auditEvent.RuleType,
+		"pid":          auditEvent.PID,
+		"comm":         auditEvent.Comm,
+		"path":         auditEvent.Path,
+	}).Info("Audit event (CSV export not implemented)")
 }
