@@ -44,6 +44,7 @@ const (
 	ForkEventType         EventType = "fork"
 	ExitEventType         EventType = "exit"
 	ProcfsEventType       EventType = "procfs"
+	AuditEventType        EventType = "audit"
 	AllEventType          EventType = "all"
 )
 

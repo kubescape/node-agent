@@ -80,6 +80,10 @@ type Config struct {
 	DSsh                           bool                                     `mapstructure:"dSsh"`
 	DSymlink                       bool                                     `mapstructure:"dSymlink"`
 	DTop                           bool                                     `mapstructure:"dTop"`
+
+	// Audit subsystem configuration
+	EnableAuditDetection bool                      `mapstructure:"auditDetectionEnabled"`
+	AuditExporters       exporters.ExportersConfig `mapstructure:"auditExporters"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -125,6 +129,7 @@ func LoadConfig(path string) (Config, error) {
 	viper.SetDefault("workerChannelSize", 750000)
 	viper.SetDefault("blockEvents", false)
 	viper.SetDefault("dnsCacheSize", 50000)
+	viper.SetDefault("auditDetectionEnabled", false)
 	viper.AutomaticEnv()
 
 	err := viper.ReadInConfig()

@@ -1,6 +1,7 @@
 package exporters
 
 import (
+	"github.com/kubescape/node-agent/pkg/auditmanager"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 )
@@ -11,6 +12,8 @@ type Exporter interface {
 	SendRuleAlert(failedRule ruleengine.RuleFailure)
 	// SendMalwareAlert sends an alert on malware detection to the exporter.
 	SendMalwareAlert(malwareResult malwaremanager.MalwareResult)
+	// SendAuditAlert sends an audit event alert to the exporter.
+	SendAuditAlert(auditResult auditmanager.AuditResult)
 }
 
 var _ Exporter = (*ExporterMock)(nil)
@@ -21,4 +24,7 @@ func (e *ExporterMock) SendRuleAlert(_ ruleengine.RuleFailure) {
 }
 
 func (e *ExporterMock) SendMalwareAlert(_ malwaremanager.MalwareResult) {
+}
+
+func (e *ExporterMock) SendAuditAlert(_ auditmanager.AuditResult) {
 }
