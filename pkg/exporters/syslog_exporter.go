@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/kubescape/node-agent/pkg/auditmanager"
 	"github.com/kubescape/node-agent/pkg/malwaremanager"
 	"github.com/kubescape/node-agent/pkg/ruleengine"
 
@@ -182,5 +183,22 @@ func (se *SyslogExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareR
 	_, err := message.WriteTo(se.writer)
 	if err != nil {
 		logger.L().Warning("SyslogExporter - failed to send alert to syslog", helpers.Error(err))
+	}
+}
+
+func (se *SyslogExporter) SendAuditAlert(auditResult auditmanager.AuditResult) {
+	auditEvent := auditResult.GetAuditEvent()
+
+	message := &rfc5424.Message{
+		Priority:  rfc5424.Daemon | rfc5424.Info,
+		Timestamp: time.Now(),
+		Hostname:  "kubescape-node-agent",
+		AppName:   "kubescape-node-agent",
+		Message:   []byte(fmt.Sprintf("Audit event '%s' detected: type=%s path=%s pid=%d comm=%s", auditEvent.Key, auditEvent.MessageType, auditEvent.Path, auditEvent.PID, auditEvent.Comm)),
+	}
+
+	_, err := message.WriteTo(se.writer)
+	if err != nil {
+		logger.L().Warning("SyslogExporter - failed to send audit alert to syslog", helpers.Error(err))
 	}
 }
