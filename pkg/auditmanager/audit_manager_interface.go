@@ -26,10 +26,13 @@ type AuditManagerClient interface {
 
 // AuditManagerStatus represents the current state of the audit manager
 type AuditManagerStatus struct {
-	IsRunning    bool
-	RulesLoaded  int
-	EventsTotal  uint64
-	EventsErrors uint64
+	IsRunning        bool
+	RulesLoaded      int
+	EventsTotal      uint64
+	EventsErrors     uint64
+	EventsDropped    uint64 // Events dropped due to channel full
+	EventsBlocked    uint64 // Events that experienced backpressure blocking
+	BackpressureTime uint64 // Total milliseconds spent in backpressure
 }
 
 // NewAuditManagerMock creates a mock audit manager for testing/disabled state
