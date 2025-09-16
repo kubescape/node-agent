@@ -97,6 +97,10 @@ func (am *AuditManagerV1) Start(ctx context.Context) error {
 	am.wg.Add(1)
 	go am.auditEventListener()
 
+	// Start periodic stats logging
+	am.wg.Add(1)
+	go am.statsLogger()
+
 	am.running = true
 	am.stats.IsRunning = true
 
@@ -161,6 +165,27 @@ func (am *AuditManagerV1) GetStatus() auditmanager.AuditManagerStatus {
 	am.stats.RulesLoaded = len(am.loadedRules)
 
 	return am.stats
+}
+
+// LogBackpressureStats logs current backpressure statistics for monitoring
+func (am *AuditManagerV1) LogBackpressureStats() {
+	am.mutex.RLock()
+	defer am.mutex.RUnlock()
+
+	if am.stats.EventsBlocked > 0 && am.stats.EventsTotal > 0 {
+		dropRate := float64(am.stats.EventsDropped) / float64(am.stats.EventsTotal) * 100
+		avgBlockTime := float64(am.stats.BackpressureTime) / float64(am.stats.EventsBlocked)
+		channelUtilization := len(am.eventChan) * 100 / cap(am.eventChan)
+
+		logger.L().Info("audit manager backpressure statistics",
+			helpers.String("eventsTotal", fmt.Sprintf("%d", am.stats.EventsTotal)),
+			helpers.String("eventsDropped", fmt.Sprintf("%d", am.stats.EventsDropped)),
+			helpers.String("eventsBlocked", fmt.Sprintf("%d", am.stats.EventsBlocked)),
+			helpers.String("backpressureTimeMs", fmt.Sprintf("%d", am.stats.BackpressureTime)),
+			helpers.String("dropRate", fmt.Sprintf("%.2f%%", dropRate)),
+			helpers.String("avgBlockTimeMs", fmt.Sprintf("%.1f", avgBlockTime)),
+			helpers.Int("channelUtilization", channelUtilization))
+	}
 }
 
 // initializeAuditClient sets up the go-libaudit client
@@ -425,7 +450,7 @@ func (am *AuditManagerV1) auditEventListener() {
 			}
 
 			if auditEvent != nil {
-				// Send event to processing channel
+				// Send event with backpressure timeout
 				select {
 				case am.eventChan <- auditEvent:
 					logger.L().Debug("real audit event queued",
@@ -433,12 +458,41 @@ func (am *AuditManagerV1) auditEventListener() {
 						helpers.String("key", auditEvent.Key))
 				case <-am.ctx.Done():
 					return
-				default:
-					// Channel is full, drop event
-					am.stats.EventsErrors++
-					logger.L().Warning("audit event channel full, dropping real event")
+				case <-time.After(1 * time.Second):
+					// Timeout after 1 second - provides backpressure but prevents indefinite blocking
+					am.stats.EventsDropped++
+					am.stats.EventsBlocked++
+					am.stats.BackpressureTime += 1000 // 1 second in milliseconds
+					logger.L().Warning("audit event channel blocked for 1s, dropping event",
+						helpers.String("messageType", auditEvent.MessageType),
+						helpers.String("key", auditEvent.Key),
+						helpers.Int("channelLen", len(am.eventChan)),
+						helpers.Int("channelCap", cap(am.eventChan)),
+						helpers.String("totalBlocked", fmt.Sprintf("%d", am.stats.EventsBlocked)),
+						helpers.String("totalBackpressureMs", fmt.Sprintf("%d", am.stats.BackpressureTime)))
+
+					// Optional: slow down reading when consistently blocked to reduce CPU usage
+					time.Sleep(100 * time.Millisecond)
 				}
 			}
+		}
+	}
+}
+
+// statsLogger periodically logs backpressure and performance statistics
+func (am *AuditManagerV1) statsLogger() {
+	defer am.wg.Done()
+
+	ticker := time.NewTicker(30 * time.Second) // Log stats every 30 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-am.ctx.Done():
+			logger.L().Debug("audit stats logger stopping due to context cancellation")
+			return
+		case <-ticker.C:
+			am.LogBackpressureStats()
 		}
 	}
 }
