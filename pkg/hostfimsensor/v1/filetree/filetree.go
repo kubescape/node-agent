@@ -11,27 +11,27 @@ import (
 
 // FileNode represents a file or directory in the tree
 type FileNode struct {
-	Name         string    // File/directory name
-	Path         string    // Full path from root
-	IsDir        bool      // Whether this is a directory
-	Size         int64     // File size in bytes
-	Inode        uint64    // File inode number
-	Device       uint64    // Device number
-	Mode         uint32    // File permissions and type
-	Uid          uint32    // Owner user ID
-	Gid          uint32    // Owner group ID
-	Mtime        time.Time // Last modification time
-	Ctime        time.Time // Last status change time
-	Children     map[string]*FileNode // Child nodes (for directories)
-	Parent       *FileNode // Parent node
-	mu           sync.RWMutex // Mutex for thread-safe access
+	Name     string               // File/directory name
+	Path     string               // Full path from root
+	IsDir    bool                 // Whether this is a directory
+	Size     int64                // File size in bytes
+	Inode    uint64               // File inode number
+	Device   uint64               // Device number
+	Mode     uint32               // File permissions and type
+	Uid      uint32               // Owner user ID
+	Gid      uint32               // Owner group ID
+	Mtime    time.Time            // Last modification time
+	Ctime    time.Time            // Last status change time
+	Children map[string]*FileNode // Child nodes (for directories)
+	Parent   *FileNode            // Parent node
+	mu       sync.RWMutex         // Mutex for thread-safe access
 }
 
 // FileTree represents the complete file system tree
 type FileTree struct {
-	Root         *FileNode
-	NodeCount    int
-	mu           sync.RWMutex
+	Root      *FileNode
+	NodeCount int
+	mu        sync.RWMutex
 }
 
 // NewFileTree creates a new empty file tree
@@ -56,7 +56,7 @@ func NewFileNode(name, path string, isDir bool) *FileNode {
 func (n *FileNode) AddChild(child *FileNode) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	
+
 	child.Parent = n
 	n.Children[child.Name] = child
 }
@@ -65,7 +65,7 @@ func (n *FileNode) AddChild(child *FileNode) {
 func (n *FileNode) GetChild(name string) *FileNode {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	
+
 	return n.Children[name]
 }
 
@@ -73,7 +73,7 @@ func (n *FileNode) GetChild(name string) *FileNode {
 func (n *FileNode) HasChild(name string) bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	
+
 	_, exists := n.Children[name]
 	return exists
 }
@@ -82,7 +82,7 @@ func (n *FileNode) HasChild(name string) bool {
 func (n *FileNode) RemoveChild(name string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	
+
 	if child, exists := n.Children[name]; exists {
 		child.Parent = nil
 		delete(n.Children, name)
@@ -93,7 +93,7 @@ func (n *FileNode) RemoveChild(name string) {
 func (n *FileNode) GetChildren() map[string]*FileNode {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	
+
 	children := make(map[string]*FileNode)
 	for name, child := range n.Children {
 		children[name] = child
@@ -105,12 +105,12 @@ func (n *FileNode) GetChildren() map[string]*FileNode {
 func (n *FileNode) SetMetadata(info os.FileInfo, stat *syscall.Stat_t) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	
+
 	n.Size = info.Size()
 	n.Mode = uint32(info.Mode())
 	n.Mtime = info.ModTime()
 	n.Ctime = info.ModTime() // Use mtime as fallback for ctime
-	
+
 	if stat != nil {
 		n.Inode = stat.Ino
 		n.Device = uint64(stat.Dev)
@@ -154,26 +154,26 @@ func (t *FileTree) GetRoot() *FileNode {
 func (t *FileTree) FindNode(path string) *FileNode {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	
+
 	if t.Root == nil {
 		return nil
 	}
-	
+
 	if path == "/" || path == "" {
 		return t.Root
 	}
-	
+
 	// Split path and traverse
 	parts := splitPath(path)
 	current := t.Root
-	
+
 	for _, part := range parts {
 		if current == nil || !current.IsDir {
 			return nil
 		}
 		current = current.GetChild(part)
 	}
-	
+
 	return current
 }
 
@@ -182,31 +182,24 @@ func splitPath(path string) []string {
 	if path == "/" || path == "" {
 		return []string{}
 	}
-	
-	// Clean the path and split
+
+	// Use filepath.Clean to normalize the path
 	cleanPath := filepath.Clean(path)
 	if cleanPath == "." {
 		return []string{}
 	}
-	
-	// Split by separator - handle both Unix and Windows paths
-	var parts []string
-	if filepath.Separator == '/' {
-		// Unix path
-		parts = strings.Split(cleanPath, "/")
-	} else {
-		// Windows path
-		parts = strings.Split(cleanPath, string(filepath.Separator))
-	}
-	
-	// Filter out empty parts
+
+	// Use strings.Split with filepath.Separator for cross-platform compatibility
+	parts := strings.Split(cleanPath, string(filepath.Separator))
+
+	// Filter out empty parts and current directory references
 	var result []string
 	for _, part := range parts {
 		if part != "" && part != "." {
 			result = append(result, part)
 		}
 	}
-	
+
 	return result
 }
 
@@ -214,11 +207,11 @@ func splitPath(path string) []string {
 func (t *FileTree) Walk(fn func(*FileNode) error) error {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	
+
 	if t.Root == nil {
 		return nil
 	}
-	
+
 	return t.walkRecursive(t.Root, fn)
 }
 
@@ -227,7 +220,7 @@ func (t *FileTree) walkRecursive(node *FileNode, fn func(*FileNode) error) error
 	if err := fn(node); err != nil {
 		return err
 	}
-	
+
 	if node.IsDir {
 		for _, child := range node.GetChildren() {
 			if err := t.walkRecursive(child, fn); err != nil {
@@ -235,7 +228,7 @@ func (t *FileTree) walkRecursive(node *FileNode, fn func(*FileNode) error) error
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -243,7 +236,7 @@ func (t *FileTree) walkRecursive(node *FileNode, fn func(*FileNode) error) error
 func (t *FileTree) Clear() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	t.Root = nil
 	t.NodeCount = 0
 }

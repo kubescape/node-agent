@@ -14,6 +14,19 @@ import (
 	fimtypes "github.com/kubescape/node-agent/pkg/hostfimsensor"
 )
 
+const (
+	// MaxRecursionDepth limits the maximum depth of directory recursion to prevent stack overflow
+	MaxRecursionDepth = 50
+)
+
+// buildPathFromComponents efficiently builds a full path from components
+func buildPathFromComponents(components []string) string {
+	if len(components) == 0 {
+		return "/"
+	}
+	return "/" + strings.Join(components, "/")
+}
+
 // ChangeType represents the type of change detected
 type ChangeType string
 
@@ -54,7 +67,8 @@ func (tc *TreeComparator) CompareSnapshots(oldTree, newTree *FileTree) []*FileCh
 	var changes []*FileChange
 
 	// Phase 1: Collect all basic changes (CREATE, DELETE, MODIFY, CHMOD)
-	changes = append(changes, tc.compareNodes(oldTree.GetRoot(), newTree.GetRoot(), "")...)
+	// Start with empty path components for root
+	changes = append(changes, tc.compareNodes(oldTree.GetRoot(), newTree.GetRoot(), []string{}, 0)...)
 
 	// Phase 2: Analyze changes to detect MOVE and RENAME operations
 	changes = tc.detectMoveAndRenameOperations(changes)
@@ -138,8 +152,15 @@ func (tc *TreeComparator) detectMoveAndRenameOperations(changes []*FileChange) [
 }
 
 // compareNodes recursively compares two nodes and their children
-func (tc *TreeComparator) compareNodes(oldNode, newNode *FileNode, currentPath string) []*FileChange {
+func (tc *TreeComparator) compareNodes(oldNode, newNode *FileNode, pathComponents []string, depth int) []*FileChange {
 	var changes []*FileChange
+
+	// Check recursion depth limit to prevent stack overflow
+	if depth > MaxRecursionDepth {
+		currentPath := buildPathFromComponents(pathComponents)
+		logger.L().Warning("Maximum recursion depth exceeded", helpers.String("path", currentPath), helpers.Int("depth", depth))
+		return changes
+	}
 
 	// Handle nil nodes
 	if oldNode == nil && newNode == nil {
@@ -148,43 +169,48 @@ func (tc *TreeComparator) compareNodes(oldNode, newNode *FileNode, currentPath s
 
 	if oldNode == nil {
 		// New node created
+		currentPath := buildPathFromComponents(pathComponents)
 		changes = append(changes, &FileChange{
 			Type:      ChangeTypeCreate,
-			Path:      newNode.Path,
+			Path:      currentPath,
 			OldNode:   nil,
 			NewNode:   newNode,
 			Timestamp: time.Now(),
 		})
 		// Recurse into children
 		for _, child := range newNode.GetChildren() {
-			changes = append(changes, tc.compareNodes(nil, child, filepath.Join(currentPath, child.Name))...)
+			childPathComponents := append(pathComponents, child.Name)
+			changes = append(changes, tc.compareNodes(nil, child, childPathComponents, depth+1)...)
 		}
 		return changes
 	}
 
 	if newNode == nil {
 		// Node deleted
+		currentPath := buildPathFromComponents(pathComponents)
 		changes = append(changes, &FileChange{
 			Type:      ChangeTypeDelete,
-			Path:      oldNode.Path,
+			Path:      currentPath,
 			OldNode:   oldNode,
 			NewNode:   nil,
 			Timestamp: time.Now(),
 		})
 		// Recurse into children
 		for _, child := range oldNode.GetChildren() {
-			changes = append(changes, tc.compareNodes(child, nil, filepath.Join(currentPath, child.Name))...)
+			childPathComponents := append(pathComponents, child.Name)
+			changes = append(changes, tc.compareNodes(child, nil, childPathComponents, depth+1)...)
 		}
 		return changes
 	}
 
 	// Both nodes exist, compare them
 	if tc.nodesAreDifferent(oldNode, newNode) {
+		currentPath := buildPathFromComponents(pathComponents)
 		// Check if this is a CHMOD (permission change only) - check this first
 		if tc.isChmodChange(oldNode, newNode) {
 			changes = append(changes, &FileChange{
 				Type:      ChangeTypeChmod,
-				Path:      newNode.Path,
+				Path:      currentPath,
 				OldNode:   oldNode,
 				NewNode:   newNode,
 				Timestamp: time.Now(),
@@ -193,7 +219,7 @@ func (tc *TreeComparator) compareNodes(oldNode, newNode *FileNode, currentPath s
 			// Check if this might be a move operation
 			changes = append(changes, &FileChange{
 				Type:      ChangeTypeMove,
-				Path:      newNode.Path,
+				Path:      currentPath,
 				OldNode:   oldNode,
 				NewNode:   newNode,
 				Timestamp: time.Now(),
@@ -202,7 +228,7 @@ func (tc *TreeComparator) compareNodes(oldNode, newNode *FileNode, currentPath s
 			// Regular modify
 			changes = append(changes, &FileChange{
 				Type:      ChangeTypeModify,
-				Path:      newNode.Path,
+				Path:      currentPath,
 				OldNode:   oldNode,
 				NewNode:   newNode,
 				Timestamp: time.Now(),
@@ -217,21 +243,24 @@ func (tc *TreeComparator) compareNodes(oldNode, newNode *FileNode, currentPath s
 	// Check for deleted children
 	for name, oldChild := range oldChildren {
 		if _, exists := newChildren[name]; !exists {
-			changes = append(changes, tc.compareNodes(oldChild, nil, filepath.Join(currentPath, name))...)
+			childPathComponents := append(pathComponents, name)
+			changes = append(changes, tc.compareNodes(oldChild, nil, childPathComponents, depth+1)...)
 		}
 	}
 
 	// Check for new children
 	for name, newChild := range newChildren {
 		if _, exists := oldChildren[name]; !exists {
-			changes = append(changes, tc.compareNodes(nil, newChild, filepath.Join(currentPath, name))...)
+			childPathComponents := append(pathComponents, name)
+			changes = append(changes, tc.compareNodes(nil, newChild, childPathComponents, depth+1)...)
 		}
 	}
 
 	// Recurse into existing children
 	for name, oldChild := range oldChildren {
 		if newChild, exists := newChildren[name]; exists {
-			changes = append(changes, tc.compareNodes(oldChild, newChild, filepath.Join(currentPath, name))...)
+			childPathComponents := append(pathComponents, name)
+			changes = append(changes, tc.compareNodes(oldChild, newChild, childPathComponents, depth+1)...)
 		}
 	}
 
