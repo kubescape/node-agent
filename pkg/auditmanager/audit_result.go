@@ -2,33 +2,75 @@ package auditmanager
 
 import (
 	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/elastic/go-libaudit/v2/auparse"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 )
 
 // AuditEvent represents the core audit event data without v1 dependency
 type AuditEvent struct {
-	AuditID     uint64
-	MessageType string
-	PID         uint32
-	PPID        uint32
-	UID         uint32
-	GID         uint32
-	EUID        uint32
-	EGID        uint32
-	Comm        string
-	Exe         string
-	Syscall     string
-	Args        []string
-	Success     bool
-	Exit        int32
-	Path        string
-	Mode        uint32
-	Operation   string
-	Key         string
-	RuleType    string
+	// Header information
+	AuditID   uint64
+	Timestamp types.Time
+	Sequence  uint32
+	Type      auparse.AuditMessageType
+
+	// Process information
+	PID       uint32
+	PPID      uint32
+	UID       uint32
+	GID       uint32
+	EUID      uint32
+	EGID      uint32
+	SUID      uint32 // Saved UID
+	SGID      uint32 // Saved GID
+	FSUID     uint32 // Filesystem UID
+	FSGID     uint32 // Filesystem GID
+	Comm      string
+	Exe       string
+	CWD       string // Current working directory
+	TTY       string // Terminal device
+	ProcTitle string // Decoded process title (command line)
+	SessionID uint32 // Audit session ID
+	LoginUID  uint32 // Login user ID
+
+	// Syscall information
+	Syscall    string
+	SyscallNum int32  // Raw syscall numbe																																																																												r
+	Arch       string // Architecture (e.g., b64)
+	Args       []string
+	Success    bool
+	Exit       int32
+	ErrorCode  string // Named error code (e.g., ENOENT)
+
+	// File information
+	Path      string
+	Mode      uint32
+	DevMajor  uint32 // Device major number
+	DevMinor  uint32 // Device minor number
+	Inode     uint64 // Inode number
+	Operation string
+
+	// Network information
+	SockAddr   map[string]string // Socket address details
+	SockFamily string            // Socket family (e.g., unix, inet)
+	SockPort   uint32            // Socket port number
+
+	// Security information
+	Key             string
+	Tags            []string // All audit rule tags
+	RuleType        string
+	SELinuxContext  string // SELinux security context
+	AppArmorProfile string // AppArmor profile
+	Capabilities    string // Process capabilities
+
+	// Kubernetes context
 	Pod         string
 	Namespace   string
 	ContainerID string
-	RawMessage  string
+
+	// Raw data
+	RawMessage string            // Original audit message
+	Data       map[string]string // All parsed key-value pairs
 }
 
 // AuditResult represents an audit event result that should be exported
