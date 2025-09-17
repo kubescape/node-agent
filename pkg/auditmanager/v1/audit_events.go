@@ -3,6 +3,7 @@ package v1
 import (
 	"time"
 
+	"github.com/elastic/go-libaudit/v2/auparse"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 )
@@ -10,9 +11,9 @@ import (
 // AuditEvent represents a Linux audit event that implements the K8sEvent interface
 type AuditEvent struct {
 	// Basic event information
-	Timestamp   types.Time `json:"timestamp"`
-	AuditID     uint64     `json:"auditId"`
-	MessageType string     `json:"messageType"`
+	Timestamp types.Time               `json:"timestamp"`
+	AuditID   uint64                   `json:"auditId"`
+	Type      auparse.AuditMessageType `json:"type"`
 
 	// Process information
 	PID  uint32 `json:"pid"`
@@ -95,12 +96,12 @@ type ProcessInfo struct {
 }
 
 // NewAuditEvent creates a new audit event with current timestamp
-func NewAuditEvent(auditID uint64, messageType string) *AuditEvent {
+func NewAuditEvent(auditID uint64, msgType auparse.AuditMessageType) *AuditEvent {
 	return &AuditEvent{
-		Timestamp:   types.Time(time.Now().UnixNano()),
-		AuditID:     auditID,
-		MessageType: messageType,
-		Success:     true, // Default to success, will be overridden if needed
+		Timestamp: types.Time(time.Now().UnixNano()),
+		AuditID:   auditID,
+		Type:      msgType,
+		Success:   true, // Default to success, will be overridden if needed
 	}
 }
 

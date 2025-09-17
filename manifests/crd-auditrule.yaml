@@ -1,0 +1,490 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: linuxauditrules.kubescape.io
+  labels:
+    app.kubernetes.io/name: kubescape-node-agent
+    app.kubernetes.io/component: linux-audit-rules
+spec:
+  group: kubescape.io
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              enabled:
+                type: boolean
+                default: true
+                description: "Controls whether these rules should be active"
+              rules:
+                type: array
+                description: "List of audit rule definitions"
+                items:
+                  type: object
+                  required:
+                  - name
+                  properties:
+                    name:
+                      type: string
+                      description: "Unique name of this rule within the CRD"
+                    description:
+                      type: string
+                      description: "Human-readable description of what this rule monitors"
+                    enabled:
+                      type: boolean
+                      default: true
+                      description: "Controls whether this specific rule is active"
+                    priority:
+                      type: integer
+                      default: 100
+                      minimum: 1
+                      maximum: 1000
+                      description: "Priority for rule ordering (lower = higher priority)"
+                    tags:
+                      type: array
+                      description: "Tags for organizing and filtering rules"
+                      items:
+                        type: string
+                    fileWatch:
+                      type: object
+                      description: "File system monitoring rule"
+                      required:
+                      - paths
+                      - permissions
+                      - key
+                      properties:
+                        paths:
+                          type: array
+                          description: "Paths to monitor"
+                          minItems: 1
+                          items:
+                            type: string
+                        permissions:
+                          type: array
+                          description: "Permissions to monitor"
+                          minItems: 1
+                          items:
+                            type: string
+                            enum: ["read", "write", "attr", "execute"]
+                        recursive:
+                          type: boolean
+                          default: false
+                          description: "Recursive monitoring (future use)"
+                        exclude:
+                          type: array
+                          description: "Exclude patterns (basic glob patterns)"
+                          items:
+                            type: string
+                        key:
+                          type: string
+                          description: "Key for identifying events from this rule"
+                    syscall:
+                      type: object
+                      description: "System call monitoring rule"
+                      required:
+                      - syscalls
+                      - key
+                      properties:
+                        syscalls:
+                          type: array
+                          description: "System calls to monitor"
+                          minItems: 1
+                          items:
+                            type: string
+                        architecture:
+                          type: array
+                          description: "Architecture filters"
+                          items:
+                            type: string
+                            enum: ["b64", "b32"]
+                        filters:
+                          type: array
+                          description: "Filters for syscall parameters"
+                          items:
+                            type: object
+                            required:
+                            - field
+                            - operator
+                            - value
+                            properties:
+                              field:
+                                type: string
+                                description: "Field to filter on"
+                                enum: ["pid", "ppid", "uid", "gid", "euid", "egid", "auid", "exe", "comm", "key", "exit", "success", "a0", "a1", "a2", "a3"]
+                              operator:
+                                type: string
+                                description: "Comparison operator"
+                                enum: ["=", "!=", "<", ">", "<=", ">="]
+                              value:
+                                type: string
+                                description: "Value to compare against"
+                        action:
+                          type: string
+                          default: "always"
+                          enum: ["always", "never"]
+                          description: "Action to take"
+                        list:
+                          type: string
+                          default: "exit"
+                          enum: ["task", "exit", "user", "exclude"]
+                          description: "Audit list type"
+                        key:
+                          type: string
+                          description: "Key for identifying events from this rule"
+                    network:
+                      type: object
+                      description: "Network monitoring rule (future extension)"
+                      required:
+                      - key
+                      properties:
+                        addresses:
+                          type: array
+                          description: "Addresses to monitor"
+                          items:
+                            type: string
+                        ports:
+                          type: array
+                          description: "Ports to monitor"
+                          items:
+                            type: integer
+                            minimum: 1
+                            maximum: 65535
+                        protocols:
+                          type: array
+                          description: "Protocols to monitor"
+                          items:
+                            type: string
+                            enum: ["tcp", "udp", "icmp"]
+                        direction:
+                          type: string
+                          enum: ["inbound", "outbound", "both"]
+                          description: "Traffic direction"
+                        key:
+                          type: string
+                          description: "Key for identifying events from this rule"
+                    process:
+                      type: object
+                      description: "Process monitoring rule"
+                      required:
+                      - key
+                      properties:
+                        executables:
+                          type: array
+                          description: "Executables to monitor (path patterns)"
+                          items:
+                            type: string
+                        arguments:
+                          type: array
+                          description: "Command line argument patterns"
+                          items:
+                            type: string
+                        users:
+                          type: array
+                          description: "Users to monitor"
+                          items:
+                            type: string
+                        groups:
+                          type: array
+                          description: "Groups to monitor"
+                          items:
+                            type: string
+                        filters:
+                          type: array
+                          description: "Additional filters"
+                          items:
+                            type: object
+                            required:
+                            - field
+                            - operator
+                            - value
+                            properties:
+                              field:
+                                type: string
+                                description: "Field to filter on"
+                              operator:
+                                type: string
+                                enum: ["=", "!=", "<", ">", "<=", ">="]
+                                description: "Comparison operator"
+                              value:
+                                type: string
+                                description: "Value to compare against"
+                        key:
+                          type: string
+                          description: "Key for identifying events from this rule"
+                    rawRule:
+                      type: string
+                      description: "Raw auditctl format rule (fallback for complex rules)"
+              nodeSelector:
+                type: object
+                description: "Node selector to target specific nodes"
+                additionalProperties:
+                  type: string
+              rateLimit:
+                type: object
+                description: "Rate limiting configuration"
+                properties:
+                  eventsPerSecond:
+                    type: integer
+                    minimum: 1
+                    description: "Maximum events per second"
+                  burstSize:
+                    type: integer
+                    minimum: 1
+                    description: "Burst size for rate limiting"
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                description: "Current conditions of the AuditRule"
+                items:
+                  type: object
+                  required:
+                  - type
+                  - status
+                  - lastTransitionTime
+                  properties:
+                    type:
+                      type: string
+                      enum: ["Ready", "Progressing", "Failed"]
+                      description: "Type of condition"
+                    status:
+                      type: string
+                      enum: ["True", "False", "Unknown"]
+                      description: "Status of the condition"
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                      description: "Last time the condition transitioned"
+                    reason:
+                      type: string
+                      description: "Reason for the condition's last transition"
+                    message:
+                      type: string
+                      description: "Human-readable message about the transition"
+              appliedRules:
+                type: integer
+                minimum: 0
+                description: "Number of rules successfully applied to the kernel"
+              failedRules:
+                type: array
+                description: "Rules that failed to apply"
+                items:
+                  type: object
+                  required:
+                  - name
+                  - error
+                  properties:
+                    name:
+                      type: string
+                      description: "Name of the failed rule"
+                    error:
+                      type: string
+                      description: "Error message describing the failure"
+                    lastAttempt:
+                      type: string
+                      format: date-time
+                      description: "When we last tried to apply this rule"
+              lastUpdated:
+                type: string
+                format: date-time
+                description: "When the rules were last updated"
+              observedGeneration:
+                type: integer
+                description: "Generation of the most recently observed AuditRule"
+    additionalPrinterColumns:
+    - name: Enabled
+      type: boolean
+      description: Whether the Linux audit rules are enabled
+      jsonPath: .spec.enabled
+    - name: Rules
+      type: integer
+      description: Number of Linux audit rules defined
+      jsonPath: .status.appliedRules
+    - name: Status
+      type: string
+      description: Status of the Linux audit rules
+      jsonPath: .status.conditions[?(@.type=="Ready")].status
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    subresources:
+      status: {}
+  scope: Namespaced
+  names:
+    plural: linuxauditrules
+    singular: linuxauditrule
+    kind: LinuxAuditRule
+    shortNames:
+    - lar
+    - linuxauditrule
+    - auditrule  # Keep backward compatibility
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubescape
+  labels:
+    name: kubescape
+---
+apiVersion: kubescape.io/v1
+kind: LinuxAuditRule
+metadata:
+  name: security-monitoring
+  namespace: kubescape
+  labels:
+    category: security
+    environment: production
+spec:
+  enabled: true
+  nodeSelector:
+    kubernetes.io/os: linux
+    # Uncomment to target specific nodes:
+    # kubernetes.io/hostname: "worker-node-1"
+    # node-type: "security"
+  rateLimit:
+    eventsPerSecond: 100
+    burstSize: 200
+  rules:
+  - name: passwd-watch
+    description: "Monitor critical system files for unauthorized changes"
+    enabled: true
+    priority: 100
+    tags: ["security", "identity", "critical"]
+    fileWatch:
+      paths:
+        - "/etc/passwd"
+        - "/etc/shadow"
+        - "/etc/group"
+        - "/etc/gshadow"
+      permissions: ["write", "attr"]
+      key: "identity_files"
+
+  - name: sudoers-watch
+    description: "Monitor sudo configuration changes"
+    enabled: true
+    priority: 110
+    tags: ["security", "privilege", "sudo"]
+    fileWatch:
+      paths: ["/etc/sudoers", "/etc/sudoers.d"]
+      permissions: ["write", "attr"]
+      key: "sudo_config"
+
+  - name: ssh-config-watch
+    description: "Monitor SSH configuration changes"
+    enabled: true
+    priority: 120
+    tags: ["security", "ssh", "config"]
+    fileWatch:
+      paths: ["/etc/ssh/sshd_config", "/etc/ssh/ssh_config"]
+      permissions: ["write", "attr"]
+      key: "ssh_config"
+
+  - name: sudo-execution
+    description: "Monitor processes running with elevated privileges"
+    enabled: true
+    priority: 200
+    tags: ["security", "privilege-escalation", "execution"]
+    syscall:
+      syscalls: ["execve"]
+      architecture: ["b64"]
+      action: "always"
+      list: "exit"
+      filters:
+      - field: "euid"
+        operator: "="
+        value: "0"
+      - field: "auid"
+        operator: ">="
+        value: "1000"
+      key: "privileged_exec"
+
+  - name: file-access-monitoring
+    description: "Monitor file access patterns"
+    enabled: true
+    priority: 300
+    tags: ["security", "file-access", "monitoring"]
+    syscall:
+      syscalls: ["open", "openat", "creat"]
+      architecture: ["b64"]
+      action: "always"
+      list: "exit"
+      filters:
+      - field: "success"
+        operator: "="
+        value: "1"
+      key: "file_access"
+
+  - name: network-connections
+    description: "Monitor network connection attempts"
+    enabled: true
+    priority: 400
+    tags: ["security", "network", "connections"]
+    syscall:
+      syscalls: ["connect", "bind"]
+      architecture: ["b64"]
+      action: "always"
+      list: "exit"
+      key: "network_activity"
+
+  - name: mount-operations
+    description: "Monitor filesystem mount operations"
+    enabled: true
+    priority: 500
+    tags: ["security", "filesystem", "mount"]
+    rawRule: "-a always,exit -F arch=b64 -S mount -F auid>=1000 -F auid!=4294967295 -k mount_ops"
+
+  - name: process-creation
+    description: "Monitor process creation by specific users"
+    enabled: true
+    priority: 600
+    tags: ["security", "process", "monitoring"]
+    process:
+      users: ["root", "admin"]
+      filters:
+      - field: "auid"
+        operator: ">="
+        value: "1000"
+      key: "process_creation"
+---
+apiVersion: kubescape.io/v1
+kind: LinuxAuditRule
+metadata:
+  name: development-monitoring
+  namespace: kubescape
+  labels:
+    category: development
+    environment: dev
+spec:
+  enabled: false  # Disabled by default for development
+  nodeSelector:
+    environment: development
+  rateLimit:
+    eventsPerSecond: 50
+    burstSize: 100
+  rules:
+  - name: dev-file-watch
+    description: "Monitor development files"
+    enabled: true
+    priority: 100
+    tags: ["development", "files"]
+    fileWatch:
+      paths: ["/home/*/dev", "/opt/development"]
+      permissions: ["write"]
+      exclude: ["*.tmp", "*.log"]
+      key: "dev_files"
+
+  - name: compiler-execution
+    description: "Monitor compiler usage"
+    enabled: true
+    priority: 200
+    tags: ["development", "compilation"]
+    process:
+      executables: ["/usr/bin/gcc", "/usr/bin/g++", "/usr/bin/clang"]
+      key: "compiler_usage"

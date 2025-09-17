@@ -61,8 +61,10 @@ import (
 	"github.com/kubescape/node-agent/pkg/storage/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/node-agent/pkg/validator"
+	"github.com/kubescape/node-agent/pkg/watcher/auditrule"
 	"github.com/kubescape/node-agent/pkg/watcher/dynamicwatcher"
 	"github.com/kubescape/node-agent/pkg/watcher/seccompprofilewatcher"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func main() {
@@ -360,16 +362,27 @@ func main() {
 	var auditManager auditmanager.AuditManagerClient
 	if cfg.EnableAuditDetection {
 		// Create dedicated exporter for audit events with separate configuration
-		auditExporter := exporters.InitExporters(cfg.AuditExporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
+		auditExporter := exporters.InitExporters(cfg.AuditDetection.Exporters, clusterData.ClusterName, cfg.NodeName, cloudMetadata)
 
-		auditManager, err = auditmanagerv1.NewAuditManagerV1(auditExporter)
+		auditManager, err = auditmanagerv1.NewAuditManagerV1(&cfg, auditExporter)
 		if err != nil {
 			logger.L().Ctx(ctx).Fatal("error creating AuditManager", helpers.Error(err))
 		}
 
-		logger.L().Info("audit manager created with dedicated exporters",
-			helpers.String("stdoutEnabled", fmt.Sprintf("%v", cfg.AuditExporters.StdoutExporter != nil && *cfg.AuditExporters.StdoutExporter)),
-			helpers.Int("alertManagerUrls", len(cfg.AuditExporters.AlertManagerExporterUrls)))
+		// Get node labels for audit rule watcher
+		node, err := k8sClient.GetKubernetesClient().CoreV1().Nodes().Get(ctx, cfg.NodeName, metav1.GetOptions{})
+		if err != nil {
+			logger.L().Warning("failed to get node labels for audit rule watcher", helpers.Error(err))
+		}
+		nodeLabels := node.GetLabels()
+
+		// Create and register the audit rule watcher
+		auditRuleWatcher := auditrule.NewAuditRuleWatcher(auditManager, cfg.NodeName, nodeLabels)
+		dWatcher.AddAdaptor(auditRuleWatcher)
+
+		logger.L().Info("audit manager and watcher created with dedicated exporters",
+			helpers.String("stdoutEnabled", fmt.Sprintf("%v", cfg.AuditDetection.Exporters.StdoutExporter != nil && *cfg.AuditDetection.Exporters.StdoutExporter)),
+			helpers.Int("alertManagerUrls", len(cfg.AuditDetection.Exporters.AlertManagerExporterUrls)))
 	} else {
 		auditManager = auditmanager.NewAuditManagerMock()
 		logger.L().Info("audit detection disabled, using mock audit manager")

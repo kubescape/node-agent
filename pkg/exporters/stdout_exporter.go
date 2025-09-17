@@ -95,7 +95,7 @@ func (exporter *StdoutExporter) SendAuditAlert(auditResult auditmanager.AuditRes
 	exporter.logger.WithFields(log.Fields{
 		"message":       fmt.Sprintf("Audit event: %s", auditEvent.Key),
 		"audit_id":      auditEvent.AuditID,
-		"message_type":  auditEvent.MessageType,
+		"message_type":  auditEvent.Type.String(),
 		"rule_type":     auditEvent.RuleType,
 		"key":           auditEvent.Key,
 		"pid":           auditEvent.PID,

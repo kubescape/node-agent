@@ -172,7 +172,7 @@ func (csvExporter *CsvExporter) SendAuditAlert(auditResult auditmanager.AuditRes
 	auditEvent := auditResult.GetAuditEvent()
 	logrus.WithFields(logrus.Fields{
 		"audit_key":    auditEvent.Key,
-		"message_type": auditEvent.MessageType,
+		"message_type": auditEvent.Type.String(),
 		"rule_type":    auditEvent.RuleType,
 		"pid":          auditEvent.PID,
 		"comm":         auditEvent.Comm,

@@ -436,7 +436,7 @@ func (e *HTTPExporter) SendAuditAlert(auditResult auditmanager.AuditResult) {
 	auditEvent := auditResult.GetAuditEvent()
 	logger.L().Info("Audit event received (HTTP export not fully implemented)",
 		helpers.String("audit_key", auditEvent.Key),
-		helpers.String("message_type", auditEvent.MessageType),
+		helpers.String("message_type", auditEvent.Type.String()),
 		helpers.String("rule_type", auditEvent.RuleType),
 		helpers.Int("pid", int(auditEvent.PID)),
 		helpers.String("comm", auditEvent.Comm),
