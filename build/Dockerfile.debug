@@ -3,6 +3,7 @@ FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS builder
 ENV GO111MODULE=on CGO_ENABLED=0
 WORKDIR /work
 ARG TARGETOS TARGETARCH
+
 RUN go install github.com/go-delve/delve/cmd/dlv@latest
 RUN --mount=target=. \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -11,9 +12,13 @@ RUN --mount=target=. \
 
 FROM --platform=$BUILDPLATFORM ghcr.io/inspektor-gadget/ig:v0.44.1 AS ig
 
+RUN ["ig", "image", "pull", "trace_tcp:v0.44.1"]
+RUN ["ig", "image", "pull", "advise_seccomp:v0.44.1"]
+RUN ["ig", "image", "pull", "trace_capabilities:v0.44.1"]
+RUN ["ig", "image", "pull", "trace_dns:v0.44.1"]
 RUN ["ig", "image", "pull", "trace_exec:v0.44.1"]
 RUN ["ig", "image", "pull", "trace_open:v0.44.1"]
-RUN ["ig", "image", "export", "trace_exec:v0.44.1", "trace_open:v0.44.1", "/tmp/tracers.tar"]
+RUN ["ig", "image", "export", "trace_tcp:v0.44.1", "advise_seccomp:v0.44.1", "trace_capabilities:v0.44.1", "trace_dns:v0.44.1", "trace_exec:v0.44.1", "trace_open:v0.44.1", "/tmp/tracers.tar"]
 
 FROM gcr.io/distroless/static-debian12:debug
 
@@ -26,4 +31,4 @@ ARG image_version
 ENV RELEASE=$image_version
 
 WORKDIR /root
-ENTRYPOINT ["/usr/bin/dlv", "--listen=:40000", "--headless=true","--accept-multiclient", "--api-version=2", "--log", "exec", "/usr/bin/node-agent"]
+ENTRYPOINT ["/usr/bin/dlv", "--listen=:40000", "--headless=true", "--continue", "--accept-multiclient", "--api-version=2", "--log", "exec", "/usr/bin/node-agent"]

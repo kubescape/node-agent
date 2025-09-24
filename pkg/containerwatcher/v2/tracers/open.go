@@ -3,7 +3,6 @@ package tracers
 import (
 	"context"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
@@ -25,12 +24,9 @@ var _ containerwatcher.TracerInterface = (*OpenTracer)(nil)
 
 // OpenTracer implements TracerInterface for open events
 type OpenTracer struct {
-	cfg                config.Config
-	containerSelector  containercollection.ContainerSelector
 	eventCallback      containerwatcher.ResultCallback
 	gadgetCtx          *gadgetcontext.GadgetContext
 	ociStore           *orasoci.ReadOnlyStore
-	orderedEventQueue  EventQueueInterface
 	runtime            runtime.Runtime
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 }
@@ -39,12 +35,10 @@ type OpenTracer struct {
 func NewOpenTracer(
 	runtime runtime.Runtime,
 	ociStore *orasoci.ReadOnlyStore,
-	containerSelector containercollection.ContainerSelector,
 	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *OpenTracer {
 	return &OpenTracer{
-		containerSelector:  containerSelector,
 		eventCallback:      eventCallback,
 		ociStore:           ociStore,
 		runtime:            runtime,
@@ -61,7 +55,6 @@ func (ot *OpenTracer) Start(ctx context.Context) error {
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
 			kubemanager.KubeManagerOperator,
-			//KubeNameResolver,
 			ocihandler.OciHandler, // pass singleton instance of the oci-handler
 			ot.eventOperator(),
 		),
@@ -97,7 +90,6 @@ func (ot *OpenTracer) GetEventType() utils.EventType {
 
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (ot *OpenTracer) IsEnabled(cfg config.Config) bool {
-	ot.cfg = cfg
 	if cfg.DOpen {
 		return false
 	}

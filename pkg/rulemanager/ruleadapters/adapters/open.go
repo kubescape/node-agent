@@ -19,7 +19,7 @@ func NewOpenAdapter() *OpenAdapter {
 
 func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
 	openEvent, ok := enrichedEvent.Event.(*utils.EnrichEvent)
-	if !ok && openEvent.EventType != utils.OpenEventType {
+	if !ok || openEvent.EventType != utils.OpenEventType {
 		return
 	}
 

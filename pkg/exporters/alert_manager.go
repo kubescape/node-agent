@@ -130,7 +130,6 @@ func (ame *AlertManagerExporter) SendRuleAlert(failedRule types.RuleFailure) {
 }
 
 func (ame *AlertManagerExporter) SendMalwareAlert(malwareResult malwaremanager.MalwareResult) {
-	malwareResult.GetTriggerEvent()
 	summary := fmt.Sprintf("Malware '%s' detected in namespace '%s' pod '%s' description '%s'", malwareResult.GetBasicRuntimeAlert().AlertName, malwareResult.GetTriggerEvent().GetNamespace(), malwareResult.GetTriggerEvent().GetPod(), malwareResult.GetMalwareRuntimeAlert().MalwareDescription)
 	myAlert := models.PostableAlert{
 		StartsAt: strfmt.DateTime(time.Now()),

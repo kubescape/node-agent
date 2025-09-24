@@ -27,12 +27,12 @@ func (f *EventRuleAdapterFactory) RegisterAdapter(eventType utils.EventType, ada
 }
 
 func (f *EventRuleAdapterFactory) registerAllAdapters() {
-	//f.RegisterAdapter(utils.ExecveEventType, adapters.NewExecAdapter())
+	f.RegisterAdapter(utils.ExecveEventType, adapters.NewExecAdapter())
 	f.RegisterAdapter(utils.OpenEventType, adapters.NewOpenAdapter())
-	//f.RegisterAdapter(utils.CapabilitiesEventType, adapters.NewCapabilitiesAdapter())
-	//f.RegisterAdapter(utils.DnsEventType, adapters.NewDnsAdapter())
-	//f.RegisterAdapter(utils.NetworkEventType, adapters.NewNetworkAdapter())
-	//f.RegisterAdapter(utils.SyscallEventType, adapters.NewSyscallAdapter())
+	f.RegisterAdapter(utils.CapabilitiesEventType, adapters.NewCapabilitiesAdapter())
+	f.RegisterAdapter(utils.DnsEventType, adapters.NewDnsAdapter())
+	f.RegisterAdapter(utils.NetworkEventType, adapters.NewNetworkAdapter())
+	f.RegisterAdapter(utils.SyscallEventType, adapters.NewSyscallAdapter())
 	//f.RegisterAdapter(utils.SymlinkEventType, adapters.NewSymlinkAdapter())
 	//f.RegisterAdapter(utils.HardlinkEventType, adapters.NewHardlinkAdapter())
 	//f.RegisterAdapter(utils.SSHEventType, adapters.NewSSHAdapter())

@@ -7,7 +7,7 @@ import (
 )
 
 type DNSManagerClient interface {
-	ReportEvent(networkEvent utils.K8sEvent)
+	ReportEvent(dnsEvent utils.K8sEvent)
 	ContainerCallback(notif containercollection.PubSubEvent)
 }
 
