@@ -6,6 +6,7 @@ import (
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	tracerexit "github.com/kubescape/node-agent/pkg/ebpf/gadgets/exit/tracer"
@@ -99,15 +100,15 @@ func (et *ExitTracer) IsEnabled(cfg config.Config) bool {
 
 // exitEventCallback handles exit events from the tracer
 func (et *ExitTracer) exitEventCallback(event *tracerexittype.Event) {
-	//if event.Type == types.DEBUG {
-	//	return
-	//}
-	//
-	//if et.eventCallback != nil {
-	//	// Extract container ID and process ID from the exit event
-	//	containerID := event.Runtime.ContainerID
-	//	processID := event.Pid
-	//
-	//	et.eventCallback(event, containerID, processID)
-	//}
+	if event.Type == types.DEBUG {
+		return
+	}
+
+	if et.eventCallback != nil {
+		// Extract container ID and process ID from the exit event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		et.eventCallback(event, containerID, processID)
+	}
 }

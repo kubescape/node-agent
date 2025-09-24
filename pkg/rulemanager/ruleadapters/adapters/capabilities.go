@@ -1,8 +1,11 @@
 package adapters
 
 import (
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type CapabilitiesAdapter struct {
@@ -13,41 +16,41 @@ func NewCapabilitiesAdapter() *CapabilitiesAdapter {
 }
 
 func (c *CapabilitiesAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	//capEvent, ok := enrichedEvent.Event.(*tracercapabilitiestype.Event)
-	//if !ok {
-	//	return
-	//}
+	capEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
+	if !ok || capEvent.EventType != utils.CapabilitiesEventType {
+		return
+	}
 
-	//baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	//baseRuntimeAlert.InfectedPID = capEvent.Pid
-	//baseRuntimeAlert.Arguments = map[string]interface{}{
-	//	"syscall":    capEvent.Syscall,
-	//	"capability": capEvent.CapName,
-	//}
-	//baseRuntimeAlert.Identifiers = &common.Identifiers{
-	//	Process: &common.ProcessEntity{
-	//		Name: capEvent.Comm,
-	//	},
-	//}
-	//failure.SetBaseRuntimeAlert(baseRuntimeAlert)
+	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
+	baseRuntimeAlert.InfectedPID = capEvent.GetPID()
+	baseRuntimeAlert.Arguments = map[string]interface{}{
+		"syscall":    capEvent.GetSyscall(),
+		"capability": capEvent.GetCapability(),
+	}
+	baseRuntimeAlert.Identifiers = &common.Identifiers{
+		Process: &common.ProcessEntity{
+			Name: capEvent.GetComm(),
+		},
+	}
+	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	//runtimeProcessDetails := apitypes.ProcessTree{
-	//	ProcessTree: apitypes.Process{
-	//		Comm: capEvent.Comm,
-	//		Gid:  &capEvent.Gid,
-	//		PID:  capEvent.Pid,
-	//		Uid:  &capEvent.Uid,
-	//	},
-	//	ContainerID: capEvent.Runtime.ContainerID,
-	//}
-	//failure.SetRuntimeProcessDetails(runtimeProcessDetails)
+	runtimeProcessDetails := apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			Comm: capEvent.GetComm(),
+			Gid:  capEvent.GetGid(),
+			PID:  capEvent.GetPID(),
+			Uid:  capEvent.GetUid(),
+		},
+		ContainerID: capEvent.GetContainerID(),
+	}
+	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	//failure.SetTriggerEvent(capEvent.Event)
+	failure.SetTriggerEvent(capEvent)
 
-	//runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
-	//	PodName: capEvent.GetPod(),
-	//}
-	//failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+		PodName: capEvent.GetPod(),
+	}
+	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 func (c *CapabilitiesAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {

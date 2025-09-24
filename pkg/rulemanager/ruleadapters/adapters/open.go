@@ -18,15 +18,15 @@ func NewOpenAdapter() *OpenAdapter {
 }
 
 func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	openEvent, ok := enrichedEvent.Event.(*utils.EnrichEvent)
-	if !ok && openEvent.EventType != utils.OpenEventType {
+	openEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
+	if !ok || openEvent.EventType != utils.OpenEventType {
 		return
 	}
 
 	failure.SetExtra(openEvent.GetExtra())
 
 	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	baseRuntimeAlert.InfectedPID = openEvent.GetPid()
+	baseRuntimeAlert.InfectedPID = openEvent.GetPID()
 	baseRuntimeAlert.Arguments = map[string]interface{}{
 		"flags": openEvent.GetFlags(),
 		"path":  openEvent.GetPath(),
@@ -46,7 +46,7 @@ func (c *OpenAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEven
 		ProcessTree: apitypes.Process{
 			Comm: openEvent.GetComm(),
 			Gid:  openEvent.GetGid(),
-			PID:  openEvent.GetPid(),
+			PID:  openEvent.GetPID(),
 			Uid:  openEvent.GetUid(),
 		},
 		ContainerID: openEvent.GetContainerID(),

@@ -10,7 +10,6 @@ import (
 	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
@@ -29,9 +28,7 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 		if data.capabilites == nil {
 			data.capabilites = mapset.NewSet[string]()
 		}
-		if !data.capabilites.Contains(capability) {
-			data.capabilites.Add(capability)
-		}
+		data.capabilites.Add(capability)
 		return size.Of(capability), nil
 	})
 
@@ -39,32 +36,33 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 }
 
 // ReportFileExec reports a file execution event for a container
-func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event *utils.EnrichEvent) {
-	//err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
-	//	if data.execs == nil {
-	//		data.execs = &maps.SafeMap[string, []string]{}
-	//	}
-	//	path := event.Comm
-	//	if len(event.Args) > 0 {
-	//		path = event.Args[0]
-	//	}
+func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event *utils.DatasourceEvent) {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+		if data.execs == nil {
+			data.execs = &maps.SafeMap[string, []string]{}
+		}
+		path := event.GetComm()
+		args := event.GetArgs()
+		if len(args) > 0 {
+			path = args[0]
+		}
 
-	// Use SHA256 hash of the exec to identify it uniquely
-	//	execIdentifier := utils.CalculateSHA256FileExecHash(path, event.Args)
-	//	if cpm.enricher != nil {
-	//		go cpm.enricher.EnrichEvent(containerID, &event, execIdentifier)
-	//	}
+		// Use SHA256 hash of the exec to identify it uniquely
+		execIdentifier := utils.CalculateSHA256FileExecHash(path, args)
+		if cpm.enricher != nil {
+			go cpm.enricher.EnrichEvent(containerID, event, execIdentifier)
+		}
 
-	//	exec := append([]string{path}, event.Args...)
-	//	data.execs.Set(execIdentifier, exec)
-	//	return size.Of(exec), nil
-	//})
+		exec := append([]string{path}, args...)
+		data.execs.Set(execIdentifier, exec)
+		return size.Of(exec), nil
+	})
 
-	//cpm.logEventError(err, "file exec", containerID)
+	cpm.logEventError(err, "file exec", containerID)
 }
 
 // ReportFileOpen reports a file open event for a container
-func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event *utils.EnrichEvent) {
+func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event *utils.DatasourceEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.opens == nil {
 			data.opens = &maps.SafeMap[string, mapset.Set[string]]{}
@@ -106,7 +104,7 @@ func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event
 	//err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
 	//	if cpm.enricher != nil {
 	//		symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
-	//		go cpm.enricher.EnrichEvent(containerID, event, symlinkIdentifier)
+	//		go cpm.enricher.DatasourceEvent(containerID, event, symlinkIdentifier)
 	//	}
 	//	return nil
 	//})
@@ -119,7 +117,7 @@ func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, even
 	//err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
 	//	if cpm.enricher != nil {
 	//		hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
-	//		go cpm.enricher.EnrichEvent(containerID, event, hardlinkIdentifier)
+	//		go cpm.enricher.DatasourceEvent(containerID, event, hardlinkIdentifier)
 	//	}
 	//	return nil
 	//})
@@ -231,40 +229,41 @@ func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string
 }
 
 // ReportNetworkEvent reports a network event for a container
-func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event *datasource.Data) {
-	//if !cpm.isValidNetworkEvent(event) {
-	//	return
-	//}
+func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event *utils.DatasourceEvent) {
+	if !cpm.isValidNetworkEvent(event) {
+		return
+	}
 
-	//err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
-	//	if data.networks == nil {
-	//		data.networks = mapset.NewSet[NetworkEvent]()
-	//	}
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+		if data.networks == nil {
+			data.networks = mapset.NewSet[NetworkEvent]()
+		}
 
-	//	networkEvent := NetworkEvent{
-	//		Port:     event.Port,
-	//		Protocol: event.Proto,
-	//		PktType:  event.PktType,
-	//		Destination: Destination{
-	//			Namespace: event.DstEndpoint.Namespace,
-	//			Name:      event.DstEndpoint.Name,
-	//			Kind:      EndpointKind(event.DstEndpoint.Kind),
-	//			IPAddress: event.DstEndpoint.Addr,
-	//		},
-	//	}
-	//	networkEvent.SetPodLabels(event.PodLabels)
-	//	networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
+		dstEndpoint := event.GetDstEndpoint()
+		networkEvent := NetworkEvent{
+			Port:     event.GetPort(),
+			Protocol: event.GetProto(),
+			PktType:  event.GetPktType(),
+			Destination: Destination{
+				Namespace: dstEndpoint.Namespace,
+				Name:      dstEndpoint.Name,
+				Kind:      EndpointKind(dstEndpoint.Kind),
+				IPAddress: dstEndpoint.Addr,
+			},
+		}
+		networkEvent.SetPodLabels(event.GetPodLabels())
+		networkEvent.SetDestinationPodLabels(dstEndpoint.PodLabels)
 
-	// Skip if we already saved this event
-	//	if data.networks.Contains(networkEvent) {
-	//		return 0, nil
-	//	}
+		// Skip if we already saved this event
+		if data.networks.Contains(networkEvent) {
+			return 0, nil
+		}
 
-	//	data.networks.Add(networkEvent)
-	//	return size.Of(networkEvent), nil
-	//})
+		data.networks.Add(networkEvent)
+		return size.Of(networkEvent), nil
+	})
 
-	//cpm.logEventError(err, "network", containerID)
+	cpm.logEventError(err, "network", containerID)
 }
 
 // ReportDroppedEvent reports a dropped event (currently just logs)
@@ -282,55 +281,39 @@ func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
 	logger.L().Debug("dropped event reported", helpers.String("containerID", containerID))
 }
 
-// PeekSyscalls returns the syscalls for the given mount namespace ID
-// Note: This function should be called with a lock held on the container data
-func (cpm *ContainerProfileManager) PeekSyscalls(data *containerData) ([]string, error) {
-	var syscalls []string
+func (cpm *ContainerProfileManager) ReportSyscalls(containerID string, syscalls []string) {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+		if data.syscalls == nil {
+			data.syscalls = mapset.NewSet[string]()
+		}
+		data.syscalls.Append(syscalls...)
+		return size.Of(syscalls), nil
+	})
 
-	if cpm.syscallPeekFunc == nil {
-		return nil, errors.New("syscall peek function is not set")
-	}
-
-	peekedSyscalls, err := cpm.syscallPeekFunc(data.watchedContainerData.NsMntId)
-	if err != nil {
-		return nil, err
-	}
-
-	if data.syscalls == nil {
-		data.syscalls = mapset.NewSet[string]()
-	}
-
-	// Get only new syscalls
-	syscallsSet := mapset.NewSet(peekedSyscalls...)
-	newSyscalls := syscallsSet.Difference(data.syscalls)
-	syscalls = newSyscalls.ToSlice()
-
-	// Store all syscalls in container data
-	data.syscalls.Append(syscalls...)
-
-	return syscalls, err
+	cpm.logEventError(err, "syscalls", containerID)
 }
 
 // isValidNetworkEvent checks if the network event is valid for processing
-//func (cpm *ContainerProfileManager) isValidNetworkEvent(event *datasource.Data) bool {
-// Unknown type, shouldn't happen
-//	if event.PktType != HostPktType && event.PktType != OutgoingPktType {
-//		logger.L().Debug("pktType is not HOST or OUTGOING", helpers.Interface("event", event))
-//		return false
-//	}
+func (cpm *ContainerProfileManager) isValidNetworkEvent(event *utils.DatasourceEvent) bool {
+	pktType := event.GetPktType()
+	// Unknown type, shouldn't happen
+	if pktType != HostPktType && pktType != OutgoingPktType {
+		logger.L().Debug("pktType is not HOST or OUTGOING", helpers.Interface("event", event))
+		return false
+	}
 
-// Ignore localhost
-//	if event.PktType == HostPktType && event.PodHostIP == event.DstEndpoint.Addr {
-//		return false
-//	}
+	// Ignore localhost
+	if pktType == HostPktType && event.GetPodHostIP() == event.GetDstEndpoint().Addr {
+		return false
+	}
 
-// Ignore host netns
-//	if event.K8s.HostNetwork {
-//		return false
-//	}
+	// Ignore host netns
+	if event.GetHostNetwork() {
+		return false
+	}
 
-//	return true
-//}
+	return true
+}
 
 // getRulePolicies returns a map of rule policies based on the rule cache
 func (cpm *ContainerProfileManager) getRulePolicies() map[string]v1beta1.RulePolicy {

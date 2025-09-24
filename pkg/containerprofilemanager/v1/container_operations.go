@@ -102,8 +102,3 @@ func (cpm *ContainerProfileManager) removeContainerEntry(containerID string) (*C
 
 	return entry, exists
 }
-
-// RegisterPeekFunc registers the syscall peek function
-func (cpm *ContainerProfileManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error)) {
-	cpm.syscallPeekFunc = peek
-}

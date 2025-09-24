@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -201,225 +203,229 @@ func (ns *NetworkStream) Start() {
 }
 
 func (ns *NetworkStream) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {
-	//eventType := enrichedEvent.EventType
-	//event := enrichedEvent.Event
-	//switch eventType {
-	//case utils.NetworkEventType:
-	//	networkEvent, ok := event.(*datasource.Data)
-	//	if !ok {
-	//		return
-	//	}
+	eventType := enrichedEvent.EventType
+	switch eventType {
+	case utils.NetworkEventType:
+		networkEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
+		if !ok {
+			return
+		}
 
-	//	if networkEvent.PktType == "HOST" && networkEvent.PodHostIP == networkEvent.DstEndpoint.Addr || networkEvent.DstEndpoint.Addr == "127.0.0.1" {
-	//		return // Ignore localhost events
-	//	}
+		dstEndpoint := networkEvent.GetDstEndpoint()
+		if networkEvent.GetPktType() == "HOST" && networkEvent.GetPodHostIP() == dstEndpoint.Addr || dstEndpoint.Addr == "127.0.0.1" {
+			return // Ignore localhost events
+		}
 
-	//	ns.handleNetworkEvent(networkEvent, &apitypes.ProcessTree{ProcessTree: enrichedEvent.ProcessTree, ContainerID: enrichedEvent.ContainerID})
-	//case utils.DnsEventType:
-	//	if !ns.dnsSupport {
-	//		return
-	//	}
+		ns.handleNetworkEvent(networkEvent, &apitypes.ProcessTree{ProcessTree: enrichedEvent.ProcessTree, ContainerID: enrichedEvent.ContainerID})
+	case utils.DnsEventType:
+		if !ns.dnsSupport {
+			return
+		}
 
-	//	dnsEvent, ok := event.(*tracerdnstype.Event)
-	//	if !ok {
-	//		return
-	//	}
-	//	if !ns.shouldReportDnsEvent(dnsEvent) {
-	//		return
-	//	}
+		dnsEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
+		if !ok {
+			return
+		}
+		if !ns.shouldReportDnsEvent(dnsEvent) {
+			return
+		}
 
-	//	ns.handleDnsEvent(dnsEvent, &apitypes.ProcessTree{ProcessTree: enrichedEvent.ProcessTree, ContainerID: enrichedEvent.ContainerID})
+		ns.handleDnsEvent(dnsEvent, &apitypes.ProcessTree{ProcessTree: enrichedEvent.ProcessTree, ContainerID: enrichedEvent.ContainerID})
 
-	//default:
-	//	logger.L().Error("NetworkStream - unknown event type", helpers.String("event type", string(eventType)))
-	//}
+	default:
+		logger.L().Error("NetworkStream - unknown event type", helpers.String("event type", string(eventType)))
+	}
 }
 
 func (ns *NetworkStream) ReportEvent(eventType utils.EventType, event utils.K8sEvent) {
-	//switch eventType {
-	//case utils.NetworkEventType:
-	//	networkEvent, ok := event.(*datasource.Data)
-	//	if !ok {
-	//		return
-	//	}
+	switch eventType {
+	case utils.NetworkEventType:
+		networkEvent, ok := event.(*utils.DatasourceEvent)
+		if !ok {
+			return
+		}
 
-	//	if networkEvent.PktType == "HOST" && networkEvent.PodHostIP == networkEvent.DstEndpoint.Addr || networkEvent.DstEndpoint.Addr == "127.0.0.1" {
-	//		return // Ignore localhost events
-	//	}
+		dstEndpoint := networkEvent.GetDstEndpoint()
+		if networkEvent.GetPktType() == "HOST" && networkEvent.GetPodHostIP() == dstEndpoint.Addr || dstEndpoint.Addr == "127.0.0.1" {
+			return // Ignore localhost events
+		}
 
-	//	ns.handleNetworkEvent(networkEvent, nil)
-	//case utils.DnsEventType:
-	//	if !ns.dnsSupport {
-	//		return
-	//	}
+		ns.handleNetworkEvent(networkEvent, nil)
+	case utils.DnsEventType:
+		if !ns.dnsSupport {
+			return
+		}
 
-	//	dnsEvent, ok := event.(*tracerdnstype.Event)
-	//	if !ok {
-	//		return
-	//	}
-	//	if !ns.shouldReportDnsEvent(dnsEvent) {
-	//		return
-	//	}
+		dnsEvent, ok := event.(*utils.DatasourceEvent)
+		if !ok {
+			return
+		}
+		if !ns.shouldReportDnsEvent(dnsEvent) {
+			return
+		}
 
-	//	ns.handleDnsEvent(dnsEvent, nil)
+		ns.handleDnsEvent(dnsEvent, nil)
 
-	//default:
-	//	logger.L().Error("NetworkStream - unknown event type", helpers.String("event type", string(eventType)))
-	//}
+	default:
+		logger.L().Error("NetworkStream - unknown event type", helpers.String("event type", string(eventType)))
+	}
 }
 
-//func (ns *NetworkStream) handleDnsEvent(event *tracerdnstype.Event, processTree *apitypes.ProcessTree) {
-//	ns.eventsStorageMutex.Lock()
-//	defer ns.eventsStorageMutex.Unlock()
-//
-//	entityId := event.Runtime.ContainerID
-//	if entityId == "" || ns.k8sObjectCache == nil {
-//		entityId = ns.nodeName
-//	}
-//
-//	entity, ok := ns.networkEventsStorage.Entities[entityId]
-//	if !ok {
-//		logger.L().Error("NetworkStream - entity not found", helpers.String("entity ID", entityId))
-//		return
-//	}
-//
-// We get only DNS response events, so we put them in the outbound map
-//	if _, exists := entity.Outbound[event.DNSName]; exists {
-//		// If the event already exists, we can skip it
-//		return
-//	}
-//
-//	networkEvent := apitypes.NetworkStreamEvent{
-//		Timestamp: time.Unix(0, int64(event.Timestamp)),
-//		DNSName:   event.DNSName,
-//		Port:      int32(event.DstPort),
-//		Protocol:  apitypes.NetworkStreamEventProtocolDNS,
-//		Kind:      apitypes.EndpointKindRaw,
-//	}
-//
-//	processTree = ns.getProcessTreeByPid(event.Pid, event.Comm, processTree)
-//	networkEvent.ProcessTree = processTree
-//
-//	entity.Outbound[event.DNSName] = networkEvent
-//	ns.networkEventsStorage.Entities[entityId] = entity
-//}
+func (ns *NetworkStream) handleDnsEvent(event *utils.DatasourceEvent, processTree *apitypes.ProcessTree) {
+	ns.eventsStorageMutex.Lock()
+	defer ns.eventsStorageMutex.Unlock()
 
-//func (hns *NetworkStream) shouldReportDnsEvent(dnsEvent *tracerdnstype.Event) bool {
-//	if dnsEvent.DNSName == "" {
-//		return false
-//	}
-//
-//	if strings.HasSuffix(dnsEvent.DNSName, "in-addr.arpa.") {
-//		return false
-//	}
-//
-//	if strings.HasSuffix(dnsEvent.DNSName, "svc.cluster.local.") {
-//		return false
-//	}
-//
-//	return true
-//}
+	entityId := event.GetContainerID()
+	if entityId == "" || ns.k8sObjectCache == nil {
+		entityId = ns.nodeName
+	}
 
-//func (ns *NetworkStream) handleNetworkEvent(event *datasource.Data, processTree *apitypes.ProcessTree) {
-//	endpointID := getNetworkEndpointIdentifier(event)
-//
-//	ns.eventsStorageMutex.Lock()
-//	defer ns.eventsStorageMutex.Unlock()
-//
-//	entityId := event.Runtime.ContainerID
-//	if entityId == "" || ns.k8sObjectCache == nil {
-//		entityId = ns.nodeName
-//	}
-//
-//	entity, ok := ns.networkEventsStorage.Entities[entityId]
-//	if !ok {
-//		logger.L().Error("NetworkStream - entity not found", helpers.String("entity ID", entityId))
-//		return
-//	}
-//
-//	if event.PktType == "OUTGOING" {
-//		if _, exists := entity.Outbound[endpointID]; exists {
-//			// If the event already exists, we can skip it
-//			return
-//		}
-//		networkEvent := ns.buildNetworkEvent(event, processTree)
-//		entity.Outbound[endpointID] = networkEvent
-//	} else {
-//		if _, exists := entity.Inbound[endpointID]; exists {
-//			// If the event already exists, we can skip it
-//			return
-//		}
-//		networkEvent := ns.buildNetworkEvent(event, processTree)
-//		entity.Inbound[endpointID] = networkEvent
-//	}
-//	ns.networkEventsStorage.Entities[entityId] = entity
-//}
+	entity, ok := ns.networkEventsStorage.Entities[entityId]
+	if !ok {
+		logger.L().Error("NetworkStream - entity not found", helpers.String("entity ID", entityId))
+		return
+	}
 
-//func (ns *NetworkStream) buildNetworkEvent(event *datasource.Data, processTree *apitypes.ProcessTree) apitypes.NetworkStreamEvent {
-//	var domain string
-//	var ok bool
-//	if event.PktType == "OUTGOING" {
-//		domain, ok = ns.dnsResolver.ResolveIPAddress(event.DstEndpoint.Addr)
-//		if !ok {
-//			// Try to resolve the domain name
-//			domains, err := net.LookupAddr(event.DstEndpoint.Addr)
-//			if err != nil {
-//				domain = ""
-//			} else {
-//				if len(domains) > 0 {
-//					domain = domains[0]
-//				}
-//			}
-//		}
-//	} else {
-//		domain, _ = ns.dnsResolver.ResolveIPAddress(event.DstEndpoint.Addr)
-//	}
-//
-//	networkEvent := apitypes.NetworkStreamEvent{
-//		Timestamp: time.Unix(0, int64(event.Timestamp)),
-//		IPAddress: event.DstEndpoint.Addr,
-//		DNSName:   domain,
-//		Port:      int32(event.Port),
-//		Protocol:  apitypes.NetworkStreamEventProtocol(event.Proto),
-//	}
-//
-//	if apitypes.EndpointKind(event.DstEndpoint.Kind) == apitypes.EndpointKindPod {
-//		slimPod := ns.k8sInventory.GetPodByIp(event.DstEndpoint.Addr)
-//		if slimPod != nil {
-//			networkEvent.PodName = slimPod.Name
-//			networkEvent.PodNamespace = slimPod.Namespace
-//
-//			workloadKind := ""
-//			workloadName := ""
-//
-//			if len(slimPod.OwnerReferences) > 0 {
-//				workloadKind = slimPod.OwnerReferences[0].Kind
-//				if WorkloadKind(workloadKind) == ReplicaSet {
-//					workloadKind = string(Deployment)
-//				}
-//				// TODO: handle similar cases for CronJob -> Job -> Pod.
-//				workloadName = extractWorkloadName(slimPod.Name, WorkloadKind(workloadKind))
-//			}
-//
-//			networkEvent.WorkloadName = workloadName
-//			networkEvent.WorkloadKind = workloadKind
-//			networkEvent.WorkloadNamespace = slimPod.Namespace
-//		}
-//	} else if apitypes.EndpointKind(event.DstEndpoint.Kind) == apitypes.EndpointKindService {
-//		slimService := ns.k8sInventory.GetSvcByIp(event.DstEndpoint.Addr)
-//		if slimService != nil {
-//			networkEvent.ServiceName = slimService.Name
-//			networkEvent.ServiceNamespace = slimService.Namespace
-//		}
-//	}
-//
-//	networkEvent.Kind = apitypes.EndpointKind(event.DstEndpoint.Kind)
-//
-//	processTree = ns.getProcessTreeByPid(event.Pid, event.Comm, processTree)
-//	networkEvent.ProcessTree = processTree
-//
-//	return networkEvent
-//}
+	// We get only DNS response events, so we put them in the outbound map
+	if _, exists := entity.Outbound[event.GetDNSName()]; exists {
+		// If the event already exists, we can skip it
+		return
+	}
+
+	networkEvent := apitypes.NetworkStreamEvent{
+		Timestamp: time.Unix(0, int64(event.GetTimestamp())),
+		DNSName:   event.GetDNSName(),
+		Port:      int32(event.GetDstPort()),
+		Protocol:  apitypes.NetworkStreamEventProtocolDNS,
+		Kind:      apitypes.EndpointKindRaw,
+	}
+
+	processTree = ns.getProcessTreeByPid(event.GetPID(), event.GetComm(), processTree)
+	networkEvent.ProcessTree = processTree
+
+	entity.Outbound[event.GetDNSName()] = networkEvent
+	ns.networkEventsStorage.Entities[entityId] = entity
+}
+
+func (ns *NetworkStream) shouldReportDnsEvent(dnsEvent *utils.DatasourceEvent) bool {
+	dnsName := dnsEvent.GetDNSName()
+
+	if dnsName == "" {
+		return false
+	}
+
+	if strings.HasSuffix(dnsName, "in-addr.arpa.") {
+		return false
+	}
+
+	if strings.HasSuffix(dnsName, "svc.cluster.local.") {
+		return false
+	}
+
+	return true
+}
+
+func (ns *NetworkStream) handleNetworkEvent(event *utils.DatasourceEvent, processTree *apitypes.ProcessTree) {
+	endpointID := getNetworkEndpointIdentifier(event)
+
+	ns.eventsStorageMutex.Lock()
+	defer ns.eventsStorageMutex.Unlock()
+
+	entityId := event.GetContainerID()
+	if entityId == "" || ns.k8sObjectCache == nil {
+		entityId = ns.nodeName
+	}
+
+	entity, ok := ns.networkEventsStorage.Entities[entityId]
+	if !ok {
+		logger.L().Error("NetworkStream - entity not found", helpers.String("entity ID", entityId))
+		return
+	}
+
+	if event.GetPktType() == "OUTGOING" {
+		if _, exists := entity.Outbound[endpointID]; exists {
+			// If the event already exists, we can skip it
+			return
+		}
+		networkEvent := ns.buildNetworkEvent(event, processTree)
+		entity.Outbound[endpointID] = networkEvent
+	} else {
+		if _, exists := entity.Inbound[endpointID]; exists {
+			// If the event already exists, we can skip it
+			return
+		}
+		networkEvent := ns.buildNetworkEvent(event, processTree)
+		entity.Inbound[endpointID] = networkEvent
+	}
+	ns.networkEventsStorage.Entities[entityId] = entity
+}
+
+func (ns *NetworkStream) buildNetworkEvent(event *utils.DatasourceEvent, processTree *apitypes.ProcessTree) apitypes.NetworkStreamEvent {
+	var domain string
+	var ok bool
+	dstEndpoint := event.GetDstEndpoint()
+	if event.GetPktType() == "OUTGOING" {
+		domain, ok = ns.dnsResolver.ResolveIPAddress(dstEndpoint.Addr)
+		if !ok {
+			// Try to resolve the domain name
+			domains, err := net.LookupAddr(dstEndpoint.Addr)
+			if err != nil {
+				domain = ""
+			} else {
+				if len(domains) > 0 {
+					domain = domains[0]
+				}
+			}
+		}
+	} else {
+		domain, _ = ns.dnsResolver.ResolveIPAddress(dstEndpoint.Addr)
+	}
+
+	networkEvent := apitypes.NetworkStreamEvent{
+		Timestamp: time.Unix(0, int64(event.GetTimestamp())),
+		IPAddress: dstEndpoint.Addr,
+		DNSName:   domain,
+		Port:      int32(event.GetPort()),
+		Protocol:  apitypes.NetworkStreamEventProtocol(event.GetProto()),
+	}
+
+	if apitypes.EndpointKind(dstEndpoint.Kind) == apitypes.EndpointKindPod {
+		slimPod := ns.k8sInventory.GetPodByIp(dstEndpoint.Addr)
+		if slimPod != nil {
+			networkEvent.PodName = slimPod.Name
+			networkEvent.PodNamespace = slimPod.Namespace
+
+			workloadKind := ""
+			workloadName := ""
+
+			if len(slimPod.OwnerReferences) > 0 {
+				workloadKind = slimPod.OwnerReferences[0].Kind
+				if WorkloadKind(workloadKind) == ReplicaSet {
+					workloadKind = string(Deployment)
+				}
+				// TODO: handle similar cases for CronJob -> Job -> Pod.
+				workloadName = extractWorkloadName(slimPod.Name, WorkloadKind(workloadKind))
+			}
+
+			networkEvent.WorkloadName = workloadName
+			networkEvent.WorkloadKind = workloadKind
+			networkEvent.WorkloadNamespace = slimPod.Namespace
+		}
+	} else if apitypes.EndpointKind(dstEndpoint.Kind) == apitypes.EndpointKindService {
+		slimService := ns.k8sInventory.GetSvcByIp(dstEndpoint.Addr)
+		if slimService != nil {
+			networkEvent.ServiceName = slimService.Name
+			networkEvent.ServiceNamespace = slimService.Namespace
+		}
+	}
+
+	networkEvent.Kind = apitypes.EndpointKind(dstEndpoint.Kind)
+
+	processTree = ns.getProcessTreeByPid(event.GetPID(), event.GetComm(), processTree)
+	networkEvent.ProcessTree = processTree
+
+	return networkEvent
+}
 
 func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream) error {
 	if !ns.cfg.KubernetesMode || ns.cfg.Exporters.HTTPExporterConfig == nil {
@@ -472,9 +478,9 @@ func (ns *NetworkStream) sendNetworkEvent(networkStream *apitypes.NetworkStream)
 	return nil
 }
 
-//func getNetworkEndpointIdentifier(event *datasource.Data) string {
-//	return fmt.Sprintf("%s/%d/%s", event.DstEndpoint.Addr, event.Port, event.Proto)
-//}
+func getNetworkEndpointIdentifier(event *utils.DatasourceEvent) string {
+	return fmt.Sprintf("%s/%d/%s", event.GetDstEndpoint().Addr, event.GetPort(), event.GetProto())
+}
 
 func isEmptyNetworkStream(networkStream *apitypes.NetworkStream) bool {
 	if len(networkStream.Entities) == 0 {

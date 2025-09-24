@@ -1,8 +1,11 @@
 package adapters
 
 import (
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 )
 
 type DnsAdapter struct {
@@ -13,60 +16,60 @@ func NewDnsAdapter() *DnsAdapter {
 }
 
 func (c *DnsAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	//dnsEvent, ok := enrichedEvent.Event.(*tracerdnstype.Event)
-	//if !ok {
-	//	return
-	//}
+	dnsEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
+	if !ok || dnsEvent.EventType != utils.DnsEventType {
+		return
+	}
 
-	//dstIP := ""
-	//if len(dnsEvent.Addresses) > 0 {
-	//	dstIP = dnsEvent.Addresses[0]
-	//}
+	dstIP := ""
+	if addresses := dnsEvent.GetAddresses(); len(addresses) > 0 {
+		dstIP = addresses[0]
+	}
 
-	//baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	//baseRuntimeAlert.InfectedPID = dnsEvent.Pid
-	//baseRuntimeAlert.Arguments = map[string]interface{}{
-	//	"domain":    dnsEvent.DNSName,
-	//	"addresses": dnsEvent.Addresses,
-	//	"protocol":  dnsEvent.Protocol,
-	//	"port":      dnsEvent.DstPort,
-	//}
-	//baseRuntimeAlert.Identifiers = &common.Identifiers{
-	//	Process: &common.ProcessEntity{
-	//		Name: dnsEvent.Comm,
-	//	},
-	//	Dns: &common.DnsEntity{
-	//		Domain: dnsEvent.DNSName,
-	//	},
-	//	Network: &common.NetworkEntity{
-	//		DstIP:    dstIP,
-	//		Protocol: dnsEvent.Protocol,
-	//	},
-	//}
-	//failure.SetBaseRuntimeAlert(baseRuntimeAlert)
+	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
+	baseRuntimeAlert.InfectedPID = dnsEvent.GetPID()
+	baseRuntimeAlert.Arguments = map[string]interface{}{
+		"domain":    dnsEvent.GetDNSName(),
+		"addresses": dnsEvent.GetAddresses(),
+		"protocol":  dnsEvent.GetProto(),
+		"port":      dnsEvent.GetDstPort(),
+	}
+	baseRuntimeAlert.Identifiers = &common.Identifiers{
+		Process: &common.ProcessEntity{
+			Name: dnsEvent.GetComm(),
+		},
+		Dns: &common.DnsEntity{
+			Domain: dnsEvent.GetDNSName(),
+		},
+		Network: &common.NetworkEntity{
+			DstIP:    dstIP,
+			Protocol: dnsEvent.GetProto(),
+		},
+	}
+	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	//runtimeProcessDetails := apitypes.ProcessTree{
-	//	ProcessTree: apitypes.Process{
-	//		Comm:  dnsEvent.Comm,
-	//		Gid:   &dnsEvent.Gid,
-	//		PID:   dnsEvent.Pid,
-	//		Uid:   &dnsEvent.Uid,
-	//		Pcomm: dnsEvent.Pcomm,
-	//		Path:  dnsEvent.Exepath,
-	//		Cwd:   dnsEvent.Cwd,
-	//		PPID:  dnsEvent.Ppid,
-	//	},
-	//	ContainerID: dnsEvent.Runtime.ContainerID,
-	//}
-	//failure.SetRuntimeProcessDetails(runtimeProcessDetails)
+	runtimeProcessDetails := apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			Comm:  dnsEvent.GetComm(),
+			Gid:   dnsEvent.GetGid(),
+			PID:   dnsEvent.GetPID(),
+			Uid:   dnsEvent.GetUid(),
+			Pcomm: dnsEvent.GetPcomm(),
+			Path:  dnsEvent.GetExePath(),
+			Cwd:   dnsEvent.GetCwd(),
+			PPID:  dnsEvent.GetPpid(),
+		},
+		ContainerID: dnsEvent.GetContainerID(),
+	}
+	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	//failure.SetTriggerEvent(dnsEvent.Event)
+	failure.SetTriggerEvent(dnsEvent)
 
-	//runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
-	//	PodName:   dnsEvent.GetPod(),
-	//	PodLabels: dnsEvent.K8s.PodLabels,
-	//}
-	//failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+		PodName:   dnsEvent.GetPod(),
+		PodLabels: dnsEvent.GetPodLabels(),
+	}
+	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
 func (c *DnsAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {

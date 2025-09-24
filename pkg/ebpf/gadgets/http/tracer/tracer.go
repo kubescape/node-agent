@@ -17,7 +17,7 @@ import (
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	gadgets2 "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
+	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracepointlib "github.com/kubescape/node-agent/pkg/ebpf/lib"
 )
@@ -249,7 +249,7 @@ func (t *Tracer) SetEventHandler(handler any) {
 
 type GadgetDesc struct{}
 
-func (g *GadgetDesc) NewInstance() (gadgets2.Gadget, error) {
+func (g *GadgetDesc) NewInstance() (ebpfgadgets.Gadget, error) {
 	tracer := &Tracer{
 		config: &Config{},
 	}

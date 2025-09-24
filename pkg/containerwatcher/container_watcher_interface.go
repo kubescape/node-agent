@@ -51,7 +51,7 @@ type ContainerReceiver interface {
 }
 
 type TaskBasedEnricher interface {
-	SubmitEnrichmentTask(event *utils.EnrichEvent, syscalls []uint64, callback ResultCallback, containerID string, processID uint32)
+	SubmitEnrichmentTask(event utils.EnrichEvent, syscalls []uint64, callback ResultCallback, containerID string, processID uint32)
 }
 
 type ThirdPartyTracers struct {

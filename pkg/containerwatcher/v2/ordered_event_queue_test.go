@@ -5,64 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// MockEvent implements utils.K8sEvent interface for testing
-type MockEvent struct {
-	ID        string
-	Timestamp int64
-	Pod       string
-	Namespace string
-}
-
-var _ utils.K8sEvent = (*MockEvent)(nil)
-
-func (m MockEvent) GetContainer() string {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (m MockEvent) GetContainerID() string {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (m MockEvent) GetContainerImage() string {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (m MockEvent) GetContainerImageDigest() string {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (m MockEvent) GetHostNetwork() bool {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (m MockEvent) GetTimestamp() types.Time {
-	return types.Time(m.Timestamp)
-}
-
-func (m MockEvent) GetPod() string {
-	if m.Pod == "" {
-		return "test-pod"
-	}
-	return m.Pod
-}
-
-func (m MockEvent) GetNamespace() string {
-	if m.Namespace == "" {
-		return "test-namespace"
-	}
-	return m.Namespace
-}
 
 func TestOrderedEventQueue_EventOrdering_LowestTimestampFirst(t *testing.T) {
 	queue := NewOrderedEventQueue(10*time.Millisecond, 1000, nil)
@@ -72,9 +18,9 @@ func TestOrderedEventQueue_EventOrdering_LowestTimestampFirst(t *testing.T) {
 	// Event 2: timestamp 10
 	// Event 2 should come out first (lowest timestamp)
 
-	event1 := MockEvent{ID: "event1", Timestamp: 20}
-	event2 := MockEvent{ID: "event2", Timestamp: 10}
-	event3 := MockEvent{ID: "event3", Timestamp: 30}
+	event1 := utils.StructEvent{ID: "event1", Timestamp: 20}
+	event2 := utils.StructEvent{ID: "event2", Timestamp: 10}
+	event3 := utils.StructEvent{ID: "event3", Timestamp: 30}
 
 	// Add events in random order
 	queue.AddEventDirect(utils.ExecveEventType, event1, "container1", 100) // timestamp 20
@@ -84,18 +30,18 @@ func TestOrderedEventQueue_EventOrdering_LowestTimestampFirst(t *testing.T) {
 	// Pop events - should come out in timestamp order (10, 20, 30)
 	firstEvent, ok := queue.PopEvent()
 	require.True(t, ok)
-	assert.Equal(t, "event2", firstEvent.Event.(MockEvent).ID) // timestamp 10 comes first
-	assert.Equal(t, int64(10), firstEvent.Event.(MockEvent).Timestamp)
+	assert.Equal(t, "event2", firstEvent.Event.(utils.StructEvent).ID) // timestamp 10 comes first
+	assert.Equal(t, int64(10), firstEvent.Event.(utils.StructEvent).Timestamp)
 
 	secondEvent, ok := queue.PopEvent()
 	require.True(t, ok)
-	assert.Equal(t, "event1", secondEvent.Event.(MockEvent).ID) // timestamp 20 comes second
-	assert.Equal(t, int64(20), secondEvent.Event.(MockEvent).Timestamp)
+	assert.Equal(t, "event1", secondEvent.Event.(utils.StructEvent).ID) // timestamp 20 comes second
+	assert.Equal(t, int64(20), secondEvent.Event.(utils.StructEvent).Timestamp)
 
 	thirdEvent, ok := queue.PopEvent()
 	require.True(t, ok)
-	assert.Equal(t, "event3", thirdEvent.Event.(MockEvent).ID) // timestamp 30 comes last
-	assert.Equal(t, int64(30), thirdEvent.Event.(MockEvent).Timestamp)
+	assert.Equal(t, "event3", thirdEvent.Event.(utils.StructEvent).ID) // timestamp 30 comes last
+	assert.Equal(t, int64(30), thirdEvent.Event.(utils.StructEvent).Timestamp)
 
 	// Verify container IDs and process IDs are preserved
 	assert.Equal(t, "container2", firstEvent.ContainerID)  // event2's container
@@ -116,9 +62,9 @@ func TestOrderedEventQueue_RealTimestampOrdering(t *testing.T) {
 	now := time.Now()
 
 	// Events with real nanosecond timestamps
-	event1 := MockEvent{ID: "first", Timestamp: now.UnixNano()}
-	event2 := MockEvent{ID: "second", Timestamp: now.Add(1 * time.Second).UnixNano()}
-	event3 := MockEvent{ID: "third", Timestamp: now.Add(2 * time.Second).UnixNano()}
+	event1 := utils.StructEvent{ID: "first", Timestamp: now.UnixNano()}
+	event2 := utils.StructEvent{ID: "second", Timestamp: now.Add(1 * time.Second).UnixNano()}
+	event3 := utils.StructEvent{ID: "third", Timestamp: now.Add(2 * time.Second).UnixNano()}
 
 	// Add events in random order
 	queue.AddEventDirect(utils.ExecveEventType, event3, "container1", 100) // third chronologically
@@ -136,14 +82,14 @@ func TestOrderedEventQueue_RealTimestampOrdering(t *testing.T) {
 	require.Len(t, poppedEvents, 3)
 
 	// Verify chronological order (earliest timestamp first)
-	assert.Equal(t, "first", poppedEvents[0].Event.(MockEvent).ID)
-	assert.Equal(t, "second", poppedEvents[1].Event.(MockEvent).ID)
-	assert.Equal(t, "third", poppedEvents[2].Event.(MockEvent).ID)
+	assert.Equal(t, "first", poppedEvents[0].Event.(utils.StructEvent).ID)
+	assert.Equal(t, "second", poppedEvents[1].Event.(utils.StructEvent).ID)
+	assert.Equal(t, "third", poppedEvents[2].Event.(utils.StructEvent).ID)
 
 	// Verify timestamps are in ascending order
-	ts1 := poppedEvents[0].Event.(MockEvent).Timestamp
-	ts2 := poppedEvents[1].Event.(MockEvent).Timestamp
-	ts3 := poppedEvents[2].Event.(MockEvent).Timestamp
+	ts1 := poppedEvents[0].Event.(utils.StructEvent).Timestamp
+	ts2 := poppedEvents[1].Event.(utils.StructEvent).Timestamp
+	ts3 := poppedEvents[2].Event.(utils.StructEvent).Timestamp
 
 	assert.True(t, ts1 < ts2, "First timestamp should be less than second")
 	assert.True(t, ts2 < ts3, "Second timestamp should be less than third")
@@ -155,14 +101,14 @@ func TestOrderedEventQueue_FullQueueAlert(t *testing.T) {
 
 	// Add events up to the limit
 	for i := 0; i < 3; i++ {
-		event := MockEvent{ID: fmt.Sprintf("event_%d", i), Timestamp: int64(i)}
+		event := utils.StructEvent{ID: fmt.Sprintf("event_%d", i), Timestamp: int64(i)}
 		queue.AddEventDirect(utils.ExecveEventType, event, fmt.Sprintf("container_%d", i), uint32(i+100))
 	}
 
 	assert.Equal(t, 3, queue.Size())
 
 	// Add one more event to trigger full queue alert
-	overflowEvent := MockEvent{ID: "overflow", Timestamp: 100}
+	overflowEvent := utils.StructEvent{ID: "overflow", Timestamp: 100}
 	queue.AddEventDirect(utils.ExecveEventType, overflowEvent, "overflow_container", 999)
 
 	// Check that full queue alert is triggered
@@ -193,7 +139,7 @@ func TestOrderedEventQueue_BasicOperations(t *testing.T) {
 	assert.False(t, ok)
 
 	// Add single event
-	event := MockEvent{ID: "test", Timestamp: time.Now().UnixNano()}
+	event := utils.StructEvent{ID: "test", Timestamp: time.Now().UnixNano()}
 	queue.AddEventDirect(utils.ExecveEventType, event, "test-container", 1234)
 
 	// Test queue properties
@@ -234,7 +180,7 @@ func TestOrderedEventQueue_MultipleEventTypes(t *testing.T) {
 
 	// Add events of different types with increasing timestamps
 	for i, eventType := range eventTypes {
-		event := MockEvent{ID: fmt.Sprintf("event_%d", i), Timestamp: int64(i * 10)}
+		event := utils.StructEvent{ID: fmt.Sprintf("event_%d", i), Timestamp: int64(i * 10)}
 		queue.AddEventDirect(eventType, event, fmt.Sprintf("container_%d", i), uint32(i+100))
 	}
 
@@ -246,7 +192,7 @@ func TestOrderedEventQueue_MultipleEventTypes(t *testing.T) {
 		require.True(t, ok, "Should be able to pop event %d", i)
 
 		assert.Equal(t, expectedType, event.EventType)
-		assert.Equal(t, fmt.Sprintf("event_%d", i), event.Event.(MockEvent).ID)
+		assert.Equal(t, fmt.Sprintf("event_%d", i), event.Event.(utils.StructEvent).ID)
 		assert.Equal(t, fmt.Sprintf("container_%d", i), event.ContainerID)
 		assert.Equal(t, uint32(i+100), event.ProcessID)
 	}
@@ -265,7 +211,7 @@ func TestOrderedEventQueue_LargeNumberOfEvents(t *testing.T) {
 	for i := 0; i < numEvents; i++ {
 		// Use reverse order timestamps so we can verify sorting works
 		timestamp := baseTime + int64((numEvents-i)*1000)
-		event := MockEvent{ID: fmt.Sprintf("event_%d", i), Timestamp: timestamp}
+		event := utils.StructEvent{ID: fmt.Sprintf("event_%d", i), Timestamp: timestamp}
 		queue.AddEventDirect(utils.ExecveEventType, event, fmt.Sprintf("container_%d", i), uint32(i))
 		expectedOrder[numEvents-1-i] = i // Expected pop order (reverse of add order)
 	}
@@ -278,7 +224,7 @@ func TestOrderedEventQueue_LargeNumberOfEvents(t *testing.T) {
 		require.True(t, ok, "Should be able to pop event %d", i)
 
 		expectedID := fmt.Sprintf("event_%d", expectedOrder[i])
-		assert.Equal(t, expectedID, event.Event.(MockEvent).ID,
+		assert.Equal(t, expectedID, event.Event.(utils.StructEvent).ID,
 			"Event %d should have ID %s", i, expectedID)
 	}
 

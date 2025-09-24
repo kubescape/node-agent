@@ -7,6 +7,7 @@ import (
 
 	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 )
@@ -39,7 +40,14 @@ func TestCsvExporter(t *testing.T) {
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",
 		},
-		TriggerEvent: MockEvent{},
+		TriggerEvent: utils.StructEvent{
+			ContainerID:          "testmalwarecontainerid",
+			Container:            "testmalwarecontainername",
+			ContainerImage:       "testmalwarecontainerimage",
+			ContainerImageDigest: "testmalwarecontainerimagedigest",
+			Namespace:            "testmalwarenamespace",
+			Pod:                  "testmalwarepodname",
+		},
 		MalwareRuntimeAlert: apitypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",
 		},

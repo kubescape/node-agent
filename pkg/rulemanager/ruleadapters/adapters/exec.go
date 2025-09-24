@@ -1,6 +1,12 @@
 package adapters
 
 import (
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	apitypes "github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/armotypes/common"
 	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -14,76 +20,68 @@ func NewExecAdapter() *ExecAdapter {
 }
 
 func (c *ExecAdapter) SetFailureMetadata(failure types.RuleFailure, enrichedEvent *events.EnrichedEvent) {
-	//execEvent, ok := enrichedEvent.Event.(*events.ExecEvent)
-	//if !ok {
-	//	return
-	//}
+	execEvent, ok := enrichedEvent.Event.(*utils.DatasourceEvent)
+	if !ok || execEvent.EventType != utils.ExecveEventType {
+		return
+	}
 
-	//failure.SetExtra(execEvent.GetExtra())
+	failure.SetExtra(execEvent.GetExtra())
 
-	//execPath := GetExecPathFromEvent(execEvent)
-	//execFullPath := GetExecFullPathFromEvent(execEvent)
-	//upperLayer := execEvent.UpperLayer || execEvent.PupperLayer
+	execPath := execEvent.GetExecPathFromEvent()
+	execFullPath := GetExecFullPathFromEvent(execEvent)
+	upperLayer := execEvent.GetUpperLayer() || execEvent.GetPupperLayer()
 
-	//baseRuntimeAlert := failure.GetBaseRuntimeAlert()
-	//baseRuntimeAlert.InfectedPID = execEvent.Pid
-	//baseRuntimeAlert.Arguments = map[string]interface{}{
-	//	"retval": execEvent.Retval,
-	//	"exec":   execPath,
-	//	"args":   execEvent.Args,
-	//}
-	//baseRuntimeAlert.Identifiers = &common.Identifiers{
-	//	Process: &common.ProcessEntity{
-	//		Name:        execEvent.Comm,
-	//		CommandLine: fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
-	//	},
-	//	File: &common.FileEntity{
-	//		Name:      filepath.Base(execFullPath),
-	//		Directory: filepath.Dir(execFullPath),
-	//	},
-	//}
-	//failure.SetBaseRuntimeAlert(baseRuntimeAlert)
+	baseRuntimeAlert := failure.GetBaseRuntimeAlert()
+	baseRuntimeAlert.InfectedPID = execEvent.GetPID()
+	baseRuntimeAlert.Arguments = map[string]interface{}{
+		//"retval": execEvent.GetRetval(), // TODO this is missing in execEvent?
+		"exec": execPath,
+		"args": execEvent.GetArgs(),
+	}
+	baseRuntimeAlert.Identifiers = &common.Identifiers{
+		Process: &common.ProcessEntity{
+			Name:        execEvent.GetComm(),
+			CommandLine: fmt.Sprintf("%s %s", execPath, strings.Join(execEvent.GetExecArgsFromEvent(), " ")),
+		},
+		File: &common.FileEntity{
+			Name:      filepath.Base(execFullPath),
+			Directory: filepath.Dir(execFullPath),
+		},
+	}
+	failure.SetBaseRuntimeAlert(baseRuntimeAlert)
 
-	//runtimeProcessDetails := apitypes.ProcessTree{
-	//	ProcessTree: apitypes.Process{
-	//		Comm:       execEvent.Comm,
-	//		Gid:        &execEvent.Gid,
-	//		PID:        execEvent.Pid,
-	//		Uid:        &execEvent.Uid,
-	//		UpperLayer: &upperLayer,
-	//		PPID:       execEvent.Ppid,
-	//		Pcomm:      execEvent.Pcomm,
-	//		Cwd:        execEvent.Cwd,
-	//		Hardlink:   execEvent.ExePath,
-	//		Path:       execFullPath,
-	//		Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(utils.GetExecArgsFromEvent(&execEvent.Event), " ")),
-	//	},
-	//	ContainerID: execEvent.Runtime.ContainerID,
-	//}
-	//failure.SetRuntimeProcessDetails(runtimeProcessDetails)
+	runtimeProcessDetails := apitypes.ProcessTree{
+		ProcessTree: apitypes.Process{
+			Comm:       execEvent.GetComm(),
+			Gid:        execEvent.GetGid(),
+			PID:        execEvent.GetPID(),
+			Uid:        execEvent.GetUid(),
+			UpperLayer: &upperLayer,
+			PPID:       execEvent.GetPpid(),
+			Pcomm:      execEvent.GetPcomm(),
+			Cwd:        execEvent.GetCwd(),
+			Hardlink:   execEvent.GetExePath(),
+			Path:       execFullPath,
+			Cmdline:    fmt.Sprintf("%s %s", execPath, strings.Join(execEvent.GetExecArgsFromEvent(), " ")),
+		},
+		ContainerID: execEvent.GetContainerID(),
+	}
+	failure.SetRuntimeProcessDetails(runtimeProcessDetails)
 
-	//failure.SetTriggerEvent(execEvent.Event.Event)
+	failure.SetTriggerEvent(execEvent)
 
-	//runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
-	//	PodName:   execEvent.GetPod(),
-	//	PodLabels: execEvent.K8s.PodLabels,
-	//}
-	//failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
+	runtimeAlertK8sDetails := apitypes.RuntimeAlertK8sDetails{
+		PodName:   execEvent.GetPod(),
+		PodLabels: execEvent.GetPodLabels(),
+	}
+	failure.SetRuntimeAlertK8sDetails(runtimeAlertK8sDetails)
 }
 
-func GetExecPathFromEvent(execEvent *utils.EnrichEvent) string {
-	//if len(execEvent.Args) > 0 {
-	//	return execEvent.Args[0]
-	//}
-	//return execEvent.Comm
-	return ""
-}
-
-func GetExecFullPathFromEvent(execEvent *utils.EnrichEvent) string {
-	//if execEvent.ExePath != "" {
-	//	return execEvent.ExePath
-	//}
-	return GetExecPathFromEvent(execEvent)
+func GetExecFullPathFromEvent(execEvent *utils.DatasourceEvent) string {
+	if path := execEvent.GetExePath(); path != "" {
+		return path
+	}
+	return execEvent.GetExecPathFromEvent()
 }
 
 func (c *ExecAdapter) ToMap(enrichedEvent *events.EnrichedEvent) map[string]interface{} {

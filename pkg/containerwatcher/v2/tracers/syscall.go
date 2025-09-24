@@ -2,61 +2,89 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
-	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	"github.com/kubescape/node-agent/pkg/rulemanager"
+	"github.com/kubescape/node-agent/pkg/kskubemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
 const syscallTraceName = "syscall_tracer"
 
 var _ containerwatcher.TracerInterface = (*SyscallTracer)(nil)
 
-// SyscallTracer implements TracerInterface for syscall/seccomp events
+// SyscallTracer implements TracerInterface for events
 type SyscallTracer struct {
-	//tracer                  *tracerseccomp.Tracer
-	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
-	ruleManager             rulemanager.RuleManagerClient
+	eventCallback containerwatcher.ResultCallback
+	gadgetCtx     *gadgetcontext.GadgetContext
+	kubeManager   *kskubemanager.KubeManager
+	ociStore      *orasoci.ReadOnlyStore
+	runtime       runtime.Runtime
 }
 
-// NewSyscallTracer creates a new syscall tracer
-func NewSyscallTracer(containerProfileManager containerprofilemanager.ContainerProfileManagerClient, ruleManager rulemanager.RuleManagerClient) *SyscallTracer {
+// NewSyscallTracer creates a new tracer
+func NewSyscallTracer(
+	kubeManager *kskubemanager.KubeManager,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
+	eventCallback containerwatcher.ResultCallback,
+) *SyscallTracer {
 	return &SyscallTracer{
-		containerProfileManager: containerProfileManager,
-		ruleManager:             ruleManager,
+		eventCallback: eventCallback,
+		kubeManager:   kubeManager,
+		ociStore:      ociStore,
+		runtime:       runtime,
 	}
 }
 
-// Start initializes and starts the syscall tracer
+// Start initializes and starts the tracer
 func (st *SyscallTracer) Start(ctx context.Context) error {
-	// Create seccomp tracer
-	//syscallTracer, err := tracerseccomp.NewTracer()
-	//if err != nil {
-	//	return fmt.Errorf("creating syscall tracer: %w", err)
-	//}
-
-	//st.tracer = syscallTracer
-
-	// Register peek function with managers
-	//st.registerPeekFunction()
-
+	st.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		"ghcr.io/inspektor-gadget/gadget/advise_seccomp:v0.44.1",
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			st.kubeManager,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			st.eventOperator(),
+		),
+		gadgetcontext.WithName(syscallTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(st.ociStore),
+	)
+	go func() {
+		params := map[string]string{
+			"operator.oci.ebpf.map-fetch-count":    "0",
+			"operator.oci.ebpf.map-fetch-interval": "5s",
+		}
+		err := st.runtime.RunGadget(st.gadgetCtx, nil, params)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", st.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
-// Stop gracefully stops the syscall tracer
+// Stop gracefully stops the tracer
 func (st *SyscallTracer) Stop() error {
-	//if st.tracer != nil {
-	//	st.tracer.Close()
-	//}
+	if st.gadgetCtx != nil {
+		st.gadgetCtx.Cancel()
+	}
 	return nil
 }
 
 // GetName returns the unique name of the tracer
 func (st *SyscallTracer) GetName() string {
-	return "syscall_tracer"
+	return syscallTraceName
 }
 
 // GetEventType returns the event type this tracer produces
@@ -72,25 +100,29 @@ func (st *SyscallTracer) IsEnabled(cfg config.Config) bool {
 	return cfg.EnableRuntimeDetection || cfg.EnableSeccomp
 }
 
-// Peek provides the peek function for other components
-func (st *SyscallTracer) Peek(mntns uint64) ([]string, error) {
-	//if st.tracer != nil {
-	//	return st.tracer.Peek(mntns)
-	//}
-	return nil, fmt.Errorf("syscall tracer not started")
+func (st *SyscallTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.SyscallEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					st.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.SyscallEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}), simple.WithPriority(opPriority),
+	)
 }
 
-// registerPeekFunction registers the peek function with the required managers
-func (st *SyscallTracer) registerPeekFunction() {
-	if st.containerProfileManager != nil {
-		st.containerProfileManager.RegisterPeekFunc(st.Peek)
+// callback handles events from the tracer
+func (st *SyscallTracer) callback(event *utils.DatasourceEvent) {
+	containerID := event.GetContainerID()
+	if containerID == "" {
+		return
 	}
-	if st.ruleManager != nil {
-		st.ruleManager.RegisterPeekFunc(st.Peek)
-	}
-}
 
-// SetPeekFunc sets the peek function (kept for compatibility, but not used since we directly use tracer.Peek)
-func (st *SyscallTracer) SetPeekFunc(peekFunc func(mntns uint64) ([]string, error)) {
-	// This method is kept for compatibility but not used since we directly use st.tracer.Peek
+	st.eventCallback(event, containerID, 0)
 }

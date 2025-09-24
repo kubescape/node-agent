@@ -13,11 +13,11 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-// emptyEvents clears all event data except syscalls (which are kept for peek function)
+// emptyEvents clears all event data
 func (cd *containerData) emptyEvents() {
 	cd.size.Store(0)
 	cd.capabilites = nil
-	// cd.syscalls is intentionally not set to nil, as we want to keep the syscalls for the peek function
+	cd.syscalls = nil
 	cd.endpoints = nil
 	cd.execs = nil
 	cd.opens = nil
@@ -93,6 +93,13 @@ func (cd *containerData) getOpens() []v1beta1.OpenCalls {
 	})
 
 	return opens
+}
+
+func (cd *containerData) getSyscalls() []string {
+	if cd.syscalls == nil {
+		return []string{}
+	}
+	return cd.syscalls.ToSlice()
 }
 
 // getEndpoints returns all HTTP endpoints recorded for this container

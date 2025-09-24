@@ -10,6 +10,7 @@ import (
 
 	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 
 	apitypes "github.com/armosec/armoapi-go/armotypes"
 	"github.com/stretchr/testify/assert"
@@ -170,7 +171,7 @@ func TestSendMalwareAlertHTTPExporter(t *testing.T) {
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",
 		},
-		TriggerEvent: MockEvent{},
+		TriggerEvent: utils.StructEvent{},
 		MalwareRuntimeAlert: apitypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",
 		},

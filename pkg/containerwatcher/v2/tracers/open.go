@@ -3,11 +3,9 @@ package tracers
 import (
 	"context"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubemanager"
 	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
@@ -15,6 +13,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/kskubemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
 	orasoci "oras.land/oras-go/v2/content/oci"
 )
@@ -25,27 +24,25 @@ var _ containerwatcher.TracerInterface = (*OpenTracer)(nil)
 
 // OpenTracer implements TracerInterface for open events
 type OpenTracer struct {
-	cfg                config.Config
-	containerSelector  containercollection.ContainerSelector
 	eventCallback      containerwatcher.ResultCallback
 	gadgetCtx          *gadgetcontext.GadgetContext
+	kubeManager        *kskubemanager.KubeManager
 	ociStore           *orasoci.ReadOnlyStore
-	orderedEventQueue  EventQueueInterface
 	runtime            runtime.Runtime
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 }
 
 // NewOpenTracer creates a new open tracer
 func NewOpenTracer(
+	kubeManager *kskubemanager.KubeManager,
 	runtime runtime.Runtime,
 	ociStore *orasoci.ReadOnlyStore,
-	containerSelector containercollection.ContainerSelector,
 	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *OpenTracer {
 	return &OpenTracer{
-		containerSelector:  containerSelector,
 		eventCallback:      eventCallback,
+		kubeManager:        kubeManager,
 		ociStore:           ociStore,
 		runtime:            runtime,
 		thirdPartyEnricher: thirdPartyEnricher,
@@ -60,8 +57,7 @@ func (ot *OpenTracer) Start(ctx context.Context) error {
 		"ghcr.io/inspektor-gadget/gadget/trace_open:v0.44.1",
 		// List of operators that will be run with the gadget
 		gadgetcontext.WithDataOperators(
-			kubemanager.KubeManagerOperator,
-			//KubeNameResolver,
+			ot.kubeManager,
 			ocihandler.OciHandler, // pass singleton instance of the oci-handler
 			ot.eventOperator(),
 		),
@@ -97,7 +93,6 @@ func (ot *OpenTracer) GetEventType() utils.EventType {
 
 // IsEnabled checks if this tracer should be enabled based on configuration
 func (ot *OpenTracer) IsEnabled(cfg config.Config) bool {
-	ot.cfg = cfg
 	if cfg.DOpen {
 		return false
 	}
@@ -109,7 +104,7 @@ func (ot *OpenTracer) eventOperator() operators.DataOperator {
 		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
 			for _, d := range gadgetCtx.GetDataSources() {
 				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
-					ot.callback(&utils.EnrichEvent{Datasource: d, Data: data, EventType: utils.OpenEventType})
+					ot.callback(&utils.DatasourceEvent{Datasource: d, Data: data, EventType: utils.OpenEventType})
 					return nil
 				}, opPriority)
 				if err != nil {
@@ -117,12 +112,12 @@ func (ot *OpenTracer) eventOperator() operators.DataOperator {
 				}
 			}
 			return nil
-		}),
+		}), simple.WithPriority(opPriority),
 	)
 }
 
 // callback handles open events from the tracer
-func (ot *OpenTracer) callback(event *utils.EnrichEvent) {
+func (ot *OpenTracer) callback(event *utils.DatasourceEvent) {
 	if event.GetContainer() == "" {
 		return
 	}
@@ -135,10 +130,10 @@ func (ot *OpenTracer) callback(event *utils.EnrichEvent) {
 }
 
 // handleEvent processes the event with syscall enrichment
-func (ot *OpenTracer) handleEvent(event *utils.EnrichEvent, syscalls []uint64) {
+func (ot *OpenTracer) handleEvent(event *utils.DatasourceEvent, syscalls []uint64) {
 	if ot.eventCallback != nil {
 		containerID := event.GetContainerID()
-		processID := event.GetPid()
+		processID := event.GetPID()
 
 		EnrichEvent(ot.thirdPartyEnricher, event, syscalls, ot.eventCallback, containerID, processID)
 	}

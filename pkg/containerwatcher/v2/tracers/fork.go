@@ -6,6 +6,7 @@ import (
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 	tracerfork "github.com/kubescape/node-agent/pkg/ebpf/gadgets/fork/tracer"
@@ -99,15 +100,15 @@ func (ft *ForkTracer) IsEnabled(cfg config.Config) bool {
 
 // forkEventCallback handles fork events from the tracer
 func (ft *ForkTracer) forkEventCallback(event *tracerforktype.Event) {
-	//if event.Type == types.DEBUG {
-	//	return
-	//}
-	//
-	//if ft.eventCallback != nil {
-	//	// Extract container ID and process ID from the fork event
-	//	containerID := event.Runtime.ContainerID
-	//	processID := event.Pid
-	//
-	//	ft.eventCallback(event, containerID, processID)
-	//}
+	if event.Type == types.DEBUG {
+		return
+	}
+
+	if ft.eventCallback != nil {
+		// Extract container ID and process ID from the fork event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		ft.eventCallback(event, containerID, processID)
+	}
 }

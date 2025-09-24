@@ -6,6 +6,9 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	_ "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/ebpf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubeipresolver"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubenameresolver"
+	_ "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/wasm"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
@@ -14,6 +17,7 @@ import (
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerprofilemanager"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
+	"github.com/kubescape/node-agent/pkg/kskubemanager"
 	"github.com/kubescape/node-agent/pkg/processtree"
 	"github.com/kubescape/node-agent/pkg/rulemanager"
 	"github.com/kubescape/node-agent/pkg/utils"
@@ -33,6 +37,9 @@ type TracerFactory struct {
 	containerCollection     *containercollection.ContainerCollection
 	containerProfileManager containerprofilemanager.ContainerProfileManagerClient
 	containerSelector       containercollection.ContainerSelector
+	kubeIPResolver          *kubeipresolver.KubeIPResolver
+	kubeManager             *kskubemanager.KubeManager
+	kubeNameResolver        *kubenameresolver.KubeNameResolver
 	ociStore                *orasoci.ReadOnlyStore
 	orderedEventQueue       EventQueueInterface
 	processTreeManager      processtree.ProcessTreeManager
@@ -68,6 +75,9 @@ func NewTracerFactory(
 		containerCollection:     containerCollection,
 		containerProfileManager: containerProfileManager,
 		containerSelector:       containerSelector,
+		kubeIPResolver:          &kubeipresolver.KubeIPResolver{},
+		kubeManager:             kskubemanager.NewKsKubeManager(containerCollection, tracerCollection),
+		kubeNameResolver:        &kubenameresolver.KubeNameResolver{},
 		ociStore:                ociStore,
 		orderedEventQueue:       orderedEventQueue,
 		processTreeManager:      processTreeManager,
@@ -94,19 +104,24 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	//)
 	//manager.RegisterTracer(procfsTracer)
 
-	// Create syscall tracer (seccomp) - handles its own peek function registration
-	//syscallTracer := NewSyscallTracer(tf.containerProfileManager, tf.ruleManager)
-	//manager.RegisterTracer(syscallTracer)
+	// Create syscall tracer (seccomp)
+	syscallTracer := NewSyscallTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.SyscallEventType),
+	)
+	manager.RegisterTracer(syscallTracer)
 
 	// Create exec tracer
-	//execTracer := NewExecTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.ExecveEventType),
-	//	tf.thirdPartyEnricher,
-	//)
-	//manager.RegisterTracer(execTracer)
+	execTracer := NewExecTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.ExecveEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(execTracer)
 
 	// Create exit tracer
 	//exitTracer := NewExitTracer(
@@ -128,22 +143,23 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 
 	// Create open tracer
 	openTracer := NewOpenTracer(
+		tf.kubeManager,
 		tf.runtime,
 		tf.ociStore,
-		tf.containerSelector,
 		tf.createEventCallback(utils.OpenEventType),
 		tf.thirdPartyEnricher,
 	)
 	manager.RegisterTracer(openTracer)
 
 	// Create capabilities tracer
-	//capabilitiesTracer := NewCapabilitiesTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.CapabilitiesEventType),
-	//)
-	//manager.RegisterTracer(capabilitiesTracer)
+	capabilitiesTracer := NewCapabilitiesTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.CapabilitiesEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(capabilitiesTracer)
 
 	// Create symlink tracer
 	//symlinkTracer := NewSymlinkTracer(
@@ -185,24 +201,26 @@ func (tf *TracerFactory) CreateAllTracers(manager containerwatcher.TracerRegistr
 	//manager.RegisterTracer(httpTracer)
 
 	// Create network tracer
-	//networkTracer := NewNetworkTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.NetworkEventType),
-	//	tf.socketEnricher,
-	//)
-	//manager.RegisterTracer(networkTracer)
+	networkTracer := NewNetworkTracer(
+		tf.kubeIPResolver,
+		tf.kubeManager,
+		tf.kubeNameResolver,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.NetworkEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(networkTracer)
 
 	// Create DNS tracer
-	//dnsTracer := NewDNSTracer(
-	//	tf.containerCollection,
-	//	tf.tracerCollection,
-	//	tf.containerSelector,
-	//	tf.createEventCallback(utils.DnsEventType),
-	//	tf.socketEnricher,
-	//)
-	//manager.RegisterTracer(dnsTracer)
+	dnsTracer := NewDNSTracer(
+		tf.kubeManager,
+		tf.runtime,
+		tf.ociStore,
+		tf.createEventCallback(utils.DnsEventType),
+		tf.thirdPartyEnricher,
+	)
+	manager.RegisterTracer(dnsTracer)
 
 	// Create randomX tracer
 	//randomXTracer := NewRandomXTracer(

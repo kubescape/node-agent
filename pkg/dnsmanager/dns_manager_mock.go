@@ -16,10 +16,10 @@ func CreateDNSManagerMock() *DNSManagerMock {
 	return &DNSManagerMock{}
 }
 
-func (n *DNSManagerMock) ReportEvent(_ utils.K8sEvent) {
+func (n *DNSManagerMock) ReportEvent(_ utils.DNSEvent) {
 }
 
-func (n *DNSManagerMock) ContainerCallback(notif containercollection.PubSubEvent) {
+func (n *DNSManagerMock) ContainerCallback(_ containercollection.PubSubEvent) {
 }
 
 func (n *DNSManagerMock) ResolveIPAddress(_ string) (string, bool) {

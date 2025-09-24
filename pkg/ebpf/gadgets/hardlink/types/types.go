@@ -7,7 +7,7 @@ import (
 )
 
 type Event struct {
-	//eventtypes.Event
+	eventtypes.Event
 	datasource.Data
 	eventtypes.WithMountNsID
 
@@ -44,8 +44,9 @@ func (event *Event) GetExtra() interface{} {
 	return event.extra
 }
 
-func (event *Event) GetPID() uint64 {
-	return (uint64(event.Pid) << 32) | uint64(event.Tid)
+func (event *Event) GetPID() uint32 {
+	//return (uint64(event.Pid) << 32) | uint64(event.Tid)
+	return event.Pid
 }
 
 // GetTimestamp returns the event timestamp

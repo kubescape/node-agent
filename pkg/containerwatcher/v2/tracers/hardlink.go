@@ -6,6 +6,9 @@ import (
 
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
 
@@ -100,26 +103,26 @@ func (ht *HardlinkTracer) IsEnabled(cfg config.Config) bool {
 
 // hardlinkEventCallback handles hardlink events from the tracer
 func (ht *HardlinkTracer) hardlinkEventCallback(event *tracerhardlinktype.Event) {
-	//if event.Type == types.DEBUG {
-	//	return
-	//}
-	//
-	//if isDroppedEvent(event.Type, event.Message) {
-	//	logger.L().Warning("hardlink tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
-	//	return
-	//}
-	//
-	//// Handle the event with syscall enrichment
-	//ht.handleEvent(event, []uint64{SYS_LINK, SYS_LINKAT})
+	if event.Type == types.DEBUG {
+		return
+	}
+
+	if isDroppedEvent(event.Type, event.Message) {
+		logger.L().Warning("hardlink tracer got drop events - we may miss some realtime data", helpers.Interface("event", event), helpers.String("error", event.Message))
+		return
+	}
+
+	// Handle the event with syscall enrichment
+	ht.handleEvent(event, []uint64{SYS_LINK, SYS_LINKAT})
 }
 
 // handleEvent processes the event with syscall enrichment
 func (ht *HardlinkTracer) handleEvent(event *tracerhardlinktype.Event, syscalls []uint64) {
-	//if ht.eventCallback != nil {
-	//	// Extract container ID and process ID from the hardlink event
-	//	containerID := event.Runtime.ContainerID
-	//	processID := event.Pid
-	//
-	//	EnrichEvent(ht.thirdPartyEnricher, event, syscalls, ht.eventCallback, containerID, processID)
-	//}
+	if ht.eventCallback != nil {
+		// Extract container ID and process ID from the hardlink event
+		containerID := event.Runtime.ContainerID
+		processID := event.Pid
+
+		EnrichEvent(ht.thirdPartyEnricher, event, syscalls, ht.eventCallback, containerID, processID)
+	}
 }

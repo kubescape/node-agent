@@ -120,6 +120,6 @@ func (st *SymlinkTracer) handleEvent(event *tracersymlinktype.Event, syscalls []
 	//	containerID := event.Runtime.ContainerID
 	//	processID := event.Pid
 	//
-	//	EnrichEvent(st.thirdPartyEnricher, event, syscalls, st.eventCallback, containerID, processID)
+	//	DatasourceEvent(st.thirdPartyEnricher, event, syscalls, st.eventCallback, containerID, processID)
 	//}
 }

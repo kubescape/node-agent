@@ -12,7 +12,7 @@ import (
 	"github.com/cilium/ebpf/perf"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets"
 	eventtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
-	gadgets2 "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
+	ebpfgadgets "github.com/kubescape/node-agent/pkg/ebpf/gadgets"
 	"github.com/kubescape/node-agent/pkg/ebpf/gadgets/iouring/tracer/types"
 	kernel "github.com/kubescape/node-agent/pkg/validator/ebpf"
 	"github.com/shirou/gopsutil/v4/host"
@@ -199,7 +199,7 @@ func (t *Tracer) parseEvent(bpfEvent *iouringEvent) *types.Event {
 
 type GadgetDesc struct{}
 
-func (g *GadgetDesc) NewInstance() (gadgets2.Gadget, error) {
+func (g *GadgetDesc) NewInstance() (ebpfgadgets.Gadget, error) {
 	tracer := &Tracer{
 		config: &Config{},
 	}

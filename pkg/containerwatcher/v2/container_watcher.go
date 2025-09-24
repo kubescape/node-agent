@@ -9,8 +9,6 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	containerutilsTypes "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/types"
-	apihelpers "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api-helpers"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubemanager"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/socketenricher"
@@ -304,14 +302,6 @@ func (cw *ContainerWatcher) Start(ctx context.Context) error {
 	cw.gadgetRuntime = local.New()
 	if err := cw.gadgetRuntime.Init(nil); err != nil {
 		logger.L().Fatal("runtime init", helpers.Error(err))
-	}
-
-	param := apihelpers.ToParamDescs(kubemanager.KubeManagerOperator.GlobalParams()).ToParams()
-	if err := param.Set(kubemanager.ParamHookMode, "fanotify+ebpf"); err != nil {
-		return fmt.Errorf("setting kube-manager hook mode: %w", err)
-	}
-	if err := kubemanager.KubeManagerOperator.Init(param); err != nil {
-		return fmt.Errorf("initializing kube-manager operator: %w", err)
 	}
 
 	// Create tracer factory
