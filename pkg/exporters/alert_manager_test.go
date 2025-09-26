@@ -13,8 +13,47 @@ import (
 	igtypes "github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	mmtypes "github.com/kubescape/node-agent/pkg/malwaremanager/v1/types"
 	"github.com/kubescape/node-agent/pkg/rulemanager/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
 )
+
+type MockEvent struct{}
+
+var _ utils.K8sEvent = (*MockEvent)(nil)
+
+func (m MockEvent) GetContainer() string {
+	return "testmalwarecontainername"
+}
+
+func (m MockEvent) GetContainerID() string {
+	return "testmalwarecontainerid"
+}
+
+func (m MockEvent) GetContainerImage() string {
+	return "testmalwarecontainerimage"
+}
+
+func (m MockEvent) GetContainerImageDigest() string {
+	return "testmalwarecontainerimagedigest"
+}
+
+func (m MockEvent) GetHostNetwork() bool {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m MockEvent) GetNamespace() string {
+	return "testmalwarenamespace"
+}
+
+func (m MockEvent) GetPod() string {
+	return "testmalwarepodname"
+}
+
+func (m MockEvent) GetTimestamp() igtypes.Time {
+	//TODO implement me
+	panic("implement me")
+}
 
 func TestSendAlert(t *testing.T) {
 	// Set up a mock Alertmanager server
@@ -101,25 +140,7 @@ func TestSendMalwareAlert(t *testing.T) {
 			SHA1Hash:   "testmalwarehash",
 			SHA256Hash: "testmalwarehash",
 		},
-		TriggerEvent: igtypes.Event{
-			CommonData: igtypes.CommonData{
-				Runtime: igtypes.BasicRuntimeMetadata{
-					ContainerID:          "testmalwarecontainerid",
-					ContainerName:        "testmalwarecontainername",
-					ContainerImageName:   "testmalwarecontainerimage",
-					ContainerImageDigest: "testmalwarecontainerimagedigest",
-				},
-				K8s: igtypes.K8sMetadata{
-					Node:        "testmalwarenode",
-					HostNetwork: false,
-					BasicK8sMetadata: igtypes.BasicK8sMetadata{
-						Namespace:     "testmalwarenamespace",
-						PodName:       "testmalwarepodname",
-						ContainerName: "testmalwarecontainername",
-					},
-				},
-			},
-		},
+		TriggerEvent: MockEvent{},
 		MalwareRuntimeAlert: apitypes.MalwareAlert{
 			MalwareDescription: "testmalwaredescription",
 		},

@@ -138,20 +138,12 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 			helpers.String("k8s workload", watchedContainer.Wlid))
 	}
 
-	// Get syscalls using peek function
-	syscalls, err := cpm.PeekSyscalls(containerData)
-	if err != nil {
-		logger.L().Debug("failed to peek syscalls for container", helpers.Error(err),
-			helpers.String("containerID", watchedContainer.ContainerID),
-			helpers.String("containerName", container.Runtime.ContainerName))
-	}
-
 	// Check if there are any dropped events
 	if containerData.droppedEvents {
 		watchedContainer.SetCompletionStatus(objectcache.WatchedContainerCompletionStatusPartial)
 	}
 
-	if containerData.isEmpty() && len(syscalls) == 0 { // TODO: Also check if the seccomp profile is new (currently not implemented)
+	if containerData.isEmpty() { // TODO: Also check if the seccomp profile is new (currently not implemented)
 		return nil
 	}
 
@@ -183,7 +175,7 @@ func (cpm *ContainerProfileManager) saveContainerProfile(watchedContainer *objec
 			Capabilities:         containerData.getCapabilities(),
 			Execs:                containerData.getExecs(),
 			Opens:                containerData.getOpens(),
-			Syscalls:             syscalls,
+			Syscalls:             containerData.getSyscalls(),
 			Endpoints:            containerData.getEndpoints(),
 			PolicyByRuleId:       containerData.getRulePolicies(),
 			IdentifiedCallStacks: containerData.getCallStacks(),

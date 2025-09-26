@@ -19,6 +19,33 @@ type MockEvent struct {
 	Namespace string
 }
 
+var _ utils.K8sEvent = (*MockEvent)(nil)
+
+func (m MockEvent) GetContainer() string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m MockEvent) GetContainerID() string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m MockEvent) GetContainerImage() string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m MockEvent) GetContainerImageDigest() string {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m MockEvent) GetHostNetwork() bool {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (m MockEvent) GetTimestamp() types.Time {
 	return types.Time(m.Timestamp)
 }
@@ -99,7 +126,7 @@ func TestOrderedEventQueue_RealTimestampOrdering(t *testing.T) {
 	queue.AddEventDirect(utils.ExecveEventType, event2, "container3", 300) // second chronologically
 
 	// Pop all events and verify they come out in chronological order
-	var poppedEvents []eventEntry
+	var poppedEvents []EventEntry
 	for !queue.Empty() {
 		event, ok := queue.PopEvent()
 		require.True(t, ok)

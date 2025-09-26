@@ -30,7 +30,7 @@ import (
 	typesv1 "github.com/kubescape/node-agent/pkg/rulemanager/types/v1"
 	"github.com/kubescape/node-agent/pkg/utils"
 
-	cel "github.com/kubescape/node-agent/pkg/rulemanager/cel"
+	"github.com/kubescape/node-agent/pkg/rulemanager/cel"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -47,7 +47,6 @@ type RuleManager struct {
 	objectCache          objectcache.ObjectCache
 	exporter             exporters.Exporter
 	metrics              metricsmanager.MetricsManager
-	syscallPeekFunc      func(nsMountId uint64) ([]string, error)
 	podToWlid            maps.SafeMap[string, string] // key is namespace/podName
 	containerIdToShimPid maps.SafeMap[string, uint32]
 	containerIdToPid     maps.SafeMap[string, uint32]
@@ -123,10 +122,6 @@ func (rm *RuleManager) startRuleManager(container *containercollection.Container
 			helpers.String("container ID", container.Runtime.ContainerID),
 			helpers.String("k8s container id", k8sContainerID))
 	}
-}
-
-func (rm *RuleManager) RegisterPeekFunc(peek func(mntns uint64) ([]string, error)) {
-	rm.syscallPeekFunc = peek
 }
 
 func (rm *RuleManager) ReportEnrichedEvent(enrichedEvent *events.EnrichedEvent) {

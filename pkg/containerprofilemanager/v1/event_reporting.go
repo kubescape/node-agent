@@ -10,10 +10,8 @@ import (
 	"github.com/DmitriyVTitov/size"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goradd/maps"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
@@ -30,9 +28,7 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 		if data.capabilites == nil {
 			data.capabilites = mapset.NewSet[string]()
 		}
-		if !data.capabilites.Contains(capability) {
-			data.capabilites.Add(capability)
-		}
+		data.capabilites.Add(capability)
 		return size.Of(capability), nil
 	})
 
@@ -40,23 +36,24 @@ func (cpm *ContainerProfileManager) ReportCapability(containerID, capability str
 }
 
 // ReportFileExec reports a file execution event for a container
-func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event events.ExecEvent) {
+func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event *utils.EnrichEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.execs == nil {
 			data.execs = &maps.SafeMap[string, []string]{}
 		}
-		path := event.Comm
-		if len(event.Args) > 0 {
-			path = event.Args[0]
+		path := event.GetComm()
+		args := event.GetArgs()
+		if len(args) > 0 {
+			path = args[0]
 		}
 
 		// Use SHA256 hash of the exec to identify it uniquely
-		execIdentifier := utils.CalculateSHA256FileExecHash(path, event.Args)
+		execIdentifier := utils.CalculateSHA256FileExecHash(path, args)
 		if cpm.enricher != nil {
-			go cpm.enricher.EnrichEvent(containerID, &event, execIdentifier)
+			go cpm.enricher.EnrichEvent(containerID, event, execIdentifier)
 		}
 
-		exec := append([]string{path}, event.Args...)
+		exec := append([]string{path}, args...)
 		data.execs.Set(execIdentifier, exec)
 		return size.Of(exec), nil
 	})
@@ -65,14 +62,14 @@ func (cpm *ContainerProfileManager) ReportFileExec(containerID string, event eve
 }
 
 // ReportFileOpen reports a file open event for a container
-func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event events.OpenEvent) {
+func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event *utils.EnrichEvent) {
 	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
 		if data.opens == nil {
 			data.opens = &maps.SafeMap[string, mapset.Set[string]]{}
 		}
 
 		// Deduplicate /proc/1234/* into /proc/.../*
-		path := event.Path
+		path := event.GetPath()
 		if strings.HasPrefix(path, "/proc/") {
 			path = procRegex.ReplaceAllString(path, "/proc/"+dynamicpathdetector.DynamicIdentifier)
 		}
@@ -80,51 +77,64 @@ func (cpm *ContainerProfileManager) ReportFileOpen(containerID string, event eve
 		isSensitive := utils.IsSensitivePath(path, []string{})
 		if cpm.enricher != nil && isSensitive {
 			openIdentifier := utils.CalculateSHA256FileOpenHash(path)
-			go cpm.enricher.EnrichEvent(containerID, &event, openIdentifier)
+			go cpm.enricher.EnrichEvent(containerID, event, openIdentifier)
 		}
 
 		// Check if we already have this open with these flags
-		if opens, ok := data.opens.Load(path); ok && opens.Contains(event.Flags...) {
+		flags := event.GetFlags()
+		if opens, ok := data.opens.Load(path); ok && opens.Contains(flags...) {
 			return 0, nil
 		}
 
 		// Add to open map
 		if opens, ok := data.opens.Load(path); ok {
-			opens.Append(event.Flags...)
+			opens.Append(flags...)
 		} else {
-			data.opens.Set(path, mapset.NewSet(event.Flags...))
+			data.opens.Set(path, mapset.NewSet(flags...))
 		}
 
-		return size.Of(path) + size.Of(event.Flags), nil
+		return size.Of(path) + size.Of(flags), nil
 	})
 
 	cpm.logEventError(err, "file open", containerID)
 }
 
-// ReportSymlinkEvent reports a symlink creation event for a container
-func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event *tracersymlinktype.Event) {
-	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
-		if cpm.enricher != nil {
-			symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
-			go cpm.enricher.EnrichEvent(containerID, event, symlinkIdentifier)
+func (cpm *ContainerProfileManager) ReportSyscalls(containerID string, syscalls []string) {
+	err := cpm.withContainer(containerID, func(data *containerData) (int, error) {
+		if data.syscalls == nil {
+			data.syscalls = mapset.NewSet[string]()
 		}
-		return nil
+		data.syscalls.Append(syscalls...)
+		return size.Of(syscalls), nil
 	})
 
-	cpm.logEventError(err, "symlink", containerID)
+	cpm.logEventError(err, "syscalls", containerID)
+}
+
+// ReportSymlinkEvent reports a symlink creation event for a container
+func (cpm *ContainerProfileManager) ReportSymlinkEvent(containerID string, event *tracersymlinktype.Event) {
+	//err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
+	//	if cpm.enricher != nil {
+	//		symlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
+	//		go cpm.enricher.EnrichEvent(containerID, event, symlinkIdentifier)
+	//	}
+	//	return nil
+	//})
+
+	//cpm.logEventError(err, "symlink", containerID)
 }
 
 // ReportHardlinkEvent reports a hardlink creation event for a container
 func (cpm *ContainerProfileManager) ReportHardlinkEvent(containerID string, event *tracerhardlinktype.Event) {
-	err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
-		if cpm.enricher != nil {
-			hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
-			go cpm.enricher.EnrichEvent(containerID, event, hardlinkIdentifier)
-		}
-		return nil
-	})
+	//err := cpm.withContainerNoSizeUpdate(containerID, func(data *containerData) error {
+	//	if cpm.enricher != nil {
+	//		hardlinkIdentifier := utils.CalculateSHA256FileOpenHash(event.OldPath + event.NewPath)
+	//		go cpm.enricher.EnrichEvent(containerID, event, hardlinkIdentifier)
+	//	}
+	//	return nil
+	//})
 
-	cpm.logEventError(err, "hardlink", containerID)
+	//cpm.logEventError(err, "hardlink", containerID)
 }
 
 // ReportHTTPEvent reports an HTTP event for a container
@@ -231,7 +241,7 @@ func (cpm *ContainerProfileManager) ReportIdentifiedCallStack(containerID string
 }
 
 // ReportNetworkEvent reports a network event for a container
-func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event *tracernetworktype.Event) {
+func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event *utils.EnrichEvent) {
 	if !cpm.isValidNetworkEvent(event) {
 		return
 	}
@@ -241,19 +251,20 @@ func (cpm *ContainerProfileManager) ReportNetworkEvent(containerID string, event
 			data.networks = mapset.NewSet[NetworkEvent]()
 		}
 
+		dstEndpoint := event.GetDstEndpoint()
 		networkEvent := NetworkEvent{
-			Port:     event.Port,
-			Protocol: event.Proto,
-			PktType:  event.PktType,
+			Port:     event.GetPort(),
+			Protocol: event.GetProto(),
+			PktType:  event.GetPktType(),
 			Destination: Destination{
-				Namespace: event.DstEndpoint.Namespace,
-				Name:      event.DstEndpoint.Name,
-				Kind:      EndpointKind(event.DstEndpoint.Kind),
-				IPAddress: event.DstEndpoint.Addr,
+				Namespace: dstEndpoint.Namespace,
+				Name:      dstEndpoint.Name,
+				Kind:      EndpointKind(dstEndpoint.Kind),
+				IPAddress: dstEndpoint.Addr,
 			},
 		}
-		networkEvent.SetPodLabels(event.PodLabels)
-		networkEvent.SetDestinationPodLabels(event.DstEndpoint.PodLabels)
+		networkEvent.SetPodLabels(event.GetPodLabels())
+		networkEvent.SetDestinationPodLabels(dstEndpoint.PodLabels)
 
 		// Skip if we already saved this event
 		if data.networks.Contains(networkEvent) {
@@ -282,50 +293,22 @@ func (cpm *ContainerProfileManager) ReportDroppedEvent(containerID string) {
 	logger.L().Debug("dropped event reported", helpers.String("containerID", containerID))
 }
 
-// PeekSyscalls returns the syscalls for the given mount namespace ID
-// Note: This function should be called with a lock held on the container data
-func (cpm *ContainerProfileManager) PeekSyscalls(data *containerData) ([]string, error) {
-	var syscalls []string
-
-	if cpm.syscallPeekFunc == nil {
-		return nil, errors.New("syscall peek function is not set")
-	}
-
-	peekedSyscalls, err := cpm.syscallPeekFunc(data.watchedContainerData.NsMntId)
-	if err != nil {
-		return nil, err
-	}
-
-	if data.syscalls == nil {
-		data.syscalls = mapset.NewSet[string]()
-	}
-
-	// Get only new syscalls
-	syscallsSet := mapset.NewSet(peekedSyscalls...)
-	newSyscalls := syscallsSet.Difference(data.syscalls)
-	syscalls = newSyscalls.ToSlice()
-
-	// Store all syscalls in container data
-	data.syscalls.Append(syscalls...)
-
-	return syscalls, err
-}
-
 // isValidNetworkEvent checks if the network event is valid for processing
-func (cpm *ContainerProfileManager) isValidNetworkEvent(event *tracernetworktype.Event) bool {
+func (cpm *ContainerProfileManager) isValidNetworkEvent(event *utils.EnrichEvent) bool {
+	pktType := event.GetPktType()
 	// Unknown type, shouldn't happen
-	if event.PktType != HostPktType && event.PktType != OutgoingPktType {
+	if pktType != HostPktType && pktType != OutgoingPktType {
 		logger.L().Debug("pktType is not HOST or OUTGOING", helpers.Interface("event", event))
 		return false
 	}
 
 	// Ignore localhost
-	if event.PktType == HostPktType && event.PodHostIP == event.DstEndpoint.Addr {
+	if pktType == HostPktType && event.GetPodHostIP() == event.GetDstEndpoint().Addr {
 		return false
 	}
 
 	// Ignore host netns
-	if event.K8s.HostNetwork {
+	if event.GetHostNetwork() {
 		return false
 	}
 

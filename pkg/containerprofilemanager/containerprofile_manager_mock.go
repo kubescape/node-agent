@@ -2,11 +2,10 @@ package containerprofilemanager
 
 import (
 	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracernetworktype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/network/types"
-	"github.com/kubescape/node-agent/pkg/ebpf/events"
 	tracerhardlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/hardlink/types"
 	tracerhttptype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/http/types"
 	tracersymlinktype "github.com/kubescape/node-agent/pkg/ebpf/gadgets/symlink/types"
+	"github.com/kubescape/node-agent/pkg/utils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -23,7 +22,7 @@ func (a ContainerProfileManagerMock) ContainerCallback(_ containercollection.Pub
 	// noop
 }
 
-func (a ContainerProfileManagerMock) RegisterPeekFunc(_ func(mntns uint64) ([]string, error)) {
+func (a ContainerProfileManagerMock) ReportSyscalls(_ string, _ []string) {
 	// noop
 }
 
@@ -31,11 +30,11 @@ func (a ContainerProfileManagerMock) ReportCapability(_, _ string) {
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportFileExec(_ string, _ events.ExecEvent) {
+func (a ContainerProfileManagerMock) ReportFileExec(_ string, _ *utils.EnrichEvent) {
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportFileOpen(_ string, _ events.OpenEvent) {
+func (a ContainerProfileManagerMock) ReportFileOpen(_ string, _ *utils.EnrichEvent) {
 	// noop
 }
 
@@ -67,7 +66,7 @@ func (a ContainerProfileManagerMock) RegisterForContainerEndOfLife(_ chan *conta
 	// noop
 }
 
-func (a ContainerProfileManagerMock) ReportNetworkEvent(_ string, _ *tracernetworktype.Event) {
+func (a ContainerProfileManagerMock) ReportNetworkEvent(_ string, _ *utils.EnrichEvent) {
 	// noop
 }
 

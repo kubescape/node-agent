@@ -2,91 +2,88 @@ package tracers
 
 import (
 	"context"
-	"fmt"
 
-	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
-	tracerexec "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/tracer"
-	tracerexectype "github.com/inspektor-gadget/inspektor-gadget/pkg/gadgets/trace/exec/types"
-	tracercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/tracer-collection"
-	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/kubemanager"
+	ocihandler "github.com/inspektor-gadget/inspektor-gadget/pkg/operators/oci-handler"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/node-agent/pkg/config"
 	"github.com/kubescape/node-agent/pkg/containerwatcher"
-	events "github.com/kubescape/node-agent/pkg/ebpf/events"
 	"github.com/kubescape/node-agent/pkg/utils"
+	orasoci "oras.land/oras-go/v2/content/oci"
 )
 
 const execTraceName = "trace_exec"
 
 var _ containerwatcher.TracerInterface = (*ExecTracer)(nil)
 
-// ExecTracer implements TracerInterface for exec events
+// ExecTracer implements TracerInterface for events
 type ExecTracer struct {
-	containerCollection *containercollection.ContainerCollection
-	tracerCollection    *tracercollection.TracerCollection
-	containerSelector   containercollection.ContainerSelector
-	eventCallback       containerwatcher.ResultCallback
-	tracer              *tracerexec.Tracer
-	thirdPartyEnricher  containerwatcher.TaskBasedEnricher
+	eventCallback      containerwatcher.ResultCallback
+	gadgetCtx          *gadgetcontext.GadgetContext
+	ociStore           *orasoci.ReadOnlyStore
+	runtime            runtime.Runtime
+	thirdPartyEnricher containerwatcher.TaskBasedEnricher
 }
 
-// NewExecTracer creates a new exec tracer
+// NewExecTracer creates a new tracer
 func NewExecTracer(
-	containerCollection *containercollection.ContainerCollection,
-	tracerCollection *tracercollection.TracerCollection,
-	containerSelector containercollection.ContainerSelector,
+	runtime runtime.Runtime,
+	ociStore *orasoci.ReadOnlyStore,
 	eventCallback containerwatcher.ResultCallback,
 	thirdPartyEnricher containerwatcher.TaskBasedEnricher,
 ) *ExecTracer {
 	return &ExecTracer{
-		containerCollection: containerCollection,
-		tracerCollection:    tracerCollection,
-		containerSelector:   containerSelector,
-		eventCallback:       eventCallback,
-		thirdPartyEnricher:  thirdPartyEnricher,
+		eventCallback:      eventCallback,
+		ociStore:           ociStore,
+		runtime:            runtime,
+		thirdPartyEnricher: thirdPartyEnricher,
 	}
 }
 
-// Start initializes and starts the exec tracer
+// Start initializes and starts the tracer
 func (et *ExecTracer) Start(ctx context.Context) error {
-	if err := et.tracerCollection.AddTracer(execTraceName, et.containerSelector); err != nil {
-		return fmt.Errorf("adding exec tracer: %w", err)
-	}
-
-	// Get mount namespace map to filter by containers
-	execMountnsmap, err := et.tracerCollection.TracerMountNsMap(execTraceName)
-	if err != nil {
-		return fmt.Errorf("getting exec mountnsmap: %w", err)
-	}
-
-	tracerExec, err := tracerexec.NewTracer(
-		&tracerexec.Config{MountnsMap: execMountnsmap, GetPaths: true},
-		et.containerCollection,
-		et.execEventCallback,
+	et.gadgetCtx = gadgetcontext.New(
+		ctx,
+		// This is the image that contains the gadget we want to run.
+		"ghcr.io/inspektor-gadget/gadget/trace_exec:v0.44.1",
+		// List of operators that will be run with the gadget
+		gadgetcontext.WithDataOperators(
+			kubemanager.KubeManagerOperator,
+			ocihandler.OciHandler, // pass singleton instance of the oci-handler
+			et.eventOperator(),
+		),
+		gadgetcontext.WithName(execTraceName),
+		gadgetcontext.WithOrasReadonlyTarget(et.ociStore),
 	)
-	if err != nil {
-		return fmt.Errorf("creating exec tracer: %w", err)
-	}
-
-	et.tracer = tracerExec
+	go func() {
+		params := map[string]string{
+			"operator.oci.ebpf.paths": "false", // TODO set to true to have CWD paths in events
+		}
+		err := et.runtime.RunGadget(et.gadgetCtx, nil, params)
+		if err != nil {
+			logger.L().Error("Error running gadget", helpers.String("gadget", et.gadgetCtx.Name()), helpers.Error(err))
+		}
+	}()
 	return nil
 }
 
-// Stop gracefully stops the exec tracer
+// Stop gracefully stops the tracer
 func (et *ExecTracer) Stop() error {
-	if et.tracer != nil {
-		et.tracer.Stop()
+	if et.gadgetCtx != nil {
+		et.gadgetCtx.Cancel()
 	}
-
-	if err := et.tracerCollection.RemoveTracer(execTraceName); err != nil {
-		return fmt.Errorf("removing exec tracer: %w", err)
-	}
-
 	return nil
 }
 
 // GetName returns the unique name of the tracer
 func (et *ExecTracer) GetName() string {
-	return "exec_tracer"
+	return execTraceName
 }
 
 // GetEventType returns the event type this tracer produces
@@ -102,33 +99,47 @@ func (et *ExecTracer) IsEnabled(cfg config.Config) bool {
 	return cfg.EnableApplicationProfile || cfg.EnableRuntimeDetection
 }
 
-// execEventCallback handles exec events from the tracer
-func (et *ExecTracer) execEventCallback(event *tracerexectype.Event) {
-	if event.Type == types.DEBUG {
-		return
-	}
+func (et *ExecTracer) eventOperator() operators.DataOperator {
+	return simple.New(string(utils.ExecveEventType),
+		simple.OnInit(func(gadgetCtx operators.GadgetContext) error {
+			for _, d := range gadgetCtx.GetDataSources() {
+				err := d.Subscribe(func(source datasource.DataSource, data datasource.Data) error {
+					et.callback(&utils.EnrichEvent{Datasource: d, Data: data, EventType: utils.ExecveEventType})
+					return nil
+				}, opPriority)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
+	)
+}
 
-	path := event.Comm
-	if len(event.Args) > 0 {
-		path = event.Args[0]
+// callback handles events from the tracer
+func (et *ExecTracer) callback(event *utils.EnrichEvent) {
+	path := event.GetComm()
+	if args := event.GetArgs(); len(args) > 0 {
+		path = args[0]
 	}
 
 	if path == "" {
 		return
 	}
 
-	if event.Retval > -1 && event.Comm != "" {
-		execEvent := &events.ExecEvent{Event: *event}
+	errorRaw := event.GetError()
+	if errorRaw > -1 {
 		// Handle the event with syscall enrichment
-		et.handleEvent(execEvent, []uint64{SYS_FORK})
+		et.handleEvent(event, []uint64{SYS_FORK})
 	}
 }
 
 // handleEvent processes the event with syscall enrichment
-func (et *ExecTracer) handleEvent(event *events.ExecEvent, syscalls []uint64) {
+func (et *ExecTracer) handleEvent(event *utils.EnrichEvent, syscalls []uint64) {
 	if et.eventCallback != nil {
-		containerID := event.Runtime.ContainerID
-		processID := event.Pid
+		containerID := event.GetContainerID()
+		processID := event.GetPid()
+
 		EnrichEvent(et.thirdPartyEnricher, event, syscalls, et.eventCallback, containerID, processID)
 	}
 }
