@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"github.com/elastic/go-libaudit/v2/auparse"
 	"github.com/elastic/go-libaudit/v2/rule"
 	"github.com/elastic/go-libaudit/v2/rule/flags"
+	"github.com/hashicorp/golang-lru/v2/expirable"
+	containercollection "github.com/inspektor-gadget/inspektor-gadget/pkg/container-collection"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/types"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -53,6 +56,16 @@ type AuditManagerV1 struct {
 	eventChan chan *auditmanager.AuditEvent
 	exporter  *exporters.ExporterBus // Direct connection to exporters
 
+	// Kubernetes enrichment
+	containerCollection *containercollection.ContainerCollection
+	pidToMntnsCache     *expirable.LRU[uint32, uint64] // PID -> mount namespace ID cache
+
+	// Rule metadata mapping
+	ruleKeyToTags map[string][]string // Maps rule keys to their tags
+
+	// Message reassembly
+	reassembler *libaudit.Reassembler // Aggregates related audit messages
+
 	// Rule management
 	loadedRules []*AuditRule // Hardcoded rules
 
@@ -82,23 +95,240 @@ func NewAuditManagerV1(config *config.Config, exporter *exporters.ExporterBus) (
 		return nil, fmt.Errorf("config cannot be nil")
 	}
 
-	return &AuditManagerV1{
-		enabled:       true,
-		config:        config,
-		eventChan:     make(chan *auditmanager.AuditEvent, 1000), // Buffered channel for events
-		exporter:      exporter,
-		crdRules:      make(map[string]*crd.LinuxAuditRule),
-		ruleIndex:     make(map[string]*IndexedRule),
-		rulesBySource: make(map[string][]string),
-		ruleConverter: crd.NewRuleConverter(),
-		loadedRules:   nil, // Don't use hardcoded rules
+	// Create PID to mount namespace cache with 5-minute TTL and max 1000 entries
+	pidToMntnsCache := expirable.NewLRU[uint32, uint64](1000, nil, 5*time.Minute)
+
+	auditManager := &AuditManagerV1{
+		enabled:             true,
+		config:              config,
+		eventChan:           make(chan *auditmanager.AuditEvent, 1000), // Buffered channel for events
+		exporter:            exporter,
+		containerCollection: nil, // Will be set later via SetContainerCollection
+		pidToMntnsCache:     pidToMntnsCache,
+		ruleKeyToTags:       make(map[string][]string),
+		crdRules:            make(map[string]*crd.LinuxAuditRule),
+		ruleIndex:           make(map[string]*IndexedRule),
+		rulesBySource:       make(map[string][]string),
+		ruleConverter:       crd.NewRuleConverter(),
+		loadedRules:         nil, // Don't use hardcoded rules
 		stats: auditmanager.AuditManagerStatus{
 			IsRunning:    false,
 			RulesLoaded:  0,
 			EventsTotal:  0,
 			EventsErrors: 0,
 		},
-	}, nil
+	}
+
+	// Initialize the reassembler with reasonable defaults
+	// maxInFlight: 1000 concurrent event sequences
+	// timeout: 5 seconds to wait for event completion
+	stream := &AuditStream{manager: auditManager}
+	reassembler, err := libaudit.NewReassembler(1000, 5*time.Second, stream)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create audit reassembler: %w", err)
+	}
+	auditManager.reassembler = reassembler
+
+	return auditManager, nil
+}
+
+// AuditStream implements the libaudit.Stream interface for handling reassembled audit events
+type AuditStream struct {
+	manager *AuditManagerV1
+}
+
+// ReassemblyComplete is called when a complete group of audit messages has been received
+func (s *AuditStream) ReassemblyComplete(msgs []*auparse.AuditMessage) {
+	logger.L().Debug("ReassemblyComplete called",
+		helpers.Int("messageCount", len(msgs)))
+
+	if len(msgs) == 0 {
+		return
+	}
+
+	// Log the message types in the sequence
+	var msgTypes []string
+	var sequence uint32
+	for _, msg := range msgs {
+		msgTypes = append(msgTypes, msg.RecordType.String())
+		sequence = msg.Sequence
+	}
+
+	logger.L().Debug("processing complete audit sequence",
+		helpers.Int("sequence", int(sequence)),
+		helpers.Interface("messageTypes", msgTypes))
+
+	// Create aggregated event from the message sequence
+	event := s.manager.parseAggregatedAuditMessages(msgs)
+	if event != nil {
+		s.manager.processAuditEvent(event)
+	} else {
+		logger.L().Warning("parseAggregatedAuditMessages returned nil event",
+			helpers.Int("sequence", int(sequence)))
+	}
+}
+
+// EventsLost is called when audit events are detected as lost
+func (s *AuditStream) EventsLost(count int) {
+	logger.L().Warning("audit events lost due to gaps in sequence numbers",
+		helpers.Int("lostCount", count))
+	// TODO: Add metric for lost events
+}
+
+// SetContainerCollection sets the container collection for Kubernetes enrichment
+func (am *AuditManagerV1) SetContainerCollection(containerCollection *containercollection.ContainerCollection) {
+	am.mutex.Lock()
+	defer am.mutex.Unlock()
+	am.containerCollection = containerCollection
+}
+
+// parseAggregatedAuditMessages creates an AuditEvent from a sequence of related audit messages
+func (am *AuditManagerV1) parseAggregatedAuditMessages(msgs []*auparse.AuditMessage) *auditmanager.AuditEvent {
+	if len(msgs) == 0 {
+		logger.L().Debug("parseAggregatedAuditMessages: empty message list")
+		return nil
+	}
+
+	logger.L().Debug("parseAggregatedAuditMessages: starting to parse",
+		helpers.Int("messageCount", len(msgs)))
+
+	// Find the primary message (usually SYSCALL, or first message if no SYSCALL)
+	var primaryMsg *auparse.AuditMessage
+
+	for _, msg := range msgs {
+		if msg.RecordType == auparse.AUDIT_SYSCALL {
+			primaryMsg = msg
+			break
+		}
+	}
+
+	// If no SYSCALL message, use the first message
+	if primaryMsg == nil {
+		primaryMsg = msgs[0]
+	}
+
+	// Create base event from primary message
+	event := &auditmanager.AuditEvent{
+		AuditID:   uint64(primaryMsg.Sequence),
+		Type:      primaryMsg.RecordType,
+		Timestamp: types.Time(primaryMsg.Timestamp.UnixNano()),
+		Sequence:  primaryMsg.Sequence,
+	}
+
+	// Extract key from the message sequence (prioritize SYSCALL messages)
+	event.Key = am.extractKeyFromMessageSequence(msgs)
+
+	// Merge data from all messages in the sequence
+	allData := make(map[string]string)
+	for _, msg := range msgs {
+		if data, err := msg.Data(); err == nil {
+			for k, v := range data {
+				allData[k] = v // Later messages override earlier ones
+			}
+		}
+	}
+	event.Data = allData
+
+	// Set rule type based on event type
+	am.setRuleType(event)
+
+	// Extract all fields using merged data
+	am.extractProcessInfo(event, allData)
+	am.extractSyscallInfo(event, allData)
+	am.extractFileInfo(event, allData)
+	am.extractNetworkInfo(event, allData)
+	am.extractCommandInfo(event, allData)
+	am.extractSecurityInfo(event, allData)
+
+	// Store raw message from primary message for debugging
+	event.RawMessage = primaryMsg.RawData
+
+	// Lookup tags from rule metadata if we have a key
+	if event.Key != "" {
+		if ruleTags, exists := am.ruleKeyToTags[event.Key]; exists {
+			event.Tags = ruleTags
+			logger.L().Debug("found tags for rule key",
+				helpers.String("key", event.Key),
+				helpers.Interface("tags", ruleTags))
+		} else {
+			logger.L().Debug("no tags found for rule key",
+				helpers.String("key", event.Key),
+				helpers.Int("totalMappings", len(am.ruleKeyToTags)))
+		}
+	} else {
+		logger.L().Debug("no rule key available for tag lookup")
+	}
+
+	// Enrich with Kubernetes context
+	am.enrichWithKubernetesContext(event)
+
+	logger.L().Debug("parseAggregatedAuditMessages: successfully created event",
+		helpers.String("key", event.Key),
+		helpers.String("type", event.Type.String()),
+		helpers.String("path", event.Path),
+		helpers.Interface("tags", event.Tags))
+
+	return event
+}
+
+// extractKeyFromMessageSequence extracts the audit rule key from a sequence of messages
+func (am *AuditManagerV1) extractKeyFromMessageSequence(msgs []*auparse.AuditMessage) string {
+	// Priority 1: SYSCALL message (most reliable for keys)
+	for _, msg := range msgs {
+		if msg.RecordType == auparse.AUDIT_SYSCALL {
+			if tags, err := msg.Tags(); err == nil && len(tags) > 0 {
+				return tags[0]
+			}
+		}
+	}
+
+	// Priority 2: PATH message (for file watch rules)
+	for _, msg := range msgs {
+		if msg.RecordType == auparse.AUDIT_PATH {
+			if tags, err := msg.Tags(); err == nil && len(tags) > 0 {
+				return tags[0]
+			}
+		}
+	}
+
+	// Priority 3: Any message with a key
+	for _, msg := range msgs {
+		if tags, err := msg.Tags(); err == nil && len(tags) > 0 {
+			return tags[0]
+		}
+	}
+
+	return ""
+}
+
+// setRuleType sets the rule type based on the audit event type
+func (am *AuditManagerV1) setRuleType(event *auditmanager.AuditEvent) {
+	switch event.Type {
+	case auparse.AUDIT_SYSCALL:
+		event.RuleType = "syscall"
+	case auparse.AUDIT_PATH:
+		event.RuleType = "file_watch"
+	case auparse.AUDIT_SOCKADDR:
+		event.RuleType = "network"
+	case auparse.AUDIT_EXECVE:
+		event.RuleType = "process"
+	case auparse.AUDIT_USER_CMD:
+		event.RuleType = "user"
+	case auparse.AUDIT_NETFILTER_PKT:
+		event.RuleType = "netfilter"
+	case auparse.AUDIT_MAC_STATUS:
+		event.RuleType = "mac"
+	case auparse.AUDIT_SECCOMP:
+		event.RuleType = "seccomp"
+	case auparse.AUDIT_KERNEL_OTHER:
+		event.RuleType = "kernel"
+	case auparse.AUDIT_CONFIG_CHANGE:
+		event.RuleType = "config"
+	case auparse.AUDIT_IPC:
+		event.RuleType = "ipc"
+	default:
+		event.RuleType = fmt.Sprintf("%d", event.Type)
+	}
 }
 
 // Start begins the audit manager and starts listening for audit events
@@ -125,6 +355,9 @@ func (am *AuditManagerV1) Start(ctx context.Context) error {
 
 	// Skip loading hardcoded rules, only use CRD rules
 	logger.L().Info("skipping hardcoded rules, using CRD rules only")
+
+	// Populate tag mappings for any existing CRD rules
+	am.populateInitialTagMappings()
 
 	// Start event processing goroutine
 	am.wg.Add(1)
@@ -479,9 +712,12 @@ func (am *AuditManagerV1) extractSyscallInfo(event *auditmanager.AuditEvent, dat
 	}
 	event.Arch = data["arch"]
 	event.ErrorCode = data["exit"] // Already enriched by auparse
-	if success, err := strconv.ParseBool(data["success"]); err == nil {
-		event.Success = success
+
+	// Parse success field - audit uses "yes"/"no" not "true"/"false"
+	if successStr := data["success"]; successStr != "" {
+		event.Success = (successStr == "yes")
 	}
+
 	if exit, err := strconv.ParseInt(data["exit"], 10, 32); err == nil {
 		event.Exit = int32(exit)
 	}
@@ -605,40 +841,35 @@ func (am *AuditManagerV1) auditEventListener() {
 				continue
 			}
 
-			// Parse and process the audit message
-			auditEvent, err := am.parseAuditMessage(rawMessage)
-			if err != nil {
-				logger.L().Warning("failed to parse audit message",
+			// Filter out non-audit messages (type < 1000)
+			if uint16(rawMessage.Type) < 1000 {
+				logger.L().Debug("skipping non-audit message",
+					helpers.String("type", rawMessage.Type.String()),
+					helpers.Int("typeNum", int(rawMessage.Type)))
+				continue
+			}
+
+			// Debug: Log what we're about to parse
+			logger.L().Debug("received raw audit message for reassembler",
+				helpers.String("type", rawMessage.Type.String()),
+				helpers.Int("typeNum", int(rawMessage.Type)),
+				helpers.Int("dataLen", len(rawMessage.Data)),
+				helpers.String("rawData", string(rawMessage.Data)))
+
+			// Feed the raw message to the reassembler
+			// The reassembler will aggregate related messages and call our Stream interface
+			if err := am.reassembler.Push(rawMessage.Type, rawMessage.Data); err != nil {
+				logger.L().Warning("failed to push audit message to reassembler",
 					helpers.Error(err),
-					helpers.String("rawMessage", string(rawMessage.Data)))
+					helpers.String("type", rawMessage.Type.String()),
+					helpers.Int("typeNum", int(rawMessage.Type)),
+					helpers.Int("dataLen", len(rawMessage.Data)),
+					helpers.String("rawData", string(rawMessage.Data)))
 				am.stats.EventsErrors++
 				continue
 			}
 
-			if auditEvent != nil {
-				// Send event with backpressure timeout
-				select {
-				case am.eventChan <- auditEvent:
-
-				case <-am.ctx.Done():
-					return
-				case <-time.After(1 * time.Second):
-					// Timeout after 1 second - provides backpressure but prevents indefinite blocking
-					am.stats.EventsDropped++
-					am.stats.EventsBlocked++
-					am.stats.BackpressureTime += 1000 // 1 second in milliseconds
-					logger.L().Warning("audit event channel blocked for 1s, dropping event",
-						helpers.String("type", auditEvent.Type.String()),
-						helpers.String("key", auditEvent.Key),
-						helpers.Int("channelLen", len(am.eventChan)),
-						helpers.Int("channelCap", cap(am.eventChan)),
-						helpers.String("totalBlocked", fmt.Sprintf("%d", am.stats.EventsBlocked)),
-						helpers.String("totalBackpressureMs", fmt.Sprintf("%d", am.stats.BackpressureTime)))
-
-					// Optional: slow down reading when consistently blocked to reduce CPU usage
-					time.Sleep(100 * time.Millisecond)
-				}
-			}
+			// Note: Event processing now happens in AuditStream.ReassemblyComplete callback
 		}
 	}
 }
@@ -758,27 +989,26 @@ func (am *AuditManagerV1) UpdateRules(ctx context.Context, crdName string, crdRu
 		helpers.String("crdName", crdName),
 		helpers.Int("ruleCount", len(auditRule.Spec.Rules)))
 
-	// Calculate what changed
-	changeSet := am.calculateRuleChanges(crdName, auditRule)
-
-	// Apply incremental changes
-	if err := am.applyIncrementalChanges(changeSet); err != nil {
-		logger.L().Warning("incremental update failed, falling back to full reload", helpers.Error(err))
-		// Store the CRD first, then reload
-		am.crdRules[crdName] = auditRule
-		am.updateRuleIndex(crdName, auditRule)
-		return am.reloadAllRules()
-	}
-
-	// Update internal state
+	// CRITICAL FIX: Update internal state first, then reload kernel rules
+	// This ensures disabled rules are properly removed from the audit subsystem
+	// The bug was that incremental changes were calculated before updating the index
 	am.crdRules[crdName] = auditRule
 	am.updateRuleIndex(crdName, auditRule)
 
+	// Update rule key to tags mapping for tag enrichment
+	am.updateRuleKeyToTagsMapping(auditRule)
+
+	// Always reload kernel rules to ensure synchronization with current rule index
+	// This fixes the bug where disabling a rule doesn't remove it from kernel
+	if err := am.reloadAllRules(); err != nil {
+		logger.L().Error("failed to reload kernel rules after CRD update", helpers.Error(err))
+		return fmt.Errorf("failed to reload kernel rules: %w", err)
+	}
+
 	logger.L().Info("successfully updated audit rules from CRD",
 		helpers.String("crdName", crdName),
-		helpers.Int("added", len(changeSet.ToAdd)),
-		helpers.Int("removed", len(changeSet.ToRemove)),
-		helpers.Int("updated", len(changeSet.ToUpdate)))
+		helpers.Int("totalRules", len(auditRule.Spec.Rules)),
+		helpers.Int("enabledRules", len(am.rulesBySource[crdName])))
 
 	return nil
 }
@@ -789,6 +1019,11 @@ func (am *AuditManagerV1) RemoveRules(ctx context.Context, crdName string) error
 	defer am.mutex.Unlock()
 
 	logger.L().Info("removing audit rules", helpers.String("crdName", crdName))
+
+	// Remove tag mappings before removing the CRD
+	if auditRule, exists := am.crdRules[crdName]; exists {
+		am.removeRuleKeyToTagsMapping(auditRule)
+	}
 
 	// Remove from CRD cache
 	delete(am.crdRules, crdName)
@@ -885,8 +1120,9 @@ func (am *AuditManagerV1) calculateRuleChanges(crdName string, newCRD *crd.Linux
 			if !ruleDef.Enabled {
 				continue
 			}
-			if indexedRule, err := am.convertCRDRule(crdName, ruleDef); err == nil {
-				changeSet.ToAdd = append(changeSet.ToAdd, indexedRule)
+			// Use convertCRDRules to handle multiple paths
+			if indexedRules, err := am.convertCRDRules(crdName, ruleDef); err == nil {
+				changeSet.ToAdd = append(changeSet.ToAdd, indexedRules...)
 			}
 		}
 		return changeSet
@@ -910,21 +1146,21 @@ func (am *AuditManagerV1) calculateRuleChanges(crdName string, newCRD *crd.Linux
 			if !am.rulesEqual(oldRule, newRule) {
 				// Only update if the rule is enabled
 				if newRule.Enabled {
-					if indexedRule, err := am.convertCRDRule(crdName, newRule); err == nil {
-						changeSet.ToUpdate = append(changeSet.ToUpdate, indexedRule)
+					if indexedRules, err := am.convertCRDRules(crdName, newRule); err == nil {
+						changeSet.ToUpdate = append(changeSet.ToUpdate, indexedRules...)
 					}
 				} else {
 					// Rule was disabled, treat it as a removal
-					if indexedRule, err := am.convertCRDRule(crdName, oldRule); err == nil {
-						changeSet.ToRemove = append(changeSet.ToRemove, indexedRule)
+					if indexedRules, err := am.convertCRDRules(crdName, oldRule); err == nil {
+						changeSet.ToRemove = append(changeSet.ToRemove, indexedRules...)
 					}
 				}
 			}
 		} else {
 			// New rule
 			if newRule.Enabled {
-				if indexedRule, err := am.convertCRDRule(crdName, newRule); err == nil {
-					changeSet.ToAdd = append(changeSet.ToAdd, indexedRule)
+				if indexedRules, err := am.convertCRDRules(crdName, newRule); err == nil {
+					changeSet.ToAdd = append(changeSet.ToAdd, indexedRules...)
 				}
 			}
 		}
@@ -933,8 +1169,8 @@ func (am *AuditManagerV1) calculateRuleChanges(crdName string, newCRD *crd.Linux
 	// Find deletions
 	for name, oldRule := range oldRules {
 		if _, exists := newRules[name]; !exists {
-			if indexedRule, err := am.convertCRDRule(crdName, oldRule); err == nil {
-				changeSet.ToRemove = append(changeSet.ToRemove, indexedRule)
+			if indexedRules, err := am.convertCRDRules(crdName, oldRule); err == nil {
+				changeSet.ToRemove = append(changeSet.ToRemove, indexedRules...)
 			}
 		}
 	}
@@ -1002,14 +1238,15 @@ func (am *AuditManagerV1) updateRuleIndex(crdName string, auditRule *crd.LinuxAu
 	// Remove old rules for this CRD
 	am.removeRulesBySource(crdName)
 
-	// Add new rules
+	// Add new rules (only enabled ones)
 	var ruleIDs []string
 	for _, ruleDef := range auditRule.Spec.Rules {
 		if !ruleDef.Enabled {
 			continue
 		}
 
-		indexedRule, err := am.convertCRDRule(crdName, ruleDef)
+		// Use convertCRDRules to handle multiple paths in file watch rules
+		indexedRules, err := am.convertCRDRules(crdName, ruleDef)
 		if err != nil {
 			logger.L().Warning("failed to convert CRD rule",
 				helpers.Error(err),
@@ -1018,8 +1255,11 @@ func (am *AuditManagerV1) updateRuleIndex(crdName string, auditRule *crd.LinuxAu
 			continue
 		}
 
-		am.ruleIndex[indexedRule.ID] = indexedRule
-		ruleIDs = append(ruleIDs, indexedRule.ID)
+		// Add all generated indexed rules to the index
+		for _, indexedRule := range indexedRules {
+			am.ruleIndex[indexedRule.ID] = indexedRule
+			ruleIDs = append(ruleIDs, indexedRule.ID)
+		}
 	}
 
 	am.rulesBySource[crdName] = ruleIDs
@@ -1043,37 +1283,130 @@ func (am *AuditManagerV1) removeRulesBySource(crdName string) []*IndexedRule {
 }
 
 // convertCRDRule converts a CRD rule definition to an IndexedRule
+// This function maintains backward compatibility by returning the first rule
 func (am *AuditManagerV1) convertCRDRule(crdName string, ruleDef crd.AuditRuleDefinition) (*IndexedRule, error) {
+	indexedRules, err := am.convertCRDRules(crdName, ruleDef)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(indexedRules) == 0 {
+		return nil, fmt.Errorf("no indexed rules generated for rule %s", ruleDef.Name)
+	}
+
+	// Return the first rule for backward compatibility
+	return indexedRules[0], nil
+}
+
+// convertCRDRules converts a CRD rule definition to multiple IndexedRules
+// This handles file watch rules with multiple paths by creating separate IndexedRule for each path
+func (am *AuditManagerV1) convertCRDRules(crdName string, ruleDef crd.AuditRuleDefinition) ([]*IndexedRule, error) {
 	// Convert structured rule to auditctl format
 	auditctlRules, err := am.ruleConverter.ConvertRule(ruleDef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert rule %s: %w", ruleDef.Name, err)
 	}
 
-	// For now, take the first rule (most rules convert to a single auditctl rule)
 	if len(auditctlRules) == 0 {
 		return nil, fmt.Errorf("no auditctl rules generated for rule %s", ruleDef.Name)
 	}
 
-	auditctlRule := auditctlRules[0]
+	var indexedRules []*IndexedRule
 
-	// Parse the auditctl rule
-	auditRule, err := parseAuditRule(auditctlRule)
+	// Handle multiple auditctl rules (e.g., file watch rules with multiple paths)
+	for i, auditctlRule := range auditctlRules {
+		// Parse the auditctl rule
+		auditRule, err := parseAuditRule(auditctlRule)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse generated auditctl rule %d for %s: %w", i, ruleDef.Name, err)
+		}
+
+		// Create unique ID for each rule (append index for multiple rules)
+		ruleID := fmt.Sprintf("%s/%s", crdName, ruleDef.Name)
+		if len(auditctlRules) > 1 {
+			ruleID = fmt.Sprintf("%s/%s[%d]", crdName, ruleDef.Name, i)
+		}
+
+		// Create indexed rule
+		indexedRule := &IndexedRule{
+			ID:          ruleID,
+			Rule:        auditRule,
+			SourceCRD:   crdName,
+			SourceType:  "crd",
+			Priority:    ruleDef.Priority,
+			LastUpdated: time.Now(),
+		}
+
+		indexedRules = append(indexedRules, indexedRule)
+	}
+
+	return indexedRules, nil
+}
+
+// getMountNamespaceForPID gets the mount namespace ID for a given PID with caching
+func (am *AuditManagerV1) getMountNamespaceForPID(pid uint32) (uint64, error) {
+	// Check cache first
+	if mntns, ok := am.pidToMntnsCache.Get(pid); ok {
+		return mntns, nil
+	}
+
+	// Read mount namespace from /proc/{pid}/ns/mnt
+	nsPath := fmt.Sprintf("/proc/%d/ns/mnt", pid)
+	linkTarget, err := os.Readlink(nsPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse generated auditctl rule for %s: %w", ruleDef.Name, err)
+		return 0, fmt.Errorf("failed to read mount namespace for PID %d: %w", pid, err)
 	}
 
-	// Create indexed rule
-	indexedRule := &IndexedRule{
-		ID:          fmt.Sprintf("%s/%s", crdName, ruleDef.Name),
-		Rule:        auditRule,
-		SourceCRD:   crdName,
-		SourceType:  "crd",
-		Priority:    ruleDef.Priority,
-		LastUpdated: time.Now(),
+	// Parse namespace ID from link target (format: "mnt:[4026531840]")
+	var mntns uint64
+	if n, err := fmt.Sscanf(linkTarget, "mnt:[%d]", &mntns); err != nil || n != 1 {
+		return 0, fmt.Errorf("failed to parse mount namespace from %s", linkTarget)
 	}
 
-	return indexedRule, nil
+	// Cache the result
+	am.pidToMntnsCache.Add(pid, mntns)
+
+	return mntns, nil
+}
+
+// enrichWithKubernetesContext enriches audit events with Kubernetes context information
+func (am *AuditManagerV1) enrichWithKubernetesContext(event *auditmanager.AuditEvent) {
+	// Skip if no PID or no container collection available
+	if event.PID == 0 || am.containerCollection == nil {
+		logger.L().Debug("skipping Kubernetes enrichment",
+			helpers.String("reason", "no PID or no container collection"),
+			helpers.Int("pid", int(event.PID)),
+			helpers.String("containerCollectionNil", fmt.Sprintf("%v", am.containerCollection == nil)))
+		return
+	}
+
+	// Get mount namespace for the process
+	mntns, err := am.getMountNamespaceForPID(event.PID)
+	if err != nil {
+		// Process might have exited or be inaccessible - this is normal
+		logger.L().Debug("failed to get mount namespace for PID",
+			helpers.Int("pid", int(event.PID)),
+			helpers.Error(err))
+		return
+	}
+
+	// Lookup container by mount namespace
+	container := am.containerCollection.LookupContainerByMntns(mntns)
+	if container == nil {
+		// Process is not in a tracked container - this is normal for host processes
+		return
+	}
+
+	// Enrich event with Kubernetes context
+	event.Pod = container.K8s.PodName
+	event.Namespace = container.K8s.Namespace
+	event.ContainerID = container.Runtime.ContainerID
+
+	logger.L().Debug("enriched audit event with Kubernetes context",
+		helpers.String("pid", fmt.Sprintf("%d", event.PID)),
+		helpers.String("pod", event.Pod),
+		helpers.String("namespace", event.Namespace),
+		helpers.String("containerID", event.ContainerID))
 }
 
 // rulesEqual compares two rule definitions for equality
@@ -1098,4 +1431,69 @@ func (am *AuditManagerV1) slicesEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// updateRuleKeyToTagsMapping updates the key-to-tags mapping for a CRD rule
+func (am *AuditManagerV1) updateRuleKeyToTagsMapping(auditRule *crd.LinuxAuditRule) {
+	for _, rule := range auditRule.Spec.Rules {
+		if !rule.Enabled {
+			continue // Skip disabled rules
+		}
+
+		var key string
+		var tags []string = rule.Tags // Get tags from rule definition
+
+		// Extract the key based on rule type
+		if rule.FileWatch != nil {
+			key = rule.FileWatch.Key
+		} else if rule.Syscall != nil {
+			key = rule.Syscall.Key
+		} else if rule.Network != nil {
+			key = rule.Network.Key
+		} else if rule.Process != nil {
+			key = rule.Process.Key
+		}
+
+		// Update the mapping if we have a key
+		if key != "" {
+			am.ruleKeyToTags[key] = tags
+			logger.L().Debug("updated rule key to tags mapping",
+				helpers.String("key", key),
+				helpers.Interface("tags", tags))
+		}
+	}
+}
+
+// removeRuleKeyToTagsMapping removes key-to-tags mappings for a CRD rule
+func (am *AuditManagerV1) removeRuleKeyToTagsMapping(auditRule *crd.LinuxAuditRule) {
+	for _, rule := range auditRule.Spec.Rules {
+		var key string
+
+		// Extract the key based on rule type
+		if rule.FileWatch != nil {
+			key = rule.FileWatch.Key
+		} else if rule.Syscall != nil {
+			key = rule.Syscall.Key
+		} else if rule.Network != nil {
+			key = rule.Network.Key
+		} else if rule.Process != nil {
+			key = rule.Process.Key
+		}
+
+		// Remove the mapping if we have a key
+		if key != "" {
+			delete(am.ruleKeyToTags, key)
+			logger.L().Debug("removed rule key to tags mapping",
+				helpers.String("key", key))
+		}
+	}
+}
+
+// populateInitialTagMappings populates tag mappings for any CRD rules already loaded at startup
+func (am *AuditManagerV1) populateInitialTagMappings() {
+	for _, auditRule := range am.crdRules {
+		am.updateRuleKeyToTagsMapping(auditRule)
+	}
+	logger.L().Info("populated initial tag mappings",
+		helpers.Int("mappingCount", len(am.ruleKeyToTags)))
 }

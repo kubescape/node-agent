@@ -398,6 +398,11 @@ func main() {
 	}
 	healthManager.SetContainerWatcher(mainHandler)
 
+	// Set container collection for audit manager Kubernetes enrichment
+	if auditManagerV1, ok := auditManager.(*auditmanagerv1.AuditManagerV1); ok && cfg.EnableAuditDetection {
+		auditManagerV1.SetContainerCollection(mainHandler.GetContainerCollection())
+	}
+
 	// Start the profileManager
 	profileManager.Start(ctx)
 

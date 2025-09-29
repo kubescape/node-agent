@@ -119,13 +119,13 @@ type SyscallRule struct {
 	// +kubebuilder:default="exit"
 	List string `json:"list,omitempty"`
 
-	// Key for identifying events from this rule
-	Key string `json:"key"`
+	// Key for identifying events from this rule (optional for some rule types)
+	Key string `json:"key,omitempty"`
 }
 
 // SyscallFilter defines filters for syscall rules
 type SyscallFilter struct {
-	// Field to filter on (pid, uid, gid, euid, egid, auid, exe, comm, etc.)
+	// Field to filter on (pid, uid, gid, euid, egid, auid, exe, comm, dir, path, perm, arch, exit, success, a0-a15, etc.)
 	Field string `json:"field"`
 
 	// Operator: =, !=, <, >, <=, >=

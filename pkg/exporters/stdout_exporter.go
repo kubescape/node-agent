@@ -93,7 +93,7 @@ func (exporter *StdoutExporter) SendAuditAlert(auditResult auditmanager.AuditRes
 	auditEvent := auditResult.GetAuditEvent()
 
 	exporter.logger.WithFields(log.Fields{
-		"message":       fmt.Sprintf("Audit event: %s", auditEvent.Key),
+		"message":       fmt.Sprintf("Audit event: %d", auditEvent.Type),
 		"audit_id":      auditEvent.AuditID,
 		"message_type":  auditEvent.Type.String(),
 		"rule_type":     auditEvent.RuleType,
@@ -109,5 +109,12 @@ func (exporter *StdoutExporter) SendAuditAlert(auditResult auditmanager.AuditRes
 		"namespace":     auditEvent.Namespace,
 		"raw_message":   auditEvent.RawMessage,
 		"CloudMetadata": exporter.cloudmetadata,
+		"tags":          auditEvent.Tags,
+		"success":       auditEvent.Success,
+		"exit":          auditEvent.Exit,
+		"error_code":    auditEvent.ErrorCode,
+		"sock_addr":     auditEvent.SockAddr,
+		"sock_family":   auditEvent.SockFamily,
+		"sock_port":     auditEvent.SockPort,
 	}).Info(fmt.Sprintf("Audit Event: %s", auditEvent.Key))
 }

@@ -25,13 +25,14 @@ var HardcodedRules = []string{
 
 // AuditRule represents a parsed audit rule
 type AuditRule struct {
-	RawRule   string
-	RuleType  string // "file_watch" or "syscall"
-	Key       string
-	WatchPath string   // for file watch rules
-	Syscalls  []string // for syscall rules
-	Arch      string   // for syscall rules
-	Filters   []string // additional filters
+	RawRule    string
+	RuleType   string // "file_watch" or "syscall"
+	Key        string
+	WatchPath  string   // for single path file watch rules (backward compatibility)
+	WatchPaths []string // for multiple path file watch rules
+	Syscalls   []string // for syscall rules
+	Arch       string   // for syscall rules
+	Filters    []string // additional filters
 }
 
 // LoadHardcodedRules parses the hardcoded rules and returns them as AuditRule structs
@@ -47,6 +48,11 @@ func LoadHardcodedRules() ([]*AuditRule, error) {
 	}
 
 	return auditRules, nil
+}
+
+// ParseAuditRule parses a string audit rule into an AuditRule struct (public function)
+func ParseAuditRule(ruleStr string) (*AuditRule, error) {
+	return parseAuditRule(ruleStr)
 }
 
 // parseAuditRule parses a string audit rule into an AuditRule struct
@@ -68,7 +74,9 @@ func parseAuditRule(ruleStr string) (*AuditRule, error) {
 			switch part {
 			case "-w":
 				if i+1 < len(parts) {
-					auditRule.WatchPath = parts[i+1]
+					path := parts[i+1]
+					auditRule.WatchPath = path            // backward compatibility
+					auditRule.WatchPaths = []string{path} // new multi-path support
 				}
 			case "-k":
 				if i+1 < len(parts) {
@@ -155,7 +163,19 @@ func (ar *AuditRule) ConvertToLibauditRule() (*rule.Rule, error) {
 // GetRuleDescription returns a human-readable description of the rule
 func (ar *AuditRule) GetRuleDescription() string {
 	if ar.RuleType == "file_watch" {
-		return fmt.Sprintf("File watch on %s (key: %s)", ar.WatchPath, ar.Key)
+		// Use WatchPaths if available, otherwise fall back to WatchPath
+		paths := ar.WatchPaths
+		if len(paths) == 0 && ar.WatchPath != "" {
+			paths = []string{ar.WatchPath}
+		}
+
+		if len(paths) == 1 {
+			return fmt.Sprintf("File watch on %s (key: %s)", paths[0], ar.Key)
+		} else if len(paths) > 1 {
+			return fmt.Sprintf("File watch on %d paths: %v (key: %s)", len(paths), paths, ar.Key)
+		} else {
+			return fmt.Sprintf("File watch rule (key: %s)", ar.Key)
+		}
 	} else if ar.RuleType == "syscall" {
 		return fmt.Sprintf("Syscall monitoring for %v (key: %s)", ar.Syscalls, ar.Key)
 	}

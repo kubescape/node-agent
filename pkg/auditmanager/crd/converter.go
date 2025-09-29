@@ -95,10 +95,11 @@ func (rc *RuleConverter) convertFileWatchRule(fw *FileWatchRule) ([]string, erro
 
 	// Map permissions to auditctl format
 	permMap := map[string]string{
-		"read":    "r",
-		"write":   "w",
-		"attr":    "a",
-		"execute": "x",
+		"read":      "r",
+		"write":     "w",
+		"attr":      "a",
+		"attribute": "a", // Support both "attr" and "attribute"
+		"execute":   "x",
 	}
 
 	var permStr string
@@ -106,7 +107,7 @@ func (rc *RuleConverter) convertFileWatchRule(fw *FileWatchRule) ([]string, erro
 		if p, ok := permMap[perm]; ok {
 			permStr += p
 		} else {
-			return nil, fmt.Errorf("invalid permission '%s', valid options: read, write, attr, execute", perm)
+			return nil, fmt.Errorf("invalid permission '%s', valid options: read, write, attr, attribute, execute", perm)
 		}
 	}
 
@@ -142,9 +143,6 @@ func (rc *RuleConverter) convertFileWatchRule(fw *FileWatchRule) ([]string, erro
 func (rc *RuleConverter) convertSyscallRule(sc *SyscallRule) ([]string, error) {
 	if len(sc.Syscalls) == 0 {
 		return nil, fmt.Errorf("syscall rule must specify at least one syscall")
-	}
-	if sc.Key == "" {
-		return nil, fmt.Errorf("syscall rule must specify a key")
 	}
 
 	// Set defaults
@@ -194,7 +192,9 @@ func (rc *RuleConverter) convertSyscallRule(sc *SyscallRule) ([]string, error) {
 	parts = append(parts, archFilters...)
 	parts = append(parts, fieldFilters...)
 	parts = append(parts, fmt.Sprintf("-S %s", syscallList))
-	parts = append(parts, fmt.Sprintf("-k %s", sc.Key))
+	if sc.Key != "" {
+		parts = append(parts, fmt.Sprintf("-k %s", sc.Key))
+	}
 
 	rule := strings.Join(parts, " ")
 	return []string{rule}, nil
